@@ -3,7 +3,7 @@ import { cva } from 'class-variance-authority';
 import { clsx } from 'clsx';
 import { Effect, pipe } from 'effect';
 import type { CSSProperties, ForwardedRef, InputHTMLAttributes, ReactNode, RefObject } from 'react';
-import { createElement, forwardRef, useRef } from 'react';
+import { createElement, forwardRef, useMemo, useRef } from 'react';
 import type { AriaButtonOptions } from 'react-aria';
 import { mergeProps, useButton, useFocusRing, useHover } from 'react-aria';
 import { twMerge } from 'tailwind-merge';
@@ -201,39 +201,39 @@ const resolveConfig = (
 const createButtonComponent = (factoryInput: ControlFactoryInput<'button'>): ControlComponent<'button'> => {
     const controlVariants = createControlVariants();
 
+    const resolved = Effect.runSync(resolveConfig(factoryInput.dimensions, factoryInput.behavior));
+    const dims = Effect.runSync(computeDimensions(resolved.dimensions));
+    const staticStyleVars = computeStyleVars(dims);
+    const staticBehavior = resolved.behavior;
+    const staticBaseClasses = controlVariants({ fullWidth: factoryInput.fullWidth ?? false });
+
     const Component = forwardRef((props: ButtonProps, forwardedRef: ForwardedRef<HTMLButtonElement>) => {
         const { asChild, children, className, ...ariaProps } = props;
         const useSlot = asChild ?? factoryInput.asChild ?? false;
         const internalRef = useRef<HTMLButtonElement>(null);
         const ref = (forwardedRef ?? internalRef) as RefObject<HTMLButtonElement>;
 
-        const { behavior, dimensions } = Effect.runSync(resolveConfig(factoryInput.dimensions, factoryInput.behavior));
-
-        const computed = Effect.runSync(computeDimensions(dimensions));
-        const styleVars = computeStyleVars(computed);
-
         const { buttonProps, isPressed } = useButton(
             {
                 ...ariaProps,
-                isDisabled: behavior.disabled || behavior.loading,
+                isDisabled: staticBehavior.disabled || staticBehavior.loading,
             },
             ref,
         );
 
         const { hoverProps, isHovered } = useHover({
-            isDisabled: behavior.disabled || behavior.loading,
+            isDisabled: staticBehavior.disabled || staticBehavior.loading,
         });
 
         const { focusProps, isFocusVisible } = useFocusRing();
 
-        const baseClasses = controlVariants({ fullWidth: factoryInput.fullWidth ?? false });
-        const stateClasses = getStateClasses(behavior, isHovered, isPressed, isFocusVisible);
-        const finalClassName = mergeClasses(baseClasses, stateClasses, factoryInput.className, className);
+        const stateClasses = getStateClasses(staticBehavior, isHovered, isPressed, isFocusVisible);
+        const finalClassName = mergeClasses(staticBaseClasses, stateClasses, factoryInput.className, className);
 
         const mergedProps = mergeProps(buttonProps, hoverProps, focusProps, {
             className: finalClassName,
             ref,
-            style: styleVars as CSSProperties,
+            style: staticStyleVars as CSSProperties,
             type: 'button' as const,
         });
 
@@ -250,6 +250,11 @@ const createInputComponent = <T extends InputControlType>(
     factoryInput: ControlFactoryInput<T>,
 ): ControlComponent<'input'> => {
     const inputVariants = createInputVariants();
+    const controlType = factoryInput.type as string;
+    const htmlInputType = controlType === 'checkbox' ? 'checkbox' : controlType === 'radio' ? 'radio' : 'text';
+    const staticBaseClasses = inputVariants({ fullWidth: factoryInput.fullWidth ?? false, inputType: htmlInputType });
+    const factoryDimensions = factoryInput.dimensions;
+    const factoryBehavior = factoryInput.behavior;
 
     const Component = forwardRef((props: InputProps, forwardedRef: ForwardedRef<HTMLInputElement>) => {
         const { asChild, behavior: propBehavior, className, dimensions: propDimensions, ...inputProps } = props;
@@ -257,15 +262,13 @@ const createInputComponent = <T extends InputControlType>(
         const internalRef = useRef<HTMLInputElement>(null);
         const ref = (forwardedRef ?? internalRef) as RefObject<HTMLInputElement>;
 
-        const { behavior, dimensions } = Effect.runSync(
-            resolveConfig(
-                { ...factoryInput.dimensions, ...propDimensions },
-                { ...factoryInput.behavior, ...propBehavior },
-            ),
-        );
-
-        const computed = Effect.runSync(computeDimensions(dimensions));
-        const styleVars = computeStyleVars(computed);
+        const { behavior, styleVars } = useMemo(() => {
+            const resolved = Effect.runSync(
+                resolveConfig({ ...factoryDimensions, ...propDimensions }, { ...factoryBehavior, ...propBehavior }),
+            );
+            const dims = Effect.runSync(computeDimensions(resolved.dimensions));
+            return { behavior: resolved.behavior, styleVars: computeStyleVars(dims) };
+        }, [propDimensions, propBehavior]);
 
         const { hoverProps, isHovered } = useHover({
             isDisabled: behavior.disabled || behavior.loading,
@@ -273,16 +276,8 @@ const createInputComponent = <T extends InputControlType>(
 
         const { focusProps, isFocusVisible } = useFocusRing();
 
-        const controlType = factoryInput.type as string;
-        const inputType = controlType === 'checkbox' ? 'checkbox' : controlType === 'radio' ? 'radio' : 'text';
-
-        const baseClasses = inputVariants({
-            fullWidth: factoryInput.fullWidth ?? false,
-            inputType,
-        });
-
         const stateClasses = getStateClasses(behavior, isHovered, false, isFocusVisible);
-        const finalClassName = mergeClasses(baseClasses, stateClasses, factoryInput.className, className);
+        const finalClassName = mergeClasses(staticBaseClasses, stateClasses, factoryInput.className, className);
 
         const mergedProps = mergeProps(hoverProps, focusProps, inputProps, {
             'aria-busy': behavior.loading ? true : undefined,
@@ -290,6 +285,7 @@ const createInputComponent = <T extends InputControlType>(
             disabled: behavior.disabled,
             ref,
             style: styleVars as CSSProperties,
+            type: htmlInputType,
         });
 
         return useSlot ? createElement(Slot, mergedProps) : createElement('input', mergedProps);

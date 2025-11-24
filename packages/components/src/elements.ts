@@ -184,6 +184,27 @@ const createElementComponent = <T extends ElementTag>(factoryInput: ElementFacto
     const baseVariants = createBaseVariants();
     const flexVars = createFlexVariants();
 
+    const resolved = Effect.runSync(resolveConfig(factoryInput.dimensions, factoryInput.behavior));
+    const dims = Effect.runSync(computeDimensions(resolved.dimensions));
+    const staticStyleVars = computeStyleVars(dims);
+    const staticBehavior = resolved.behavior;
+
+    const staticBaseClasses = baseVariants({
+        gap: factoryInput.gap ?? false,
+        padding: factoryInput.padding ?? false,
+        radius: factoryInput.radius ?? false,
+    });
+
+    const staticFlexClasses =
+        factoryInput.direction !== undefined
+            ? flexVars({
+                  align: factoryInput.align ?? 'stretch',
+                  direction: factoryInput.direction,
+                  justify: factoryInput.justify ?? 'start',
+                  wrap: factoryInput.wrap ?? false,
+              })
+            : '';
+
     const Component = forwardRef(
         (
             props: HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode },
@@ -192,41 +213,23 @@ const createElementComponent = <T extends ElementTag>(factoryInput: ElementFacto
             const { asChild, children, className, style, ...rest } = props;
             const useSlot = asChild ?? factoryInput.asChild ?? false;
 
-            const { behavior, dimensions } = Effect.runSync(
-                resolveConfig(factoryInput.dimensions, factoryInput.behavior),
+            const finalClassName = mergeClasses(
+                staticBaseClasses,
+                staticFlexClasses,
+                factoryInput.className,
+                className,
             );
-
-            const computed = Effect.runSync(computeDimensions(dimensions));
-            const styleVars = computeStyleVars(computed);
-
-            const baseClasses = baseVariants({
-                gap: factoryInput.gap ?? false,
-                padding: factoryInput.padding ?? false,
-                radius: factoryInput.radius ?? false,
-            });
-
-            const flexClasses =
-                factoryInput.direction !== undefined
-                    ? flexVars({
-                          align: factoryInput.align ?? 'stretch',
-                          direction: factoryInput.direction,
-                          justify: factoryInput.justify ?? 'start',
-                          wrap: factoryInput.wrap ?? false,
-                      })
-                    : '';
-
-            const finalClassName = mergeClasses(baseClasses, flexClasses, factoryInput.className, className);
-
-            const finalStyle = { ...styleVars, ...style } as CSSProperties;
+            const finalStyle = { ...staticStyleVars, ...style } as CSSProperties;
 
             const elementProps = {
                 ...rest,
-                'aria-busy': behavior.loading ? true : undefined,
-                'aria-disabled': behavior.disabled ? true : undefined,
+                'aria-busy': staticBehavior.loading ? true : undefined,
+                'aria-disabled': staticBehavior.disabled ? true : undefined,
                 className: finalClassName,
                 ref,
                 style: finalStyle,
-                tabIndex: behavior.focusable && behavior.interactive && !behavior.disabled ? 0 : undefined,
+                tabIndex:
+                    staticBehavior.focusable && staticBehavior.interactive && !staticBehavior.disabled ? 0 : undefined,
             };
 
             return useSlot

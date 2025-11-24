@@ -4,7 +4,7 @@ import { Effect, pipe } from 'effect';
 import type { LucideIcon, LucideProps } from 'lucide-react';
 import { icons } from 'lucide-react';
 import type { CSSProperties, ForwardedRef, SVGAttributes } from 'react';
-import { createElement, forwardRef, memo } from 'react';
+import { createElement, forwardRef, memo, useMemo } from 'react';
 import { twMerge } from 'tailwind-merge';
 import type { ComputedDimensions, DimensionConfig } from './schema.ts';
 import { ALGORITHM_CONFIG, computeDimensions, createDimensionDefaults, decodeDimensions } from './schema.ts';
@@ -39,10 +39,13 @@ type IconProps = SVGAttributes<SVGElement> & {
 
 type IconComponent = ReturnType<typeof forwardRef<SVGSVGElement, IconProps>>;
 
+type DynamicIconProps = IconProps & { readonly name: IconName };
+type DynamicIconComponent = ReturnType<typeof forwardRef<SVGSVGElement, DynamicIconProps>>;
+
 type IconFactory = {
     readonly create: (input: IconFactoryInput) => IconComponent;
     readonly get: (name: IconName) => LucideIcon;
-    readonly Icon: (props: IconProps & { readonly name: IconName }) => ReturnType<typeof createElement>;
+    readonly Icon: DynamicIconComponent;
     readonly names: ReadonlyArray<IconName>;
 };
 
@@ -106,16 +109,18 @@ const resolveConfig = (dimInput: Partial<DimensionConfig> | undefined): Effect.E
 const createIconComponent = (factoryInput: IconFactoryInput): IconComponent => {
     const iconVariants = createIconVariants();
     const LucideIconComponent = getIconByName(factoryInput.name);
+    const factoryDimensions = factoryInput.dimensions;
+    const factoryStrokeWidth = factoryInput.strokeWidth;
 
     const Component = forwardRef((props: IconProps, ref: ForwardedRef<SVGSVGElement>) => {
         const { className, dimensions: propDimensions, strokeWidth: propStrokeWidth, style, ...svgProps } = props;
 
-        const dimensions = Effect.runSync(resolveConfig({ ...factoryInput.dimensions, ...propDimensions }));
-
-        const computed = Effect.runSync(computeDimensions(dimensions));
-        const styleVars = computeStyleVars(computed);
-
-        const calculatedStroke = propStrokeWidth ?? factoryInput.strokeWidth ?? computeStrokeWidth(dimensions.scale);
+        const { calculatedStroke, styleVars } = useMemo(() => {
+            const dims = Effect.runSync(resolveConfig({ ...factoryDimensions, ...propDimensions }));
+            const computed = Effect.runSync(computeDimensions(dims));
+            const stroke = propStrokeWidth ?? factoryStrokeWidth ?? computeStrokeWidth(dims.scale);
+            return { calculatedStroke: stroke, styleVars: computeStyleVars(computed) };
+        }, [propDimensions, propStrokeWidth]);
 
         const baseClasses = iconVariants({});
         const finalClassName = mergeClasses(baseClasses, factoryInput.className, className);
@@ -138,16 +143,17 @@ const createIconComponent = (factoryInput: IconFactoryInput): IconComponent => {
     return memo(Component);
 };
 
-const createDynamicIcon = (props: IconProps & { readonly name: IconName }): ReturnType<typeof createElement> => {
+const DynamicIcon: DynamicIconComponent = forwardRef((props: DynamicIconProps, ref: ForwardedRef<SVGSVGElement>) => {
     const { className, dimensions: propDimensions, name, strokeWidth: propStrokeWidth, style, ...svgProps } = props;
 
     const LucideIconComponent = getIconByName(name);
 
-    const dimensions = Effect.runSync(resolveConfig(propDimensions));
-    const computed = Effect.runSync(computeDimensions(dimensions));
-    const styleVars = computeStyleVars(computed);
-
-    const calculatedStroke = propStrokeWidth ?? computeStrokeWidth(dimensions.scale);
+    const { calculatedStroke, styleVars } = useMemo(() => {
+        const dims = Effect.runSync(resolveConfig(propDimensions));
+        const computed = Effect.runSync(computeDimensions(dims));
+        const stroke = propStrokeWidth ?? computeStrokeWidth(dims.scale);
+        return { calculatedStroke: stroke, styleVars: computeStyleVars(computed) };
+    }, [propDimensions, propStrokeWidth]);
 
     const iconVariants = createIconVariants();
     const baseClasses = iconVariants({});
@@ -158,13 +164,16 @@ const createDynamicIcon = (props: IconProps & { readonly name: IconName }): Retu
         'aria-hidden': svgProps['aria-label'] === undefined,
         className: finalClassName,
         height: 'var(--icon-size)',
+        ref,
         strokeWidth: calculatedStroke,
         style: { ...styleVars, ...style } as CSSProperties,
         width: 'var(--icon-size)',
     };
 
     return createElement(LucideIconComponent, iconProps);
-};
+});
+
+DynamicIcon.displayName = 'DynamicIcon';
 
 const createIcons = (tuning?: Partial<IconTuning>): IconFactory => {
     const mergedTuning = {
@@ -184,7 +193,7 @@ const createIcons = (tuning?: Partial<IconTuning>): IconFactory => {
                 strokeWidth: input.strokeWidth ?? mergedTuning.defaults.strokeWidth,
             }),
         get: getIconByName,
-        Icon: createDynamicIcon,
+        Icon: DynamicIcon,
         names: ICON_NAMES,
     });
 };
