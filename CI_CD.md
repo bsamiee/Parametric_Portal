@@ -265,7 +265,7 @@ rm -rf node_modules/.vite
 ### CI Not Running Affected
 
 Ensure:
-1. PR has base and head shas
+1. PR has base and head SHAs
 2. Checkout step uses `fetch-depth: 0`
 3. Base branch is correct
 
