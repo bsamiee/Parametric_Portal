@@ -31,5 +31,5 @@ export const createEffectTagMatcher =
     <R>(cases: { [K in T['_tag']]: (value: Extract<T, { _tag: K }>) => Effect.Effect<R, E, never> }) =>
     (value: T): Effect.Effect<R, E, never> => {
         const handler = cases[value._tag as T['_tag']];
-        return pipe(Effect.succeed(value as Extract<T, { _tag: typeof value._tag }>), Effect.flatMap(handler));
+        return handler(value as Extract<T, { _tag: typeof value._tag }>);
     };
