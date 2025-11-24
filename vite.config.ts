@@ -206,51 +206,70 @@ const createLibraryConfig = (options: {
                 declarationDir: 'dist',
             }),
         ),
-        Effect.map((rollupTypescript) => ({
-            build: {
-                lib: {
-                    entry: options.entry,
-                    fileName: (format: string, entryName: string) =>
-                        format === 'es' ? `${entryName}.js` : `${entryName}.${format}.js`,
-                    formats: ['es', 'cjs'] as const,
-                    name: options.name,
-                },
-                rollupOptions: {
-                    external: options.external ?? [],
-                    output: {
-                        exports: 'named' as const,
-                        preserveModules: false,
+        Effect.map((rollupTypescript) => {
+            const compressionPlugins = createCompressionPlugins();
+            return {
+                build: {
+                    lib: {
+                        entry: options.entry,
+                        fileName: (format: string, entryName: string) =>
+                            format === 'es' ? `${entryName}.js` : `${entryName}.${format}.js`,
+                        formats: ['es', 'cjs'] as const,
+                        name: options.name,
                     },
-                    plugins: [rollupTypescript],
+                    rollupOptions: {
+                        external: options.external ?? [],
+                        output: {
+                            exports: 'named' as const,
+                            preserveModules: false,
+                        },
+                        plugins: [
+                            rollupTypescript,
+                            visualizer({
+                                emitFile: true,
+                                filename: `.vite/${options.name.toLowerCase()}-stats.html`,
+                                gzipSize: true,
+                                template: 'treemap' as const,
+                            }),
+                        ],
+                    },
+                    sourcemap: true,
+                    target: 'esnext' as const,
                 },
-                sourcemap: true,
-                target: 'esnext' as const,
-            },
-            css: {
-                lightningcss: {
-                    drafts: { customMedia: true },
-                    nonStandard: { deepSelectorCombinator: true },
-                    targets: { ...BROWSER_TARGETS },
+                css: {
+                    lightningcss: {
+                        drafts: { customMedia: true },
+                        nonStandard: { deepSelectorCombinator: true },
+                        targets: { ...BROWSER_TARGETS },
+                    },
+                    transformer: 'lightningcss' as const,
                 },
-                transformer: 'lightningcss' as const,
-            },
-            esbuild: {
-                format: 'esm' as const,
-                keepNames: true,
-                minifyIdentifiers: false,
-                minifySyntax: true,
-                minifyWhitespace: true,
-                target: 'esnext' as const,
-                treeShaking: true,
-            },
-            plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] })],
-            resolve: {
-                alias: {
-                    '@': '/packages',
+                esbuild: {
+                    format: 'esm' as const,
+                    keepNames: true,
+                    minifyIdentifiers: false,
+                    minifySyntax: true,
+                    minifyWhitespace: true,
+                    target: 'esnext' as const,
+                    treeShaking: true,
                 },
-                conditions: ['import', 'module', 'default'] as const,
-            },
-        })),
+                plugins: Object.freeze([
+                    tsconfigPaths({ projects: ['./tsconfig.json'] }),
+                    ViteImageOptimizer({
+                        exclude: /^virtual:/,
+                        test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
+                    }),
+                    Inspect(PLUGIN_CONFIGS.inspect),
+                    ...compressionPlugins,
+                ]),
+                resolve: {
+                    alias: {
+                        '@': '/packages',
+                    },
+                    conditions: ['import', 'module', 'default'] as const,
+                },
+            };
+        }),
     );
 
 const createBuildConstants = (): Effect.Effect<BuildConstants, never, never> =>
