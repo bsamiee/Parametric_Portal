@@ -17,12 +17,12 @@ const { dateUtils } = Effect.runSync(
     Effect.all({
         dateUtils: Effect.succeed({
             addDays:
-                (days: number) =>
+                (numDays: number) =>
                 (date: Date): Effect.Effect<Date, never> =>
-                    Effect.sync(() => addDays(date, days)),
+                    Effect.sync(() => addDays(date, numDays)),
             daysBetween: (start: Date, end: Date): Effect.Effect<number, never> =>
                 Effect.sync(() => differenceInDays(end, start)),
-            format:
+            formatDate:
                 (formatStr = 'yyyy-MM-dd') =>
                 (date: Date): Effect.Effect<string, ParseError> =>
                     Effect.try({
