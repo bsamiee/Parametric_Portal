@@ -43,118 +43,188 @@ const createConfigSchemas = () =>
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
-const { browsers, chunks, assets, port, pluginConfigs, pwaManifest, pwaWorkbox, svgrOptions, ssrConfig } =
-    Effect.runSync(
-        Effect.all({
-            assets: Effect.succeed([
-                '**/*.bin',
-                '**/*.exr',
-                '**/*.fbx',
-                '**/*.glb',
-                '**/*.gltf',
-                '**/*.hdr',
-                '**/*.mtl',
-                '**/*.obj',
-                '**/*.wasm',
-            ] as const),
-            browsers: pipe(
-                Effect.try({
-                    catch: () => ({ chrome: 107, edge: 107, firefox: 104, safari: 16 }),
-                    try: () => {
-                        const queries = browserslist();
-                        const versions = queries.reduce(
-                            (acc, query) => {
-                                const match = query.match(/^(chrome|edge|firefox|safari)\s+(\d+)/);
-                                if (match) {
-                                    const [, browser, version] = match;
-                                    const num = Number.parseInt(version, 10);
-                                    if (browser && !Number.isNaN(num)) {
-                                        acc[browser as keyof BrowserTargetConfig] = Math.max(
-                                            acc[browser as keyof BrowserTargetConfig] || 0,
-                                            num,
-                                        );
-                                    }
+const {
+    browsers,
+    chunks,
+    assets,
+    port,
+    pluginConfigs,
+    pwaManifest,
+    pwaWorkbox,
+    svgrOptions,
+    ssrConfig,
+    compressionConfig,
+    visualizerConfig,
+    imageOptimizerConfig,
+} = Effect.runSync(
+    Effect.all({
+        assets: Effect.succeed([
+            '**/*.bin',
+            '**/*.exr',
+            '**/*.fbx',
+            '**/*.glb',
+            '**/*.gltf',
+            '**/*.hdr',
+            '**/*.mtl',
+            '**/*.obj',
+            '**/*.wasm',
+        ] as const),
+        browsers: pipe(
+            Effect.try({
+                catch: () => ({ chrome: 107, edge: 107, firefox: 104, safari: 16 }),
+                try: () => {
+                    const queries = browserslist();
+                    const versions = queries.reduce(
+                        (acc, query) => {
+                            const match = query.match(/^(chrome|edge|firefox|safari)\s+(\d+)/);
+                            if (match) {
+                                const [, browser, version] = match;
+                                const num = Number.parseInt(version, 10);
+                                if (browser && !Number.isNaN(num)) {
+                                    acc[browser as keyof BrowserTargetConfig] = Math.max(
+                                        acc[browser as keyof BrowserTargetConfig] || 0,
+                                        num,
+                                    );
                                 }
-                                return acc;
-                            },
-                            { chrome: 107, edge: 107, firefox: 104, safari: 16 } as BrowserTargetConfig,
-                        );
-                        return versions;
-                    },
-                }),
-                Effect.map((config) => {
-                    const result = createConfigSchemas().browser.safeParse(config);
-                    return result.success ? result.data : config;
-                }),
-            ),
-            chunks: Effect.succeed([
-                { name: 'vendor-react', priority: 3, test: /react(?:-dom)?/ },
-                { name: 'vendor-effect', priority: 2, test: /@effect/ },
-                { name: 'vendor', priority: 1, test: /node_modules/ },
-            ] as const),
-            pluginConfigs: Effect.succeed({
-                inspect: { build: true, outputDir: '.vite-inspect' },
-                react: {
-                    babel: {
-                        plugins: [['babel-plugin-react-compiler', {}]] as Array<[string, Record<string, unknown>]>,
-                    },
+                            }
+                            return acc;
+                        },
+                        { chrome: 107, edge: 107, firefox: 104, safari: 16 } as BrowserTargetConfig,
+                    );
+                    return versions;
                 },
-            } as const),
-            port: Effect.succeed(3000 as const),
-            pwaManifest: Effect.succeed({
-                backgroundColor: '#ffffff',
-                description: 'Next-gen parametric design platform',
-                display: 'standalone' as const,
-                icons: [
-                    { purpose: 'any', sizes: '192x192', src: '/icon-192.png', type: 'image/png' },
-                    { purpose: 'any', sizes: '512x512', src: '/icon-512.png', type: 'image/png' },
-                    { purpose: 'maskable', sizes: '512x512', src: '/icon-maskable.png', type: 'image/png' },
-                ],
-                name: 'Parametric Portal',
-                scope: '/',
-                shortName: 'Portal',
-                startUrl: '/',
-                themeColor: '#000000',
             }),
-            pwaWorkbox: Effect.succeed({
-                clientsClaim: true,
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,glb,gltf}'],
-                runtimeCaching: [
-                    {
-                        handler: 'CacheFirst' as const,
-                        options: { cacheName: 'cdn-cache', expiration: { maxAgeSeconds: 604800, maxEntries: 50 } },
-                        urlPattern: /^https:\/\/cdn\./,
-                    },
-                    {
-                        handler: 'NetworkFirst' as const,
-                        options: { cacheName: 'api-cache', expiration: { maxAgeSeconds: 300, maxEntries: 50 } },
-                        urlPattern: /^https:\/\/api\./,
-                    },
-                ],
-                skipWaiting: true,
+            Effect.map((config) => {
+                const result = createConfigSchemas().browser.safeParse(config);
+                return result.success ? result.data : config;
             }),
-            ssrConfig: Effect.succeed({
-                external: ['react', 'react-dom', 'react/jsx-runtime'],
-                noExternal: ['@effect/platform', '@effect/platform-browser', '@effect/experimental', '@effect/schema'],
-                optimizeDeps: {
-                    include: ['@effect/platform'],
+        ),
+        chunks: Effect.succeed([
+            { name: 'vendor-react', priority: 3, test: /react(?:-dom)?/ },
+            { name: 'vendor-effect', priority: 2, test: /@effect/ },
+            { name: 'vendor', priority: 1, test: /node_modules/ },
+        ] as const),
+        compressionConfig: Effect.succeed({
+            brotli: {
+                algorithm: 'brotliCompress' as const,
+                deleteOriginFile: false,
+                ext: '.br',
+                filter: /\.(js|mjs|json|css|html|svg)$/i,
+                threshold: 10240,
+                verbose: true,
+            },
+            gzip: {
+                algorithm: 'gzip' as const,
+                deleteOriginFile: false,
+                ext: '.gz',
+                filter: /\.(js|mjs|json|css|html|svg)$/i,
+                threshold: 10240,
+                verbose: true,
+            },
+        } as const),
+        imageOptimizerConfig: Effect.succeed({
+            avif: {
+                lossless: false,
+                quality: 70,
+                speed: 5,
+            },
+            exclude: [/^virtual:/, /node_modules/],
+            includePublic: true,
+            jpeg: {
+                progressive: true,
+                quality: 75,
+            },
+            logStats: true,
+            png: {
+                quality: 80,
+            },
+            test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
+            webp: {
+                lossless: false,
+                quality: 80,
+            },
+        } as const),
+        pluginConfigs: Effect.succeed({
+            inspect: {
+                build: true,
+                dev: {
+                    enabled: true,
+                    logLevel: 'error',
                 },
-                resolve: {
-                    conditions: ['node', 'import', 'module', 'default'],
-                    externalConditions: ['node'],
+                outputDir: '.vite-inspect',
+            },
+            react: {
+                babel: {
+                    plugins: [['babel-plugin-react-compiler', {}]] as Array<[string, Record<string, unknown>]>,
                 },
-                target: 'node' as const,
-            }),
-            svgrOptions: Effect.succeed({
-                exportType: 'default' as const,
-                memo: true,
-                ref: true,
-                svgo: true,
-                titleProp: true,
-                typescript: true,
-            }),
+            },
+        } as const),
+        port: Effect.succeed(3000 as const),
+        pwaManifest: Effect.succeed({
+            backgroundColor: '#ffffff',
+            description: 'Next-gen parametric design platform',
+            display: 'standalone' as const,
+            icons: [
+                { purpose: 'any', sizes: '192x192', src: '/icon-192.png', type: 'image/png' },
+                { purpose: 'any', sizes: '512x512', src: '/icon-512.png', type: 'image/png' },
+                { purpose: 'maskable', sizes: '512x512', src: '/icon-maskable.png', type: 'image/png' },
+            ],
+            name: 'Parametric Portal',
+            scope: '/',
+            shortName: 'Portal',
+            startUrl: '/',
+            themeColor: '#000000',
         }),
-    );
+        pwaWorkbox: Effect.succeed({
+            clientsClaim: true,
+            globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,glb,gltf}'],
+            runtimeCaching: [
+                {
+                    handler: 'CacheFirst' as const,
+                    options: { cacheName: 'cdn-cache', expiration: { maxAgeSeconds: 604800, maxEntries: 50 } },
+                    urlPattern: /^https:\/\/cdn\./,
+                },
+                {
+                    handler: 'NetworkFirst' as const,
+                    options: { cacheName: 'api-cache', expiration: { maxAgeSeconds: 300, maxEntries: 50 } },
+                    urlPattern: /^https:\/\/api\./,
+                },
+            ],
+            skipWaiting: true,
+        }),
+        ssrConfig: Effect.succeed({
+            external: ['react', 'react-dom', 'react/jsx-runtime'],
+            noExternal: ['@effect/platform', '@effect/platform-browser', '@effect/experimental', '@effect/schema'],
+            optimizeDeps: {
+                include: ['@effect/platform'],
+            },
+            resolve: {
+                conditions: ['node', 'import', 'module', 'default'],
+                externalConditions: ['node'],
+            },
+            target: 'node' as const,
+        }),
+        svgrOptions: Effect.succeed({
+            exportType: 'default' as const,
+            memo: true,
+            ref: true,
+            svgo: true,
+            titleProp: true,
+            typescript: true,
+        }),
+        visualizerConfig: Effect.succeed({
+            brotliSize: true,
+            emitFile: true,
+            exclude: [/node_modules\/react-compiler-runtime/],
+            filename: '.vite/stats.html',
+            gzipSize: true,
+            open: false,
+            projectRoot: process.cwd(),
+            sourcemap: true,
+            template: 'treemap' as const,
+        } as const),
+    }),
+);
 
 const BROWSER_TARGETS = Object.freeze(browsers satisfies BrowserTargetConfig);
 const CHUNK_PATTERNS = Object.freeze(chunks);
@@ -165,6 +235,9 @@ const PWA_MANIFEST = Object.freeze(pwaManifest);
 const PWA_WORKBOX_CONFIG = Object.freeze(pwaWorkbox);
 const SVGR_OPTIONS = Object.freeze(svgrOptions);
 const SSR_CONFIG = Object.freeze(ssrConfig);
+const COMPRESSION_CONFIG = Object.freeze(compressionConfig);
+const VISUALIZER_CONFIG = Object.freeze(visualizerConfig);
+const IMAGE_OPTIMIZER_CONFIG = Object.freeze(imageOptimizerConfig);
 
 // --- Pure Utility Functions --------------------------------------------------
 
@@ -172,22 +245,9 @@ const matchesNodeModules = (id: string): boolean => id.includes('node_modules');
 
 const createCompressionPlugins = (): ReadonlyArray<PluginOption> =>
     pipe(
-        Effect.sync(() => process.env.NODE_ENV),
-        Effect.map((mode) =>
-            mode === 'production'
-                ? [
-                      viteCompression({
-                          algorithm: 'brotliCompress',
-                          ext: '.br',
-                          threshold: 1024,
-                      }),
-                      viteCompression({
-                          algorithm: 'gzip',
-                          ext: '.gz',
-                          threshold: 1024,
-                      }),
-                  ]
-                : [],
+        isProductionMode(),
+        Effect.map((isProd) =>
+            isProd ? [viteCompression(COMPRESSION_CONFIG.brotli), viteCompression(COMPRESSION_CONFIG.gzip)] : [],
         ),
         Effect.runSync,
     );
@@ -310,10 +370,7 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
             workbox: PWA_WORKBOX_CONFIG,
         }),
         svgr({ exclude: '', include: '**/*.svg?react', svgrOptions: SVGR_OPTIONS }),
-        ViteImageOptimizer({
-            exclude: /^virtual:/,
-            test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
-        }),
+        ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG),
         ...createCompressionPlugins(),
         {
             buildApp: async (builder: ViteBuilder) => {
@@ -357,14 +414,7 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                             entryFileNames: 'entries/[name]-[hash].js',
                             manualChunks: createChunkStrategy(CHUNK_PATTERNS),
                         },
-                        plugins: [
-                            visualizer({
-                                emitFile: true,
-                                filename: '.vite/stats.html',
-                                gzipSize: true,
-                                template: 'treemap' as const,
-                            }),
-                        ],
+                        plugins: [visualizer(VISUALIZER_CONFIG)],
                         treeshake: {
                             moduleSideEffects: 'no-external' as const,
                             propertyReadSideEffects: false,

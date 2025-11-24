@@ -33,6 +33,7 @@ playwright/.cache/
 .cache/
 .nx/
 .vite-inspect/
+.vite/
 
 # --- Environment variables ----------------------------------------------------
 .env

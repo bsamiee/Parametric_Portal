@@ -51,6 +51,14 @@
         }
     ],
     "targetDefaults": {
+        "analyze": {
+            "cache": true,
+            "dependsOn": ["build"],
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "npx serve .vite -l 8080"
+            }
+        },
         "build": {
             "cache": true,
             "dependsOn": ["^build"],
@@ -64,11 +72,34 @@
         "dev": {
             "cache": false
         },
+        "inspect:build": {
+            "cache": false,
+            "dependsOn": ["build"],
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "npx serve .vite-inspect -l 8081"
+            }
+        },
+        "inspect:dev": {
+            "cache": false,
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && nx dev"
+            }
+        },
         "pwa:icons": {
             "cache": false,
             "executor": "nx:run-commands",
             "options": {
-                "command": "tsx scripts/generate-pwa-icons.ts",
+                "command": "tsx --no-warnings scripts/generate-pwa-icons.ts",
+                "cwd": "{projectRoot}"
+            }
+        },
+        "pwa:icons:watch": {
+            "cache": false,
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "tsx watch scripts/generate-pwa-icons.ts",
                 "cwd": "{projectRoot}"
             }
         },
@@ -81,6 +112,18 @@
             "cache": true,
             "dependsOn": ["^typecheck"],
             "inputs": ["typescript", "sharedGlobals"]
+        },
+        "validate:compression": {
+            "cache": false,
+            "dependsOn": ["build"],
+            "executor": "nx:run-commands",
+            "options": {
+                "commands": [
+                    "test -f {projectRoot}/dist/entries/*.js.br || (echo '❌ Brotli files missing' && exit 1)",
+                    "test -f {projectRoot}/dist/entries/*.js.gz || (echo '❌ Gzip files missing' && exit 1)",
+                    "echo '✅ Compression artifacts verified'"
+                ]
+            }
         }
     },
     "useInferencePlugins": true,
