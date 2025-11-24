@@ -88,7 +88,7 @@ const parseBrowsers = (queries: ReadonlyArray<string>): Browsers => {
     for (const q of queries) {
         const m = q.match(/^(chrome|edge|firefox|safari)\s+(\d+)/);
         if (m) {
-            result[m[1] as keyof Browsers] = Math.max(result[m[1] as keyof Browsers] ?? 0, Number(m[2]));
+            result[m[1] as keyof Browsers] = Math.max(result[m[1] as keyof Browsers], Number(m[2]));
         }
     }
     return result as Browsers;
