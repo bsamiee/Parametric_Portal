@@ -1,0 +1,72 @@
+# --- Dependencies -------------------------------------------------------------
+node_modules/
+pnpm-debug.log*
+
+# --- Build outputs ------------------------------------------------------------
+dist/
+build/
+out/
+public/build/
+.next/
+.nuxt/
+.turbo/
+.docusaurus/
+.rollup.cache/
+
+# --- TypeScript/Build artifacts ----------------------------------------------
+*.tsbuildinfo
+*.d.ts
+*.d.ts.map
+*.js.map
+
+# --- Test coverage ------------------------------------------------------------
+coverage/
+.nyc_output/
+.coverage
+coverage.xml
+htmlcov/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# --- Caches (Nx, Vite inspect only) ------------------------------------------
+.cache/
+.nx/
+.vite-inspect/
+
+# --- Environment variables ----------------------------------------------------
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+
+# --- Logs ---------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- IDE & Editor -------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
+*~
+
+# --- macOS --------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# --- Misc ---------------------------------------------------------------------
+.claude/
+.archive/
+.kiro/

@@ -1,0 +1,96 @@
+{
+    "browserslist": [
+        "baseline widely available",
+        "not dead",
+        "not ie <= 11"
+    ],
+    "dependencies": {},
+    "devDependencies": {
+        "@biomejs/biome": "catalog:",
+        "@effect/experimental": "catalog:",
+        "@effect/platform": "catalog:",
+        "@effect/platform-browser": "catalog:",
+        "@effect/schema": "catalog:",
+        "@nx/js": "catalog:",
+        "@nx/react": "catalog:",
+        "@nx/vite": "catalog:",
+        "@playwright/test": "catalog:",
+        "@radix-ui/react-label": "catalog:",
+        "@radix-ui/react-separator": "catalog:",
+        "@radix-ui/react-slot": "catalog:",
+        "@rollup/plugin-typescript": "catalog:",
+        "@tailwindcss/vite": "catalog:",
+        "@tanstack/react-query": "catalog:",
+        "@tanstack/react-query-devtools": "catalog:",
+        "@tanstack/react-query-persist-client": "catalog:",
+        "@tanstack/react-table": "catalog:",
+        "@tanstack/react-virtual": "catalog:",
+        "@vitejs/plugin-react": "catalog:",
+        "@vitest/coverage-v8": "catalog:",
+        "@vitest/ui": "catalog:",
+        "babel-plugin-react-compiler": "catalog:",
+        "browserslist": "catalog:",
+        "class-variance-authority": "catalog:",
+        "clsx": "catalog:",
+        "cmdk": "catalog:",
+        "date-fns": "catalog:",
+        "effect": "catalog:",
+        "happy-dom": "catalog:",
+        "husky": "catalog:",
+        "immer": "catalog:",
+        "jspdf": "catalog:",
+        "jszip": "catalog:",
+        "lightningcss": "catalog:",
+        "lint-staged": "catalog:",
+        "lucide-react": "catalog:",
+        "nx": "catalog:",
+        "react-aria": "catalog:",
+        "react-compiler-runtime": "catalog:",
+        "react-stately": "catalog:",
+        "rollup-plugin-visualizer": "catalog:",
+        "sharp": "catalog:",
+        "tailwind-merge": "catalog:",
+        "tailwindcss": "catalog:",
+        "ts-pattern": "catalog:",
+        "tslib": "catalog:",
+        "tsx": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vite-plugin-compression": "catalog:",
+        "vite-plugin-image-optimizer": "catalog:",
+        "vite-plugin-inspect": "catalog:",
+        "vite-plugin-pwa": "catalog:",
+        "vite-plugin-svgr": "catalog:",
+        "vite-tsconfig-paths": "catalog:",
+        "vitest": "catalog:",
+        "zod": "catalog:",
+        "zustand": "catalog:"
+    },
+    "engines": {
+        "node": "25.2.1"
+    },
+    "lint-staged": {
+        "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}": [
+            "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true"
+        ],
+        "*.{md,yml,yaml}": [
+            "biome check --write --no-errors-on-unmatched"
+        ]
+    },
+    "name": "parametric-portal",
+    "packageManager": "pnpm@10.23.0",
+    "private": true,
+    "scripts": {
+        "build": "nx run-many -t build",
+        "check": "biome check .",
+        "prepare": "husky",
+        "pwa:icons": "nx run-many -t pwa:icons",
+        "test": "nx run-many -t test",
+        "typecheck": "tsc -b"
+    },
+    "version": "0.0.0",
+    "workspaces": [
+        "apps/*",
+        "packages/*"
+    ]
+}

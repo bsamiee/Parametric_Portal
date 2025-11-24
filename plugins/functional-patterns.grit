@@ -1,0 +1,106 @@
+sequential {
+    `$fn($args)` where {
+        $fn <: `Object.assign`,
+        register_diagnostic(span=$fn, message="Use object spread {...obj} instead of Object.assign() for immutable composition and better readability", severity="warn")
+    },
+    `$arr.forEach($callback)` where {
+        register_diagnostic(span=$arr, message="Use functional methods (.map/.filter/.reduce) or for-of instead of .forEach() for better composability and return values", severity="warn")
+    },
+    `$obj[$key] = $value` where {
+        register_diagnostic(span=$obj, message="Mutation detected - use object spread {...obj, [key]: value} or immutable update patterns", severity="error")
+    },
+    `$arr.push($value)` where {
+        register_diagnostic(span=$arr, message="Mutation detected - use array spread [...arr, value] or .concat() instead of .push()", severity="error")
+    },
+    `let $name = $init` where {
+        register_diagnostic(span=$name, message="Use const instead of let for immutability - reassignment is an imperative antipattern", severity="warn")
+    },
+    `var $name = $init` where {
+        register_diagnostic(span=$name, message="Use const or let - var has function scope and hoisting issues that violate modern JavaScript best practices", severity="error")
+    },
+    `$arr.splice($args)` where {
+        register_diagnostic(span=$arr, message="splice() mutates the array - use .slice() and spread operators, or .toSpliced() in modern environments", severity="error")
+    },
+    `$arr.reverse()` where {
+        register_diagnostic(span=$arr, message="reverse() mutates the array - use [...arr].reverse() or .toReversed() to maintain immutability", severity="warn")
+    },
+    `$arr.sort($compareFn)` where {
+        register_diagnostic(span=$arr, message="sort() mutates the array - use [...arr].sort(compareFn) or .toSorted(compareFn) for functional code", severity="warn")
+    },
+    `$arr.pop()` where {
+        register_diagnostic(span=$arr, message="pop() mutates the array - use $arr.slice(0, -1) for immutable removal of last element", severity="error")
+    },
+    `$arr.shift()` where {
+        register_diagnostic(span=$arr, message="shift() mutates the array - use $arr.slice(1) or destructuring [_, ...rest] for immutable removal", severity="error")
+    },
+    `$arr.unshift($value)` where {
+        register_diagnostic(span=$arr, message="unshift() mutates the array - use [value, ...arr] for immutable prepending", severity="error")
+    },
+    `delete $obj.$prop` where {
+        register_diagnostic(span=$obj, message="delete operator mutates - use object destructuring: const {prop, ...rest} = obj", severity="error")
+    },
+    `delete $obj[$key]` where {
+        register_diagnostic(span=$obj, message="delete operator mutates - use object spread and filtering, or Object.fromEntries() for immutable removal", severity="error")
+    },
+    `for (let $i = $init; $condition; $increment) { $body }` where {
+        not $body <: contains `break`,
+        not $body <: contains `continue`,
+        register_diagnostic(span=$_, message="Traditional for-loop is imperative - use .map(), .filter(), .reduce(), or for-of for functional iteration", severity="info")
+    },
+    `while ($condition) { $body }` where {
+        register_diagnostic(span=$_, message="while loops are imperative and prone to infinite loops - prefer recursive functions or .reduce() for functional code", severity="info")
+    },
+    `function $name($params) { $body }` where {
+        register_diagnostic(span=$name, message="Use arrow functions (const name = (params) => body) for lexical this binding and functional style", severity="info")
+    },
+    `$arr.map($fn).filter($fn2)` where {
+        register_diagnostic(span=$_, message="Multiple array iterations inefficient - consider combining with .reduce() or use .flatMap() if filtering maps to empty arrays", severity="info")
+    },
+    `$arr.filter($fn).map($fn2)` where {
+        register_diagnostic(span=$_, message="Filter then map is correct order, but consider .reduce() for single pass if performance critical", severity="hint")
+    },
+    `$arr.reduce($fn, $init)` where {
+        $fn <: contains `$acc.push(`,
+        register_diagnostic(span=$fn, message="Mutating accumulator in reduce() - use [...acc, item] for immutable updates", severity="error")
+    },
+    `?? $default` where {
+        $default <: contains `throw`,
+        register_diagnostic(span=$default, message="Throwing in nullish coalescing is imperative - use Option.getOrElse() or Effect.fail() for explicit error handling", severity="warn")
+    },
+    `$condition ? $true : $false` where {
+        $true <: contains `throw`,
+        register_diagnostic(span=$true, message="Throwing in ternary expressions mixes paradigms - use Option/Either/Effect for explicit error handling", severity="warn")
+    },
+    `if ($condition) { $body }` where {
+        $body <: contains `throw`,
+        register_diagnostic(span=$body, message="Throwing in if statements is imperative - use guard clauses with return or Effect.fail() for functional error handling", severity="info")
+    },
+    `class $name { $body }` where {
+        $body <: contains `this.$prop = $value`,
+        register_diagnostic(span=$body, message="Mutable class properties violate immutability - use readonly properties or consider functional data structures", severity="warn")
+    },
+    `++$var` where {
+        register_diagnostic(span=$var, message="Increment operators are imperative mutations - use const newValue = value + 1 for functional code", severity="warn")
+    },
+    `--$var` where {
+        register_diagnostic(span=$var, message="Decrement operators are imperative mutations - use const newValue = value - 1 for functional code", severity="warn")
+    },
+    `$var++` where {
+        register_diagnostic(span=$var, message="Post-increment mutates - use newValue = value + 1 for explicit, functional updates", severity="warn")
+    },
+    `$var--` where {
+        register_diagnostic(span=$var, message="Post-decrement mutates - use newValue = value - 1 for explicit, functional updates", severity="warn")
+    },
+    `$var += $value` where {
+        register_diagnostic(span=$var, message="Compound assignment mutates - use const newVar = var + value for immutable updates", severity="warn")
+    },
+    `$var -= $value` where {
+        register_diagnostic(span=$var, message="Compound assignment mutates - use const newVar = var - value for functional code", severity="warn")
+    },
+    `$var *= $value` where {
+        register_diagnostic(span=$var, message="Compound assignment mutates - use const newVar = var * value for immutability", severity="warn")
+    },
+    `$var /= $value` where {
+        register_diagnostic(span=$var, message="Compound assignment mutates - use const newVar = var / value for functional updates", severity="warn")
+    }
+}

@@ -1,0 +1,42 @@
+{
+    "dependencies": {
+        "@effect/schema": "catalog:",
+        "date-fns": "catalog:",
+        "effect": "catalog:",
+        "uuid": "catalog:",
+        "zustand": "catalog:"
+    },
+    "devDependencies": {
+        "@types/uuid": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:"
+    },
+    "exports": {
+        "./branded": {
+            "import": "./dist/branded.js",
+            "types": "./dist/branded.d.ts"
+        },
+        "./dates": {
+            "import": "./dist/dates.js",
+            "types": "./dist/dates.d.ts"
+        },
+        "./identifiers": {
+            "import": "./dist/identifiers.js",
+            "types": "./dist/identifiers.d.ts"
+        },
+        "./matchers": {
+            "import": "./dist/matchers.js",
+            "types": "./dist/matchers.d.ts"
+        },
+        "./registry": {
+            "import": "./dist/registry.js",
+            "types": "./dist/registry.d.ts"
+        }
+    },
+    "name": "@parametric-portal/types",
+    "scripts": {
+        "check": "biome check ."
+    },
+    "type": "module",
+    "version": "0.0.1"
+}

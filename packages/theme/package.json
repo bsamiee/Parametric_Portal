@@ -1,0 +1,30 @@
+{
+    "dependencies": {
+        "@effect/schema": "catalog:",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "catalog:"
+    },
+    "exports": {
+        "./fonts": {
+            "import": "./dist/fonts.js",
+            "types": "./dist/fonts.d.ts"
+        },
+        "./layouts": {
+            "import": "./dist/layouts.js",
+            "types": "./dist/layouts.d.ts"
+        },
+        "./theme": {
+            "import": "./dist/theme.js",
+            "types": "./dist/theme.d.ts"
+        }
+    },
+    "name": "@parametric-portal/theme",
+    "scripts": {
+        "check": "biome check ."
+    },
+    "type": "module",
+    "version": "0.0.1"
+}
