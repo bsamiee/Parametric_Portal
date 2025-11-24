@@ -1,0 +1,45 @@
+{
+    "dependencies": {
+        "@effect/schema": "catalog:",
+        "@radix-ui/react-slot": "catalog:",
+        "class-variance-authority": "catalog:",
+        "clsx": "catalog:",
+        "effect": "catalog:",
+        "lucide-react": "catalog:",
+        "react": "catalog:",
+        "react-aria": "catalog:",
+        "react-stately": "catalog:",
+        "tailwind-merge": "catalog:"
+    },
+    "devDependencies": {
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:"
+    },
+    "exports": {
+        "./controls": {
+            "import": "./dist/controls.js",
+            "types": "./dist/controls.d.ts"
+        },
+        "./elements": {
+            "import": "./dist/elements.js",
+            "types": "./dist/elements.d.ts"
+        },
+        "./icons": {
+            "import": "./dist/icons.js",
+            "types": "./dist/icons.d.ts"
+        }
+    },
+    "name": "@parametric-portal/components",
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.0.1"
+}
