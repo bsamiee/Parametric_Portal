@@ -14,7 +14,7 @@ export default defineConfig(
                 matchers: './src/matchers.ts',
                 registry: './src/registry.ts',
             },
-            external: ['effect', '@effect/schema', 'uuid', 'date-fns', 'zustand'],
+            external: ['effect', '@effect/schema', 'uuid', 'zustand'],
             name: 'ParametricTypes',
         }),
     ),

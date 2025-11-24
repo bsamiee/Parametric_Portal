@@ -15,6 +15,14 @@ const { patterns } = Effect.runSync(
 
 const PATTERNS = Object.freeze(patterns);
 
+const COMMON_BRANDS = Object.freeze({
+    email: pipe(S.String, S.pattern(PATTERNS.email), S.brand('Email')),
+    hexColor: pipe(S.String, S.pattern(PATTERNS.hexColor), S.brand('HexColor')),
+    nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
+    positiveInt: pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt')),
+    slug: pipe(S.String, S.pattern(PATTERNS.slug), S.brand('Slug')),
+} as const);
+
 export const SCHEMAS = Object.freeze({
     email: pipe(S.String, S.pattern(PATTERNS.email)),
     hexColor: pipe(S.String, S.pattern(PATTERNS.hexColor)),
@@ -31,3 +39,7 @@ export const SCHEMAS = Object.freeze({
 
 export const brand = <A, I, Brand extends string>(schema: S.Schema<A, I, never>, brandName: Brand) =>
     pipe(schema, S.brand(brandName));
+
+// --- Export ------------------------------------------------------------------
+
+export { COMMON_BRANDS, PATTERNS };

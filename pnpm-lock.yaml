@@ -396,12 +396,12 @@ importers:
 
   packages/types:
     dependencies:
+      '@effect/experimental':
+        specifier: 'catalog:'
+        version: 0.57.4(@effect/platform@0.93.3(effect@3.19.6))(effect@3.19.6)
       '@effect/schema':
         specifier: 'catalog:'
         version: 0.75.5(effect@3.19.6)
-      date-fns:
-        specifier: 'catalog:'
-        version: 4.1.0
       effect:
         specifier: 'catalog:'
         version: 3.19.6

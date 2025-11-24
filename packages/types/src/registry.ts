@@ -10,7 +10,7 @@ type RegistryState = { readonly brands: ReadonlyMap<string, BrandMetadata> };
 type RegistryActions = {
     readonly getBrandNames: () => ReadonlyArray<string>;
     readonly hasBrand: (name: string) => boolean;
-    readonly register: (name: string) => void;
+    readonly register: (name: string) => Effect.Effect<void, ParseError, never>;
     readonly unregister: (name: string) => void;
 };
 type BrandRegistry = RegistryState & RegistryActions;
@@ -61,12 +61,10 @@ const createBrandRegistry = () =>
         getBrandNames: () => listBrandNames(get()),
         hasBrand: (name) => brandExists(get(), name),
         register: (name) =>
-            Effect.runSync(
-                pipe(
-                    createBrandEntry(name),
-                    Effect.tap((brand) => Effect.sync(() => set((state) => ({ brands: addBrand(state, brand) })))),
-                    Effect.catchAll(() => Effect.void), // Swallow ParseError, do nothing
-                ),
+            pipe(
+                createBrandEntry(name),
+                Effect.tap((brand) => Effect.sync(() => set((state) => ({ brands: addBrand(state, brand) })))),
+                Effect.asVoid,
             ),
         unregister: (name) => set((state) => ({ brands: removeBrand(state, name) })),
     }));
