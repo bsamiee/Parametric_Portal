@@ -253,7 +253,7 @@ const appCfg = (
     time: string,
 ): UserConfig => ({
     appType: 'spa',
-    assetsInclude: [...toGlob(i.assetExts ?? B.assets)],
+    assetsInclude: toGlob(i.assetExts ?? B.assets),
     build: {
         cssCodeSplit: true,
         cssMinify: 'lightningcss',
