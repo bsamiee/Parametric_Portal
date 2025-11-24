@@ -18,8 +18,6 @@ import * as z from 'zod';
 
 // --- Type Definitions --------------------------------------------------------
 
-type ChunkDecision = Option.Option<string>;
-
 type ConfigSchemas = ReturnType<typeof createConfigSchemas>;
 
 // --- Schema Definitions ------------------------------------------------------
@@ -41,6 +39,14 @@ const createConfigSchemas = () => ({ browser: browserSchema, build: buildSchema,
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
+const ASSET_EXTENSIONS = ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'] as const;
+
+const CHUNK_RULES = [
+    { name: 'vendor-react', pattern: 'react(?:-dom)?', priority: 3 },
+    { name: 'vendor-effect', pattern: '@effect', priority: 2 },
+    { name: 'vendor', pattern: 'node_modules', priority: 1 },
+] as const satisfies ReadonlyArray<{ readonly name: string; readonly pattern: string; readonly priority: number }>;
+
 const {
     browsers,
     chunks,
@@ -58,17 +64,7 @@ const {
     webfontConfig,
 } = Effect.runSync(
     Effect.all({
-        assets: Effect.succeed([
-            '**/*.bin',
-            '**/*.exr',
-            '**/*.fbx',
-            '**/*.glb',
-            '**/*.gltf',
-            '**/*.hdr',
-            '**/*.mtl',
-            '**/*.obj',
-            '**/*.wasm',
-        ] as const),
+        assets: Effect.succeed(Object.freeze(ASSET_EXTENSIONS.map((ext) => `**/*.${ext}` as const))),
         browsers: pipe(
             Effect.try({
                 catch: () => ({ chrome: 107, edge: 107, firefox: 104, safari: 16 }),
@@ -99,11 +95,13 @@ const {
                 return result.success ? result.data : config;
             }),
         ),
-        chunks: Effect.succeed([
-            { name: 'vendor-react', priority: 3, test: /react(?:-dom)?/ },
-            { name: 'vendor-effect', priority: 2, test: /@effect/ },
-            { name: 'vendor', priority: 1, test: /node_modules/ },
-        ] as const),
+        chunks: Effect.succeed(
+            Object.freeze(
+                CHUNK_RULES.map(({ name, pattern, priority }) =>
+                    Object.freeze({ name, priority, test: new RegExp(pattern) }),
+                ),
+            ),
+        ),
         compressionConfig: Effect.succeed({
             brotli: {
                 algorithm: 'brotliCompress' as const,
@@ -136,28 +134,18 @@ const {
                 'style-src': ["'self'", "'unsafe-inline'"] as string[],
             },
         }),
-        imageOptimizerConfig: Effect.succeed({
-            avif: {
-                lossless: false,
-                quality: 70,
-                speed: 5,
-            },
-            exclude: [/^virtual:/, /node_modules/] as RegExp[],
-            includePublic: true,
-            jpeg: {
-                progressive: true,
-                quality: 75,
-            },
-            logStats: true,
-            png: {
-                quality: 80,
-            },
-            test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
-            webp: {
-                lossless: false,
-                quality: 80,
-            },
-        }),
+        imageOptimizerConfig: Effect.succeed(
+            Object.freeze({
+                avif: Object.freeze({ lossless: false, quality: 70, speed: 5 }),
+                exclude: [/^virtual:/, /node_modules/] as RegExp[],
+                includePublic: true,
+                jpeg: Object.freeze({ progressive: true, quality: 75 }),
+                logStats: true,
+                png: Object.freeze({ quality: 80 }),
+                test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
+                webp: Object.freeze({ lossless: false, quality: 80 }),
+            }),
+        ),
         pluginConfigs: Effect.succeed({
             inspect: {
                 build: true,
@@ -171,21 +159,23 @@ const {
             },
         } as const),
         port: Effect.succeed(3000 as const),
-        pwaManifest: Effect.succeed({
-            backgroundColor: '#ffffff',
-            description: 'Next-gen parametric design platform',
-            display: 'standalone' as const,
-            icons: [
-                { purpose: 'any', sizes: '192x192', src: '/icon-192.png', type: 'image/png' },
-                { purpose: 'any', sizes: '512x512', src: '/icon-512.png', type: 'image/png' },
-                { purpose: 'maskable', sizes: '512x512', src: '/icon-maskable.png', type: 'image/png' },
-            ],
-            name: 'Parametric Portal',
-            scope: '/',
-            shortName: 'Portal',
-            startUrl: '/',
-            themeColor: '#000000',
-        }),
+        pwaManifest: Effect.succeed(
+            Object.freeze({
+                backgroundColor: '#ffffff',
+                description: 'Next-gen parametric design platform',
+                display: 'standalone' as const,
+                icons: [
+                    { purpose: 'any', sizes: '192x192', src: '/icon-192.png', type: 'image/png' },
+                    { purpose: 'any', sizes: '512x512', src: '/icon-512.png', type: 'image/png' },
+                    { purpose: 'maskable', sizes: '512x512', src: '/icon-maskable.png', type: 'image/png' },
+                ],
+                name: 'Parametric Portal',
+                scope: '/',
+                shortName: 'Portal',
+                startUrl: '/',
+                themeColor: '#000000',
+            }),
+        ),
         pwaWorkbox: Effect.succeed({
             clientsClaim: true,
             globPatterns: ['**/*.{js,css,html,ico,png,svg,wasm,glb,gltf}'],
@@ -255,16 +245,31 @@ const WEBFONT_CONFIG = webfontConfig as string[];
 
 // --- Pure Utility Functions --------------------------------------------------
 
-const matchesNodeModules = (id: string): boolean => id.includes('node_modules');
+const createSharedCssConfig = (browsers: z.infer<ConfigSchemas['browser']>) => ({
+    lightningcss: {
+        drafts: { customMedia: true },
+        nonStandard: { deepSelectorCombinator: true },
+        targets: { ...browsers },
+    },
+    transformer: 'lightningcss' as const,
+});
 
-const createCompressionPlugins = (): ReadonlyArray<PluginOption> =>
-    pipe(
-        isProductionMode(),
-        Effect.map((isProd) =>
-            isProd ? [viteCompression(COMPRESSION_CONFIG.brotli), viteCompression(COMPRESSION_CONFIG.gzip)] : [],
-        ),
-        Effect.runSync,
-    );
+const createSharedEsbuildConfig = (extras: { readonly format: 'esm'; readonly minifyIdentifiers: boolean }) => ({
+    format: extras.format,
+    keepNames: true,
+    minifyIdentifiers: extras.minifyIdentifiers,
+    minifySyntax: true,
+    minifyWhitespace: true,
+    target: 'esnext' as const,
+    treeShaking: true,
+});
+
+const createSharedResolveConfig = (conditions: ReadonlyArray<string>) => ({
+    alias: {
+        '@': '/packages',
+    },
+    conditions: [...conditions],
+});
 
 // --- Effect Pipelines & Builders ---------------------------------------------
 
@@ -300,30 +305,10 @@ const createLibraryConfig = (options: {
                 sourcemap: true,
                 target: 'esnext' as const,
             },
-            css: {
-                lightningcss: {
-                    drafts: { customMedia: true },
-                    nonStandard: { deepSelectorCombinator: true },
-                    targets: { ...BROWSER_TARGETS },
-                },
-                transformer: 'lightningcss' as const,
-            },
-            esbuild: {
-                format: 'esm' as const,
-                keepNames: true,
-                minifyIdentifiers: false,
-                minifySyntax: true,
-                minifyWhitespace: true,
-                target: 'esnext' as const,
-                treeShaking: true,
-            },
+            css: createSharedCssConfig(BROWSER_TARGETS),
+            esbuild: createSharedEsbuildConfig({ format: 'esm', minifyIdentifiers: false }),
             plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] }), Inspect(PLUGIN_CONFIGS.inspect)],
-            resolve: {
-                alias: {
-                    '@': '/packages',
-                },
-                conditions: ['import', 'module', 'default'] as const,
-            },
+            resolve: createSharedResolveConfig(['import', 'module', 'default']),
         })),
     );
 
@@ -334,58 +319,36 @@ const createBuildConstants = (): Effect.Effect<z.infer<ConfigSchemas['build']>, 
             time: Effect.sync(() => new Date().toISOString()),
             version: Effect.sync(() => process.env.npm_package_version),
         }),
-        Effect.map(({ mode, time, version }) => ({
-            'import.meta.env.APP_VERSION': JSON.stringify(version ?? '0.0.0'),
-            'import.meta.env.BUILD_MODE': JSON.stringify(mode ?? 'development'),
-            'import.meta.env.BUILD_TIME': JSON.stringify(time),
-        })),
-        Effect.map((constants) => {
+        Effect.map(({ mode, time, version }) => {
+            const constants = {
+                'import.meta.env.APP_VERSION': JSON.stringify(version ?? '0.0.0'),
+                'import.meta.env.BUILD_MODE': JSON.stringify(mode ?? 'development'),
+                'import.meta.env.BUILD_TIME': JSON.stringify(time),
+            };
             const result = createConfigSchemas().build.safeParse(constants);
             return result.success ? result.data : constants;
         }),
     );
 
-const isProductionMode = (): Effect.Effect<boolean, never, never> =>
-    pipe(
-        Effect.sync(() => process.env.NODE_ENV),
-        Effect.map((mode) => mode === 'production'),
-    );
-
 const getDropTargets = (): Effect.Effect<ReadonlyArray<'console' | 'debugger'>, never, never> =>
-    pipe(
-        isProductionMode(),
-        Effect.map((isProd) => (isProd ? (['console', 'debugger'] as const) : ([] as const))),
-    );
-
-const findMatchingPattern =
-    (patterns: ReadonlyArray<z.infer<ConfigSchemas['chunk']>>) =>
-    (id: string): ChunkDecision =>
-        pipe(
-            [...patterns].sort((a, b) => b.priority - a.priority),
-            EffectArray.findFirst(({ test }) => test.test(id)),
-            Option.map(({ name }) => name),
-        );
+    Effect.sync(() => (process.env.NODE_ENV === 'production' ? (['console', 'debugger'] as const) : ([] as const)));
 
 const createChunkStrategy =
     (patterns: ReadonlyArray<z.infer<ConfigSchemas['chunk']>>) =>
     (id: string): string | undefined =>
-        matchesNodeModules(id) ? pipe(id, findMatchingPattern(patterns), Option.getOrUndefined) : undefined;
-
-const basePlugins = [tsconfigPaths({ root: './' }), react(PLUGIN_CONFIGS.react)] as const;
-
-const createBuildHook = (): PluginOption =>
-    ({
-        buildApp: async (builder: ViteBuilder) =>
-            void (await Promise.all(Object.values(builder.environments).map((env) => builder.build(env)))),
-        buildEnd: () => void 0,
-        buildStart: () => void 0,
-        enforce: 'pre' as const,
-        name: 'parametric-build-hooks',
-    }) as const;
+        id.includes('node_modules')
+            ? pipe(
+                  [...patterns].sort((a, b) => b.priority - a.priority),
+                  EffectArray.findFirst(({ test }) => test.test(id)),
+                  Option.map(({ name }) => name),
+                  Option.getOrUndefined,
+              )
+            : undefined;
 
 const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; readonly worker: () => PluginOption[] } => ({
     main: [
-        ...basePlugins,
+        tsconfigPaths({ root: './' }),
+        react(PLUGIN_CONFIGS.react),
         tailwindcss({ optimize: { minify: true } }),
         VitePWA({
             devOptions: { enabled: false },
@@ -398,13 +361,22 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
         // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable exclude array
         ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG as any),
         webfontDownload(WEBFONT_CONFIG),
-        ...createCompressionPlugins(),
+        ...(process.env.NODE_ENV === 'production'
+            ? [viteCompression(COMPRESSION_CONFIG.brotli), viteCompression(COMPRESSION_CONFIG.gzip)]
+            : []),
         // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable policy arrays
         csp(CSP_CONFIG as any),
-        createBuildHook(),
+        {
+            buildApp: async (builder: ViteBuilder) =>
+                void (await Promise.all(Object.values(builder.environments).map((env) => builder.build(env)))),
+            buildEnd: () => void 0,
+            buildStart: () => void 0,
+            enforce: 'pre' as const,
+            name: 'parametric-build-hooks',
+        } as const,
         Inspect(PLUGIN_CONFIGS.inspect),
     ],
-    worker: () => [...basePlugins],
+    worker: () => [tsconfigPaths({ root: './' }), react(PLUGIN_CONFIGS.react)],
 });
 
 const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
@@ -416,6 +388,8 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
         Effect.map(({ constants, dropTargets }) => {
             const plugins = createAllPlugins();
             const outputDir = 'dist';
+            const baseCss = createSharedCssConfig(BROWSER_TARGETS);
+            const baseEsbuild = createSharedEsbuildConfig({ format: 'esm', minifyIdentifiers: true });
             return {
                 appType: 'spa' as const,
                 assetsInclude: [...ASSET_PATTERNS],
@@ -448,33 +422,19 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                     target: 'esnext' as const,
                 },
                 cacheDir: '.nx/cache/vite',
-                css: {
-                    devSourcemap: true,
-                    lightningcss: {
-                        drafts: { customMedia: true },
-                        nonStandard: { deepSelectorCombinator: true },
-                        targets: { ...BROWSER_TARGETS },
-                    },
-                    transformer: 'lightningcss' as const,
-                },
+                css: { ...baseCss, devSourcemap: true },
                 define: constants,
                 esbuild: {
+                    ...baseEsbuild,
                     drop: [...dropTargets],
-                    format: 'esm' as const,
                     jsx: 'automatic' as const,
-                    keepNames: true,
                     legalComments: 'none' as const,
                     logLevel: 'error' as const,
-                    minifyIdentifiers: true,
-                    minifySyntax: true,
-                    minifyWhitespace: true,
                     pure: ['console.log', 'console.debug'] as const,
                     supported: {
                         'dynamic-import': true,
                         'import-meta': true,
                     },
-                    target: 'esnext' as const,
-                    treeShaking: true,
                 },
                 json: {
                     namedExports: true,
@@ -498,10 +458,7 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                 },
                 plugins: [...plugins.main],
                 resolve: {
-                    alias: {
-                        '@': '/packages',
-                    },
-                    conditions: ['import', 'module', 'browser', 'default'] as const,
+                    ...createSharedResolveConfig(['import', 'module', 'browser', 'default']),
                     dedupe: ['react', 'react-dom'] as const,
                     extensions: ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json'] as const,
                 },
