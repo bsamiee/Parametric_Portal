@@ -40,7 +40,16 @@ const createConfigSchemas = () => ({ browser: browserSchema, build: buildSchema,
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
+/**
+ * Binary and 3D asset file extensions for special Vite handling.
+ * These files bypass normal JS/CSS processing and are copied as-is.
+ */
 const ASSET_EXTENSIONS = ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'] as const;
+
+/**
+ * Vendor chunk splitting rules prioritized by dependency importance.
+ * React (p3) → Effect (p2) → other node_modules (p1).
+ */
 const CHUNK_RULES = [
     { name: 'vendor-react', pattern: 'react(?:-dom)?', priority: 3 },
     { name: 'vendor-effect', pattern: '@effect', priority: 2 },
@@ -66,7 +75,7 @@ const {
     Effect.all({
         assets: pipe(
             Effect.succeed(ASSET_EXTENSIONS),
-            Effect.map((e) => Object.freeze(e.map((ext) => `**/*.${ext}` as const))),
+            Effect.map((extensions) => Object.freeze(extensions.map((ext) => `**/*.${ext}` as const))),
         ),
         browsers: pipe(
             Effect.try({
