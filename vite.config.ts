@@ -19,7 +19,6 @@ import * as z from 'zod';
 // --- Type Definitions --------------------------------------------------------
 
 type ConfigSchemas = ReturnType<typeof createConfigSchemas>;
-type ChunkRule = { readonly name: string; readonly pattern: string; readonly priority: number };
 
 // --- Schema Definitions ------------------------------------------------------
 
@@ -40,21 +39,13 @@ const createConfigSchemas = () => ({ browser: browserSchema, build: buildSchema,
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
-/**
- * Binary and 3D asset file extensions for special Vite handling.
- * These files bypass normal JS/CSS processing and are copied as-is.
- */
 const ASSET_EXTENSIONS = ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'] as const;
 
-/**
- * Vendor chunk splitting rules prioritized by dependency importance.
- * React (p3) → Effect (p2) → other node_modules (p1).
- */
 const CHUNK_RULES = [
     { name: 'vendor-react', pattern: 'react(?:-dom)?', priority: 3 },
     { name: 'vendor-effect', pattern: '@effect', priority: 2 },
     { name: 'vendor', pattern: 'node_modules', priority: 1 },
-] as const satisfies ReadonlyArray<ChunkRule>;
+] as const satisfies ReadonlyArray<{ readonly name: string; readonly pattern: string; readonly priority: number }>;
 
 const {
     browsers,
@@ -73,10 +64,7 @@ const {
     webfontConfig,
 } = Effect.runSync(
     Effect.all({
-        assets: pipe(
-            Effect.succeed(ASSET_EXTENSIONS),
-            Effect.map((extensions) => Object.freeze(extensions.map((ext) => `**/*.${ext}` as const))),
-        ),
+        assets: Effect.succeed(Object.freeze(ASSET_EXTENSIONS.map((ext) => `**/*.${ext}` as const))),
         browsers: pipe(
             Effect.try({
                 catch: () => ({ chrome: 107, edge: 107, firefox: 104, safari: 16 }),
@@ -107,13 +95,10 @@ const {
                 return result.success ? result.data : config;
             }),
         ),
-        chunks: pipe(
-            Effect.succeed(CHUNK_RULES),
-            Effect.map((r) =>
-                Object.freeze(
-                    r.map(({ name, pattern, priority }) =>
-                        Object.freeze({ name, priority, test: new RegExp(pattern) }),
-                    ),
+        chunks: Effect.succeed(
+            Object.freeze(
+                CHUNK_RULES.map(({ name, pattern, priority }) =>
+                    Object.freeze({ name, priority, test: new RegExp(pattern) }),
                 ),
             ),
         ),
@@ -260,8 +245,6 @@ const WEBFONT_CONFIG = webfontConfig as string[];
 
 // --- Pure Utility Functions --------------------------------------------------
 
-const matchesNodeModules = (id: string): boolean => id.includes('node_modules');
-
 const createSharedCssConfig = (browsers: z.infer<ConfigSchemas['browser']>) => ({
     lightningcss: {
         drafts: { customMedia: true },
@@ -336,27 +319,24 @@ const createBuildConstants = (): Effect.Effect<z.infer<ConfigSchemas['build']>, 
             time: Effect.sync(() => new Date().toISOString()),
             version: Effect.sync(() => process.env.npm_package_version),
         }),
-        Effect.map(({ mode, time, version }) => ({
-            'import.meta.env.APP_VERSION': JSON.stringify(version ?? '0.0.0'),
-            'import.meta.env.BUILD_MODE': JSON.stringify(mode ?? 'development'),
-            'import.meta.env.BUILD_TIME': JSON.stringify(time),
-        })),
-        Effect.map((constants) => {
+        Effect.map(({ mode, time, version }) => {
+            const constants = {
+                'import.meta.env.APP_VERSION': JSON.stringify(version ?? '0.0.0'),
+                'import.meta.env.BUILD_MODE': JSON.stringify(mode ?? 'development'),
+                'import.meta.env.BUILD_TIME': JSON.stringify(time),
+            };
             const result = createConfigSchemas().build.safeParse(constants);
             return result.success ? result.data : constants;
         }),
     );
 
 const getDropTargets = (): Effect.Effect<ReadonlyArray<'console' | 'debugger'>, never, never> =>
-    pipe(
-        Effect.sync(() => process.env.NODE_ENV),
-        Effect.map((mode) => (mode === 'production' ? (['console', 'debugger'] as const) : ([] as const))),
-    );
+    Effect.sync(() => (process.env.NODE_ENV === 'production' ? (['console', 'debugger'] as const) : ([] as const)));
 
 const createChunkStrategy =
     (patterns: ReadonlyArray<z.infer<ConfigSchemas['chunk']>>) =>
     (id: string): string | undefined =>
-        matchesNodeModules(id)
+        id.includes('node_modules')
             ? pipe(
                   [...patterns].sort((a, b) => b.priority - a.priority),
                   EffectArray.findFirst(({ test }) => test.test(id)),
@@ -364,16 +344,6 @@ const createChunkStrategy =
                   Option.getOrUndefined,
               )
             : undefined;
-
-const createBuildHook = (): PluginOption =>
-    ({
-        buildApp: async (builder: ViteBuilder) =>
-            void (await Promise.all(Object.values(builder.environments).map((env) => builder.build(env)))),
-        buildEnd: () => void 0,
-        buildStart: () => void 0,
-        enforce: 'pre' as const,
-        name: 'parametric-build-hooks',
-    }) as const;
 
 const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; readonly worker: () => PluginOption[] } => ({
     main: [
@@ -391,18 +361,19 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
         // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable exclude array
         ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG as any),
         webfontDownload(WEBFONT_CONFIG),
-        ...pipe(
-            Effect.sync(() => process.env.NODE_ENV),
-            Effect.map((mode) =>
-                mode === 'production'
-                    ? [viteCompression(COMPRESSION_CONFIG.brotli), viteCompression(COMPRESSION_CONFIG.gzip)]
-                    : [],
-            ),
-            Effect.runSync,
-        ),
+        ...(process.env.NODE_ENV === 'production'
+            ? [viteCompression(COMPRESSION_CONFIG.brotli), viteCompression(COMPRESSION_CONFIG.gzip)]
+            : []),
         // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable policy arrays
         csp(CSP_CONFIG as any),
-        createBuildHook(),
+        {
+            buildApp: async (builder: ViteBuilder) =>
+                void (await Promise.all(Object.values(builder.environments).map((env) => builder.build(env)))),
+            buildEnd: () => void 0,
+            buildStart: () => void 0,
+            enforce: 'pre' as const,
+            name: 'parametric-build-hooks',
+        } as const,
         Inspect(PLUGIN_CONFIGS.inspect),
     ],
     worker: () => [tsconfigPaths({ root: './' }), react(PLUGIN_CONFIGS.react)],
