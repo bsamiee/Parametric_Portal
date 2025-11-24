@@ -1,4 +1,4 @@
-import { Effect, pipe } from 'effect';
+import type { Effect } from 'effect';
 
 // --- Type Definitions --------------------------------------------------------
 

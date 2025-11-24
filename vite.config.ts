@@ -129,20 +129,20 @@ const {
                 'style-src': true,
             },
             policy: {
-                'default-src': ["'self'"] as const,
-                'font-src': ["'self'", 'https://fonts.gstatic.com'] as const,
-                'img-src': ["'self'", 'data:', 'https:'] as const,
-                'script-src': ["'self'", "'unsafe-inline'"] as const,
-                'style-src': ["'self'", "'unsafe-inline'"] as const,
+                'default-src': ["'self'"] as string[],
+                'font-src': ["'self'", 'https://fonts.gstatic.com'] as string[],
+                'img-src': ["'self'", 'data:', 'https:'] as string[],
+                'script-src': ["'self'", "'unsafe-inline'"] as string[],
+                'style-src': ["'self'", "'unsafe-inline'"] as string[],
             },
-        } as const),
+        }),
         imageOptimizerConfig: Effect.succeed({
             avif: {
                 lossless: false,
                 quality: 70,
                 speed: 5,
             },
-            exclude: [/^virtual:/, /node_modules/],
+            exclude: [/^virtual:/, /node_modules/] as RegExp[],
             includePublic: true,
             jpeg: {
                 progressive: true,
@@ -157,14 +157,11 @@ const {
                 lossless: false,
                 quality: 80,
             },
-        } as const),
+        }),
         pluginConfigs: Effect.succeed({
             inspect: {
                 build: true,
-                dev: {
-                    enabled: true,
-                    logLevel: 'error',
-                },
+                dev: true,
                 outputDir: '.vite-inspect',
             },
             react: {
@@ -229,18 +226,15 @@ const {
         visualizerConfig: Effect.succeed({
             brotliSize: true,
             emitFile: true,
-            exclude: [/node_modules\/react-compiler-runtime/],
+            exclude: [/node_modules\/react-compiler-runtime/] as RegExp[],
             filename: '.vite/stats.html',
             gzipSize: true,
             open: false,
             projectRoot: process.cwd(),
             sourcemap: true,
             template: 'treemap' as const,
-        } as const),
-        webfontConfig: Effect.succeed({
-            injectAsStyleTag: false,
-            minifyCss: true,
-        } as const),
+        }),
+        webfontConfig: Effect.succeed([] as string[]),
     }),
 );
 
@@ -257,7 +251,7 @@ const COMPRESSION_CONFIG = Object.freeze(compressionConfig);
 const VISUALIZER_CONFIG = Object.freeze(visualizerConfig);
 const IMAGE_OPTIMIZER_CONFIG = Object.freeze(imageOptimizerConfig);
 const CSP_CONFIG = Object.freeze(cspConfig);
-const WEBFONT_CONFIG = Object.freeze(webfontConfig);
+const WEBFONT_CONFIG = webfontConfig as string[];
 
 // --- Pure Utility Functions --------------------------------------------------
 
@@ -390,7 +384,7 @@ const createBuildHook = (): PluginOption =>
     }) as const;
 
 const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; readonly worker: () => PluginOption[] } => ({
-    main: Object.freeze([
+    main: [
         ...basePlugins,
         tailwindcss({ optimize: { minify: true } }),
         VitePWA({
@@ -401,14 +395,16 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
             workbox: PWA_WORKBOX_CONFIG,
         }),
         svgr({ exclude: '', include: '**/*.svg?react', svgrOptions: SVGR_OPTIONS }),
-        ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG),
+        // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable exclude array
+        ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG as any),
         webfontDownload(WEBFONT_CONFIG),
         ...createCompressionPlugins(),
-        csp(CSP_CONFIG),
+        // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable policy arrays
+        csp(CSP_CONFIG as any),
         createBuildHook(),
         Inspect(PLUGIN_CONFIGS.inspect),
-    ] as const),
-    worker: () => Object.freeze([...basePlugins]),
+    ],
+    worker: () => [...basePlugins],
 });
 
 const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
@@ -439,7 +435,8 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                             entryFileNames: 'entries/[name]-[hash].js',
                             manualChunks: createChunkStrategy(CHUNK_PATTERNS),
                         },
-                        plugins: [visualizer(VISUALIZER_CONFIG)],
+                        // biome-ignore lint/suspicious/noExplicitAny: Plugin requires mutable exclude Filter array
+                        plugins: [visualizer(VISUALIZER_CONFIG as any)],
                         treeshake: {
                             moduleSideEffects: 'no-external' as const,
                             propertyReadSideEffects: false,
@@ -522,7 +519,7 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                 ssr: SSR_CONFIG,
                 worker: {
                     format: 'es' as const,
-                    plugins: plugins.worker(),
+                    plugins: plugins.worker,
                     rollupOptions: {
                         output: {
                             assetFileNames: 'workers/assets/[name]-[hash][extname]',

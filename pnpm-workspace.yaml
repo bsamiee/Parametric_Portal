@@ -3,96 +3,67 @@ packages:
   - packages/*
 
 catalog:
-  # --- Linting & Formatting (Rust-powered, lint-staged integration) -----------
-  '@biomejs/biome': 2.3.7                                       # Rust linter/formatter (replaces ESLint+Prettier)
-
-  # --- Effect Ecosystem (Functional ROP, monadic pipelines) -------------------
-  '@effect/experimental': 0.57.4                                # Experimental Effect features
-  '@effect/platform': 0.93.3                                    # Cross-platform Effect runtime
-  '@effect/platform-browser': 0.73.0                            # Browser-specific Effect runtime
-  '@effect/schema': 0.75.5                                      # Schema validation with Effect integration
-  effect: 3.19.6                                                # Core Effect library (async/error handling)
-
-  # --- Nx Monorepo Tooling (Crystal inference, caching) -----------------------
-  '@nx/js': 22.2.0-canary.20251121-9a6c7ad                      # Nx JavaScript plugin
-  '@nx/react': 22.2.0-canary.20251121-9a6c7ad                   # Nx React plugin
-  '@nx/vite': 22.2.0-canary.20251121-9a6c7ad                    # Nx Vite plugin (Crystal auto-inference)
-  nx: 22.2.0-canary.20251121-9a6c7ad                            # Nx core (task orchestration, caching)
-
-  # --- Testing & Browser Automation (E2E, visual testing) ---------------------
-  '@playwright/test': 1.56.1                                    # E2E browser testing (Chromium)
-  '@vitest/coverage-v8': 4.0.13                                 # V8 coverage provider for Vitest
-  '@vitest/ui': 4.0.13                                          # Vitest UI (visual test runner)
-  happy-dom: 20.0.10                                            # Lightweight DOM for unit tests
-  vitest: 4.0.13                                                # Vite-native test runner (HMR testing)
-
-  # --- UI Component Primitives (Radix, unstyled, accessible) ------------------
-  '@radix-ui/react-label': 2.1.8                                # Accessible label component
-  '@radix-ui/react-separator': 1.1.8                            # Visual separator component
-  '@radix-ui/react-slot': 1.2.4                                 # Slot composition primitive
-
-  # --- Build Tooling (Vite 7, React 19 Compiler, TypeScript 6-dev) ------------
-  '@rollup/plugin-typescript': 12.3.0                           # TypeScript declarations for library builds
-  '@vitejs/plugin-react': 5.1.1                                 # React Fast Refresh + React 19 Compiler
-  rollup-plugin-visualizer: 6.0.5                               # Bundle size visualization
-  tsx: 4.20.6                                                   # TypeScript execution (scripts/tooling)
-  typescript: 6.0.0-dev.20251121                                # TypeScript 6.0 nightly (bleeding-edge)
-  vite: 7.2.4                                                   # Vite 7 (Environment API, ESM-first)
-  vite-plugin-compression: 0.5.1                                # Brotli+gzip compression
-  vite-plugin-csp: 1.1.2                                        # Content Security Policy + SRI generation
-  vite-plugin-image-optimizer: 2.0.3                            # Image optimization (sharp-based)
-  vite-plugin-inspect: 11.3.3                                   # Vite bundle inspector
-  vite-plugin-pwa: 1.1.0                                        # PWA generation (Workbox 7)
-  vite-plugin-svgr: 4.5.0                                       # SVG→React component transformer
-  vite-plugin-webfont-dl: 3.11.1                                # Self-host web fonts (performance optimization)
-  vite-tsconfig-paths: 5.1.4                                    # tsconfig path alias resolution
-
-  # --- CSS & Styling (Tailwind v4, LightningCSS, no PostCSS) -----------------
-  '@tailwindcss/vite': 4.1.17                                   # Tailwind v4 alpha (Vite-native, no PostCSS)
-  lightningcss: 1.30.2                                          # Rust CSS transformer (only CSS pipeline)
-  tailwind-merge: 3.4.0                                         # Tailwind class merging utility
-  tailwindcss: 4.1.17                                           # Tailwind CSS v4 core
-
-  # --- React 19 Ecosystem (Canary, Compiler, Server Components) ---------------
-  babel-plugin-react-compiler: 19.0.0-beta-9ee70a1-20241017     # React 19 Compiler (auto-memoization)
-  react: 19.3.0-canary-40b4a5bf-20251120                        # React 19 canary (experimental)
-  react-compiler-runtime: 19.0.0-beta-af1b7da-20250417          # React Compiler runtime helpers
-  react-dom: 19.3.0-canary-40b4a5bf-20251120                    # React DOM 19 canary
-
-  # --- State Management & Data Fetching (React Query, Zustand) ----------------
-  '@tanstack/react-query': 5.90.10                              # Async state management (queries/mutations)
-  '@tanstack/react-query-devtools': 5.91.0                      # React Query devtools
-  '@tanstack/react-query-persist-client': 5.90.12               # Query cache persistence
-  '@tanstack/react-table': 8.21.3                               # Headless table library
-  '@tanstack/react-virtual': 3.13.12                            # Virtual scrolling
-  immer: 11.0.0                                                 # Immutable state updates
-  zustand: 5.0.8                                                # Lightweight state management
-
-  # --- React Aria & Stately (Headless UI primitives, Adobe) -------------------
-  react-aria: 3.44.0                                            # Accessible UI behavior hooks
-  react-stately: 3.42.0                                         # State management for UI components
-
-  # --- Utility Libraries (Pattern matching, date handling, IDs) ---------------
-  class-variance-authority: 0.7.1                               # Type-safe variant styling
-  clsx: 2.1.1                                                   # Class name composition
-  cmdk: 1.1.1                                                   # Command palette component
-  date-fns: 4.1.0                                               # Modern date utility library
-  lucide-react: 0.554.0                                         # Icon library (SVG components)
-  sharp: 0.34.5                                                 # Image processing (PWA icons)
-  ts-pattern: 5.9.0                                             # Exhaustive pattern matching
-  tslib: 2.8.1                                                  # TypeScript runtime library
-  uuid: 10.0.0                                                  # UUID generation
-  '@types/uuid': 10.0.0                                         # UUID type definitions
-
-  # --- Document Generation & Export (PDF, ZIP) --------------------------------
-  jspdf: 3.0.4                                                  # PDF generation
-  jszip: 3.10.1                                                 # ZIP file creation
-
-  # --- Browser Targeting & Compatibility (Baseline Widely Available) ----------
-  browserslist: 4.28.0                                          # Browser target queries (Baseline support)
-
-  # --- Git Hooks & Pre-commit -------------------------------------------------
-  lefthook: 2.0.4                                               # Fast Git hook runner (replaces husky + lint-staged)
-
-  # --- Schema Validation (Zod, branded types, runtime safety) -----------------
-  zod: 4.1.13                                                   # TypeScript-first schema validation
+  '@biomejs/biome': 2.3.7
+  '@effect/experimental': 0.57.4
+  '@effect/platform': 0.93.3
+  '@effect/platform-browser': 0.73.0
+  '@effect/schema': 0.75.5
+  '@nx/js': 22.2.0-canary.20251121-9a6c7ad
+  '@nx/react': 22.2.0-canary.20251121-9a6c7ad
+  '@nx/vite': 22.2.0-canary.20251121-9a6c7ad
+  '@playwright/test': 1.56.1
+  '@radix-ui/react-label': 2.1.8
+  '@radix-ui/react-separator': 1.1.8
+  '@radix-ui/react-slot': 1.2.4
+  '@rollup/plugin-typescript': 12.3.0
+  '@tailwindcss/vite': 4.1.17
+  '@tanstack/react-query': 5.90.10
+  '@tanstack/react-query-devtools': 5.91.0
+  '@tanstack/react-query-persist-client': 5.90.12
+  '@tanstack/react-table': 8.21.3
+  '@tanstack/react-virtual': 3.13.12
+  '@types/uuid': 10.0.0
+  '@vitejs/plugin-react': 5.1.1
+  '@vitest/coverage-v8': 4.0.13
+  '@vitest/ui': 4.0.13
+  babel-plugin-react-compiler: 19.0.0-beta-9ee70a1-20241017
+  browserslist: 4.28.0
+  class-variance-authority: 0.7.1
+  clsx: 2.1.1
+  cmdk: 1.1.1
+  date-fns: 4.1.0
+  effect: 3.19.6
+  happy-dom: 20.0.10
+  immer: 11.0.0
+  jspdf: 3.0.4
+  jszip: 3.10.1
+  lefthook: 2.0.4
+  lightningcss: 1.30.2
+  lucide-react: 0.554.0
+  nx: 22.2.0-canary.20251121-9a6c7ad
+  react: 19.3.0-canary-40b4a5bf-20251120
+  react-aria: 3.44.0
+  react-compiler-runtime: 19.0.0-beta-af1b7da-20250417
+  react-dom: 19.3.0-canary-40b4a5bf-20251120
+  react-stately: 3.42.0
+  rollup-plugin-visualizer: 6.0.5
+  sharp: 0.34.5
+  tailwind-merge: 3.4.0
+  tailwindcss: 4.1.17
+  ts-pattern: 5.9.0
+  tslib: 2.8.1
+  tsx: 4.20.6
+  typescript: 6.0.0-dev.20251121
+  uuid: 10.0.0
+  vite: 7.2.4
+  vite-plugin-compression: 0.5.1
+  vite-plugin-csp: 1.1.2
+  vite-plugin-image-optimizer: 2.0.3
+  vite-plugin-inspect: 11.3.3
+  vite-plugin-pwa: 1.1.0
+  vite-plugin-svgr: 4.5.0
+  vite-plugin-webfont-dl: 3.11.1
+  vite-tsconfig-paths: 5.1.4
+  vitest: 4.0.13
+  zod: 4.1.13
+  zustand: 5.0.8
