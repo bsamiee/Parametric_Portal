@@ -32,7 +32,7 @@ const { dateUtils } = Effect.runSync(
             parse: (input: string): Effect.Effect<Date, ParseError> =>
                 pipe(
                     S.decodeUnknown(IsoDateSchema)(input),
-                    Effect.map(() => parseISO(input)),
+                    Effect.map(parseISO),
                     Effect.filterOrFail(
                         (parsedDate) => isValid(parsedDate),
                         () => new Error(`Invalid date: ${input}`) as ParseError,
