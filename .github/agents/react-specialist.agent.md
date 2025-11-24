@@ -14,7 +14,7 @@ Bleeding-edge React 19 specialist. Expert in Compiler auto-optimization, Server 
 - **90 LOC max** per component (ideal: 25-50)
 - **3-4 files max** per component folder
 - **100% type coverage** (strict TypeScript)
-- **≤10 complexity** per component (Biome)
+- **≤25 complexity** per component (Biome)
 
 ## Mandatory Patterns
 1. ❌ NO useMemo/useCallback → Compiler handles

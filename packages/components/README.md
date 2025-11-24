@@ -170,7 +170,7 @@ All components support the `asChild` pattern via `@radix-ui/react-slot`:
 - **react-aria** 3.40+
 - **@radix-ui/react-slot** 1.1+
 - **class-variance-authority** 0.7+
-- **effect** 4+
+- **effect** 3.19+
 - **lucide-react** 0.500+
 
 **License**: MIT

@@ -234,10 +234,11 @@ const createButtonComponent = (factoryInput: ControlFactoryInput<'button'>): Con
             className: finalClassName,
             ref,
             style: staticStyleVars as CSSProperties,
-            type: 'button' as const,
         });
 
-        return useSlot ? createElement(Slot, mergedProps, children) : createElement('button', mergedProps, children);
+        return useSlot
+            ? createElement(Slot, mergedProps, children)
+            : createElement('button', { ...mergedProps, type: 'button' }, children);
     });
 
     Component.displayName = 'Control(button)';

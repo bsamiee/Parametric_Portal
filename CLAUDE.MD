@@ -343,7 +343,7 @@ nx build <project>
 **Strictest TS**. Path aliases: `@/*` → `packages/*`, `@theme/*`, `@types/*`
 
 ### biome.json (141 lines)
-**70+ rules**. No default exports (except configs), no `any`, no `forEach`, complexity ≤10
+**70+ rules**. No default exports (except configs), no `any`, no `forEach`, complexity ≤25
 
 ### pnpm-workspace.yaml (98 lines)
 **Catalog** with 98 exact versions. Single source of truth.
