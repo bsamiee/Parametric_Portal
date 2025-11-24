@@ -238,7 +238,7 @@ const {
             template: 'treemap' as const,
         } as const),
         webfontConfig: Effect.succeed({
-            injectAsStyleTag: true,
+            injectAsStyleTag: false,
             minifyCss: true,
         } as const),
     }),
