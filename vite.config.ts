@@ -7,10 +7,12 @@ import { visualizer } from 'rollup-plugin-visualizer';
 import type { PluginOption, UserConfig, ViteBuilder } from 'vite';
 import { defineConfig } from 'vite';
 import viteCompression from 'vite-plugin-compression';
+import csp from 'vite-plugin-csp';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
 import Inspect from 'vite-plugin-inspect';
 import { VitePWA } from 'vite-plugin-pwa';
 import svgr from 'vite-plugin-svgr';
+import webfontDownload from 'vite-plugin-webfont-dl';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import * as z from 'zod';
 
@@ -52,6 +54,8 @@ const {
     compressionConfig,
     visualizerConfig,
     imageOptimizerConfig,
+    cspConfig,
+    webfontConfig,
 } = Effect.runSync(
     Effect.all({
         assets: Effect.succeed([
@@ -116,6 +120,21 @@ const {
                 filter: /\.(js|mjs|json|css|html|svg)$/i,
                 threshold: 10240,
                 verbose: true,
+            },
+        } as const),
+        cspConfig: Effect.succeed({
+            algorithm: 'sha256' as const,
+            enabled: true,
+            hashEnabled: {
+                'script-src': true,
+                'style-src': true,
+            },
+            policy: {
+                'default-src': ["'self'"] as const,
+                'font-src': ["'self'", 'https://fonts.gstatic.com'] as const,
+                'img-src': ["'self'", 'data:', 'https:'] as const,
+                'script-src': ["'self'", "'unsafe-inline'"] as const,
+                'style-src': ["'self'", "'unsafe-inline'"] as const,
             },
         } as const),
         imageOptimizerConfig: Effect.succeed({
@@ -219,6 +238,10 @@ const {
             sourcemap: true,
             template: 'treemap' as const,
         } as const),
+        webfontConfig: Effect.succeed({
+            injectAsStyleTag: true,
+            minifyCss: true,
+        } as const),
     }),
 );
 
@@ -234,6 +257,8 @@ const SSR_CONFIG = Object.freeze(ssrConfig);
 const COMPRESSION_CONFIG = Object.freeze(compressionConfig);
 const VISUALIZER_CONFIG = Object.freeze(visualizerConfig);
 const IMAGE_OPTIMIZER_CONFIG = Object.freeze(imageOptimizerConfig);
+const CSP_CONFIG = Object.freeze(cspConfig);
+const WEBFONT_CONFIG = Object.freeze(webfontConfig);
 
 // --- Pure Utility Functions --------------------------------------------------
 
@@ -378,7 +403,9 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
         }),
         svgr({ exclude: '', include: '**/*.svg?react', svgrOptions: SVGR_OPTIONS }),
         ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG),
+        webfontDownload(WEBFONT_CONFIG),
         ...createCompressionPlugins(),
+        csp(CSP_CONFIG),
         createBuildHook(),
         Inspect(PLUGIN_CONFIGS.inspect),
     ] as const),

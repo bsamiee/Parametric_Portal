@@ -83,19 +83,20 @@
 
 ### Configuration Files
 
-#### `vite.config.ts` (515 lines)
+#### `vite.config.ts` (530+ lines)
 
-**Unified Constant Factory** (lines 46-227):
+**Unified Constant Factory** (lines 46-246):
 ```typescript
 Effect.runSync(Effect.all({
     browsers, chunks, assets, port,
     pluginConfigs, pwaManifest, pwaWorkbox,
     svgrOptions, ssrConfig,
-    compressionConfig, visualizerConfig, imageOptimizerConfig
+    compressionConfig, visualizerConfig, imageOptimizerConfig,
+    cspConfig, webfontConfig
 }))
 ```
 
-**Frozen Constants** (12 total):
+**Frozen Constants** (14 total):
 - `BROWSER_TARGETS`: Validated browser versions (Chrome 107, Edge 107, Firefox 104, Safari 16)
 - `CHUNK_PATTERNS`: Priority-based vendor splitting (React p3, Effect p2, node_modules p1)
 - `ASSET_PATTERNS`: 3D models, textures, binaries (`.glb`, `.gltf`, `.hdr`, `.wasm`, etc.)
@@ -107,6 +108,9 @@ Effect.runSync(Effect.all({
 - `SSR_CONFIG`: SSR configuration (dormant, Node.js target)
 - `COMPRESSION_CONFIG`: Brotli + gzip (10KB threshold, text-only filter, verbose logging)
 - `VISUALIZER_CONFIG`: Treemap analysis (Brotli sizes, sourcemap, CI-friendly)
+- `IMAGE_OPTIMIZER_CONFIG`: AVIF/WebP optimization (quality 70/80, progressive JPEG)
+- `CSP_CONFIG`: Content Security Policy + SRI (SHA-256 hashing, production security)
+- `WEBFONT_CONFIG`: Web font self-hosting (inject as style tags, minified CSS)
 - `IMAGE_OPTIMIZER_CONFIG`: AVIF/WebP optimization (quality 70/80, progressive JPEG)
 
 **Effect Pipelines** (4 total):
@@ -236,7 +240,7 @@ Effect.runSync(Effect.all({
 
 ### Plugins & Tools
 
-**Vite Plugins** (10):
+**Vite Plugins** (12):
 1. `@vitejs/plugin-react` (React 19 compiler integration)
 2. `@tailwindcss/vite` (Tailwind v4)
 3. `vite-plugin-pwa` (Workbox 7, manifest, auto-update)
@@ -245,8 +249,10 @@ Effect.runSync(Effect.all({
 6. `vite-plugin-inspect` (bundle analysis, dev/build modes)
 7. `vite-plugin-compression` (Brotli + gzip, 10KB threshold, text-only)
 8. `vite-plugin-image-optimizer` (AVIF/WebP, Sharp-based, progressive JPEG)
-9. `rollup-plugin-visualizer` (treemap, Brotli sizes, sourcemap integration)
-10. `vite-tsconfig-paths` (tsconfig path alias resolution)
+9. `vite-plugin-csp` (Content Security Policy + SRI generation, security)
+10. `vite-plugin-webfont-dl` (self-host web fonts, performance optimization)
+11. `rollup-plugin-visualizer` (treemap, Brotli sizes, sourcemap integration)
+12. `vite-tsconfig-paths` (tsconfig path alias resolution)
 
 **Development Tools**:
 - `tsx`: TypeScript execution (10-100x faster than ts-node, ESM-native)
@@ -499,7 +505,8 @@ const agentForTask = (task: Task): AgentName =>
 **Last Updated**: 2025-11-24
 **Agent Profiles**: 10 specialized agents (+5,056 lines comprehensive guidance)
 **Modern Prompt Engineering**: 2024-2025 best practices (precision, context, stepwise, few-shot, security-first)
-**Vite Config**: 515 lines, 12 frozen constants, 10+ plugins, ultra-dense factories
+**Vite Config**: 530+ lines, 14 frozen constants, 12 plugins (Phase 2A complete)
+**Security & Performance**: CSP + SRI, web font self-hosting, comprehensive optimization
 **Vitest Config**: 103 lines, 7+ features
 **Nx Targets**: 10+ custom targets (analyze, inspect, validate, pwa:icons)
 **Tool Integration**: tsx, compression, visualizer, image-optimizer, inspect (fully optimized)
