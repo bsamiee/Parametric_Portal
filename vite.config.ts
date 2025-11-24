@@ -303,7 +303,7 @@ const createLibraryConfig = (options: {
                 target: 'esnext' as const,
                 treeShaking: true,
             },
-            plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] })],
+            plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] }), Inspect(PLUGIN_CONFIGS.inspect)],
             resolve: {
                 alias: {
                     '@': '/packages',
