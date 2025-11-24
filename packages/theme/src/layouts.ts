@@ -179,14 +179,14 @@ ${containerRule}  max-width: var(--layout-${config.name}-max);
         }),
     );
 
-const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> =>
-    input.type === 'grid'
-        ? generateGridLayout(input)
-        : input.type === 'stack'
-          ? generateStackLayout(input)
-          : input.type === 'sticky'
-            ? generateStickyLayout(input)
-            : generateContainerLayout(input);
+const LAYOUT_GENERATORS = Object.freeze({
+    container: generateContainerLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
+    grid: generateGridLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
+    stack: generateStackLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
+    sticky: generateStickyLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
+} as const);
+
+const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> => LAYOUT_GENERATORS[input.type](input);
 
 // --- Plugin ------------------------------------------------------------------
 
