@@ -48,7 +48,7 @@ const { dateConfig, dateUtils } = Effect.runSync(
     }),
 );
 
-const DATE_CONFIG = Object.freeze(dateConfig);
+const _DATE_CONFIG = Object.freeze(dateConfig);
 const DateUtils = Object.freeze(dateUtils);
 
 // --- Export ------------------------------------------------------------------

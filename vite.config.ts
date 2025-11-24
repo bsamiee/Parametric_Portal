@@ -76,7 +76,7 @@ const { browsers, chunks, assets, port, pluginConfigs, pwaManifest, pwaWorkbox, 
                                     }
                                 }
                                 return acc;
-                                },
+                            },
                             { chrome: 107, edge: 107, firefox: 104, safari: 16 } as BrowserTargetConfig,
                         );
                         return versions;
