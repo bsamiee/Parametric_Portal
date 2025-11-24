@@ -38,7 +38,7 @@ No `any` (Zod `.brand()`) • No `var`/`let` (`const` only) • No `if/else` (te
 
 **tsconfig.base.json**: Strictest (strict, exactOptionalPropertyTypes, noUncheckedIndexedAccess, verbatimModuleSyntax) • ESNext • Bundler • `@/* → packages/*` • Extend: `{"extends":"../../tsconfig.base.json","compilerOptions":{"composite":true,"outDir":"./dist"}}`
 
-**biome.json**: No default exports (except configs) • No any/forEach • Complexity ≤10 • Exhaustive deps/switch • Import type separation • Auto-organize • 120w/4sp/single quotes
+**biome.json**: No default exports (except configs) • No any/forEach • Complexity ≤25 • Exhaustive deps/switch • Import type separation • Auto-organize • 120w/4sp/single quotes
 
 **nx.json**: Targets: build/test/typecheck/check • Crystal: auto-infers from vite.config • 4 workers • Outputs: `{projectRoot}/dist`, `{projectRoot}/coverage`
 
@@ -68,7 +68,7 @@ No `any` (Zod `.brand()`) • No `var`/`let` (`const` only) • No `if/else` (te
 
 **MUST NOT**: Use `any` (except experimental APIs) • Use `let`/mutations • Imperative loops • Scattered `Object.freeze` • try/catch (use Effect) • if/else statements • Default exports (except configs) • Omit type annotations • Handroll implementations • Skip validation
 
-**Quality Targets**: 25-30 lines/feature • 100% type coverage • 80% test coverage (V8) • ≤10 complexity • <3s dev start • <250KB main chunk
+**Quality Targets**: 25-30 lines/feature • 100% type coverage • 80% test coverage (V8) • ≤25 complexity • <3s dev start • <250KB main chunk
 
 ## Custom Agents (Delegate First)
 

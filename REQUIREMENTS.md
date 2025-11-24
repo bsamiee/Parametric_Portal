@@ -165,7 +165,7 @@ Effect.runSync(Effect.all({
 **Linter Rules** (70+ rules):
 - **Correctness**: No unused imports/variables, exhaustive deps, yield enforcement
 - **Style**: No default exports, block statements, const preference, import types
-- **Complexity**: Max cognitive complexity 10, no forEach, arrow functions
+- **Complexity**: Max cognitive complexity 25, no forEach, arrow functions
 - **Suspicious**: No console (warn), no any, no var
 - **Performance**: No barrel files, no re-export-all
 - **Nursery**: No floating promises, exhaustive switch
@@ -177,7 +177,7 @@ Effect.runSync(Effect.all({
 
 **Overrides**:
 - Config files: Allow default exports
-- Effects/services: Disable complexity limits
+- Effects/services: Use universal complexity limit (25)
 - JSONC: Trailing commas
 
 #### `.npmrc` (35 lines)
@@ -475,7 +475,7 @@ const agentForTask = (task: Task): AgentName =>
 - **Functionality Density**: 25-30 lines/feature
 - **Type Coverage**: 100% (strict TypeScript)
 - **Test Coverage**: 80% minimum (V8)
-- **Cognitive Complexity**: ≤10 per function
+- **Cognitive Complexity**: ≤25 per function
 - **Build Performance**: <3s dev server start
 - **Bundle Size**: <250KB gzipped (main chunk)
 

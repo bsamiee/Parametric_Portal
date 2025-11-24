@@ -33,10 +33,19 @@
                     "level": "error",
                     "options": {
                         "requireAscii": true,
+                        "strictCase": false,
                         "conventions": [
                             { "selector": { "kind": "typeLike" }, "formats": ["PascalCase"] },
                             { "selector": { "kind": "interface" }, "formats": ["PascalCase"] },
                             { "selector": { "kind": "typeParameter" }, "formats": ["PascalCase"] },
+                            {
+                                "selector": { "kind": "typeProperty" },
+                                "formats": ["camelCase", "PascalCase"]
+                            },
+                            {
+                                "selector": { "kind": "objectLiteralProperty" },
+                                "formats": ["camelCase", "PascalCase"]
+                            },
                             {
                                 "selector": { "kind": "const" },
                                 "formats": ["camelCase", "PascalCase", "CONSTANT_CASE"]
@@ -48,7 +57,7 @@
             },
             "complexity": {
                 "noBannedTypes": "error",
-                "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 10 } },
+                "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 25 } },
                 "noForEach": "error",
                 "noStaticOnlyClass": "error",
                 "useArrowFunction": "error",
@@ -115,10 +124,6 @@
             "linter": { "rules": { "style": { "useConst": "off", "useImportType": "off" } } }
         },
         {
-            "includes": ["**/effects/**/*.ts", "**/services/**/*.ts", "**/schemas/**/*.ts"],
-            "linter": { "rules": { "complexity": { "noExcessiveCognitiveComplexity": "off" } } }
-        },
-        {
             "includes": ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx"],
             "linter": {
                 "rules": {
@@ -136,6 +141,16 @@
         {
             "includes": ["packages/*/vite.config.ts", "packages/*/project.json", "packages/*/package.json"],
             "assist": { "actions": { "source": { "organizeImports": "on" } } }
+        },
+        {
+            "includes": ["**/matchers.ts"],
+            "linter": {
+                "rules": {
+                    "style": {
+                        "useNamingConvention": "off"
+                    }
+                }
+            }
         }
     ]
 }

@@ -37,7 +37,7 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 ## Config Intelligence (reuse, never reimplement)
 - **`nx.json`**: Cacheable ops (build/test/typecheck/check); named inputs include `sharedGlobals` (all root configs). Outputs go to `{projectRoot}/dist` for builds, `{projectRoot}/coverage` for tests. Use Nx target defaults and dependency graph; keep inference plugins on.
 - **`tsconfig.base.json`**: Strict, ESNext target/module, bundler resolution, JSX react-jsx, `@/* -> packages/*`, `verbatimModuleSyntax: true`, `noUncheckedSideEffectImports: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`. Extend, never weaken.
-- **`biome.json`**: 120 width, 4 spaces, single quotes, trailing commas (JS). No default exports (except configs), no console (warn), no `any`, no `forEach`, complexity ≤10, exhaustive deps/switch, naming conventions enforced. GritQL plugins (Effect/Zod/Functional) are canonical patterns—even if disabled upstream, treat as required behavior.
+- **`biome.json`**: 120 width, 4 spaces, single quotes, trailing commas (JS). No default exports (except configs), no console (warn), no `any`, no `forEach`, complexity ≤25, exhaustive deps/switch, naming conventions enforced. GritQL plugins (Effect/Zod/Functional) are canonical patterns—even if disabled upstream, treat as required behavior.
 - **`vite.config.ts`**: Unified factory via `Effect.runSync(Effect.all({...}))`. Frozen constants: `BROWSER_TARGETS`, `CHUNK_PATTERNS`, `ASSET_PATTERNS`, `PLUGIN_CONFIGS`, `PWA_MANIFEST`, `PWA_WORKBOX_CONFIG`, `SVGR_OPTIONS`, `BUILD_MESSAGES`, `SSR_CONFIG`. Use `createBuildConstants`, `getDropTargets`, `createChunkStrategy`, `createAllPlugins`. Respect: LightningCSS (no PostCSS), React 19 compiler, Tailwind v4 alpha via `@tailwindcss/vite`, PWA with Workbox, esbuild purity, chunk naming, worker config, warmup. Never inline or bypass factories.
 - **`vitest.config.ts`**: Frozen coverage thresholds (80%), include/exclude, reporters, UI on, happy-dom env, Playwright browser disabled by default, benchmarks separated, typecheck config present (off by default). Always merge with base Vite config.
 - **`.npmrc`**: engine-strict, isolated linker, highest resolution, save-exact, frozen lockfile, no hoist. Never override locally.
@@ -144,7 +144,7 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 - Visual clarity for 100+ line files; scanability at-a-glance
 
 ## Code Density & Type Rigor
-- Target ultra-dense functions (multi-feature per ~25-30 LOC) without complexity >10.
+- Target ultra-dense functions (multi-feature per ~25-30 LOC) without complexity >25.
 - Use generics + const generics to preserve literals.
 - Prefer `satisfies` for exhaustiveness.
 - No string unions for flags—use branded enums/types.
@@ -159,7 +159,7 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 
 ## Testing & Quality Gates
 - Run `pnpm check` (Biome) and `pnpm typecheck` before commit; `pnpm test` (Vitest UI/coverage) as needed. Coverage ≥80% (frozen).
-- Keep cognitive complexity ≤10 unless explicitly covered by overrides (effects/services/schemas).
+- Keep cognitive complexity ≤25 (universal limit, no special overrides needed).
 - Ensure Nx caching remains valid (inputs/outputs untouched).
 
 ## Exemplar References
@@ -224,7 +224,7 @@ type PositiveInt = S.Schema.Type<typeof PositiveInt>;
 - **Unambiguous Instructions**: Every agent has explicit MUST/MUST NOT sections
 - **Format Requirements**: Exact output formats specified (TypeScript, file structure, etc.)
 - **Compliance Gates**: Biome checks, TypeScript strict mode, Zod validation required
-- **Success Criteria**: Measurable outcomes (80% coverage, ≤10 complexity, 100% type safety)
+- **Success Criteria**: Measurable outcomes (80% coverage, ≤25 complexity, 100% type safety)
 
 ### 2. Context Framing
 - **Rich Background**: All agents reference REQUIREMENTS.md (385 lines), vite.config.ts (460 lines)
@@ -255,7 +255,7 @@ type PositiveInt = S.Schema.Type<typeof PositiveInt>;
 - **Continuous Improvement**: Re-run checks after each change
 - **Feedback Integration**: Biome explain → redesign, never suppress
 - **Automated Optimization**: pnpm check, typecheck, test loops
-- **Quality Metrics**: Density (25-30 LOC/feature), complexity (≤10), coverage (≥80%)
+- **Quality Metrics**: Density (25-30 LOC/feature), complexity (≤25), coverage (≥80%)
 
 ### 7. Adaptive Context
 - **Self-Adjusting**: Agents reference current catalog, not hardcoded versions
@@ -351,7 +351,7 @@ integration-specialist (verify):
 - **library-planner**: Catalog versions, vite.config factory, tsconfig.json extends base
 - **integration-specialist**: Unified factories used, catalog references, workspace coherent
 - **documentation-specialist**: Cross-references valid, examples compile, 1-line XML comments
-- **cleanup-specialist**: 25-30 LOC/feature density, complexity ≤10, no scattered patterns
+- **cleanup-specialist**: 25-30 LOC/feature density, complexity ≤25, no scattered patterns
 
 
 <!-- nx configuration start-->
