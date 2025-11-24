@@ -64,6 +64,7 @@ const createBrandRegistry = () =>
             pipe(
                 createBrandEntry(name),
                 Effect.tap((brand) => Effect.sync(() => set((state) => ({ brands: addBrand(state, brand) })))),
+                Effect.catchAll(() => Effect.unit), // Swallow ParseError, do nothing
                 Effect.runSync,
             ),
         unregister: (name) => set((state) => ({ brands: removeBrand(state, name) })),
