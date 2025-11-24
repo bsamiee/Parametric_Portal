@@ -1,7 +1,7 @@
 {
     "dependencies": {
+        "@effect/experimental": "catalog:",
         "@effect/schema": "catalog:",
-        "date-fns": "catalog:",
         "effect": "catalog:",
         "uuid": "catalog:",
         "zustand": "catalog:"

@@ -1,6 +1,5 @@
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
-import { addDays, differenceInDays, format, isValid, parseISO } from 'date-fns';
 import { Effect, pipe } from 'effect';
 
 // --- Type Definitions --------------------------------------------------------
@@ -19,22 +18,32 @@ const { dateUtils } = Effect.runSync(
             addDays:
                 (numDays: number) =>
                 (date: Date): Effect.Effect<Date, never> =>
-                    Effect.sync(() => addDays(date, numDays)),
+                    Effect.sync(() => new Date(date.getTime() + numDays * 86400000)),
             daysBetween: (start: Date, end: Date): Effect.Effect<number, never> =>
-                Effect.sync(() => differenceInDays(end, start)),
+                Effect.sync(() => Math.floor((end.getTime() - start.getTime()) / 86400000)),
             formatDate:
                 (formatStr = 'yyyy-MM-dd') =>
                 (date: Date): Effect.Effect<string, ParseError> =>
                     Effect.try({
                         catch: (error) => new Error(`Format failed: ${String(error)}`) as ParseError,
-                        try: () => format(date, formatStr),
+                        try: () => {
+                            if (formatStr !== 'yyyy-MM-dd') {
+                                throw new Error(`Unsupported format: ${formatStr}. Only 'yyyy-MM-dd' is supported.`);
+                            }
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            return `${year}-${month}-${day}`;
+                        },
                     }),
             parse: (input: string): Effect.Effect<Date, ParseError> =>
                 pipe(
-                    S.decodeUnknown(IsoDateSchema)(input),
-                    Effect.map(parseISO),
+                    Effect.try({
+                        catch: (error) => new Error(`Parse failed: ${String(error)}`) as ParseError,
+                        try: () => new Date(input),
+                    }),
                     Effect.filterOrFail(
-                        (parsedDate) => isValid(parsedDate),
+                        (parsedDate) => !Number.isNaN(parsedDate.getTime()),
                         () => new Error(`Invalid date: ${input}`) as ParseError,
                     ),
                 ),

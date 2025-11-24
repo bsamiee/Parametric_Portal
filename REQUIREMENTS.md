@@ -83,41 +83,48 @@
 
 ### Configuration Files
 
-#### `vite.config.ts` (272 lines)
+#### `vite.config.ts` (530+ lines)
 
-**Unified Constant Factory** (lines 25-83):
+**Unified Constant Factory** (lines 46-246):
 ```typescript
 Effect.runSync(Effect.all({
     browsers, chunks, assets, port,
     pluginConfigs, pwaManifest, pwaWorkbox,
-    svgrOptions, buildMessages, ssrConfig
+    svgrOptions, ssrConfig,
+    compressionConfig, visualizerConfig, imageOptimizerConfig,
+    cspConfig, webfontConfig
 }))
 ```
 
-**Frozen Constants** (10 total):
+**Frozen Constants** (14 total):
 - `BROWSER_TARGETS`: Validated browser versions (Chrome 107, Edge 107, Firefox 104, Safari 16)
 - `CHUNK_PATTERNS`: Priority-based vendor splitting (React p3, Effect p2, node_modules p1)
 - `ASSET_PATTERNS`: 3D models, textures, binaries (`.glb`, `.gltf`, `.hdr`, `.wasm`, etc.)
 - `PORT_DEFAULT`: Dev server port (3000)
-- `PLUGIN_CONFIGS`: React compiler + Inspect configs
+- `PLUGIN_CONFIGS`: React compiler + Inspect configs (dev/prod modes)
 - `PWA_MANIFEST`: App manifest (name, icons, theme)
 - `PWA_WORKBOX_CONFIG`: SW caching strategies (CDN CacheFirst, API NetworkFirst)
 - `SVGR_OPTIONS`: SVG→React conversion (TypeScript, ref, memo, SVGO)
-- `BUILD_MESSAGES`: Build hook messages (emoji-prefixed)
 - `SSR_CONFIG`: SSR configuration (dormant, Node.js target)
+- `COMPRESSION_CONFIG`: Brotli + gzip (10KB threshold, text-only filter, verbose logging)
+- `VISUALIZER_CONFIG`: Treemap analysis (Brotli sizes, sourcemap, CI-friendly)
+- `IMAGE_OPTIMIZER_CONFIG`: AVIF/WebP optimization (quality 70/80, progressive JPEG)
+- `CSP_CONFIG`: Content Security Policy + SRI (SHA-256 hashing, production security)
+- `WEBFONT_CONFIG`: Web font self-hosting (inject as style tags, minified CSS)
 
-**Effect Pipelines** (3 total):
+**Effect Pipelines** (4 total):
 - `createBuildConstants()`: Injects `APP_VERSION`, `BUILD_MODE`, `BUILD_TIME` with Zod validation
 - `isProductionMode()`: Checks `NODE_ENV === 'production'`
 - `getDropTargets()`: Conditional console/debugger dropping
+- `createCompressionPlugins()`: Production-only dual compression via Effect pipeline
 
 **Chunk Strategy** (Monadic):
 - `findMatchingPattern()`: Option-based pattern matching with priority sorting
 - `createChunkStrategy()`: Point-free composition with `Option.getOrUndefined`
 
 **Plugin Factory** (`createAllPlugins`):
-- **Main**: React, Tailwind, PWA, SVGR, BuildHooks, Inspect (6 plugins)
-- **Worker**: React, Tailwind (structural sharing via `PLUGIN_CONFIGS`)
+- **Main**: React, Tailwind, PWA, SVGR, ImageOptimizer, Compression, BuildHooks, Inspect, tsconfigPaths (10+ plugins)
+- **Worker**: React, Tailwind, tsconfigPaths (structural sharing via `PLUGIN_CONFIGS`)
 
 **Vite Configuration**:
 - Manifest generation: `manifest: true`, `ssrManifest: true`
@@ -125,6 +132,7 @@ Effect.runSync(Effect.all({
 - esbuild: ESNext target, pure annotations, tree-shaking
 - Warmup: Pre-bundle `main.tsx`, `**/*.tsx`, `index.ts`
 - Build Hooks: `buildStart`, `buildEnd` (Option monads), `buildApp` (Vite 7 experimental)
+- Rollup Plugins: Visualizer (treemap with Brotli sizes)
 
 #### `vitest.config.ts` (103 lines)
 
@@ -191,9 +199,9 @@ Effect.runSync(Effect.all({
 - `side-effects-cache=true`
 - `public-hoist-pattern=[]`: No hoisting
 
-#### `nx.json` (70 lines)
+#### `nx.json` (131 lines)
 
-**Cacheable Operations**: build, test, typecheck, check
+**Cacheable Operations**: build, test, typecheck, check, analyze
 
 **Named Inputs**:
 - `sharedGlobals`: Tracks all config files (vite, vitest, biome, tsconfig, package, lockfile)
@@ -202,6 +210,14 @@ Effect.runSync(Effect.all({
 **Plugins**:
 - `@nx/vite`: build/dev/preview/serve-static targets
 - Smart caching, dependency graphs, parallel execution (4 workers)
+
+**Custom Targets** (tool-specific workflows):
+- `analyze`: Bundle visualization server (port 8080, requires build)
+- `inspect:dev`: Dev-time plugin inspection (`http://localhost:5173/__inspect/`)
+- `inspect:build`: Post-build analysis server (port 8081, requires build)
+- `pwa:icons`: Generate PWA icons with tsx (`--no-warnings` flag)
+- `pwa:icons:watch`: Hot-reload icon generation for development
+- `validate:compression`: Verify Brotli/gzip artifacts after build
 
 #### `pnpm-workspace.yaml`
 
@@ -223,15 +239,22 @@ Effect.runSync(Effect.all({
 
 ### Plugins & Tools
 
-**Vite Plugins** (6):
+**Vite Plugins** (12):
 1. `@vitejs/plugin-react` (React 19 compiler integration)
 2. `@tailwindcss/vite` (Tailwind v4)
 3. `vite-plugin-pwa` (Workbox 7, manifest, auto-update)
 4. `vite-plugin-svgr` (SVG→React, TypeScript, memo)
 5. `parametric-build-hooks` (custom, Option monads)
-6. `vite-plugin-inspect` (bundle analysis)
+6. `vite-plugin-inspect` (bundle analysis, dev/build modes)
+7. `vite-plugin-compression` (Brotli + gzip, 10KB threshold, text-only)
+8. `vite-plugin-image-optimizer` (AVIF/WebP, Sharp-based, progressive JPEG)
+9. `vite-plugin-csp` (Content Security Policy + SRI generation, security)
+10. `vite-plugin-webfont-dl` (self-host web fonts, performance optimization)
+11. `rollup-plugin-visualizer` (treemap, Brotli sizes, sourcemap integration)
+12. `vite-tsconfig-paths` (tsconfig path alias resolution)
 
 **Development Tools**:
+- `tsx`: TypeScript execution (10-100x faster than ts-node, ESM-native)
 - `@vitest/ui`: Visual test interface
 - `@vitest/coverage-v8`: V8 coverage provider
 - `happy-dom`: Lightweight DOM for tests
@@ -284,6 +307,36 @@ const result = pipe(
         onSome: (v) => transform(v),
     })
 );
+```
+
+**Tool Integration Patterns**:
+
+*tsx Usage* (TypeScript script execution):
+```bash
+# Nx targets (preferred)
+nx pwa:icons                    # Run script once with --no-warnings
+nx pwa:icons:watch              # Watch mode for development
+
+# Direct usage
+tsx --no-warnings scripts/my-script.ts    # Single run
+tsx watch scripts/my-script.ts             # Hot-reload mode
+```
+
+*Bundle Analysis* (visualizer + inspect):
+```bash
+# After build, analyze bundle composition
+nx analyze                      # Serve .vite/ at http://localhost:8080
+# Opens treemap, network view, stats.json
+
+# Inspect plugin transformations
+nx inspect:dev                  # Dev: http://localhost:5173/__inspect/
+nx inspect:build                # Build: http://localhost:8081 (serves .vite-inspect/)
+```
+
+*Compression Validation*:
+```bash
+# Verify production artifacts include Brotli + gzip
+nx validate:compression         # Checks for .br and .gz files
 ```
 
 **File Organization Standard** (mandatory for all `.ts` files >50 LOC):
@@ -451,6 +504,9 @@ const agentForTask = (task: Task): AgentName =>
 **Last Updated**: 2025-11-24
 **Agent Profiles**: 10 specialized agents (+5,056 lines comprehensive guidance)
 **Modern Prompt Engineering**: 2024-2025 best practices (precision, context, stepwise, few-shot, security-first)
-**Vite Config**: 460 lines, 13+ features, ultra-dense factories
-**Vitest Config**: 121 lines, 7+ features
+**Vite Config**: 530+ lines, 14 frozen constants, 12 plugins (Phase 2A complete)
+**Security & Performance**: CSP + SRI, web font self-hosting, comprehensive optimization
+**Vitest Config**: 103 lines, 7+ features
+**Nx Targets**: 10+ custom targets (analyze, inspect, validate, pwa:icons)
+**Tool Integration**: tsx, compression, visualizer, image-optimizer, inspect (fully optimized)
 **Custom Agents**: Sequential chains, parallel tasks, iterative refinement patterns

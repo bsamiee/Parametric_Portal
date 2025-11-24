@@ -15,6 +15,25 @@ const { patterns } = Effect.runSync(
 
 const PATTERNS = Object.freeze(patterns);
 
+const { commonBrands } = Effect.runSync(
+    Effect.all({
+        commonBrands: Effect.succeed({
+            email: pipe(S.String, S.pattern(PATTERNS.email), S.brand('Email')),
+            hexColor: pipe(S.String, S.pattern(PATTERNS.hexColor), S.brand('HexColor')),
+            nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
+            positiveInt: pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt')),
+            slug: pipe(S.String, S.pattern(PATTERNS.slug), S.brand('Slug')),
+        } as const),
+    }),
+);
+
+const COMMON_BRANDS = Object.freeze(commonBrands);
+
+// --- Pure Utility Functions --------------------------------------------------
+
+export const brand = <A, I, Brand extends string>(schema: S.Schema<A, I, never>, brandName: Brand) =>
+    pipe(schema, S.brand(brandName));
+
 export const SCHEMAS = Object.freeze({
     email: pipe(S.String, S.pattern(PATTERNS.email)),
     hexColor: pipe(S.String, S.pattern(PATTERNS.hexColor)),
@@ -27,7 +46,6 @@ export const SCHEMAS = Object.freeze({
     uuid: S.UUID,
 } as const);
 
-// --- Pure Utility Functions --------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
-export const brand = <A, I, Brand extends string>(schema: S.Schema<A, I, never>, brandName: Brand) =>
-    pipe(schema, S.brand(brandName));
+export { COMMON_BRANDS, PATTERNS };

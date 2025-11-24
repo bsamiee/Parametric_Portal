@@ -39,10 +39,12 @@ catalog:
   typescript: 6.0.0-dev.20251121                                # TypeScript 6.0 nightly (bleeding-edge)
   vite: 7.2.4                                                   # Vite 7 (Environment API, ESM-first)
   vite-plugin-compression: 0.5.1                                # Brotli+gzip compression
+  vite-plugin-csp: 1.1.2                                        # Content Security Policy + SRI generation
   vite-plugin-image-optimizer: 2.0.3                            # Image optimization (sharp-based)
   vite-plugin-inspect: 11.3.3                                   # Vite bundle inspector
   vite-plugin-pwa: 1.1.0                                        # PWA generation (Workbox 7)
   vite-plugin-svgr: 4.5.0                                       # SVG→React component transformer
+  vite-plugin-webfont-dl: 3.11.1                                # Self-host web fonts (performance optimization)
   vite-tsconfig-paths: 5.1.4                                    # tsconfig path alias resolution
 
   # --- CSS & Styling (Tailwind v4, LightningCSS, no PostCSS) -----------------
