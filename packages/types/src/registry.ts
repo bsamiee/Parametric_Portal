@@ -40,8 +40,11 @@ const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError
         Effect.flatMap(S.decode(BrandMetadataSchema)),
     );
 
-const addBrand = (state: RegistryState, brand: BrandMetadata): ReadonlyMap<string, BrandMetadata> =>
-    new Map([...state.brands, [brand.brandName, brand]]);
+const addBrand = (state: RegistryState, brand: BrandMetadata): ReadonlyMap<string, BrandMetadata> => {
+    const newBrands = new Map(state.brands);
+    newBrands.set(brand.brandName, brand);
+    return newBrands;
+};
 
 const removeBrand = (state: RegistryState, name: string): ReadonlyMap<string, BrandMetadata> =>
     new Map([...state.brands].filter(([brandName]) => brandName !== name));
