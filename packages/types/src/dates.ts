@@ -53,4 +53,4 @@ const DateUtils = Object.freeze(dateUtils);
 
 // --- Export ------------------------------------------------------------------
 
-export { DateUtils, IsoDate };
+export { DATE_CONFIG, DateUtils, IsoDate };
