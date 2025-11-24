@@ -319,6 +319,74 @@ export default createConfig();
 - Required sections: Type Definitions, Schema Definitions, Constants, Pure Utility Functions, Effect Pipelines & Builders, Export
 - **Rationale**: Top-down dependency flow (types depend on nothing → schemas depend on types → constants depend on schemas → functions depend on constants → export depends on everything). Cognitive load reduction: abstract/small at top, concrete/large at bottom. Scanability: reference material immediately visible.
 
+## Custom Agent Profiles
+
+**10 Specialized Agents** (`.github/agents/*.agent.md`):
+
+1. **cleanup-specialist** - Ultra-dense code cleanup with algorithmic density focus
+2. **documentation-specialist** - Documentation consistency across all project files
+3. **integration-specialist** - Ensures unified factories and catalog-driven dependencies
+4. **library-planner** - Research and create new Nx packages with proper structure
+5. **performance-analyst** - Bundle size, tree-shaking, code splitting optimization
+6. **react-specialist** - React 19 canary + Compiler + Server Components expertise
+7. **refactoring-architect** - Holistic refactoring with Effect/Option pipeline migration
+8. **testing-specialist** - Vitest + property-based testing with Effect/Option patterns
+9. **typescript-advanced** - Bleeding-edge TypeScript with ultra-dense functional code
+10. **vite-nx-specialist** - Vite 7 Environment API + Nx 22 Crystal inference mastery
+
+**Agent Delegation**: Use custom agents for specialized tasks before attempting yourself. They have domain-specific knowledge, exemplar references, and modern prompt engineering patterns built-in.
+
+## Modern Prompt Engineering (2024-2025)
+
+**Core Principles Applied**:
+
+1. **Precision & Task Specificity**: Unambiguous language, explicit output formats, compliance requirements upfront
+2. **Context Framing**: Rich background (REQUIREMENTS.md, exemplars), architectural patterns, stack versions
+3. **Stepwise Structure**: Multi-step protocols, sequential subtasks, iterative refinement loops
+4. **Few-Shot Learning**: 1-5 concrete examples of desired patterns (before/after transformations)
+5. **Security-First**: Type safety emphasis (100% coverage), Effect error channels, Zod validation gates
+6. **Iterative Refinement**: Continuous improvement, automated optimization, feedback integration
+7. **Adaptive Context**: Self-adjusting to user intent, multimodal when needed (code + diagrams + docs)
+
+**Implementation**:
+- All agent profiles use stepwise protocols (Research → Plan → Implement → Validate)
+- Exemplar references (packages/theme) provide few-shot learning foundation
+- Security gates enforce Zod validation, branded types, Effect error handling
+- Iterative loops via quality checklists and validation steps
+
+## Working with Custom Agents
+
+**When to Delegate**:
+
+```typescript
+// Decision Tree (use first matching agent)
+const agentForTask = (task: Task): AgentName =>
+  task.involves.react19 ? 'react-specialist' :
+  task.involves.viteConfig ? 'vite-nx-specialist' :
+  task.involves.testing ? 'testing-specialist' :
+  task.involves.performance ? 'performance-analyst' :
+  task.involves.refactoring ? 'refactoring-architect' :
+  task.involves.newPackage ? 'library-planner' :
+  task.involves.typescript ? 'typescript-advanced' :
+  task.involves.documentation ? 'documentation-specialist' :
+  task.involves.integration ? 'integration-specialist' :
+  task.involves.cleanup ? 'cleanup-specialist' :
+  'self'; // Do it yourself as fallback
+```
+
+**Agent Interaction Patterns**:
+
+1. **Sequential Chain**: library-planner → typescript-advanced → testing-specialist
+2. **Parallel Tasks**: documentation-specialist + integration-specialist (independent)
+3. **Iterative Refinement**: refactoring-architect → cleanup-specialist → refactoring-architect
+4. **Validation Loop**: Any agent → integration-specialist (verify integration)
+
+**Providing Context** (required for effective delegation):
+- Pass relevant file paths (absolute from repo root)
+- Reference catalog versions from `pnpm-workspace.yaml`
+- Cite exemplar patterns (packages/theme, vite.config.ts)
+- Specify exact success criteria and constraints
+
 ## Integration Requirements
 
 ### For New Code
@@ -334,6 +402,7 @@ export default createConfig();
 8. Follow expression-based style (no if/else)
 9. Validate with Zod schemas (runtime safety)
 10. Run Biome check before committing
+11. **Delegate to custom agents** when task matches their expertise
 
 **MUST NOT**:
 1. Use `any` type (except experimental APIs)
@@ -346,6 +415,7 @@ export default createConfig();
 8. Omit type annotations
 9. Handroll lower-quality implementations
 10. Skip schema validation
+11. **Bypass custom agents** for their specialized domains
 
 ### Quality Targets
 
@@ -378,7 +448,9 @@ export default createConfig();
 
 ---
 
-**Last Updated**: 2025-11-22
-**Vite Config**: 272 lines, 13 features, 28.8 lines/feature density
-**Vitest Config**: 103 lines, 7 features
-**Total**: 375 lines, 2.2x functionality density achieved
+**Last Updated**: 2025-11-24
+**Agent Profiles**: 10 specialized agents (+5,056 lines comprehensive guidance)
+**Modern Prompt Engineering**: 2024-2025 best practices (precision, context, stepwise, few-shot, security-first)
+**Vite Config**: 460 lines, 13+ features, ultra-dense factories
+**Vitest Config**: 121 lines, 7+ features
+**Custom Agents**: Sequential chains, parallel tasks, iterative refinement patterns

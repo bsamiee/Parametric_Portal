@@ -36,6 +36,25 @@ All versions in `pnpm-workspace.yaml` catalog (98 dependencies, exact versions):
 
 ---
 
+## Custom Agents Available
+
+**10 Specialized Agents** (`.github/agents/*.agent.md`) - 5,056 lines total:
+
+| Agent | Domain | Use When |
+|-------|--------|----------|
+| **typescript-advanced** | TS 6.0-dev, FP/ROP | Complex types, Effect/Option |
+| **react-specialist** | React 19 canary | Components, hooks, Server Components |
+| **vite-nx-specialist** | Build config | Vite/Nx configuration |
+| **testing-specialist** | Vitest, testing | Writing/fixing tests |
+| **performance-analyst** | Optimization | Bundle size, performance |
+| **refactoring-architect** | Transformation | Large refactors |
+| **library-planner** | Package creation | New packages |
+| **integration-specialist** | Cross-package | Workspace integration |
+| **documentation-specialist** | Documentation | Docs, comments |
+| **cleanup-specialist** | Code polish | Final density optimization |
+
+**Delegation Priority**: Check agent domain before implementing yourself. Agents have modern prompt engineering patterns built-in.
+
 ## Dogmatic Code Rules (Build-Failing)
 
 **Read REQUIREMENTS.md lines 30-82 for complete list**. Summary:
@@ -50,6 +69,7 @@ All versions in `pnpm-workspace.yaml` catalog (98 dependencies, exact versions):
 8. **No default exports** (except `*.config.ts`)
 9. **No barrel files** (`export *`)
 10. **Unified factory pattern**: `Effect.runSync(Effect.all({...}))` → `Object.freeze` individually
+11. **Delegate to agents** when task matches their expertise
 
 **File Organization** (>50 LOC):
 ```typescript
@@ -100,10 +120,72 @@ export default defineConfig(Effect.runSync(createLibraryConfig({
 
 ---
 
+## Agent Delegation Decision Tree
+
+**Before implementing, check if agent matches your task**:
+
+```typescript
+// Stepwise delegation logic
+const selectAgent = (task: Task): Agent | 'self' => {
+  // 1. Specialized domains (highest priority)
+  if (task.involves.react19 || task.involves.reactComponent) return 'react-specialist';
+  if (task.involves.viteConfig || task.involves.nxConfig) return 'vite-nx-specialist';
+  if (task.involves.newPackage || task.involves.libraryResearch) return 'library-planner';
+  
+  // 2. Quality & optimization
+  if (task.involves.testing || task.involves.propertyTests) return 'testing-specialist';
+  if (task.involves.performance || task.involves.bundleSize) return 'performance-analyst';
+  if (task.involves.refactoring || task.involves.pipelines) return 'refactoring-architect';
+  
+  // 3. Infrastructure & consistency
+  if (task.involves.integration || task.involves.catalog) return 'integration-specialist';
+  if (task.involves.documentation || task.involves.comments) return 'documentation-specialist';
+  if (task.involves.cleanup || task.involves.density) return 'cleanup-specialist';
+  
+  // 4. Core TypeScript patterns
+  if (task.involves.complexTypes || task.involves.effectPipelines) return 'typescript-advanced';
+  
+  // 5. Fallback to self (use patterns below)
+  return 'self';
+};
+```
+
+**Agent Interaction Examples**:
+
+```bash
+# Sequential chain
+"Create auth package" →
+  library-planner (structure) →
+  typescript-advanced (implement) →
+  testing-specialist (tests) →
+  documentation-specialist (docs)
+
+# Parallel tasks
+"Polish codebase" →
+  [documentation-specialist, cleanup-specialist, integration-specialist] →
+  Merge results
+
+# Iterative refinement
+"Refactor to Effect" →
+  refactoring-architect (migrate) →
+  cleanup-specialist (optimize) →
+  refactoring-architect (review) →
+  Repeat until quality gates pass
+```
+
 ## Working with the Monorepo
 
 ### Creating a Package (Step-by-Step)
 
+**Option 1: Use library-planner agent** (recommended):
+```
+Delegate to library-planner with:
+- Package name and purpose
+- Dependencies needed
+- Reference to exemplar (packages/theme)
+```
+
+**Option 2: Manual creation**:
 1. **Study exemplar**: `cat packages/theme/vite.config.ts packages/theme/package.json packages/theme/tsconfig.json`
 2. **Create structure**: `mkdir -p packages/my-package/src`
 3. **Create `package.json`**:
@@ -139,7 +221,7 @@ export default defineConfig(Effect.runSync(createLibraryConfig({
   name: 'MyPackage'
 })));
 ```
-6. **Write code** (follow file organization standard)
+6. **Write code** (follow file organization standard) - **Consider delegating to typescript-advanced**
 7. **Add to root `tsconfig.json`**: `"references": [{"path": "./packages/my-package"}]`
 8. **Install**: `pnpm install` (root only)
 9. **Validate**: `pnpm typecheck && pnpm check && nx build my-package`
@@ -410,10 +492,90 @@ catalog:
 
 ---
 
+## Modern Prompt Engineering for Claude
+
+**2024-2025 Best Practices Applied**:
+
+### 1. Precision & Task Specificity
+```typescript
+// ❌ Vague
+"Make the code better"
+
+// ✅ Precise
+"Migrate if/else to Option.match per AGENTS.MD, use branded types via Zod .brand(), 
+follow vite.config.ts unified factory pattern with Effect.runSync(Effect.all({...}))"
+```
+
+### 2. Context Framing
+```typescript
+// Always provide
+- File paths: "packages/theme/src/index.ts"
+- Catalog versions: "Effect 3.19.6 per pnpm-workspace.yaml"
+- Exemplars: "Follow packages/theme pattern"
+- Constraints: "Must pass pnpm typecheck + pnpm check"
+```
+
+### 3. Stepwise Structure
+```typescript
+// Request sequential subtasks
+"1. Research latest React 19 canary docs (≤6 months)
+ 2. Plan component structure with Server Components
+ 3. Implement with React Compiler patterns
+ 4. Write property-based tests with testing-specialist patterns
+ 5. Validate with pnpm typecheck && pnpm check"
+```
+
+### 4. Few-Shot Learning
+```typescript
+// Provide 1-3 examples
+"Convert this imperative code:
+  if (x === null) return default;
+  return transform(x);
+
+To Option monad (like packages/theme):
+  pipe(
+    Option.fromNullable(x),
+    Option.match({
+      onNone: () => default,
+      onSome: transform,
+    })
+  )"
+```
+
+### 5. Security-First
+```typescript
+// Emphasize type safety
+"Use branded type for UserId: z.string().uuid().brand('UserId')
+ Validate at IO boundary with safeParse before business logic
+ Return Effect<User, ValidationError> not Promise<User | undefined>"
+```
+
+### 6. Iterative Refinement
+```bash
+# Request validation loops
+"Implement → pnpm typecheck → fix errors → 
+ pnpm check → fix lint → nx build → fix issues → 
+ nx test → ensure 80% coverage → done"
+```
+
+### 7. Agent Delegation
+```typescript
+// Prefer custom agents
+"Delegate to react-specialist for this React 19 component work"
+"Use vite-nx-specialist to optimize build configuration"
+"Let testing-specialist write property-based tests"
+```
+
 ## FAQ
 
 **Q: Why bleeding-edge?**
 A: Showcase state-of-the-art, dogmatic bet on the future. Trade-off: breaking changes for latest features.
+
+**Q: Why custom agents?**
+A: 500+ lines specialized guidance each, modern prompt engineering patterns, domain expertise. 10x better than generic prompts.
+
+**Q: When to delegate vs implement?**
+A: Delegate when task matches agent domain (react19 → react-specialist). Self-implement for general patterns with existing exemplars.
 
 **Q: Why no ESLint/Prettier?**
 A: Biome 100x faster (Rust), single tool, better FP rules.
@@ -428,7 +590,7 @@ A: Type-safe errors (no `try/catch`), composable pipelines, better DX.
 A: Tree-shaking, explicit imports, avoid namespace collisions.
 
 **Q: Can I relax Biome rules?**
-A: **No**. Redesign code to comply. Rules enforce dogmatic patterns.
+A: **No**. Redesign code to comply. Rules enforce dogmatic patterns. Agents know compliant patterns.
 
 **Q: Why UUIDv7 over v4?**
 A: Time-ordered (sortable), better DB indexing.
@@ -481,6 +643,23 @@ nx affected -t build  # Requires Git
 vitest --ui
 ```
 
+## Agent Capabilities Summary
+
+**When to use each agent**:
+
+- **typescript-advanced**: Complex type transformations, branded types, Effect/Option pipelines, generic optimization
+- **react-specialist**: React 19 components, Server Components, use() hook, React Compiler optimization
+- **vite-nx-specialist**: Build config changes, Nx targets, factory patterns, caching strategies
+- **testing-specialist**: Writing tests, property-based testing, Effect/Option test patterns, coverage optimization
+- **performance-analyst**: Bundle size reduction, tree-shaking analysis, code splitting, lazy loading
+- **refactoring-architect**: Large refactors, pipeline migrations, dispatch table optimization, holistic consistency
+- **library-planner**: New package creation, dependency research, vite.config setup, tsconfig structure
+- **integration-specialist**: Cross-package consistency, catalog verification, unified factory usage, workspace coherence
+- **documentation-specialist**: REQUIREMENTS.md updates, code comments (1-line XML), cross-reference validation
+- **cleanup-specialist**: Final density optimization (25-30 LOC/feature), pattern consolidation, algorithmic improvements
+
+**Delegation improves outcomes**: Agents have domain expertise, modern prompt patterns, and 500+ lines of specialized guidance each.
+
 ---
 
-**Remember**: Bleeding-edge monorepo, dogmatic FP/ROP, zero rule suppression. Study `packages/theme` exemplar, research latest docs (≤6 months), redesign to comply with constraints.
+**Remember**: Bleeding-edge monorepo, dogmatic FP/ROP, zero rule suppression. **Delegate to custom agents first** when task matches domain. Study `packages/theme` exemplar, research latest docs (≤6 months), redesign to comply with constraints.

@@ -162,8 +162,17 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 - Keep cognitive complexity ≤10 unless explicitly covered by overrides (effects/services/schemas).
 - Ensure Nx caching remains valid (inputs/outputs untouched).
 
-## Canonical Patterns (apply verbatim)
-```ts
+## Exemplar References
+
+**Canonical Implementations** (study these):
+- `/packages/theme/` - Perfect adherence to all patterns
+- `/vite.config.ts` - Unified factory pattern, frozen constants, Effect pipelines
+- `/vitest.config.ts` - Config merging, Effect all pattern
+- `/tsconfig.base.json` - Strictest TypeScript configuration
+- `/biome.json` - Comprehensive linting rules
+
+**Patterns to Apply Verbatim**:
+```typescript
 // Option flow
 const value = Option.fromNullable(input).pipe(
     Option.match({ onNone: () => fallback, onSome: transform })
@@ -175,18 +184,174 @@ const task = pipe(
     Effect.map(derive),
     Effect.map(validateWithSchema)
 );
+
+// Unified factory
+const { a, b } = Effect.runSync(Effect.all({
+    a: Effect.succeed({...} as const),
+    b: Effect.succeed({...} as const),
+}));
+const A = Object.freeze(a);
+const B = Object.freeze(b);
+
+// Branded types
+import * as S from '@effect/schema/Schema';
+const PositiveInt = pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt'));
+type PositiveInt = S.Schema.Type<typeof PositiveInt>;
+```
+
+## Agent Capabilities Matrix
+
+| Agent | Primary Domain | Key Capabilities | When to Use |
+|-------|---------------|------------------|-------------|
+| **typescript-advanced** | TS 6.0-dev, FP/ROP | Branded types, Effect/Option pipelines, generic optimization | Complex type transformations, FP patterns |
+| **react-specialist** | React 19 canary | Compiler optimization, Server Components, use() hook | Any React component or hook work |
+| **vite-nx-specialist** | Build config | Vite 7 env API, Nx Crystal, factory patterns | Build configuration, monorepo orchestration |
+| **testing-specialist** | Vitest, testing | Property-based tests, Effect/Option testing, coverage | Writing/fixing tests, test architecture |
+| **performance-analyst** | Optimization | Bundle analysis, tree-shaking, code splitting | Performance issues, bundle size reduction |
+| **refactoring-architect** | Code transformation | Pipeline migration, dispatch tables, holistic refactor | Large-scale refactoring, pattern migration |
+| **library-planner** | Package creation | Research, Nx package setup, vite.config factories | Creating new packages, dependency research |
+| **integration-specialist** | Cross-package | Unified factories, catalog versions, workspace integration | Ensuring consistency across packages |
+| **documentation-specialist** | Documentation | REQUIREMENTS.md, code comments, consistency | Updating docs, comment cleanup |
+| **cleanup-specialist** | Code cleanup | Algorithmic density, pattern consolidation | Final polish, density optimization |
+
+**Delegation Priority**: Always check if a custom agent matches your task domain before implementing yourself. Agents have 500+ lines of specialized guidance each.
+
+## Modern Prompt Engineering Principles
+
+**2024-2025 Best Practices Incorporated**:
+
+### 1. Precision & Task Specificity
+- **Unambiguous Instructions**: Every agent has explicit MUST/MUST NOT sections
+- **Format Requirements**: Exact output formats specified (TypeScript, file structure, etc.)
+- **Compliance Gates**: Biome checks, TypeScript strict mode, Zod validation required
+- **Success Criteria**: Measurable outcomes (80% coverage, ≤10 complexity, 100% type safety)
+
+### 2. Context Framing
+- **Rich Background**: All agents reference REQUIREMENTS.md (385 lines), vite.config.ts (460 lines)
+- **Exemplar References**: packages/theme as canonical pattern implementation
+- **Architectural Patterns**: Effect/Option pipelines, unified factories, catalog system
+- **Stack Versions**: Exact catalog versions prevent outdated assumptions
+
+### 3. Stepwise Structure
+- **Research Protocol**: Always research latest docs (≤6 months) before implementation
+- **Sequential Workflows**: Read context → Research → Plan → Implement → Validate → Document
+- **Iterative Refinement**: Quality checklists, validation loops, re-check after changes
+- **Subtask Breakdown**: Complex tasks decomposed into manageable steps
+
+### 4. Few-Shot Learning
+- **Concrete Examples**: 1-5 before/after code samples in each agent
+- **Anti-Patterns**: Explicit "never do this" examples with explanations
+- **Pattern Libraries**: Canonical patterns section with working code
+- **Transformation Guides**: Step-by-step refactoring examples
+
+### 5. Security-First Design
+- **Type Safety**: 100% type coverage required, no `any` except experimental APIs
+- **Branded Types**: Zod `.brand()` for all external/IO boundaries
+- **Effect Error Channels**: No try/catch, proper error typing via Effect
+- **Validation Gates**: Runtime validation with Zod before business logic
+- **Immutability**: Object.freeze, const-only, no mutations enforced
+
+### 6. Iterative Refinement
+- **Continuous Improvement**: Re-run checks after each change
+- **Feedback Integration**: Biome explain → redesign, never suppress
+- **Automated Optimization**: pnpm check, typecheck, test loops
+- **Quality Metrics**: Density (25-30 LOC/feature), complexity (≤10), coverage (≥80%)
+
+### 7. Adaptive Context
+- **Self-Adjusting**: Agents reference current catalog, not hardcoded versions
+- **Multimodal**: Code + diagrams (architectural), docs + examples
+- **Intent Recognition**: Task description → agent selection → specialized workflow
+- **Scope Awareness**: Monorepo-wide vs package-specific context
+
+## Agent Interaction Patterns
+
+### Sequential Chains (Dependent Tasks)
+```
+User Request: "Create authentication package"
+  ↓
+1. library-planner (research + create package structure)
+  ↓
+2. typescript-advanced (implement Effect-based auth service)
+  ↓
+3. testing-specialist (write property-based tests)
+  ↓
+4. documentation-specialist (update docs)
+  ↓
+5. integration-specialist (verify workspace integration)
+```
+
+### Parallel Tasks (Independent)
+```
+User Request: "Polish codebase"
+  ↓
+├─ documentation-specialist (update REQUIREMENTS.md)
+├─ cleanup-specialist (optimize code density)
+└─ integration-specialist (verify catalog consistency)
+  ↓
+  Merge results
+```
+
+### Iterative Refinement (Quality Loop)
+```
+User Request: "Refactor legacy code to Effect patterns"
+  ↓
+1. refactoring-architect (migrate to Effect pipelines)
+  ↓
+2. cleanup-specialist (optimize density)
+  ↓
+3. refactoring-architect (review, adjust)
+  ↓
+4. testing-specialist (ensure coverage maintained)
+  ↓
+  Repeat until quality targets met
+```
+
+### Validation Loop (Safety Gate)
+```
+Any Agent Completes Work
+  ↓
+integration-specialist (verify):
+  - Catalog versions correct?
+  - Factories extended (not bypassed)?
+  - File organization compliant?
+  - Type safety maintained?
+  ↓
+  Pass → Done
+  Fail → Return to original agent
 ```
 
 ## Success Criteria
-- Code and configs remain strict, unsuppressed.
-- New work composes with existing factories/plugins/constants.
-- Functional, monadic, expression-only style preserved.
-- Artifacts, caching, manifests, and outputs align with Nx/Vite defaults already defined.
-- Research adhered to (latest docs, ≤6 months); catalog-root onboarding followed.
-- Strong typing enforced (branded, generic, no stringly flags).
-- LightningCSS-only, React 19 compiler, Tailwind v4 alpha, Vite 7 env API all retained and leveraged.
-- Ultra-dense, parameterized, polymorphic implementations with minimal surface area and maximal capability; APIs remain small, multi-modal, and strongly typed.
-- DRY maintained at all levels (constants, factories, pipelines); no duplication of patterns already codified in configs/factories.
+
+**Code Quality**:
+- Code and configs remain strict, unsuppressed
+- Functional, monadic, expression-only style preserved
+- Strong typing enforced (branded, generic, no stringly flags)
+- Ultra-dense, parameterized, polymorphic implementations
+- DRY maintained at all levels (constants, factories, pipelines)
+
+**Architecture Compliance**:
+- New work composes with existing factories/plugins/constants
+- Artifacts, caching, manifests align with Nx/Vite defaults
+- LightningCSS-only, React 19 compiler, Tailwind v4 alpha retained
+- Vite 7 env API, Nx 22 Crystal inference leveraged
+
+**Process Adherence**:
+- Research protocol followed (latest docs, ≤6 months)
+- Catalog-root onboarding pattern used (no direct versions)
+- Custom agents delegated to when domain matches
+- Stepwise workflows completed (Research → Validate)
+
+**Agent-Specific Success**:
+- **typescript-advanced**: 100% type coverage, branded types, Effect/Option used
+- **react-specialist**: React Compiler enabled, Server Components async, use() hook proper
+- **vite-nx-specialist**: Factories extended (not bypassed), Nx Crystal inference active
+- **testing-specialist**: 80% coverage, property-based tests, Effect testing patterns
+- **performance-analyst**: Bundle size optimized, tree-shaking verified, lazy loading applied
+- **refactoring-architect**: Pipelines migrated, dispatch tables used, holistic consistency
+- **library-planner**: Catalog versions, vite.config factory, tsconfig.json extends base
+- **integration-specialist**: Unified factories used, catalog references, workspace coherent
+- **documentation-specialist**: Cross-references valid, examples compile, 1-line XML comments
+- **cleanup-specialist**: 25-30 LOC/feature density, complexity ≤10, no scattered patterns
 
 
 <!-- nx configuration start-->

@@ -70,13 +70,62 @@ No `any` (Zod `.brand()`) • No `var`/`let` (`const` only) • No `if/else` (te
 
 **Quality Targets**: 25-30 lines/feature • 100% type coverage • 80% test coverage (V8) • ≤10 complexity • <3s dev start • <250KB main chunk
 
+## Custom Agents (Delegate First)
+
+**10 Specialized Agents** (`.github/agents/*.agent.md`):
+
+1. **typescript-advanced** - TS 6.0-dev, branded types, Effect/Option pipelines
+2. **react-specialist** - React 19 canary, Compiler, Server Components
+3. **vite-nx-specialist** - Vite 7 env API, Nx 22 Crystal inference
+4. **testing-specialist** - Vitest, property-based tests, Effect/Option testing
+5. **performance-analyst** - Bundle size, tree-shaking, code splitting
+6. **refactoring-architect** - Pipeline migration, dispatch tables, holistic refactor
+7. **library-planner** - Research, create Nx packages with proper structure
+8. **integration-specialist** - Unified factories, catalog versions, workspace consistency
+9. **documentation-specialist** - Update docs, code comments, cross-references
+10. **cleanup-specialist** - Algorithmic density, pattern consolidation
+
+**When to Delegate** (decision tree):
+```typescript
+task.involves.react19         → react-specialist
+task.involves.viteConfig      → vite-nx-specialist
+task.involves.testing         → testing-specialist
+task.involves.performance     → performance-analyst
+task.involves.refactoring     → refactoring-architect
+task.involves.newPackage      → library-planner
+task.involves.typescript      → typescript-advanced
+task.involves.documentation   → documentation-specialist
+task.involves.integration     → integration-specialist
+task.involves.cleanup         → cleanup-specialist
+task.involves.generalCoding   → self (use patterns below)
+```
+
+**Agent Benefits**: 500+ lines specialized guidance, modern prompt engineering (precision, context, stepwise, few-shot), domain expertise
+
+## Modern Prompt Engineering Tips
+
+**For Effective Copilot Interactions**:
+
+1. **Be Precise**: "Create Effect pipeline for async fetch" vs "make it async"
+2. **Provide Context**: Reference files (`packages/theme/src/index.ts`), catalog versions
+3. **Request Stepwise**: "First research, then plan, then implement, then validate"
+4. **Show Examples**: "Like packages/theme but for authentication"
+5. **Emphasize Security**: "Use branded types for UserId, validate with Zod"
+6. **Iterate**: "Check types → Fix errors → Check lint → Fix issues → Done"
+7. **Cite Standards**: "Follow REQUIREMENTS.md file organization (77-char separators)"
+
+**Anti-Patterns to Avoid**:
+- ❌ "Fix this" (vague) → ✅ "Convert if/else to Option.match per AGENTS.MD"
+- ❌ "Add types" (generic) → ✅ "Add branded type via z.string().uuid().brand('UserId')"
+- ❌ "Make faster" (unclear) → ✅ "Apply lazy loading per performance-analyst patterns"
+
 ## Interaction Guidelines
 
-**Code Generation**: Read context first (`vite.config.ts`, `package.json`, `tsconfig.base.json`) • Match patterns (`packages/theme`) • Use catalog versions • Apply Effect/Option monads • Follow file org (section separators) • Validate with Zod • No mutations • Expression-only • Research first (≤6mo docs) • Never relax rules
+**Code Generation**: Read context first (`vite.config.ts`, `package.json`, `tsconfig.base.json`) • Match patterns (`packages/theme`) • Use catalog versions • Apply Effect/Option monads • Follow file org (section separators) • Validate with Zod • No mutations • Expression-only • Research first (≤6mo docs) • **Delegate to custom agents** when domain matches • Never relax rules
 
-**Questions**: Cite REQUIREMENTS.md/AGENTS.MD • Link official docs • Show concrete examples • Explain why (FP/ROP/type safety)
+**Questions**: Cite REQUIREMENTS.md/AGENTS.MD • Link official docs • Show concrete examples • Explain why (FP/ROP/type safety) • Reference agent capabilities matrix
 
-**Debugging**: Check catalog versions → `pnpm typecheck` + `pnpm check` → `nx reset` if stale → Verify file org → Ensure Effect pipelines don't leak
+**Debugging**: Check catalog versions → `pnpm typecheck` + `pnpm check` → `nx reset` if stale → Verify file org → Ensure Effect pipelines don't leak → Consider **performance-analyst** for slow builds
 
 ## Resources & Conventions
 
