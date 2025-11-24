@@ -1,0 +1,30 @@
+{
+    "dependencies": {
+        "@effect/schema": "catalog:",
+        "class-variance-authority": "catalog:",
+        "clsx": "catalog:",
+        "effect": "catalog:",
+        "tailwind-merge": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "catalog:"
+    },
+    "exports": {
+        "./components": {
+            "import": "./dist/components.js",
+            "types": "./dist/components.d.ts"
+        }
+    },
+    "name": "@parametric-portal/components",
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.0.1"
+}
