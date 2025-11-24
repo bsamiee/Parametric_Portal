@@ -124,7 +124,6 @@ const {
         } as const),
         cspConfig: Effect.succeed({
             algorithm: 'sha256' as const,
-            enabled: true,
             hashEnabled: {
                 'script-src': true,
                 'style-src': true,
