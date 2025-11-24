@@ -19,27 +19,23 @@ import * as z from 'zod';
 type ChunkDecision = Option.Option<string>;
 
 type ConfigSchemas = ReturnType<typeof createConfigSchemas>;
-type BrowserTargetConfig = z.infer<ConfigSchemas['browser']>;
-type ChunkPattern = z.infer<ConfigSchemas['chunk']>;
-type BuildConstants = z.infer<ConfigSchemas['build']>;
 
 // --- Schema Definitions ------------------------------------------------------
 
-const createConfigSchemas = () =>
-    ({
-        browser: z
-            .object({
-                chrome: z.number().positive(),
-                edge: z.number().positive(),
-                firefox: z.number().positive(),
-                safari: z.number().positive(),
-            })
-            .strict(),
-        build: z.record(z.string().startsWith('import.meta.env.'), z.string()),
-        chunk: z
-            .object({ name: z.string(), priority: z.number().int().nonnegative(), test: z.instanceof(RegExp) })
-            .strict(),
-    }) as const;
+const browserSchema = z
+    .object({
+        chrome: z.number().positive(),
+        edge: z.number().positive(),
+        firefox: z.number().positive(),
+        safari: z.number().positive(),
+    })
+    .strict();
+const chunkSchema = z
+    .object({ name: z.string(), priority: z.number().int().nonnegative(), test: z.instanceof(RegExp) })
+    .strict();
+const buildSchema = z.record(z.string().startsWith('import.meta.env.'), z.string());
+
+const createConfigSchemas = () => ({ browser: browserSchema, build: buildSchema, chunk: chunkSchema }) as const;
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
@@ -81,15 +77,15 @@ const {
                                 const [, browser, version] = match;
                                 const num = Number.parseInt(version, 10);
                                 if (browser && !Number.isNaN(num)) {
-                                    acc[browser as keyof BrowserTargetConfig] = Math.max(
-                                        acc[browser as keyof BrowserTargetConfig] || 0,
+                                    acc[browser as keyof z.infer<ConfigSchemas['browser']>] = Math.max(
+                                        acc[browser as keyof z.infer<ConfigSchemas['browser']>] || 0,
                                         num,
                                     );
                                 }
                             }
                             return acc;
                         },
-                        { chrome: 107, edge: 107, firefox: 104, safari: 16 } as BrowserTargetConfig,
+                        { chrome: 107, edge: 107, firefox: 104, safari: 16 } as z.infer<ConfigSchemas['browser']>,
                     );
                     return versions;
                 },
@@ -226,7 +222,7 @@ const {
     }),
 );
 
-const BROWSER_TARGETS = Object.freeze(browsers satisfies BrowserTargetConfig);
+const BROWSER_TARGETS = Object.freeze(browsers satisfies z.infer<ConfigSchemas['browser']>);
 const CHUNK_PATTERNS = Object.freeze(chunks);
 const ASSET_PATTERNS = Object.freeze(assets);
 const PORT_DEFAULT = Object.freeze(port);
@@ -313,7 +309,7 @@ const createLibraryConfig = (options: {
         })),
     );
 
-const createBuildConstants = (): Effect.Effect<BuildConstants, never, never> =>
+const createBuildConstants = (): Effect.Effect<z.infer<ConfigSchemas['build']>, never, never> =>
     pipe(
         Effect.all({
             mode: Effect.sync(() => process.env.NODE_ENV),
@@ -344,7 +340,7 @@ const getDropTargets = (): Effect.Effect<ReadonlyArray<'console' | 'debugger'>, 
     );
 
 const findMatchingPattern =
-    (patterns: ReadonlyArray<ChunkPattern>) =>
+    (patterns: ReadonlyArray<z.infer<ConfigSchemas['chunk']>>) =>
     (id: string): ChunkDecision =>
         pipe(
             [...patterns].sort((a, b) => b.priority - a.priority),
@@ -353,14 +349,25 @@ const findMatchingPattern =
         );
 
 const createChunkStrategy =
-    (patterns: ReadonlyArray<ChunkPattern>) =>
+    (patterns: ReadonlyArray<z.infer<ConfigSchemas['chunk']>>) =>
     (id: string): string | undefined =>
         matchesNodeModules(id) ? pipe(id, findMatchingPattern(patterns), Option.getOrUndefined) : undefined;
 
+const basePlugins = [tsconfigPaths({ root: './' }), react(PLUGIN_CONFIGS.react)] as const;
+
+const createBuildHook = (): PluginOption =>
+    ({
+        buildApp: async (builder: ViteBuilder) =>
+            void (await Promise.all(Object.values(builder.environments).map((env) => builder.build(env)))),
+        buildEnd: () => void 0,
+        buildStart: () => void 0,
+        enforce: 'pre' as const,
+        name: 'parametric-build-hooks',
+    }) as const;
+
 const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; readonly worker: () => PluginOption[] } => ({
     main: Object.freeze([
-        tsconfigPaths({ root: './' }),
-        react(PLUGIN_CONFIGS.react),
+        ...basePlugins,
         tailwindcss({ optimize: { minify: true } }),
         VitePWA({
             devOptions: { enabled: false },
@@ -372,18 +379,10 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
         svgr({ exclude: '', include: '**/*.svg?react', svgrOptions: SVGR_OPTIONS }),
         ViteImageOptimizer(IMAGE_OPTIMIZER_CONFIG),
         ...createCompressionPlugins(),
-        {
-            buildApp: async (builder: ViteBuilder) => {
-                await Promise.all(Object.values(builder.environments).map((env) => builder.build(env)));
-            },
-            buildEnd: (_error: Error | undefined) => {},
-            buildStart: () => {},
-            enforce: 'pre' as const,
-            name: 'parametric-build-hooks',
-        } as const,
+        createBuildHook(),
         Inspect(PLUGIN_CONFIGS.inspect),
     ] as const),
-    worker: () => Object.freeze([tsconfigPaths({ root: './' }), react(PLUGIN_CONFIGS.react)]),
+    worker: () => Object.freeze([...basePlugins]),
 });
 
 const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
@@ -471,6 +470,7 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                         '@effect/platform-browser',
                         '@effect/schema',
                     ] as const,
+                    holdUntilCrawlEnd: true,
                     include: ['react', 'react-dom', 'react/jsx-runtime'] as const,
                 },
                 plugins: [...plugins.main],
