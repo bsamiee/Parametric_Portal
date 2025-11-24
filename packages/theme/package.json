@@ -23,7 +23,12 @@
     },
     "name": "@parametric-portal/theme",
     "scripts": {
-        "check": "biome check ."
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host --config vite.config.ts",
+        "preview": "vite preview --host --config vite.config.ts",
+        "test": "vitest run --passWithNoTests --config vite.config.ts",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "type": "module",
     "version": "0.0.1"

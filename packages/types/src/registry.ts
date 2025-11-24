@@ -61,11 +61,12 @@ const createBrandRegistry = () =>
         getBrandNames: () => listBrandNames(get()),
         hasBrand: (name) => brandExists(get(), name),
         register: (name) =>
-            pipe(
-                createBrandEntry(name),
-                Effect.tap((brand) => Effect.sync(() => set((state) => ({ brands: addBrand(state, brand) })))),
-                Effect.catchAll(() => Effect.unit), // Swallow ParseError, do nothing
-                Effect.runSync,
+            Effect.runSync(
+                pipe(
+                    createBrandEntry(name),
+                    Effect.tap((brand) => Effect.sync(() => set((state) => ({ brands: addBrand(state, brand) })))),
+                    Effect.catchAll(() => Effect.void), // Swallow ParseError, do nothing
+                ),
             ),
         unregister: (name) => set((state) => ({ brands: removeBrand(state, name) })),
     }));
