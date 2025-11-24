@@ -3,8 +3,15 @@ import { Effect, pipe } from 'effect';
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
-const { patterns } = Effect.runSync(
+const { patterns, commonBrands } = Effect.runSync(
     Effect.all({
+        commonBrands: Effect.succeed({
+            email: pipe(S.String, S.pattern(/^[^@]+@[^@]+$/), S.brand('Email')),
+            hexColor: pipe(S.String, S.pattern(/^#[0-9a-f]{6}$/i), S.brand('HexColor')),
+            nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
+            positiveInt: pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt')),
+            slug: pipe(S.String, S.pattern(/^[a-z0-9-]+$/), S.brand('Slug')),
+        } as const),
         patterns: Effect.succeed({
             email: /^[^@]+@[^@]+$/,
             hexColor: /^#[0-9a-f]{6}$/i,
@@ -14,14 +21,12 @@ const { patterns } = Effect.runSync(
 );
 
 const PATTERNS = Object.freeze(patterns);
+const COMMON_BRANDS = Object.freeze(commonBrands);
 
-const COMMON_BRANDS = Object.freeze({
-    email: pipe(S.String, S.pattern(PATTERNS.email), S.brand('Email')),
-    hexColor: pipe(S.String, S.pattern(PATTERNS.hexColor), S.brand('HexColor')),
-    nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
-    positiveInt: pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt')),
-    slug: pipe(S.String, S.pattern(PATTERNS.slug), S.brand('Slug')),
-} as const);
+// --- Pure Utility Functions --------------------------------------------------
+
+export const brand = <A, I, Brand extends string>(schema: S.Schema<A, I, never>, brandName: Brand) =>
+    pipe(schema, S.brand(brandName));
 
 export const SCHEMAS = Object.freeze({
     email: pipe(S.String, S.pattern(PATTERNS.email)),
@@ -34,11 +39,6 @@ export const SCHEMAS = Object.freeze({
     string: S.String,
     uuid: S.UUID,
 } as const);
-
-// --- Pure Utility Functions --------------------------------------------------
-
-export const brand = <A, I, Brand extends string>(schema: S.Schema<A, I, never>, brandName: Brand) =>
-    pipe(schema, S.brand(brandName));
 
 // --- Export ------------------------------------------------------------------
 
