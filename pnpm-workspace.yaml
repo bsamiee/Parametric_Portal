@@ -89,9 +89,8 @@ catalog:
   # --- Browser Targeting & Compatibility (Baseline Widely Available) ----------
   browserslist: 4.28.0                                          # Browser target queries (Baseline support)
 
-  # --- Git Hooks & Pre-commit (Husky, lint-staged→Biome) ----------------------
-  husky: 9.1.7                                                  # Git hooks manager (pre-commit)
-  lint-staged: 16.2.7                                           # Run linters on staged files
+  # --- Git Hooks & Pre-commit -------------------------------------------------
+  lefthook: 2.0.4                                               # Fast Git hook runner (replaces husky + lint-staged)
 
   # --- Schema Validation (Zod, branded types, runtime safety) -----------------
   zod: 4.1.13                                                   # TypeScript-first schema validation
