@@ -1,12 +1,12 @@
 import { Effect } from 'effect';
 import { defineConfig } from 'vite';
-import { createLibraryConfig } from '../../vite.config.ts';
+import { createConfig } from '../../vite.config.ts';
 
 // --- Export ------------------------------------------------------------------
 
 export default defineConfig(
     Effect.runSync(
-        createLibraryConfig({
+        createConfig({
             entry: {
                 branded: './src/branded.ts',
                 dates: './src/dates.ts',
@@ -15,6 +15,7 @@ export default defineConfig(
                 registry: './src/registry.ts',
             },
             external: ['effect', '@effect/schema', 'uuid', 'zustand'],
+            mode: 'library',
             name: 'ParametricTypes',
         }),
     ),
