@@ -192,6 +192,36 @@ const createCompressionPlugins = (): ReadonlyArray<PluginOption> =>
         Effect.runSync,
     );
 
+const createLibraryPlugins = (options: { readonly inspectDir: string; readonly statsFile: string }) =>
+    pipe(
+        Effect.all({
+            compression: Effect.succeed(createCompressionPlugins()),
+            inspect: Effect.succeed(Inspect({ ...PLUGIN_CONFIGS.inspect, outputDir: options.inspectDir })),
+            optimizer: Effect.succeed(
+                ViteImageOptimizer({
+                    exclude: /^virtual:/,
+                    png: { quality: 90 },
+                    test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
+                }),
+            ),
+            paths: Effect.succeed(tsconfigPaths({ projects: ['./tsconfig.json'] })),
+            visualizerPlugin: Effect.succeed(
+                visualizer({
+                    emitFile: true,
+                    filename: options.statsFile,
+                    gzipSize: true,
+                    template: 'treemap' as const,
+                }),
+            ),
+        }),
+        Effect.map(({ compression, inspect, optimizer, paths, visualizerPlugin }) =>
+            Object.freeze({
+                rollup: Object.freeze([visualizerPlugin] as const),
+                vite: Object.freeze([paths, optimizer, inspect, ...compression] as const),
+            }),
+        ),
+    );
+
 // --- Effect Pipelines & Builders ---------------------------------------------
 
 const createLibraryConfig = (options: {
@@ -200,13 +230,19 @@ const createLibraryConfig = (options: {
     readonly name: string;
 }): Effect.Effect<UserConfig, never, never> =>
     pipe(
-        Effect.succeed(
-            typescript({
-                declaration: true,
-                declarationDir: 'dist',
+        Effect.all({
+            plugins: createLibraryPlugins({
+                inspectDir: `.vite-inspect/${options.name.toLowerCase()}`,
+                statsFile: `.vite/stats-${options.name.toLowerCase()}.html`,
             }),
-        ),
-        Effect.map((rollupTypescript) => ({
+            rollupTypescript: Effect.succeed(
+                typescript({
+                    declaration: true,
+                    declarationDir: 'dist',
+                }),
+            ),
+        }),
+        Effect.map(({ plugins, rollupTypescript }) => ({
             build: {
                 lib: {
                     entry: options.entry,
@@ -215,13 +251,14 @@ const createLibraryConfig = (options: {
                     formats: ['es', 'cjs'] as const,
                     name: options.name,
                 },
+                reportCompressedSize: false,
                 rollupOptions: {
                     external: options.external ?? [],
                     output: {
                         exports: 'named' as const,
                         preserveModules: false,
                     },
-                    plugins: [rollupTypescript],
+                    plugins: [rollupTypescript, ...plugins.rollup],
                 },
                 sourcemap: true,
                 target: 'esnext' as const,
@@ -243,7 +280,7 @@ const createLibraryConfig = (options: {
                 target: 'esnext' as const,
                 treeShaking: true,
             },
-            plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] })],
+            plugins: [...plugins.vite],
             resolve: {
                 alias: {
                     '@': '/packages',

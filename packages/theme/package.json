@@ -4,7 +4,6 @@
         "effect": "catalog:"
     },
     "devDependencies": {
-        "typescript": "catalog:",
         "vite": "catalog:"
     },
     "exports": {
@@ -23,12 +22,12 @@
     },
     "name": "@parametric-portal/theme",
     "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+        "build": "pnpm exec vite build",
+        "check": "pnpm exec biome ci .",
+        "dev": "pnpm exec vite dev --host",
+        "preview": "pnpm exec vite preview --host",
+        "test": "pnpm exec vitest run --passWithNoTests",
+        "typecheck": "pnpm exec tsc --project tsconfig.json --noEmit"
     },
     "type": "module",
     "version": "0.0.1"
