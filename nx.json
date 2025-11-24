@@ -119,8 +119,8 @@
             "executor": "nx:run-commands",
             "options": {
                 "commands": [
-                    "test -f {projectRoot}/dist/entries/*.js.br || (echo '❌ Brotli files missing' && exit 1)",
-                    "test -f {projectRoot}/dist/entries/*.js.gz || (echo '❌ Gzip files missing' && exit 1)",
+                    "[ -n \"$(ls {projectRoot}/dist/entries/*.js.br 2>/dev/null)\" ] || (echo '❌ Brotli files missing' && exit 1)",
+                    "[ -n \"$(ls {projectRoot}/dist/entries/*.js.gz 2>/dev/null)\" ] || (echo '❌ Gzip files missing' && exit 1)",
                     "echo '✅ Compression artifacts verified'"
                 ]
             }

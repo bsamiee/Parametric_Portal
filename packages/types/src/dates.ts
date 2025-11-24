@@ -27,10 +27,13 @@ const { dateUtils } = Effect.runSync(
                     Effect.try({
                         catch: (error) => new Error(`Format failed: ${String(error)}`) as ParseError,
                         try: () => {
+                            if (formatStr !== 'yyyy-MM-dd') {
+                                throw new Error(`Unsupported format: ${formatStr}. Only 'yyyy-MM-dd' is supported.`);
+                            }
                             const year = date.getFullYear();
                             const month = String(date.getMonth() + 1).padStart(2, '0');
                             const day = String(date.getDate()).padStart(2, '0');
-                            return formatStr.replace('yyyy', String(year)).replace('MM', month).replace('dd', day);
+                            return `${year}-${month}-${day}`;
                         },
                     }),
             parse: (input: string): Effect.Effect<Date, ParseError> =>

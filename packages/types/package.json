@@ -1,5 +1,6 @@
 {
     "dependencies": {
+        "@effect/experimental": "catalog:",
         "@effect/schema": "catalog:",
         "effect": "catalog:",
         "uuid": "catalog:",

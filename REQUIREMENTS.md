@@ -111,7 +111,6 @@ Effect.runSync(Effect.all({
 - `IMAGE_OPTIMIZER_CONFIG`: AVIF/WebP optimization (quality 70/80, progressive JPEG)
 - `CSP_CONFIG`: Content Security Policy + SRI (SHA-256 hashing, production security)
 - `WEBFONT_CONFIG`: Web font self-hosting (inject as style tags, minified CSS)
-- `IMAGE_OPTIMIZER_CONFIG`: AVIF/WebP optimization (quality 70/80, progressive JPEG)
 
 **Effect Pipelines** (4 total):
 - `createBuildConstants()`: Injects `APP_VERSION`, `BUILD_MODE`, `BUILD_TIME` with Zod validation

@@ -3,15 +3,8 @@ import { Effect, pipe } from 'effect';
 
 // --- Constants (Unified Factory → Frozen) ------------------------------------
 
-const { patterns, commonBrands } = Effect.runSync(
+const { patterns } = Effect.runSync(
     Effect.all({
-        commonBrands: Effect.succeed({
-            email: pipe(S.String, S.pattern(/^[^@]+@[^@]+$/), S.brand('Email')),
-            hexColor: pipe(S.String, S.pattern(/^#[0-9a-f]{6}$/i), S.brand('HexColor')),
-            nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
-            positiveInt: pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt')),
-            slug: pipe(S.String, S.pattern(/^[a-z0-9-]+$/), S.brand('Slug')),
-        } as const),
         patterns: Effect.succeed({
             email: /^[^@]+@[^@]+$/,
             hexColor: /^#[0-9a-f]{6}$/i,
@@ -21,6 +14,19 @@ const { patterns, commonBrands } = Effect.runSync(
 );
 
 const PATTERNS = Object.freeze(patterns);
+
+const { commonBrands } = Effect.runSync(
+    Effect.all({
+        commonBrands: Effect.succeed({
+            email: pipe(S.String, S.pattern(PATTERNS.email), S.brand('Email')),
+            hexColor: pipe(S.String, S.pattern(PATTERNS.hexColor), S.brand('HexColor')),
+            nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
+            positiveInt: pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt')),
+            slug: pipe(S.String, S.pattern(PATTERNS.slug), S.brand('Slug')),
+        } as const),
+    }),
+);
+
 const COMMON_BRANDS = Object.freeze(commonBrands);
 
 // --- Pure Utility Functions --------------------------------------------------
