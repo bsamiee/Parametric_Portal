@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel in-progress runs when a new run is triggered
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Restore Nx cache
+        uses: actions/cache@v4
+        with:
+          path: .nx/cache
+          key: ${{ runner.os }}-nx-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-nx-${{ hashFiles('**/pnpm-lock.yaml') }}-
+            ${{ runner.os }}-nx-
+
+      - name: Set base and head for Nx affected
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "BASE=${{ github.event.pull_request.base.sha }}" >> $GITHUB_ENV
+            echo "HEAD=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
+          else
+            echo "BASE=HEAD~1" >> $GITHUB_ENV
+            echo "HEAD=HEAD" >> $GITHUB_ENV
+          fi
+
+      - name: Check code style and linting
+        run: pnpm exec biome ci .
+
+      - name: Type check
+        run: pnpm exec nx affected -t typecheck --base=${{ env.BASE }} --head=${{ env.HEAD }} --parallel=4
+
+      - name: Build
+        run: pnpm exec nx affected -t build --base=${{ env.BASE }} --head=${{ env.HEAD }} --parallel=4
+
+      - name: Test
+        run: pnpm exec nx affected -t test --base=${{ env.BASE }} --head=${{ env.HEAD }} --parallel=4
+
+      - name: Upload test coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: '**/coverage'
+          if-no-files-found: ignore
+          retention-days: 7
