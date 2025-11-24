@@ -243,6 +243,7 @@ const createLibraryConfig = (options: {
                 target: 'esnext' as const,
                 treeShaking: true,
             },
+            plugins: [tsconfigPaths({ projects: ['./tsconfig.json'] })],
             resolve: {
                 alias: {
                     '@': '/packages',
@@ -325,7 +326,7 @@ const createAllPlugins = (): { readonly main: ReadonlyArray<PluginOption>; reado
         } as const,
         Inspect(PLUGIN_CONFIGS.inspect),
     ] as const),
-    worker: () => [react(PLUGIN_CONFIGS.react)],
+    worker: () => Object.freeze([tsconfigPaths({ root: './' }), react(PLUGIN_CONFIGS.react)]),
 });
 
 const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
@@ -414,7 +415,12 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                         },
                         target: 'esnext' as const,
                     },
-                    exclude: ['@effect/platform', '@effect/schema'] as const,
+                    exclude: [
+                        '@effect/experimental',
+                        '@effect/platform',
+                        '@effect/platform-browser',
+                        '@effect/schema',
+                    ] as const,
                     include: ['react', 'react-dom', 'react/jsx-runtime'] as const,
                 },
                 plugins: [...plugins.main],
@@ -440,7 +446,7 @@ const createAppConfig = (): Effect.Effect<UserConfig, never, never> =>
                 ssr: SSR_CONFIG,
                 worker: {
                     format: 'es' as const,
-                    plugins: plugins.worker,
+                    plugins: plugins.worker(),
                     rollupOptions: {
                         output: {
                             assetFileNames: 'workers/assets/[name]-[hash][extname]',

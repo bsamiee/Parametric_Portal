@@ -46,5 +46,5 @@ const DateUtils = Object.freeze(dateUtils);
 
 // --- Export ------------------------------------------------------------------
 
-export { DateUtils, IsoDateSchema as IsoDate };
+export { DateUtils, IsoDateSchema };
 export type { IsoDate };
