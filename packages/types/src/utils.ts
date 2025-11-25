@@ -77,7 +77,7 @@ const createRegistry = (): BrandRegistry => {
                         Effect.tap((brand) =>
                             Effect.sync(() =>
                                 set((draft) => {
-                                    (draft.brands as Map<string, BrandMetadata>).set(brand.brandName, brand);
+                                    castDraft(draft.brands).set(brand.brandName, brand);
                                 }),
                             ),
                         ),
@@ -86,7 +86,7 @@ const createRegistry = (): BrandRegistry => {
                 ),
             unregister: (name) =>
                 set((draft) => {
-                    (draft.brands as Map<string, BrandMetadata>).delete(name);
+                    castDraft(draft.brands).delete(name);
                 }),
         })),
     );
