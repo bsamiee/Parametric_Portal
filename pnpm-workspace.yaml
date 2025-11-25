@@ -33,7 +33,7 @@ catalog:
   '@stryker-mutator/core': 9.1.0
   '@stryker-mutator/vitest-runner': 9.1.0
   fast-check: 4.3.0
-  babel-plugin-react-compiler: 19.0.0-beta-9ee70a1-20241017
+  babel-plugin-react-compiler: 19.0.0-beta-ebf51a3-20250411
   browserslist: 4.28.0
   class-variance-authority: 0.7.1
   clsx: 2.1.1
@@ -50,7 +50,7 @@ catalog:
   nx: 22.2.0-canary.20251121-9a6c7ad
   react: 19.3.0-canary-40b4a5bf-20251120
   react-aria: 3.44.0
-  react-compiler-runtime: 19.0.0-beta-af1b7da-20250417
+  react-compiler-runtime: 19.0.0-beta-ebf51a3-20250411
   react-dom: 19.3.0-canary-40b4a5bf-20251120
   react-stately: 3.42.0
   rollup-plugin-visualizer: 6.0.5
