@@ -1,7 +1,6 @@
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
 import { Cache, Duration, Effect, pipe } from 'effect';
-import { match } from 'ts-pattern';
 import { v7 as uuidv7 } from 'uuid';
 
 // --- Type Definitions --------------------------------------------------------
@@ -91,7 +90,7 @@ const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
 const matchTag = <T extends { readonly _tag: string }, R>(
     value: T,
     cases: { [K in T['_tag']]: (v: Extract<T, { _tag: K }>) => R },
-): R => match(value).with({ _tag: value._tag }, (v) => cases[v._tag as T['_tag']](v as never)).exhaustive() as R;
+): R => cases[value._tag as T['_tag']](value as never);
 
 // --- Factory Functions -------------------------------------------------------
 

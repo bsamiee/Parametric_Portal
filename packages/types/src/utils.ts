@@ -110,7 +110,8 @@ const createUtils = (config: UtilsConfig = {}): UtilsApi =>
         addDays: dateUtils.addDays,
         createRegistry,
         daysBetween: dateUtils.daysBetween,
-        formatDate: (formatStr?: string) => dateUtils.formatDate(formatStr ?? config.defaultDateFormat ?? B.defaultFormat),
+        formatDate: (formatStr?: string) =>
+            dateUtils.formatDate(formatStr ?? config.defaultDateFormat ?? B.defaultFormat),
         parse: dateUtils.parse,
     } as const);
 

@@ -463,6 +463,9 @@ importers:
       '@effect/schema':
         specifier: 'catalog:'
         version: 0.75.5(effect@3.19.6)
+      date-fns:
+        specifier: 'catalog:'
+        version: 4.1.0
       effect:
         specifier: 'catalog:'
         version: 3.19.6

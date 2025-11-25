@@ -4,7 +4,6 @@
         "@effect/schema": "catalog:",
         "date-fns": "catalog:",
         "effect": "catalog:",
-        "ts-pattern": "catalog:",
         "uuid": "catalog:",
         "zustand": "catalog:"
     },
