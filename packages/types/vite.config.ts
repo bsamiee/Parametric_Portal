@@ -8,13 +8,10 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
-                branded: './src/branded.ts',
-                dates: './src/dates.ts',
-                identifiers: './src/identifiers.ts',
-                matchers: './src/matchers.ts',
-                registry: './src/registry.ts',
+                types: './src/types.ts',
+                utils: './src/utils.ts',
             },
-            external: ['effect', '@effect/schema', 'uuid', 'zustand'],
+            external: ['effect', '@effect/schema', 'date-fns', 'ts-pattern', 'uuid', 'zustand'],
             mode: 'library',
             name: 'ParametricTypes',
         }),

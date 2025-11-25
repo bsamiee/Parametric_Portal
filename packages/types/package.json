@@ -2,7 +2,9 @@
     "dependencies": {
         "@effect/experimental": "catalog:",
         "@effect/schema": "catalog:",
+        "date-fns": "catalog:",
         "effect": "catalog:",
+        "ts-pattern": "catalog:",
         "uuid": "catalog:",
         "zustand": "catalog:"
     },
@@ -12,25 +14,13 @@
         "vite": "catalog:"
     },
     "exports": {
-        "./branded": {
-            "import": "./dist/branded.js",
-            "types": "./dist/branded.d.ts"
+        "./types": {
+            "import": "./dist/types.js",
+            "types": "./dist/types.d.ts"
         },
-        "./dates": {
-            "import": "./dist/dates.js",
-            "types": "./dist/dates.d.ts"
-        },
-        "./identifiers": {
-            "import": "./dist/identifiers.js",
-            "types": "./dist/identifiers.d.ts"
-        },
-        "./matchers": {
-            "import": "./dist/matchers.js",
-            "types": "./dist/matchers.d.ts"
-        },
-        "./registry": {
-            "import": "./dist/registry.js",
-            "types": "./dist/registry.d.ts"
+        "./utils": {
+            "import": "./dist/utils.js",
+            "types": "./dist/utils.d.ts"
         }
     },
     "name": "@parametric-portal/types",
