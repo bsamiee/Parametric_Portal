@@ -1,162 +1,116 @@
 import { Slot } from '@radix-ui/react-slot';
-import { cva } from 'class-variance-authority';
-import { Effect } from 'effect';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
-import type { BehaviorConfig, DimensionConfig } from './schema.ts';
-import {
-    cls,
-    computeDimensions,
-    createBehaviorDefaults,
-    createDimensionDefaults,
-    createVars,
-    resolve,
-} from './schema.ts';
+import type { BehaviorInput, ScaleInput } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
-type ElementTag = 'article' | 'aside' | 'div' | 'footer' | 'header' | 'main' | 'nav' | 'section' | 'span';
-type FlexDirection = 'column' | 'column-reverse' | 'row' | 'row-reverse';
+type Tag = 'article' | 'aside' | 'div' | 'footer' | 'header' | 'main' | 'nav' | 'section' | 'span';
+type FlexDir = 'col' | 'col-reverse' | 'row' | 'row-reverse';
 type FlexAlign = 'baseline' | 'center' | 'end' | 'start' | 'stretch';
 type FlexJustify = 'around' | 'between' | 'center' | 'end' | 'evenly' | 'start';
-type ElementInput<T extends ElementTag> = {
+type ElementInput<T extends Tag = 'div'> = {
     readonly align?: FlexAlign;
     readonly asChild?: boolean;
-    readonly behavior?: Partial<BehaviorConfig>;
+    readonly behavior?: BehaviorInput | undefined;
     readonly className?: string;
-    readonly dimensions?: Partial<DimensionConfig>;
-    readonly direction?: FlexDirection;
+    readonly direction?: FlexDir;
     readonly gap?: boolean;
     readonly justify?: FlexJustify;
     readonly padding?: boolean;
     readonly radius?: boolean;
-    readonly tag: T;
+    readonly scale?: ScaleInput | undefined;
+    readonly tag?: T;
     readonly wrap?: boolean;
 };
+type ElementProps = HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode };
 
-// --- Constants (Unified Base) -----------------------------------------------
+// --- Constants (Structural CSS Variable Classes Only) -----------------------
 
 const B = Object.freeze({
-    align: {
-        baseline: 'items-baseline',
-        center: 'items-center',
-        end: 'items-end',
-        start: 'items-start',
-        stretch: 'items-stretch',
-    } as { readonly [K in FlexAlign]: string },
-    defaults: { behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() },
-    direction: {
-        column: 'flex-col',
-        'column-reverse': 'flex-col-reverse',
-        row: 'flex-row',
-        'row-reverse': 'flex-row-reverse',
-    } as { readonly [K in FlexDirection]: string },
-    justify: {
-        around: 'justify-around',
-        between: 'justify-between',
-        center: 'justify-center',
-        end: 'justify-end',
-        evenly: 'justify-evenly',
-        start: 'justify-start',
-    } as { readonly [K in FlexJustify]: string },
-    wrap: { false: 'flex-nowrap', true: 'flex-wrap' },
+    flex: { align: 'items-', dir: 'flex-', justify: 'justify-', wrap: { false: 'flex-nowrap', true: 'flex-wrap' } },
+    var: {
+        gap: 'gap-[var(--el-gap)]',
+        px: 'px-[var(--el-padding-x)]',
+        py: 'py-[var(--el-padding-y)]',
+        r: 'rounded-[var(--el-radius)]',
+    },
 } as const);
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const vars = createVars('element');
+const flexCls = (d?: FlexDir, a?: FlexAlign, j?: FlexJustify, w?: boolean): string =>
+    d
+        ? cls(
+              'flex',
+              `${B.flex.dir}${d}`,
+              `${B.flex.align}${a ?? 'stretch'}`,
+              `${B.flex.justify}${j ?? 'start'}`,
+              B.flex.wrap[w ? 'true' : 'false'],
+          )
+        : '';
 
-const baseVariants = cva('', {
-    defaultVariants: { gap: false, padding: false, radius: false },
-    variants: {
-        gap: { false: '', true: 'gap-[var(--element-gap)]' },
-        padding: { false: '', true: 'px-[var(--element-padding-x)] py-[var(--element-padding-y)]' },
-        radius: { false: '', true: 'rounded-[var(--element-radius)]' },
-    },
-});
-
-const flexVariants = cva('flex', {
-    defaultVariants: { align: 'stretch', direction: 'row', justify: 'start', wrap: false },
-    variants: { align: B.align, direction: B.direction, justify: B.justify, wrap: B.wrap },
-});
+const varCls = (g?: boolean, p?: boolean, r?: boolean): string =>
+    cls(g ? B.var.gap : undefined, p ? `${B.var.px} ${B.var.py}` : undefined, r ? B.var.r : undefined);
 
 // --- Component Factory ------------------------------------------------------
 
-const createElementComponent = <T extends ElementTag>(i: ElementInput<T>) => {
-    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior, B.defaults));
-    const cssVars = vars(Effect.runSync(computeDimensions(dims)));
-    const baseCls = baseVariants({ gap: i.gap ?? false, padding: i.padding ?? false, radius: i.radius ?? false });
-    const flexCls =
-        i.direction !== undefined
-            ? flexVariants({
-                  align: i.align ?? 'stretch',
-                  direction: i.direction,
-                  justify: i.justify ?? 'start',
-                  wrap: i.wrap ?? false,
-              })
-            : '';
-    const Component = forwardRef(
-        (
-            props: HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode },
-            fRef: ForwardedRef<HTMLElement>,
-        ) => {
-            const { asChild, children, className, style, ...rest } = props;
-            const internalRef = useRef<HTMLElement>(null);
-            const ref = (fRef ?? internalRef) as RefObject<HTMLElement>;
-            const elementProps = {
-                ...rest,
-                'aria-busy': beh.loading || undefined,
-                'aria-disabled': beh.disabled || undefined,
-                className: cls(baseCls, flexCls, i.className, className),
-                ref,
-                style: { ...cssVars, ...style } as CSSProperties,
-                tabIndex: beh.focusable && beh.interactive && !beh.disabled ? 0 : undefined,
-            };
-            return (asChild ?? i.asChild)
-                ? createElement(Slot, elementProps, children)
-                : createElement(i.tag, elementProps, children);
-        },
-    );
-    Component.displayName = `Element(${i.tag})`;
-    return Component;
+const createEl = <T extends Tag>(i: ElementInput<T>) => {
+    const beh = resolveBehavior(i.behavior);
+    const scl = resolveScale(i.scale);
+    const vars = cssVars(computeScale(scl), 'el');
+    const base = cls(varCls(i.gap, i.padding, i.radius), flexCls(i.direction, i.align, i.justify, i.wrap), i.className);
+    const Comp = forwardRef((props: ElementProps, fRef: ForwardedRef<HTMLElement>) => {
+        const { asChild, children, className, style, ...rest } = props;
+        const intRef = useRef<HTMLElement>(null);
+        const ref = (fRef ?? intRef) as RefObject<HTMLElement>;
+        const elProps = {
+            ...rest,
+            'aria-busy': beh.loading || undefined,
+            'aria-disabled': beh.disabled || undefined,
+            className: cls(base, className),
+            ref,
+            style: { ...vars, ...style } as CSSProperties,
+            tabIndex: beh.focusable && beh.interactive && !beh.disabled ? 0 : undefined,
+        };
+        return (asChild ?? i.asChild)
+            ? createElement(Slot, elProps, children)
+            : createElement(i.tag ?? 'div', elProps, children);
+    });
+    Comp.displayName = `El(${i.tag ?? 'div'})`;
+    return Comp;
 };
 
 // --- Factory ----------------------------------------------------------------
 
-const createElements = (tuning?: {
-    defaults?: { behavior?: Partial<BehaviorConfig>; dimensions?: Partial<DimensionConfig> };
-}) => {
-    const defs = {
-        behavior: { ...B.defaults.behavior, ...tuning?.defaults?.behavior },
-        dimensions: { ...B.defaults.dimensions, ...tuning?.defaults?.dimensions },
-    };
-    return Object.freeze({
-        Box: createElementComponent({ dimensions: defs.dimensions, tag: 'div' }),
-        create: <T extends ElementTag>(i: ElementInput<T>) =>
-            createElementComponent({
+const createElements = (tuning?: { scale?: ScaleInput; behavior?: BehaviorInput }) =>
+    Object.freeze({
+        Box: createEl({
+            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
+        }),
+        create: <T extends Tag>(i: ElementInput<T>) =>
+            createEl({
                 ...i,
-                behavior: { ...defs.behavior, ...i.behavior },
-                dimensions: { ...defs.dimensions, ...i.dimensions },
+                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
+                ...(merge(tuning?.behavior, i.behavior) && { behavior: merge(tuning?.behavior, i.behavior) }),
             }),
-        Flex: createElementComponent({
-            align: 'stretch',
-            dimensions: defs.dimensions,
+        Flex: createEl({
             direction: 'row',
             gap: true,
-            justify: 'start',
-            tag: 'div',
+            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
         }),
-        Stack: createElementComponent({
-            align: 'stretch',
-            dimensions: defs.dimensions,
-            direction: 'column',
+        Stack: createEl({
+            direction: 'col',
             gap: true,
-            justify: 'start',
-            tag: 'div',
+            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
         }),
     });
-};
 
 // --- Export -----------------------------------------------------------------
 
 export { B as ELEMENT_TUNING, createElements };
+export type { ElementInput, ElementProps, FlexAlign, FlexDir, FlexJustify, Tag };

@@ -1,72 +1,112 @@
 import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
 import { clsx } from 'clsx';
 import { Effect, pipe } from 'effect';
+import type { CSSProperties } from 'react';
 import { twMerge } from 'tailwind-merge';
-
-// --- Type Definitions -------------------------------------------------------
-
-type DimensionConfig = S.Schema.Type<typeof DimensionSchema>;
-type BehaviorConfig = S.Schema.Type<typeof BehaviorSchema>;
-type OverlayConfig = S.Schema.Type<typeof OverlaySchema>;
-type FeedbackConfig = S.Schema.Type<typeof FeedbackSchema>;
-type AnimationConfig = S.Schema.Type<typeof AnimationSchema>;
-type ComputedDimensions = {
-    readonly [K in 'fontSize' | 'gap' | 'height' | 'iconSize' | 'paddingX' | 'paddingY' | 'radius']: string;
-};
-type ComputeKey = keyof ComputedDimensions;
-type FeedbackVariant = 'error' | 'info' | 'success' | 'warning';
-type OverlayPosition = 'bottom' | 'left' | 'right' | 'top';
 
 // --- Schema Definitions -----------------------------------------------------
 
-const DimensionSchema = S.Struct({
-    baseUnit: S.optionalWith(pipe(S.Number, S.positive(), S.brand('BaseUnit')), { default: () => 0.25 as never }),
+const PositiveSchema = pipe(S.Number, S.positive());
+const NonNegativeIntSchema = pipe(S.Number, S.int(), S.nonNegative());
+
+const ScaleSchema = S.Struct({
+    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
+    _tag: S.optionalWith(S.Literal('scale'), { default: () => 'scale' as const }),
+    baseUnit: S.optionalWith(pipe(PositiveSchema, S.brand('Unit')), { default: () => 0.25 as never }),
     density: S.optionalWith(pipe(S.Number, S.between(0.5, 2), S.brand('Density')), { default: () => 1 as never }),
     radiusMultiplier: S.optionalWith(pipe(S.Number, S.between(0, 1), S.brand('Radius')), {
         default: () => 0.25 as never,
     }),
-    scale: pipe(S.Number, S.between(1, 10), S.brand('Scale')),
+    scale: S.optionalWith(pipe(S.Number, S.between(1, 10), S.brand('Scale')), { default: () => 5 as never }),
 });
 
 const BehaviorSchema = S.Struct({
+    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
+    _tag: S.optionalWith(S.Literal('behavior'), { default: () => 'behavior' as const }),
     asChild: S.optionalWith(S.Boolean, { default: () => false }),
     disabled: S.optionalWith(S.Boolean, { default: () => false }),
     focusable: S.optionalWith(S.Boolean, { default: () => true }),
     interactive: S.optionalWith(S.Boolean, { default: () => true }),
     loading: S.optionalWith(S.Boolean, { default: () => false }),
+    readonly: S.optionalWith(S.Boolean, { default: () => false }),
 });
 
 const OverlaySchema = S.Struct({
+    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
+    _tag: S.optionalWith(S.Literal('overlay'), { default: () => 'overlay' as const }),
     backdrop: S.optionalWith(S.Boolean, { default: () => true }),
     closeOnEscape: S.optionalWith(S.Boolean, { default: () => true }),
     closeOnOutsideClick: S.optionalWith(S.Boolean, { default: () => true }),
     modal: S.optionalWith(S.Boolean, { default: () => true }),
     position: S.optionalWith(S.Union(S.Literal('top'), S.Literal('bottom'), S.Literal('left'), S.Literal('right')), {
-        default: () => 'bottom' as never,
+        default: () => 'bottom' as const,
     }),
     trapFocus: S.optionalWith(S.Boolean, { default: () => true }),
+    zIndex: S.optionalWith(pipe(S.Number, S.int(), S.between(0, 9999)), { default: () => 50 as never }),
 });
 
 const FeedbackSchema = S.Struct({
+    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
+    _tag: S.optionalWith(S.Literal('feedback'), { default: () => 'feedback' as const }),
     autoDismiss: S.optionalWith(S.Boolean, { default: () => true }),
     dismissible: S.optionalWith(S.Boolean, { default: () => true }),
-    duration: S.optionalWith(pipe(S.Number, S.positive()), { default: () => 5000 as never }),
-    variant: S.optionalWith(
-        S.Union(S.Literal('info'), S.Literal('success'), S.Literal('warning'), S.Literal('error')),
-        {
-            default: () => 'info' as never,
-        },
-    ),
+    duration: S.optionalWith(PositiveSchema, { default: () => 5000 as never }),
 });
 
 const AnimationSchema = S.Struct({
-    duration: S.optionalWith(pipe(S.Number, S.positive()), { default: () => 200 as never }),
+    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
+    _tag: S.optionalWith(S.Literal('animation'), { default: () => 'animation' as const }),
+    delay: S.optionalWith(NonNegativeIntSchema, { default: () => 0 as never }),
+    duration: S.optionalWith(NonNegativeIntSchema, { default: () => 200 as never }),
     easing: S.optionalWith(S.String, { default: () => 'ease-out' as never }),
     enabled: S.optionalWith(S.Boolean, { default: () => true }),
 });
 
-// --- Constants (Unified Base) -----------------------------------------------
+// --- Type Definitions -------------------------------------------------------
+
+type Scale = S.Schema.Type<typeof ScaleSchema>;
+type Behavior = S.Schema.Type<typeof BehaviorSchema>;
+type Overlay = S.Schema.Type<typeof OverlaySchema>;
+type Feedback = S.Schema.Type<typeof FeedbackSchema>;
+type Animation = S.Schema.Type<typeof AnimationSchema>;
+type Computed = {
+    readonly [K in 'fontSize' | 'gap' | 'height' | 'iconSize' | 'paddingX' | 'paddingY' | 'radius']: string;
+};
+
+// --- Input Types (match Schema.Encoded to handle optionals correctly) -------
+
+type ScaleInput = {
+    readonly baseUnit?: number;
+    readonly density?: number;
+    readonly radiusMultiplier?: number;
+    readonly scale?: number;
+};
+type BehaviorInput = {
+    readonly asChild?: boolean;
+    readonly disabled?: boolean;
+    readonly focusable?: boolean;
+    readonly interactive?: boolean;
+    readonly loading?: boolean;
+    readonly readonly?: boolean;
+};
+type OverlayInput = {
+    readonly backdrop?: boolean;
+    readonly closeOnEscape?: boolean;
+    readonly closeOnOutsideClick?: boolean;
+    readonly modal?: boolean;
+    readonly position?: 'top' | 'bottom' | 'left' | 'right';
+    readonly trapFocus?: boolean;
+    readonly zIndex?: number;
+};
+type FeedbackInput = { readonly autoDismiss?: boolean; readonly dismissible?: boolean; readonly duration?: number };
+type AnimationInput = {
+    readonly delay?: number;
+    readonly duration?: number;
+    readonly easing?: string;
+    readonly enabled?: boolean;
+};
+
+// --- Constants (Algorithmic Only) -------------------------------------------
 
 const B = Object.freeze({
     algo: {
@@ -80,175 +120,102 @@ const B = Object.freeze({
         pyMul: 0.5,
         rMax: 9999,
     },
-    defaults: { behavior: {} as const, dimensions: { scale: 5 } as const },
     stroke: { base: 2.5, factor: 0.15, max: 3, min: 1 },
 } as const);
 
+// --- Compute Dispatch Table -------------------------------------------------
+
+const compute: { readonly [K in keyof Computed]: (c: Scale) => string } = {
+    fontSize: (c) => `${(B.algo.fontBase + c.scale * B.algo.fontStep).toFixed(3)}rem`,
+    gap: (c) => `${(c.scale * B.algo.gapMul * c.density * c.baseUnit).toFixed(3)}rem`,
+    height: (c) => `${((B.algo.hBase + c.scale * B.algo.hStep) * c.density * c.baseUnit * 4).toFixed(3)}rem`,
+    iconSize: (c) =>
+        `${((B.algo.fontBase + c.scale * B.algo.fontStep) * B.algo.iconRatio * c.baseUnit * 4).toFixed(3)}rem`,
+    paddingX: (c) => `${(c.scale * B.algo.pxMul * c.density * c.baseUnit).toFixed(3)}rem`,
+    paddingY: (c) => `${(c.scale * B.algo.pyMul * c.density * c.baseUnit).toFixed(3)}rem`,
+    radius: (c) =>
+        c.radiusMultiplier >= 1
+            ? `${B.algo.rMax}px`
+            : `${(c.scale * c.radiusMultiplier * 2 * c.baseUnit).toFixed(3)}rem`,
+};
+
 // --- Pure Utility Functions -------------------------------------------------
 
-const rem = (v: number, u: number): string => `${(v * u).toFixed(3)}rem`;
 const cls = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
 const strokeWidth = (scale: number): number =>
     Math.max(B.stroke.min, Math.min(B.stroke.max, B.stroke.base - scale * B.stroke.factor));
-const styleVars = (d: ComputedDimensions, prefix: string): Record<string, string> =>
+const cssVars = (d: Computed, prefix: string): Record<string, string> =>
     Object.fromEntries(
         Object.entries(d).map(([k, v]) => [`--${prefix}-${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, v]),
     );
-const createVars =
-    (prefix: string) =>
-    (d: ComputedDimensions): Record<string, string> =>
-        styleVars(d, prefix);
+const computeScale = (s: Scale): Computed =>
+    Object.fromEntries(
+        (Object.keys(compute) as ReadonlyArray<keyof Computed>).map((k) => [k, compute[k](s)]),
+    ) as Computed;
 
-// --- Compute Dispatch Table -------------------------------------------------
+// --- Generic Resolver (DRY pattern for all schemas) -------------------------
 
-const compute: { readonly [K in ComputeKey]: (c: DimensionConfig) => string } = {
-    fontSize: (c) => rem(B.algo.fontBase + c.scale * B.algo.fontStep, 1),
-    gap: (c) => rem(c.scale * B.algo.gapMul * c.density, c.baseUnit),
-    height: (c) => rem((B.algo.hBase + c.scale * B.algo.hStep) * c.density, c.baseUnit * 4),
-    iconSize: (c) => rem((B.algo.fontBase + c.scale * B.algo.fontStep) * B.algo.iconRatio, c.baseUnit * 4),
-    paddingX: (c) => rem(c.scale * B.algo.pxMul * c.density, c.baseUnit),
-    paddingY: (c) => rem(c.scale * B.algo.pyMul * c.density, c.baseUnit),
-    radius: (c) => (c.radiusMultiplier >= 1 ? `${B.algo.rMax}px` : rem(c.scale * c.radiusMultiplier * 2, c.baseUnit)),
-};
-
-// --- Effect Pipelines -------------------------------------------------------
-
-const computeDimensions = (c: DimensionConfig): Effect.Effect<ComputedDimensions, never, never> =>
-    Effect.succeed(
-        Object.fromEntries(
-            (Object.keys(compute) as ReadonlyArray<ComputeKey>).map((k) => [k, compute[k](c)]),
-        ) as ComputedDimensions,
-    );
-
-const decodeDimensions = (
-    input: S.Schema.Encoded<typeof DimensionSchema>,
-): Effect.Effect<DimensionConfig, ParseError, never> => S.decode(DimensionSchema)(input);
-
-const decodeBehavior = (
-    input: S.Schema.Encoded<typeof BehaviorSchema>,
-): Effect.Effect<BehaviorConfig, ParseError, never> => S.decode(BehaviorSchema)(input);
-
-const decodeOverlay = (
-    input: S.Schema.Encoded<typeof OverlaySchema>,
-): Effect.Effect<OverlayConfig, ParseError, never> => S.decode(OverlaySchema)(input);
-
-const decodeFeedback = (
-    input: S.Schema.Encoded<typeof FeedbackSchema>,
-): Effect.Effect<FeedbackConfig, ParseError, never> => S.decode(FeedbackSchema)(input);
-
-const decodeAnimation = (
-    input: S.Schema.Encoded<typeof AnimationSchema>,
-): Effect.Effect<AnimationConfig, ParseError, never> => S.decode(AnimationSchema)(input);
-
-const createDimensionDefaults = (): DimensionConfig => Effect.runSync(S.decode(DimensionSchema)(B.defaults.dimensions));
-const createBehaviorDefaults = (): BehaviorConfig => Effect.runSync(S.decode(BehaviorSchema)(B.defaults.behavior));
-const createOverlayDefaults = (): OverlayConfig => Effect.runSync(S.decode(OverlaySchema)({}));
-const createFeedbackDefaults = (): FeedbackConfig => Effect.runSync(S.decode(FeedbackSchema)({}));
-const createAnimationDefaults = (): AnimationConfig => Effect.runSync(S.decode(AnimationSchema)({}));
-
-const resolve = (
-    dim?: Partial<DimensionConfig>,
-    beh?: Partial<BehaviorConfig>,
-    defaults?: { behavior: BehaviorConfig; dimensions: DimensionConfig },
-): Effect.Effect<{ behavior: BehaviorConfig; dimensions: DimensionConfig }, never, never> => {
-    const defs = defaults ?? (() => ({ behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() }))();
-    return pipe(
-        Effect.all({
-            behavior: pipe(
-                decodeBehavior({ ...defs.behavior, ...beh }),
-                Effect.catchAll(() => Effect.succeed(defs.behavior)),
+const resolve =
+    <A, I>(schema: S.Schema<A, I>) =>
+    (input?: I): A =>
+        Effect.runSync(
+            pipe(
+                Effect.try(() => S.decodeUnknownSync(schema)(input ?? {})),
+                Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(schema)({}))),
+                Effect.orDie,
             ),
-            dimensions: pipe(
-                decodeDimensions({ ...defs.dimensions, ...dim }),
-                Effect.catchAll(() => Effect.succeed(defs.dimensions)),
-            ),
-        }),
-    );
-};
+        );
 
-// Unified resolvers for consistent config resolution across components
-const resolveDimensions = (
-    dim?: Partial<DimensionConfig>,
-    defaults?: DimensionConfig,
-): Effect.Effect<DimensionConfig, never, never> => {
-    const defs = defaults ?? createDimensionDefaults();
-    return pipe(
-        decodeDimensions({ ...defs, ...dim }),
-        Effect.catchAll(() => Effect.succeed(defs)),
-    );
-};
+// --- Typed Resolvers (generated from generic) -------------------------------
+// Note: We let TypeScript infer types from schemas to work with exactOptionalPropertyTypes
 
-const resolveFeedback = (
-    fb?: Partial<FeedbackConfig>,
-    defaults?: FeedbackConfig,
-): Effect.Effect<FeedbackConfig, never, never> => {
-    const defs = defaults ?? createFeedbackDefaults();
-    return pipe(
-        decodeFeedback({ ...defs, ...fb }),
-        Effect.catchAll(() => Effect.succeed(defs)),
-    );
-};
+const resolveScale = (input?: ScaleInput) => resolve(ScaleSchema)(input);
+const resolveBehavior = (input?: BehaviorInput) => resolve(BehaviorSchema)(input);
+const resolveOverlay = (input?: OverlayInput) => resolve(OverlaySchema)(input);
+const resolveFeedback = (input?: FeedbackInput) => resolve(FeedbackSchema)(input);
+const resolveAnimation = (input?: AnimationInput) => resolve(AnimationSchema)(input);
 
-const resolveOverlay = (
-    ovr?: Partial<OverlayConfig>,
-    defaults?: OverlayConfig,
-): Effect.Effect<OverlayConfig, never, never> => {
-    const defs = defaults ?? createOverlayDefaults();
-    return pipe(
-        decodeOverlay({ ...defs, ...ovr }),
-        Effect.catchAll(() => Effect.succeed(defs)),
-    );
-};
+// --- Generic Utilities ------------------------------------------------------
 
-const resolveAnimation = (
-    anim?: Partial<AnimationConfig>,
-    defaults?: AnimationConfig,
-): Effect.Effect<AnimationConfig, never, never> => {
-    const defs = defaults ?? createAnimationDefaults();
-    return pipe(
-        decodeAnimation({ ...defs, ...anim }),
-        Effect.catchAll(() => Effect.succeed(defs)),
-    );
-};
+const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
+    a || b ? ({ ...a, ...b } as T) : undefined;
+const animStyle = (a: Animation): CSSProperties =>
+    a.enabled
+        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
+        : {};
 
 // --- Export -----------------------------------------------------------------
 
 export {
+    animStyle,
     AnimationSchema,
-    B as SCHEMA_TUNING,
+    B as TUNING,
     BehaviorSchema,
     cls,
     compute,
-    computeDimensions,
-    createAnimationDefaults,
-    createBehaviorDefaults,
-    createDimensionDefaults,
-    createFeedbackDefaults,
-    createOverlayDefaults,
-    createVars,
-    decodeAnimation,
-    decodeBehavior,
-    decodeDimensions,
-    decodeFeedback,
-    decodeOverlay,
-    DimensionSchema,
+    computeScale,
+    cssVars,
     FeedbackSchema,
+    merge,
     OverlaySchema,
-    resolve,
     resolveAnimation,
-    resolveDimensions,
+    resolveBehavior,
     resolveFeedback,
     resolveOverlay,
+    resolveScale,
+    ScaleSchema,
     strokeWidth,
-    styleVars,
 };
 export type {
-    AnimationConfig,
-    BehaviorConfig,
-    ComputedDimensions,
-    DimensionConfig,
-    FeedbackConfig,
-    FeedbackVariant,
-    OverlayConfig,
-    OverlayPosition,
+    Animation,
+    AnimationInput,
+    Behavior,
+    BehaviorInput,
+    Computed,
+    Feedback,
+    FeedbackInput,
+    Overlay,
+    OverlayInput,
+    Scale,
+    ScaleInput,
 };

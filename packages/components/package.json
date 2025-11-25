@@ -22,13 +22,37 @@
             "import": "./dist/controls.js",
             "types": "./dist/controls.d.ts"
         },
+        "./data": {
+            "import": "./dist/data.js",
+            "types": "./dist/data.d.ts"
+        },
         "./elements": {
             "import": "./dist/elements.js",
             "types": "./dist/elements.d.ts"
         },
+        "./feedback": {
+            "import": "./dist/feedback.js",
+            "types": "./dist/feedback.d.ts"
+        },
         "./icons": {
             "import": "./dist/icons.js",
             "types": "./dist/icons.d.ts"
+        },
+        "./navigation": {
+            "import": "./dist/navigation.js",
+            "types": "./dist/navigation.d.ts"
+        },
+        "./overlays": {
+            "import": "./dist/overlays.js",
+            "types": "./dist/overlays.d.ts"
+        },
+        "./schema": {
+            "import": "./dist/schema.js",
+            "types": "./dist/schema.d.ts"
+        },
+        "./utility": {
+            "import": "./dist/utility.js",
+            "types": "./dist/utility.d.ts"
         }
     },
     "name": "@parametric-portal/components",

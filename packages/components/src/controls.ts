@@ -1,24 +1,14 @@
 import { Slot } from '@radix-ui/react-slot';
-import { cva } from 'class-variance-authority';
-import { Effect } from 'effect';
 import type { CSSProperties, ForwardedRef, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useMemo, useRef } from 'react';
 import type { AriaButtonOptions } from 'react-aria';
 import { mergeProps, useButton, useFocusRing, useHover } from 'react-aria';
-import type { BehaviorConfig, DimensionConfig } from './schema.ts';
-import {
-    cls,
-    computeDimensions,
-    createBehaviorDefaults,
-    createDimensionDefaults,
-    createVars,
-    resolve,
-} from './schema.ts';
+import type { Behavior, BehaviorInput, ScaleInput } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
 type ControlType = 'button' | 'checkbox' | 'input' | 'radio' | 'switch' | 'textarea';
-type StateKey = 'disabled' | 'focus' | 'hover' | 'loading' | 'pressed';
 type ButtonProps = AriaButtonOptions<'button'> & {
     readonly asChild?: boolean;
     readonly children?: ReactNode;
@@ -26,148 +16,137 @@ type ButtonProps = AriaButtonOptions<'button'> & {
 };
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'disabled'> & {
     readonly asChild?: boolean;
-    readonly behavior?: Partial<BehaviorConfig>;
-    readonly dimensions?: Partial<DimensionConfig>;
+    readonly behavior?: BehaviorInput | undefined;
+    readonly scale?: ScaleInput | undefined;
 };
-type ControlInput<T extends ControlType> = {
+type ControlInput<T extends ControlType = 'button'> = {
     readonly asChild?: boolean;
-    readonly behavior?: Partial<BehaviorConfig>;
+    readonly behavior?: BehaviorInput | undefined;
     readonly className?: string;
-    readonly dimensions?: Partial<DimensionConfig>;
     readonly fullWidth?: boolean;
-    readonly type: T;
+    readonly scale?: ScaleInput | undefined;
+    readonly type?: T;
 };
 
-// --- Constants (Unified Base) -----------------------------------------------
+// --- Constants (CSS Variable Classes Only - NO hardcoded colors) ------------
 
 const B = Object.freeze({
-    cls: {
+    state: {
         disabled: 'opacity-50 cursor-not-allowed pointer-events-none',
-        focus: 'outline-none ring-2 ring-offset-2 ring-[var(--color-primary-500,currentColor)]',
-        hover: 'brightness-110',
-        loading: 'cursor-wait animate-pulse',
-        pressed: 'brightness-90 scale-[0.98]',
-    } as { readonly [K in StateKey]: string },
-    defaults: { behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() },
-    input: {
-        checkbox: 'appearance-none cursor-pointer',
-        radio: 'appearance-none cursor-pointer rounded-full',
-        text: 'bg-transparent',
+        loading: 'cursor-wait',
+        readonly: 'cursor-default',
     },
-    width: { false: 'w-auto', true: 'w-full' },
+    var: {
+        base: 'inline-flex items-center justify-center font-medium transition-all duration-150',
+        fs: 'text-[length:var(--ctrl-font-size)]',
+        g: 'gap-[var(--ctrl-gap)]',
+        h: 'h-[var(--ctrl-height)]',
+        px: 'px-[var(--ctrl-padding-x)]',
+        py: 'py-[var(--ctrl-padding-y)]',
+        r: 'rounded-[var(--ctrl-radius)]',
+    },
 } as const);
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const vars = createVars('control');
-
-const stateClass = (b: BehaviorConfig, h: boolean, p: boolean, f: boolean): string =>
+const baseCls = (fw?: boolean): string =>
+    cls(B.var.base, B.var.h, B.var.px, B.var.py, B.var.fs, B.var.r, B.var.g, fw ? 'w-full' : 'w-auto');
+const stateCls = (b: Behavior): string =>
     cls(
-        b.disabled ? B.cls.disabled : undefined,
-        b.loading ? B.cls.loading : undefined,
-        f && !b.disabled ? B.cls.focus : undefined,
-        h && !b.disabled && !b.loading ? B.cls.hover : undefined,
-        p && !b.disabled ? B.cls.pressed : undefined,
+        b.disabled ? B.state.disabled : undefined,
+        b.loading ? B.state.loading : undefined,
+        b.readonly ? B.state.readonly : undefined,
     );
-
-const baseVariants = cva(
-    [
-        'inline-flex items-center justify-center font-medium transition-all duration-150',
-        'h-[var(--control-height)] px-[var(--control-padding-x)] py-[var(--control-padding-y)]',
-        'text-[length:var(--control-font-size)] rounded-[var(--control-radius)] gap-[var(--control-gap)]',
-    ].join(' '),
-    { defaultVariants: { fullWidth: false }, variants: { fullWidth: B.width } },
-);
-
-const inputVariants = cva(
-    [
-        'inline-flex items-center font-normal transition-all duration-150',
-        'h-[var(--control-height)] px-[var(--control-padding-x)] py-[var(--control-padding-y)]',
-        'text-[length:var(--control-font-size)] rounded-[var(--control-radius)] border border-current/20 bg-transparent',
-    ].join(' '),
-    { defaultVariants: { fullWidth: false, inputType: 'text' }, variants: { fullWidth: B.width, inputType: B.input } },
-);
 
 // --- Component Factories ----------------------------------------------------
 
-const createButton = (i: ControlInput<'button'>) => {
-    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior, B.defaults));
-    const cssVars = vars(Effect.runSync(computeDimensions(dims)));
-    const base = baseVariants({ fullWidth: i.fullWidth ?? false });
-    const Component = forwardRef((props: ButtonProps, fRef: ForwardedRef<HTMLButtonElement>) => {
+const createBtn = (i: ControlInput<'button'>) => {
+    const beh = resolveBehavior(i.behavior);
+    const scl = resolveScale(i.scale);
+    const vars = cssVars(computeScale(scl), 'ctrl');
+    const base = cls(baseCls(i.fullWidth), stateCls(beh), i.className);
+    const Comp = forwardRef((props: ButtonProps, fRef: ForwardedRef<HTMLButtonElement>) => {
         const { asChild, children, className, ...aria } = props;
-        const internalRef = useRef<HTMLButtonElement>(null);
-        const ref = (fRef ?? internalRef) as RefObject<HTMLButtonElement>;
+        const intRef = useRef<HTMLButtonElement>(null);
+        const ref = (fRef ?? intRef) as RefObject<HTMLButtonElement>;
         const { buttonProps, isPressed } = useButton({ ...aria, isDisabled: beh.disabled || beh.loading }, ref);
         const { hoverProps, isHovered } = useHover({ isDisabled: beh.disabled || beh.loading });
         const { focusProps, isFocusVisible } = useFocusRing();
         const merged = mergeProps(buttonProps, hoverProps, focusProps, {
-            className: cls(base, stateClass(beh, isHovered, isPressed, isFocusVisible), i.className, className),
+            className: cls(base, className),
+            'data-focus': isFocusVisible || undefined,
+            'data-hover': isHovered || undefined,
+            'data-pressed': isPressed || undefined,
             ref,
-            style: cssVars as CSSProperties,
+            style: vars as CSSProperties,
         });
         return (asChild ?? i.asChild)
             ? createElement(Slot, merged, children)
             : createElement('button', { ...merged, type: 'button' }, children);
     });
-    Component.displayName = 'Control(button)';
-    return Component;
+    Comp.displayName = 'Ctrl(button)';
+    return Comp;
 };
 
-const createInput = <T extends ControlType>(i: ControlInput<T>) => {
+const createInp = <T extends ControlType>(i: ControlInput<T>) => {
     const htmlType = i.type === 'checkbox' ? 'checkbox' : i.type === 'radio' ? 'radio' : 'text';
-    const base = inputVariants({ fullWidth: i.fullWidth ?? false, inputType: htmlType });
-    const Component = forwardRef((props: InputProps, fRef: ForwardedRef<HTMLInputElement>) => {
-        const { asChild, behavior: pb, className, dimensions: pd, ...rest } = props;
-        const internalRef = useRef<HTMLInputElement>(null);
-        const ref = (fRef ?? internalRef) as RefObject<HTMLInputElement>;
-        const { behavior: beh, cssVars } = useMemo(() => {
-            const r = Effect.runSync(resolve({ ...i.dimensions, ...pd }, { ...i.behavior, ...pb }, B.defaults));
-            return { behavior: r.behavior, cssVars: vars(Effect.runSync(computeDimensions(r.dimensions))) };
-        }, [pd, pb, i.behavior, i.dimensions]);
+    const base = cls(baseCls(i.fullWidth), 'border border-current/20 bg-transparent', i.className);
+    const Comp = forwardRef((props: InputProps, fRef: ForwardedRef<HTMLInputElement>) => {
+        const { asChild, behavior: pb, className, scale: ps, ...rest } = props;
+        const intRef = useRef<HTMLInputElement>(null);
+        const ref = (fRef ?? intRef) as RefObject<HTMLInputElement>;
+        const { beh, vars } = useMemo(() => {
+            const b = resolveBehavior({ ...i.behavior, ...pb });
+            const s = resolveScale({ ...i.scale, ...ps });
+            return { beh: b, vars: cssVars(computeScale(s), 'ctrl') };
+        }, [pb, ps]);
         const { hoverProps, isHovered } = useHover({ isDisabled: beh.disabled || beh.loading });
         const { focusProps, isFocusVisible } = useFocusRing();
         const merged = mergeProps(hoverProps, focusProps, rest, {
             'aria-busy': beh.loading || undefined,
-            className: cls(base, stateClass(beh, isHovered, false, isFocusVisible), i.className, className),
+            'aria-readonly': beh.readonly || undefined,
+            className: cls(base, stateCls(beh), className),
+            'data-focus': isFocusVisible || undefined,
+            'data-hover': isHovered || undefined,
+            'data-readonly': beh.readonly || undefined,
             disabled: beh.disabled,
+            readOnly: beh.readonly,
             ref,
-            style: cssVars as CSSProperties,
+            style: vars as CSSProperties,
             type: htmlType,
         });
         return (asChild ?? i.asChild) ? createElement(Slot, merged) : createElement('input', merged);
     });
-    Component.displayName = `Control(${i.type})`;
-    return Component;
+    Comp.displayName = `Ctrl(${i.type ?? 'input'})`;
+    return Comp;
 };
 
 const create = <T extends ControlType>(i: ControlInput<T>) =>
-    i.type === 'button' ? createButton(i as ControlInput<'button'>) : createInput(i);
+    i.type === 'button' ? createBtn(i as ControlInput<'button'>) : createInp(i);
 
 // --- Factory ----------------------------------------------------------------
 
-const createControls = (tuning?: {
-    defaults?: { behavior?: Partial<BehaviorConfig>; dimensions?: Partial<DimensionConfig> };
-}) =>
+const createControls = (tuning?: { scale?: ScaleInput; behavior?: BehaviorInput }) =>
     Object.freeze({
         Button: create({
-            behavior: { ...B.defaults.behavior, ...tuning?.defaults?.behavior },
-            dimensions: { ...B.defaults.dimensions, ...tuning?.defaults?.dimensions },
             type: 'button',
+            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
         }),
         create: <T extends ControlType>(i: ControlInput<T>) =>
             create({
                 ...i,
-                behavior: { ...B.defaults.behavior, ...tuning?.defaults?.behavior, ...i.behavior },
-                dimensions: { ...B.defaults.dimensions, ...tuning?.defaults?.dimensions, ...i.dimensions },
+                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
+                ...(merge(tuning?.behavior, i.behavior) && { behavior: merge(tuning?.behavior, i.behavior) }),
             }),
         Input: create({
-            behavior: { ...B.defaults.behavior, ...tuning?.defaults?.behavior },
-            dimensions: { ...B.defaults.dimensions, ...tuning?.defaults?.dimensions },
             type: 'input',
+            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
         }),
     });
 
 // --- Export -----------------------------------------------------------------
 
 export { B as CONTROL_TUNING, createControls };
+export type { ButtonProps, ControlInput, ControlType, InputProps };
