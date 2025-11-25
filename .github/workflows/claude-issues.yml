@@ -1,0 +1,72 @@
+name: Claude Auto-Implement
+
+on:
+  issues:
+    types: [labeled]
+
+concurrency:
+  group: claude-implement-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  implement:
+    if: github.event.label.name == 'claude-implement'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Claude Implementation
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Implement issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+            ## ISSUE DESCRIPTION
+            ${{ github.event.issue.body }}
+
+            ## REQUIREMENTS
+            1. Read REQUIREMENTS.md for dogmatic patterns
+            2. Use appropriate agent (typescript-advanced, react-specialist, etc.)
+            3. Follow single B constant + dispatch table patterns
+            4. Create a PR with implementation
+
+            ## VERIFICATION
+            - pnpm typecheck passes
+            - pnpm check passes
+            - All tests pass
+
+            ## OUTPUT
+            Create a PR with:
+            - Clear title referencing issue
+            - Implementation following REQUIREMENTS.md
+            - Tests if applicable
+
+          claude_args: |
+            --model claude-opus-4-5-20251101
+            --max-turns 25

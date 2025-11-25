@@ -3,33 +3,36 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    paths:
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/vite.config.ts'
+      - '**/package.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
+      actions: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25.2.1'
 
       - name: Run Claude Code Review
         id: claude-review
@@ -37,21 +40,38 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            Review PR #${{ github.event.pull_request.number }} against REQUIREMENTS.md standards.
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            ## MANDATORY CHECKS (build failures)
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            **Syntax violations** (search for these patterns):
+            - `any` type → must use branded types via @effect/schema
+            - `var ` or `let ` → must use `const`
+            - `if (` with `} else {` → must use dispatch tables or ternaries
+            - `for (`/`while (` → must use .map/.filter/Effect
+            - `try {` → must use Effect error channel
+            - Scattered constants → must use single B constant pattern
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            **Architecture violations**:
+            - Missing `as const` on object literals
+            - Missing dispatch table for mode switching
+            - Raw Promise instead of Effect.Effect<T, E, R>
+            - null checks instead of Option.match
 
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+            **Organization violations** (files >50 LOC):
+            - Missing section separators (77-char `// --- Section ---`)
+            - Sections out of order (Imports → Types → Schema → Constants → Functions → Dispatch → Export)
 
+            ## REVIEW FORMAT
+
+            Use `gh pr review` with:
+            - `--approve` if ALL checks pass
+            - `--request-changes` if ANY violation found
+
+            Include specific line references for each violation.
+            Run `pnpm typecheck && pnpm check` to verify compliance.
+
+          claude_args: |
+            --model claude-opus-4-5-20251101
+            --max-turns 8
+            --allowedTools Read,Grep,Glob,Bash(pnpm:*),Bash(git diff:*),Bash(gh pr:*)
