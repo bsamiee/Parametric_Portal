@@ -99,7 +99,7 @@ const createInp = <T extends ControlType>(i: ControlInput<T>) => {
             const b = resolveBehavior({ ...i.behavior, ...pb });
             const s = resolveScale({ ...i.scale, ...ps });
             return { beh: b, vars: cssVars(computeScale(s), 'ctrl') };
-        }, [pb, ps, i.behavior, i.scale]);
+        }, [pb, ps]);
         const { hoverProps, isHovered } = useHover({ isDisabled: beh.disabled || beh.loading });
         const { focusProps, isFocusVisible } = useFocusRing();
         const merged = mergeProps(hoverProps, focusProps, rest, {
