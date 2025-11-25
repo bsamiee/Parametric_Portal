@@ -7,32 +7,20 @@ import { Effect, pipe } from 'effect';
 type DimensionConfig = S.Schema.Type<typeof DimensionSchema>;
 type BehaviorConfig = S.Schema.Type<typeof BehaviorSchema>;
 type ComputedDimensions = {
-    readonly fontSize: string;
-    readonly gap: string;
-    readonly height: string;
-    readonly iconSize: string;
-    readonly paddingX: string;
-    readonly paddingY: string;
-    readonly radius: string;
+    readonly [K in 'fontSize' | 'gap' | 'height' | 'iconSize' | 'paddingX' | 'paddingY' | 'radius']: string;
 };
+type ComputeKey = keyof ComputedDimensions;
 
-// --- Schema Definitions (Master Schema 1: Dimensions) -----------------------
-
-const ScaleValue = pipe(S.Number, S.between(1, 10), S.brand('ScaleValue'));
-const DensityValue = pipe(S.Number, S.between(0.5, 2), S.brand('DensityValue'));
-const BaseUnit = pipe(S.Number, S.positive(), S.brand('BaseUnit'));
-const RadiusMultiplier = pipe(S.Number, S.between(0, 1), S.brand('RadiusMultiplier'));
+// --- Schema Definitions -----------------------------------------------------
 
 const DimensionSchema = S.Struct({
-    baseUnit: S.optionalWith(BaseUnit, { default: () => 0.25 as S.Schema.Type<typeof BaseUnit> }),
-    density: S.optionalWith(DensityValue, { default: () => 1 as S.Schema.Type<typeof DensityValue> }),
-    radiusMultiplier: S.optionalWith(RadiusMultiplier, {
-        default: () => 0.25 as S.Schema.Type<typeof RadiusMultiplier>,
+    baseUnit: S.optionalWith(pipe(S.Number, S.positive(), S.brand('BaseUnit')), { default: () => 0.25 as never }),
+    density: S.optionalWith(pipe(S.Number, S.between(0.5, 2), S.brand('Density')), { default: () => 1 as never }),
+    radiusMultiplier: S.optionalWith(pipe(S.Number, S.between(0, 1), S.brand('Radius')), {
+        default: () => 0.25 as never,
     }),
-    scale: ScaleValue,
+    scale: pipe(S.Number, S.between(1, 10), S.brand('Scale')),
 });
-
-// --- Schema Definitions (Master Schema 2: Behavior) -------------------------
 
 const BehaviorSchema = S.Struct({
     asChild: S.optionalWith(S.Boolean, { default: () => false }),
@@ -42,66 +30,56 @@ const BehaviorSchema = S.Struct({
     loading: S.optionalWith(S.Boolean, { default: () => false }),
 });
 
-// --- Constants (Unified Factory -> Frozen) ----------------------------------
+// --- Constants (Unified Base) -----------------------------------------------
 
-const { algorithmConfig } = Effect.runSync(
-    Effect.all({
-        algorithmConfig: Effect.succeed({
-            fontScaleBase: 0.75,
-            fontScaleStep: 0.125,
-            gapMultiplier: 1,
-            heightBase: 1.5,
-            heightStep: 0.5,
-            iconScaleRatio: 0.6,
-            paddingHorizontalMultiplier: 2,
-            paddingVerticalMultiplier: 0.5,
-            radiusMax: 9999,
-        } as const),
-    }),
-);
+const B = Object.freeze({
+    algo: {
+        fontBase: 0.75,
+        fontStep: 0.125,
+        gapMul: 1,
+        hBase: 1.5,
+        hStep: 0.5,
+        iconRatio: 0.6,
+        pxMul: 2,
+        pyMul: 0.5,
+        rMax: 9999,
+    },
+    defaults: { behavior: {} as const, dimensions: { scale: 5 } as const },
+    stroke: { base: 2.5, factor: 0.15, max: 3, min: 1 },
+} as const);
 
-const ALGORITHM_CONFIG = Object.freeze(algorithmConfig);
+// --- Compute Dispatch Table -------------------------------------------------
+
+const rem = (v: number, u: number): string => `${(v * u).toFixed(3)}rem`;
+
+const compute: { readonly [K in ComputeKey]: (c: DimensionConfig) => string } = {
+    fontSize: (c) => rem(B.algo.fontBase + c.scale * B.algo.fontStep, 1),
+    gap: (c) => rem(c.scale * B.algo.gapMul * c.density, c.baseUnit),
+    height: (c) => rem((B.algo.hBase + c.scale * B.algo.hStep) * c.density, c.baseUnit * 4),
+    iconSize: (c) => rem((B.algo.fontBase + c.scale * B.algo.fontStep) * B.algo.iconRatio, c.baseUnit * 4),
+    paddingX: (c) => rem(c.scale * B.algo.pxMul * c.density, c.baseUnit),
+    paddingY: (c) => rem(c.scale * B.algo.pyMul * c.density, c.baseUnit),
+    radius: (c) => (c.radiusMultiplier >= 1 ? `${B.algo.rMax}px` : rem(c.scale * c.radiusMultiplier * 2, c.baseUnit)),
+};
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const computeRem = (value: number, baseUnit: number): string => `${(value * baseUnit).toFixed(3)}rem`;
+const strokeWidth = (scale: number): number =>
+    Math.max(B.stroke.min, Math.min(B.stroke.max, B.stroke.base - scale * B.stroke.factor));
 
-const computeFontSize = (scale: number): string =>
-    computeRem(ALGORITHM_CONFIG.fontScaleBase + scale * ALGORITHM_CONFIG.fontScaleStep, 1);
-
-const computeHeight = (scale: number, density: number, baseUnit: number): string =>
-    computeRem((ALGORITHM_CONFIG.heightBase + scale * ALGORITHM_CONFIG.heightStep) * density, baseUnit * 4);
-
-const computePaddingX = (scale: number, density: number, baseUnit: number): string =>
-    computeRem(scale * ALGORITHM_CONFIG.paddingHorizontalMultiplier * density, baseUnit);
-
-const computePaddingY = (scale: number, density: number, baseUnit: number): string =>
-    computeRem(scale * ALGORITHM_CONFIG.paddingVerticalMultiplier * density, baseUnit);
-
-const computeGap = (scale: number, density: number, baseUnit: number): string =>
-    computeRem(scale * ALGORITHM_CONFIG.gapMultiplier * density, baseUnit);
-
-const computeRadius = (scale: number, radiusMultiplier: number, baseUnit: number): string =>
-    radiusMultiplier >= 1 ? `${ALGORITHM_CONFIG.radiusMax}px` : computeRem(scale * radiusMultiplier * 2, baseUnit);
-
-const computeIconSize = (scale: number, baseUnit: number): string =>
-    computeRem(
-        (ALGORITHM_CONFIG.fontScaleBase + scale * ALGORITHM_CONFIG.fontScaleStep) * ALGORITHM_CONFIG.iconScaleRatio,
-        baseUnit * 4,
+const styleVars = (d: ComputedDimensions, prefix: string): Record<string, string> =>
+    Object.fromEntries(
+        Object.entries(d).map(([k, v]) => [`--${prefix}-${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, v]),
     );
 
-// --- Effect Pipelines & Builders --------------------------------------------
+// --- Effect Pipelines -------------------------------------------------------
 
-const computeDimensions = (config: DimensionConfig): Effect.Effect<ComputedDimensions, never, never> =>
-    Effect.succeed({
-        fontSize: computeFontSize(config.scale),
-        gap: computeGap(config.scale, config.density, config.baseUnit),
-        height: computeHeight(config.scale, config.density, config.baseUnit),
-        iconSize: computeIconSize(config.scale, config.baseUnit),
-        paddingX: computePaddingX(config.scale, config.density, config.baseUnit),
-        paddingY: computePaddingY(config.scale, config.density, config.baseUnit),
-        radius: computeRadius(config.scale, config.radiusMultiplier, config.baseUnit),
-    } as const);
+const computeDimensions = (c: DimensionConfig): Effect.Effect<ComputedDimensions, never, never> =>
+    Effect.succeed(
+        Object.fromEntries(
+            (Object.keys(compute) as ReadonlyArray<ComputeKey>).map((k) => [k, compute[k](c)]),
+        ) as ComputedDimensions,
+    );
 
 const decodeDimensions = (
     input: S.Schema.Encoded<typeof DimensionSchema>,
@@ -111,20 +89,22 @@ const decodeBehavior = (
     input: S.Schema.Encoded<typeof BehaviorSchema>,
 ): Effect.Effect<BehaviorConfig, ParseError, never> => S.decode(BehaviorSchema)(input);
 
-const createDimensionDefaults = (): DimensionConfig => Effect.runSync(S.decode(DimensionSchema)({ scale: 5 }));
+const createDimensionDefaults = (): DimensionConfig => Effect.runSync(S.decode(DimensionSchema)(B.defaults.dimensions));
+const createBehaviorDefaults = (): BehaviorConfig => Effect.runSync(S.decode(BehaviorSchema)(B.defaults.behavior));
 
-const createBehaviorDefaults = (): BehaviorConfig => Effect.runSync(S.decode(BehaviorSchema)({}));
-
-// --- Export (Internal - not public API) -------------------------------------
+// --- Export -----------------------------------------------------------------
 
 export {
-    ALGORITHM_CONFIG,
+    B,
     BehaviorSchema,
+    compute,
     computeDimensions,
     createBehaviorDefaults,
     createDimensionDefaults,
     decodeBehavior,
     decodeDimensions,
     DimensionSchema,
+    strokeWidth,
+    styleVars,
 };
 export type { BehaviorConfig, ComputedDimensions, DimensionConfig };

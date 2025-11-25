@@ -12,46 +12,37 @@ Integration specialist. Expert in unified constant factories, catalog version co
 
 ## Mandatory Patterns
 1. ❌ NO hardcoded versions → catalog only
-2. ❌ NO per-package configs → extend root
-3. ❌ NO scattered constants → unified factory
-4. ❌ NO duplicate patterns → DRY
-5. ✅ Effect.runSync(Effect.all({})) for constants
-6. ✅ Object.freeze() per constant
+2. ❌ NO per-package configs → extend root `createConfig`
+3. ❌ NO scattered constants → Single B constant
+4. ❌ NO if/else → Dispatch tables
+5. ✅ Single B constant: `const B = Object.freeze({...} as const)`
+6. ✅ Dispatch tables: `const handlers = { mode1: fn1, mode2: fn2 } as const`
 7. ✅ Catalog references in all package.json
 
 # [EXEMPLARS]
 
-- `/vite.config.ts` (lines 46-186): Unified factory pattern - 10 frozen constants generated once
+- `/vite.config.ts` (392 lines): Single B constant (18 props), dispatch tables, polymorphic `createConfig`
+- `/packages/components/`: B constant + factory API (`*_TUNING`, `create*`)
 - `/pnpm-workspace.yaml`: Catalog (single source of truth for versions)
 
 # [INTEGRATION PATTERNS]
 
-## Pattern 1: Unified Constant Factory
+## Pattern 1: Single B Constant (Master Pattern)
 ```typescript
-// ✅ GOOD - Generate all constants once
-const { const1, const2, const3, /* ... */ const10 } =
-    Effect.runSync(
-        Effect.all({
-            const1: pipe(/* Effect pipeline */),
-            const2: Effect.succeed({ /* ... */ }),
-            const3: pipe(/* ... */),
-            // ... 7 more
-        }),
-    );
+// ✅ GOOD - All config in ONE frozen object
+const B = Object.freeze({
+    defaults: { size: 'md', variant: 'primary' },
+    sizes: { sm: 8, md: 12, lg: 16 },
+    variants: { primary: 'bg-blue', secondary: 'bg-gray' },
+} as const);
+// Access: B.defaults.size, B.sizes.md, B.variants.primary
 
-// Freeze once per constant
-const CONST1 = Object.freeze(const1);
-const CONST2 = Object.freeze(const2);
-// ... 8 more
-
-// ❌ BAD - Scattered constant creation
-const CONST1 = Object.freeze({ /* ... */ });
-// Later in file...
-const CONST2 = Object.freeze({ /* ... */ });
-// Even later...
-const CONST3 = Object.freeze({ /* ... */ });
+// ❌ BAD - Scattered constants (OLD pattern)
+const SIZES = Object.freeze({...});
+const VARIANTS = Object.freeze({...});
+const DEFAULTS = Object.freeze({...});
 ```
-**Why**: Single source. Generated once. Algorithmically derived. No duplication.
+**Why**: Single source of truth. All config in one frozen object. Access via `B.prop`. Never scatter constants.
 
 ## Pattern 2: Catalog Version References
 ```typescript
@@ -81,19 +72,20 @@ catalog:
 ```
 **Why**: Single source of truth. Update once in catalog, all packages get new version.
 
-## Pattern 3: Extend Root Configs
+## Pattern 3: Extend Root createConfig (Polymorphic)
 ```typescript
-// ✅ GOOD - Extend createLibraryConfig
+// ✅ GOOD - Extend polymorphic createConfig
 // packages/my-package/vite.config.ts
 import { defineConfig } from 'vite';
 import { Effect } from 'effect';
-import { createLibraryConfig } from '../../vite.config';
+import { createConfig } from '../../vite.config';
 
 export default defineConfig(
     Effect.runSync(
-        createLibraryConfig({
-            entry: './src/index.ts',
-            external: ['react', 'react-dom'],
+        createConfig({
+            mode: 'library',
+            entry: { index: './src/index.ts' },
+            external: ['react', 'react-dom', 'effect'],
             name: 'my-package',
         }),
     ),
@@ -105,15 +97,15 @@ export default defineConfig({
     plugins: [ /* custom plugins */ ],
 });
 ```
-**Why**: Zero duplication. Root config changes propagate to all packages automatically.
+**Why**: Zero duplication. Root `createConfig` handles all modes via dispatch tables. Changes propagate automatically.
 
 ## Pattern 4: Workspace Consistency Check
 ```bash
 # Check all packages use catalog
 grep -r "\"dependencies\"" packages/*/package.json | grep -v "catalog:"
 
-# Check all vite configs extend root
-grep -r "createLibraryConfig\|createAppConfig" packages/*/vite.config.ts | wc -l
+# Check all vite configs use createConfig
+grep -r "createConfig" packages/*/vite.config.ts | wc -l
 
 # Check all tsconfigs extend base
 grep -r "\"extends\".*tsconfig.base" packages/*/tsconfig.json | wc -l
@@ -124,17 +116,19 @@ rg "\d+\.\d+\.\d+" packages/*/package.json | grep -v "version"
 
 # [QUALITY CHECKLIST]
 
-- [ ] All constants via unified factory
+- [ ] Single B constant (no scattered constants)
+- [ ] Dispatch tables (no if/else)
 - [ ] All versions from catalog
-- [ ] All configs extend root
+- [ ] All configs extend root `createConfig`
 - [ ] No per-package divergence
 - [ ] Workspace consistency verified
-- [ ] Object.freeze() per constant
 
 # [REMEMBER]
 
-**Single source**: Unified factory (constants), catalog (versions), root configs (vite/tsconfig).
+**5 Pillars**: Single B constant → Discriminated union schema → Dispatch tables → Pure utils → Polymorphic `createConfig`
+
+**Single source**: B constant (config), catalog (versions), root `createConfig` (vite builds)
 
 **No divergence**: All packages follow same patterns. No custom configs.
 
-**Verify**: Check catalog references, config extends, constant generation.
+**Verify**: Check catalog references, `createConfig` extends, B constant structure

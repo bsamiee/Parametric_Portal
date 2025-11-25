@@ -1,12 +1,12 @@
 import { Effect } from 'effect';
 import { defineConfig } from 'vite';
-import { createLibraryConfig } from '../../vite.config.ts';
+import { createConfig } from '../../vite.config.ts';
 
 // --- Export ------------------------------------------------------------------
 
 export default defineConfig(
     Effect.runSync(
-        createLibraryConfig({
+        createConfig({
             entry: {
                 controls: './src/controls.ts',
                 elements: './src/elements.ts',
@@ -26,6 +26,7 @@ export default defineConfig(
                 'tailwind-merge',
                 'lucide-react',
             ],
+            mode: 'library',
             name: 'ParametricComponents',
         }),
     ),

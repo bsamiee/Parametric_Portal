@@ -2,17 +2,18 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
 import { clsx } from 'clsx';
 import { Effect, pipe } from 'effect';
-import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
-import { createElement, forwardRef } from 'react';
+import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
+import { createElement, forwardRef, useRef } from 'react';
 import { twMerge } from 'tailwind-merge';
 import type { BehaviorConfig, ComputedDimensions, DimensionConfig } from './schema.ts';
 import {
-    ALGORITHM_CONFIG,
     computeDimensions,
     createBehaviorDefaults,
     createDimensionDefaults,
     decodeBehavior,
     decodeDimensions,
+    B as SB,
+    styleVars,
 } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
@@ -21,16 +22,7 @@ type ElementTag = 'article' | 'aside' | 'div' | 'footer' | 'header' | 'main' | '
 type FlexDirection = 'column' | 'column-reverse' | 'row' | 'row-reverse';
 type FlexAlign = 'baseline' | 'center' | 'end' | 'start' | 'stretch';
 type FlexJustify = 'around' | 'between' | 'center' | 'end' | 'evenly' | 'start';
-
-type ElementTuning = {
-    readonly algorithms: typeof ALGORITHM_CONFIG;
-    readonly defaults: {
-        readonly behavior: BehaviorConfig;
-        readonly dimensions: DimensionConfig;
-    };
-};
-
-type ElementFactoryInput<T extends ElementTag> = {
+type ElementInput<T extends ElementTag> = {
     readonly align?: FlexAlign;
     readonly asChild?: boolean;
     readonly behavior?: Partial<BehaviorConfig>;
@@ -45,226 +37,135 @@ type ElementFactoryInput<T extends ElementTag> = {
     readonly wrap?: boolean;
 };
 
-type ElementComponent<_T extends ElementTag> = ReturnType<
-    typeof forwardRef<
-        HTMLElement,
-        HTMLAttributes<HTMLElement> & {
-            readonly asChild?: boolean;
-            readonly children?: ReactNode;
-        }
-    >
->;
+// --- Constants (Unified Base) -----------------------------------------------
 
-type ElementFactory = {
-    readonly Box: ElementComponent<'div'>;
-    readonly create: <T extends ElementTag>(input: ElementFactoryInput<T>) => ElementComponent<T>;
-    readonly Flex: ElementComponent<'div'>;
-    readonly Stack: ElementComponent<'div'>;
-};
-
-// --- Constants (Unified Factory -> Frozen) ----------------------------------
-
-const { elementTuning, flexVariants } = Effect.runSync(
-    Effect.all({
-        elementTuning: Effect.succeed({
-            algorithms: ALGORITHM_CONFIG,
-            defaults: {
-                behavior: createBehaviorDefaults(),
-                dimensions: createDimensionDefaults(),
-            },
-        } as const),
-        flexVariants: Effect.succeed({
-            align: {
-                baseline: 'items-baseline',
-                center: 'items-center',
-                end: 'items-end',
-                start: 'items-start',
-                stretch: 'items-stretch',
-            },
-            direction: {
-                column: 'flex-col',
-                'column-reverse': 'flex-col-reverse',
-                row: 'flex-row',
-                'row-reverse': 'flex-row-reverse',
-            },
-            justify: {
-                around: 'justify-around',
-                between: 'justify-between',
-                center: 'justify-center',
-                end: 'justify-end',
-                evenly: 'justify-evenly',
-                start: 'justify-start',
-            },
-            wrap: {
-                false: 'flex-nowrap',
-                true: 'flex-wrap',
-            },
-        } as const),
-    }),
-);
-
-const ELEMENT_TUNING: ElementTuning = Object.freeze(elementTuning);
-const FLEX_VARIANTS = Object.freeze(flexVariants);
+const B = Object.freeze({
+    algo: SB.algo,
+    align: {
+        baseline: 'items-baseline',
+        center: 'items-center',
+        end: 'items-end',
+        start: 'items-start',
+        stretch: 'items-stretch',
+    } as { readonly [K in FlexAlign]: string },
+    defaults: { behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() },
+    direction: {
+        column: 'flex-col',
+        'column-reverse': 'flex-col-reverse',
+        row: 'flex-row',
+        'row-reverse': 'flex-row-reverse',
+    } as { readonly [K in FlexDirection]: string },
+    justify: {
+        around: 'justify-around',
+        between: 'justify-between',
+        center: 'justify-center',
+        end: 'justify-end',
+        evenly: 'justify-evenly',
+        start: 'justify-start',
+    } as { readonly [K in FlexJustify]: string },
+    wrap: { false: 'flex-nowrap', true: 'flex-wrap' },
+} as const);
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const mergeClasses = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
+const cls = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
 
-const computeStyleVars = (dims: ComputedDimensions): Record<string, string> => ({
-    '--element-font-size': dims.fontSize,
-    '--element-gap': dims.gap,
-    '--element-height': dims.height,
-    '--element-icon-size': dims.iconSize,
-    '--element-padding-x': dims.paddingX,
-    '--element-padding-y': dims.paddingY,
-    '--element-radius': dims.radius,
+const vars = (d: ComputedDimensions): Record<string, string> => styleVars(d, 'element');
+
+const baseVariants = cva('', {
+    defaultVariants: { gap: false, padding: false, radius: false },
+    variants: {
+        gap: { false: '', true: 'gap-[var(--element-gap)]' },
+        padding: { false: '', true: 'px-[var(--element-padding-x)] py-[var(--element-padding-y)]' },
+        radius: { false: '', true: 'rounded-[var(--element-radius)]' },
+    },
 });
 
-const createBaseVariants = () =>
-    cva('', {
-        compoundVariants: [],
-        defaultVariants: {
-            gap: false,
-            padding: false,
-            radius: false,
-        },
-        variants: {
-            gap: {
-                false: '',
-                true: 'gap-[var(--element-gap)]',
-            },
-            padding: {
-                false: '',
-                true: 'px-[var(--element-padding-x)] py-[var(--element-padding-y)]',
-            },
-            radius: {
-                false: '',
-                true: 'rounded-[var(--element-radius)]',
-            },
-        },
-    });
+const flexVariants = cva('flex', {
+    defaultVariants: { align: 'stretch', direction: 'row', justify: 'start', wrap: false },
+    variants: { align: B.align, direction: B.direction, justify: B.justify, wrap: B.wrap },
+});
 
-const createFlexVariants = () =>
-    cva('flex', {
-        compoundVariants: [],
-        defaultVariants: {
-            align: 'stretch',
-            direction: 'row',
-            justify: 'start',
-            wrap: false,
-        },
-        variants: {
-            align: FLEX_VARIANTS.align,
-            direction: FLEX_VARIANTS.direction,
-            justify: FLEX_VARIANTS.justify,
-            wrap: FLEX_VARIANTS.wrap,
-        },
-    });
+// --- Effect Pipelines -------------------------------------------------------
 
-// --- Effect Pipelines & Builders --------------------------------------------
-
-const resolveConfig = (
-    dimInput: Partial<DimensionConfig> | undefined,
-    behInput: Partial<BehaviorConfig> | undefined,
+const resolve = (
+    dim?: Partial<DimensionConfig>,
+    beh?: Partial<BehaviorConfig>,
 ): Effect.Effect<{ behavior: BehaviorConfig; dimensions: DimensionConfig }, never, never> =>
     pipe(
         Effect.all({
             behavior: pipe(
-                decodeBehavior({ ...ELEMENT_TUNING.defaults.behavior, ...behInput }),
-                Effect.catchAll(() => Effect.succeed(ELEMENT_TUNING.defaults.behavior)),
+                decodeBehavior({ ...B.defaults.behavior, ...beh }),
+                Effect.catchAll(() => Effect.succeed(B.defaults.behavior)),
             ),
             dimensions: pipe(
-                decodeDimensions({ ...ELEMENT_TUNING.defaults.dimensions, ...dimInput }),
-                Effect.catchAll(() => Effect.succeed(ELEMENT_TUNING.defaults.dimensions)),
+                decodeDimensions({ ...B.defaults.dimensions, ...dim }),
+                Effect.catchAll(() => Effect.succeed(B.defaults.dimensions)),
             ),
         }),
     );
 
-const createElementComponent = <T extends ElementTag>(factoryInput: ElementFactoryInput<T>): ElementComponent<T> => {
-    const baseVariants = createBaseVariants();
-    const flexVars = createFlexVariants();
+// --- Component Factory ------------------------------------------------------
 
-    const resolved = Effect.runSync(resolveConfig(factoryInput.dimensions, factoryInput.behavior));
-    const dims = Effect.runSync(computeDimensions(resolved.dimensions));
-    const staticStyleVars = computeStyleVars(dims);
-    const staticBehavior = resolved.behavior;
-
-    const staticBaseClasses = baseVariants({
-        gap: factoryInput.gap ?? false,
-        padding: factoryInput.padding ?? false,
-        radius: factoryInput.radius ?? false,
-    });
-
-    const staticFlexClasses =
-        factoryInput.direction !== undefined
-            ? flexVars({
-                  align: factoryInput.align ?? 'stretch',
-                  direction: factoryInput.direction,
-                  justify: factoryInput.justify ?? 'start',
-                  wrap: factoryInput.wrap ?? false,
+const createElementComponent = <T extends ElementTag>(i: ElementInput<T>) => {
+    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior));
+    const cssVars = vars(Effect.runSync(computeDimensions(dims)));
+    const baseCls = baseVariants({ gap: i.gap ?? false, padding: i.padding ?? false, radius: i.radius ?? false });
+    const flexCls =
+        i.direction !== undefined
+            ? flexVariants({
+                  align: i.align ?? 'stretch',
+                  direction: i.direction,
+                  justify: i.justify ?? 'start',
+                  wrap: i.wrap ?? false,
               })
             : '';
-
     const Component = forwardRef(
         (
             props: HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode },
-            ref: ForwardedRef<HTMLElement>,
+            fRef: ForwardedRef<HTMLElement>,
         ) => {
             const { asChild, children, className, style, ...rest } = props;
-            const useSlot = asChild ?? factoryInput.asChild ?? false;
-
-            const finalClassName = mergeClasses(
-                staticBaseClasses,
-                staticFlexClasses,
-                factoryInput.className,
-                className,
-            );
-            const finalStyle = { ...staticStyleVars, ...style } as CSSProperties;
-
+            const internalRef = useRef<HTMLElement>(null);
+            const ref = (fRef ?? internalRef) as RefObject<HTMLElement>;
             const elementProps = {
                 ...rest,
-                'aria-busy': staticBehavior.loading ? true : undefined,
-                'aria-disabled': staticBehavior.disabled ? true : undefined,
-                className: finalClassName,
+                'aria-busy': beh.loading || undefined,
+                'aria-disabled': beh.disabled || undefined,
+                className: cls(baseCls, flexCls, i.className, className),
                 ref,
-                style: finalStyle,
-                tabIndex:
-                    staticBehavior.focusable && staticBehavior.interactive && !staticBehavior.disabled ? 0 : undefined,
+                style: { ...cssVars, ...style } as CSSProperties,
+                tabIndex: beh.focusable && beh.interactive && !beh.disabled ? 0 : undefined,
             };
-
-            return useSlot
+            return (asChild ?? i.asChild)
                 ? createElement(Slot, elementProps, children)
-                : createElement(factoryInput.tag, elementProps, children);
+                : createElement(i.tag, elementProps, children);
         },
     );
-
-    Component.displayName = `Element(${factoryInput.tag})`;
-    return Component as ElementComponent<T>;
+    Component.displayName = `Element(${i.tag})`;
+    return Component;
 };
 
-const createElements = (tuning?: Partial<ElementTuning>): ElementFactory => {
-    const mergedTuning = {
-        algorithms: tuning?.algorithms ?? ELEMENT_TUNING.algorithms,
-        defaults: {
-            behavior: { ...ELEMENT_TUNING.defaults.behavior, ...tuning?.defaults?.behavior },
-            dimensions: { ...ELEMENT_TUNING.defaults.dimensions, ...tuning?.defaults?.dimensions },
-        },
-    };
+// --- Factory ----------------------------------------------------------------
 
+const createElements = (tuning?: {
+    defaults?: { behavior?: Partial<BehaviorConfig>; dimensions?: Partial<DimensionConfig> };
+}) => {
+    const defs = {
+        behavior: { ...B.defaults.behavior, ...tuning?.defaults?.behavior },
+        dimensions: { ...B.defaults.dimensions, ...tuning?.defaults?.dimensions },
+    };
     return Object.freeze({
-        Box: createElementComponent({
-            dimensions: mergedTuning.defaults.dimensions,
-            tag: 'div',
-        }),
-        create: <T extends ElementTag>(input: ElementFactoryInput<T>) =>
+        Box: createElementComponent({ dimensions: defs.dimensions, tag: 'div' }),
+        create: <T extends ElementTag>(i: ElementInput<T>) =>
             createElementComponent({
-                ...input,
-                behavior: { ...mergedTuning.defaults.behavior, ...input.behavior },
-                dimensions: { ...mergedTuning.defaults.dimensions, ...input.dimensions },
+                ...i,
+                behavior: { ...defs.behavior, ...i.behavior },
+                dimensions: { ...defs.dimensions, ...i.dimensions },
             }),
         Flex: createElementComponent({
             align: 'stretch',
-            dimensions: mergedTuning.defaults.dimensions,
+            dimensions: defs.dimensions,
             direction: 'row',
             gap: true,
             justify: 'start',
@@ -272,7 +173,7 @@ const createElements = (tuning?: Partial<ElementTuning>): ElementFactory => {
         }),
         Stack: createElementComponent({
             align: 'stretch',
-            dimensions: mergedTuning.defaults.dimensions,
+            dimensions: defs.dimensions,
             direction: 'column',
             gap: true,
             justify: 'start',
@@ -283,4 +184,4 @@ const createElements = (tuning?: Partial<ElementTuning>): ElementFactory => {
 
 // --- Export -----------------------------------------------------------------
 
-export { createElements, ELEMENT_TUNING };
+export { B as ELEMENT_TUNING, createElements };

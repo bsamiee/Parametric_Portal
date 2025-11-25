@@ -12,24 +12,27 @@ Library planner. Expert in researching latest APIs (≤6mo), creating Nx package
 
 ## Package Structure
 - **src/** folder (source code)
-- **vite.config.ts** (extends createLibraryConfig)
+- **vite.config.ts** (extends polymorphic `createConfig` with `mode: 'library'`)
 - **tsconfig.json** (extends base, composite: true)
 - **package.json** (type: module, catalog versions, exports)
 
 ## Mandatory Patterns
 1. ❌ NO hardcoded versions → catalog only
 2. ❌ NO default exports → named only
-3. ❌ NO per-package unique patterns → follow theme
-4. ✅ Effect pipelines for async
-5. ✅ Option for nullable
-6. ✅ Zod schemas (branded types)
-7. ✅ ReadonlyArray<T>
+3. ❌ NO per-package unique patterns → follow vite.config.ts master pattern
+4. ✅ Single B constant per file (no scattered constants)
+5. ✅ Dispatch tables (no if/else)
+6. ✅ Effect pipelines for async
+7. ✅ Option for nullable
+8. ✅ @effect/schema branded types
+9. ✅ ReadonlyArray<T>
 
 # [EXEMPLARS]
 
 Study before creating package:
+- `/vite.config.ts` (392 lines): Master pattern - Single B constant, dispatch tables, polymorphic `createConfig`
+- `/packages/components/`: B constant + factory API (`*_TUNING`, `create*`)
 - `/packages/theme/`: Complete canonical package structure, Effect/Option/Zod patterns
-- `/vite.config.ts`: createLibraryConfig factory (lines 276-330)
 - `/pnpm-workspace.yaml`: Catalog versions
 
 # [PACKAGE CREATION WORKFLOW]
@@ -70,17 +73,18 @@ Total: 250 lines (within limits)
 # Create directories
 mkdir -p packages/my-package/src
 
-# Create vite.config.ts (extends createLibraryConfig)
+# Create vite.config.ts (extends polymorphic createConfig)
 cat > packages/my-package/vite.config.ts << 'VITE'
 import { defineConfig } from 'vite';
 import { Effect } from 'effect';
-import { createLibraryConfig } from '../../vite.config';
+import { createConfig } from '../../vite.config';
 
 export default defineConfig(
     Effect.runSync(
-        createLibraryConfig({
-            entry: './src/index.ts',
-            external: ['react', 'react-dom'],  // Don't bundle React
+        createConfig({
+            mode: 'library',
+            entry: { index: './src/index.ts' },
+            external: ['react', 'react-dom', 'effect'],
             name: 'my-package',
         }),
     ),
@@ -174,12 +178,14 @@ nx test my-package
 # [QUALITY CHECKLIST]
 
 - [ ] Researched ≤6mo old docs
-- [ ] Studied packages/theme patterns
-- [ ] vite.config.ts extends createLibraryConfig
+- [ ] Studied vite.config.ts (master pattern) and packages/components
+- [ ] vite.config.ts extends polymorphic `createConfig({ mode: 'library', ... })`
 - [ ] tsconfig.json extends base, composite: true
 - [ ] package.json uses catalog versions
+- [ ] Single B constant per file (no scattered constants)
+- [ ] Dispatch tables (no if/else)
 - [ ] Effect pipelines for async
-- [ ] Zod schemas for validation
+- [ ] @effect/schema for validation
 - [ ] Branded types via S.brand()
 - [ ] ReadonlyArray<T> for collections
 - [ ] Build succeeds (dist/ outputs)
@@ -187,12 +193,16 @@ nx test my-package
 
 # [REMEMBER]
 
+**5 Pillars**: Single B constant → Discriminated union schema → Dispatch tables → Pure utils → Polymorphic entry point
+
 **Research first**: ≤6mo old docs. Verify catalog versions. Check compatibility.
 
-**Follow theme**: Study `packages/theme` structure exactly. Don't invent patterns.
+**Follow master pattern**: Study `vite.config.ts` and `packages/components`. Apply same patterns.
 
-**Structure**: src/ + vite.config.ts + tsconfig.json + package.json. Extend root configs.
+**Structure**: src/ + vite.config.ts + tsconfig.json + package.json. Extend root `createConfig`.
 
-**Implementation**: Effect pipelines, Zod schemas, branded types, ReadonlyArray.
+**Implementation**: Single B constant, dispatch tables, Effect pipelines, @effect/schema, branded types.
+
+**Export pattern**: `export { B as *_TUNING, create* };`
 
 **Validate**: Build, typecheck, lint, test. Verify Crystal inference works.

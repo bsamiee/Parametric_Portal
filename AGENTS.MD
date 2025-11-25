@@ -38,7 +38,7 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 - **`nx.json`**: Cacheable ops (build/test/typecheck/check); named inputs include `sharedGlobals` (all root configs). Outputs go to `{projectRoot}/dist` for builds, `{projectRoot}/coverage` for tests. Use Nx target defaults and dependency graph; keep inference plugins on.
 - **`tsconfig.base.json`**: Strict, ESNext target/module, bundler resolution, JSX react-jsx, `@/* -> packages/*`, `verbatimModuleSyntax: true`, `noUncheckedSideEffectImports: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`. Extend, never weaken.
 - **`biome.json`**: 120 width, 4 spaces, single quotes, trailing commas (JS). No default exports (except configs), no console (warn), no `any`, no `forEach`, complexity ≤25, exhaustive deps/switch, naming conventions enforced. GritQL plugins (Effect/Zod/Functional) are canonical patterns—even if disabled upstream, treat as required behavior.
-- **`vite.config.ts`**: Unified factory via `Effect.runSync(Effect.all({...}))`. Frozen constants: `BROWSER_TARGETS`, `CHUNK_PATTERNS`, `ASSET_PATTERNS`, `PLUGIN_CONFIGS`, `PWA_MANIFEST`, `PWA_WORKBOX_CONFIG`, `SVGR_OPTIONS`, `BUILD_MESSAGES`, `SSR_CONFIG`. Use `createBuildConstants`, `getDropTargets`, `createChunkStrategy`, `createAllPlugins`. Respect: LightningCSS (no PostCSS), React 19 compiler, Tailwind v4 alpha via `@tailwindcss/vite`, PWA with Workbox, esbuild purity, chunk naming, worker config, warmup. Never inline or bypass factories.
+- **`vite.config.ts`** (392 lines): Single `B` constant (18 props: assets, browsers, cache, chunks, comp, csp, exts, glob, img, port, pwa, ssr, svgr, treeshake, viz). `CfgSchema` discriminated union for app/library modes. Dispatch tables: `plugins[mode]()`, `config[mode]()`. Single entry: `createConfig(input)` → decode → dispatch → UserConfig. Access via `B.browsers`, `B.chunks`. Never scatter constants, never use if/else.
 - **`vitest.config.ts`**: Frozen coverage thresholds (80%), include/exclude, reporters, UI on, happy-dom env, Playwright browser disabled by default, benchmarks separated, typecheck config present (off by default). Always merge with base Vite config.
 - **`.npmrc`**: engine-strict, isolated linker, highest resolution, save-exact, frozen lockfile, no hoist. Never override locally.
 - **`.gitignore`**: Respect `.vite`, coverage, caches, build outputs.
@@ -52,7 +52,7 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 ## Nx/Vite/Vitest Usage Patterns
 - Use Nx targets (`build`, `test`, `typecheck`, `check`) with run-many or affected; never bypass with raw vite/vitest scripts.
 - Respect Nx outputs (`{projectRoot}/dist`, `{projectRoot}/coverage`) and named inputs (`sharedGlobals`, `production`); add new inputs/outputs if you introduce new artifacts.
-- Extend Vite/Vitest only through existing factories: add plugins via `createAllPlugins` (reuse `PLUGIN_CONFIGS`), extend build constants via `createBuildConstants`, adjust chunking via `createChunkStrategy`.
+- Extend Vite via `createConfig({ mode: 'app' | 'library', ... })`. The single polymorphic entry point handles all modes via dispatch tables. Never bypass with separate factory functions.
 - Keep Vite manifest + ssrManifest on; preserve esbuild purity (`pure`, `drop`, `minify*`) and treeshake settings.
 - Keep Vitest merged with Vite config; preserve coverage thresholds/reporters; keep browser mode off unless explicitly enabled through config.
 
@@ -84,16 +84,17 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 7) Re-read configs to ensure alignment; update docs/comments only if needed—never relax rules.
 
 ## Implementation Protocol (dogmatic)
-1. **Model first (Zod + brands)**: Strict schemas with `.brand()`; mirror with types. Validate every IO boundary; reject stringly-typed flags.
-2. **Pipeline everything (Effect/Option)**: `pipe(Effect.all(...), Effect.map(...))`; `Option.fromNullable(...).pipe(Option.match(...))`. No statements.
-3. **Freeze + derive**: Build constants in a factory, schema-validate, then `Object.freeze`. Reuse frozen constants before introducing new ones.
-4. **Parameterize**: Builders accept baselines/params, derive outputs (chunk strategies, targets, runtime options). No literals.
-5. **Imports/order**: External → `@/` aliases → relatives; type imports isolated. No barrel files, no re-export-all.
-6. **Outputs/paths**: `{projectRoot}/dist` for builds, `{projectRoot}/coverage` for tests; respect Nx target outputs.
-7. **LightningCSS-only CSS**: No PostCSS. Tailwind v4 via `@tailwindcss/vite`. Keep LightningCSS drafts/nonStandard flags as configured.
-8. **React 19 compiler**: Keep babel plugin via `PLUGIN_CONFIGS.react`. Do not downgrade.
-9. **Vite 7 env API**: Keep manifest + ssrManifest; do not remove `buildApp` hooks or chunk strategy.
-10. **SSR config**: Use `SSR_CONFIG` helper; no inline SSR overrides.
+1. **Model first (Schema + brands)**: Strict schemas with @effect/schema; mirror with types. Validate every IO boundary; reject stringly-typed flags.
+2. **Single B Constant**: All config in one frozen object: `const B = Object.freeze({...} as const)`. Access via `B.prop`. Never scatter multiple frozen constants.
+3. **Dispatch Tables (replace if/else)**: `const handlers = { app: (c) => ..., library: (c) => ... } as const`. Use `handlers[mode]()` for type-safe lookup.
+4. **Pure Utility Functions**: Single-expression arrows, parameterized, composable. No side effects.
+5. **Single Polymorphic Entry Point**: `createConfig(input)` → decode → dispatch → typed output. One function handles all modes.
+6. **Pipeline everything (Effect/Option)**: `pipe(Effect.all(...), Effect.map(...))`; `Option.fromNullable(...).pipe(Option.match(...))`. No statements.
+7. **Imports/order**: External → `@/` aliases → relatives; type imports isolated. No barrel files, no re-export-all.
+8. **Outputs/paths**: `{projectRoot}/dist` for builds, `{projectRoot}/coverage` for tests; respect Nx target outputs.
+9. **LightningCSS-only CSS**: No PostCSS. Tailwind v4 via `@tailwindcss/vite`. Keep LightningCSS drafts/nonStandard flags as configured.
+10. **React 19 compiler**: Keep babel plugin enabled. Do not downgrade.
+11. **Vite 7 env API**: Keep manifest + ssrManifest; do not remove `buildApp` hooks or chunk strategy.
 
 ## File Organization Standard (mandatory structure)
 **Top-down dependency flow** (simple → complex, abstract → concrete):
@@ -108,40 +109,44 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 2. **Type Definitions** (atomic types first)
    - Utility types (e.g., `ChunkDecision = Option.Option<string>`)
    - Derived types (e.g., `ConfigSchemas = ReturnType<...>`)
-   - Branded types via `z.infer<...>`
+   - Branded types via `S.Schema.Type<...>`
    - No implementations—pure type declarations
 
 3. **Schema Definitions** (validation layer)
-   - Zod schemas via factory functions
-   - Foundation for runtime validation
+   - @effect/schema discriminated unions
+   - Foundation for runtime validation + polymorphic dispatch
    - Mirrors type definitions
 
-4. **Constants** (frozen, immutable data)
-   - Unified Effect factory: `Effect.runSync(Effect.all({...}))`
-   - Individual `Object.freeze(...)` per constant
-   - Validated via schemas before freezing
+4. **Constants** (single B constant)
+   - Single unified `const B = Object.freeze({...} as const)`
+   - All config in one frozen object
+   - Access via `B.prop` (e.g., `B.browsers`, `B.chunks`)
 
 5. **Pure Utility Functions** (predicates, transformers)
-   - Smallest/simplest first (e.g., `matchesNodeModules`)
-   - No side effects, no mutations
    - Single-expression arrows
+   - No side effects, no mutations
+   - Smallest/simplest first
 
-6. **Effect Pipelines & Builders** (composition layer)
-   - Simple helpers first (e.g., `createSSRConfig`)
-   - Complex factories last (e.g., `createViteConfig`)
+6. **Dispatch Tables** (polymorphic handlers)
+   - `const handlers = { mode1: fn1, mode2: fn2 } as const`
+   - Replace if/else chains with type-safe lookup
+   - Used by Effect pipelines
+
+7. **Effect Pipelines** (composition layer)
+   - `createConfig(input)` → decode → dispatch → output
+   - Single polymorphic entry point
    - Monadic composition via `pipe`
 
-7. **Export** (entry point)
+8. **Export** (entry point)
    - Default export for configs (allowed via Biome override)
-   - Named exports for reusable utilities
+   - Named exports: `{ B as *_TUNING, create* }`
 
 **Section Separators** (mandatory format):
 ```typescript
 // --- Section Name -------------------------------------------------------
 ```
-- Triple-dash prefix, single space, title, space, dashes to ~77 chars total (80 - 3 for `//` + space)
-- Sections: `Type Definitions`, `Schema Definitions`, `Constants (Unified Factory → Frozen)`, `Pure Utility Functions`, `Effect Pipelines & Builders`, `Export`
-- Visual clarity for 100+ line files; scanability at-a-glance
+- Triple-dash prefix, single space, title, space, dashes to ~77 chars total
+- Sections: `Type Definitions`, `Schema Definitions`, `Constants`, `Pure Utility Functions`, `Dispatch Tables`, `Effect Pipeline`, `Export`
 
 ## Code Density & Type Rigor
 - Target ultra-dense functions (multi-feature per ~25-30 LOC) without complexity >25.
@@ -165,33 +170,51 @@ You are operating inside a bleeding-edge Nx/Vite/Effect monorepo. This is the si
 ## Exemplar References
 
 **Canonical Implementations** (study these):
-- `/packages/theme/` - Perfect adherence to all patterns
-- `/vite.config.ts` - Unified factory pattern, frozen constants, Effect pipelines
-- `/vitest.config.ts` - Config merging, Effect all pattern
+- `/vite.config.ts` - Master pattern: Single B constant, dispatch tables, polymorphic createConfig
+- `/packages/components/` - B constant + factory API (`*_TUNING`, `create*`)
+- `/packages/theme/` - Frozen configs, Effect pipelines
+- `/vitest.config.ts` - Config merging pattern
 - `/tsconfig.base.json` - Strictest TypeScript configuration
 - `/biome.json` - Comprehensive linting rules
 
 **Patterns to Apply Verbatim**:
 ```typescript
+// Single B Constant (replace scattered constants)
+const B = Object.freeze({
+    defaults: { size: 'md', variant: 'primary' },
+    sizes: { sm: 8, md: 12, lg: 16 },
+    variants: { primary: 'bg-blue', secondary: 'bg-gray' },
+} as const);
+// Access: B.defaults.size, B.sizes.md, B.variants.primary
+
+// Dispatch Tables (replace if/else)
+const handlers = {
+    app: (c) => appConfig(c),
+    library: (c) => libConfig(c),
+} as const;
+// Usage: handlers[mode](config) — type-safe, extensible
+
+// Discriminated Union Schema
+const ConfigSchema = S.Union(
+    S.Struct({ mode: S.Literal('app'), port: S.Number }),
+    S.Struct({ mode: S.Literal('library'), entry: S.String }),
+);
+
+// Single Polymorphic Entry Point
+const createConfig = (input: unknown) =>
+    pipe(
+        Effect.try(() => S.decodeUnknownSync(ConfigSchema)(input)),
+        Effect.orDie,
+        Effect.map((c) => handlers[c.mode](c)),
+    );
+
+// Factory Export Pattern
+export { B as COMPONENT_TUNING, createComponents };
+
 // Option flow
 const value = Option.fromNullable(input).pipe(
     Option.match({ onNone: () => fallback, onSome: transform })
 );
-
-// Effect pipeline
-const task = pipe(
-    Effect.all({ a, b }),
-    Effect.map(derive),
-    Effect.map(validateWithSchema)
-);
-
-// Unified factory
-const { a, b } = Effect.runSync(Effect.all({
-    a: Effect.succeed({...} as const),
-    b: Effect.succeed({...} as const),
-}));
-const A = Object.freeze(a);
-const B = Object.freeze(b);
 
 // Branded types
 import * as S from '@effect/schema/Schema';
@@ -227,9 +250,9 @@ type PositiveInt = S.Schema.Type<typeof PositiveInt>;
 - **Success Criteria**: Measurable outcomes (80% coverage, ≤25 complexity, 100% type safety)
 
 ### 2. Context Framing
-- **Rich Background**: All agents reference REQUIREMENTS.md (385 lines), vite.config.ts (460 lines)
-- **Exemplar References**: packages/theme as canonical pattern implementation
-- **Architectural Patterns**: Effect/Option pipelines, unified factories, catalog system
+- **Rich Background**: All agents reference REQUIREMENTS.md (385 lines), vite.config.ts (392 lines)
+- **Exemplar References**: vite.config.ts (master pattern), packages/components (B constant + factory API)
+- **Architectural Patterns**: Single B constant, dispatch tables, discriminated union schemas, Effect pipelines
 - **Stack Versions**: Exact catalog versions prevent outdated assumptions
 
 ### 3. Stepwise Structure
@@ -330,7 +353,7 @@ integration-specialist (verify):
 - DRY maintained at all levels (constants, factories, pipelines)
 
 **Architecture Compliance**:
-- New work composes with existing factories/plugins/constants
+- New work composes with existing B constant (extend, don't scatter)
 - Artifacts, caching, manifests align with Nx/Vite defaults
 - LightningCSS-only, React 19 compiler, Tailwind v4 alpha retained
 - Vite 7 env API, Nx 22 Crystal inference leveraged
@@ -344,12 +367,12 @@ integration-specialist (verify):
 **Agent-Specific Success**:
 - **typescript-advanced**: 100% type coverage, branded types, Effect/Option used
 - **react-specialist**: React Compiler enabled, Server Components async, use() hook proper
-- **vite-nx-specialist**: Factories extended (not bypassed), Nx Crystal inference active
+- **vite-nx-specialist**: Single B constant used, dispatch tables, Nx Crystal inference active
 - **testing-specialist**: 80% coverage, property-based tests, Effect testing patterns
 - **performance-analyst**: Bundle size optimized, tree-shaking verified, lazy loading applied
 - **refactoring-architect**: Pipelines migrated, dispatch tables used, holistic consistency
-- **library-planner**: Catalog versions, vite.config factory, tsconfig.json extends base
-- **integration-specialist**: Unified factories used, catalog references, workspace coherent
+- **library-planner**: Catalog versions, vite.config createConfig, tsconfig.json extends base
+- **integration-specialist**: Single B constant pattern used, catalog references, workspace coherent
 - **documentation-specialist**: Cross-references valid, examples compile, 1-line XML comments
 - **cleanup-specialist**: 25-30 LOC/feature density, complexity ≤25, no scattered patterns
 

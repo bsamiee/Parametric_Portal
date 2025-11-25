@@ -1,6 +1,6 @@
 # Parametric Portal — Claude Code Development Guide
 
-**Last Updated**: 2025-11-24
+**Last Updated**: 2025-01-XX
 **Target**: Claude Code (long context, code generation, debugging)
 
 ---
@@ -8,10 +8,10 @@
 ## Quick Orientation (Read First)
 
 **Context Files** (read before working):
-- `REQUIREMENTS.md` - Authoritative spec (385 lines, complete technical details)
-- `AGENTS.MD` - Dogmatic protocol (204 lines, non-negotiable principles)
-- `vite.config.ts` - Master config with 10 frozen constants, 2 factories
-- `packages/theme/` - Canonical exemplar (perfect pattern adherence)
+- `REQUIREMENTS.md` - Authoritative spec (complete technical details)
+- `AGENTS.MD` - Dogmatic protocol (non-negotiable principles)
+- `vite.config.ts` - Master pattern (392 lines, single B constant, dispatch tables, polymorphic createConfig)
+- `packages/components/` - Canonical exemplar (B constant + factory API)
 
 **Verify Environment**:
 ```bash
@@ -21,8 +21,6 @@ pnpm typecheck  # Should pass
 pnpm check      # Should pass
 ```
 
-**Critical Gap**: ⚠️ Git not initialized (affects nx affected, Biome VCS, cache keys)
-
 ---
 
 ## Stack Versions (Catalog Truth)
@@ -30,7 +28,7 @@ pnpm check      # Should pass
 All versions in `pnpm-workspace.yaml` catalog (98 dependencies, exact versions):
 
 **Core** (bleeding-edge canaries/nightlies):
-- TypeScript `6.0.0-dev.20251121` • React `19.3.0-canary-40b4a5bf-20251120` • Vite `7.2.4` • Vitest `4.0.13` • Effect `3.19.6` • Zod `4.1.13` • Nx `22.2.0-canary.20251121-9a6c7ad` • Tailwind `4.1.17` • LightningCSS `1.30.2` • Biome `2.3.7` • Node `25.2.1` • pnpm `10.23.0`
+- TypeScript `6.0.0-dev.20251121` • React `19.3.0-canary-*` • Vite `7.2.4` • Vitest `4.0.13` • Effect `3.19.6` • @effect/schema • Nx `22.2.0-canary.*` • Tailwind `4.1.17` • LightningCSS `1.30.2` • Biome `2.3.7` • Node `25.2.1` • pnpm `10.23.0`
 
 **Philosophy**: Dogmatic FP/ROP + super-strong types. Zero compromises, zero rule suppression.
 
@@ -44,12 +42,12 @@ All versions in `pnpm-workspace.yaml` catalog (98 dependencies, exact versions):
 |-------|--------|----------|
 | **typescript-advanced** | TS 6.0-dev, FP/ROP | Complex types, Effect/Option |
 | **react-specialist** | React 19 canary | Components, hooks, Server Components |
-| **vite-nx-specialist** | Build config | Vite/Nx configuration |
+| **vite-nx-specialist** | Build config | Vite/Nx configuration, dispatch tables |
 | **testing-specialist** | Vitest, testing | Writing/fixing tests |
 | **performance-analyst** | Optimization | Bundle size, performance |
-| **refactoring-architect** | Transformation | Large refactors |
+| **refactoring-architect** | Transformation | Large refactors, B constant consolidation |
 | **library-planner** | Package creation | New packages |
-| **integration-specialist** | Cross-package | Workspace integration |
+| **integration-specialist** | Cross-package | Single B constants, workspace consistency |
 | **documentation-specialist** | Documentation | Docs, comments |
 | **cleanup-specialist** | Code polish | Final density optimization |
 
@@ -57,28 +55,30 @@ All versions in `pnpm-workspace.yaml` catalog (98 dependencies, exact versions):
 
 ## Dogmatic Code Rules (Build-Failing)
 
-**Read REQUIREMENTS.md lines 30-82 for complete list**. Summary:
+**Read REQUIREMENTS.md for complete list**. Summary:
 
-1. **No `any`** (branded types via Zod `.brand()`)
-2. **No `var`/`let`** (`const` only)
-3. **No `if/else`** (ternaries, `Option.match`)
-4. **No loops** (`.map`/`.filter`/Effect)
-5. **ReadonlyArray<T>** + `as const`
-6. **Effect** for async/failable, **Option** for nullable
-7. **No try/catch** (Effect error channel)
-8. **No default exports** (except `*.config.ts`)
-9. **No barrel files** (`export *`)
-10. **Unified factory pattern**: `Effect.runSync(Effect.all({...}))` → `Object.freeze` individually
-11. **Delegate to agents** when task matches their expertise
+1. **Single B Constant**: All config in one frozen object `const B = Object.freeze({...} as const)`
+2. **Dispatch Tables**: Replace if/else with `handlers[mode]()` type-safe lookup
+3. **No `any`** (branded types via @effect/schema)
+4. **No `var`/`let`** (`const` only)
+5. **No `if/else`** (dispatch tables, ternaries, `Option.match`)
+6. **No loops** (`.map`/`.filter`/Effect)
+7. **ReadonlyArray<T>** + `as const`
+8. **Effect** for async/failable, **Option** for nullable
+9. **No try/catch** (Effect error channel)
+10. **No default exports** (except `*.config.ts`)
+11. **Single polymorphic entry point**: `createConfig(input)` handles all modes
+12. **Delegate to agents** when task matches their expertise
 
 **File Organization** (>50 LOC):
 ```typescript
 // --- Imports -----------------------------------------------------------------
 // --- Type Definitions --------------------------------------------------------
 // --- Schema Definitions ------------------------------------------------------
-// --- Constants (Unified Factory → Frozen) ------------------------------------
+// --- Constants ---------------------------------------------------------------
 // --- Pure Utility Functions --------------------------------------------------
-// --- Effect Pipelines & Builders ---------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 // --- Export ------------------------------------------------------------------
 ```
 
@@ -88,22 +88,27 @@ All versions in `pnpm-workspace.yaml` catalog (98 dependencies, exact versions):
 
 ## Configuration Cascade
 
-**Master Pattern** - Single source of truth:
+**Master Pattern** - Single B constant + polymorphic entry:
 
 ```typescript
-// Root: vite.config.ts (10 frozen constants, 2 factories)
-export const BROWSER_TARGETS = Object.freeze({...});
-export const createAppConfig = (): Effect.Effect<UserConfig, never, never> => ...;
-export const createLibraryConfig = (opts): Effect.Effect<UserConfig, never, never> => ...;
+// Root: vite.config.ts (392 lines)
+const B = Object.freeze({
+    assets, browsers, cache, chunks, comp, csp, exts, glob, img, port, pwa, ssr, svgr, treeshake, viz
+} as const);
 
-// Apps: extend createAppConfig
-import { createAppConfig } from '../../vite.config.ts';
-export default defineConfig(Effect.runSync(createAppConfig()));
+const plugins = { app: (c, prod) => [...], library: () => [...] } as const;
+const config = { app: (c, b, env) => UserConfig, library: (c, b) => UserConfig } as const;
 
-// Packages: extend createLibraryConfig
-import { createLibraryConfig } from '../../vite.config.ts';
-export default defineConfig(Effect.runSync(createLibraryConfig({
-  entry: { main: './src/index.ts' },
+export const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =>
+    pipe(decode, dispatch);
+
+// Apps: createConfig with mode: 'app'
+export default defineConfig(Effect.runSync(createConfig({ mode: 'app' })));
+
+// Packages: createConfig with mode: 'library'
+export default defineConfig(Effect.runSync(createConfig({
+  mode: 'library',
+  entry: { index: './src/index.ts' },
   external: ['effect', '@effect/schema'],
   name: 'MyPackage'
 })));
@@ -128,25 +133,25 @@ export default defineConfig(Effect.runSync(createLibraryConfig({
 // Stepwise delegation logic
 const selectAgent = (task: Task): Agent | 'self' => {
   // 1. Specialized domains (highest priority)
-  if (task.involves.react19 || task.involves.reactComponent) return 'react-specialist';
-  if (task.involves.viteConfig || task.involves.nxConfig) return 'vite-nx-specialist';
-  if (task.involves.newPackage || task.involves.libraryResearch) return 'library-planner';
+  task.involves.react19 || task.involves.reactComponent ? 'react-specialist' :
+  task.involves.viteConfig || task.involves.nxConfig ? 'vite-nx-specialist' :
+  task.involves.newPackage || task.involves.libraryResearch ? 'library-planner' :
   
   // 2. Quality & optimization
-  if (task.involves.testing || task.involves.propertyTests) return 'testing-specialist';
-  if (task.involves.performance || task.involves.bundleSize) return 'performance-analyst';
-  if (task.involves.refactoring || task.involves.pipelines) return 'refactoring-architect';
+  task.involves.testing || task.involves.propertyTests ? 'testing-specialist' :
+  task.involves.performance || task.involves.bundleSize ? 'performance-analyst' :
+  task.involves.refactoring || task.involves.pipelines ? 'refactoring-architect' :
   
   // 3. Infrastructure & consistency
-  if (task.involves.integration || task.involves.catalog) return 'integration-specialist';
-  if (task.involves.documentation || task.involves.comments) return 'documentation-specialist';
-  if (task.involves.cleanup || task.involves.density) return 'cleanup-specialist';
+  task.involves.integration || task.involves.catalog ? 'integration-specialist' :
+  task.involves.documentation || task.involves.comments ? 'documentation-specialist' :
+  task.involves.cleanup || task.involves.density ? 'cleanup-specialist' :
   
   // 4. Core TypeScript patterns
-  if (task.involves.complexTypes || task.involves.effectPipelines) return 'typescript-advanced';
+  task.involves.complexTypes || task.involves.effectPipelines ? 'typescript-advanced' :
   
   // 5. Fallback to self (use patterns below)
-  return 'self';
+  'self';
 };
 ```
 
@@ -182,11 +187,11 @@ const selectAgent = (task: Task): Agent | 'self' => {
 Delegate to library-planner with:
 - Package name and purpose
 - Dependencies needed
-- Reference to exemplar (packages/theme)
+- Reference to exemplar (vite.config.ts, packages/components)
 ```
 
 **Option 2: Manual creation**:
-1. **Study exemplar**: `cat packages/theme/vite.config.ts packages/theme/package.json packages/theme/tsconfig.json`
+1. **Study exemplar**: `cat packages/components/src/*.ts` (B constant + factory pattern)
 2. **Create structure**: `mkdir -p packages/my-package/src`
 3. **Create `package.json`**:
 ```json
@@ -213,15 +218,16 @@ Delegate to library-planner with:
 ```typescript
 import { Effect } from 'effect';
 import { defineConfig } from 'vite';
-import { createLibraryConfig } from '../../vite.config.ts';
+import { createConfig } from '../../vite.config.ts';
 
-export default defineConfig(Effect.runSync(createLibraryConfig({
+export default defineConfig(Effect.runSync(createConfig({
+  mode: 'library',
   entry: { index: './src/index.ts' },
   external: ['effect', '@effect/schema'],
   name: 'MyPackage'
 })));
 ```
-6. **Write code** (follow file organization standard) - **Consider delegating to typescript-advanced**
+6. **Write code** (follow B constant + factory pattern) - **Consider delegating to typescript-advanced**
 7. **Add to root `tsconfig.json`**: `"references": [{"path": "./packages/my-package"}]`
 8. **Install**: `pnpm install` (root only)
 9. **Validate**: `pnpm typecheck && pnpm check && nx build my-package`
@@ -324,14 +330,17 @@ nx build <project>
 
 ## Root Configs (Reuse Only, Never Modify)
 
-### vite.config.ts (460 lines, master)
-**Exports**:
-- `BROWSER_TARGETS`, `CHUNK_PATTERNS`, `ASSET_PATTERNS`, `PORT_DEFAULT`, `PLUGIN_CONFIGS`, `PWA_MANIFEST`, `PWA_WORKBOX_CONFIG`, `SVGR_OPTIONS`, `SSR_CONFIG`
-- `createAppConfig()`, `createLibraryConfig()`
+### vite.config.ts (392 lines, master pattern)
+**Architecture** (5 Pillars):
+1. **Single B Constant**: `B = Object.freeze({ assets, browsers, cache, chunks, ... } as const)`
+2. **Discriminated Union Schema**: `CfgSchema` with `mode: 'app' | 'library'`
+3. **Dispatch Tables**: `plugins[mode]()`, `config[mode]()`
+4. **Pure Utility Functions**: 14 single-expression helpers
+5. **Single Polymorphic Entry Point**: `createConfig(input)`
 
-**Usage**: Always extend factories, never inline configs
+**Usage**: `defineConfig(Effect.runSync(createConfig({ mode: 'library', entry, name })))`
 
-### vitest.config.ts (121 lines)
+### vitest.config.ts (103 lines)
 **Merges vite**, adds:
 - `COVERAGE_THRESHOLDS` (80%), `COVERAGE_REPORTERS`, `TEST_REPORTERS`
 - Happy-DOM, Vitest UI enabled
@@ -355,14 +364,51 @@ nx build <project>
 
 ## Canonical Patterns
 
-**Unified Factory**:
+**Single B Constant** (replace scattered constants):
 ```typescript
-const { a, b } = Effect.runSync(Effect.all({
-  a: Effect.succeed({...} as const),
-  b: Effect.succeed({...} as const),
-}));
-const A = Object.freeze(a);
-const B = Object.freeze(b);
+// ❌ OLD
+const SIZES = Object.freeze({...});
+const VARIANTS = Object.freeze({...});
+const DEFAULTS = Object.freeze({...});
+
+// ✅ NEW
+const B = Object.freeze({
+    defaults: { size: 'md', variant: 'primary' },
+    sizes: { sm: 8, md: 12, lg: 16 },
+    variants: { primary: 'bg-blue', secondary: 'bg-gray' },
+} as const);
+// Access: B.defaults.size, B.sizes.md, B.variants.primary
+```
+
+**Dispatch Tables** (replace if/else):
+```typescript
+// ❌ OLD
+if (mode === 'app') return appConfig();
+else if (mode === 'library') return libConfig();
+
+// ✅ NEW
+const handlers = {
+    app: (c) => appConfig(c),
+    library: (c) => libConfig(c),
+} as const;
+return handlers[mode](config);
+```
+
+**Single Polymorphic Entry Point**:
+```typescript
+// ❌ OLD (separate functions)
+export const createAppConfig = () => {...};
+export const createLibraryConfig = () => {...};
+
+// ✅ NEW (polymorphic)
+export const createConfig = (input: unknown) =>
+    pipe(decode, dispatch);
+```
+
+**Factory Export Pattern** (packages/components style):
+```typescript
+export { B as COMPONENT_TUNING, createComponents };
+// Consumers: import { COMPONENT_TUNING, createComponents } from '@/components';
 ```
 
 **Effect Pipeline**:
@@ -502,25 +548,25 @@ catalog:
 "Make the code better"
 
 // ✅ Precise
-"Migrate if/else to Option.match per AGENTS.MD, use branded types via Zod .brand(), 
-follow vite.config.ts unified factory pattern with Effect.runSync(Effect.all({...}))"
+"Consolidate scattered constants into single B constant per vite.config.ts pattern,
+replace if/else with dispatch tables, use @effect/schema for validation"
 ```
 
 ### 2. Context Framing
 ```typescript
 // Always provide
-- File paths: "packages/theme/src/index.ts"
+- File paths: "packages/components/src/controls.ts"
 - Catalog versions: "Effect 3.19.6 per pnpm-workspace.yaml"
-- Exemplars: "Follow packages/theme pattern"
+- Exemplars: "Follow vite.config.ts B constant + dispatch table pattern"
 - Constraints: "Must pass pnpm typecheck + pnpm check"
 ```
 
 ### 3. Stepwise Structure
 ```typescript
 // Request sequential subtasks
-"1. Research latest React 19 canary docs (≤6 months)
- 2. Plan component structure with Server Components
- 3. Implement with React Compiler patterns
+"1. Research latest @effect/schema docs (≤6 months)
+ 2. Plan B constant structure with discriminated union schema
+ 3. Implement with dispatch tables (no if/else)
  4. Write property-based tests with testing-specialist patterns
  5. Validate with pnpm typecheck && pnpm check"
 ```
@@ -528,25 +574,22 @@ follow vite.config.ts unified factory pattern with Effect.runSync(Effect.all({..
 ### 4. Few-Shot Learning
 ```typescript
 // Provide 1-3 examples
-"Convert this imperative code:
-  if (x === null) return default;
-  return transform(x);
+"Convert scattered constants:
+  const SIZES = Object.freeze({...});
+  const VARIANTS = Object.freeze({...});
 
-To Option monad (like packages/theme):
-  pipe(
-    Option.fromNullable(x),
-    Option.match({
-      onNone: () => default,
-      onSome: transform,
-    })
-  )"
+To single B constant (like vite.config.ts):
+  const B = Object.freeze({
+      sizes: {...},
+      variants: {...},
+  } as const);"
 ```
 
 ### 5. Security-First
 ```typescript
 // Emphasize type safety
-"Use branded type for UserId: z.string().uuid().brand('UserId')
- Validate at IO boundary with safeParse before business logic
+"Use branded type for UserId: S.String.pipe(S.brand('UserId'))
+ Validate at IO boundary with S.decodeUnknownSync before business logic
  Return Effect<User, ValidationError> not Promise<User | undefined>"
 ```
 
@@ -561,8 +604,8 @@ To Option monad (like packages/theme):
 ### 7. Agent Delegation
 ```typescript
 // Prefer custom agents
-"Delegate to react-specialist for this React 19 component work"
-"Use vite-nx-specialist to optimize build configuration"
+"Delegate to refactoring-architect for B constant consolidation"
+"Use vite-nx-specialist for dispatch table optimization"
 "Let testing-specialist write property-based tests"
 ```
 
@@ -613,9 +656,10 @@ A: Perceptually uniform, wider gamut, better interpolation (CSS Color 4).
 ## Resources
 
 **Internal**:
-- `REQUIREMENTS.md` - Authoritative spec (385 lines)
-- `AGENTS.MD` - Agent charter (204 lines)
-- `vite.config.ts` - Master config (460 lines)
+- `REQUIREMENTS.md` - Authoritative spec
+- `AGENTS.MD` - Agent charter
+- `vite.config.ts` - Master pattern (392 lines, B constant, dispatch tables)
+- `packages/components/` - Canonical exemplar (B constant + factory API)
 
 **External**:
 - [Nx Docs](https://nx.dev) - Monorepo
@@ -649,12 +693,12 @@ vitest --ui
 
 - **typescript-advanced**: Complex type transformations, branded types, Effect/Option pipelines, generic optimization
 - **react-specialist**: React 19 components, Server Components, use() hook, React Compiler optimization
-- **vite-nx-specialist**: Build config changes, Nx targets, factory patterns, caching strategies
+- **vite-nx-specialist**: Build config changes, Nx targets, dispatch tables, B constant patterns
 - **testing-specialist**: Writing tests, property-based testing, Effect/Option test patterns, coverage optimization
 - **performance-analyst**: Bundle size reduction, tree-shaking analysis, code splitting, lazy loading
-- **refactoring-architect**: Large refactors, pipeline migrations, dispatch table optimization, holistic consistency
+- **refactoring-architect**: Large refactors, pipeline migrations, B constant consolidation, dispatch table conversion
 - **library-planner**: New package creation, dependency research, vite.config setup, tsconfig structure
-- **integration-specialist**: Cross-package consistency, catalog verification, unified factory usage, workspace coherence
+- **integration-specialist**: Cross-package consistency, catalog verification, single B constant usage, workspace coherence
 - **documentation-specialist**: REQUIREMENTS.md updates, code comments (1-line XML), cross-reference validation
 - **cleanup-specialist**: Final density optimization (25-30 LOC/feature), pattern consolidation, algorithmic improvements
 
@@ -662,4 +706,4 @@ vitest --ui
 
 ---
 
-**Remember**: Bleeding-edge monorepo, dogmatic FP/ROP, zero rule suppression. **Delegate to custom agents first** when task matches domain. Study `packages/theme` exemplar, research latest docs (≤6 months), redesign to comply with constraints.
+**Remember**: Bleeding-edge monorepo, dogmatic FP/ROP, zero rule suppression. **Delegate to custom agents first** when task matches domain. Study `vite.config.ts` (master pattern) and `packages/components` (exemplar), research latest docs (≤6 months), redesign to comply with constraints.

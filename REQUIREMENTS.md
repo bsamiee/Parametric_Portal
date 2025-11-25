@@ -63,15 +63,15 @@
 
 5. **DRY (Don't Repeat Yourself)**
    - Single source of truth for all constants
-   - Unified factory patterns (e.g., `Effect.runSync(Effect.all({...}))`)
-   - No scattered `Object.freeze` - consolidate via Effect pipelines
-   - Extract once, freeze individually
+   - **Single B Constant** pattern: `const B = Object.freeze({...} as const)`
+   - **Dispatch tables** replace if/else: `handlers[mode]()`
+   - **Single polymorphic entry point**: `createConfig(input)` handles all modes
 
 6. **Algorithmic & Parameterized**
    - No hard-coded values
    - All constants derived from base values
-   - Parameterized builders (e.g., `createBrowserTargets(baseline)`)
-   - Schema-validated at runtime (`safeParse` fallback)
+   - Parameterized builders with schema validation
+   - Runtime validation via `@effect/schema`
 
 7. **Polymorphic & Type-Safe**
    - Generic type parameters for reusable logic
@@ -83,50 +83,73 @@
 
 ### Configuration Files
 
-#### `vite.config.ts` (530+ lines)
+#### `vite.config.ts` (392 lines)
 
-**Unified Constant Factory** (lines 46-246):
+**Architecture** (5 Pillars):
+1. **Single B Constant**: All 18 configuration properties in one frozen object
+2. **Discriminated Union Schema**: `CfgSchema` with `mode: 'app' | 'library'` polymorphism
+3. **Dispatch Tables**: `plugins[mode]()`, `config[mode]()` for type-safe lookup
+4. **Pure Utility Functions**: 14 single-expression helpers (browsers, chunk, css, etc.)
+5. **Single Polymorphic Entry Point**: `createConfig(input)` → decode → dispatch → UserConfig
+
+**Single B Constant** (18 properties):
 ```typescript
-Effect.runSync(Effect.all({
-    browsers, chunks, assets, port,
-    pluginConfigs, pwaManifest, pwaWorkbox,
-    svgrOptions, ssrConfig,
-    compressionConfig, visualizerConfig, imageOptimizerConfig,
-    cspConfig, webfontConfig
-}))
+const B = Object.freeze({
+    assets, browsers, cache, chunks, comp, csp, exts, glob, img, port, pwa, ssr, svgr, treeshake, viz
+} as const);
+// Access: B.browsers, B.chunks, B.pwa.manifest, etc.
 ```
 
-**Frozen Constants** (14 total):
-- `BROWSER_TARGETS`: Validated browser versions (Chrome 107, Edge 107, Firefox 104, Safari 16)
-- `CHUNK_PATTERNS`: Priority-based vendor splitting (React p3, Effect p2, node_modules p1)
-- `ASSET_PATTERNS`: 3D models, textures, binaries (`.glb`, `.gltf`, `.hdr`, `.wasm`, etc.)
-- `PORT_DEFAULT`: Dev server port (3000)
-- `PLUGIN_CONFIGS`: React compiler + Inspect configs (dev/prod modes)
-- `PWA_MANIFEST`: App manifest (name, icons, theme)
-- `PWA_WORKBOX_CONFIG`: SW caching strategies (CDN CacheFirst, API NetworkFirst)
-- `SVGR_OPTIONS`: SVG→React conversion (TypeScript, ref, memo, SVGO)
-- `SSR_CONFIG`: SSR configuration (dormant, Node.js target)
-- `COMPRESSION_CONFIG`: Brotli + gzip (10KB threshold, text-only filter, verbose logging)
-- `VISUALIZER_CONFIG`: Treemap analysis (Brotli sizes, sourcemap, CI-friendly)
-- `IMAGE_OPTIMIZER_CONFIG`: AVIF/WebP optimization (quality 70/80, progressive JPEG)
-- `CSP_CONFIG`: Content Security Policy + SRI (SHA-256 hashing, production security)
-- `WEBFONT_CONFIG`: Web font self-hosting (inject as style tags, minified CSS)
+**Discriminated Union Schema**:
+```typescript
+const CfgSchema = S.Union(
+    S.Struct({ mode: S.Literal('app'), port: S.optional(S.Number), ... }),
+    S.Struct({ mode: S.Literal('library'), entry: ..., name: S.String, ... }),
+);
+// One schema validates all modes, TypeScript narrows automatically
+```
 
-**Effect Pipelines** (4 total):
-- `createBuildConstants()`: Injects `APP_VERSION`, `BUILD_MODE`, `BUILD_TIME` with Zod validation
-- `isProductionMode()`: Checks `NODE_ENV === 'production'`
-- `getDropTargets()`: Conditional console/debugger dropping
-- `createCompressionPlugins()`: Production-only dual compression via Effect pipeline
+**Dispatch Tables** (replace if/else):
+```typescript
+const plugins = {
+    app: (c, prod) => [...app-specific plugins...],
+    library: () => [...library-specific plugins...],
+} as const;
 
-**Chunk Strategy** (Monadic):
-- `findMatchingPattern()`: Option-based pattern matching with priority sorting
-- `createChunkStrategy()`: Point-free composition with `Option.getOrUndefined`
+const config = {
+    app: (c, b, env) => UserConfig,
+    library: (c, b) => UserConfig,
+} as const;
+// Usage: config[mode](c, b, env) — type-safe, extensible
+```
 
-**Plugin Factory** (`createAllPlugins`):
-- **Main**: React, Tailwind, PWA, SVGR, ImageOptimizer, Compression, BuildHooks, Inspect, tsconfigPaths (10+ plugins)
-- **Worker**: React, Tailwind, tsconfigPaths (structural sharing via `PLUGIN_CONFIGS`)
+**Single Polymorphic Entry Point**:
+```typescript
+const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =>
+    pipe(
+        Effect.try(() => S.decodeUnknownSync(CfgSchema)(input)),
+        Effect.orDie,
+        Effect.flatMap((c) => pipe(
+            Effect.all({ b, p, t, v }),
+            Effect.map(({ b, p, t, v }) => config[c.mode](c as never, b, { prod: p, time: t, ver: v })),
+        )),
+    );
+// Usage: defineConfig(Effect.runSync(createConfig({ mode: 'library', entry, name })))
+```
 
-**Vite Configuration**:
+**Pure Utility Functions** (14 total):
+- `browsers()`: Parse browserslist to esbuild targets
+- `chunk(id)`: Chunk strategy with Option pattern matching
+- `css(b, dev)`: LightningCSS config with custom media drafts
+- `esbuild(app, prod)`: esbuild purity + minification
+- `compress(alg, ext, t)`: Compression plugin factory
+- `cache(h, n, s, u)`: Runtime caching strategy
+- `output(p)`: Output path configuration
+- `icons()`: PWA icon generation
+- `imgOpt(q)`: Image optimizer config
+- `resolve(browser)`: Resolution config
+
+**Vite Configuration Features**:
 - Manifest generation: `manifest: true`, `ssrManifest: true`
 - CSS: Lightning CSS transformer, custom media drafts
 - esbuild: ESNext target, pure annotations, tree-shaking
@@ -275,17 +298,49 @@ Effect.runSync(Effect.all({
 3. Relative imports
 4. Type imports (separate)
 
-**Constant Pattern**:
+**Constant Pattern** (Single B Constant):
 ```typescript
-const { a, b, c } = Effect.runSync(Effect.all({
-    a: Effect.succeed(...),
-    b: Effect.succeed(...),
-    c: Effect.succeed(...),
-}));
+// ❌ OLD: Scattered constants
+const SIZES = Object.freeze({...});
+const VARIANTS = Object.freeze({...});
+const DEFAULTS = Object.freeze({...});
 
-const A = Object.freeze(a);
-const B = Object.freeze(b);
-const C = Object.freeze(c);
+// ✅ NEW: Single B constant
+const B = Object.freeze({
+    defaults: { size: 'md', variant: 'primary' },
+    sizes: { sm: 8, md: 12, lg: 16 },
+    variants: { primary: 'bg-blue', secondary: 'bg-gray' },
+} as const);
+// Access: B.defaults.size, B.sizes.md, B.variants.primary
+```
+
+**Dispatch Table Pattern** (replace if/else):
+```typescript
+// ❌ OLD: if/else chains
+if (mode === 'app') return appConfig();
+else if (mode === 'library') return libConfig();
+
+// ✅ NEW: Dispatch table
+const handlers = {
+    app: (c) => appConfig(c),
+    library: (c) => libConfig(c),
+} as const;
+return handlers[mode](config); // Type-safe lookup
+```
+
+**Polymorphic Entry Point Pattern**:
+```typescript
+// ❌ OLD: Separate factory functions
+export const createAppConfig = () => {...};
+export const createLibraryConfig = () => {...};
+
+// ✅ NEW: Single polymorphic entry
+export const createConfig = (input: unknown) =>
+    pipe(
+        Effect.try(() => S.decodeUnknownSync(CfgSchema)(input)),
+        Effect.orDie,
+        Effect.map((c) => handlers[c.mode](c)),
+    );
 ```
 
 **Effect Pipeline Pattern**:
@@ -307,6 +362,12 @@ const result = pipe(
         onSome: (v) => transform(v),
     })
 );
+```
+
+**Factory Export Pattern** (packages/components style):
+```typescript
+export { B as COMPONENT_TUNING, createComponents };
+// Consumers: import { COMPONENT_TUNING, createComponents } from '@/components';
 ```
 
 **Tool Integration Patterns**:
@@ -342,7 +403,7 @@ nx validate:compression         # Checks for .br and .gz files
 **File Organization Standard** (mandatory for all `.ts` files >50 LOC):
 ```typescript
 // Imports (external → @/ → relative → type-only)
-import react from '@vitejs/plugin-react';
+import * as S from '@effect/schema/Schema';
 import { Effect, pipe } from 'effect';
 import type { UserConfig } from 'vite';
 
@@ -350,27 +411,43 @@ import type { UserConfig } from 'vite';
 type MyType = { readonly field: string };
 
 // --- Schema Definitions -----------------------------------------------------
-const createSchemas = () => ({ my: z.object({...}) });
+const ConfigSchema = S.Union(
+    S.Struct({ mode: S.Literal('app'), ... }),
+    S.Struct({ mode: S.Literal('library'), ... }),
+);
 
-// --- Constants (Unified Factory → Frozen) -----------------------------------
-const { value } = Effect.runSync(Effect.all({ value: Effect.succeed(...) }));
-const VALUE = Object.freeze(value);
+// --- Constants --------------------------------------------------------------
+const B = Object.freeze({
+    defaults: { ... },
+    settings: { ... },
+} as const);
 
 // --- Pure Utility Functions -------------------------------------------------
 const helper = (x: string): boolean => x.includes('test');
 
-// --- Effect Pipelines & Builders --------------------------------------------
-const createConfig = (): Effect.Effect<Config, never, never> => pipe(...);
+// --- Dispatch Tables --------------------------------------------------------
+const handlers = {
+    app: (c) => appConfig(c),
+    library: (c) => libConfig(c),
+} as const;
+
+// --- Effect Pipeline --------------------------------------------------------
+const createConfig = (input: unknown) =>
+    pipe(
+        Effect.try(() => S.decodeUnknownSync(ConfigSchema)(input)),
+        Effect.orDie,
+        Effect.map((c) => handlers[c.mode](c)),
+    );
 
 // --- Export -----------------------------------------------------------------
-export default createConfig();
+export { B as CONFIG_TUNING, createConfig };
 ```
 
 **Separator Format**:
 - `// --- Section Name -------------------------------------------------------`
-- Triple-dash, space, title (PascalCase words), space, dashes to 80 chars total
-- Required sections: Type Definitions, Schema Definitions, Constants, Pure Utility Functions, Effect Pipelines & Builders, Export
-- **Rationale**: Top-down dependency flow (types depend on nothing → schemas depend on types → constants depend on schemas → functions depend on constants → export depends on everything). Cognitive load reduction: abstract/small at top, concrete/large at bottom. Scanability: reference material immediately visible.
+- Triple-dash, space, title (PascalCase words), space, dashes to 77 chars total
+- Required sections: Type Definitions, Schema Definitions, Constants, Pure Utility Functions, Dispatch Tables, Effect Pipeline, Export
+- **Rationale**: Top-down dependency flow (types → schemas → constants → utils → dispatch → pipeline → export). Cognitive load reduction: abstract/small at top, concrete/large at bottom. Scanability: reference material immediately visible.
 
 ## Custom Agent Profiles
 
@@ -403,8 +480,8 @@ export default createConfig();
 
 **Implementation**:
 - All agent profiles use stepwise protocols (Research → Plan → Implement → Validate)
-- Exemplar references (packages/theme) provide few-shot learning foundation
-- Security gates enforce Zod validation, branded types, Effect error handling
+- Exemplar references (vite.config.ts, packages/components) provide few-shot learning foundation
+- Security gates enforce schema validation, branded types, Effect error handling
 - Iterative loops via quality checklists and validation steps
 
 ## Working with Custom Agents
@@ -437,7 +514,7 @@ const agentForTask = (task: Task): AgentName =>
 **Providing Context** (required for effective delegation):
 - Pass relevant file paths (absolute from repo root)
 - Reference catalog versions from `pnpm-workspace.yaml`
-- Cite exemplar patterns (packages/theme, vite.config.ts)
+- Cite exemplar patterns (vite.config.ts, packages/components)
 - Specify exact success criteria and constraints
 
 ## Integration Requirements
@@ -445,28 +522,29 @@ const agentForTask = (task: Task): AgentName =>
 ### For New Code
 
 **MUST**:
-1. Use existing frozen constants (never recreate)
-2. Follow Effect pipeline pattern for async operations
-3. Use Option monads for nullable values
-4. Add to unified constant factory if creating new constants
-5. Freeze all data structures with `Object.freeze`
-6. Use `as const` for all object literals
-7. Type all functions with Effect/Option return types
-8. Follow expression-based style (no if/else)
-9. Validate with Zod schemas (runtime safety)
-10. Run Biome check before committing
-11. **Delegate to custom agents** when task matches their expertise
+1. Use single `B` constant pattern (never scatter multiple frozen constants)
+2. Use dispatch tables (replace if/else with `handlers[mode]()`)
+3. Use discriminated union schemas for polymorphic validation
+4. Follow Effect pipeline pattern for async operations
+5. Use Option monads for nullable values
+6. Single `Object.freeze` for B constant
+7. Use `as const` for all object literals
+8. Type all functions with Effect/Option return types
+9. Follow expression-based style (no if/else)
+10. Validate with @effect/schema (runtime safety)
+11. Run Biome check before committing
+12. **Delegate to custom agents** when task matches their expertise
 
 **MUST NOT**:
-1. Use `any` type (except experimental APIs)
-2. Use `let` or mutations
-3. Use imperative loops
-4. Create scattered `Object.freeze` calls
-5. Use try/catch (use Effect error channel)
-6. Use if/else statements
-7. Create default exports (except config files)
-8. Omit type annotations
-9. Handroll lower-quality implementations
+1. Scatter multiple frozen constants (use single B)
+2. Use if/else (use dispatch tables)
+3. Use `any` type (except experimental APIs)
+4. Use `let` or mutations
+5. Use imperative loops
+6. Use try/catch (use Effect error channel)
+7. Create separate builder functions (use polymorphic entry point)
+8. Create default exports (except config files)
+9. Omit type annotations
 10. Skip schema validation
 11. **Bypass custom agents** for their specialized domains
 
@@ -501,10 +579,11 @@ const agentForTask = (task: Task): AgentName =>
 
 ---
 
-**Last Updated**: 2025-11-24
+**Last Updated**: 2025-01-XX
 **Agent Profiles**: 10 specialized agents (+5,056 lines comprehensive guidance)
 **Modern Prompt Engineering**: 2024-2025 best practices (precision, context, stepwise, few-shot, security-first)
-**Vite Config**: 530+ lines, 14 frozen constants, 12 plugins (Phase 2A complete)
+**Vite Config**: 392 lines, single B constant (18 props), dispatch tables, polymorphic createConfig
+**Exemplars**: vite.config.ts (master pattern), packages/components (B constant + factory API)
 **Security & Performance**: CSP + SRI, web font self-hosting, comprehensive optimization
 **Vitest Config**: 103 lines, 7+ features
 **Nx Targets**: 10+ custom targets (analyze, inspect, validate, pwa:icons)
