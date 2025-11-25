@@ -22,8 +22,8 @@ catalogs:
       specifier: 0.75.5
       version: 0.75.5
     '@effect/vitest':
-      specifier: 0.25.1
-      version: 0.25.1
+      specifier: 0.27.0
+      version: 0.27.0
     '@fast-check/vitest':
       specifier: 0.2.3
       version: 0.2.3
@@ -235,7 +235,7 @@ importers:
         version: 0.75.5(effect@3.19.6)
       '@effect/vitest':
         specifier: 'catalog:'
-        version: 0.25.1(effect@3.19.6)(vitest@4.0.13)
+        version: 0.27.0(effect@3.19.6)(vitest@4.0.13)
       '@fast-check/vitest':
         specifier: 'catalog:'
         version: 0.2.3(vitest@4.0.13)
@@ -1238,10 +1238,10 @@ packages:
     peerDependencies:
       effect: ^3.9.2
 
-  '@effect/vitest@0.25.1':
-    resolution: {integrity: sha512-OMYvOU8iGed8GZXxgVBXlYtjG+jwWj5cJxFk0hOHOfTbCHXtdCMEWlXNba5zxbE7dBnW4srbnSYrP/NGGTC3qQ==}
+  '@effect/vitest@0.27.0':
+    resolution: {integrity: sha512-8bM7n9xlMUYw9GqPIVgXFwFm2jf27m/R7psI64PGpwU5+26iwyxp9eAXEsfT5S6lqztYfpQQ1Ubp5o6HfNYzJQ==}
     peerDependencies:
-      effect: ^3.17.7
+      effect: ^3.19.0
       vitest: ^3.2.0
 
   '@emnapi/core@1.7.1':
@@ -8328,7 +8328,7 @@ snapshots:
       effect: 3.19.6
       fast-check: 3.23.2
 
-  '@effect/vitest@0.25.1(effect@3.19.6)(vitest@4.0.13)':
+  '@effect/vitest@0.27.0(effect@3.19.6)(vitest@4.0.13)':
     dependencies:
       effect: 3.19.6
       vitest: 4.0.13(@types/node@24.10.1)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)

@@ -28,7 +28,7 @@ catalog:
   '@vitejs/plugin-react': 5.1.1
   '@vitest/coverage-v8': 4.0.13
   '@vitest/ui': 4.0.13
-  '@effect/vitest': 0.25.1
+  '@effect/vitest': 0.27.0
   '@fast-check/vitest': 0.2.3
   '@stryker-mutator/core': 9.1.0
   '@stryker-mutator/vitest-runner': 9.1.0
