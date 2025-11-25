@@ -76,10 +76,10 @@ const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Behavior, a: 
         const activeKey = selectedKey ?? internalKey;
 
         const handleSelect = (key: Key) => {
-            if (selectedKey === undefined) {
-                setInternalKey(key);
+            if (key !== activeKey) {
+                selectedKey === undefined ? setInternalKey(key) : void 0;
+                onSelectionChange?.(key);
             }
-            onSelectionChange?.(key);
         };
 
         const selectedItem = items.find((item) => item.key === activeKey);
