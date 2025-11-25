@@ -66,7 +66,7 @@ const createRegistry = (): BrandRegistry => {
             brands: B.registry.initial,
             clear: () =>
                 set((draft) => {
-                    draft.brands = castDraft(new Map<string, BrandMetadata>());
+                    draft.brands = new Map<string, BrandMetadata>();
                 }),
             getBrandNames: () => [...get().brands.keys()],
             hasBrand: (name) => get().brands.has(name),
