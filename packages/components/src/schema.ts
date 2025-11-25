@@ -166,12 +166,17 @@ const resolve =
         );
 
 // --- Typed Resolvers (generated from generic) -------------------------------
+// Note: We let TypeScript infer types from schemas to work with exactOptionalPropertyTypes
 
-const resolveScale = resolve<Scale, ScaleInput>(ScaleSchema);
-const resolveBehavior = resolve<Behavior, BehaviorInput>(BehaviorSchema);
-const resolveOverlay = resolve<Overlay, OverlayInput>(OverlaySchema);
-const resolveFeedback = resolve<Feedback, FeedbackInput>(FeedbackSchema);
-const resolveAnimation = resolve<Animation, AnimationInput>(AnimationSchema);
+const resolveScale = (input?: ScaleInput) => resolve(ScaleSchema)(input as S.Schema.Encoded<typeof ScaleSchema>);
+const resolveBehavior = (input?: BehaviorInput) =>
+    resolve(BehaviorSchema)(input as S.Schema.Encoded<typeof BehaviorSchema>);
+const resolveOverlay = (input?: OverlayInput) =>
+    resolve(OverlaySchema)(input as S.Schema.Encoded<typeof OverlaySchema>);
+const resolveFeedback = (input?: FeedbackInput) =>
+    resolve(FeedbackSchema)(input as S.Schema.Encoded<typeof FeedbackSchema>);
+const resolveAnimation = (input?: AnimationInput) =>
+    resolve(AnimationSchema)(input as S.Schema.Encoded<typeof AnimationSchema>);
 
 // --- Generic Utilities ------------------------------------------------------
 
