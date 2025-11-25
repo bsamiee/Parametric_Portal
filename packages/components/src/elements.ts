@@ -1,19 +1,17 @@
 import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
-import { clsx } from 'clsx';
-import { Effect, pipe } from 'effect';
+import { Effect } from 'effect';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
-import { twMerge } from 'tailwind-merge';
-import type { BehaviorConfig, ComputedDimensions, DimensionConfig } from './schema.ts';
+import type { BehaviorConfig, DimensionConfig } from './schema.ts';
 import {
+    cls,
     computeDimensions,
     createBehaviorDefaults,
     createDimensionDefaults,
-    decodeBehavior,
-    decodeDimensions,
-    B as SB,
-    styleVars,
+    createVars,
+    resolve,
+    SCHEMA_TUNING as SB,
 } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
@@ -68,9 +66,7 @@ const B = Object.freeze({
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const cls = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
-
-const vars = (d: ComputedDimensions): Record<string, string> => styleVars(d, 'element');
+const vars = createVars('element');
 
 const baseVariants = cva('', {
     defaultVariants: { gap: false, padding: false, radius: false },
@@ -86,29 +82,10 @@ const flexVariants = cva('flex', {
     variants: { align: B.align, direction: B.direction, justify: B.justify, wrap: B.wrap },
 });
 
-// --- Effect Pipelines -------------------------------------------------------
-
-const resolve = (
-    dim?: Partial<DimensionConfig>,
-    beh?: Partial<BehaviorConfig>,
-): Effect.Effect<{ behavior: BehaviorConfig; dimensions: DimensionConfig }, never, never> =>
-    pipe(
-        Effect.all({
-            behavior: pipe(
-                decodeBehavior({ ...B.defaults.behavior, ...beh }),
-                Effect.catchAll(() => Effect.succeed(B.defaults.behavior)),
-            ),
-            dimensions: pipe(
-                decodeDimensions({ ...B.defaults.dimensions, ...dim }),
-                Effect.catchAll(() => Effect.succeed(B.defaults.dimensions)),
-            ),
-        }),
-    );
-
 // --- Component Factory ------------------------------------------------------
 
 const createElementComponent = <T extends ElementTag>(i: ElementInput<T>) => {
-    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior));
+    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior, B.defaults));
     const cssVars = vars(Effect.runSync(computeDimensions(dims)));
     const baseCls = baseVariants({ gap: i.gap ?? false, padding: i.padding ?? false, radius: i.radius ?? false });
     const flexCls =

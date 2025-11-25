@@ -1,6 +1,6 @@
 # @parametric-portal/types
 
-Type-safe branded primitives, exhaustive pattern matching, UUID v7 generation, and dense utility factories.
+Ultra-strong type primitives with Effect pipelines: branded types via @effect/schema, ts-pattern matching, Option monads, immer immutability, UUID v7.
 
 ## Installation
 
@@ -8,82 +8,107 @@ Type-safe branded primitives, exhaustive pattern matching, UUID v7 generation, a
 pnpm add @parametric-portal/types
 ```
 
-## Quick Start
-
-```typescript
-import { brand, SCHEMAS } from '@parametric-portal/types/branded';
-import { DateUtils } from '@parametric-portal/types/dates';
-import { useBrandRegistry } from '@parametric-portal/types/registry';
-
-const UserId = brand(SCHEMAS.uuid, 'UserId');
-const tomorrow = Effect.runSync(DateUtils.addDays(1)(new Date()));
-useBrandRegistry.getState().register('MyBrand');
-```
-
----
-
 ## Modules
 
-### Branded Types (`branded`)
+### Types (`types`)
 
-Compose type-safe branded primitives via `@effect/schema`.
-
-```typescript
-import { brand, SCHEMAS, COMMON_BRANDS } from '@parametric-portal/types/branded';
-
-// Custom brand
-const UserId = brand(SCHEMAS.uuid, 'UserId');
-type UserId = S.Schema.Type<typeof UserId>;
-
-// Built-in brands: email, hexColor, slug, positiveInt, nonNegativeInt
-```
-
-### Date Utilities (`dates`)
-
-Curried, Effect-based date manipulation.
+Branded schemas, UUID v7, ts-pattern matching, and Option monads.
 
 ```typescript
-import { DateUtils } from '@parametric-portal/types/dates';
+import { createTypes, TYPES_TUNING } from '@parametric-portal/types/types';
+import type { Email, Percentage, Url } from '@parametric-portal/types/types';
+import { Effect } from 'effect';
 
-DateUtils.addDays(days: number)(date: Date)      // Effect<Date>
-DateUtils.daysBetween(start, end)                // Effect<number>
-DateUtils.format(pattern?)(date)                 // Effect<string, ParseError>
-DateUtils.parse(isoString)                       // Effect<Date, ParseError>
+// Initialize with optional config
+const types = Effect.runSync(createTypes({ cacheCapacity: 500 }));
+
+// Generate UUIDv7
+const id = Effect.runSync(types.generateUuidv7);
+
+// Branded schemas (11 types via @effect/schema)
+types.brands.email         // Email
+types.brands.hexColor      // HexColor  
+types.brands.isoDate       // IsoDate
+types.brands.nonEmptyString // NonEmptyString
+types.brands.percentage    // Percentage (0-100)
+types.brands.positiveInt   // PositiveInt
+types.brands.safeInteger   // SafeInteger
+types.brands.slug          // Slug
+types.brands.url           // Url
+types.brands.uuidv7        // Uuidv7
+
+// ts-pattern exhaustive matching
+const result = types.match(value)
+  .with({ _tag: 'loading' }, () => 'Loading...')
+  .with({ _tag: 'success' }, (v) => v.data)
+  .exhaustive();
+
+// Option monad helpers
+const maybeValue = types.Option.fromNullable(input);
+types.Option.match(maybeValue, {
+  onNone: () => 'fallback',
+  onSome: (v) => v.toString(),
+});
+
+// Pattern matching utilities
+types.P.string  // String pattern
+types.P.number  // Number pattern
 ```
 
-### Brand Registry (`registry`)
+**API**:
+- `createTypes(config?) => Effect<TypesApi>`
+- `TypesApi.generateUuidv7` - Generate UUID v7
+- `TypesApi.brands` - 11 pre-built branded schemas (@effect/schema)
+- `TypesApi.schemas` - Validation schemas (non-branded)
+- `TypesApi.patterns` - Regex patterns
+- `TypesApi.match` - ts-pattern match function (exhaustive)
+- `TypesApi.P` - ts-pattern predicates
+- `TypesApi.Option` - Effect Option monad
 
-Zustand store for runtime brand metadata.
+### Utils (`utils`)
+
+Effect-based date utilities, immer-powered state, and Zustand registry.
 
 ```typescript
-import { useBrandRegistry } from '@parametric-portal/types/registry';
+import { createUtils, UTILS_TUNING } from '@parametric-portal/types/utils';
 
-const { register, unregister, hasBrand, getBrandNames } = useBrandRegistry.getState();
+const utils = createUtils({ defaultDateFormat: 'yyyy-MM-dd' });
+
+// Date operations (Effect-based)
+const tomorrow = Effect.runSync(utils.addDays(1)(new Date()));
+const days = Effect.runSync(utils.daysBetween(start, end));
+const formatted = Effect.runSync(utils.formatDate()(new Date()));
+const parsed = Effect.runSync(utils.parse('2024-01-01'));
+
+// Immer produce for immutable updates
+const nextState = utils.produce(state, (draft) => {
+  draft.items.push({ id: 1, name: 'New' });
+});
+
+// Brand registry (Zustand + Immer)
+const registry = utils.createRegistry();
+registry.register('MyBrand');
+registry.hasBrand('MyBrand'); // true
+registry.getBrandNames(); // ['MyBrand']
+registry.clear(); // Clear all
 ```
 
-### Identifiers (`identifiers`)
+**API**:
+- `createUtils(config?) => UtilsApi`
+- `UtilsApi.addDays(n)(date)` - Add days
+- `UtilsApi.daysBetween(start, end)` - Days difference
+- `UtilsApi.formatDate(fmt?)(date)` - Format date
+- `UtilsApi.parse(str)` - Parse ISO date
+- `UtilsApi.produce` - Immer produce function
+- `UtilsApi.createRegistry()` - Zustand + Immer brand store
 
-UUID v7 generation with Effect.
+## Requirements
 
-```typescript
-import { generateUuidv7 } from '@parametric-portal/types/identifiers';
+- **effect** 3.19+
+- **@effect/schema** 0.75+
+- **ts-pattern** 5.9+
+- **immer** 11.0+
+- **date-fns** 4.1+
+- **zustand** 5.0+
 
-const id = await Effect.runPromise(generateUuidv7);
-```
-
-### Pattern Matching (`matchers`)
-
-Exhaustive matching for discriminated unions.
-
-```typescript
-import { createTagMatcher } from '@parametric-portal/types/matchers';
-
-const match = createTagMatcher<State>();
-match({ loading: () => 'Loading...', success: ({ data }) => data });
-```
-
----
-
-## License
-
-MIT
+**License**: MIT

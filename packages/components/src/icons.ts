@@ -1,17 +1,16 @@
 import { cva } from 'class-variance-authority';
-import { clsx } from 'clsx';
 import { Effect, pipe } from 'effect';
 import type { LucideIcon, LucideProps } from 'lucide-react';
 import { icons } from 'lucide-react';
 import type { CSSProperties, ForwardedRef, SVGAttributes } from 'react';
 import { createElement, forwardRef, memo, useMemo } from 'react';
-import { twMerge } from 'tailwind-merge';
 import type { ComputedDimensions, DimensionConfig } from './schema.ts';
 import {
+    cls,
     computeDimensions,
     createDimensionDefaults,
     decodeDimensions,
-    B as SB,
+    SCHEMA_TUNING as SB,
     strokeWidth,
     styleVars,
 } from './schema.ts';
@@ -41,8 +40,6 @@ const B = Object.freeze({
 } as const);
 
 // --- Pure Utility Functions -------------------------------------------------
-
-const cls = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
 
 const vars = (d: ComputedDimensions): Record<string, string> => ({
     '--icon-size': styleVars(d, 'icon')['--icon-icon-size'] ?? d.iconSize,

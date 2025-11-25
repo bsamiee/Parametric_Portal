@@ -1,6 +1,8 @@
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
+import { clsx } from 'clsx';
 import { Effect, pipe } from 'effect';
+import { twMerge } from 'tailwind-merge';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -48,9 +50,22 @@ const B = Object.freeze({
     stroke: { base: 2.5, factor: 0.15, max: 3, min: 1 },
 } as const);
 
-// --- Compute Dispatch Table -------------------------------------------------
+// --- Pure Utility Functions -------------------------------------------------
 
 const rem = (v: number, u: number): string => `${(v * u).toFixed(3)}rem`;
+const cls = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
+const strokeWidth = (scale: number): number =>
+    Math.max(B.stroke.min, Math.min(B.stroke.max, B.stroke.base - scale * B.stroke.factor));
+const styleVars = (d: ComputedDimensions, prefix: string): Record<string, string> =>
+    Object.fromEntries(
+        Object.entries(d).map(([k, v]) => [`--${prefix}-${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, v]),
+    );
+const createVars =
+    (prefix: string) =>
+    (d: ComputedDimensions): Record<string, string> =>
+        styleVars(d, prefix);
+
+// --- Compute Dispatch Table -------------------------------------------------
 
 const compute: { readonly [K in ComputeKey]: (c: DimensionConfig) => string } = {
     fontSize: (c) => rem(B.algo.fontBase + c.scale * B.algo.fontStep, 1),
@@ -61,16 +76,6 @@ const compute: { readonly [K in ComputeKey]: (c: DimensionConfig) => string } = 
     paddingY: (c) => rem(c.scale * B.algo.pyMul * c.density, c.baseUnit),
     radius: (c) => (c.radiusMultiplier >= 1 ? `${B.algo.rMax}px` : rem(c.scale * c.radiusMultiplier * 2, c.baseUnit)),
 };
-
-// --- Pure Utility Functions -------------------------------------------------
-
-const strokeWidth = (scale: number): number =>
-    Math.max(B.stroke.min, Math.min(B.stroke.max, B.stroke.base - scale * B.stroke.factor));
-
-const styleVars = (d: ComputedDimensions, prefix: string): Record<string, string> =>
-    Object.fromEntries(
-        Object.entries(d).map(([k, v]) => [`--${prefix}-${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, v]),
-    );
 
 // --- Effect Pipelines -------------------------------------------------------
 
@@ -92,18 +97,41 @@ const decodeBehavior = (
 const createDimensionDefaults = (): DimensionConfig => Effect.runSync(S.decode(DimensionSchema)(B.defaults.dimensions));
 const createBehaviorDefaults = (): BehaviorConfig => Effect.runSync(S.decode(BehaviorSchema)(B.defaults.behavior));
 
+const resolve = (
+    dim?: Partial<DimensionConfig>,
+    beh?: Partial<BehaviorConfig>,
+    defaults?: { behavior: BehaviorConfig; dimensions: DimensionConfig },
+): Effect.Effect<{ behavior: BehaviorConfig; dimensions: DimensionConfig }, never, never> => {
+    const defs = defaults ?? (() => ({ behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() }))();
+    return pipe(
+        Effect.all({
+            behavior: pipe(
+                decodeBehavior({ ...defs.behavior, ...beh }),
+                Effect.catchAll(() => Effect.succeed(defs.behavior)),
+            ),
+            dimensions: pipe(
+                decodeDimensions({ ...defs.dimensions, ...dim }),
+                Effect.catchAll(() => Effect.succeed(defs.dimensions)),
+            ),
+        }),
+    );
+};
+
 // --- Export -----------------------------------------------------------------
 
 export {
-    B,
+    B as SCHEMA_TUNING,
     BehaviorSchema,
+    cls,
     compute,
     computeDimensions,
     createBehaviorDefaults,
     createDimensionDefaults,
+    createVars,
     decodeBehavior,
     decodeDimensions,
     DimensionSchema,
+    resolve,
     strokeWidth,
     styleVars,
 };

@@ -40,6 +40,7 @@
                             { "selector": { "kind": "typeParameter" }, "formats": ["PascalCase"] },
                             {
                                 "selector": { "kind": "typeProperty" },
+                                "match": "(_tag|.*)",
                                 "formats": ["camelCase", "PascalCase"]
                             },
                             {
@@ -144,7 +145,7 @@
             "assist": { "actions": { "source": { "organizeImports": "on" } } }
         },
         {
-            "includes": ["**/matchers.ts"],
+            "includes": ["**/matchers.ts", "**/types/src/types.ts"],
             "linter": {
                 "rules": {
                     "style": {

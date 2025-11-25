@@ -1,21 +1,19 @@
 import { Slot } from '@radix-ui/react-slot';
 import { cva } from 'class-variance-authority';
-import { clsx } from 'clsx';
-import { Effect, pipe } from 'effect';
+import { Effect } from 'effect';
 import type { CSSProperties, ForwardedRef, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useMemo, useRef } from 'react';
 import type { AriaButtonOptions } from 'react-aria';
 import { mergeProps, useButton, useFocusRing, useHover } from 'react-aria';
-import { twMerge } from 'tailwind-merge';
-import type { BehaviorConfig, ComputedDimensions, DimensionConfig } from './schema.ts';
+import type { BehaviorConfig, DimensionConfig } from './schema.ts';
 import {
+    cls,
     computeDimensions,
     createBehaviorDefaults,
     createDimensionDefaults,
-    decodeBehavior,
-    decodeDimensions,
-    B as SB,
-    styleVars,
+    createVars,
+    resolve,
+    SCHEMA_TUNING as SB,
 } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
@@ -63,9 +61,7 @@ const B = Object.freeze({
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const cls = (...inputs: ReadonlyArray<string | undefined>): string => twMerge(clsx(inputs));
-
-const vars = (d: ComputedDimensions): Record<string, string> => styleVars(d, 'control');
+const vars = createVars('control');
 
 const stateClass = (b: BehaviorConfig, h: boolean, p: boolean, f: boolean): string =>
     cls(
@@ -94,31 +90,11 @@ const inputVariants = cva(
     { defaultVariants: { fullWidth: false, inputType: 'text' }, variants: { fullWidth: B.width, inputType: B.input } },
 );
 
-// --- Effect Pipelines -------------------------------------------------------
-
-const resolve = (
-    dim?: Partial<DimensionConfig>,
-    beh?: Partial<BehaviorConfig>,
-): Effect.Effect<{ behavior: BehaviorConfig; dimensions: DimensionConfig }, never, never> =>
-    pipe(
-        Effect.all({
-            behavior: pipe(
-                decodeBehavior({ ...B.defaults.behavior, ...beh }),
-                Effect.catchAll(() => Effect.succeed(B.defaults.behavior)),
-            ),
-            dimensions: pipe(
-                decodeDimensions({ ...B.defaults.dimensions, ...dim }),
-                Effect.catchAll(() => Effect.succeed(B.defaults.dimensions)),
-            ),
-        }),
-    );
-
 // --- Component Factories ----------------------------------------------------
 
 const createButton = (i: ControlInput<'button'>) => {
-    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior));
-    const computed = Effect.runSync(computeDimensions(dims));
-    const cssVars = vars(computed);
+    const { behavior: beh, dimensions: dims } = Effect.runSync(resolve(i.dimensions, i.behavior, B.defaults));
+    const cssVars = vars(Effect.runSync(computeDimensions(dims)));
     const base = baseVariants({ fullWidth: i.fullWidth ?? false });
     const Component = forwardRef((props: ButtonProps, fRef: ForwardedRef<HTMLButtonElement>) => {
         const { asChild, children, className, ...aria } = props;
@@ -148,7 +124,7 @@ const createInput = <T extends ControlType>(i: ControlInput<T>) => {
         const internalRef = useRef<HTMLInputElement>(null);
         const ref = (fRef ?? internalRef) as RefObject<HTMLInputElement>;
         const { behavior: beh, cssVars } = useMemo(() => {
-            const r = Effect.runSync(resolve({ ...i.dimensions, ...pd }, { ...i.behavior, ...pb }));
+            const r = Effect.runSync(resolve({ ...i.dimensions, ...pd }, { ...i.behavior, ...pb }, B.defaults));
             return { behavior: r.behavior, cssVars: vars(Effect.runSync(computeDimensions(r.dimensions))) };
         }, [pd, pb, i.behavior, i.dimensions]);
         const { hoverProps, isHovered } = useHover({ isDisabled: beh.disabled || beh.loading });
