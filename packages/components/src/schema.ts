@@ -41,6 +41,7 @@ const OverlaySchema = S.Struct({
         default: () => 'bottom' as const,
     }),
     trapFocus: S.optionalWith(S.Boolean, { default: () => true }),
+    zIndex: S.optionalWith(pipe(S.Number, S.int(), S.between(0, 9999)), { default: () => 50 as never }),
 });
 
 const FeedbackSchema = S.Struct({
@@ -94,6 +95,7 @@ type OverlayInput = {
     readonly modal?: boolean;
     readonly position?: 'top' | 'bottom' | 'left' | 'right';
     readonly trapFocus?: boolean;
+    readonly zIndex?: number;
 };
 type FeedbackInput = { readonly autoDismiss?: boolean; readonly dismissible?: boolean; readonly duration?: number };
 type AnimationInput = {
@@ -150,52 +152,26 @@ const computeScale = (s: Scale): Computed =>
         (Object.keys(compute) as ReadonlyArray<keyof Computed>).map((k) => [k, compute[k](s)]),
     ) as Computed;
 
-// --- Resolvers (Typed for each schema) --------------------------------------
+// --- Generic Resolver (DRY pattern for all schemas) -------------------------
 
-const resolveScale = (input?: ScaleInput): Scale =>
-    Effect.runSync(
-        pipe(
-            Effect.try(() => S.decodeUnknownSync(ScaleSchema)(input ?? {})),
-            Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(ScaleSchema)({}))),
-            Effect.orDie,
-        ),
-    );
+const resolve =
+    <A, I>(schema: S.Schema<A, I>) =>
+    (input?: I): A =>
+        Effect.runSync(
+            pipe(
+                Effect.try(() => S.decodeUnknownSync(schema)(input ?? {})),
+                Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(schema)({}))),
+                Effect.orDie,
+            ),
+        );
 
-const resolveBehavior = (input?: BehaviorInput): Behavior =>
-    Effect.runSync(
-        pipe(
-            Effect.try(() => S.decodeUnknownSync(BehaviorSchema)(input ?? {})),
-            Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(BehaviorSchema)({}))),
-            Effect.orDie,
-        ),
-    );
+// --- Typed Resolvers (generated from generic) -------------------------------
 
-const resolveOverlay = (input?: OverlayInput): Overlay =>
-    Effect.runSync(
-        pipe(
-            Effect.try(() => S.decodeUnknownSync(OverlaySchema)(input ?? {})),
-            Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(OverlaySchema)({}))),
-            Effect.orDie,
-        ),
-    );
-
-const resolveFeedback = (input?: FeedbackInput): Feedback =>
-    Effect.runSync(
-        pipe(
-            Effect.try(() => S.decodeUnknownSync(FeedbackSchema)(input ?? {})),
-            Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(FeedbackSchema)({}))),
-            Effect.orDie,
-        ),
-    );
-
-const resolveAnimation = (input?: AnimationInput): Animation =>
-    Effect.runSync(
-        pipe(
-            Effect.try(() => S.decodeUnknownSync(AnimationSchema)(input ?? {})),
-            Effect.catchAll(() => Effect.succeed(S.decodeUnknownSync(AnimationSchema)({}))),
-            Effect.orDie,
-        ),
-    );
+const resolveScale = resolve<Scale, ScaleInput>(ScaleSchema);
+const resolveBehavior = resolve<Behavior, BehaviorInput>(BehaviorSchema);
+const resolveOverlay = resolve<Overlay, OverlayInput>(OverlaySchema);
+const resolveFeedback = resolve<Feedback, FeedbackInput>(FeedbackSchema);
+const resolveAnimation = resolve<Animation, AnimationInput>(AnimationSchema);
 
 // --- Generic Utilities ------------------------------------------------------
 

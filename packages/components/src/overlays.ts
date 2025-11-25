@@ -50,6 +50,7 @@ const animStyle = (a: Animation): CSSProperties =>
     a.enabled
         ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
         : {};
+const zStyle = (z: number, isUnderlay = false): CSSProperties => ({ zIndex: isUnderlay ? z - 10 : z });
 
 // --- Component Builders -----------------------------------------------------
 
@@ -93,7 +94,11 @@ const mkModal = (i: OverlayInput<'modal'>, v: Record<string, string>, o: Overlay
         return isOpen
             ? createElement(
                   'div',
-                  { ...underlayProps, className: 'fixed inset-0 bg-black/50 z-40 flex items-center justify-center' },
+                  {
+                      ...underlayProps,
+                      className: 'fixed inset-0 bg-black/50 flex items-center justify-center',
+                      style: zStyle(o.zIndex, true),
+                  },
                   focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
               )
             : null;
@@ -130,14 +135,14 @@ const mkDialog = (i: OverlayInput<'dialog'>, v: Record<string, string>, o: Overl
                 ...modalProps,
                 ...dialogProps,
                 className: cls(
-                    'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 shadow-xl w-full max-w-md overflow-hidden',
+                    'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-xl w-full max-w-md overflow-hidden',
                     B.var.r,
                     i.className,
                     className,
                 ),
                 ref,
                 role: 'alertdialog',
-                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
+                style: { ...v, ...animStyle(a), ...zStyle(o.zIndex), ...style } as CSSProperties,
             },
             title
                 ? createElement(
@@ -167,7 +172,7 @@ const mkDialog = (i: OverlayInput<'dialog'>, v: Record<string, string>, o: Overl
         return isOpen
             ? createElement(
                   'div',
-                  { ...underlayProps, className: 'fixed inset-0 bg-black/50 z-40' },
+                  { ...underlayProps, className: 'fixed inset-0 bg-black/50', style: zStyle(o.zIndex, true) },
                   focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
               )
             : null;
@@ -192,7 +197,7 @@ const mkDrawer = (i: OverlayInput<'drawer'>, v: Record<string, string>, o: Overl
                 ...overlayProps,
                 ...modalProps,
                 className: cls(
-                    'fixed z-50 shadow-xl overflow-hidden',
+                    'fixed shadow-xl overflow-hidden',
                     B.pos[position],
                     isHoriz ? 'h-full' : 'w-full',
                     B.var.r,
@@ -200,14 +205,14 @@ const mkDrawer = (i: OverlayInput<'drawer'>, v: Record<string, string>, o: Overl
                     className,
                 ),
                 ref,
-                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
+                style: { ...v, ...animStyle(a), ...zStyle(o.zIndex), ...style } as CSSProperties,
             },
             createElement('div', { className: cls('h-full overflow-y-auto', B.var.px, B.var.py) }, children),
         );
         return isOpen
             ? createElement(
                   'div',
-                  { ...underlayProps, className: 'fixed inset-0 bg-black/50 z-40' },
+                  { ...underlayProps, className: 'fixed inset-0 bg-black/50', style: zStyle(o.zIndex, true) },
                   focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
               )
             : null;
@@ -230,16 +235,16 @@ const mkPopover = (i: OverlayInput<'popover'>, v: Record<string, string>, o: Ove
                   {
                       ...rest,
                       ...overlayProps,
-                      className: cls('absolute z-50 shadow-lg border overflow-hidden', B.var.r, i.className, className),
+                      className: cls('absolute shadow-lg border overflow-hidden', B.var.r, i.className, className),
                       ref,
-                      style: { ...v, ...pos, ...style } as CSSProperties,
+                      style: { ...v, ...zStyle(o.zIndex), ...pos, ...style } as CSSProperties,
                   },
                   createElement('div', { className: cls(B.var.px, B.var.py) }, children),
               )
             : null;
     });
 
-const mkTooltip = (i: OverlayInput<'tooltip'>) =>
+const mkTooltip = (i: OverlayInput<'tooltip'>, _v: Record<string, string>, o: Overlay) =>
     forwardRef((props: TooltipProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, style, triggerRef, ...rest } = props;
         const intRef = useRef<HTMLDivElement>(null);
@@ -255,13 +260,13 @@ const mkTooltip = (i: OverlayInput<'tooltip'>) =>
                   {
                       ...rest,
                       className: cls(
-                          'absolute z-50 text-xs px-2 py-1 rounded shadow-lg pointer-events-none',
+                          'absolute text-xs px-2 py-1 rounded shadow-lg pointer-events-none',
                           i.className,
                           className,
                       ),
                       ref,
                       role: 'tooltip',
-                      style: { ...pos, ...style } as CSSProperties,
+                      style: { ...zStyle(o.zIndex), ...pos, ...style } as CSSProperties,
                   },
                   children,
               )
