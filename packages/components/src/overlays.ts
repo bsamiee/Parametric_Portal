@@ -291,7 +291,7 @@ const builders = {
 
 const createOV = <T extends OverlayType>(i: OverlayInput<T>) => {
     const s = resolveScale(i.scale);
-    const o = resolveOverlay(i.type === 'sheet' ? { ...i.overlay, position: 'bottom' } : i.overlay);
+    const o = resolveOverlay((i.type ?? 'modal') === 'sheet' ? { ...i.overlay, position: 'bottom' } : i.overlay);
     const a = resolveAnimation(i.animation);
     const c = computeScale(s);
     const v = cssVars(c, 'ov');
