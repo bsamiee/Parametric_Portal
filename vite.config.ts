@@ -353,15 +353,23 @@ const appCfg = (
     },
 });
 
-const createConfig = (input: ConfigInput): Effect.Effect<UserConfig, never, never> =>
+const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =>
     pipe(
-        Effect.all({
-            b: Effect.sync(getBrowsers),
-            p: Effect.sync(() => process.env.NODE_ENV === 'production'),
-            t: Effect.sync(() => new Date().toISOString()),
-            v: Effect.sync(() => process.env.npm_package_version ?? '0.0.0'),
-        }),
-        Effect.map(({ b, p, t, v }) => (input.mode === 'library' ? libCfg(input, b) : appCfg(input, b, p, v, t))),
+        Effect.try(() => S.decodeUnknownSync(ConfigInputSchema)(input)),
+        Effect.orDie,
+        Effect.flatMap((validated) =>
+            pipe(
+                Effect.all({
+                    b: Effect.sync(getBrowsers),
+                    p: Effect.sync(() => process.env.NODE_ENV === 'production'),
+                    t: Effect.sync(() => new Date().toISOString()),
+                    v: Effect.sync(() => process.env.npm_package_version ?? '0.0.0'),
+                }),
+                Effect.map(({ b, p, t, v }) =>
+                    validated.mode === 'library' ? libCfg(validated, b) : appCfg(validated, b, p, v, t),
+                ),
+            ),
+        ),
     );
 
 // --- Export ------------------------------------------------------------------
