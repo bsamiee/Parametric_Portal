@@ -9,8 +9,14 @@ export default defineConfig(
         createConfig({
             entry: {
                 controls: './src/controls.ts',
+                data: './src/data.ts',
                 elements: './src/elements.ts',
+                feedback: './src/feedback.ts',
                 icons: './src/icons.ts',
+                navigation: './src/navigation.ts',
+                overlays: './src/overlays.ts',
+                schema: './src/schema.ts',
+                utility: './src/utility.ts',
             },
             external: [
                 'effect',

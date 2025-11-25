@@ -1,7 +1,16 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, Key, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useId, useRef, useState } from 'react';
 import type { Animation, AnimationInput, Behavior, BehaviorInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveAnimation, resolveBehavior, resolveScale } from './schema.ts';
+import {
+    animStyle,
+    cls,
+    computeScale,
+    cssVars,
+    merge,
+    resolveAnimation,
+    resolveBehavior,
+    resolveScale,
+} from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -53,10 +62,6 @@ const B = Object.freeze({
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const animStyle = (a: Animation): CSSProperties =>
-    a.enabled
-        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
-        : {};
 const stateCls = (b: Behavior): string => cls(b.disabled ? B.state.disabled : undefined);
 
 // --- Component Builders -----------------------------------------------------

@@ -1,6 +1,7 @@
 import { Schema as S } from '@effect/schema';
 import { clsx } from 'clsx';
 import { Effect, pipe } from 'effect';
+import type { CSSProperties } from 'react';
 import { twMerge } from 'tailwind-merge';
 
 // --- Schema Definitions -----------------------------------------------------
@@ -182,11 +183,15 @@ const resolveAnimation = (input?: AnimationInput) =>
 
 const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
     a || b ? ({ ...a, ...b } as T) : undefined;
+const animStyle = (a: Animation): CSSProperties =>
+    a.enabled
+        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
+        : {};
 
 // --- Export -----------------------------------------------------------------
 
 export {
-    merge,
+    animStyle,
     AnimationSchema,
     B as TUNING,
     BehaviorSchema,
@@ -195,6 +200,7 @@ export {
     computeScale,
     cssVars,
     FeedbackSchema,
+    merge,
     OverlaySchema,
     resolveAnimation,
     resolveBehavior,

@@ -2,7 +2,16 @@ import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject 
 import { createElement, forwardRef, useEffect, useRef, useState } from 'react';
 import { FocusScope, useDialog, useModal, useOverlay, usePreventScroll } from 'react-aria';
 import type { Animation, AnimationInput, Overlay, OverlayInput as OvInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveAnimation, resolveOverlay, resolveScale } from './schema.ts';
+import {
+    animStyle,
+    cls,
+    computeScale,
+    cssVars,
+    merge,
+    resolveAnimation,
+    resolveOverlay,
+    resolveScale,
+} from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -46,10 +55,6 @@ const B = Object.freeze({
 
 const focus = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
     createElement(FocusScope, { ...opts, ...({ children: child } as const) });
-const animStyle = (a: Animation): CSSProperties =>
-    a.enabled
-        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
-        : {};
 const zStyle = (z: number, isUnderlay = false): CSSProperties => ({ zIndex: isUnderlay ? z - 10 : z });
 
 // --- Component Builders -----------------------------------------------------

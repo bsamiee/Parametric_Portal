@@ -1,7 +1,16 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
 import type { Animation, AnimationInput, Computed, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveAnimation, resolveFeedback, resolveScale } from './schema.ts';
+import {
+    animStyle,
+    cls,
+    computeScale,
+    cssVars,
+    merge,
+    resolveAnimation,
+    resolveFeedback,
+    resolveScale,
+} from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -37,13 +46,6 @@ const B = Object.freeze({
         r: 'rounded-[var(--fb-radius)]',
     },
 } as const);
-
-// --- Pure Utility Functions -------------------------------------------------
-
-const animStyle = (a: Animation): CSSProperties =>
-    a.enabled
-        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
-        : {};
 
 // --- Component Builders -----------------------------------------------------
 
