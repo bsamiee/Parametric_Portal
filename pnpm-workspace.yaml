@@ -8,9 +8,9 @@ catalog:
   '@effect/platform': 0.93.3
   '@effect/platform-browser': 0.73.0
   '@effect/schema': 0.75.5
-  '@nx/js': 22.2.0-canary.20251121-9a6c7ad
-  '@nx/react': 22.2.0-canary.20251121-9a6c7ad
-  '@nx/vite': 22.2.0-canary.20251121-9a6c7ad
+  '@nx/js': 22.2.0-canary.20251125-7e00ec4
+  '@nx/react': 22.2.0-canary.20251125-7e00ec4
+  '@nx/vite': 22.2.0-canary.20251125-7e00ec4
   '@playwright/test': 1.56.1
   '@radix-ui/react-label': 2.1.8
   '@radix-ui/react-separator': 1.1.8
@@ -47,7 +47,7 @@ catalog:
   lefthook: 2.0.4
   lightningcss: 1.30.2
   lucide-react: 0.554.0
-  nx: 22.2.0-canary.20251121-9a6c7ad
+  nx: 22.2.0-canary.20251125-7e00ec4
   react: 19.3.0-canary-40b4a5bf-20251120
   react-aria: 3.44.0
   react-compiler-runtime: 19.0.0-beta-af1b7da-20250417
