@@ -2,7 +2,7 @@ import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject 
 import { createElement, forwardRef, useEffect, useRef, useState } from 'react';
 import { FocusScope, useDialog, useModal, useOverlay, usePreventScroll } from 'react-aria';
 import type { Animation, AnimationInput, Overlay, OverlayInput as OvInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, resolveAnimation, resolveOverlay, resolveScale } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveAnimation, resolveOverlay, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -296,9 +296,6 @@ const createOV = <T extends OverlayType>(i: OverlayInput<T>) => {
 };
 
 // --- Factory ----------------------------------------------------------------
-
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
 
 const createOverlays = (tuning?: { animation?: AnimationInput; overlay?: OvInput; scale?: ScaleInput }) =>
     Object.freeze({

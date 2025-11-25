@@ -4,7 +4,7 @@ import { createElement, forwardRef, useMemo, useRef } from 'react';
 import type { AriaButtonOptions } from 'react-aria';
 import { mergeProps, useButton, useFocusRing, useHover } from 'react-aria';
 import type { Behavior, BehaviorInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, resolveBehavior, resolveScale } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -114,9 +114,6 @@ const create = <T extends ControlType>(i: ControlInput<T>) =>
     i.type === 'button' ? createBtn(i as ControlInput<'button'>) : createInp(i);
 
 // --- Factory ----------------------------------------------------------------
-
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
 
 const createControls = (tuning?: { scale?: ScaleInput; behavior?: BehaviorInput }) =>
     Object.freeze({

@@ -1,7 +1,7 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ImgHTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
 import type { Computed, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, resolveScale } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -197,9 +197,6 @@ const createData = <T extends DataType>(i: DataInput<T>) => {
 };
 
 // --- Factory ----------------------------------------------------------------
-
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
 
 const createDataComponents = (tuning?: { scale?: ScaleInput }) =>
     Object.freeze({

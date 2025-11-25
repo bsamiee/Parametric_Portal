@@ -189,9 +189,15 @@ const resolveAnimation = (input?: AnimationInput): Animation =>
         ),
     );
 
+// --- Generic Utilities ------------------------------------------------------
+
+const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
+    a || b ? ({ ...a, ...b } as T) : undefined;
+
 // --- Export -----------------------------------------------------------------
 
 export {
+    merge,
     AnimationSchema,
     B as TUNING,
     BehaviorSchema,

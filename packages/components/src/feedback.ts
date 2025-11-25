@@ -1,7 +1,7 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
 import type { Computed, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, resolveFeedback, resolveScale } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveFeedback, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -234,9 +234,6 @@ const createFB = <T extends FeedbackType>(i: FBInput<T>) => {
 };
 
 // --- Factory ----------------------------------------------------------------
-
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
 
 const createFeedback = (tuning?: { scale?: ScaleInput; feedback?: FeedbackInput }) =>
     Object.freeze({

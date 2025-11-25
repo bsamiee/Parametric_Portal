@@ -2,7 +2,7 @@ import { Slot } from '@radix-ui/react-slot';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
 import type { BehaviorInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, resolveBehavior, resolveScale } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -83,9 +83,6 @@ const createEl = <T extends Tag>(i: ElementInput<T>) => {
 };
 
 // --- Factory ----------------------------------------------------------------
-
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
 
 const createElements = (tuning?: { scale?: ScaleInput; behavior?: BehaviorInput }) =>
     Object.freeze({

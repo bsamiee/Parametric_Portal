@@ -3,7 +3,7 @@ import { icons } from 'lucide-react';
 import type { CSSProperties, ForwardedRef, SVGAttributes } from 'react';
 import { createElement, forwardRef, memo, useMemo } from 'react';
 import type { ScaleInput } from './schema.ts';
-import { cls, computeScale, resolveScale, strokeWidth, TUNING } from './schema.ts';
+import { cls, computeScale, merge, resolveScale, strokeWidth, TUNING } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -79,9 +79,6 @@ const DynamicIcon = memo(
 DynamicIcon.displayName = 'DynamicIcon';
 
 // --- Factory ----------------------------------------------------------------
-
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
 
 const createIcons = (tuning?: { scale?: ScaleInput; strokeWidth?: number }) =>
     Object.freeze({
