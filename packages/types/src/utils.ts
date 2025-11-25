@@ -2,13 +2,16 @@ import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
 import { addDays, differenceInDays, format, parseISO } from 'date-fns';
 import { Effect, pipe } from 'effect';
+import { castDraft, enableMapSet, produce } from 'immer';
 import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
 
 // --- Type Definitions --------------------------------------------------------
 
 type BrandMetadata = S.Schema.Type<typeof BrandMetadataSchema>;
 type RegistryState = { readonly brands: ReadonlyMap<string, BrandMetadata> };
 type RegistryActions = {
+    readonly clear: () => void;
     readonly getBrandNames: () => ReadonlyArray<string>;
     readonly hasBrand: (name: string) => boolean;
     readonly register: (name: string) => void;
@@ -26,6 +29,7 @@ type UtilsApi = {
     readonly daysBetween: (start: Date, end: Date) => Effect.Effect<number, never>;
     readonly formatDate: (formatStr?: string) => (date: Date) => Effect.Effect<string, ParseError>;
     readonly parse: (input: string) => Effect.Effect<Date, ParseError>;
+    readonly produce: typeof produce;
 };
 
 // --- Schema Definitions ------------------------------------------------------
@@ -42,6 +46,10 @@ const B = Object.freeze({
     registry: { initial: new Map<string, BrandMetadata>() },
 } as const);
 
+// --- Immer Setup -------------------------------------------------------------
+
+enableMapSet();
+
 // --- Pure Utility Functions --------------------------------------------------
 
 const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError, never> =>
@@ -50,29 +58,40 @@ const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError
         Effect.flatMap(S.decode(BrandMetadataSchema)),
     );
 
-const addBrand = (state: RegistryState, brand: BrandMetadata): ReadonlyMap<string, BrandMetadata> =>
-    new Map([...state.brands, [brand.brandName, brand]]);
+// --- Registry Factory (Immer-powered) ----------------------------------------
 
-const removeBrand = (state: RegistryState, name: string): ReadonlyMap<string, BrandMetadata> =>
-    new Map([...state.brands].filter(([brandName]) => brandName !== name));
-
-// --- Registry Factory --------------------------------------------------------
-
-const createRegistry = (): BrandRegistry =>
-    create<BrandRegistry>((set, get) => ({
-        brands: B.registry.initial,
-        getBrandNames: () => [...get().brands.keys()],
-        hasBrand: (name) => get().brands.has(name),
-        register: (name) =>
-            Effect.runSync(
-                pipe(
-                    createBrandEntry(name),
-                    Effect.tap((brand) => Effect.sync(() => set((state) => ({ brands: addBrand(state, brand) })))),
-                    Effect.asVoid,
+const createRegistry = (): BrandRegistry => {
+    const useStore = create<BrandRegistry>()(
+        immer((set, get) => ({
+            brands: B.registry.initial,
+            clear: () =>
+                set((draft) => {
+                    draft.brands = castDraft(new Map<string, BrandMetadata>());
+                }),
+            getBrandNames: () => [...get().brands.keys()],
+            hasBrand: (name) => get().brands.has(name),
+            register: (name) =>
+                Effect.runSync(
+                    pipe(
+                        createBrandEntry(name),
+                        Effect.tap((brand) =>
+                            Effect.sync(() =>
+                                set((draft) => {
+                                    (draft.brands as Map<string, BrandMetadata>).set(brand.brandName, brand);
+                                }),
+                            ),
+                        ),
+                        Effect.asVoid,
+                    ),
                 ),
-            ),
-        unregister: (name) => set((state) => ({ brands: removeBrand(state, name) })),
-    }))();
+            unregister: (name) =>
+                set((draft) => {
+                    (draft.brands as Map<string, BrandMetadata>).delete(name);
+                }),
+        })),
+    );
+    return useStore.getState();
+};
 
 // --- Date Utilities ----------------------------------------------------------
 
@@ -113,6 +132,7 @@ const createUtils = (config: UtilsConfig = {}): UtilsApi =>
         formatDate: (formatStr?: string) =>
             dateUtils.formatDate(formatStr ?? config.defaultDateFormat ?? B.defaultFormat),
         parse: dateUtils.parse,
+        produce,
     } as const);
 
 // --- Export (2 Exports: Tuning + Factory) ------------------------------------

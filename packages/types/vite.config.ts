@@ -11,7 +11,7 @@ export default defineConfig(
                 types: './src/types.ts',
                 utils: './src/utils.ts',
             },
-            external: ['effect', '@effect/schema', 'date-fns', 'uuid', 'zustand'],
+            external: ['effect', '@effect/schema', 'date-fns', 'immer', 'ts-pattern', 'uuid', 'zustand'],
             mode: 'library',
             name: 'ParametricTypes',
         }),

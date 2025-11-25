@@ -195,9 +195,6 @@ catalogs:
     vitest:
       specifier: 4.0.13
       version: 4.0.13
-    zod:
-      specifier: 4.1.13
-      version: 4.1.13
     zustand:
       specifier: 5.0.8
       version: 5.0.8
@@ -386,9 +383,6 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.0.13(@types/node@24.10.1)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
-      zod:
-        specifier: 'catalog:'
-        version: 4.1.13
       zustand:
         specifier: 'catalog:'
         version: 5.0.8(@types/react@19.1.8)(immer@11.0.0)(react@19.3.0-canary-40b4a5bf-20251120)(use-sync-external-store@1.6.0(react@19.3.0-canary-40b4a5bf-20251120))
@@ -469,6 +463,12 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 3.19.6
+      immer:
+        specifier: 'catalog:'
+        version: 11.0.0
+      ts-pattern:
+        specifier: 'catalog:'
+        version: 5.9.0
       uuid:
         specifier: 'catalog:'
         version: 10.0.0
@@ -7037,9 +7037,6 @@ packages:
 
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
-  zod@4.1.13:
-    resolution: {integrity: sha512-AvvthqfqrAhNH9dnfmrfKzX5upOdjUVJYFqNSlkmGf64gRaTzlPwz99IHYnVs28qYAybvAlBV+H7pn0saFY4Ig==}
 
   zustand@5.0.8:
     resolution: {integrity: sha512-gyPKpIaxY9XcO2vSMrLbiER7QMAMGOQZVRdJ6Zi782jkbzZygq5GI9nG8g+sMgitRtndwaBSl7uiqC49o1SSiw==}
@@ -14767,8 +14764,6 @@ snapshots:
       zod: 3.25.76
 
   zod@3.25.76: {}
-
-  zod@4.1.13: {}
 
   zustand@5.0.8(@types/react@19.1.8)(immer@11.0.0)(react@19.2.0)(use-sync-external-store@1.6.0(react@19.2.0)):
     optionalDependencies:
