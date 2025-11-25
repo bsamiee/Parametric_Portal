@@ -145,7 +145,7 @@
             "assist": { "actions": { "source": { "organizeImports": "on" } } }
         },
         {
-            "includes": ["**/matchers.ts", "**/types/src/types.ts"],
+            "includes": ["**/matchers.ts", "**/types/src/*.ts"],
             "linter": {
                 "rules": {
                     "style": {

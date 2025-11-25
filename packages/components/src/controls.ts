@@ -13,7 +13,6 @@ import {
     createDimensionDefaults,
     createVars,
     resolve,
-    SCHEMA_TUNING as SB,
 } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
@@ -42,7 +41,6 @@ type ControlInput<T extends ControlType> = {
 // --- Constants (Unified Base) -----------------------------------------------
 
 const B = Object.freeze({
-    algo: SB.algo,
     cls: {
         disabled: 'opacity-50 cursor-not-allowed pointer-events-none',
         focus: 'outline-none ring-2 ring-offset-2 ring-[var(--color-primary-500,currentColor)]',

@@ -11,7 +11,6 @@ import {
     createDimensionDefaults,
     createVars,
     resolve,
-    SCHEMA_TUNING as SB,
 } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
@@ -38,7 +37,6 @@ type ElementInput<T extends ElementTag> = {
 // --- Constants (Unified Base) -----------------------------------------------
 
 const B = Object.freeze({
-    algo: SB.algo,
     align: {
         baseline: 'items-baseline',
         center: 'items-center',

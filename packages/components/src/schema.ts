@@ -8,10 +8,15 @@ import { twMerge } from 'tailwind-merge';
 
 type DimensionConfig = S.Schema.Type<typeof DimensionSchema>;
 type BehaviorConfig = S.Schema.Type<typeof BehaviorSchema>;
+type OverlayConfig = S.Schema.Type<typeof OverlaySchema>;
+type FeedbackConfig = S.Schema.Type<typeof FeedbackSchema>;
+type AnimationConfig = S.Schema.Type<typeof AnimationSchema>;
 type ComputedDimensions = {
     readonly [K in 'fontSize' | 'gap' | 'height' | 'iconSize' | 'paddingX' | 'paddingY' | 'radius']: string;
 };
 type ComputeKey = keyof ComputedDimensions;
+type FeedbackVariant = 'error' | 'info' | 'success' | 'warning';
+type OverlayPosition = 'bottom' | 'left' | 'right' | 'top';
 
 // --- Schema Definitions -----------------------------------------------------
 
@@ -30,6 +35,35 @@ const BehaviorSchema = S.Struct({
     focusable: S.optionalWith(S.Boolean, { default: () => true }),
     interactive: S.optionalWith(S.Boolean, { default: () => true }),
     loading: S.optionalWith(S.Boolean, { default: () => false }),
+});
+
+const OverlaySchema = S.Struct({
+    backdrop: S.optionalWith(S.Boolean, { default: () => true }),
+    closeOnEscape: S.optionalWith(S.Boolean, { default: () => true }),
+    closeOnOutsideClick: S.optionalWith(S.Boolean, { default: () => true }),
+    modal: S.optionalWith(S.Boolean, { default: () => true }),
+    position: S.optionalWith(S.Union(S.Literal('top'), S.Literal('bottom'), S.Literal('left'), S.Literal('right')), {
+        default: () => 'bottom' as never,
+    }),
+    trapFocus: S.optionalWith(S.Boolean, { default: () => true }),
+});
+
+const FeedbackSchema = S.Struct({
+    autoDismiss: S.optionalWith(S.Boolean, { default: () => true }),
+    dismissible: S.optionalWith(S.Boolean, { default: () => true }),
+    duration: S.optionalWith(pipe(S.Number, S.positive()), { default: () => 5000 as never }),
+    variant: S.optionalWith(
+        S.Union(S.Literal('info'), S.Literal('success'), S.Literal('warning'), S.Literal('error')),
+        {
+            default: () => 'info' as never,
+        },
+    ),
+});
+
+const AnimationSchema = S.Struct({
+    duration: S.optionalWith(pipe(S.Number, S.positive()), { default: () => 200 as never }),
+    easing: S.optionalWith(S.String, { default: () => 'ease-out' as never }),
+    enabled: S.optionalWith(S.Boolean, { default: () => true }),
 });
 
 // --- Constants (Unified Base) -----------------------------------------------
@@ -94,8 +128,23 @@ const decodeBehavior = (
     input: S.Schema.Encoded<typeof BehaviorSchema>,
 ): Effect.Effect<BehaviorConfig, ParseError, never> => S.decode(BehaviorSchema)(input);
 
+const decodeOverlay = (
+    input: S.Schema.Encoded<typeof OverlaySchema>,
+): Effect.Effect<OverlayConfig, ParseError, never> => S.decode(OverlaySchema)(input);
+
+const decodeFeedback = (
+    input: S.Schema.Encoded<typeof FeedbackSchema>,
+): Effect.Effect<FeedbackConfig, ParseError, never> => S.decode(FeedbackSchema)(input);
+
+const decodeAnimation = (
+    input: S.Schema.Encoded<typeof AnimationSchema>,
+): Effect.Effect<AnimationConfig, ParseError, never> => S.decode(AnimationSchema)(input);
+
 const createDimensionDefaults = (): DimensionConfig => Effect.runSync(S.decode(DimensionSchema)(B.defaults.dimensions));
 const createBehaviorDefaults = (): BehaviorConfig => Effect.runSync(S.decode(BehaviorSchema)(B.defaults.behavior));
+const createOverlayDefaults = (): OverlayConfig => Effect.runSync(S.decode(OverlaySchema)({}));
+const createFeedbackDefaults = (): FeedbackConfig => Effect.runSync(S.decode(FeedbackSchema)({}));
+const createAnimationDefaults = (): AnimationConfig => Effect.runSync(S.decode(AnimationSchema)({}));
 
 const resolve = (
     dim?: Partial<DimensionConfig>,
@@ -117,22 +166,89 @@ const resolve = (
     );
 };
 
+// Unified resolvers for consistent config resolution across components
+const resolveDimensions = (
+    dim?: Partial<DimensionConfig>,
+    defaults?: DimensionConfig,
+): Effect.Effect<DimensionConfig, never, never> => {
+    const defs = defaults ?? createDimensionDefaults();
+    return pipe(
+        decodeDimensions({ ...defs, ...dim }),
+        Effect.catchAll(() => Effect.succeed(defs)),
+    );
+};
+
+const resolveFeedback = (
+    fb?: Partial<FeedbackConfig>,
+    defaults?: FeedbackConfig,
+): Effect.Effect<FeedbackConfig, never, never> => {
+    const defs = defaults ?? createFeedbackDefaults();
+    return pipe(
+        decodeFeedback({ ...defs, ...fb }),
+        Effect.catchAll(() => Effect.succeed(defs)),
+    );
+};
+
+const resolveOverlay = (
+    ovr?: Partial<OverlayConfig>,
+    defaults?: OverlayConfig,
+): Effect.Effect<OverlayConfig, never, never> => {
+    const defs = defaults ?? createOverlayDefaults();
+    return pipe(
+        decodeOverlay({ ...defs, ...ovr }),
+        Effect.catchAll(() => Effect.succeed(defs)),
+    );
+};
+
+const resolveAnimation = (
+    anim?: Partial<AnimationConfig>,
+    defaults?: AnimationConfig,
+): Effect.Effect<AnimationConfig, never, never> => {
+    const defs = defaults ?? createAnimationDefaults();
+    return pipe(
+        decodeAnimation({ ...defs, ...anim }),
+        Effect.catchAll(() => Effect.succeed(defs)),
+    );
+};
+
 // --- Export -----------------------------------------------------------------
 
 export {
+    AnimationSchema,
     B as SCHEMA_TUNING,
     BehaviorSchema,
     cls,
     compute,
     computeDimensions,
+    createAnimationDefaults,
     createBehaviorDefaults,
     createDimensionDefaults,
+    createFeedbackDefaults,
+    createOverlayDefaults,
     createVars,
+    decodeAnimation,
     decodeBehavior,
     decodeDimensions,
+    decodeFeedback,
+    decodeOverlay,
     DimensionSchema,
+    FeedbackSchema,
+    OverlaySchema,
     resolve,
+    resolveAnimation,
+    resolveDimensions,
+    resolveFeedback,
+    resolveOverlay,
     strokeWidth,
     styleVars,
 };
-export type { BehaviorConfig, ComputedDimensions, DimensionConfig };
+export type {
+    AnimationConfig,
+    BehaviorConfig,
+    ComputedDimensions,
+    DimensionConfig,
+    FeedbackConfig,
+    FeedbackVariant,
+    OverlayConfig,
+    OverlayPosition,
+};
