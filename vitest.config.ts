@@ -25,7 +25,7 @@ const { coverage, patterns, reporters } = Effect.runSync(
         }),
         reporters: Effect.all({
             coverage: Effect.succeed(['text', 'json', 'html', 'lcov']),
-            test: Effect.succeed(['default', 'html', 'json', 'junit']),
+            test: Effect.succeed(['default', 'json', 'junit']),
         }),
     }),
 );
@@ -108,7 +108,7 @@ const createVitestConfig = () =>
                     include: ['**/*.{test,spec}-d.{ts,tsx}'],
                     tsconfig: './tsconfig.base.json',
                 },
-                ui: true,
+                ui: false,
                 unstubEnvs: true,
                 unstubGlobals: true,
             },

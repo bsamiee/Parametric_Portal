@@ -6,6 +6,7 @@ pnpm-debug.log*
 dist/
 build/
 out/
+html/
 public/build/
 .next/
 .nuxt/
@@ -69,4 +70,5 @@ Thumbs.db
 
 # --- Misc ---------------------------------------------------------------------
 .archive/
+.claude/
 .kiro/

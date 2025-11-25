@@ -1,158 +1,112 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "dependencyDashboard": true,
-    "dependencyDashboardTitle": "🔄 Dependency Dashboard",
     "extends": [
         "config:recommended",
-        "group:monorepos",
-        "group:recommended",
         "schedule:weekly",
-        ":maintainLockFilesWeekly",
-        ":enableVulnerabilityAlertsWithLabel(security)",
+        ":pinAllExceptPeerDependencies",
         "helpers:pinGitHubActionDigests"
     ],
     "labels": ["dependencies"],
     "lockFileMaintenance": {
-        "automerge": true,
-        "automergeType": "pr",
         "enabled": true,
         "schedule": ["before 4am on monday"]
     },
     "packageRules": [
         {
+            "automerge": true,
+            "description": "Automerge patch updates",
+            "matchUpdateTypes": ["patch"]
+        },
+        {
+            "automerge": true,
+            "description": "Automerge minor updates for stable deps",
+            "matchCurrentVersion": "!/^0/",
+            "matchUpdateTypes": ["minor"]
+        },
+        {
+            "automerge": true,
+            "description": "Group type definitions",
+            "groupName": "types",
+            "matchPackageNames": ["@types/**"]
+        },
+        {
+            "automerge": true,
+            "description": "Group GitHub Actions",
+            "groupName": "github-actions",
+            "labels": ["dependencies", "ci"],
+            "matchManagers": ["github-actions"]
+        },
+        {
             "automerge": false,
-            "description": "TypeScript nightly builds - manual review",
-            "groupName": "typescript-nightly",
+            "description": "Major updates require manual review",
+            "labels": ["dependencies", "breaking"],
+            "matchUpdateTypes": ["major"]
+        },
+        {
+            "automerge": false,
+            "description": "TypeScript nightly - manual review",
             "labels": ["dependencies", "typescript", "breaking"],
             "matchCurrentVersion": "/dev/",
             "matchPackageNames": ["typescript"]
         },
         {
             "automerge": false,
-            "description": "React canary - grouped, manual review",
+            "description": "React canary - manual review",
             "groupName": "react-canary",
             "labels": ["dependencies", "react", "breaking"],
             "matchCurrentVersion": "/canary|beta|rc/",
-            "matchPackageNames": ["react", "react-dom", "react-compiler-runtime", "@types/react", "@types/react-dom"]
+            "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"]
         },
         {
             "automerge": false,
-            "description": "Nx canary - grouped, manual review",
+            "description": "Nx canary - manual review",
             "groupName": "nx-canary",
             "labels": ["dependencies", "nx", "breaking"],
             "matchCurrentVersion": "/canary/",
             "matchPackageNames": ["nx", "@nx/**"]
         },
         {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Effect ecosystem - grouped updates",
-            "groupName": "effect-ecosystem",
-            "labels": ["dependencies", "effect"],
-            "matchPackageNames": ["effect", "@effect/**"],
-            "matchUpdateTypes": ["minor", "patch"]
-        },
-        {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Vite ecosystem - grouped updates",
-            "groupName": "vite-ecosystem",
-            "labels": ["dependencies", "vite"],
-            "matchPackageNames": ["vite", "vite-**", "@vitejs/**", "vitest", "@vitest/**"],
-            "matchUpdateTypes": ["minor", "patch"]
-        },
-        {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "TanStack - grouped updates",
-            "groupName": "tanstack",
-            "labels": ["dependencies", "tanstack"],
-            "matchPackageNames": ["@tanstack/**"],
-            "matchUpdateTypes": ["minor", "patch"]
-        },
-        {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Radix UI - grouped updates",
-            "groupName": "radix-ui",
-            "labels": ["dependencies", "ui"],
-            "matchPackageNames": ["@radix-ui/**"],
-            "matchUpdateTypes": ["minor", "patch"]
-        },
-        {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Tailwind + LightningCSS - grouped",
-            "groupName": "styling",
-            "labels": ["dependencies", "styling"],
-            "matchPackageNames": ["tailwindcss", "@tailwindcss/**", "tailwind-**", "lightningcss"],
-            "matchUpdateTypes": ["minor", "patch"]
-        },
-        {
             "automerge": false,
-            "description": "Biome - manual review (linting rule changes)",
+            "description": "Biome - manual review for linting changes",
             "labels": ["dependencies", "tooling"],
             "matchPackageNames": ["@biomejs/biome"]
         },
         {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Rollup plugins - grouped",
-            "groupName": "rollup-plugins",
-            "labels": ["dependencies", "build"],
-            "matchPackageNames": ["@rollup/**", "rollup-plugin-**"],
-            "matchUpdateTypes": ["minor", "patch"]
+            "description": "Group Effect ecosystem",
+            "groupName": "effect-ecosystem",
+            "labels": ["dependencies", "effect"],
+            "matchPackageNames": ["effect", "@effect/**"]
         },
         {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Type definitions - automerge all",
-            "groupName": "types",
-            "labels": ["dependencies", "types"],
-            "matchPackageNames": ["@types/**"]
+            "description": "Group Vite ecosystem",
+            "groupName": "vite-ecosystem",
+            "labels": ["dependencies", "vite"],
+            "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"]
         },
         {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Patch updates - automerge",
-            "matchUpdateTypes": ["patch"]
+            "description": "Group TanStack",
+            "groupName": "tanstack",
+            "labels": ["dependencies", "tanstack"],
+            "matchPackageNames": ["@tanstack/**"]
         },
         {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "Minor updates for stable deps - automerge",
-            "matchCurrentVersion": "!/canary|beta|alpha|dev|rc/",
-            "matchUpdateTypes": ["minor"]
+            "description": "Group Radix UI",
+            "groupName": "radix-ui",
+            "labels": ["dependencies", "ui"],
+            "matchPackageNames": ["@radix-ui/**"]
         },
         {
-            "automerge": false,
-            "description": "Major updates - always manual review",
-            "labels": ["dependencies", "breaking"],
-            "matchUpdateTypes": ["major"]
-        },
-        {
-            "automerge": true,
-            "automergeType": "pr",
-            "description": "GitHub Actions - weekly update with automerge",
-            "groupName": "github-actions",
-            "labels": ["dependencies", "ci"],
-            "matchManagers": ["github-actions"]
-        },
-        {
-            "description": "Pin digests for GitHub Actions",
-            "matchManagers": ["github-actions"],
-            "pinDigests": true
+            "description": "Group Tailwind + styling",
+            "groupName": "styling",
+            "labels": ["dependencies", "styling"],
+            "matchPackageNames": ["tailwindcss", "@tailwindcss/**", "lightningcss"]
         }
     ],
-    "pnpm": {
-        "fileMatch": ["(^|/)pnpm-workspace\\.ya?ml$"]
-    },
     "prConcurrentLimit": 10,
     "prHourlyLimit": 5,
-    "rangeStrategy": "pin",
     "timezone": "America/Los_Angeles",
     "vulnerabilityAlerts": {
-        "automerge": true,
+        "enabled": true,
         "labels": ["security", "dependencies"]
     }
 }

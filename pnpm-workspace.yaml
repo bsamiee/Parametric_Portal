@@ -28,6 +28,11 @@ catalog:
   '@vitejs/plugin-react': 5.1.1
   '@vitest/coverage-v8': 4.0.13
   '@vitest/ui': 4.0.13
+  '@effect/vitest': 0.25.1
+  '@fast-check/vitest': 0.2.2
+  '@stryker-mutator/core': 9.1.0
+  '@stryker-mutator/vitest-runner': 9.1.0
+  fast-check: 4.3.0
   babel-plugin-react-compiler: 19.0.0-beta-9ee70a1-20241017
   browserslist: 4.28.0
   class-variance-authority: 0.7.1

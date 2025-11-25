@@ -4,8 +4,11 @@
         "effect": "catalog:"
     },
     "devDependencies": {
+        "@fast-check/vitest": "catalog:",
+        "fast-check": "catalog:",
         "typescript": "catalog:",
-        "vite": "catalog:"
+        "vite": "catalog:",
+        "vitest": "catalog:"
     },
     "exports": {
         "./fonts": {

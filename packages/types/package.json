@@ -10,9 +10,12 @@
         "zustand": "catalog:"
     },
     "devDependencies": {
+        "@fast-check/vitest": "catalog:",
         "@types/uuid": "catalog:",
+        "fast-check": "catalog:",
         "typescript": "catalog:",
-        "vite": "catalog:"
+        "vite": "catalog:",
+        "vitest": "catalog:"
     },
     "exports": {
         "./types": {

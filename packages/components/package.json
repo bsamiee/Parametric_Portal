@@ -12,10 +12,13 @@
         "tailwind-merge": "catalog:"
     },
     "devDependencies": {
+        "@fast-check/vitest": "catalog:",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
+        "fast-check": "catalog:",
         "typescript": "catalog:",
-        "vite": "catalog:"
+        "vite": "catalog:",
+        "vitest": "catalog:"
     },
     "exports": {
         "./controls": {

@@ -23,6 +23,7 @@
             "{workspaceRoot}/tsconfig.base.json",
             "{workspaceRoot}/vite.config.ts",
             "{workspaceRoot}/vitest.config.ts",
+            "{workspaceRoot}/stryker.config.js",
             "{workspaceRoot}/biome.json",
             "{workspaceRoot}/package.json",
             "{workspaceRoot}/pnpm-lock.yaml",
@@ -85,6 +86,14 @@
             "executor": "nx:run-commands",
             "options": {
                 "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && nx dev"
+            }
+        },
+        "mutate": {
+            "cache": false,
+            "dependsOn": ["build"],
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "stryker run --testRunner vitest --coverageAnalysis perTest --reporters html,clear-text,progress --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts'"
             }
         },
         "pwa:icons": {
