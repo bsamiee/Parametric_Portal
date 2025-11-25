@@ -25,8 +25,8 @@ catalogs:
       specifier: 0.25.1
       version: 0.25.1
     '@fast-check/vitest':
-      specifier: 0.2.2
-      version: 0.2.2
+      specifier: 0.2.3
+      version: 0.2.3
     '@nx/js':
       specifier: 22.2.0-canary.20251121-9a6c7ad
       version: 22.2.0-canary.20251121-9a6c7ad
@@ -238,7 +238,7 @@ importers:
         version: 0.25.1(effect@3.19.6)(vitest@4.0.13)
       '@fast-check/vitest':
         specifier: 'catalog:'
-        version: 0.2.2(vitest@4.0.13)
+        version: 0.2.3(vitest@4.0.13)
       '@nx/js':
         specifier: 'catalog:'
         version: 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
@@ -452,7 +452,7 @@ importers:
     devDependencies:
       '@fast-check/vitest':
         specifier: 'catalog:'
-        version: 0.2.2(vitest@4.0.13)
+        version: 0.2.3(vitest@4.0.13)
       '@types/react':
         specifier: 'catalog:'
         version: 19.1.8
@@ -483,7 +483,7 @@ importers:
     devDependencies:
       '@fast-check/vitest':
         specifier: 'catalog:'
-        version: 0.2.2(vitest@4.0.13)
+        version: 0.2.3(vitest@4.0.13)
       fast-check:
         specifier: 'catalog:'
         version: 4.3.0
@@ -526,7 +526,7 @@ importers:
     devDependencies:
       '@fast-check/vitest':
         specifier: 'catalog:'
-        version: 0.2.2(vitest@4.0.13)
+        version: 0.2.3(vitest@4.0.13)
       '@types/uuid':
         specifier: 'catalog:'
         version: 10.0.0
@@ -1447,10 +1447,10 @@ packages:
     resolution: {integrity: sha512-43/qtrDUokr7LJqoF2c3+RInu/t4zfrpYdoSDfYyhg52rwLV6TnOvdG4fXm7IkSB3wErkcmJS9iEhjVtOSEjjA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
-  '@fast-check/vitest@0.2.2':
-    resolution: {integrity: sha512-bL7uiHj3PetEUSDoEANFzIY2QQIR2svQdCRbe6RgWxYO+QGaJD8PdyshM4hNA2ieqrtrDWuUs+1S34DWJQjn9A==}
+  '@fast-check/vitest@0.2.3':
+    resolution: {integrity: sha512-BBjiZOiCvKRfoeuWz62ZpjFfuaLEKSDWXl7Fkli9FBNJGUzBDv7PZdXPGbrUiaTreIFs9I1INrlQgboRBA3H1Q==}
     peerDependencies:
-      vitest: ^1 || ^2 || ^3
+      vitest: ^1 || ^2 || ^3 || ^4
 
   '@formatjs/ecma402-abstract@2.3.6':
     resolution: {integrity: sha512-HJnTFeRM2kVFVr5gr5kH1XP6K0JcJtE7Lzvtr3FS/so5f1kpsqqqxy5JF+FRaO6H2qmcMfAUIox7AJteieRtVw==}
@@ -8470,7 +8470,7 @@ snapshots:
       '@eslint/core': 0.17.0
       levn: 0.4.1
 
-  '@fast-check/vitest@0.2.2(vitest@4.0.13)':
+  '@fast-check/vitest@0.2.3(vitest@4.0.13)':
     dependencies:
       fast-check: 4.3.0
       vitest: 4.0.13(@types/node@24.10.1)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
