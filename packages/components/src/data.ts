@@ -1,7 +1,28 @@
-import type { CSSProperties, ForwardedRef, HTMLAttributes, ImgHTMLAttributes, ReactNode, RefObject } from 'react';
-import { createElement, forwardRef, useRef } from 'react';
-import type { Behavior, BehaviorInput, Computed, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
+import type { CSSProperties, FC, ForwardedRef, HTMLAttributes, ImgHTMLAttributes, ReactNode } from 'react';
+import { createElement, forwardRef } from 'react';
+import {
+    useTable,
+    useTableCell,
+    useTableColumnHeader,
+    useTableHeaderRow,
+    useTableRow,
+    useTableRowGroup,
+} from 'react-aria';
+import type { Key, Node, SortDescriptor, TableState, TableStateProps } from 'react-stately';
+import { Cell, Column, Row, TableBody, TableHeader, useTableState } from 'react-stately';
+import type { Behavior, BehaviorInput, Computed, DataTuning, ScaleInput } from './schema.ts';
+import {
+    B,
+    cls,
+    computeScale,
+    cssVars,
+    merged,
+    pick,
+    resolve,
+    stateCls,
+    useCollectionEl,
+    useForwardedRef,
+} from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -19,11 +40,31 @@ type AvatarProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> & {
 };
 type ListProps<T> = HTMLAttributes<HTMLUListElement> & {
     readonly items: ReadonlyArray<T>;
+    readonly keyExtractor: (item: T, index: number) => Key;
     readonly renderItem: (item: T, index: number) => ReactNode;
 };
+type Selection = 'all' | Set<Key>;
+type SelectionMode = 'multiple' | 'none' | 'single';
+type TableColumnDef<T> = {
+    readonly allowsSorting?: boolean;
+    readonly header: string;
+    readonly isRowHeader?: boolean;
+    readonly key: keyof T;
+};
 type TableProps<T> = HTMLAttributes<HTMLTableElement> & {
-    readonly columns: ReadonlyArray<{ readonly header: string; readonly key: keyof T }>;
+    readonly columns: ReadonlyArray<TableColumnDef<T>>;
+    readonly currentPage?: number;
     readonly data: ReadonlyArray<T>;
+    readonly defaultSelectedKeys?: Selection;
+    readonly defaultSortDescriptor?: SortDescriptor;
+    readonly disabledKeys?: Iterable<Key>;
+    readonly onSelectionChange?: (keys: Selection) => void;
+    readonly onSortChange?: (descriptor: SortDescriptor) => void;
+    readonly pageSize?: number;
+    readonly rowKey: (row: T, index: number) => Key;
+    readonly selectedKeys?: Selection;
+    readonly selectionMode?: SelectionMode;
+    readonly sortDescriptor?: SortDescriptor;
 };
 type DataInput<T extends DataType = 'card'> = {
     readonly behavior?: BehaviorInput | undefined;
@@ -32,28 +73,12 @@ type DataInput<T extends DataType = 'card'> = {
     readonly type?: T;
 };
 
-// --- Constants (CSS Variable Classes Only - NO hardcoded colors) ------------
-
-const B = Object.freeze({
-    state: { disabled: 'opacity-50 pointer-events-none', loading: 'animate-pulse' },
-    var: {
-        g: 'gap-[var(--data-gap)]',
-        px: 'px-[var(--data-padding-x)]',
-        py: 'py-[var(--data-padding-y)]',
-        r: 'rounded-[var(--data-radius)]',
-    },
-} as const);
-
-const stateCls = (b: Behavior): string =>
-    cls(b.disabled ? B.state.disabled : undefined, b.loading ? B.state.loading : undefined);
-
 // --- Component Builders -----------------------------------------------------
 
 const mkAvatar = (i: DataInput<'avatar'>, c: Computed) =>
     forwardRef((props: AvatarProps, fRef: ForwardedRef<HTMLSpanElement>) => {
         const { alt, className, fallback, src, style, ...rest } = props;
-        const intRef = useRef<HTMLSpanElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLSpanElement>;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'span',
             {
@@ -79,8 +104,7 @@ const mkAvatar = (i: DataInput<'avatar'>, c: Computed) =>
 const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
     forwardRef((props: BadgeProps, fRef: ForwardedRef<HTMLSpanElement>) => {
         const { children, className, style, variant, ...rest } = props;
-        const intRef = useRef<HTMLSpanElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLSpanElement>;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'span',
             {
@@ -101,91 +125,218 @@ const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
 const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Behavior) =>
     forwardRef((props: CardProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, footer, header, style, ...rest } = props;
-        const intRef = useRef<HTMLDivElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLDivElement>;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'div',
             {
                 ...rest,
                 'aria-busy': b.loading || undefined,
                 'aria-disabled': b.disabled || undefined,
-                className: cls(B.var.r, 'border shadow-sm overflow-hidden', stateCls(b), i.className, className),
+                className: cls(
+                    B.data.var.r,
+                    'border shadow-sm overflow-hidden',
+                    stateCls.data(b),
+                    i.className,
+                    className,
+                ),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
             header
-                ? createElement('div', { className: cls('border-b font-semibold', B.var.px, B.var.py) }, header)
+                ? createElement(
+                      'div',
+                      { className: cls('border-b font-semibold', B.data.var.px, B.data.var.py) },
+                      header,
+                  )
                 : null,
-            createElement('div', { className: cls(B.var.px, B.var.py) }, children),
-            footer ? createElement('div', { className: cls('border-t', B.var.px, B.var.py) }, footer) : null,
+            createElement('div', { className: cls(B.data.var.px, B.data.var.py) }, children),
+            footer ? createElement('div', { className: cls('border-t', B.data.var.px, B.data.var.py) }, footer) : null,
         );
     });
 
 const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Behavior) =>
     forwardRef((props: ListProps<T>, fRef: ForwardedRef<HTMLUListElement>) => {
-        const { className, items, renderItem, style, ...rest } = props;
-        const intRef = useRef<HTMLUListElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLUListElement>;
+        const { className, items, keyExtractor, renderItem, style, ...rest } = props;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'ul',
             {
                 ...rest,
                 'aria-busy': b.loading || undefined,
                 'aria-disabled': b.disabled || undefined,
-                className: cls('space-y-1', stateCls(b), i.className, className),
+                className: cls('space-y-1', stateCls.data(b), i.className, className),
                 ref,
                 role: 'list',
                 style: { ...v, ...style } as CSSProperties,
             },
-            items.map((item, idx) => createElement('li', { key: idx }, renderItem(item, idx))),
+            items.map((item, idx) => createElement('li', { key: keyExtractor(item, idx) }, renderItem(item, idx))),
         );
     });
 
+// --- Table Sub-Components (react-aria) --------------------------------------
+
+type TColHeaderProps<T> = { readonly column: Node<T>; readonly state: TableState<T> };
+const sortDirMap = { ascending: 'asc', descending: 'desc' } as const;
+const TColHeader = <T>({ column, state }: TColHeaderProps<T>) => {
+    const { merge, ref } = useCollectionEl<HTMLTableCellElement>(B.data.table.cell.focus);
+    const { columnHeaderProps } = useTableColumnHeader({ node: column }, state, ref);
+    const rawDir = state.sortDescriptor?.column === column.key ? state.sortDescriptor.direction : undefined;
+    const dir = rawDir ? sortDirMap[rawDir] : 'none';
+    return createElement(
+        'th',
+        merge(
+            columnHeaderProps,
+            'text-left font-semibold',
+            B.data.var.px,
+            B.data.var.py,
+            column.props?.allowsSorting && B.data.table.header.sortable,
+        ),
+        column.rendered,
+        column.props?.allowsSorting &&
+            createElement('span', { className: B.data.table.header.sortIcon }, B.data.table.sort[dir]),
+    );
+};
+
+type THeaderRowProps<T> = { readonly item: Node<T>; readonly state: TableState<T> };
+const THeaderRow = <T>({ item, state }: THeaderRowProps<T>) => {
+    const { merge, ref } = useCollectionEl<HTMLTableRowElement>();
+    const { rowProps } = useTableHeaderRow({ node: item }, state, ref);
+    return createElement(
+        'tr',
+        merge(rowProps),
+        [...item.childNodes].map((col) => createElement(TColHeader, { column: col, key: col.key, state })),
+    );
+};
+
+type TRowProps<T> = { readonly item: Node<T>; readonly state: TableState<T> };
+const TRow = <T>({ item, state }: TRowProps<T>) => {
+    const { merge, ref } = useCollectionEl<HTMLTableRowElement>(B.data.table.row.focus);
+    const isSelected = state.selectionManager.isSelected(item.key);
+    const { rowProps } = useTableRow({ node: item }, state, ref);
+    return createElement(
+        'tr',
+        merge(rowProps, B.data.table.row.hover, isSelected && B.data.table.row.selected),
+        [...item.childNodes].map((cell) => createElement(TCell, { cell, key: cell.key, state })),
+    );
+};
+
+type TCellProps<T> = { readonly cell: Node<T>; readonly state: TableState<T> };
+const TCell = <T>({ cell, state }: TCellProps<T>) => {
+    const { merge, ref } = useCollectionEl<HTMLTableCellElement>(B.data.table.cell.focus);
+    const { gridCellProps } = useTableCell({ node: cell }, state, ref);
+    return createElement('td', merge(gridCellProps, B.data.var.px, B.data.var.py), cell.rendered);
+};
+
+// --- Table Builder ----------------------------------------------------------
+
 const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Record<string, string>, b: Behavior) =>
     forwardRef((props: TableProps<T>, fRef: ForwardedRef<HTMLTableElement>) => {
-        const { className, columns, data, style, ...rest } = props;
-        const intRef = useRef<HTMLTableElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLTableElement>;
+        const {
+            className,
+            columns,
+            currentPage,
+            data,
+            defaultSelectedKeys,
+            defaultSortDescriptor,
+            disabledKeys,
+            onSelectionChange,
+            onSortChange,
+            pageSize,
+            rowKey,
+            selectedKeys,
+            selectionMode = 'none',
+            sortDescriptor,
+            style,
+            ...rest
+        } = props;
+        const ref = useForwardedRef(fRef);
+        // Pagination: slice data if currentPage and pageSize are provided
+        const displayData =
+            currentPage !== undefined && pageSize !== undefined
+                ? data.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                : data;
+        // Build react-stately collection - children prop required for exactOptionalPropertyTypes
+        const headerCols = columns.map((col) =>
+            createElement(
+                Column as FC<{ allowsSorting: boolean; children: ReactNode; isRowHeader: boolean; key: string }>,
+                {
+                    allowsSorting: col.allowsSorting ?? false,
+                    // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
+                    children: col.header,
+                    isRowHeader: col.isRowHeader ?? false,
+                    key: String(col.key),
+                },
+            ),
+        );
+        const bodyCells = (item: T) =>
+            columns.map((col) =>
+                createElement(Cell as FC<{ children: ReactNode; key: string }>, {
+                    // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
+                    children: String(item[col.key] ?? ''),
+                    key: String(col.key),
+                }),
+            );
+        const pageOffset = currentPage !== undefined && pageSize !== undefined ? (currentPage - 1) * pageSize : 0;
+        const bodyRows = displayData.map((item, idx) =>
+            createElement(Row as FC<{ children: ReactNode; key: Key }>, {
+                // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
+                children: bodyCells(item),
+                key: rowKey(item, pageOffset + idx),
+            }),
+        );
+        const tableHeader = createElement(TableHeader as FC<{ children: ReactNode; key: string }>, {
+            // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
+            children: headerCols,
+            key: 'header',
+        });
+        const tableBody = createElement(TableBody as FC<{ children: ReactNode; key: string }>, {
+            // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
+            children: bodyRows,
+            key: 'body',
+        });
+        // Cast to TableStateProps to satisfy exactOptionalPropertyTypes with react-stately
+        const tableStateProps = {
+            children: [tableHeader, tableBody],
+            selectionMode,
+            ...(defaultSelectedKeys !== undefined && {
+                defaultSelectedKeys: defaultSelectedKeys === 'all' ? 'all' : (defaultSelectedKeys as Iterable<Key>),
+            }),
+            ...(selectedKeys !== undefined && {
+                selectedKeys: selectedKeys === 'all' ? 'all' : (selectedKeys as Iterable<Key>),
+            }),
+            ...(defaultSortDescriptor && { defaultSortDescriptor }),
+            ...(sortDescriptor && { sortDescriptor }),
+            ...(disabledKeys && { disabledKeys: disabledKeys as Iterable<Key> }),
+            ...(onSelectionChange && { onSelectionChange: onSelectionChange as (keys: 'all' | Set<Key>) => void }),
+            ...(onSortChange && { onSortChange }),
+        } as TableStateProps<object>;
+        const state = useTableState(tableStateProps);
+        const { gridProps } = useTable({ 'aria-label': 'Data table' }, state, ref);
+        const { rowGroupProps: theadProps } = useTableRowGroup();
+        const { rowGroupProps: tbodyProps } = useTableRowGroup();
         return createElement(
             'table',
             {
                 ...rest,
+                ...gridProps,
                 'aria-busy': b.loading || undefined,
                 'aria-disabled': b.disabled || undefined,
-                className: cls('w-full border-collapse text-sm', stateCls(b), i.className, className),
+                className: cls('w-full border-collapse text-sm', stateCls.data(b), i.className, className),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
             createElement(
                 'thead',
-                { className: 'border-b' },
-                createElement(
-                    'tr',
-                    null,
-                    columns.map((col) =>
-                        createElement(
-                            'th',
-                            { className: cls('text-left font-semibold', B.var.px, B.var.py), key: String(col.key) },
-                            col.header,
-                        ),
-                    ),
+                { ...theadProps, className: 'border-b' },
+                [...state.collection.headerRows].map((row) =>
+                    createElement(THeaderRow, { item: row, key: row.key, state }),
                 ),
             ),
             createElement(
                 'tbody',
-                { className: 'divide-y' },
-                data.map((row, idx) =>
-                    createElement(
-                        'tr',
-                        { key: idx },
-                        columns.map((col) =>
-                            createElement(
-                                'td',
-                                { className: cls(B.var.px, B.var.py), key: String(col.key) },
-                                String(row[col.key] ?? ''),
-                            ),
-                        ),
-                    ),
+                { ...tbodyProps, className: 'divide-y' },
+                [...state.collection.body.childNodes].map((row) =>
+                    createElement(TRow, { item: row, key: row.key, state }),
                 ),
             ),
         );
@@ -195,9 +346,9 @@ const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Re
 
 const builders = { avatar: mkAvatar, badge: mkBadge, card: mkCard, list: mkList, table: mkTable } as const;
 
-const createData = <T extends DataType>(i: DataInput<T>) => {
-    const s = resolveScale(i.scale);
-    const b = resolveBehavior(i.behavior);
+const createDT = <T extends DataType>(i: DataInput<T>) => {
+    const s = resolve('scale', i.scale);
+    const b = resolve('behavior', i.behavior);
     const c = computeScale(s);
     const v = cssVars(c, 'data');
     const builder = builders[i.type ?? 'card'];
@@ -210,34 +361,19 @@ const createData = <T extends DataType>(i: DataInput<T>) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const createDataComponents = (tuning?: { behavior?: BehaviorInput; scale?: ScaleInput }) =>
+const K = ['behavior', 'scale'] as const;
+
+const createData = (tuning?: DataTuning) =>
     Object.freeze({
-        Avatar: createData({ type: 'avatar', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Badge: createData({ type: 'badge', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Card: createData({
-            type: 'card',
-            ...(tuning?.behavior && { behavior: tuning.behavior }),
-            ...(tuning?.scale && { scale: tuning.scale }),
-        }),
-        create: <T extends DataType>(i: DataInput<T>) =>
-            createData({
-                ...i,
-                ...(merge(tuning?.behavior, i.behavior) && { behavior: merge(tuning?.behavior, i.behavior) }),
-                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
-            }),
-        List: createData({
-            type: 'list',
-            ...(tuning?.behavior && { behavior: tuning.behavior }),
-            ...(tuning?.scale && { scale: tuning.scale }),
-        }),
-        Table: createData({
-            type: 'table',
-            ...(tuning?.behavior && { behavior: tuning.behavior }),
-            ...(tuning?.scale && { scale: tuning.scale }),
-        }),
+        Avatar: createDT({ type: 'avatar', ...pick(tuning, ['scale']) }),
+        Badge: createDT({ type: 'badge', ...pick(tuning, ['scale']) }),
+        Card: createDT({ type: 'card', ...pick(tuning, K) }),
+        create: <T extends DataType>(i: DataInput<T>) => createDT({ ...i, ...merged(tuning, i, K) }),
+        List: createDT({ type: 'list', ...pick(tuning, K) }),
+        Table: createDT({ type: 'table', ...pick(tuning, K) }),
     });
 
 // --- Export -----------------------------------------------------------------
 
-export { B as DATA_TUNING, createDataComponents };
+export { createData };
 export type { AvatarProps, BadgeProps, CardProps, DataInput, DataType, ListProps, TableProps, Variant };

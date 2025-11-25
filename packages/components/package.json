@@ -50,6 +50,10 @@
             "import": "./dist/schema.js",
             "types": "./dist/schema.d.ts"
         },
+        "./selection": {
+            "import": "./dist/selection.js",
+            "types": "./dist/selection.d.ts"
+        },
         "./utility": {
             "import": "./dist/utility.js",
             "types": "./dist/utility.d.ts"

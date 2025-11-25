@@ -1,8 +1,8 @@
 import { Slot } from '@radix-ui/react-slot';
-import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
-import { createElement, forwardRef, useRef } from 'react';
-import type { BehaviorInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
+import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
+import { createElement, forwardRef } from 'react';
+import type { BehaviorInput, ElTuning, ScaleInput } from './schema.ts';
+import { B, cls, computeScale, cssVars, merged, pick, resolve, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -10,33 +10,32 @@ type Tag = 'article' | 'aside' | 'div' | 'footer' | 'header' | 'main' | 'nav' | 
 type FlexDir = 'col' | 'col-reverse' | 'row' | 'row-reverse';
 type FlexAlign = 'baseline' | 'center' | 'end' | 'start' | 'stretch';
 type FlexJustify = 'around' | 'between' | 'center' | 'end' | 'evenly' | 'start';
+type GridAutoFlow = keyof typeof B.el.grid.autoFlow;
+type DividerOrientation = 'horizontal' | 'vertical';
 type ElementInput<T extends Tag = 'div'> = {
     readonly align?: FlexAlign;
     readonly asChild?: boolean;
+    readonly autoFlow?: GridAutoFlow;
     readonly behavior?: BehaviorInput | undefined;
     readonly className?: string;
+    readonly columns?: number | string;
     readonly direction?: FlexDir;
     readonly gap?: boolean;
     readonly justify?: FlexJustify;
     readonly padding?: boolean;
     readonly radius?: boolean;
+    readonly rows?: number | string;
     readonly scale?: ScaleInput | undefined;
     readonly tag?: T;
     readonly wrap?: boolean;
 };
+type DividerInput = {
+    readonly className?: string;
+    readonly decorative?: boolean;
+    readonly orientation?: DividerOrientation;
+};
 type ElementProps = HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode };
-
-// --- Constants (Structural CSS Variable Classes Only) -----------------------
-
-const B = Object.freeze({
-    flex: { align: 'items-', dir: 'flex-', justify: 'justify-', wrap: { false: 'flex-nowrap', true: 'flex-wrap' } },
-    var: {
-        gap: 'gap-[var(--el-gap)]',
-        px: 'px-[var(--el-padding-x)]',
-        py: 'py-[var(--el-padding-y)]',
-        r: 'rounded-[var(--el-radius)]',
-    },
-} as const);
+type DividerProps = HTMLAttributes<HTMLDivElement>;
 
 // --- Pure Utility Functions -------------------------------------------------
 
@@ -44,34 +43,47 @@ const flexCls = (d?: FlexDir, a?: FlexAlign, j?: FlexJustify, w?: boolean): stri
     d
         ? cls(
               'flex',
-              `${B.flex.dir}${d}`,
-              `${B.flex.align}${a ?? 'stretch'}`,
-              `${B.flex.justify}${j ?? 'start'}`,
-              B.flex.wrap[w ? 'true' : 'false'],
+              `${B.el.flex.dir}${d}`,
+              `${B.el.flex.align}${a ?? 'stretch'}`,
+              `${B.el.flex.justify}${j ?? 'start'}`,
+              B.el.flex.wrap[w ? 'true' : 'false'],
           )
         : '';
 
+const gridCls = (cols?: number | string, rows?: number | string, flow?: GridAutoFlow): string =>
+    cols || rows ? cls('grid', flow ? B.el.grid.autoFlow[flow] : undefined) : '';
+
+const gridStyle = (cols?: number | string, rows?: number | string): CSSProperties => ({
+    ...(cols ? { gridTemplateColumns: typeof cols === 'number' ? `repeat(${cols}, minmax(0, 1fr))` : cols } : {}),
+    ...(rows ? { gridTemplateRows: typeof rows === 'number' ? `repeat(${rows}, minmax(0, 1fr))` : rows } : {}),
+});
+
 const varCls = (g?: boolean, p?: boolean, r?: boolean): string =>
-    cls(g ? B.var.gap : undefined, p ? `${B.var.px} ${B.var.py}` : undefined, r ? B.var.r : undefined);
+    cls(g ? B.el.var.gap : undefined, p ? `${B.el.var.px} ${B.el.var.py}` : undefined, r ? B.el.var.r : undefined);
 
 // --- Component Factory ------------------------------------------------------
 
 const createEl = <T extends Tag>(i: ElementInput<T>) => {
-    const beh = resolveBehavior(i.behavior);
-    const scl = resolveScale(i.scale);
+    const beh = resolve('behavior', i.behavior);
+    const scl = resolve('scale', i.scale);
     const vars = cssVars(computeScale(scl), 'el');
-    const base = cls(varCls(i.gap, i.padding, i.radius), flexCls(i.direction, i.align, i.justify, i.wrap), i.className);
+    const gStyle = gridStyle(i.columns, i.rows);
+    const base = cls(
+        varCls(i.gap, i.padding, i.radius),
+        flexCls(i.direction, i.align, i.justify, i.wrap),
+        gridCls(i.columns, i.rows, i.autoFlow),
+        i.className,
+    );
     const Comp = forwardRef((props: ElementProps, fRef: ForwardedRef<HTMLElement>) => {
         const { asChild, children, className, style, ...rest } = props;
-        const intRef = useRef<HTMLElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLElement>;
+        const ref = useForwardedRef(fRef);
         const elProps = {
             ...rest,
             'aria-busy': beh.loading || undefined,
             'aria-disabled': beh.disabled || undefined,
             className: cls(base, className),
             ref,
-            style: { ...vars, ...style } as CSSProperties,
+            style: { ...vars, ...gStyle, ...style } as CSSProperties,
             tabIndex: beh.focusable && beh.interactive && !beh.disabled ? 0 : undefined,
         };
         return (asChild ?? i.asChild)
@@ -82,35 +94,51 @@ const createEl = <T extends Tag>(i: ElementInput<T>) => {
     return Comp;
 };
 
+const createDivider = (i: DividerInput) => {
+    const orientation = i.orientation ?? 'horizontal';
+    const Comp = forwardRef((props: DividerProps, fRef: ForwardedRef<HTMLDivElement>) => {
+        const { className, ...rest } = props;
+        const ref = useForwardedRef(fRef);
+        return createElement('div', {
+            ...rest,
+            'aria-hidden': i.decorative ?? true,
+            className: cls(B.el.separator.base, B.el.separator[orientation], i.className, className),
+            'data-orientation': orientation,
+            ref,
+            role: 'separator',
+        });
+    });
+    Comp.displayName = `Divider(${orientation})`;
+    return Comp;
+};
+
 // --- Factory ----------------------------------------------------------------
 
-const createElements = (tuning?: { scale?: ScaleInput; behavior?: BehaviorInput }) =>
+const K = ['behavior', 'scale'] as const;
+
+const createElements = (tuning?: ElTuning) =>
     Object.freeze({
-        Box: createEl({
-            ...(tuning?.scale && { scale: tuning.scale }),
-            ...(tuning?.behavior && { behavior: tuning.behavior }),
-        }),
-        create: <T extends Tag>(i: ElementInput<T>) =>
-            createEl({
-                ...i,
-                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
-                ...(merge(tuning?.behavior, i.behavior) && { behavior: merge(tuning?.behavior, i.behavior) }),
-            }),
-        Flex: createEl({
-            direction: 'row',
-            gap: true,
-            ...(tuning?.scale && { scale: tuning.scale }),
-            ...(tuning?.behavior && { behavior: tuning.behavior }),
-        }),
-        Stack: createEl({
-            direction: 'col',
-            gap: true,
-            ...(tuning?.scale && { scale: tuning.scale }),
-            ...(tuning?.behavior && { behavior: tuning.behavior }),
-        }),
+        Box: createEl({ ...pick(tuning, K) }),
+        create: <T extends Tag>(i: ElementInput<T>) => createEl({ ...i, ...merged(tuning, i, K) }),
+        createDivider: (i: DividerInput) => createDivider(i),
+        Divider: createDivider({}),
+        Flex: createEl({ direction: 'row', gap: true, ...pick(tuning, K) }),
+        Grid: createEl({ columns: 3, gap: true, ...pick(tuning, K) }),
+        Stack: createEl({ direction: 'col', gap: true, ...pick(tuning, K) }),
     });
 
 // --- Export -----------------------------------------------------------------
 
-export { B as ELEMENT_TUNING, createElements };
-export type { ElementInput, ElementProps, FlexAlign, FlexDir, FlexJustify, Tag };
+export { createElements };
+export type {
+    DividerInput,
+    DividerOrientation,
+    DividerProps,
+    ElementInput,
+    ElementProps,
+    FlexAlign,
+    FlexDir,
+    FlexJustify,
+    GridAutoFlow,
+    Tag,
+};

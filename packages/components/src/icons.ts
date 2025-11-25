@@ -3,7 +3,10 @@ import { icons } from 'lucide-react';
 import type { CSSProperties, ForwardedRef, SVGAttributes } from 'react';
 import { createElement, forwardRef, memo, useMemo } from 'react';
 import type { ScaleInput } from './schema.ts';
-import { cls, computeScale, merge, resolveScale, strokeWidth, TUNING } from './schema.ts';
+import { cls, computeScale, merged, resolve, strokeWidth } from './schema.ts';
+
+// Icons has unique strokeWidth tuning (primitive, not schema-based)
+type IconTuning = { readonly scale?: ScaleInput | undefined; readonly strokeWidth?: number | undefined };
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -19,10 +22,7 @@ type DynamicIconProps = IconProps & { readonly name: IconName };
 
 // --- Constants --------------------------------------------------------------
 
-const B = Object.freeze({
-    names: Object.freeze(Object.keys(icons) as ReadonlyArray<IconName>),
-    stroke: TUNING.stroke,
-} as const);
+const iconNames = Object.freeze(Object.keys(icons) as ReadonlyArray<IconName>);
 const getIcon = (name: IconName): LucideIcon => icons[name];
 
 // --- Component Factory ------------------------------------------------------
@@ -34,7 +34,7 @@ const createIcon = (i: IconInput) => {
         const { size, stroke } = useMemo(() => {
             const base = i.scale ?? {};
             const props = ps ?? {};
-            const s = resolveScale({ ...base, ...props });
+            const s = resolve('scale', { ...base, ...props });
             const c = computeScale(s);
             return { size: c.iconSize, stroke: sw ?? i.strokeWidth ?? strokeWidth(s.scale) };
         }, [ps, sw, i.scale, i.strokeWidth]);
@@ -59,7 +59,7 @@ const DynamicIcon = memo(
         const { className, name, scale: ps, strokeWidth: sw, style, ...rest } = props;
         const Icon = getIcon(name);
         const { size, stroke } = useMemo(() => {
-            const s = resolveScale(ps);
+            const s = resolve('scale', ps);
             const c = computeScale(s);
             return { size: c.iconSize, stroke: sw ?? strokeWidth(s.scale) };
         }, [ps, sw]);
@@ -80,22 +80,22 @@ DynamicIcon.displayName = 'DynamicIcon';
 
 // --- Factory ----------------------------------------------------------------
 
-const createIcons = (tuning?: { scale?: ScaleInput; strokeWidth?: number }) =>
+const createIcons = (tuning?: IconTuning) =>
     Object.freeze({
         create: (i: IconInput) =>
             createIcon({
                 ...i,
-                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
+                ...merged(tuning, i, ['scale']),
                 ...((i.strokeWidth ?? tuning?.strokeWidth)
                     ? { strokeWidth: i.strokeWidth ?? tuning?.strokeWidth }
                     : {}),
             }),
         get: getIcon,
         Icon: DynamicIcon,
-        names: B.names,
+        names: iconNames,
     });
 
 // --- Export -----------------------------------------------------------------
 
-export { B as ICON_TUNING, createIcons };
+export { createIcons, iconNames };
 export type { DynamicIconProps, IconInput, IconName, IconProps };

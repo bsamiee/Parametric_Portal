@@ -1,16 +1,7 @@
-import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
-import { createElement, forwardRef, useRef } from 'react';
-import type { Animation, AnimationInput, Computed, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
-import {
-    animStyle,
-    cls,
-    computeScale,
-    cssVars,
-    merge,
-    resolveAnimation,
-    resolveFeedback,
-    resolveScale,
-} from './schema.ts';
+import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
+import { createElement, forwardRef } from 'react';
+import type { Animation, AnimationInput, Computed, FbTuning, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
+import { animStyle, B, cls, computeScale, cssVars, merged, pick, resolve, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -34,37 +25,30 @@ type FBInput<T extends FeedbackType = 'alert'> = {
     readonly type?: T;
 };
 
-// --- Constants (CSS Variable Classes Only - NO hardcoded colors) ------------
-
-const B = Object.freeze({
-    anim: { enter: 'animate-in fade-in slide-in-from-top-2', exit: 'animate-out fade-out slide-out-to-top-2' },
-    var: {
-        fs: 'text-[length:var(--fb-font-size)]',
-        g: 'gap-[var(--fb-gap)]',
-        px: 'px-[var(--fb-padding-x)]',
-        py: 'py-[var(--fb-padding-y)]',
-        r: 'rounded-[var(--fb-radius)]',
-    },
-} as const);
-
 // --- Component Builders -----------------------------------------------------
 
-const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback, a: Animation) =>
-    forwardRef((props: AlertProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { children, className, icon, onDismiss, style, variant, ...rest } = props;
-        const intRef = useRef<HTMLDivElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLDivElement>;
+const mkAlertBase = (
+    i: FBInput<'alert' | 'toast'>,
+    v: Record<string, string>,
+    f: Feedback,
+    a: Animation,
+    opts: { shadow: boolean; title: boolean },
+) =>
+    forwardRef((props: ToastProps, fRef: ForwardedRef<HTMLDivElement>) => {
+        const { children, className, icon, onDismiss, style, title, variant, ...rest } = props;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'div',
             {
                 ...rest,
                 className: cls(
                     'relative flex items-start border',
-                    B.var.g,
-                    B.var.px,
-                    B.var.py,
-                    B.var.r,
-                    B.var.fs,
+                    opts.shadow ? 'shadow-lg' : '',
+                    B.fb.var.g,
+                    B.fb.var.px,
+                    B.fb.var.py,
+                    B.fb.var.r,
+                    B.fb.var.fs,
                     i.className,
                     className,
                 ),
@@ -74,7 +58,12 @@ const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback, a:
                 style: { ...v, ...animStyle(a), ...style } as CSSProperties,
             },
             icon,
-            createElement('div', { className: 'flex-1' }, children),
+            createElement(
+                'div',
+                { className: 'flex-1' },
+                opts.title && title ? createElement('div', { className: 'font-semibold' }, title) : null,
+                children,
+            ),
             f.dismissible && onDismiss
                 ? createElement(
                       'button',
@@ -90,11 +79,16 @@ const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback, a:
         );
     });
 
+const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback, a: Animation) =>
+    mkAlertBase(i, v, f, a, { shadow: false, title: false });
+
+const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Feedback, a: Animation) =>
+    mkAlertBase(i, v, f, a, { shadow: true, title: true });
+
 const mkProgress = (i: FBInput<'progress'>, v: Record<string, string>) =>
     forwardRef((props: ProgressProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { className, style, value = 0, ...rest } = props;
-        const intRef = useRef<HTMLDivElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLDivElement>;
+        const ref = useForwardedRef(fRef);
         const clamped = Math.max(0, Math.min(100, value));
         return createElement(
             'div',
@@ -104,7 +98,8 @@ const mkProgress = (i: FBInput<'progress'>, v: Record<string, string>) =>
                 'aria-valuemin': 0,
                 'aria-valuenow': clamped,
                 className: cls(
-                    'relative h-2 w-full overflow-hidden rounded-full bg-current/10',
+                    'relative w-full overflow-hidden rounded-full bg-current/10',
+                    B.fb.var.progressH,
                     i.className,
                     className,
                 ),
@@ -122,15 +117,14 @@ const mkProgress = (i: FBInput<'progress'>, v: Record<string, string>) =>
 const mkSkeleton = (i: FBInput<'skeleton'>, c: Computed, v: Record<string, string>) =>
     forwardRef((props: SkeletonProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { className, lines = 1, style, ...rest } = props;
-        const intRef = useRef<HTMLDivElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLDivElement>;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'div',
             {
                 ...rest,
                 'aria-busy': true,
                 'aria-label': 'Loading',
-                className: cls('space-y-2', i.className, className),
+                className: cls('flex flex-col', B.fb.var.skeletonSp, i.className, className),
                 ref,
                 role: 'status',
                 style: { ...v, ...style } as CSSProperties,
@@ -138,7 +132,7 @@ const mkSkeleton = (i: FBInput<'skeleton'>, c: Computed, v: Record<string, strin
             Array.from({ length: lines }, (_, idx) =>
                 createElement('div', {
                     className: cls('animate-pulse rounded bg-current/10', idx === lines - 1 ? 'w-3/4' : 'w-full'),
-                    key: idx,
+                    key: `skeleton-line-${idx}`,
                     style: { height: c.height },
                 }),
             ),
@@ -148,8 +142,7 @@ const mkSkeleton = (i: FBInput<'skeleton'>, c: Computed, v: Record<string, strin
 const mkSpinner = (i: FBInput<'spinner'>, c: Computed) =>
     forwardRef((props: SpinnerProps, fRef: ForwardedRef<SVGSVGElement>) => {
         const { className, style, ...rest } = props;
-        const intRef = useRef<SVGSVGElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<SVGSVGElement>;
+        const ref = useForwardedRef(fRef);
         return createElement(
             'svg',
             {
@@ -175,52 +168,6 @@ const mkSpinner = (i: FBInput<'spinner'>, c: Computed) =>
         );
     });
 
-const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Feedback, a: Animation) =>
-    forwardRef((props: ToastProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { children, className, icon, onDismiss, style, title, variant, ...rest } = props;
-        const intRef = useRef<HTMLDivElement>(null);
-        const ref = (fRef ?? intRef) as RefObject<HTMLDivElement>;
-        return createElement(
-            'div',
-            {
-                ...rest,
-                className: cls(
-                    'relative flex items-start border shadow-lg',
-                    B.var.g,
-                    B.var.px,
-                    B.var.py,
-                    B.var.r,
-                    B.var.fs,
-                    i.className,
-                    className,
-                ),
-                'data-variant': variant,
-                ref,
-                role: 'alert',
-                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
-            },
-            icon,
-            createElement(
-                'div',
-                { className: 'flex-1' },
-                title ? createElement('div', { className: 'font-semibold' }, title) : null,
-                children,
-            ),
-            f.dismissible && onDismiss
-                ? createElement(
-                      'button',
-                      {
-                          'aria-label': 'Dismiss',
-                          className: 'ml-auto opacity-70 hover:opacity-100',
-                          onClick: onDismiss,
-                          type: 'button',
-                      },
-                      '\u00d7',
-                  )
-                : null,
-        );
-    });
-
 // --- Dispatch Table ---------------------------------------------------------
 
 const builders = {
@@ -232,9 +179,9 @@ const builders = {
 } as const;
 
 const createFB = <T extends FeedbackType>(i: FBInput<T>) => {
-    const s = resolveScale(i.scale);
-    const f = resolveFeedback(i.feedback);
-    const a = resolveAnimation(i.animation);
+    const s = resolve('scale', i.scale);
+    const f = resolve('feedback', i.feedback);
+    const a = resolve('animation', i.animation);
     const c = computeScale(s);
     const v = cssVars(c, 'fb');
     const builder = builders[i.type ?? 'alert'];
@@ -252,35 +199,21 @@ const createFB = <T extends FeedbackType>(i: FBInput<T>) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const createFeedback = (tuning?: { animation?: AnimationInput; feedback?: FeedbackInput; scale?: ScaleInput }) =>
+const K = ['animation', 'feedback', 'scale'] as const;
+
+const createFeedback = (tuning?: FbTuning) =>
     Object.freeze({
-        Alert: createFB({
-            type: 'alert',
-            ...(tuning?.animation && { animation: tuning.animation }),
-            ...(tuning?.feedback && { feedback: tuning.feedback }),
-            ...(tuning?.scale && { scale: tuning.scale }),
-        }),
-        create: <T extends FeedbackType>(i: FBInput<T>) =>
-            createFB({
-                ...i,
-                ...(merge(tuning?.animation, i.animation) && { animation: merge(tuning?.animation, i.animation) }),
-                ...(merge(tuning?.feedback, i.feedback) && { feedback: merge(tuning?.feedback, i.feedback) }),
-                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
-            }),
-        Progress: createFB({ type: 'progress', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Skeleton: createFB({ type: 'skeleton', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Spinner: createFB({ type: 'spinner', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Toast: createFB({
-            type: 'toast',
-            ...(tuning?.animation && { animation: tuning.animation }),
-            ...(tuning?.feedback && { feedback: tuning.feedback }),
-            ...(tuning?.scale && { scale: tuning.scale }),
-        }),
+        Alert: createFB({ type: 'alert', ...pick(tuning, K) }),
+        create: <T extends FeedbackType>(i: FBInput<T>) => createFB({ ...i, ...merged(tuning, i, K) }),
+        Progress: createFB({ type: 'progress', ...pick(tuning, ['scale']) }),
+        Skeleton: createFB({ type: 'skeleton', ...pick(tuning, ['scale']) }),
+        Spinner: createFB({ type: 'spinner', ...pick(tuning, ['scale']) }),
+        Toast: createFB({ type: 'toast', ...pick(tuning, K) }),
     });
 
 // --- Export -----------------------------------------------------------------
 
-export { B as FEEDBACK_TUNING, createFeedback };
+export { createFeedback };
 export type {
     AlertProps,
     FBInput as FeedbackInput,
