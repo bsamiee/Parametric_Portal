@@ -102,7 +102,7 @@ const resolve = (
     beh?: Partial<BehaviorConfig>,
     defaults?: { behavior: BehaviorConfig; dimensions: DimensionConfig },
 ): Effect.Effect<{ behavior: BehaviorConfig; dimensions: DimensionConfig }, never, never> => {
-    const defs = defaults ?? { behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() };
+    const defs = defaults ?? (() => ({ behavior: createBehaviorDefaults(), dimensions: createDimensionDefaults() }))();
     return pipe(
         Effect.all({
             behavior: pipe(
