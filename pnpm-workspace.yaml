@@ -48,10 +48,10 @@ catalog:
   lightningcss: 1.30.2
   lucide-react: 0.554.0
   nx: 22.2.0-canary.20251121-9a6c7ad
-  react: 19.3.0-canary-40b4a5bf-20251120
+  react: 19.3.0-canary-fd524fe0-20251121
   react-aria: 3.44.0
   react-compiler-runtime: 19.0.0-beta-ebf51a3-20250411
-  react-dom: 19.3.0-canary-40b4a5bf-20251120
+  react-dom: 19.3.0-canary-fd524fe0-20251121
   react-stately: 3.42.0
   rollup-plugin-visualizer: 6.0.5
   sharp: 0.34.5
