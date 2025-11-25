@@ -55,7 +55,7 @@ const processIcon = ({ maskable, size }: { maskable: boolean; size: number }): E
         Effect.tap(() =>
             Effect.sync(() => {
                 // biome-ignore lint/suspicious/noConsole: script output
-                console.log(`✓ Generated: ${getOutputPath(size, maskable)}`);
+                console.log(`[OK] Generated: ${getOutputPath(size, maskable)}`);
             }),
         ),
     );
@@ -68,13 +68,13 @@ const main = pipe(
     Effect.tap(() =>
         Effect.sync(() => {
             // biome-ignore lint/suspicious/noConsole: script output
-            console.log('\n✓ PWA Icons Generation Complete');
+            console.log('\n[OK] PWA Icons Generation Complete');
         }),
     ),
     Effect.catchAll((error) =>
         Effect.sync(() => {
             // biome-ignore lint/suspicious/noConsole: script output
-            console.error(`\n✗ Error: ${error.message}`);
+            console.error(`\n[ERROR] ${error.message}`);
             process.exit(1);
         }),
     ),

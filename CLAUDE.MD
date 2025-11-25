@@ -258,7 +258,7 @@ nx reset
 rm -rf node_modules/.vite packages/*/dist
 ```
 
-**Never bypass Nx** (breaks caching): ❌ `vite build`, ❌ `vitest run`
+**Never bypass Nx** (breaks caching): [AVOID] `vite build`, [AVOID] `vitest run`
 
 ### Testing with Effect/Option
 
@@ -366,12 +366,12 @@ nx build <project>
 
 **Single B Constant** (replace scattered constants):
 ```typescript
-// ❌ OLD
+// [AVOID] OLD
 const SIZES = Object.freeze({...});
 const VARIANTS = Object.freeze({...});
 const DEFAULTS = Object.freeze({...});
 
-// ✅ NEW
+// [USE] NEW
 const B = Object.freeze({
     defaults: { size: 'md', variant: 'primary' },
     sizes: { sm: 8, md: 12, lg: 16 },
@@ -382,11 +382,11 @@ const B = Object.freeze({
 
 **Dispatch Tables** (replace if/else):
 ```typescript
-// ❌ OLD
+// [AVOID] OLD
 if (mode === 'app') return appConfig();
 else if (mode === 'library') return libConfig();
 
-// ✅ NEW
+// [USE] NEW
 const handlers = {
     app: (c) => appConfig(c),
     library: (c) => libConfig(c),
@@ -396,11 +396,11 @@ return handlers[mode](config);
 
 **Single Polymorphic Entry Point**:
 ```typescript
-// ❌ OLD (separate functions)
+// [AVOID] OLD (separate functions)
 export const createAppConfig = () => {...};
 export const createLibraryConfig = () => {...};
 
-// ✅ NEW (polymorphic)
+// [USE] NEW (polymorphic)
 export const createConfig = (input: unknown) =>
     pipe(decode, dispatch);
 ```
@@ -544,10 +544,10 @@ catalog:
 
 ### 1. Precision & Task Specificity
 ```typescript
-// ❌ Vague
+// [AVOID] Vague
 "Make the code better"
 
-// ✅ Precise
+// [USE] Precise
 "Consolidate scattered constants into single B constant per vite.config.ts pattern,
 replace if/else with dispatch tables, use @effect/schema for validation"
 ```

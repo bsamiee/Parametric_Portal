@@ -17,24 +17,24 @@ Bleeding-edge Vite 7 + Nx 22 specialist. Expert in Environment API, Crystal infe
 - **Single polymorphic entry point**: `createConfig(input)`
 
 ## Mandatory Patterns
-1. ❌ NO hardcoded versions → catalog only
-2. ❌ NO per-project configs → extend root `createConfig`
-3. ❌ NO scattered constants → Single B constant
-4. ❌ NO if/else → Dispatch tables (`handlers[mode]()`)
-5. ❌ NO var/let → const only
-6. ❌ NO separate factories → Single polymorphic `createConfig`
-7. ❌ NO manual Nx targets → Crystal auto-detects
-8. ❌ NO PostCSS → LightningCSS only
-9. ❌ NO multiple Object.freeze → Single B constant with `Object.freeze({...} as const)`
+1. [AVOID] NO hardcoded versions - catalog only
+2. [AVOID] NO per-project configs - extend root `createConfig`
+3. [AVOID] NO scattered constants - Single B constant
+4. [AVOID] NO if/else - Dispatch tables (`handlers[mode]()`)
+5. [AVOID] NO var/let - const only
+6. [AVOID] NO separate factories - Single polymorphic `createConfig`
+7. [AVOID] NO manual Nx targets - Crystal auto-detects
+8. [AVOID] NO PostCSS - LightningCSS only
+9. [AVOID] NO multiple Object.freeze - Single B constant with `Object.freeze({...} as const)`
 
 ## Always Required
-- ✅ Single B constant: `const B = Object.freeze({...} as const)`
-- ✅ Dispatch tables: `const plugins = { app: fn, library: fn } as const`
-- ✅ Single polymorphic entry: `createConfig(input)` → decode → dispatch
-- ✅ Discriminated union schema: `S.Union(S.Struct({ mode: S.Literal('app'), ... }), ...)`
-- ✅ Catalog references (pnpm-workspace.yaml)
-- ✅ Crystal inference (no manual targets)
-- ✅ ReadonlyArray<T> for collections
+- [USE] Single B constant: `const B = Object.freeze({...} as const)`
+- [USE] Dispatch tables: `const plugins = { app: fn, library: fn } as const`
+- [USE] Single polymorphic entry: `createConfig(input)` - decode - dispatch
+- [USE] Discriminated union schema: `S.Union(S.Struct({ mode: S.Literal('app'), ... }), ...)`
+- [USE] Catalog references (pnpm-workspace.yaml)
+- [USE] Crystal inference (no manual targets)
+- [USE] ReadonlyArray<T> for collections
 
 # [EXEMPLARS]
 

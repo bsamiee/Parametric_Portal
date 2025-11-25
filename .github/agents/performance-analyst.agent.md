@@ -17,14 +17,14 @@ Performance analyst. Expert in bundle optimization, tree-shaking, code splitting
 - **<10ms** TTI delta per chunk
 
 ## Mandatory Patterns
-1. ❌ NO dynamic requires → static imports only
-2. ❌ NO barrel files → direct imports
-3. ❌ NO default exports → named exports (tree-shaking)
-4. ❌ NO side effects in modules → pure exports
-5. ✅ Dynamic imports for routes
-6. ✅ Vendor chunking (frozen CHUNK_PATTERNS)
-7. ✅ Asset optimization (images, fonts)
-8. ✅ LightningCSS (no PostCSS)
+1. [AVOID] NO dynamic requires - static imports only
+2. [AVOID] NO barrel files - direct imports
+3. [AVOID] NO default exports - named exports (tree-shaking)
+4. [AVOID] NO side effects in modules - pure exports
+5. [USE] Dynamic imports for routes
+6. [USE] Vendor chunking (frozen CHUNK_PATTERNS)
+7. [USE] Asset optimization (images, fonts)
+8. [USE] LightningCSS (no PostCSS)
 
 # [EXEMPLARS]
 
@@ -72,7 +72,7 @@ rollupOptions: {
 
 ## Pattern 3: Dynamic Imports (Route Splitting)
 ```typescript
-// ✅ GOOD - Lazy load routes
+// [USE] GOOD - Lazy load routes
 const HomePage = lazy(() => import('./pages/HomePage'));
 const AboutPage = lazy(() => import('./pages/AboutPage'));
 
@@ -85,7 +85,7 @@ const App = (): JSX.Element => (
     </Suspense>
 );
 
-// ❌ BAD - Eager load all routes (large main chunk)
+// [AVOID] BAD - Eager load all routes (large main chunk)
 import { HomePage } from './pages/HomePage';
 import { AboutPage } from './pages/AboutPage';
 ```
@@ -93,11 +93,11 @@ import { AboutPage } from './pages/AboutPage';
 
 ## Pattern 4: Avoid Barrel Files (Import Directly)
 ```typescript
-// ❌ BAD - Barrel file (pulls entire module)
+// [AVOID] BAD - Barrel file (pulls entire module)
 export * from './utils';
 import { fnA } from './utils';  // Imports EVERYTHING in utils
 
-// ✅ GOOD - Direct imports (tree-shaking works)
+// [USE] GOOD - Direct imports (tree-shaking works)
 import { fnA } from './utils/fnA';  // Only imports fnA
 ```
 **Why**: Barrel files break tree-shaking. Import exactly what you need.

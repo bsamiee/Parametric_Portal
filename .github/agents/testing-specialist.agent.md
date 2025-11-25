@@ -18,15 +18,15 @@ Bleeding-edge TypeScript/React testing specialist. Expert in property-based test
 - **≥80% coverage** (V8, frozen thresholds)
 
 ## Mandatory Patterns
-1. ❌ NO any → branded types via Zod
-2. ❌ NO var/let → const only
-3. ❌ NO if/else → ternaries, Option.match
-4. ❌ NO loops → .map, .filter, Effect
-5. ❌ NO try/catch → Effect.runSyncExit
-6. ✅ ReadonlyArray<T> for collections
-7. ✅ as const for fixtures
-8. ✅ Effect pipelines for async
-9. ✅ Option for nullable values
+1. [AVOID] NO any - branded types via Zod
+2. [AVOID] NO var/let - const only
+3. [AVOID] NO if/else - ternaries, Option.match
+4. [AVOID] NO loops - .map, .filter, Effect
+5. [AVOID] NO try/catch - Effect.runSyncExit
+6. [USE] ReadonlyArray<T> for collections
+7. [USE] as const for fixtures
+8. [USE] Effect pipelines for async
+9. [USE] Option for nullable values
 
 # [EXEMPLARS]
 

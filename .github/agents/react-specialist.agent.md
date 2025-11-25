@@ -17,18 +17,18 @@ Bleeding-edge React 19 specialist. Expert in Compiler auto-optimization, Server 
 - **≤25 complexity** per component (Biome)
 
 ## Mandatory Patterns
-1. ❌ NO useMemo/useCallback → Compiler handles
-2. ❌ NO forwardRef → React 19 auto-forwards
-3. ❌ NO React.memo() → Compiler optimizes
-4. ❌ NO var/let → const only
-5. ❌ NO if/else → ternaries, early returns
-6. ❌ NO inline object literals in JSX props
-7. ❌ NO default exports (except pages)
-8. ✅ 'use client' directive (client components)
-9. ✅ Async Server Components (data fetching)
-10. ✅ use() hook (promises/context)
-11. ✅ Suspense boundaries
-12. ✅ ReadonlyArray<T> for props
+1. [AVOID] NO useMemo/useCallback - Compiler handles
+2. [AVOID] NO forwardRef - React 19 auto-forwards
+3. [AVOID] NO React.memo() - Compiler optimizes
+4. [AVOID] NO var/let - const only
+5. [AVOID] NO if/else - ternaries, early returns
+6. [AVOID] NO inline object literals in JSX props
+7. [AVOID] NO default exports (except pages)
+8. [USE] 'use client' directive (client components)
+9. [USE] Async Server Components (data fetching)
+10. [USE] use() hook (promises/context)
+11. [USE] Suspense boundaries
+12. [USE] ReadonlyArray<T> for props
 
 # [EXEMPLARS]
 
@@ -41,7 +41,7 @@ Study before coding:
 
 ## Pattern 1: React Compiler Auto-Optimization
 ```typescript
-// ✅ GOOD - Compiler auto-optimizes
+// [USE] GOOD - Compiler auto-optimizes
 const Component = ({ items }: { items: ReadonlyArray<Item> }): JSX.Element => {
     // Compiler auto-memoizes expensive computation
     const sortedItems = items.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -60,7 +60,7 @@ const Component = ({ items }: { items: ReadonlyArray<Item> }): JSX.Element => {
     );
 };
 
-// ❌ BAD - Manual memoization interferes
+// [AVOID] BAD - Manual memoization interferes
 const Component = ({ items }: { items: ReadonlyArray<Item> }): JSX.Element => {
     // Don't do this - Compiler handles it
     const sortedItems = useMemo(() => items.slice().sort(...), [items]);
@@ -135,7 +135,7 @@ const Counter = (): JSX.Element => {
     return <button onClick={increment}>Count: {count}</button>;
 };
 
-// ✅ GOOD - Client boundary at leaf (minimal client JS)
+// [USE] GOOD - Client boundary at leaf (minimal client JS)
 // Server Component (root)
 const Page = async (): Promise<JSX.Element> => {
     const data = await fetchData();
@@ -149,7 +149,7 @@ const Page = async (): Promise<JSX.Element> => {
     );
 };
 
-// ❌ BAD - Client boundary too high (entire tree client-side)
+// [AVOID] BAD - Client boundary too high (entire tree client-side)
 'use client';
 const Page = (): JSX.Element => {
     // Loses Server Component benefits

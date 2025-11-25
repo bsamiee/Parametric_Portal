@@ -11,13 +11,14 @@ Integration specialist. Expert in unified constant factories, catalog version co
 **Philosophy**: Single source of truth. Unified factories generate all constants. Catalog versions only. No per-package divergence.
 
 ## Mandatory Patterns
-1. ❌ NO hardcoded versions → catalog only
-2. ❌ NO per-package configs → extend root `createConfig`
-3. ❌ NO scattered constants → Single B constant
-4. ❌ NO if/else → Dispatch tables
-5. ✅ Single B constant: `const B = Object.freeze({...} as const)`
-6. ✅ Dispatch tables: `const handlers = { mode1: fn1, mode2: fn2 } as const`
-7. ✅ Catalog references in all package.json
+1. [AVOID] NO hardcoded versions - catalog only
+2. [AVOID] NO per-package configs - extend root `createConfig`
+3. [AVOID] NO scattered constants - Single B constant
+4. [AVOID] NO if/else - Dispatch tables
+5. [AVOID] NO emojis in outputs - use `[OK]`/`[ERROR]`/`[AVOID]`/`[USE]`
+6. [USE] Single B constant: `const B = Object.freeze({...} as const)`
+7. [USE] Dispatch tables: `const handlers = { mode1: fn1, mode2: fn2 } as const`
+8. [USE] Catalog references in all package.json
 
 # [EXEMPLARS]
 
@@ -29,7 +30,7 @@ Integration specialist. Expert in unified constant factories, catalog version co
 
 ## Pattern 1: Single B Constant (Master Pattern)
 ```typescript
-// ✅ GOOD - All config in ONE frozen object
+// [USE] GOOD - All config in ONE frozen object
 const B = Object.freeze({
     defaults: { size: 'md', variant: 'primary' },
     sizes: { sm: 8, md: 12, lg: 16 },
@@ -37,7 +38,7 @@ const B = Object.freeze({
 } as const);
 // Access: B.defaults.size, B.sizes.md, B.variants.primary
 
-// ❌ BAD - Scattered constants (OLD pattern)
+// [AVOID] BAD - Scattered constants (OLD pattern)
 const SIZES = Object.freeze({...});
 const VARIANTS = Object.freeze({...});
 const DEFAULTS = Object.freeze({...});
@@ -52,7 +53,7 @@ catalog:
   effect: 3.19.6
   zod: 4.1.13
 
-// ✅ GOOD - All packages reference catalog
+// [USE] GOOD - All packages reference catalog
 // packages/my-package/package.json
 {
   "dependencies": {
@@ -62,7 +63,7 @@ catalog:
   }
 }
 
-// ❌ BAD - Hardcoded versions
+// [AVOID] BAD - Hardcoded versions
 {
   "dependencies": {
     "react": "19.3.0-canary-40b4a5bf-20251120",  // Don't hardcode!
@@ -74,7 +75,7 @@ catalog:
 
 ## Pattern 3: Extend Root createConfig (Polymorphic)
 ```typescript
-// ✅ GOOD - Extend polymorphic createConfig
+// [USE] GOOD - Extend polymorphic createConfig
 // packages/my-package/vite.config.ts
 import { defineConfig } from 'vite';
 import { Effect } from 'effect';
@@ -91,7 +92,7 @@ export default defineConfig(
     ),
 );
 
-// ❌ BAD - Custom config (diverges from root)
+// [AVOID] BAD - Custom config (diverges from root)
 export default defineConfig({
     build: { /* custom settings */ },  // Don't do this!
     plugins: [ /* custom plugins */ ],

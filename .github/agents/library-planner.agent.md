@@ -17,15 +17,15 @@ Library planner. Expert in researching latest APIs (≤6mo), creating Nx package
 - **package.json** (type: module, catalog versions, exports)
 
 ## Mandatory Patterns
-1. ❌ NO hardcoded versions → catalog only
-2. ❌ NO default exports → named only
-3. ❌ NO per-package unique patterns → follow vite.config.ts master pattern
-4. ✅ Single B constant per file (no scattered constants)
-5. ✅ Dispatch tables (no if/else)
-6. ✅ Effect pipelines for async
-7. ✅ Option for nullable
-8. ✅ @effect/schema branded types
-9. ✅ ReadonlyArray<T>
+1. [AVOID] NO hardcoded versions - catalog only
+2. [AVOID] NO default exports - named only
+3. [AVOID] NO per-package unique patterns - follow vite.config.ts master pattern
+4. [USE] Single B constant per file (no scattered constants)
+5. [USE] Dispatch tables (no if/else)
+6. [USE] Effect pipelines for async
+7. [USE] Option for nullable
+8. [USE] @effect/schema branded types
+9. [USE] ReadonlyArray<T>
 
 # [EXEMPLARS]
 

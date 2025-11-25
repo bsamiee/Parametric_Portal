@@ -16,15 +16,15 @@ Refactoring architect. Expert in holistic improvements: Effect/Option pipelines,
 - **300 LOC max** per function
 
 ## Mandatory Patterns
-1. ❌ NO any → branded types
-2. ❌ NO var/let → const only
-3. ❌ NO if/else → ternaries, Option.match
-4. ❌ NO loops → .map, .filter, Effect
-5. ❌ NO helper methods → improve algorithms
-6. ❌ NO try/catch → Effect error channel
-7. ✅ ReadonlyArray<T>
-8. ✅ as const
-9. ✅ Dispatch tables (no switch)
+1. [AVOID] NO any - branded types
+2. [AVOID] NO var/let - const only
+3. [AVOID] NO if/else - ternaries, Option.match
+4. [AVOID] NO loops - .map, .filter, Effect
+5. [AVOID] NO helper methods - improve algorithms
+6. [AVOID] NO try/catch - Effect error channel
+7. [USE] ReadonlyArray<T>
+8. [USE] as const
+9. [USE] Dispatch tables (no switch)
 
 # [EXEMPLARS]
 
@@ -36,12 +36,12 @@ Study before refactoring:
 
 ## Pattern 1: Similar Functions → Generic Parameterized
 ```typescript
-// ❌ BAD - 3 similar functions (90 LOC)
+// [AVOID] BAD - 3 similar functions (90 LOC)
 const fetchUser = async (id: string): Promise<User> => { /* ... */ };
 const fetchPost = async (id: string): Promise<Post> => { /* ... */ };
 const fetchComment = async (id: string): Promise<Comment> => { /* ... */ };
 
-// ✅ GOOD - 1 generic function (30 LOC, 67% reduction)
+// [USE] GOOD - 1 generic function (30 LOC, 67% reduction)
 const fetchById = <T>(
     endpoint: string,
     schema: S.Schema<T, unknown>,
@@ -62,7 +62,7 @@ const fetchComment = fetchById('/api/comments', CommentSchema);
 
 ## Pattern 2: Switch/If-Else → Dispatch Table
 ```typescript
-// ❌ BAD - Switch statement (imperative, 15 LOC)
+// [AVOID] BAD - Switch statement (imperative, 15 LOC)
 function processEvent(event: Event): string {
     switch (event.type) {
         case 'click': return handleClick(event);
@@ -72,7 +72,7 @@ function processEvent(event: Event): string {
     }
 }
 
-// ✅ GOOD - Dispatch table (functional, frozen, 8 LOC, 47% reduction)
+// [USE] GOOD - Dispatch table (functional, frozen, 8 LOC, 47% reduction)
 type EventType = 'click' | 'hover' | 'focus';
 
 const EVENT_HANDLERS = Object.freeze({
@@ -88,7 +88,7 @@ const processEvent = (event: Event): string =>
 
 ## Pattern 3: Scattered Helpers → Single Pipeline
 ```typescript
-// ❌ BAD - Many scattered helpers (40 LOC)
+// [AVOID] BAD - Many scattered helpers (40 LOC)
 const isValid = (x: unknown): boolean => { /* validate */ };
 const sanitize = (x: string): string => { /* sanitize */ };
 const normalize = (x: string): string => { /* normalize */ };
@@ -102,7 +102,7 @@ function processInput(input: unknown): string | null {
     return format(normalized);
 }
 
-// ✅ GOOD - Single pipeline (12 LOC, 70% reduction)
+// [USE] GOOD - Single pipeline (12 LOC, 70% reduction)
 const processInput = (input: unknown): Effect.Effect<string, Error, never> =>
     pipe(
         S.decode(InputSchema)(input),        // Validates
@@ -115,7 +115,7 @@ const processInput = (input: unknown): Effect.Effect<string, Error, never> =>
 
 ## Pattern 4: Imperative Loops → Functional Chains
 ```typescript
-// ❌ BAD - Imperative loops (10 LOC)
+// [AVOID] BAD - Imperative loops (10 LOC)
 function processItems(items: Item[]): ProcessedItem[] {
     const results: ProcessedItem[] = [];
     for (const item of items) {
@@ -127,7 +127,7 @@ function processItems(items: Item[]): ProcessedItem[] {
     return results;
 }
 
-// ✅ GOOD - Functional chain (3 LOC, 70% reduction)
+// [USE] GOOD - Functional chain (3 LOC, 70% reduction)
 const processItems = (items: ReadonlyArray<Item>): ReadonlyArray<ProcessedItem> =>
     items.filter((item) => item.active).map(transform);
 ```
@@ -135,14 +135,14 @@ const processItems = (items: ReadonlyArray<Item>): ReadonlyArray<ProcessedItem> 
 
 ## Pattern 5: Manual Validation → Zod Branded Types
 ```typescript
-// ❌ BAD - Manual validation scattered (20 LOC)
+// [AVOID] BAD - Manual validation scattered (20 LOC)
 function createUser(email: string, age: number): User | null {
     if (!email.includes('@')) return null;
     if (age < 0 || age > 150) return null;
     return { email, age };
 }
 
-// ✅ GOOD - Zod schema with branded types (8 LOC, 60% reduction)
+// [USE] GOOD - Zod schema with branded types (8 LOC, 60% reduction)
 const EmailSchema = pipe(
     S.String,
     S.pattern(/^[^@]+@[^@]+\.[^@]+$/),

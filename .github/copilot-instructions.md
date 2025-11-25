@@ -128,34 +128,34 @@ export { B as COMPONENT_TUNING, createComponents };
 
 ## Anti-Patterns to Avoid
 
-❌ **Scattered Constants**:
+[AVOID] **Scattered Constants**:
 ```typescript
 const SIZES = Object.freeze({...});
 const VARIANTS = Object.freeze({...});
 const DEFAULTS = Object.freeze({...});
 ```
-✅ **Single B Constant**:
+[USE] **Single B Constant**:
 ```typescript
 const B = Object.freeze({ sizes, variants, defaults } as const);
 ```
 
-❌ **If/Else Chains**:
+[AVOID] **If/Else Chains**:
 ```typescript
 if (mode === 'app') return appConfig();
 else if (mode === 'library') return libConfig();
 ```
-✅ **Dispatch Table**:
+[USE] **Dispatch Table**:
 ```typescript
 const config = { app: appConfig, library: libConfig } as const;
 return config[mode]();
 ```
 
-❌ **Separate Builder Functions**:
+[AVOID] **Separate Builder Functions**:
 ```typescript
 export const createAppConfig = () => {...};
 export const createLibraryConfig = () => {...};
 ```
-✅ **Polymorphic Entry Point**:
+[USE] **Polymorphic Entry Point**:
 ```typescript
 export const createConfig = (input) => pipe(decode, dispatch);
 ```

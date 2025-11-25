@@ -298,14 +298,24 @@ Effect.runSync(Effect.all({
 3. Relative imports
 4. Type imports (separate)
 
+**Messaging Standard** (console outputs, comments, docs):
+- `[OK]` - Success, correct pattern, completion
+- `[ERROR]` - Failure, error condition
+- `[AVOID]` - Anti-pattern, deprecated approach
+- `[USE]` - Preferred pattern, recommended approach
+- `[INFO]` - Informational, neutral status
+- `[WARN]` - Warning, caution required
+- **No emojis** in code outputs, comments, or documentation
+- Consistent bracketed indicators throughout codebase
+
 **Constant Pattern** (Single B Constant):
 ```typescript
-// ❌ OLD: Scattered constants
+// [AVOID] OLD: Scattered constants
 const SIZES = Object.freeze({...});
 const VARIANTS = Object.freeze({...});
 const DEFAULTS = Object.freeze({...});
 
-// ✅ NEW: Single B constant
+// [USE] NEW: Single B constant
 const B = Object.freeze({
     defaults: { size: 'md', variant: 'primary' },
     sizes: { sm: 8, md: 12, lg: 16 },
@@ -316,11 +326,11 @@ const B = Object.freeze({
 
 **Dispatch Table Pattern** (replace if/else):
 ```typescript
-// ❌ OLD: if/else chains
+// [AVOID] OLD: if/else chains
 if (mode === 'app') return appConfig();
 else if (mode === 'library') return libConfig();
 
-// ✅ NEW: Dispatch table
+// [USE] NEW: Dispatch table
 const handlers = {
     app: (c) => appConfig(c),
     library: (c) => libConfig(c),
@@ -330,11 +340,11 @@ return handlers[mode](config); // Type-safe lookup
 
 **Polymorphic Entry Point Pattern**:
 ```typescript
-// ❌ OLD: Separate factory functions
+// [AVOID] OLD: Separate factory functions
 export const createAppConfig = () => {...};
 export const createLibraryConfig = () => {...};
 
-// ✅ NEW: Single polymorphic entry
+// [USE] NEW: Single polymorphic entry
 export const createConfig = (input: unknown) =>
     pipe(
         Effect.try(() => S.decodeUnknownSync(CfgSchema)(input)),

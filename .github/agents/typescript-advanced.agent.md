@@ -11,16 +11,16 @@ TypeScript 6.0-dev specialist. Expert in branded types (Zod S.brand()), Effect/O
 **Philosophy**: Super strict types. Branded types for nominal typing. Effect/Option for safety. No any (except experimental APIs).
 
 ## Mandatory Patterns
-1. ❌ NO any → S.brand() for branded types
-2. ❌ NO var/let → const only
-3. ❌ NO if/else → ternaries, Option.match
-4. ❌ NO loops → .map, .filter, Effect
-5. ❌ NO null/undefined → Option
-6. ✅ Branded types via S.brand()
-7. ✅ Effect for async/errors
-8. ✅ Option for nullable
-9. ✅ ReadonlyArray<T>
-10. ✅ as const
+1. [AVOID] NO any - S.brand() for branded types
+2. [AVOID] NO var/let - const only
+3. [AVOID] NO if/else - ternaries, Option.match
+4. [AVOID] NO loops - .map, .filter, Effect
+5. [AVOID] NO null/undefined - Option
+6. [USE] Branded types via S.brand()
+7. [USE] Effect for async/errors
+8. [USE] Option for nullable
+9. [USE] ReadonlyArray<T>
+10. [USE] as const
 
 # [EXEMPLARS]
 
@@ -45,11 +45,11 @@ export const Email = pipe(
 );
 export type Email = S.Schema.Type<typeof Email>;
 
-// ✅ Type-safe - can't mix UserId and Email
+// [USE] Type-safe - can't mix UserId and Email
 const getUserById = (id: UserId): Effect.Effect<User, Error, never> => { /* ... */ };
 const getUserByEmail = (email: Email): Effect.Effect<User, Error, never> => { /* ... */ };
 
-// ❌ Won't compile - type mismatch
+// [AVOID] Won't compile - type mismatch
 const user1 = getUserById(email);  // Error: Email ≠ UserId
 const user2 = getUserByEmail(userId);  // Error: UserId ≠ Email
 ```
@@ -108,13 +108,13 @@ const userName = pipe(
 
 ## Pattern 4: Const Type Parameters
 ```typescript
-// ✅ GOOD - Const type params (literals preserved)
+// [USE] GOOD - Const type params (literals preserved)
 const createConfig = <const T extends ReadonlyArray<string>>(items: T): T => items;
 
 const config = createConfig(['a', 'b', 'c'] as const);
 // Type: readonly ['a', 'b', 'c'] (exact literals)
 
-// ❌ BAD - Without const (literals lost)
+// [AVOID] BAD - Without const (literals lost)
 const createConfigBad = <T extends ReadonlyArray<string>>(items: T): T => items;
 
 const configBad = createConfigBad(['a', 'b', 'c'] as const);
@@ -124,13 +124,13 @@ const configBad = createConfigBad(['a', 'b', 'c'] as const);
 
 ## Pattern 5: ReadonlyArray + as const
 ```typescript
-// ✅ GOOD - ReadonlyArray + as const
+// [USE] GOOD - ReadonlyArray + as const
 const COLORS = ['red', 'green', 'blue'] as const;
 type Color = typeof COLORS[number];  // 'red' | 'green' | 'blue'
 
 const processColors = (colors: ReadonlyArray<Color>): void => { /* ... */ };
 
-// ❌ BAD - Mutable array
+// [AVOID] BAD - Mutable array
 const COLORS_BAD = ['red', 'green', 'blue'];
 type ColorBad = typeof COLORS_BAD[number];  // string (too wide)
 ```
