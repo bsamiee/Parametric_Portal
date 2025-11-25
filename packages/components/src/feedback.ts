@@ -1,7 +1,7 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
-import type { Computed, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveFeedback, resolveScale } from './schema.ts';
+import type { Animation, AnimationInput, Computed, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveAnimation, resolveFeedback, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -18,6 +18,7 @@ type SpinnerProps = HTMLAttributes<SVGElement>;
 type SkeletonProps = HTMLAttributes<HTMLDivElement> & { readonly lines?: number };
 type ToastProps = AlertProps & { readonly title?: string };
 type FBInput<T extends FeedbackType = 'alert'> = {
+    readonly animation?: AnimationInput | undefined;
     readonly className?: string;
     readonly feedback?: FeedbackInput | undefined;
     readonly scale?: ScaleInput | undefined;
@@ -27,6 +28,7 @@ type FBInput<T extends FeedbackType = 'alert'> = {
 // --- Constants (CSS Variable Classes Only - NO hardcoded colors) ------------
 
 const B = Object.freeze({
+    anim: { enter: 'animate-in fade-in slide-in-from-top-2', exit: 'animate-out fade-out slide-out-to-top-2' },
     var: {
         fs: 'text-[length:var(--fb-font-size)]',
         g: 'gap-[var(--fb-gap)]',
@@ -36,9 +38,16 @@ const B = Object.freeze({
     },
 } as const);
 
+// --- Pure Utility Functions -------------------------------------------------
+
+const animStyle = (a: Animation): CSSProperties =>
+    a.enabled
+        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
+        : {};
+
 // --- Component Builders -----------------------------------------------------
 
-const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback) =>
+const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback, a: Animation) =>
     forwardRef((props: AlertProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, icon, onDismiss, style, variant, ...rest } = props;
         const intRef = useRef<HTMLDivElement>(null);
@@ -60,7 +69,7 @@ const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback) =>
                 'data-variant': variant,
                 ref,
                 role: 'alert',
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
             },
             icon,
             createElement('div', { className: 'flex-1' }, children),
@@ -164,7 +173,7 @@ const mkSpinner = (i: FBInput<'spinner'>, c: Computed) =>
         );
     });
 
-const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Feedback) =>
+const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Feedback, a: Animation) =>
     forwardRef((props: ToastProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, icon, onDismiss, style, title, variant, ...rest } = props;
         const intRef = useRef<HTMLDivElement>(null);
@@ -186,7 +195,7 @@ const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Feedback) =>
                 'data-variant': variant,
                 ref,
                 role: 'alert',
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
             },
             icon,
             createElement(
@@ -223,38 +232,47 @@ const builders = {
 const createFB = <T extends FeedbackType>(i: FBInput<T>) => {
     const s = resolveScale(i.scale);
     const f = resolveFeedback(i.feedback);
+    const a = resolveAnimation(i.animation);
     const c = computeScale(s);
     const v = cssVars(c, 'fb');
     const builder = builders[i.type ?? 'alert'];
     const comp = (
-        builder as (i: FBInput<T>, c: Computed, v: Record<string, string>, f: Feedback) => ReturnType<typeof forwardRef>
-    )(i, c, v, f);
+        builder as (
+            i: FBInput<T>,
+            v: Record<string, string>,
+            f: Feedback,
+            a: Animation,
+        ) => ReturnType<typeof forwardRef>
+    )(i, v, f, a);
     comp.displayName = `Feedback(${i.type ?? 'alert'})`;
     return comp;
 };
 
 // --- Factory ----------------------------------------------------------------
 
-const createFeedback = (tuning?: { scale?: ScaleInput; feedback?: FeedbackInput }) =>
+const createFeedback = (tuning?: { animation?: AnimationInput; feedback?: FeedbackInput; scale?: ScaleInput }) =>
     Object.freeze({
         Alert: createFB({
             type: 'alert',
-            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.animation && { animation: tuning.animation }),
             ...(tuning?.feedback && { feedback: tuning.feedback }),
+            ...(tuning?.scale && { scale: tuning.scale }),
         }),
         create: <T extends FeedbackType>(i: FBInput<T>) =>
             createFB({
                 ...i,
-                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
+                ...(merge(tuning?.animation, i.animation) && { animation: merge(tuning?.animation, i.animation) }),
                 ...(merge(tuning?.feedback, i.feedback) && { feedback: merge(tuning?.feedback, i.feedback) }),
+                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
             }),
         Progress: createFB({ type: 'progress', ...(tuning?.scale && { scale: tuning.scale }) }),
         Skeleton: createFB({ type: 'skeleton', ...(tuning?.scale && { scale: tuning.scale }) }),
         Spinner: createFB({ type: 'spinner', ...(tuning?.scale && { scale: tuning.scale }) }),
         Toast: createFB({
             type: 'toast',
-            ...(tuning?.scale && { scale: tuning.scale }),
+            ...(tuning?.animation && { animation: tuning.animation }),
             ...(tuning?.feedback && { feedback: tuning.feedback }),
+            ...(tuning?.scale && { scale: tuning.scale }),
         }),
     });
 

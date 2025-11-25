@@ -31,7 +31,11 @@ type ControlInput<T extends ControlType = 'button'> = {
 // --- Constants (CSS Variable Classes Only - NO hardcoded colors) ------------
 
 const B = Object.freeze({
-    state: { disabled: 'opacity-50 cursor-not-allowed pointer-events-none', loading: 'cursor-wait' },
+    state: {
+        disabled: 'opacity-50 cursor-not-allowed pointer-events-none',
+        loading: 'cursor-wait',
+        readonly: 'cursor-default',
+    },
     var: {
         base: 'inline-flex items-center justify-center font-medium transition-all duration-150',
         fs: 'text-[length:var(--ctrl-font-size)]',
@@ -48,7 +52,11 @@ const B = Object.freeze({
 const baseCls = (fw?: boolean): string =>
     cls(B.var.base, B.var.h, B.var.px, B.var.py, B.var.fs, B.var.r, B.var.g, fw ? 'w-full' : 'w-auto');
 const stateCls = (b: Behavior): string =>
-    cls(b.disabled ? B.state.disabled : undefined, b.loading ? B.state.loading : undefined);
+    cls(
+        b.disabled ? B.state.disabled : undefined,
+        b.loading ? B.state.loading : undefined,
+        b.readonly ? B.state.readonly : undefined,
+    );
 
 // --- Component Factories ----------------------------------------------------
 
@@ -96,10 +104,13 @@ const createInp = <T extends ControlType>(i: ControlInput<T>) => {
         const { focusProps, isFocusVisible } = useFocusRing();
         const merged = mergeProps(hoverProps, focusProps, rest, {
             'aria-busy': beh.loading || undefined,
+            'aria-readonly': beh.readonly || undefined,
             className: cls(base, stateCls(beh), className),
             'data-focus': isFocusVisible || undefined,
             'data-hover': isHovered || undefined,
+            'data-readonly': beh.readonly || undefined,
             disabled: beh.disabled,
+            readOnly: beh.readonly,
             ref,
             style: vars as CSSProperties,
             type: htmlType,

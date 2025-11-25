@@ -46,7 +46,10 @@ const B = Object.freeze({
 
 const focus = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
     createElement(FocusScope, { ...opts, ...({ children: child } as const) });
-const animStyle = (a: Animation): CSSProperties => (a.enabled ? { transition: `all ${a.duration}ms ${a.easing}` } : {});
+const animStyle = (a: Animation): CSSProperties =>
+    a.enabled
+        ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
+        : {};
 
 // --- Component Builders -----------------------------------------------------
 

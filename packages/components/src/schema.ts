@@ -27,6 +27,7 @@ const BehaviorSchema = S.Struct({
     focusable: S.optionalWith(S.Boolean, { default: () => true }),
     interactive: S.optionalWith(S.Boolean, { default: () => true }),
     loading: S.optionalWith(S.Boolean, { default: () => false }),
+    readonly: S.optionalWith(S.Boolean, { default: () => false }),
 });
 
 const OverlaySchema = S.Struct({
@@ -53,6 +54,7 @@ const FeedbackSchema = S.Struct({
 const AnimationSchema = S.Struct({
     // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('animation'), { default: () => 'animation' as const }),
+    delay: S.optionalWith(NonNegativeIntSchema, { default: () => 0 as never }),
     duration: S.optionalWith(NonNegativeIntSchema, { default: () => 200 as never }),
     easing: S.optionalWith(S.String, { default: () => 'ease-out' as never }),
     enabled: S.optionalWith(S.Boolean, { default: () => true }),
@@ -83,6 +85,7 @@ type BehaviorInput = {
     readonly focusable?: boolean;
     readonly interactive?: boolean;
     readonly loading?: boolean;
+    readonly readonly?: boolean;
 };
 type OverlayInput = {
     readonly backdrop?: boolean;
@@ -93,7 +96,12 @@ type OverlayInput = {
     readonly trapFocus?: boolean;
 };
 type FeedbackInput = { readonly autoDismiss?: boolean; readonly dismissible?: boolean; readonly duration?: number };
-type AnimationInput = { readonly duration?: number; readonly easing?: string; readonly enabled?: boolean };
+type AnimationInput = {
+    readonly delay?: number;
+    readonly duration?: number;
+    readonly easing?: string;
+    readonly enabled?: boolean;
+};
 
 // --- Constants (Algorithmic Only) -------------------------------------------
 

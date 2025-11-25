@@ -1,7 +1,7 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ImgHTMLAttributes, ReactNode, RefObject } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
-import type { Computed, ScaleInput } from './schema.ts';
-import { cls, computeScale, cssVars, merge, resolveScale } from './schema.ts';
+import type { Behavior, BehaviorInput, Computed, ScaleInput } from './schema.ts';
+import { cls, computeScale, cssVars, merge, resolveBehavior, resolveScale } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -26,6 +26,7 @@ type TableProps<T> = HTMLAttributes<HTMLTableElement> & {
     readonly data: ReadonlyArray<T>;
 };
 type DataInput<T extends DataType = 'card'> = {
+    readonly behavior?: BehaviorInput | undefined;
     readonly className?: string;
     readonly scale?: ScaleInput | undefined;
     readonly type?: T;
@@ -34,6 +35,7 @@ type DataInput<T extends DataType = 'card'> = {
 // --- Constants (CSS Variable Classes Only - NO hardcoded colors) ------------
 
 const B = Object.freeze({
+    state: { disabled: 'opacity-50 pointer-events-none', loading: 'animate-pulse' },
     var: {
         g: 'gap-[var(--data-gap)]',
         px: 'px-[var(--data-padding-x)]',
@@ -41,6 +43,9 @@ const B = Object.freeze({
         r: 'rounded-[var(--data-radius)]',
     },
 } as const);
+
+const stateCls = (b: Behavior): string =>
+    cls(b.disabled ? B.state.disabled : undefined, b.loading ? B.state.loading : undefined);
 
 // --- Component Builders -----------------------------------------------------
 
@@ -93,7 +98,7 @@ const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
         );
     });
 
-const mkCard = (i: DataInput<'card'>, v: Record<string, string>) =>
+const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Behavior) =>
     forwardRef((props: CardProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, footer, header, style, ...rest } = props;
         const intRef = useRef<HTMLDivElement>(null);
@@ -102,7 +107,9 @@ const mkCard = (i: DataInput<'card'>, v: Record<string, string>) =>
             'div',
             {
                 ...rest,
-                className: cls(B.var.r, 'border shadow-sm overflow-hidden', i.className, className),
+                'aria-busy': b.loading || undefined,
+                'aria-disabled': b.disabled || undefined,
+                className: cls(B.var.r, 'border shadow-sm overflow-hidden', stateCls(b), i.className, className),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
@@ -114,7 +121,7 @@ const mkCard = (i: DataInput<'card'>, v: Record<string, string>) =>
         );
     });
 
-const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>) =>
+const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Behavior) =>
     forwardRef((props: ListProps<T>, fRef: ForwardedRef<HTMLUListElement>) => {
         const { className, items, renderItem, style, ...rest } = props;
         const intRef = useRef<HTMLUListElement>(null);
@@ -123,7 +130,9 @@ const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>) =>
             'ul',
             {
                 ...rest,
-                className: cls('space-y-1', i.className, className),
+                'aria-busy': b.loading || undefined,
+                'aria-disabled': b.disabled || undefined,
+                className: cls('space-y-1', stateCls(b), i.className, className),
                 ref,
                 role: 'list',
                 style: { ...v, ...style } as CSSProperties,
@@ -132,7 +141,7 @@ const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>) =>
         );
     });
 
-const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Record<string, string>) =>
+const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Record<string, string>, b: Behavior) =>
     forwardRef((props: TableProps<T>, fRef: ForwardedRef<HTMLTableElement>) => {
         const { className, columns, data, style, ...rest } = props;
         const intRef = useRef<HTMLTableElement>(null);
@@ -141,7 +150,9 @@ const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Re
             'table',
             {
                 ...rest,
-                className: cls('w-full border-collapse text-sm', i.className, className),
+                'aria-busy': b.loading || undefined,
+                'aria-disabled': b.disabled || undefined,
+                className: cls('w-full border-collapse text-sm', stateCls(b), i.className, className),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
@@ -186,27 +197,44 @@ const builders = { avatar: mkAvatar, badge: mkBadge, card: mkCard, list: mkList,
 
 const createData = <T extends DataType>(i: DataInput<T>) => {
     const s = resolveScale(i.scale);
+    const b = resolveBehavior(i.behavior);
     const c = computeScale(s);
     const v = cssVars(c, 'data');
     const builder = builders[i.type ?? 'card'];
     const comp = (
-        builder as (i: DataInput<T>, c: Computed, v: Record<string, string>) => ReturnType<typeof forwardRef>
-    )(i, c, v);
+        builder as (i: DataInput<T>, v: Record<string, string>, b: Behavior) => ReturnType<typeof forwardRef>
+    )(i, v, b);
     comp.displayName = `Data(${i.type ?? 'card'})`;
     return comp;
 };
 
 // --- Factory ----------------------------------------------------------------
 
-const createDataComponents = (tuning?: { scale?: ScaleInput }) =>
+const createDataComponents = (tuning?: { behavior?: BehaviorInput; scale?: ScaleInput }) =>
     Object.freeze({
         Avatar: createData({ type: 'avatar', ...(tuning?.scale && { scale: tuning.scale }) }),
         Badge: createData({ type: 'badge', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Card: createData({ type: 'card', ...(tuning?.scale && { scale: tuning.scale }) }),
+        Card: createData({
+            type: 'card',
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
+            ...(tuning?.scale && { scale: tuning.scale }),
+        }),
         create: <T extends DataType>(i: DataInput<T>) =>
-            createData({ ...i, ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }) }),
-        List: createData({ type: 'list', ...(tuning?.scale && { scale: tuning.scale }) }),
-        Table: createData({ type: 'table', ...(tuning?.scale && { scale: tuning.scale }) }),
+            createData({
+                ...i,
+                ...(merge(tuning?.behavior, i.behavior) && { behavior: merge(tuning?.behavior, i.behavior) }),
+                ...(merge(tuning?.scale, i.scale) && { scale: merge(tuning?.scale, i.scale) }),
+            }),
+        List: createData({
+            type: 'list',
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
+            ...(tuning?.scale && { scale: tuning.scale }),
+        }),
+        Table: createData({
+            type: 'table',
+            ...(tuning?.behavior && { behavior: tuning.behavior }),
+            ...(tuning?.scale && { scale: tuning.scale }),
+        }),
     });
 
 // --- Export -----------------------------------------------------------------
