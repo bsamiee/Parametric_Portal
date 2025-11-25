@@ -30,8 +30,8 @@ catalog:
   '@vitest/ui': 4.0.13
   '@effect/vitest': 0.25.1
   '@fast-check/vitest': 0.2.3
-  '@stryker-mutator/core': 9.1.0
-  '@stryker-mutator/vitest-runner': 9.1.0
+  '@stryker-mutator/core': 9.4.0
+  '@stryker-mutator/vitest-runner': 9.4.0
   fast-check: 4.3.0
   babel-plugin-react-compiler: 19.0.0-beta-ebf51a3-20250411
   browserslist: 4.28.0
