@@ -11,6 +11,7 @@ type Email = S.Schema.Type<typeof EmailSchema>;
 type HexColor = S.Schema.Type<typeof HexColorSchema>;
 type IsoDate = S.Schema.Type<typeof IsoDateSchema>;
 type NonEmptyString = S.Schema.Type<typeof NonEmptyStringSchema>;
+type NonNegativeInt = S.Schema.Type<typeof NonNegativeIntSchema>;
 type Percentage = S.Schema.Type<typeof PercentageSchema>;
 type PositiveInt = S.Schema.Type<typeof PositiveIntSchema>;
 type SafeInteger = S.Schema.Type<typeof SafeIntegerSchema>;
@@ -75,6 +76,7 @@ const SafeIntegerSchema = pipe(
 );
 const SlugSchema = pipe(S.String, S.pattern(B.patterns.slug), S.brand('Slug'));
 const UrlSchema = pipe(S.String, S.pattern(B.patterns.url), S.brand('Url'));
+const NonNegativeIntSchema = pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt'));
 
 const patterns = Object.freeze({
     email: B.patterns.email,
@@ -108,7 +110,7 @@ const brands = Object.freeze({
     hexColor: HexColorSchema,
     isoDate: IsoDateSchema,
     nonEmptyString: NonEmptyStringSchema,
-    nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt')),
+    nonNegativeInt: NonNegativeIntSchema,
     percentage: PercentageSchema,
     positiveInt: PositiveIntSchema,
     safeInteger: SafeIntegerSchema,
@@ -165,6 +167,7 @@ export type {
     HexColor,
     IsoDate,
     NonEmptyString,
+    NonNegativeInt,
     Percentage,
     PositiveInt,
     SafeInteger,
