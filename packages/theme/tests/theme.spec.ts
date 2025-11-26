@@ -7,8 +7,19 @@ import { defineThemes, THEME_CONFIG } from '../src/theme.ts';
 
 const loadVirtualModule = (input: Parameters<typeof defineThemes>[0]) => {
     const plugin = defineThemes(input);
-    const resolved = plugin.resolveId?.('virtual:parametric-theme');
-    return { css: plugin.load?.(resolved ?? ''), resolved };
+    const resolveIdHook = plugin.resolveId;
+    const loadHook = plugin.load;
+    const resolved =
+        typeof resolveIdHook === 'function'
+            ? resolveIdHook.call({} as never, 'virtual:parametric-theme', undefined, {
+                  attributes: {},
+                  isEntry: false,
+              })
+            : undefined;
+    const loadResult =
+        typeof loadHook === 'function' ? loadHook.call({} as never, (resolved as string) ?? '') : undefined;
+    const css = typeof loadResult === 'string' ? loadResult : undefined;
+    return { css, resolved };
 };
 
 // --- Test Data (Parameterized) ----------------------------------------------

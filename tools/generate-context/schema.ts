@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import { Schema as S } from '@effect/schema';
 import { pipe } from 'effect';
 

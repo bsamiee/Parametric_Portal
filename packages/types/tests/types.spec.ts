@@ -1,6 +1,6 @@
 import { Schema as S } from '@effect/schema';
 import { it } from '@fast-check/vitest';
-import { Effect, Either } from 'effect';
+import { Effect } from 'effect';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
 import { createTypes, TYPES_TUNING } from '../src/types.ts';
@@ -79,8 +79,8 @@ describe('types package', () => {
         it(`${expected ? 'accepts' : 'rejects'} value`, () => {
             const api = loadApi();
             const schema = api.brands[brand as keyof typeof api.brands];
-            const result = Effect.runSync(Effect.either(S.decode(schema)(value as never)));
-            expect(Either.isRight(result)).toBe(expected);
+            const isValid = S.is(schema as S.Schema<unknown, unknown, never>)(value);
+            expect(isValid).toBe(expected);
         });
     });
 
