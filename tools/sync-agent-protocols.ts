@@ -158,9 +158,10 @@ const generateFiles = (root: string, sections: Sections): Effect.Effect<Readonly
     pipe(
         buildSectionContent(sections),
         Effect.map((content) => {
-            const agentsHash = computeHash(content);
-            const claudeHash = computeHash(content);
-            const copilotHash = computeHash(content);
+            // Hash includes header to make each file's hash unique
+            const agentsHash = computeHash(`${B.templates.agents.header}${content}`);
+            const copilotHash = computeHash(`${B.templates.copilot.header}${content}`);
+            const claudeHash = computeHash(`${B.templates.claude.header}${content}`);
 
             return [
                 {

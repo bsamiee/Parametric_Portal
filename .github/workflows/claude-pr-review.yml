@@ -1,0 +1,375 @@
+name: PR Review & Summary
+
+on:
+    workflow_run:
+        workflows: ["CI"]
+        types: [completed]
+    issue_comment:
+        types: [created]
+
+concurrency:
+    group: pr-review-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+    pull-requests: write
+    issues: write
+    checks: read
+    id-token: write
+    actions: read
+
+jobs:
+    # Job 1: REQUIREMENTS.md Compliance Review (post-CI)
+    requirements-review:
+        if: |
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.pull_requests[0]
+        runs-on: ubuntu-latest
+        outputs:
+            pr_number: ${{ steps.pr.outputs.number }}
+            head_sha: ${{ steps.pr.outputs.head_sha }}
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              with:
+                  fetch-depth: 0
+
+            - name: Get PR Info
+              id: pr
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const pr = context.payload.workflow_run.pull_requests[0];
+                      core.setOutput('number', pr.number);
+                      core.setOutput('head_sha', pr.head.sha);
+
+            - name: Collect CI Status
+              id: ci
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const { data: checks } = await github.rest.checks.listForRef({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        ref: '${{ steps.pr.outputs.head_sha }}'
+                      });
+
+                      const status = checks.check_runs.map(c => ({
+                        name: c.name,
+                        status: c.status,
+                        conclusion: c.conclusion
+                      }));
+
+                      core.setOutput('status', JSON.stringify(status));
+
+            - name: Run REQUIREMENTS.md Compliance Review
+              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  prompt: |
+                      Perform comprehensive REQUIREMENTS.md compliance review for PR #${{ steps.pr.outputs.number }}.
+
+                      CI Status: ${{ steps.ci.outputs.status }}
+
+                      ## COMPLIANCE CHECKS
+
+                      Read REQUIREMENTS.md and check the PR diff for violations:
+
+                      ### Forbidden Patterns (MUST fail review if found)
+                      1. `any` type usage (except type assertions with justification)
+                      2. `var` or `let` declarations (must use `const`)
+                      3. `if/else` chains (must use dispatch tables or ternaries)
+                      4. `for`/`while` loops (must use .map/.filter/Effect)
+                      5. `try/catch` blocks (must use Effect error channel)
+                      6. `console.log` in production code (allowed in tools/ and scripts/)
+
+                      ### Required Patterns
+                      1. B constant pattern - single frozen object for all config
+                      2. Dispatch tables for mode/type switching
+                      3. Effect.Effect<T, E, R> for async operations
+                      4. Option.match for nullable handling
+                      5. Section separators (77-char `// --- Name ---`) for files >50 LOC
+
+                      ### Exemptions
+                      - `*.config.ts` files: default exports allowed
+                      - `*.spec.ts`/`*.test.ts` files: test utilities allowed
+                      - `plugins/*` files: side effects allowed
+
+                      ## OUTPUT FORMAT
+
+                      Generate a review with this structure:
+
+                      ### Compliance Summary
+
+                      | Rule | Status | Details |
+                      |------|--------|---------|
+                      (one row per check)
+
+                      ### Violations (if any)
+                      - File: path/to/file.ts:line
+                      - Rule: [rule name]
+                      - Code: `offending code`
+                      - Fix: [suggested fix]
+
+                      ### Recommendations
+                      (non-blocking suggestions)
+
+                      Use `gh pr review ${{ steps.pr.outputs.number }}` with:
+                      - `--approve` if ALL mandatory checks pass
+                      - `--request-changes` if ANY violation found
+
+                  claude_args: |
+                      --model claude-opus-4-5-20251101
+                      --max-turns 10
+                      --allowedTools Read,Grep,Glob,Bash(pnpm:*),Bash(git diff:*),Bash(gh pr:*)
+
+    # Job 2: Synthesize and Post Summary
+    synthesize-summary:
+        needs: requirements-review
+        if: always() && needs.requirements-review.outputs.pr_number
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+
+            - name: Collect Reviews
+              id: reviews
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const prNumber = ${{ needs.requirements-review.outputs.pr_number }};
+
+                      const { data: reviews } = await github.rest.pulls.listReviews({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: prNumber
+                      });
+
+                      const { data: pr } = await github.rest.pulls.get({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: prNumber
+                      });
+
+                      const { data: checks } = await github.rest.checks.listForRef({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        ref: pr.head.sha
+                      });
+
+                      const summary = {
+                        reviews: reviews.map(r => ({
+                          author: r.user.login,
+                          state: r.state,
+                          body: r.body?.substring(0, 500) || ''
+                        })),
+                        checks: checks.check_runs.map(c => ({
+                          name: c.name,
+                          status: c.status,
+                          conclusion: c.conclusion
+                        }))
+                      };
+
+                      core.setOutput('data', JSON.stringify(summary));
+
+            - name: Synthesize Summary
+              id: synthesize
+              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  prompt: |
+                      Synthesize PR #${{ needs.requirements-review.outputs.pr_number }} review data into a structured summary.
+
+                      Review Data:
+                      ```json
+                      ${{ steps.reviews.outputs.data }}
+                      ```
+
+                      Generate a markdown summary with these exact sections:
+
+                      ## Overall Assessment
+                      - **Risk**: LOW | MEDIUM | HIGH (based on review concerns)
+                      - **Merge Readiness**: BLOCKED | CAUTION | SAFE
+
+                      ## Required Actions (blocking)
+                      - List any changes required before merge
+                      - "None" if ready
+
+                      ## Quality Signals
+                      | Check | Status |
+                      |-------|--------|
+                      (list all CI checks)
+
+                      ## Nits (non-blocking)
+                      - List style/minor suggestions
+                      - "None" if no nits
+
+                      ## Agent Provenance
+                      - List which reviewers (human/bot) provided feedback
+
+                      Output ONLY the markdown, no preamble.
+                  claude_args: |
+                      --model claude-sonnet-4-5-20250929
+                      --max-turns 3
+                      --allowedTools Read
+
+            - name: Post Summary Comment
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const prNumber = ${{ needs.requirements-review.outputs.pr_number }};
+                      const marker = '<!-- PR-REVIEW-SUMMARY -->';
+                      const summary = `${marker}\n# PR Review Summary\n\n${{ steps.synthesize.outputs.claude_response || '## Summary\n\nNo synthesis available.' }}`;
+
+                      const { data: comments } = await github.rest.issues.listComments({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: prNumber
+                      });
+
+                      const existing = comments.find(c => c.body?.includes(marker));
+
+                      if (existing) {
+                        await github.rest.issues.updateComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          comment_id: existing.id,
+                          body: summary
+                        });
+                      } else {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: prNumber,
+                          body: summary
+                        });
+                      }
+
+    # Job 3: On-demand summary via /summarize command
+    manual-summarize:
+        if: |
+            github.event_name == 'issue_comment' &&
+            github.event.issue.pull_request &&
+            contains(github.event.comment.body, '/summarize')
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+
+            - name: Collect Reviews
+              id: reviews
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const prNumber = context.payload.issue.number;
+
+                      const { data: reviews } = await github.rest.pulls.listReviews({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: prNumber
+                      });
+
+                      const { data: pr } = await github.rest.pulls.get({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: prNumber
+                      });
+
+                      const { data: checks } = await github.rest.checks.listForRef({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        ref: pr.head.sha
+                      });
+
+                      const summary = {
+                        reviews: reviews.map(r => ({
+                          author: r.user.login,
+                          state: r.state,
+                          body: r.body?.substring(0, 500) || ''
+                        })),
+                        checks: checks.check_runs.map(c => ({
+                          name: c.name,
+                          status: c.status,
+                          conclusion: c.conclusion
+                        }))
+                      };
+
+                      core.setOutput('data', JSON.stringify(summary));
+                      core.setOutput('pr_number', prNumber);
+
+            - name: Synthesize Summary
+              id: synthesize
+              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  prompt: |
+                      Synthesize PR #${{ steps.reviews.outputs.pr_number }} review data into a structured summary.
+
+                      Review Data:
+                      ```json
+                      ${{ steps.reviews.outputs.data }}
+                      ```
+
+                      Generate a markdown summary with these exact sections:
+
+                      ## Overall Assessment
+                      - **Risk**: LOW | MEDIUM | HIGH (based on review concerns)
+                      - **Merge Readiness**: BLOCKED | CAUTION | SAFE
+
+                      ## Required Actions (blocking)
+                      - List any changes required before merge
+                      - "None" if ready
+
+                      ## Quality Signals
+                      | Check | Status |
+                      |-------|--------|
+                      (list all CI checks)
+
+                      ## Nits (non-blocking)
+                      - List style/minor suggestions
+                      - "None" if no nits
+
+                      ## Agent Provenance
+                      - List which reviewers (human/bot) provided feedback
+
+                      Output ONLY the markdown, no preamble.
+                  claude_args: |
+                      --model claude-sonnet-4-5-20250929
+                      --max-turns 3
+                      --allowedTools Read
+
+            - name: Post Summary Comment
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const prNumber = ${{ steps.reviews.outputs.pr_number }};
+                      const marker = '<!-- PR-REVIEW-SUMMARY -->';
+                      const summary = `${marker}\n# PR Review Summary\n\n${{ steps.synthesize.outputs.claude_response || '## Summary\n\nNo synthesis available.' }}`;
+
+                      const { data: comments } = await github.rest.issues.listComments({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: prNumber
+                      });
+
+                      const existing = comments.find(c => c.body?.includes(marker));
+
+                      if (existing) {
+                        await github.rest.issues.updateComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          comment_id: existing.id,
+                          body: summary
+                        });
+                      } else {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: prNumber,
+                          body: summary
+                        });
+                      }

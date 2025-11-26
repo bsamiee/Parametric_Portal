@@ -22,22 +22,10 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
 
-            - name: Setup pnpm
-              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
-              with:
-                  version: 10.23.0
-                  run_install: false
-
-            - name: Setup Node.js
-              uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-              with:
-                  node-version: "25.2.1"
-                  cache: pnpm
-
-            - name: Install Dependencies
-              run: pnpm install --frozen-lockfile
+            - name: Setup Environment
+              uses: ./.github/actions/setup
 
             - name: Parse AGENT_CONTEXT
               id: context
@@ -46,7 +34,7 @@ jobs:
                   echo "context=$CONTEXT" >> $GITHUB_OUTPUT
 
             - name: Apply Context Labels
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const agentContext = JSON.parse('${{ steps.context.outputs.context }}');
@@ -68,7 +56,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Validate Issue Format
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const issue = context.payload.issue;
@@ -116,7 +104,7 @@ jobs:
                   exempt-pr-labels: pinned,security,priority/critical
 
             - name: Generate Aging Report
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const { data: issues } = await github.rest.issues.listForRepo({

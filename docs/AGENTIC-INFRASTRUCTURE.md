@@ -17,12 +17,11 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/labeler.yml` — Path-to-label mappings for auto-labeler workflow
 - `.github/copilot-instructions.md` — IDE agent instructions (generated from REQUIREMENTS.md)
 
-### GitHub Workflows (17 total)
+### GitHub Workflows (14 total)
 - `.github/workflows/ci.yml` — Main CI pipeline with quality gates
-- `.github/workflows/pr-review-aggregator.yml` — Synthesizes AI/CI feedback
-- `.github/workflows/auto-labeler.yml` — Path-based and AI-powered labeling
+- `.github/workflows/claude-pr-review.yml` — Consolidated PR review: REQUIREMENTS.md compliance + feedback synthesis + /summarize
+- `.github/workflows/auto-labeler.yml` — Path-based and AI-powered labeling (uses codelytv/pr-size-labeler)
 - `.github/workflows/issue-lifecycle.yml` — Triage, stale handling, validation
-- `.github/workflows/claude-code-review-enhanced.yml` — REQUIREMENTS.md compliance review
 - `.github/workflows/renovate-automerge.yml` — Mutation-gated dependency updates
 - `.github/workflows/biome-repair.yml` — Auto-fix style issues before review
 - `.github/workflows/semantic-commits.yml` — Enforce conventional commit format
@@ -31,10 +30,12 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/release.yml` — Conventional commit-based releases
 - `.github/workflows/bundle-analysis.yml` — Bundle size tracking with PR comments
 - `.github/workflows/security.yml` — Multi-layer security scanning
-- `.github/workflows/claude.yml` — Legacy Claude integration
-- `.github/workflows/claude-code-review.yml` — Legacy code review
-- `.github/workflows/claude-issues.yml` — Legacy issue automation
-- `.github/workflows/claude-maintenance.yml` — Legacy maintenance tasks
+- `.github/workflows/claude.yml` — Claude @mention integration
+- `.github/workflows/claude-issues.yml` — claude-implement label automation
+- `.github/workflows/claude-maintenance.yml` — Weekly maintenance tasks
+
+### GitHub Composite Actions (1 total)
+- `.github/actions/setup/action.yml` — Unified Node.js + pnpm setup with caching (used by all workflows)
 
 ### GitHub Templates (4 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration and contact links
@@ -103,17 +104,17 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
                                               │
                                               ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         GitHub Workflows (17)                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────┐ │
-│  │ CI Pipeline  │→│ PR Aggregator│←│ Code Review  │←│ Biome    │ │
-│  │              │  │              │  │ Enhanced     │  │ Repair   │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘  └──────────┘ │
-│         │                 │                                           │
-│         ▼                 ▼                                           │
-│  ┌──────────────┐  ┌──────────────┐                                  │
-│  │ Auto-Labeler │  │ Issue        │                                  │
-│  │              │  │ Lifecycle    │                                  │
-│  └──────────────┘  └──────────────┘                                  │
+│                         GitHub Workflows (14)                         │
+│  ┌──────────────┐  ┌─────────────────────────────────┐  ┌──────────┐ │
+│  │ CI Pipeline  │→│ claude-pr-review.yml             │←│ Biome    │ │
+│  │              │  │ (consolidated: review+synthesis) │  │ Repair   │ │
+│  └──────┬───────┘  └──────────────┬──────────────────┘  └──────────┘ │
+│         │                         │                                   │
+│         ▼                         ▼                                   │
+│  ┌──────────────┐          ┌──────────────┐                          │
+│  │ Auto-Labeler │          │ Issue        │                          │
+│  │              │          │ Lifecycle    │                          │
+│  └──────────────┘          └──────────────┘                          │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
           ┌──────────────────┴──────────────────┐
@@ -171,17 +172,14 @@ Parses AGENT_CONTEXT JSON blocks from issue and PR template bodies. Extracts met
 
 ### GitHub Workflows
 
-**pr-review-aggregator.yml**
-Synthesizes all AI and CI feedback into a single structured comment on PRs. Triggered by workflow_run completion, pull_request_review events, or `/summarize` slash command. Collects reviews from claude[bot], copilot[bot], github-actions[bot], and humans; gathers CI check statuses. Uses Claude Sonnet 4.5 to generate risk assessment (LOW/MEDIUM/HIGH), merge readiness (BLOCKED/CAUTION/SAFE), required actions, quality signals, and nits. Posts/updates comment with marker `<!-- PR-AGGREGATOR-SUMMARY -->`.
+**claude-pr-review.yml** (Consolidated)
+Unified PR review workflow combining REQUIREMENTS.md compliance review, AI/CI feedback synthesis, and /summarize command. Three jobs: (1) requirements-review waits for CI, checks compliance patterns (no `any`, no `var`/`let`, no `if`/`else`, no loops, no `try`/`catch`, B constant pattern, dispatch tables), uses Claude Opus 4.5; (2) synthesize-summary collects all reviews and CI status, posts structured summary with risk assessment; (3) manual-summarize handles /summarize slash command. Posts comments with marker `<!-- PR-REVIEW-SUMMARY -->`. Replaces former pr-review-aggregator.yml, claude-code-review.yml, and claude-code-review-enhanced.yml.
 
 **auto-labeler.yml**
-Applies labels to PRs and issues based on path analysis and AI classification. Triggered by PR/issue events or `/triage` slash command. For PRs: uses actions/labeler for path-based labels (pkg/*, scope/*), analyzes file content for tech labels (react/effect/vite), calculates size labels (XS/S/M/L/XL). For issues: Claude Sonnet 4.5 classifies into type/*, priority/*, scope/*, effort/* categories. Conservative labeling only applies confident classifications.
+Applies labels to PRs and issues based on path analysis and AI classification. Triggered by PR/issue events or `/triage` slash command. For PRs: uses actions/labeler for path-based labels (pkg/*, scope/*), codelytv/pr-size-labeler for size labels (XS/S/M/L/XL), analyzes file content for tech labels (react/effect/vite). For issues: Claude Sonnet 4.5 classifies into type/*, priority/*, scope/*, effort/* categories. Conservative labeling only applies confident classifications.
 
 **issue-lifecycle.yml**
 Manages issue triage, stale detection, and validation. Parses AGENT_CONTEXT from issue body, auto-labels based on context, validates format (empty body, title length). Daily schedule runs stale detection: 30 days inactive → stale label, 44 days → close. Exemptions: pinned, security, priority/critical, claude-implement, in-progress labels. Generates aging report in GitHub step summary.
-
-**claude-code-review-enhanced.yml**
-Enforces REQUIREMENTS.md compliance for all code changes. Waits for CI completion via workflow_run, reads REQUIREMENTS.md and CI status. Checks compliance: no `any`, no `var`/`let`, no `if`/`else`, no loops, no `try`/`catch`; validates B constant pattern, dispatch tables, Effect/Option patterns, section separators (77 chars) for >50 LOC files. Exemptions: config files (default exports allowed), test files, plugins. Outputs structured review with compliance table, triggers pr-review-aggregator after completion. Uses Claude Opus 4.5.
 
 **renovate-automerge.yml**
 Mutation-gated auto-merge for dependency updates. Triggered by Renovate PRs, check_suite completion, or 4-hour schedule. Classifies updates: patch/minor (eligible) vs major/canary (blocked). Gate requirements: all checks green + mutation score ≥ 80%. Auto-merges eligible PRs via `gh pr merge --squash --auto`. For blocked PRs: adds renovate-blocked label, comments with concerns. For major updates: creates migration campaign issue with scope, breaking changes, and migration steps checklist.
@@ -193,7 +191,7 @@ Auto-fixes style issues before human review. Runs `pnpm biome check --write --un
 Enforces conventional commit format for PR titles. Uses amannn/action-semantic-pull-request to validate type (feat/fix/refactor/style/docs/deps/test/chore), requires scope, validates subject pattern (lowercase, descriptive). Blocks merge on violation.
 
 **dashboard.yml**
-Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, push to main, or `/health` command on dashboard issue. Collects metrics: open PRs, merged (7d), stale (>14d); open issues by type; Renovate activity; commit activity; latest release. Runs `pnpm typecheck && pnpm check` for health status. Creates or updates pinned issue (label: dashboard) with structured markdown report including quick stats, activity, health badges, and workflow status.
+Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or `/health` command on dashboard issue. Collects metrics: open PRs, merged (7d), stale (>14d); open issues by type; Renovate activity; commit activity; latest release. Runs `pnpm typecheck && pnpm check` for health status. Creates or updates pinned issue (label: dashboard) with structured markdown report including quick stats, activity, health badges, and workflow status. References claude-pr-review.yml for PR review status badge.
 
 **release.yml**
 Automated releases based on conventional commits. Triggered by push to main (src paths) or workflow_dispatch. Analyzes commits for release type: `feat!` → major, `feat` → minor, `fix` → patch. Generates changelog grouped by Breaking, Features, Fixes, Refactoring, Docs. Creates git tag and GitHub release. Claude enhances release notes with impact summary.
@@ -205,6 +203,11 @@ Tracks bundle size changes in PRs. Builds all packages, analyzes sizes (raw, gzi
 Multi-layer security scanning. Jobs: dependency-audit (`pnpm audit`), CodeQL (JavaScript/TypeScript analysis), secrets-scan (Gitleaks), license-check (copyleft detection). Triggered by PR, push to main, or weekly schedule. Creates security issue if critical vulnerabilities found.
 
 **validate-protocols.yml** (detailed above)
+
+### Composite Actions
+
+**.github/actions/setup/action.yml**
+Unified Node.js + pnpm setup with caching. Eliminates duplication across all 14 workflows. Inputs: `node-version` (default: 25.2.1), `pnpm-version` (default: 10.23.0), `install-dependencies` (default: true). Steps: (1) pnpm/action-setup for package manager, (2) actions/setup-node with pnpm cache, (3) conditional `pnpm install --frozen-lockfile`. All workflows reference via `uses: ./.github/actions/setup`.
 
 ### GitHub Templates
 

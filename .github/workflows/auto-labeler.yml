@@ -23,71 +23,30 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
 
             - name: Apply Path Labels
               uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v5
               with:
                   repo-token: "${{ secrets.GITHUB_TOKEN }}"
 
-            - name: Calculate PR Size
-              id: size
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-              with:
-                  script: |
-                      const { data: files } = await github.rest.pulls.listFiles({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: context.payload.pull_request.number
-                      });
-
-                      const additions = files.reduce((sum, f) => sum + f.additions, 0);
-                      const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
-                      const total = additions + deletions;
-
-                      const size = total < 10 ? 'XS'
-                        : total < 50 ? 'S'
-                        : total < 200 ? 'M'
-                        : total < 500 ? 'L'
-                        : 'XL';
-
-                      core.setOutput('label', `size/${size}`);
-
             - name: Apply Size Label
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              uses: CodelyTV/pr-size-labeler@4ec67706cd878fbc1c8db0a5dcd28b6bb412e85a # v1
               with:
-                  script: |
-                      const sizeLabel = '${{ steps.size.outputs.label }}';
-                      const prNumber = context.payload.pull_request.number;
-
-                      // Remove existing size labels
-                      const { data: labels } = await github.rest.issues.listLabelsOnIssue({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: prNumber
-                      });
-
-                      for (const label of labels) {
-                        if (label.name.startsWith('size/')) {
-                          await github.rest.issues.removeLabel({
-                            owner: context.repo.owner,
-                            repo: context.repo.repo,
-                            issue_number: prNumber,
-                            name: label.name
-                          });
-                        }
-                      }
-
-                      // Add new size label
-                      await github.rest.issues.addLabels({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: prNumber,
-                        labels: [sizeLabel]
-                      });
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  xs_label: size/XS
+                  xs_max_size: 9
+                  s_label: size/S
+                  s_max_size: 49
+                  m_label: size/M
+                  m_max_size: 199
+                  l_label: size/L
+                  l_max_size: 499
+                  xl_label: size/XL
+                  fail_if_xl: false
 
             - name: Detect Tech Labels
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const { data: files } = await github.rest.pulls.listFiles({
@@ -119,7 +78,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
 
             - name: Classify Issue
               uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1

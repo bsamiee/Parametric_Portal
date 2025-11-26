@@ -6,10 +6,9 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 
 | Agent | Role | Trigger | Model | Workflow |
 |-------|------|---------|-------|----------|
-| **PR Review Aggregator** | Synthesize all AI/CI feedback | workflow_run, pull_request_review, /summarize | Claude Sonnet 4.5 | pr-review-aggregator.yml |
+| **PR Review** | REQUIREMENTS.md compliance + feedback synthesis | pull_request (after CI), /summarize | Claude Opus 4.5 | claude-pr-review.yml |
 | **Auto-Labeler** | Path-based + AI classification | pull_request, issues, /triage | Claude Sonnet 4.5 | auto-labeler.yml |
 | **Issue Lifecycle** | Triage, stale handling, validation | issues, schedule | - | issue-lifecycle.yml |
-| **Code Review Enhanced** | REQUIREMENTS.md compliance | pull_request (after CI) | Claude Opus 4.5 | claude-code-review-enhanced.yml |
 | **Renovate Auto-Merge** | Mutation-gated dependency updates | pull_request, check_suite | - | renovate-automerge.yml |
 | **Biome Repair** | Auto-fix style issues | pull_request | - | biome-repair.yml |
 | **Dashboard** | Repository health metrics | schedule, /health | - | dashboard.yml |
@@ -18,6 +17,9 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 | **Security** | Multi-layer security scanning | pull_request, push, schedule | - | security.yml |
 | **Semantic Commits** | Conventional commit validation | pull_request | - | semantic-commits.yml |
 | **Protocol Validator** | REQUIREMENTS.md drift detection | pull_request (*.md) | - | validate-protocols.yml |
+| **Claude @mention** | Ad-hoc Claude assistance | issue_comment, PR comment | Claude Opus 4.5 | claude.yml |
+| **Claude Implement** | Auto-implement labeled issues | issues (claude-implement label) | Claude Opus 4.5 | claude-issues.yml |
+| **Claude Maintenance** | Weekly maintenance tasks | schedule (Monday 9am UTC) | Claude Sonnet 4.5 | claude-maintenance.yml |
 
 ## Workflow Architecture
 
@@ -36,7 +38,8 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 │                      Workflow Orchestration                          │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐│
 │  │ CI Pipeline │  │ PR Review   │  │ Issue Triage│  │ Renovate    ││
-│  │             │  │ Aggregator  │  │             │  │ Auto-Merge  ││
+│  │             │  │ (claude-pr- │  │             │  │ Auto-Merge  ││
+│  │             │  │ review.yml) │  │             │  │             ││
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘│
 │         │                │                │                │        │
 │         └────────────────┴────────────────┴────────────────┘        │
@@ -154,8 +157,7 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
    └─► Bundle Analysis (compare sizes)
 
 2. CI Complete
-   ├─► Code Review Enhanced (REQUIREMENTS.md compliance)
-   └─► PR Review Aggregator (synthesize feedback)
+   └─► claude-pr-review.yml (REQUIREMENTS.md compliance + synthesize feedback)
 
 3. Ready to Merge
    ├─► All checks green
@@ -321,6 +323,33 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 - Public repos: Free
 - Private repos: 2000 minutes/month free (GitHub Free), then $0.008/minute
 
+## Composite Actions
+
+### .github/actions/setup/action.yml
+
+Unified Node.js + pnpm setup used by all 14 workflows. Eliminates ~200 lines of duplicated setup code.
+
+**Inputs**:
+- `node-version`: Node.js version (default: `25.2.1`)
+- `pnpm-version`: pnpm version (default: `10.23.0`)
+- `install-dependencies`: Whether to run `pnpm install` (default: `true`)
+
+**Usage**:
+```yaml
+- name: Setup Environment
+  uses: ./.github/actions/setup
+  with:
+    install-dependencies: 'false'  # Optional: skip install for lint-only jobs
+```
+
+**Action Versions** (all SHA-pinned):
+- `actions/checkout@v6`
+- `actions/github-script@v8`
+- `actions/upload-artifact@v5`
+- `pnpm/action-setup@v4`
+- `actions/setup-node@v4`
+- `anthropics/claude-code-action@v1`
+
 ## Tools & Scripts
 
 ### Context Generation
@@ -336,7 +365,7 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 
 ## Verification Checklist
 
-- [ ] All workflows pass YAML syntax validation
+- [ ] All 14 workflows pass YAML syntax validation
 - [ ] `nx affected -t check,typecheck,test` passes
 - [ ] All 45 labels created via `pnpm labels:create`
 - [ ] project-map.json generates successfully via `pnpm generate:context`
@@ -348,6 +377,7 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 - [ ] Quality debt issues created on CI failure
 - [ ] All workflows have concurrency groups
 - [ ] First-time contributors receive welcome message
+- [ ] Composite action (.github/actions/setup) working in all workflows
 
 ## Troubleshooting
 

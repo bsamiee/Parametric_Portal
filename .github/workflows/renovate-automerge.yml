@@ -5,8 +5,6 @@ on:
         types: [opened, synchronize, reopened]
     check_suite:
         types: [completed]
-    schedule:
-        - cron: '0 */4 * * *' # Every 4 hours
 
 permissions:
     contents: write
@@ -14,7 +12,7 @@ permissions:
     issues: write
 
 concurrency:
-    group: renovate-automerge-${{ github.event.pull_request.number || 'scheduled' }}
+    group: renovate-automerge-${{ github.event.pull_request.number || github.run_id }}
     cancel-in-progress: false
 
 jobs:
@@ -24,11 +22,11 @@ jobs:
         if: github.actor == 'renovate[bot]'
         steps:
             - name: Checkout
-              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
 
             - name: Get PR Details
               id: pr
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const pr = context.payload.pull_request;
@@ -67,7 +65,7 @@ jobs:
             - name: Check Mutation Score
               if: fromJSON(steps.pr.outputs.result).eligible && github.event_name == 'pull_request'
               id: mutation
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const { data: checkRuns } = await github.rest.checks.listForRef({
@@ -108,7 +106,7 @@ jobs:
               if: |
                   !fromJSON(steps.pr.outputs.result).eligible ||
                   steps.mutation.outputs.passed == 'false'
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const prData = ${{ steps.pr.outputs.result }};
@@ -155,7 +153,7 @@ jobs:
         steps:
             - name: Extract Package Info
               id: package
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const title = context.payload.pull_request.title;
@@ -171,7 +169,7 @@ jobs:
                       };
 
             - name: Find or Create Migration Issue
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const pkg = ${{ steps.package.outputs.result }};
