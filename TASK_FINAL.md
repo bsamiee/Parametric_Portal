@@ -481,7 +481,7 @@
 <verification>
   <check id="v1">All workflows pass YAML syntax validation</check>
   <check id="v2">nx affected -t check,typecheck,test passes</check>
-  <check id="v3">All referenced labels exist (create with gh label create)</check>
+  <check id="v3">All labels referenced in .github/labeler.yml and issue templates exist (create with gh label create; see labeler.yml and templates for canonical list)</check>
   <check id="v4">project-map.json generates successfully</check>
   <check id="v5">Biome repair workflow doesn't break tests</check>
   <check id="v6">Dashboard issue created and populated</check>
