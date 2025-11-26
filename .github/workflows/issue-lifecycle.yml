@@ -1,0 +1,145 @@
+name: Issue Lifecycle
+
+on:
+    issues:
+        types: [opened, labeled]
+    issue_comment:
+        types: [created]
+    schedule:
+        - cron: "0 6 * * *" # Daily at 6 AM UTC
+
+concurrency:
+    group: issue-lifecycle-${{ github.event.issue.number || 'scheduled' }}
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    issues: write
+
+jobs:
+    parse-context:
+        if: github.event_name == 'issues' && github.event.action == 'opened'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+              with:
+                  node-version: "25.2.1"
+
+            - name: Install Dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Parse AGENT_CONTEXT
+              id: context
+              run: |
+                  CONTEXT=$(echo '${{ github.event.issue.body }}' | pnpm parse:context)
+                  echo "context=$CONTEXT" >> $GITHUB_OUTPUT
+
+            - name: Apply Context Labels
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              with:
+                  script: |
+                      const context = JSON.parse('${{ steps.context.outputs.context }}');
+                      const labels = [];
+
+                      if (context.type) labels.push(`type/${context.type}`);
+                      if (context.priority) labels.push(`priority/${context.priority}`);
+                      if (context.scope) context.scope.forEach(s => labels.push(`scope/${s}`));
+
+                      if (labels.length > 0) {
+                        await github.rest.issues.addLabels({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: context.payload.issue.number,
+                          labels
+                        });
+                      }
+
+    validate-issue:
+        if: github.event_name == 'issues' && github.event.action == 'opened'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Validate Issue Format
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              with:
+                  script: |
+                      const issue = context.payload.issue;
+                      const warnings = [];
+
+                      if (!issue.body || issue.body.length < 20) {
+                        warnings.push('- Issue body appears to be empty or too short');
+                      }
+
+                      if (issue.title.length < 10) {
+                        warnings.push('- Issue title is too short. Please be more descriptive.');
+                      }
+
+                      if (issue.title.toLowerCase().includes('bug') && !issue.body?.includes('Steps to Reproduce')) {
+                        warnings.push('- For bug reports, please include steps to reproduce');
+                      }
+
+                      if (warnings.length > 0) {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: issue.number,
+                          body: `## Issue Validation\n\nPlease address the following:\n${warnings.join('\n')}`
+                        });
+                      }
+
+    stale-management:
+        if: github.event_name == 'schedule'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Mark Stale Issues
+              uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
+              with:
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+                  stale-issue-message: |
+                      This issue has been automatically marked as stale due to inactivity.
+                      It will be closed in 14 days if there is no further activity.
+                      Comment to keep it open.
+                  stale-pr-message: |
+                      This PR has been automatically marked as stale due to inactivity.
+                      It will be closed in 14 days if there is no further activity.
+                  stale-issue-label: stale
+                  stale-pr-label: stale
+                  days-before-stale: 30
+                  days-before-close: 14
+                  exempt-issue-labels: pinned,security,priority/critical,claude-implement,in-progress
+                  exempt-pr-labels: pinned,security,priority/critical
+
+            - name: Generate Aging Report
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              with:
+                  script: |
+                      const { data: issues } = await github.rest.issues.listForRepo({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        state: 'open',
+                        per_page: 100
+                      });
+
+                      const now = new Date();
+                      const aging = {
+                        critical: issues.filter(i => i.labels.some(l => l.name === 'priority/critical')).length,
+                        stale: issues.filter(i => i.labels.some(l => l.name === 'stale')).length,
+                        old: issues.filter(i => (now - new Date(i.created_at)) > 30 * 24 * 60 * 60 * 1000).length,
+                        total: issues.length
+                      };
+
+                      const summary = `## Issue Aging Report
+
+                      | Category | Count |
+                      |----------|-------|
+                      | Critical | ${aging.critical} |
+                      | Stale | ${aging.stale} |
+                      | >30 days | ${aging.old} |
+                      | Total Open | ${aging.total} |
+
+                      _Generated: ${now.toISOString()}_`;
+
+                      core.summary.addRaw(summary).write();
