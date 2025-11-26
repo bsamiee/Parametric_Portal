@@ -81,14 +81,12 @@ jobs:
                         warnings.push('- For bug reports, please include steps to reproduce');
                       }
 
-                      if (warnings.length > 0) {
-                        await github.rest.issues.createComment({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: issue.number,
-                          body: `## Issue Validation\n\nPlease address the following:\n${warnings.join('\n')}`
-                        });
-                      }
+                      warnings.length > 0 && await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: issue.number,
+                        body: `## Issue Validation\n\nPlease address the following:\n${warnings.join('\n')}`
+                      });
 
     stale-management:
         if: github.event_name == 'schedule'
