@@ -14,7 +14,7 @@
 - **Vite**: `7.2.4` (latest with experimental Environment API)
 - **Vitest**: `4.0.13` (latest with V8 AST-based coverage)
 - **Effect**: `3.19.6` (functional effect system)
-- **Zod**: `4.1.13` (schema validation)
+- **@effect/schema**: `0.75.5` (schema validation)
 - **Tailwind CSS**: `4.1.17` (v4 bleeding-edge)
 - **Lightning CSS**: `1.30.2` (Rust-powered CSS)
 - **Biome**: `2.3.7` (Rust linter/formatter)
@@ -36,7 +36,7 @@
 1. **Bleeding-Edge TypeScript**
    - TypeScript 6.0-dev features
    - Super strong types (no `any` except for unstable experimental APIs)
-   - Branded types for nominal typing (`@effect/schema` `S.Branded`)
+   - Branded types for nominal typing (@effect/schema `S.Brand`)
    - Const type parameters where literal types matter
    - `as const` for all object literals
    - `ReadonlyArray` for all collections
@@ -105,4 +105,4 @@
 - **Build Performance**: <3s dev server start
 - **Bundle Size**: <250KB gzipped (main chunk)
 
-<!-- SYNC_HASH: 06b155c5d7d6e9c7058b56c6a66082f0199e26b5eaa7e3136756c78dc1b12b63 -->
+<!-- SYNC_HASH: 87bf235bf5a1f0864e991f5fdff3c0800c776fbfcd60f85a8ac92581354f50c0 -->

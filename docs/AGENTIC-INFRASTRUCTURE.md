@@ -288,7 +288,7 @@ Three on-demand workflow triggers via issue/PR comments:
 - **Option Monads**: All nullable values use Option, no null checks
 - **Single B Constant**: All config in one frozen object per file
 - **Dispatch Tables**: Replace if/else with type-safe lookup tables
-- **Branded Types**: Nominal typing via Zod .brand() or @effect/schema
+- **Branded Types**: Nominal typing via @effect/schema `S.Brand`
 - **Section Separators**: 77-char separators for files >50 LOC
 
 ---
