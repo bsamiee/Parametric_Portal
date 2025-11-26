@@ -104,11 +104,11 @@ jobs:
                             issue_number: issue.number,
                             body: `## Quality Review
 
-                            This issue needs improvement before it can be actioned:
+This issue needs improvement before it can be actioned:
 
-                            ${problems.map(p => `- ${p}`).join('\n')}
+${problems.map(p => `- ${p}`).join('\n')}
 
-                            Please update the issue to address these points. The \`needs-info\` label will be automatically removed once resolved.`
+Please update the issue to address these points. The \`needs-info\` label will be automatically removed once resolved.`
                           });
                         }
 
