@@ -96,20 +96,13 @@ jobs:
                         pull_number: context.payload.pull_request.number
                       });
 
-                      const techLabels = new Set();
-
-                      for (const file of files) {
-                        if (file.filename.endsWith('.tsx')) {
-                          techLabels.add('tech/react');
-                        }
-                        if (file.filename.includes('vite.config')) {
-                          techLabels.add('tech/vite');
-                        }
-                        if (file.patch?.includes('Effect.') || file.patch?.includes('pipe(')) {
-                          techLabels.add('tech/effect');
-                        }
-                      }
-
+                      const techLabels = new Set(
+                        files.flatMap(file => [
+                          file.filename.endsWith('.tsx') ? 'tech/react' : null,
+                          file.filename.includes('vite.config') ? 'tech/vite' : null,
+                          (file.patch?.includes('Effect.') || file.patch?.includes('pipe(')) ? 'tech/effect' : null,
+                        ].filter(Boolean))
+                      );
                       if (techLabels.size > 0) {
                         await github.rest.issues.addLabels({
                           owner: context.repo.owner,
