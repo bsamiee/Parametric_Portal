@@ -141,13 +141,13 @@
 ```html
 <!-- AGENT_CONTEXT
 {
-  "type": "feature|bugfix|refactor|docs|deps",
+  "type": "feature",
   "scope": ["packages/components"],
   "agents": ["typescript-advanced", "testing-specialist"],
   "patterns": ["Effect-pipeline", "Option-monad", "B-constant"],
-  "priority": "p0|p1|p2|p3",
+  "priority": "p1",
   "breaking": false,
-  "test_coverage": "required|optional"
+  "test_coverage": "required"
 }
 -->
 ```
