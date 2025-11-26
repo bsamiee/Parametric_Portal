@@ -68,7 +68,7 @@
     contact_links:
       - name: Documentation
         url: https://github.com/bsamiee/Parametric_Portal/wiki
-      - name: Ask Claude
+      - name: Request Claude Implementation
         url: https://github.com/bsamiee/Parametric_Portal/issues/new?labels=claude-implement
   </content>
 </task>
@@ -77,7 +77,7 @@
   <file>.github/ISSUE_TEMPLATE/bug_report.yml</file>
   <action>Create form-based bug template with AGENT_CONTEXT</action>
   <spec>
-    - Embed: <!-- AGENT_CONTEXT {"type":"bug","agents":["testing-specialist"]} -->
+    - Embed: <!-- AGENT_CONTEXT {"type":"bug","agents":["testing-specialist","typescript-advanced"]} -->
     - Fields: description, repro steps, expected, actual, severity dropdown, environment, logs
     - Default labels: type/bug, needs-triage
     - Require: searched existing issues checkbox
@@ -160,7 +160,7 @@
       ## Nits (non-blocking)
       ## Agent Provenance
     - Post/update comment with marker: <!-- PR-AGGREGATOR-SUMMARY -->
-    - Use concurrency group per PR
+    - Concurrency: group: pr-aggregator-${{ github.event.pull_request.number }}, cancel-in-progress: true
   </spec>
   <permissions>contents:read, pull-requests:write, checks:read</permissions>
   <model>claude-sonnet-4-5-20250929</model>
@@ -205,6 +205,7 @@
       - B constant pattern, dispatch tables
       - Effect.Effect<T,E,R>, Option.match
       - Section separators (77 chars) for >50 LOC files
+    - Exemptions: *.config.ts (default exports allowed), *.spec.ts/*.test.ts (test utilities), plugins/* (side effects)
     - Output structured review with compliance table
     - Trigger pr-review-aggregator after completion
   </spec>
@@ -217,8 +218,9 @@
 
 <task id="4.1">
   <file>renovate.json</file>
-  <action>Enhance with domain grouping and automerge config</action>
+  <action>Enhance existing config with automerge settings</action>
   <merge>true</merge>
+  <note>Existing groups (effect-ecosystem, vite-ecosystem, types, github-actions, react-canary, nx-canary) already defined. Modify, don't duplicate.</note>
   <additions>
     {
       "platformAutomerge": true,
@@ -227,35 +229,33 @@
       "dependencyDashboard": true,
       "dependencyDashboardTitle": "Dependency Dashboard",
       "osvVulnerabilityAlerts": true,
-      "postUpdateOptions": ["pnpmDedupe"],
-      "packageRules": [
-        { "groupName": "effect-ecosystem", "matchPackagePatterns": ["^effect$", "^@effect/"], "automerge": false, "schedule": ["before 6am on Monday"] },
-        { "groupName": "vite-ecosystem", "matchPackagePatterns": ["^vite", "^vitest", "^@vitejs/", "^@vitest/"], "automerge": true, "matchUpdateTypes": ["minor", "patch"] },
-        { "groupName": "nx-ecosystem", "matchPackagePatterns": ["^nx$", "^@nx/"], "automerge": false },
-        { "groupName": "react-ecosystem", "matchPackagePatterns": ["^react", "^@types/react"], "automerge": false },
-        { "groupName": "types", "matchPackagePatterns": ["^@types/"], "excludePackagePatterns": ["^@types/react"], "automerge": true },
-        { "groupName": "github-actions", "matchManagers": ["github-actions"], "automerge": true }
-      ]
+      "postUpdateOptions": ["pnpmDedupe"]
     }
   </additions>
+  <modifications>
+    - effect-ecosystem: add "schedule": ["before 6am on Monday"]
+    - vite-ecosystem: add "automerge": true, "matchUpdateTypes": ["minor", "patch"]
+    - types: add "excludePackagePatterns": ["^@types/react"]
+  </modifications>
 </task>
 
 <task id="4.2">
-  <file>stryker.config.js</file>
-  <action>Enable incremental mutation testing</action>
-  <change>Add: incremental: true</change>
-  <rationale>Speed up Renovate gate by only mutating changed files</rationale>
+  <file>nx.json</file>
+  <action>Enable incremental mutation testing via CLI flag</action>
+  <change>Update mutate target: add "--incremental" to stryker command</change>
+  <rationale>Speed up Renovate gate by only mutating changed files; --incremental is CLI flag, not config option</rationale>
 </task>
 
 <task id="4.3">
   <file>.github/workflows/renovate-automerge.yml</file>
   <action>Create mutation-gated auto-merge workflow</action>
   <triggers>pull_request, check_suite completed, schedule (every 4 hours)</triggers>
+  <prerequisite>Branch protection must allow auto-merge; mutation-score check must be required status</prerequisite>
   <spec>
     - Filter: author is renovate[bot]
     - Classify: patch/minor (eligible) vs major/canary (blocked)
     - Gate: all checks green + mutation score >= 80%
-    - Auto-merge eligible PRs via gh pr merge --squash --auto
+    - Auto-merge eligible PRs via gh pr merge --squash --auto (requires branch protection allowing auto-merge)
     - Blocked: add renovate-blocked label, comment with concerns
     - For majors: create/update migration campaign issue:
       - Title: "Migration: {package} v{from} → v{to}"
@@ -302,10 +302,10 @@
     effect-check:
       glob: "*.{ts,tsx}"
       run: |
-        # Exclude comments and strings via grep -v for common false positives
-        # More robust: use AST-based linting via Biome GritQL when stable
-        if grep -E "^\s*try\s*\{" {staged_files} | grep -v "^\s*//" | grep -v "^\s*\*"; then
-          echo "[ERROR] try/catch detected. Use Effect.tryPromise"
+        # Use word boundary for better matching (catches "if (x) try {")
+        # Exclude comments via grep -v
+        if grep -E "\btry\s*\{" {staged_files} | grep -v "^\s*//" | grep -v "^\s*\*"; then
+          echo "[ERROR] try/catch detected. Use Effect.try, Effect.tryPromise, or Effect.gen"
           exit 1
         fi
   </additions>
@@ -525,10 +525,10 @@
     .github/PULL_REQUEST_TEMPLATE.md
   </category>
 
-  <category name="config" count="3">
+  <category name="config" count="4">
     .github/labeler.yml
     renovate.json (merge)
-    stryker.config.js (modify)
+    nx.json (add --incremental to mutate target)
     lefthook.yml (merge)
   </category>
 

@@ -51,9 +51,9 @@
 <deliverables type="config">
 | File | Changes |
 |------|---------|
-| `renovate.json` | Domain grouping (6 groups), platformAutomerge, vulnerability alerts |
-| `stryker.config.js` | `incremental: true` for speed |
-| `lefthook.yml` | Effect pattern validation (with grep limitation noted) |
+| `renovate.json` | Enhance existing groups (schedule, automerge), add platformAutomerge settings |
+| `nx.json` | Add --incremental flag to mutate target |
+| `lefthook.yml` | Effect pattern validation (word boundary regex, limitations noted) |
 | `.github/labeler.yml` | Path-to-label mappings (content-based requires custom scripting) |
 </deliverables>
 
@@ -164,14 +164,14 @@ const parseAgentContext = (body: string) =>
 
 ### 2.3 Renovate Domain Strategy
 
-| Group | Packages | Auto-merge | Gate | Schedule |
-|-------|----------|------------|------|----------|
-| `effect-ecosystem` | `effect`, `@effect/*` | No | CI + mutation | before 6am Monday |
-| `vite-ecosystem` | `vite*`, `vitest*`, `@vitejs/*` | Yes (minor/patch) | CI | default |
-| `react-ecosystem` | `react*`, `@types/react*` | No | Manual (canary) | default |
-| `nx-ecosystem` | `nx`, `@nx/*` | No | Manual (canary) | default |
-| `types` | `@types/*` (except react) | Yes | CI | default |
-| `github-actions` | GitHub Actions | Yes | CI | default |
+Existing groups in renovate.json to be modified (not duplicated):
+
+| Group | Modification |
+|-------|--------------|
+| `effect-ecosystem` | Add `schedule: ["before 6am on Monday"]` |
+| `vite-ecosystem` | Add `automerge: true`, `matchUpdateTypes: ["minor", "patch"]` |
+| `types` | Add `excludePackagePatterns: ["^@types/react"]` |
+| `react-canary`, `nx-canary`, `github-actions` | No changes (already configured) |
 
 ### 2.4 CI Quality → Issue Pipeline
 
