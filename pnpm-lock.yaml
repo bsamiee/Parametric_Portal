@@ -175,8 +175,8 @@ catalogs:
       specifier: 4.20.6
       version: 4.20.6
     typescript:
-      specifier: 6.0.0-dev.20251121
-      version: 6.0.0-dev.20251121
+      specifier: 6.0.0-dev.20251125
+      version: 6.0.0-dev.20251125
     uuid:
       specifier: 10.0.0
       version: 10.0.0
@@ -244,10 +244,10 @@ importers:
         version: 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/react':
         specifier: 'catalog:'
-        version: 22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)(webpack@5.103.0)
+        version: 22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)(webpack@5.103.0)
       '@nx/vite':
         specifier: 'catalog:'
-        version: 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
+        version: 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.56.1
@@ -262,7 +262,7 @@ importers:
         version: 1.2.4(@types/react@19.1.8)(react@19.3.0-canary-40b4a5bf-20251120)
       '@rollup/plugin-typescript':
         specifier: 'catalog:'
-        version: 12.3.0(rollup@4.53.3)(tslib@2.8.1)(typescript@6.0.0-dev.20251121)
+        version: 12.3.0(rollup@4.53.3)(tslib@2.8.1)(typescript@6.0.0-dev.20251125)
       '@stryker-mutator/core':
         specifier: 'catalog:'
         version: 9.1.0(@types/node@24.10.1)
@@ -382,7 +382,7 @@ importers:
         version: 4.20.6
       typescript:
         specifier: 'catalog:'
-        version: 6.0.0-dev.20251121
+        version: 6.0.0-dev.20251125
       vite:
         specifier: 'catalog:'
         version: 7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
@@ -403,13 +403,13 @@ importers:
         version: 1.1.0(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(workbox-build@7.4.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
       vite-plugin-svgr:
         specifier: 'catalog:'
-        version: 4.5.0(rollup@4.53.3)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
+        version: 4.5.0(rollup@4.53.3)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
       vite-plugin-webfont-dl:
         specifier: 'catalog:'
         version: 3.11.1(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
       vite-tsconfig-paths:
         specifier: 'catalog:'
-        version: 5.1.4(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
+        version: 5.1.4(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))
       vitest:
         specifier: 'catalog:'
         version: 4.0.13(@types/node@24.10.1)(@vitest/ui@4.0.13)(happy-dom@20.0.10)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
@@ -464,7 +464,7 @@ importers:
         version: 4.3.0
       typescript:
         specifier: 'catalog:'
-        version: 6.0.0-dev.20251121
+        version: 6.0.0-dev.20251125
       vite:
         specifier: 'catalog:'
         version: 7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
@@ -489,7 +489,7 @@ importers:
         version: 4.3.0
       typescript:
         specifier: 'catalog:'
-        version: 6.0.0-dev.20251121
+        version: 6.0.0-dev.20251125
       vite:
         specifier: 'catalog:'
         version: 7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
@@ -535,7 +535,7 @@ importers:
         version: 4.3.0
       typescript:
         specifier: 'catalog:'
-        version: 6.0.0-dev.20251121
+        version: 6.0.0-dev.20251125
       vite:
         specifier: 'catalog:'
         version: 7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
@@ -6884,8 +6884,8 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  typescript@6.0.0-dev.20251121:
-    resolution: {integrity: sha512-TrGhGS4hOAKgwizhMuH/3pbTNNBMCpxRA7ia8Lrv4HRMOAOzI5lWhP5uoKRDmmaF3pUVe90MBYjSieM498zUqQ==}
+  typescript@6.0.0-dev.20251125:
+    resolution: {integrity: sha512-9Z3Gc/FwO/swCqfmqvha4UkUVlEkBf1lu0u0ELR4TynnXV1lWHc9iomNPfNLzclcKK6xJS9fOgiNi3p8L5imUw==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -8734,9 +8734,9 @@ snapshots:
       '@types/semver': 7.5.8
       semver: 7.6.3
 
-  '@module-federation/cli@0.21.6(typescript@6.0.0-dev.20251121)':
+  '@module-federation/cli@0.21.6(typescript@6.0.0-dev.20251125)':
     dependencies:
-      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251121)
+      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251125)
       '@module-federation/sdk': 0.21.6
       chalk: 3.0.0
       commander: 11.1.0
@@ -8757,7 +8757,7 @@ snapshots:
       react: 19.3.0-canary-40b4a5bf-20251120
       react-dom: 19.2.0(react@19.3.0-canary-40b4a5bf-20251120)
 
-  '@module-federation/dts-plugin@0.21.6(typescript@6.0.0-dev.20251121)':
+  '@module-federation/dts-plugin@0.21.6(typescript@6.0.0-dev.20251125)':
     dependencies:
       '@module-federation/error-codes': 0.21.6
       '@module-federation/managers': 0.21.6
@@ -8774,7 +8774,7 @@ snapshots:
       log4js: 6.9.1
       node-schedule: 2.1.1
       rambda: 9.4.2
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
       ws: 8.18.0
     transitivePeerDependencies:
       - bufferutil
@@ -8782,24 +8782,24 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@module-federation/enhanced@0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(webpack@5.103.0)':
+  '@module-federation/enhanced@0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)':
     dependencies:
       '@module-federation/bridge-react-webpack-plugin': 0.21.6
-      '@module-federation/cli': 0.21.6(typescript@6.0.0-dev.20251121)
+      '@module-federation/cli': 0.21.6(typescript@6.0.0-dev.20251125)
       '@module-federation/data-prefetch': 0.21.6(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)
-      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251121)
+      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251125)
       '@module-federation/error-codes': 0.21.6
       '@module-federation/inject-external-runtime-core-plugin': 0.21.6(@module-federation/runtime-tools@0.21.6)
       '@module-federation/managers': 0.21.6
-      '@module-federation/manifest': 0.21.6(typescript@6.0.0-dev.20251121)
-      '@module-federation/rspack': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(typescript@6.0.0-dev.20251121)
+      '@module-federation/manifest': 0.21.6(typescript@6.0.0-dev.20251125)
+      '@module-federation/rspack': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(typescript@6.0.0-dev.20251125)
       '@module-federation/runtime-tools': 0.21.6
       '@module-federation/sdk': 0.21.6
       btoa: 1.2.1
       schema-utils: 4.3.3
       upath: 2.0.1
     optionalDependencies:
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
       webpack: 5.103.0
     transitivePeerDependencies:
       - '@rspack/core'
@@ -8824,9 +8824,9 @@ snapshots:
       find-pkg: 2.0.0
       fs-extra: 9.1.0
 
-  '@module-federation/manifest@0.21.6(typescript@6.0.0-dev.20251121)':
+  '@module-federation/manifest@0.21.6(typescript@6.0.0-dev.20251125)':
     dependencies:
-      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251121)
+      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251125)
       '@module-federation/managers': 0.21.6
       '@module-federation/sdk': 0.21.6
       chalk: 3.0.0
@@ -8839,9 +8839,9 @@ snapshots:
       - utf-8-validate
       - vue-tsc
 
-  '@module-federation/node@2.7.25(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(webpack@5.103.0)':
+  '@module-federation/node@2.7.25(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)':
     dependencies:
-      '@module-federation/enhanced': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(webpack@5.103.0)
+      '@module-federation/enhanced': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)
       '@module-federation/runtime': 0.21.6
       '@module-federation/sdk': 0.21.6
       btoa: 1.2.1
@@ -8860,19 +8860,19 @@ snapshots:
       - utf-8-validate
       - vue-tsc
 
-  '@module-federation/rspack@0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(typescript@6.0.0-dev.20251121)':
+  '@module-federation/rspack@0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(typescript@6.0.0-dev.20251125)':
     dependencies:
       '@module-federation/bridge-react-webpack-plugin': 0.21.6
-      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251121)
+      '@module-federation/dts-plugin': 0.21.6(typescript@6.0.0-dev.20251125)
       '@module-federation/inject-external-runtime-core-plugin': 0.21.6(@module-federation/runtime-tools@0.21.6)
       '@module-federation/managers': 0.21.6
-      '@module-federation/manifest': 0.21.6(typescript@6.0.0-dev.20251121)
+      '@module-federation/manifest': 0.21.6(typescript@6.0.0-dev.20251125)
       '@module-federation/runtime-tools': 0.21.6
       '@module-federation/sdk': 0.21.6
       '@rspack/core': 1.6.4(@swc/helpers@0.5.17)
       btoa: 1.2.1
     optionalDependencies:
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
     transitivePeerDependencies:
       - bufferutil
       - debug
@@ -9040,10 +9040,10 @@ snapshots:
       - nx
       - supports-color
 
-  '@nx/module-federation@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)':
+  '@nx/module-federation@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)':
     dependencies:
-      '@module-federation/enhanced': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(webpack@5.103.0)
-      '@module-federation/node': 2.7.25(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(webpack@5.103.0)
+      '@module-federation/enhanced': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)
+      '@module-federation/node': 2.7.25(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)
       '@module-federation/sdk': 0.21.6
       '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
@@ -9104,16 +9104,16 @@ snapshots:
   '@nx/nx-win32-x64-msvc@22.2.0-canary.20251121-9a6c7ad':
     optional: true
 
-  '@nx/react@22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)(webpack@5.103.0)':
+  '@nx/react@22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)(webpack@5.103.0)':
     dependencies:
       '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/eslint': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/module-federation': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251121)
-      '@nx/rollup': 22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@types/babel__core@7.20.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)
+      '@nx/module-federation': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)
+      '@nx/rollup': 22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@types/babel__core@7.20.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)
       '@nx/web': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@phenomnomnominal/tsquery': 5.0.1(typescript@6.0.0-dev.20251121)
-      '@svgr/webpack': 8.1.0(typescript@6.0.0-dev.20251121)
+      '@phenomnomnominal/tsquery': 5.0.1(typescript@6.0.0-dev.20251125)
+      '@svgr/webpack': 8.1.0(typescript@6.0.0-dev.20251125)
       express: 4.21.2
       file-loader: 6.2.0(webpack@5.103.0)
       http-proxy-middleware: 3.0.5
@@ -9122,7 +9122,7 @@ snapshots:
       semver: 7.7.3
       tslib: 2.8.1
     optionalDependencies:
-      '@nx/vite': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
+      '@nx/vite': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
     transitivePeerDependencies:
       - '@babel/core'
       - '@babel/traverse'
@@ -9151,7 +9151,7 @@ snapshots:
       - webpack
       - webpack-cli
 
-  '@nx/rollup@22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@types/babel__core@7.20.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)':
+  '@nx/rollup@22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@types/babel__core@7.20.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)':
     dependencies:
       '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
@@ -9160,7 +9160,7 @@ snapshots:
       '@rollup/plugin-image': 3.0.3(rollup@4.53.3)
       '@rollup/plugin-json': 6.1.0(rollup@4.53.3)
       '@rollup/plugin-node-resolve': 15.3.1(rollup@4.53.3)
-      '@rollup/plugin-typescript': 12.3.0(rollup@4.53.3)(tslib@2.8.1)(typescript@6.0.0-dev.20251121)
+      '@rollup/plugin-typescript': 12.3.0(rollup@4.53.3)(tslib@2.8.1)(typescript@6.0.0-dev.20251125)
       autoprefixer: 10.4.22(postcss@8.5.6)
       picocolors: 1.1.1
       picomatch: 4.0.2
@@ -9168,7 +9168,7 @@ snapshots:
       rollup: 4.53.3
       rollup-plugin-copy: 3.5.0
       rollup-plugin-postcss: 4.0.2(postcss@8.5.6)
-      rollup-plugin-typescript2: 0.36.0(rollup@4.53.3)(typescript@6.0.0-dev.20251121)
+      rollup-plugin-typescript2: 0.36.0(rollup@4.53.3)(typescript@6.0.0-dev.20251125)
       tslib: 2.8.1
     transitivePeerDependencies:
       - '@babel/core'
@@ -9183,12 +9183,12 @@ snapshots:
       - typescript
       - verdaccio
 
-  '@nx/vite@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)':
+  '@nx/vite@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)':
     dependencies:
       '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/vitest': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
-      '@phenomnomnominal/tsquery': 5.0.1(typescript@6.0.0-dev.20251121)
+      '@nx/vitest': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)
+      '@phenomnomnominal/tsquery': 5.0.1(typescript@6.0.0-dev.20251125)
       ajv: 8.17.1
       enquirer: 2.3.6
       picomatch: 4.0.2
@@ -9207,11 +9207,11 @@ snapshots:
       - typescript
       - verdaccio
 
-  '@nx/vitest@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)':
+  '@nx/vitest@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)':
     dependencies:
       '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
       '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@phenomnomnominal/tsquery': 5.0.1(typescript@6.0.0-dev.20251121)
+      '@phenomnomnominal/tsquery': 5.0.1(typescript@6.0.0-dev.20251125)
       semver: 7.7.3
       tslib: 2.8.1
     optionalDependencies:
@@ -9260,10 +9260,10 @@ snapshots:
       - '@swc/core'
       - debug
 
-  '@phenomnomnominal/tsquery@5.0.1(typescript@6.0.0-dev.20251121)':
+  '@phenomnomnominal/tsquery@5.0.1(typescript@6.0.0-dev.20251125)':
     dependencies:
       esquery: 1.6.0
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
 
   '@playwright/test@1.56.1':
     dependencies:
@@ -10493,11 +10493,11 @@ snapshots:
     optionalDependencies:
       rollup: 2.79.2
 
-  '@rollup/plugin-typescript@12.3.0(rollup@4.53.3)(tslib@2.8.1)(typescript@6.0.0-dev.20251121)':
+  '@rollup/plugin-typescript@12.3.0(rollup@4.53.3)(tslib@2.8.1)(typescript@6.0.0-dev.20251125)':
     dependencies:
       '@rollup/pluginutils': 5.3.0(rollup@4.53.3)
       resolve: 1.22.11
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
     optionalDependencies:
       rollup: 4.53.3
       tslib: 2.8.1
@@ -10776,12 +10776,12 @@ snapshots:
       '@svgr/babel-plugin-transform-react-native-svg': 8.1.0(@babel/core@7.28.5)
       '@svgr/babel-plugin-transform-svg-component': 8.0.0(@babel/core@7.28.5)
 
-  '@svgr/core@8.1.0(typescript@6.0.0-dev.20251121)':
+  '@svgr/core@8.1.0(typescript@6.0.0-dev.20251125)':
     dependencies:
       '@babel/core': 7.28.5
       '@svgr/babel-preset': 8.1.0(@babel/core@7.28.5)
       camelcase: 6.3.0
-      cosmiconfig: 8.3.6(typescript@6.0.0-dev.20251121)
+      cosmiconfig: 8.3.6(typescript@6.0.0-dev.20251125)
       snake-case: 3.0.4
     transitivePeerDependencies:
       - supports-color
@@ -10792,35 +10792,35 @@ snapshots:
       '@babel/types': 7.28.5
       entities: 4.5.0
 
-  '@svgr/plugin-jsx@8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251121))':
+  '@svgr/plugin-jsx@8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251125))':
     dependencies:
       '@babel/core': 7.28.5
       '@svgr/babel-preset': 8.1.0(@babel/core@7.28.5)
-      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251121)
+      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251125)
       '@svgr/hast-util-to-babel-ast': 8.0.0
       svg-parser: 2.0.4
     transitivePeerDependencies:
       - supports-color
 
-  '@svgr/plugin-svgo@8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251121))(typescript@6.0.0-dev.20251121)':
+  '@svgr/plugin-svgo@8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251125))(typescript@6.0.0-dev.20251125)':
     dependencies:
-      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251121)
-      cosmiconfig: 8.3.6(typescript@6.0.0-dev.20251121)
+      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251125)
+      cosmiconfig: 8.3.6(typescript@6.0.0-dev.20251125)
       deepmerge: 4.3.1
       svgo: 3.3.2
     transitivePeerDependencies:
       - typescript
 
-  '@svgr/webpack@8.1.0(typescript@6.0.0-dev.20251121)':
+  '@svgr/webpack@8.1.0(typescript@6.0.0-dev.20251125)':
     dependencies:
       '@babel/core': 7.28.5
       '@babel/plugin-transform-react-constant-elements': 7.27.1(@babel/core@7.28.5)
       '@babel/preset-env': 7.28.5(@babel/core@7.28.5)
       '@babel/preset-react': 7.28.5(@babel/core@7.28.5)
       '@babel/preset-typescript': 7.28.5(@babel/core@7.28.5)
-      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251121)
-      '@svgr/plugin-jsx': 8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251121))
-      '@svgr/plugin-svgo': 8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251121))(typescript@6.0.0-dev.20251121)
+      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251125)
+      '@svgr/plugin-jsx': 8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251125))
+      '@svgr/plugin-svgo': 8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251125))(typescript@6.0.0-dev.20251125)
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -11674,14 +11674,14 @@ snapshots:
       path-type: 4.0.0
       yaml: 1.10.2
 
-  cosmiconfig@8.3.6(typescript@6.0.0-dev.20251121):
+  cosmiconfig@8.3.6(typescript@6.0.0-dev.20251125):
     dependencies:
       import-fresh: 3.3.1
       js-yaml: 4.1.1
       parse-json: 5.2.0
       path-type: 4.0.0
     optionalDependencies:
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
 
   cron-parser@4.9.0:
     dependencies:
@@ -14230,7 +14230,7 @@ snapshots:
     transitivePeerDependencies:
       - ts-node
 
-  rollup-plugin-typescript2@0.36.0(rollup@4.53.3)(typescript@6.0.0-dev.20251121):
+  rollup-plugin-typescript2@0.36.0(rollup@4.53.3)(typescript@6.0.0-dev.20251125):
     dependencies:
       '@rollup/pluginutils': 4.2.1
       find-cache-dir: 3.3.2
@@ -14238,7 +14238,7 @@ snapshots:
       rollup: 4.53.3
       semver: 7.7.3
       tslib: 2.8.1
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
 
   rollup-plugin-visualizer@6.0.5(rollup@4.53.3):
     dependencies:
@@ -14743,9 +14743,9 @@ snapshots:
 
   ts-pattern@5.9.0: {}
 
-  tsconfck@3.1.6(typescript@6.0.0-dev.20251121):
+  tsconfck@3.1.6(typescript@6.0.0-dev.20251125):
     optionalDependencies:
-      typescript: 6.0.0-dev.20251121
+      typescript: 6.0.0-dev.20251125
 
   tsconfig-paths@4.2.0:
     dependencies:
@@ -14828,7 +14828,7 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  typescript@6.0.0-dev.20251121: {}
+  typescript@6.0.0-dev.20251125: {}
 
   unbox-primitive@1.1.0:
     dependencies:
@@ -14993,11 +14993,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  vite-plugin-svgr@4.5.0(rollup@4.53.3)(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)):
+  vite-plugin-svgr@4.5.0(rollup@4.53.3)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)):
     dependencies:
       '@rollup/pluginutils': 5.3.0(rollup@4.53.3)
-      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251121)
-      '@svgr/plugin-jsx': 8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251121))
+      '@svgr/core': 8.1.0(typescript@6.0.0-dev.20251125)
+      '@svgr/plugin-jsx': 8.1.0(@svgr/core@8.1.0(typescript@6.0.0-dev.20251125))
       vite: 7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
     transitivePeerDependencies:
       - rollup
@@ -15014,11 +15014,11 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
-  vite-tsconfig-paths@5.1.4(typescript@6.0.0-dev.20251121)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)):
+  vite-tsconfig-paths@5.1.4(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)):
     dependencies:
       debug: 4.4.3
       globrex: 0.1.2
-      tsconfck: 3.1.6(typescript@6.0.0-dev.20251121)
+      tsconfck: 3.1.6(typescript@6.0.0-dev.20251125)
     optionalDependencies:
       vite: 7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
     transitivePeerDependencies:
