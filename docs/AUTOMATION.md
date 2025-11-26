@@ -132,7 +132,7 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 
 ```
 1. Issue Created (via template)
-   └─► Type label applied (bug, feature, enhancement, refactor, optimize, help, docs, chore)
+   └─► Type label applied (bug, feature, enhancement, refactor, help, docs, chore)
 
 2. Stale Detection (Schedule: Daily)
    ├─► 30 days inactive → stale label
@@ -201,7 +201,6 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `refactor` | #fbca04 | Code restructuring without behavior change |
 | `help` | #d876e3 | Question or assistance needed |
 | `enhancement` | #84b6eb | Improvement to existing feature |
-| `optimize` | #0e8a16 | Performance or code optimization |
 
 ### Priority (optional, escalation only)
 | Label | Color | Description |
@@ -235,7 +234,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 19 labels**
+**Total: 18 labels**
 
 ## Custom Agent Profiles
 

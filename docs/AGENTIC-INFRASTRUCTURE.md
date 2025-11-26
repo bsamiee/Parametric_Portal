@@ -35,13 +35,12 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 ### GitHub Composite Actions (1 total)
 - `.github/actions/setup/action.yml` — Unified Node.js + pnpm setup with caching (used by all workflows)
 
-### GitHub Templates (10 total)
+### GitHub Templates (9 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
 - `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (label: bug)
 - `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (label: feature)
 - `.github/ISSUE_TEMPLATE/enhancement.yml` — Enhancement form (label: enhancement)
 - `.github/ISSUE_TEMPLATE/refactor.yml` — Refactor request form (label: refactor)
-- `.github/ISSUE_TEMPLATE/optimize.yml` — Optimization form (label: optimize)
 - `.github/ISSUE_TEMPLATE/help.yml` — Help request form (label: help)
 - `.github/ISSUE_TEMPLATE/docs.yml` — Documentation form (label: docs)
 - `.github/ISSUE_TEMPLATE/chore.yml` — Maintenance task form (label: chore)
@@ -96,7 +95,6 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `refactor` | #fbca04 | Code restructuring without behavior change |
 | `help` | #d876e3 | Question or assistance needed |
 | `enhancement` | #84b6eb | Improvement to existing feature |
-| `optimize` | #0e8a16 | Performance or code optimization |
 
 ### Priority (optional, escalation only)
 | Label | Color | Description |
@@ -130,7 +128,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 19 labels**
+**Total: 18 labels**
 
 ---
 
@@ -170,7 +168,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
           ┌──────────────────┴──────────────────┐
           ▼                                     ▼
-    GitHub Templates (10)             Renovate Auto-Merge
+    GitHub Templates (9)              Renovate Auto-Merge
     (type labels applied)             (mutation-gated)
           │                                     │
           ▼                                     ▼
@@ -179,7 +177,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 
 ### Data Flow
 
-1. **Issue Creation**: Templates apply type labels (bug, feature, enhancement, refactor, optimize, help, docs, chore)
+1. **Issue Creation**: Templates apply type labels (bug, feature, enhancement, refactor, help, docs, chore)
 2. **Context Gen**: Nx graph → generate-context → project-map.json → Custom Agents
 3. **PR Lifecycle**: PR opened → Biome Repair → CI → Code Review → Merge
 4. **Dependency Flow**: Renovate PR → CI + Mutation → Auto-Merge gate → Merge/Block
@@ -258,9 +256,6 @@ Fields: current_behavior, improved_behavior, rationale, scope (multi-select), ta
 
 **refactor.yml** (label: refactor)
 Fields: target_files, current_pattern, target_pattern, rationale, scope (multi-select), breaking_change, test_strategy, target_patterns (checkboxes). AGENT_CONTEXT routes to refactoring-architect, cleanup-specialist, and typescript-advanced agents.
-
-**optimize.yml** (label: optimize)
-Fields: optimization_type (dropdown), target_area, current_metrics (yaml), target_metrics (yaml), proposed_approach, scope (multi-select), acceptance_criteria, breaking_change. AGENT_CONTEXT routes to performance-analyst and cleanup-specialist agents.
 
 **help.yml** (label: help)
 Fields: help_category (dropdown), question, context, attempted_solutions, relevant_files, urgency (dropdown), scope (multi-select). AGENT_CONTEXT routes to documentation-specialist and typescript-advanced agents.

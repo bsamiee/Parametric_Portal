@@ -90,7 +90,6 @@ body:
               - build
               - types
               - testing
-              - patterns
-              - tooling
+              - config
       validations:
           required: false

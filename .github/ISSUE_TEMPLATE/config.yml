@@ -3,3 +3,6 @@ contact_links:
     - name: Documentation
       url: https://github.com/bsamiee/Parametric_Portal/wiki
       about: Check the wiki for documentation and guides
+    - name: Discussions
+      url: https://github.com/bsamiee/Parametric_Portal/discussions
+      about: Ask questions and share ideas with the community

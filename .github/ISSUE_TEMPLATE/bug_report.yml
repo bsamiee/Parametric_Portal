@@ -82,8 +82,7 @@ body:
               - build
               - types
               - testing
-              - performance
-              - security
+              - config
       validations:
           required: true
 

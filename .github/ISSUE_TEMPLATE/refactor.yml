@@ -60,12 +60,12 @@ body:
           description: Which areas are affected?
           multiple: true
           options:
-              - core-logic
-              - ui-components
-              - api-layer
-              - types-schemas
+              - ui
+              - api
+              - build
+              - types
               - testing
-              - build-config
+              - config
       validations:
           required: true
 
