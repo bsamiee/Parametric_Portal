@@ -31,10 +31,7 @@ jobs:
                       const hasQualityLabel = labels.includes('needs-info');
 
                       // Skip on edit if already flagged (let author self-correct)
-                      if (context.payload.action === 'edited' && hasQualityLabel) {
-                        console.log('Skipping: already has needs-info label');
-                        return;
-                      }
+                      // (Removed early return to allow quality check and label removal on edit)
 
                       // Required fields by template type
                       const requiredFields = {
