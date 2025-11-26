@@ -1,4 +1,4 @@
-# Parametric Portal — Copilot Instructions
+# Parametric Portal - Code Standards
 
 ## Bleeding-Edge Technology Stack
 

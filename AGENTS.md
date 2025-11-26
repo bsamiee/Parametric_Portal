@@ -1,4 +1,4 @@
-# Parametric Portal — Copilot Instructions
+# Parametric Portal — Agent Charter (Bleeding-Edge, Dogmatic)
 
 ## Bleeding-Edge Technology Stack
 
