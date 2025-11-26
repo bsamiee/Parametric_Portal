@@ -138,17 +138,16 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 2. Quality Review (on: opened, edited, reopened)
    ├─► Check required fields for template type
    ├─► Validate content length and quality
-   ├─► Add needs-info if missing required fields
-   ├─► Add needs-edit if description insufficient
-   └─► Auto-remove quality labels when fixed
+   ├─► Add needs-info if any quality issues found
+   └─► Auto-remove label when fixed
 
 3. Stale Detection (Schedule: Every 6 hours)
    ├─► 30 days inactive → stale label
    ├─► 44 days inactive → close
-   └─► Exempt: pinned, security, critical, implement, needs-info, needs-edit
+   └─► Exempt: pinned, security, critical, implement, needs-info
 
 4. Aging Report
-   └─► Metrics: critical, needs-info, needs-edit, stale, >30 days, total
+   └─► Metrics: critical, needs-info, stale, >30 days, total
 ```
 
 ### Agent-Friendly Templates
@@ -238,8 +237,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 ### Quality (system-managed, triggers agent actions)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `needs-info` | #f9d0c4 | Awaiting additional details |
-| `needs-edit` | #fef2c0 | Description needs improvement |
+| `needs-info` | #f9d0c4 | Requires improvement before actionable |
 
 ### Exempt (special handling)
 | Label | Color | Description |
@@ -248,7 +246,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 20 labels**
+**Total: 19 labels**
 
 ## Custom Agent Profiles
 

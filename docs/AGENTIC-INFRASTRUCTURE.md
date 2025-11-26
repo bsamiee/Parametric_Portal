@@ -124,8 +124,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 ### Quality (system-managed, triggers agent actions)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `needs-info` | #f9d0c4 | Awaiting additional details |
-| `needs-edit` | #fef2c0 | Description needs improvement |
+| `needs-info` | #f9d0c4 | Requires improvement before actionable |
 
 ### Exempt (special handling)
 | Label | Color | Description |
@@ -134,7 +133,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 20 labels**
+**Total: 19 labels**
 
 ---
 
@@ -222,8 +221,8 @@ Unified PR review workflow combining REQUIREMENTS.md compliance review, AI/CI fe
 Quality review and stale management. Triggers on issue opened/edited/reopened and every 6 hours.
 
 Jobs:
-1. **quality-review**: Evaluates issue content quality, checks required fields based on template type, validates content length. Adds `needs-info` (missing fields) or `needs-edit` (poor quality) labels. Automatically removes quality labels when issues are fixed.
-2. **stale-management**: 30 days inactive → stale label, 44 days → close. Exemptions: pinned, security, critical, implement, needs-info, needs-edit. Generates aging report with quality metrics.
+1. **quality-review**: Evaluates issue content quality, checks required fields based on template type, validates content length. Adds `needs-info` label for any quality issues. Automatically removes label when issues are fixed.
+2. **stale-management**: 30 days inactive → stale label, 44 days → close. Exemptions: pinned, security, critical, implement, needs-info. Generates aging report with quality metrics.
 
 **renovate-automerge.yml**
 Mutation-gated auto-merge for dependency updates. Triggered by Renovate PRs, check_suite completion, or 4-hour schedule. Classifies updates: patch/minor (eligible) vs major/canary (blocked). Gate requirements: all checks green + mutation score ≥ 80%. Auto-merges eligible PRs via `gh pr merge --squash --auto`.

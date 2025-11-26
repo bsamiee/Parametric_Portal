@@ -86,11 +86,7 @@
 # -----------------------------------------------------------------------------
 - name: needs-info
   color: "f9d0c4"                       # peach
-  description: "Awaiting additional details"
-
-- name: needs-edit
-  color: "fef2c0"                       # pale yellow
-  description: "Description needs improvement"
+  description: "Requires improvement before actionable"
 
 # -----------------------------------------------------------------------------
 # Exempt (special handling)
