@@ -1,5 +1,5 @@
 {
-    "generatedAt": "2025-11-26T05:29:59.993Z",
+    "generatedAt": "2025-11-26T05:46:32.422Z",
     "graph": {
         "cycles": [],
         "edges": [],
@@ -138,7 +138,7 @@
     "version": "1.0.0",
     "workspace": {
         "nxVersion": "22.2.0-canary.20251121-9a6c7ad",
-        "packageManager": "0.0.0",
+        "packageManager": "pnpm@10.23.0",
         "root": "/home/user/Parametric_Portal"
     }
 }

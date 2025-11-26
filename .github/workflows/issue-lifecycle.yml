@@ -42,12 +42,12 @@ jobs:
               uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
               with:
                   script: |
-                      const context = JSON.parse('${{ steps.context.outputs.context }}');
+                      const agentContext = JSON.parse('${{ steps.context.outputs.context }}');
                       const labels = [];
 
-                      if (context.type) labels.push(`type/${context.type}`);
-                      if (context.priority) labels.push(`priority/${context.priority}`);
-                      if (context.scope) context.scope.forEach(s => labels.push(`scope/${s}`));
+                      if (agentContext.type) labels.push(`type/${agentContext.type}`);
+                      if (agentContext.priority) labels.push(`priority/${agentContext.priority}`);
+                      if (agentContext.scope) agentContext.scope.forEach(s => labels.push(`scope/${s}`));
 
                       if (labels.length > 0) {
                         await github.rest.issues.addLabels({

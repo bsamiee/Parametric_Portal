@@ -1,5 +1,5 @@
 <!-- AGENT_CONTEXT
-{"type":"implementation","scope":[],"breaking":false,"patterns_applied":[],"test_coverage":"required"}
+{"type":"implementation","scope":[],"breaking":false,"patterns":[],"test_coverage":"required"}
 -->
 <!-- @claude Please review against REQUIREMENTS.md patterns -->
 

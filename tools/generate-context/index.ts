@@ -33,6 +33,7 @@ type PackageJson = {
         { readonly import?: string; readonly require?: string; readonly types?: string } | string
     >;
     readonly name?: string;
+    readonly packageManager?: string;
     readonly version?: string;
 };
 
@@ -59,26 +60,13 @@ const B = Object.freeze({
 
 // --- Pure Utility Functions --------------------------------------------------
 
+const safeJsonParse = Option.liftThrowable(JSON.parse);
+
 const readJson = <T>(path: string): Option.Option<T> =>
     pipe(
         Option.fromNullable(existsSync(path) ? path : undefined),
-        Option.flatMap((p) =>
-            pipe(
-                Option.some(readFileSync(p, 'utf-8')),
-                Option.flatMap((content) =>
-                    Option.fromNullable(
-                        (() => {
-                            try {
-                                return JSON.parse(content) as T;
-                            } catch {
-                                return undefined;
-                            }
-                        })(),
-                    ),
-                ),
-            ),
-        ),
-    );
+        Option.flatMap((p) => pipe(Option.some(readFileSync(p, 'utf-8')), Option.flatMap(safeJsonParse))),
+    ) as Option.Option<T>;
 
 const extractExports = (pkgJson: PackageJson): Project['exports'] =>
     pipe(
@@ -190,7 +178,7 @@ const loadWorkspaceInfo = (root: string): Effect.Effect<{ nxVersion: string; pac
                                 Option.flatMap((nx) => Option.fromNullable(nx.installation?.version)),
                                 Option.getOrElse(() => 'unknown'),
                             ),
-                            packageManager: pkg.version ?? 'unknown',
+                            packageManager: pkg.packageManager ?? 'unknown',
                         }),
                 }),
             ),

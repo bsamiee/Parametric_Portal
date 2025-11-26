@@ -60,37 +60,9 @@ const extractJsonBlock = (body: string): Option.Option<string> =>
         Option.flatMap((match) => Option.fromNullable(match[1])),
     );
 
-const parseJson = (content: string): Option.Option<unknown> =>
-    pipe(
-        Option.some(content),
-        Option.flatMap((c) =>
-            Option.fromNullable(
-                (() => {
-                    try {
-                        return JSON.parse(c) as unknown;
-                    } catch {
-                        return undefined;
-                    }
-                })(),
-            ),
-        ),
-    );
+const parseJson = Option.liftThrowable((content: string) => JSON.parse(content) as unknown);
 
-const decodeContext = (data: unknown): Option.Option<AgentContext> =>
-    pipe(
-        Option.some(data),
-        Option.flatMap((d) =>
-            Option.fromNullable(
-                (() => {
-                    try {
-                        return S.decodeUnknownSync(AgentContextSchema)(d);
-                    } catch {
-                        return undefined;
-                    }
-                })(),
-            ),
-        ),
-    );
+const decodeContext = Option.liftThrowable((data: unknown) => S.decodeUnknownSync(AgentContextSchema)(data));
 
 // --- Effect Pipeline ---------------------------------------------------------
 
