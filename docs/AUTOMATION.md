@@ -132,12 +132,12 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 - Includes workflow status badges
 
 **Dashboard Sections**:
-- 🎯 Quick Stats
-- 📈 Activity (Last 7 Days)
-- 🔧 Pull Requests
-- 🐛 Issues
-- ✅ Health Status
-- 🔄 Workflows
+- [STATS] Quick Stats
+- [ACTIVITY] Activity (Last 7 Days)
+- [PULL REQUESTS] Pull Requests
+- [ISSUES] Issues
+- [HEALTH] Health Status
+- [WORKFLOWS] Workflows
 
 ---
 
