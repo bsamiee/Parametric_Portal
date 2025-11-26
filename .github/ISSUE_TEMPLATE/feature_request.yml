@@ -1,5 +1,5 @@
 name: Feature Request
-description: Suggest a new feature or enhancement
+description: Propose a new feature or capability
 title: "[Feature]: "
 labels: ["feature"]
 body:
@@ -7,32 +7,32 @@ body:
       attributes:
           value: |
               <!-- AGENT_CONTEXT
-              {"type":"feature","agents":["library-planner","typescript-advanced"]}
+              {"type":"feature","agents":["library-planner","typescript-advanced"],"patterns":["effect-pipeline","option-monad","branded-types","dispatch-table"],"priority_hint":"medium"}
               -->
-              Thanks for suggesting a feature! Please fill out the form below.
+              **Agent-parseable feature request.** All fields map to JSON keys via `id` attribute.
 
     - type: textarea
-      id: problem
+      id: problem_statement
       attributes:
           label: Problem Statement
-          description: Describe the problem this feature would solve
-          placeholder: I'm always frustrated when...
+          description: What problem does this feature solve?
+          placeholder: "Users currently cannot [action] because [limitation], resulting in [negative outcome]"
       validations:
           required: true
 
     - type: textarea
-      id: solution
+      id: proposed_solution
       attributes:
           label: Proposed Solution
-          description: Describe your ideal solution
+          description: Your ideal implementation
       validations:
           required: true
 
     - type: textarea
-      id: alternatives
+      id: alternatives_considered
       attributes:
           label: Alternatives Considered
-          description: What alternatives have you considered?
+          description: What alternatives have you explored?
       validations:
           required: false
 
@@ -40,51 +40,64 @@ body:
       id: scope
       attributes:
           label: Scope
-          description: What areas does this feature affect?
+          description: Which areas does this feature affect?
           multiple: true
           options:
-              - UI / Components
-              - API / Backend
-              - Build / Tooling
-              - Documentation
-              - Testing
-              - Performance
-              - Security
-              - Types / Schemas
+              - ui
+              - api
+              - build
+              - types
+              - testing
+              - performance
+              - security
+              - documentation
       validations:
           required: true
 
     - type: dropdown
-      id: effort
+      id: effort_estimate
       attributes:
           label: Estimated Effort
-          description: How much effort do you think this requires?
+          description: How much work is this?
           options:
-              - Trivial - Less than 1 hour
-              - Small - 1-4 hours
-              - Medium - 1-3 days
-              - Large - 1+ weeks
+              - trivial
+              - small
+              - medium
+              - large
       validations:
           required: false
 
     - type: textarea
-      id: acceptance
+      id: acceptance_criteria
       attributes:
           label: Acceptance Criteria
           description: How will we know this feature is complete?
           placeholder: |
               - [ ] Criterion 1
               - [ ] Criterion 2
+              - [ ] Tests pass with 80% coverage
       validations:
           required: true
 
     - type: checkboxes
-      id: patterns
+      id: required_patterns
       attributes:
           label: Required Patterns
-          description: Which patterns should be applied?
+          description: Which architectural patterns apply?
           options:
-              - label: Effect pipeline (no try/catch)
-              - label: Option monad (no null checks)
-              - label: Branded types
-              - label: Dispatch table (no if/else chains)
+              - label: effect-pipeline
+              - label: option-monad
+              - label: branded-types
+              - label: dispatch-table
+              - label: single-b-constant
+
+    - type: dropdown
+      id: breaking_change
+      attributes:
+          label: Breaking Change
+          description: Does this introduce breaking changes?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true

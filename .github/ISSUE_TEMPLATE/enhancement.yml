@@ -1,0 +1,98 @@
+name: Enhancement
+description: Improve an existing feature
+title: "[Enhancement]: "
+labels: ["enhancement"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              <!-- AGENT_CONTEXT
+              {"type":"enhancement","agents":["refactoring-architect","typescript-advanced"],"patterns":["effect-pipeline","option-monad"],"priority_hint":"low"}
+              -->
+              **Agent-parseable enhancement request.** All fields map to JSON keys via `id` attribute.
+
+    - type: textarea
+      id: current_behavior
+      attributes:
+          label: Current Behavior
+          description: How does the feature work now?
+      validations:
+          required: true
+
+    - type: textarea
+      id: improved_behavior
+      attributes:
+          label: Improved Behavior
+          description: How should it work after enhancement?
+      validations:
+          required: true
+
+    - type: textarea
+      id: rationale
+      attributes:
+          label: Rationale
+          description: Why is this improvement valuable?
+          placeholder: "This enhancement will [benefit] by [mechanism], improving [metric]"
+      validations:
+          required: true
+
+    - type: dropdown
+      id: scope
+      attributes:
+          label: Scope
+          description: Which areas are affected?
+          multiple: true
+          options:
+              - ui
+              - api
+              - build
+              - types
+              - testing
+              - performance
+              - security
+              - documentation
+      validations:
+          required: true
+
+    - type: input
+      id: target_files
+      attributes:
+          label: Target Files
+          description: Comma-separated list of files to modify
+          placeholder: "src/lib/core.ts, src/components/Button.tsx"
+      validations:
+          required: false
+
+    - type: textarea
+      id: acceptance_criteria
+      attributes:
+          label: Acceptance Criteria
+          description: How will we know this enhancement is complete?
+          placeholder: |
+              - [ ] Existing tests still pass
+              - [ ] New behavior documented
+              - [ ] No breaking changes
+      validations:
+          required: true
+
+    - type: dropdown
+      id: breaking_change
+      attributes:
+          label: Breaking Change
+          description: Does this introduce breaking changes?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
+    - type: checkboxes
+      id: required_patterns
+      attributes:
+          label: Required Patterns
+          description: Which architectural patterns apply?
+          options:
+              - label: effect-pipeline
+              - label: option-monad
+              - label: branded-types
+              - label: dispatch-table

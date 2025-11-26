@@ -21,6 +21,22 @@
   color: "d4a373"
   description: "Maintenance task"
 
+- name: refactor
+  color: "fbca04"
+  description: "Code restructuring without behavior change"
+
+- name: help
+  color: "d876e3"
+  description: "Question or assistance needed"
+
+- name: enhancement
+  color: "84b6eb"
+  description: "Improvement to existing feature"
+
+- name: optimize
+  color: "0e8a16"
+  description: "Performance or code optimization"
+
 # -----------------------------------------------------------------------------
 # Priority (optional, only for escalation)
 # -----------------------------------------------------------------------------

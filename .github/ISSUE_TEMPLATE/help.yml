@@ -1,0 +1,96 @@
+name: Help Request
+description: Ask a question or request assistance
+title: "[Help]: "
+labels: ["help"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              <!-- AGENT_CONTEXT
+              {"type":"help","agents":["documentation-specialist","typescript-advanced"],"patterns":[],"priority_hint":"low"}
+              -->
+              **Agent-parseable help request.** All fields map to JSON keys via `id` attribute.
+
+    - type: dropdown
+      id: help_category
+      attributes:
+          label: Help Category
+          description: What type of help do you need?
+          options:
+              - understanding-codebase
+              - debugging-issue
+              - implementation-guidance
+              - architecture-decision
+              - tooling-setup
+              - pattern-application
+      validations:
+          required: true
+
+    - type: textarea
+      id: question
+      attributes:
+          label: Question
+          description: What do you need help with?
+          placeholder: "How do I [action] when [context]?"
+      validations:
+          required: true
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Context
+          description: Background information relevant to your question
+          placeholder: |
+              I'm trying to implement [feature] and encountered [situation].
+              The codebase uses [patterns] but I'm unsure how to apply them here.
+      validations:
+          required: true
+
+    - type: textarea
+      id: attempted_solutions
+      attributes:
+          label: What I've Tried
+          description: Solutions you've already attempted
+          placeholder: |
+              1. Tried [approach A] - resulted in [outcome]
+              2. Searched docs for [term] - didn't find [expected]
+      validations:
+          required: false
+
+    - type: input
+      id: relevant_files
+      attributes:
+          label: Relevant Files
+          description: Comma-separated list of related files
+          placeholder: "src/lib/utils.ts, src/hooks/useAuth.ts"
+      validations:
+          required: false
+
+    - type: dropdown
+      id: urgency
+      attributes:
+          label: Urgency
+          description: How urgent is this request?
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true
+
+    - type: dropdown
+      id: scope
+      attributes:
+          label: Related Areas
+          description: Which areas does this relate to?
+          multiple: true
+          options:
+              - ui
+              - api
+              - build
+              - types
+              - testing
+              - patterns
+              - tooling
+      validations:
+          required: false

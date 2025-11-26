@@ -35,10 +35,16 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 ### GitHub Composite Actions (1 total)
 - `.github/actions/setup/action.yml` — Unified Node.js + pnpm setup with caching (used by all workflows)
 
-### GitHub Templates (4 total)
-- `.github/ISSUE_TEMPLATE/config.yml` — Template configuration and contact links
-- `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (default label: bug)
-- `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (default label: feature)
+### GitHub Templates (10 total)
+- `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
+- `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (label: bug)
+- `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (label: feature)
+- `.github/ISSUE_TEMPLATE/enhancement.yml` — Enhancement form (label: enhancement)
+- `.github/ISSUE_TEMPLATE/refactor.yml` — Refactor request form (label: refactor)
+- `.github/ISSUE_TEMPLATE/optimize.yml` — Optimization form (label: optimize)
+- `.github/ISSUE_TEMPLATE/help.yml` — Help request form (label: help)
+- `.github/ISSUE_TEMPLATE/docs.yml` — Documentation form (label: docs)
+- `.github/ISSUE_TEMPLATE/chore.yml` — Maintenance task form (label: chore)
 - `.github/PULL_REQUEST_TEMPLATE.md` — PR template with checklist
 
 ### Custom Agent Profiles (10 total)
@@ -87,6 +93,10 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `feature` | #a2eeef | New feature request |
 | `docs` | #0075ca | Documentation only |
 | `chore` | #d4a373 | Maintenance task |
+| `refactor` | #fbca04 | Code restructuring without behavior change |
+| `help` | #d876e3 | Question or assistance needed |
+| `enhancement` | #84b6eb | Improvement to existing feature |
+| `optimize` | #0e8a16 | Performance or code optimization |
 
 ### Priority (optional, escalation only)
 | Label | Color | Description |
@@ -120,7 +130,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 15 labels**
+**Total: 19 labels**
 
 ---
 
@@ -160,7 +170,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
           ┌──────────────────┴──────────────────┐
           ▼                                     ▼
-    GitHub Templates (4)              Renovate Auto-Merge
+    GitHub Templates (10)             Renovate Auto-Merge
     (type labels applied)             (mutation-gated)
           │                                     │
           ▼                                     ▼
@@ -169,7 +179,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 
 ### Data Flow
 
-1. **Issue Creation**: Templates apply type labels (bug or feature)
+1. **Issue Creation**: Templates apply type labels (bug, feature, enhancement, refactor, optimize, help, docs, chore)
 2. **Context Gen**: Nx graph → generate-context → project-map.json → Custom Agents
 3. **PR Lifecycle**: PR opened → Biome Repair → CI → Code Review → Merge
 4. **Dependency Flow**: Renovate PR → CI + Mutation → Auto-Merge gate → Merge/Block
@@ -235,11 +245,31 @@ Unified Node.js + pnpm setup with caching. Eliminates duplication across all wor
 
 ### GitHub Templates
 
-**bug_report.yml**
-Form-based bug template. Fields: description, repro steps, expected/actual behavior, severity dropdown, environment, logs. Default labels: bug, triage. Requires checkbox: searched existing issues.
+All issue templates are agent-friendly with JSON-parseable structure. Each field has an `id` attribute that becomes the JSON key when parsed by [github/issue-parser](https://github.com/github/issue-parser) or [issue-ops/parser](https://github.com/issue-ops/parser). Templates include embedded `AGENT_CONTEXT` metadata for agent routing.
 
-**feature_request.yml**
-Form-based feature template with pattern selection. Fields: problem statement, proposed solution, alternatives, scope dropdown (multi), effort dropdown, acceptance criteria. Checkboxes for patterns: Effect pipeline, Option monad, Branded types, Dispatch table. Default labels: feature, triage.
+**bug_report.yml** (label: bug)
+Fields: description, repro_steps, expected_behavior, actual_behavior, severity (dropdown), scope (multi-select), environment (yaml), logs (shell), affected_packages. AGENT_CONTEXT routes to testing-specialist and typescript-advanced agents.
+
+**feature_request.yml** (label: feature)
+Fields: problem_statement, proposed_solution, alternatives_considered, scope (multi-select), effort_estimate (dropdown), acceptance_criteria, required_patterns (checkboxes), breaking_change. AGENT_CONTEXT routes to library-planner and typescript-advanced agents.
+
+**enhancement.yml** (label: enhancement)
+Fields: current_behavior, improved_behavior, rationale, scope (multi-select), target_files, acceptance_criteria, breaking_change, required_patterns (checkboxes). AGENT_CONTEXT routes to refactoring-architect and typescript-advanced agents.
+
+**refactor.yml** (label: refactor)
+Fields: target_files, current_pattern, target_pattern, rationale, scope (multi-select), breaking_change, test_strategy, target_patterns (checkboxes). AGENT_CONTEXT routes to refactoring-architect, cleanup-specialist, and typescript-advanced agents.
+
+**optimize.yml** (label: optimize)
+Fields: optimization_type (dropdown), target_area, current_metrics (yaml), target_metrics (yaml), proposed_approach, scope (multi-select), acceptance_criteria, breaking_change. AGENT_CONTEXT routes to performance-analyst and cleanup-specialist agents.
+
+**help.yml** (label: help)
+Fields: help_category (dropdown), question, context, attempted_solutions, relevant_files, urgency (dropdown), scope (multi-select). AGENT_CONTEXT routes to documentation-specialist and typescript-advanced agents.
+
+**docs.yml** (label: docs)
+Fields: documentation_type (dropdown), target_file, current_content, proposed_content, rationale, scope (multi-select), related_files (checkboxes). AGENT_CONTEXT routes to documentation-specialist agent.
+
+**chore.yml** (label: chore)
+Fields: chore_type (dropdown), description, target_files, scope (multi-select), acceptance_criteria, breaking_change, urgency (dropdown). AGENT_CONTEXT routes to cleanup-specialist and integration-specialist agents.
 
 **PULL_REQUEST_TEMPLATE.md**
 PR template with checklist. Includes Claude Code review trigger: `@claude Please review against REQUIREMENTS.md patterns`. Checklist validates: pnpm check/typecheck/test passes, Effect patterns used, B constant followed, tests added.
