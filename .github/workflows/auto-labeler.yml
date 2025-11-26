@@ -45,12 +45,11 @@ jobs:
                       const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
                       const total = additions + deletions;
 
-                      let size;
-                      if (total < 10) size = 'XS';
-                      else if (total < 50) size = 'S';
-                      else if (total < 200) size = 'M';
-                      else if (total < 500) size = 'L';
-                      else size = 'XL';
+                      const size = total < 10 ? 'XS'
+                        : total < 50 ? 'S'
+                        : total < 200 ? 'M'
+                        : total < 500 ? 'L'
+                        : 'XL';
 
                       core.setOutput('label', `size/${size}`);
 
