@@ -66,7 +66,11 @@ jobs:
               if: steps.changes.outputs.has_changes == 'true'
               id: test
               run: |
-                  pnpm test || echo "tests_failed=true" >> $GITHUB_OUTPUT
+                  if pnpm test; then
+                    echo "tests_failed=false" >> $GITHUB_OUTPUT
+                  else
+                    echo "tests_failed=true" >> $GITHUB_OUTPUT
+                  fi
 
             - name: Commit and Push Auto-Repairs
               if: |

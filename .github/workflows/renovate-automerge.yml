@@ -56,7 +56,7 @@ jobs:
                       };
 
             - name: Wait for CI Checks
-              if: fromJSON(steps.pr.outputs.result).eligible
+              if: fromJSON(steps.pr.outputs.result).eligible && github.event_name == 'pull_request'
               uses: lewagon/wait-on-check-action@595dabb3acf442d47e29c9ec9ba44db0c6bdd18f # v1.3.4
               with:
                   ref: ${{ github.event.pull_request.head.sha }}
@@ -65,7 +65,7 @@ jobs:
                   repo-token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Check Mutation Score
-              if: fromJSON(steps.pr.outputs.result).eligible
+              if: fromJSON(steps.pr.outputs.result).eligible && github.event_name == 'pull_request'
               id: mutation
               uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
               with:

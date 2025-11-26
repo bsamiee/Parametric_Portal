@@ -60,7 +60,7 @@
             "description": "Group React ecosystem (stable releases)",
             "groupName": "react-ecosystem",
             "matchCurrentVersion": "!/canary|beta|rc/",
-            "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+            "matchPackageNames": ["react", "react-dom"],
             "matchUpdateTypes": ["minor", "patch"]
         },
         {

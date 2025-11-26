@@ -167,47 +167,20 @@ jobs:
                   script: |
                       const analysis = ${{ steps.analyze.outputs.result }};
                       
-                      let changelog = '';
+                      const sections = [
+                        { title: 'Breaking Changes', items: analysis.breaking },
+                        { title: 'Features', items: analysis.features },
+                        { title: 'Bug Fixes', items: analysis.fixes },
+                        { title: 'Refactoring', items: analysis.refactors },
+                        { title: 'Documentation', items: analysis.docs }
+                      ];
                       
-                      if (analysis.breaking.length > 0) {
-                        changelog += '## Breaking Changes\n\n';
-                        analysis.breaking.forEach(msg => {
-                          changelog += `- ${msg}\n`;
-                        });
-                        changelog += '\n';
-                      }
-                      
-                      if (analysis.features.length > 0) {
-                        changelog += '## Features\n\n';
-                        analysis.features.forEach(msg => {
-                          changelog += `- ${msg}\n`;
-                        });
-                        changelog += '\n';
-                      }
-                      
-                      if (analysis.fixes.length > 0) {
-                        changelog += '## Bug Fixes\n\n';
-                        analysis.fixes.forEach(msg => {
-                          changelog += `- ${msg}\n`;
-                        });
-                        changelog += '\n';
-                      }
-                      
-                      if (analysis.refactors.length > 0) {
-                        changelog += '## Refactoring\n\n';
-                        analysis.refactors.forEach(msg => {
-                          changelog += `- ${msg}\n`;
-                        });
-                        changelog += '\n';
-                      }
-                      
-                      if (analysis.docs.length > 0) {
-                        changelog += '## Documentation\n\n';
-                        analysis.docs.forEach(msg => {
-                          changelog += `- ${msg}\n`;
-                        });
-                        changelog += '\n';
-                      }
+                      const changelog = sections
+                        .filter(section => section.items.length > 0)
+                        .map(section => 
+                          `## ${section.title}\n\n${section.items.map(msg => `- ${msg}`).join('\n')}\n\n`
+                        )
+                        .join('');
                       
                       return changelog;
 

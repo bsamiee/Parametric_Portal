@@ -112,33 +112,31 @@ const loadProjectMap = (): Effect.Effect<ProjectMap, never, never> =>
 const projectMap = Effect.runSync(loadProjectMap());
 
 // Find affected packages by changed file
-const findAffectedPackages = (changedFile: string): string[] => {
+const findAffectedPackages = (changedFile: string): ReadonlyArray<string> => {
   const changedProject = Object.entries(projectMap.projects).find(
     ([_, project]) => changedFile.startsWith(project.root)
   )?.[0];
 
   if (!changedProject) return [];
 
-  // BFS to find all dependents
-  const dependents = new Set<string>();
-  const queue = [changedProject];
+  // Recursive BFS to find all dependents (no loops, no mutations)
+  const findDependentsRecursive = (
+    queue: ReadonlyArray<string>,
+    visited: ReadonlySet<string>,
+    edges: ReadonlyArray<Edge>
+  ): ReadonlyArray<string> =>
+    queue.length === 0
+      ? Array.from(visited)
+      : pipe(
+          edges.filter(e => e.target === queue[0]),
+          newEdges => findDependentsRecursive(
+            [...queue.slice(1), ...newEdges.map(e => e.source).filter(s => !visited.has(s))],
+            new Set([...visited, queue[0]]),
+            edges
+          )
+        );
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    dependents.add(current);
-
-    const edges = projectMap.graph.edges.filter(
-      (edge) => edge.target === current
-    );
-
-    edges.forEach((edge) => {
-      if (!dependents.has(edge.source)) {
-        queue.push(edge.source);
-      }
-    });
-  }
-
-  return Array.from(dependents);
+  return findDependentsRecursive([changedProject], new Set<string>(), projectMap.graph.edges);
 };
 ```
 
@@ -326,52 +324,60 @@ const validate = (data: unknown): ProjectMap => {
 
 ```typescript
 const topologicalSort = (projectMap: ProjectMap): ReadonlyArray<string> => {
-  const graph = new Map<string, ReadonlyArray<string>>();
-  const inDegree = new Map<string, number>();
+  // Build adjacency list and in-degree immutably
+  const packages = Object.keys(projectMap.projects);
+  
+  const graph = packages.reduce(
+    (acc, pkg) => ({ ...acc, [pkg]: [] as ReadonlyArray<string> }),
+    {} as Record<string, ReadonlyArray<string>>
+  );
+  
+  const initialInDegree = packages.reduce(
+    (acc, pkg) => ({ ...acc, [pkg]: 0 }),
+    {} as Record<string, number>
+  );
+  
+  const { graph: adjacencyList, inDegree } = projectMap.graph.edges.reduce(
+    (acc, { source, target }) => ({
+      graph: {
+        ...acc.graph,
+        [target]: [...(acc.graph[target] || []), source]
+      },
+      inDegree: {
+        ...acc.inDegree,
+        [source]: (acc.inDegree[source] || 0) + 1
+      }
+    }),
+    { graph, inDegree: initialInDegree }
+  );
 
-  // Build adjacency list using reduce instead of forEach
-  Object.keys(projectMap.projects).reduce((acc, pkg) => {
-    graph.set(pkg, []);
-    inDegree.set(pkg, 0);
-    return acc;
-  }, undefined);
-
-  projectMap.graph.edges.reduce((acc, { source, target }) => {
-    const existing = graph.get(target) || [];
-    graph.set(target, [...existing, source]);
-    inDegree.set(source, (inDegree.get(source) || 0) + 1);
-    return acc;
-  }, undefined);
-
-  // Kahn's algorithm using recursion
+  // Kahn's algorithm using pure recursion (no mutations)
   const processQueue = (
     queue: ReadonlyArray<string>,
-    sorted: ReadonlyArray<string>
+    sorted: ReadonlyArray<string>,
+    degrees: Record<string, number>
   ): ReadonlyArray<string> => {
     if (queue.length === 0) return sorted;
 
     const [current, ...remaining] = queue;
-    const dependents = graph.get(current) || [];
+    const dependents = adjacencyList[current] || [];
     
-    const { newQueue, updatedDegrees } = dependents.reduce(
+    const { newQueue, newDegrees } = dependents.reduce(
       (acc, dependent) => {
-        const degree = inDegree.get(dependent)! - 1;
-        inDegree.set(dependent, degree);
-        return degree === 0 
-          ? { ...acc, newQueue: [...acc.newQueue, dependent] }
-          : acc;
+        const degree = acc.newDegrees[dependent] - 1;
+        return {
+          newQueue: degree === 0 ? [...acc.newQueue, dependent] : acc.newQueue,
+          newDegrees: { ...acc.newDegrees, [dependent]: degree }
+        };
       },
-      { newQueue: remaining, updatedDegrees: inDegree }
+      { newQueue: remaining, newDegrees: degrees }
     );
 
-    return processQueue(newQueue, [...sorted, current]);
+    return processQueue(newQueue, [...sorted, current], newDegrees);
   };
 
-  const initialQueue = Array.from(inDegree.entries())
-    .filter(([_, degree]) => degree === 0)
-    .map(([pkg, _]) => pkg);
-
-  return processQueue(initialQueue, []);
+  const initialQueue = packages.filter(pkg => inDegree[pkg] === 0);
+  return processQueue(initialQueue, [], inDegree);
 };
 ```
 
