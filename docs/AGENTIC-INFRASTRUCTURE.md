@@ -10,8 +10,6 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `REQUIREMENTS.md` — Single Source of Truth (SSoT) for all coding standards and agent protocols
 - `AGENTS.md` — Agent charter for CLI/CI agents (generated from REQUIREMENTS.md)
 - `CLAUDE.md` — Code standards for Claude Code (generated from REQUIREMENTS.md)
-- `TASK_FINAL.md` — 41-task implementation roadmap for agentic systems
-- `ANALYSIS.md` — Architectural strategy and design decisions for agentic automation
 
 ### Configuration Files
 - `renovate.json` — Renovate dependency update configuration with domain grouping
