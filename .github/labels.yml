@@ -82,6 +82,17 @@
   description: "No recent activity"
 
 # -----------------------------------------------------------------------------
+# Quality (system-managed, triggers agent actions)
+# -----------------------------------------------------------------------------
+- name: needs-info
+  color: "f9d0c4"
+  description: "Awaiting additional details"
+
+- name: needs-edit
+  color: "fef2c0"
+  description: "Description needs improvement"
+
+# -----------------------------------------------------------------------------
 # Exempt (special handling)
 # -----------------------------------------------------------------------------
 - name: pinned

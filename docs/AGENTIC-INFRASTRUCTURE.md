@@ -21,7 +21,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/ci.yml` — Main CI pipeline with quality gates
 - `.github/workflows/claude-pr-review.yml` — Consolidated PR review: REQUIREMENTS.md compliance + feedback synthesis + /summarize
 - `.github/workflows/auto-labeler.yml` — Declarative label sync
-- `.github/workflows/issue-lifecycle.yml` — Stale handling, validation
+- `.github/workflows/issue-lifecycle.yml` — Quality review + stale management
 - `.github/workflows/renovate-automerge.yml` — Mutation-gated dependency updates
 - `.github/workflows/biome-repair.yml` — Auto-fix style issues before review
 - `.github/workflows/semantic-commits.yml` — Enforce conventional commit format
@@ -121,6 +121,12 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 |-------|-------|-------------|
 | `stale` | #57606a | No recent activity |
 
+### Quality (system-managed, triggers agent actions)
+| Label | Color | Description |
+|-------|-------|-------------|
+| `needs-info` | #f9d0c4 | Awaiting additional details |
+| `needs-edit` | #fef2c0 | Description needs improvement |
+
 ### Exempt (special handling)
 | Label | Color | Description |
 |-------|-------|-------------|
@@ -128,7 +134,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 18 labels**
+**Total: 20 labels**
 
 ---
 
@@ -213,7 +219,11 @@ Parses AGENT_CONTEXT JSON blocks from issue and PR template bodies. Extracts met
 Unified PR review workflow combining REQUIREMENTS.md compliance review, AI/CI feedback synthesis, and /summarize command. Three jobs: (1) requirements-review waits for CI, checks compliance patterns (no `any`, no `var`/`let`, no `if`/`else`, no loops, no `try`/`catch`, B constant pattern, dispatch tables), uses Claude Opus 4.5; (2) synthesize-summary collects all reviews and CI status, posts structured summary with risk assessment; (3) manual-summarize handles /summarize slash command. Posts comments with marker `<!-- PR-REVIEW-SUMMARY -->`.
 
 **issue-lifecycle.yml**
-Manages stale detection and validation. Daily schedule runs stale detection: 30 days inactive → stale label, 44 days → close. Exemptions: pinned, security, critical labels. Generates aging report in GitHub step summary.
+Quality review and stale management. Triggers on issue opened/edited/reopened and every 6 hours.
+
+Jobs:
+1. **quality-review**: Evaluates issue content quality, checks required fields based on template type, validates content length. Adds `needs-info` (missing fields) or `needs-edit` (poor quality) labels. Automatically removes quality labels when issues are fixed.
+2. **stale-management**: 30 days inactive → stale label, 44 days → close. Exemptions: pinned, security, critical, implement, needs-info, needs-edit. Generates aging report with quality metrics.
 
 **renovate-automerge.yml**
 Mutation-gated auto-merge for dependency updates. Triggered by Renovate PRs, check_suite completion, or 4-hour schedule. Classifies updates: patch/minor (eligible) vs major/canary (blocked). Gate requirements: all checks green + mutation score ≥ 80%. Auto-merges eligible PRs via `gh pr merge --squash --auto`.

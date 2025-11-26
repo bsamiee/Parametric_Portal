@@ -8,7 +8,7 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 |-------|------|---------|-------|----------|
 | **PR Review** | REQUIREMENTS.md compliance + feedback synthesis | pull_request (after CI), /summarize | Claude Opus 4.5 | claude-pr-review.yml |
 | **Label Sync** | Declarative label management | labels.yml change | - | auto-labeler.yml |
-| **Issue Lifecycle** | Stale handling, validation | issues, schedule | - | issue-lifecycle.yml |
+| **Issue Lifecycle** | Quality review + stale management | issues (opened/edited), 6h schedule | - | issue-lifecycle.yml |
 | **Renovate Auto-Merge** | Mutation-gated dependency updates | pull_request, check_suite | - | renovate-automerge.yml |
 | **Biome Repair** | Auto-fix style issues | pull_request | - | biome-repair.yml |
 | **Dashboard** | Repository health metrics | schedule, /health | - | dashboard.yml |
@@ -132,15 +132,23 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 
 ```
 1. Issue Created (via template)
-   └─► Type label applied (bug, feature, enhancement, refactor, help, docs, chore)
+   ├─► Type label applied (bug, feature, enhancement, refactor, help, docs, chore)
+   └─► Quality Review triggered
 
-2. Stale Detection (Schedule: Daily)
+2. Quality Review (on: opened, edited, reopened)
+   ├─► Check required fields for template type
+   ├─► Validate content length and quality
+   ├─► Add needs-info if missing required fields
+   ├─► Add needs-edit if description insufficient
+   └─► Auto-remove quality labels when fixed
+
+3. Stale Detection (Schedule: Every 6 hours)
    ├─► 30 days inactive → stale label
    ├─► 44 days inactive → close
-   └─► Exempt: pinned, security, critical
+   └─► Exempt: pinned, security, critical, implement, needs-info, needs-edit
 
-3. Issue Lifecycle
-   └─► Aging report in step summary
+4. Aging Report
+   └─► Metrics: critical, needs-info, needs-edit, stale, >30 days, total
 ```
 
 ### Agent-Friendly Templates
@@ -227,6 +235,12 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 |-------|-------|-------------|
 | `stale` | #57606a | No recent activity |
 
+### Quality (system-managed, triggers agent actions)
+| Label | Color | Description |
+|-------|-------|-------------|
+| `needs-info` | #f9d0c4 | Awaiting additional details |
+| `needs-edit` | #fef2c0 | Description needs improvement |
+
 ### Exempt (special handling)
 | Label | Color | Description |
 |-------|-------|-------------|
@@ -234,7 +248,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 18 labels**
+**Total: 20 labels**
 
 ## Custom Agent Profiles
 

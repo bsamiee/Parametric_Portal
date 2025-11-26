@@ -2,11 +2,9 @@ name: Issue Lifecycle
 
 on:
     issues:
-        types: [opened, labeled]
-    issue_comment:
-        types: [created]
+        types: [opened, edited, reopened]
     schedule:
-        - cron: "0 6 * * *" # Daily at 6 AM UTC
+        - cron: "0 */6 * * *" # Every 6 hours
 
 concurrency:
     group: issue-lifecycle-${{ github.event.issue.number || 'scheduled' }}
@@ -17,69 +15,165 @@ permissions:
     issues: write
 
 jobs:
-    parse-context:
-        if: github.event_name == 'issues' && github.event.action == 'opened'
+    quality-review:
+        if: github.event_name == 'issues'
         runs-on: ubuntu-latest
         steps:
-            - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
-
-            - name: Setup Environment
-              uses: ./.github/actions/setup
-
-            - name: Parse AGENT_CONTEXT
-              id: context
-              run: |
-                  CONTEXT=$(echo '${{ github.event.issue.body }}' | pnpm parse:context)
-                  echo "context=$CONTEXT" >> $GITHUB_OUTPUT
-
-            - name: Apply Context Labels
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-              with:
-                  script: |
-                      const agentContext = JSON.parse('${{ steps.context.outputs.context }}');
-                      const labels = [];
-
-                      if (agentContext.type) labels.push(`type/${agentContext.type}`);
-                      if (agentContext.priority) labels.push(`priority/${agentContext.priority}`);
-                      if (agentContext.scope) agentContext.scope.forEach(s => labels.push(`scope/${s}`));
-
-                      labels.length > 0 && await github.rest.issues.addLabels({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: context.payload.issue.number,
-                        labels
-                      });
-
-    validate-issue:
-        if: github.event_name == 'issues' && github.event.action == 'opened'
-        runs-on: ubuntu-latest
-        steps:
-            - name: Validate Issue Format
+            - name: Quality Review
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
                       const issue = context.payload.issue;
-                      const warnings = [];
+                      const body = issue.body || '';
+                      const labels = issue.labels.map(l => l.name);
 
-                      if (!issue.body || issue.body.length < 20) {
-                        warnings.push('- Issue body appears to be empty or too short');
+                      // Skip if already has quality labels (avoid re-review loops)
+                      const qualityLabels = ['needs-info', 'needs-edit'];
+                      const hasQualityLabel = labels.some(l => qualityLabels.includes(l));
+
+                      // Skip bot-created issues on edit (let them self-correct)
+                      if (context.payload.action === 'edited' && hasQualityLabel) {
+                        console.log('Skipping: already has quality label');
+                        return;
                       }
 
-                      if (issue.title.length < 10) {
-                        warnings.push('- Issue title is too short. Please be more descriptive.');
+                      // Required fields by template type (based on our templates)
+                      const requiredFields = {
+                        bug: ['Bug Description', 'Steps to Reproduce', 'Expected Behavior', 'Actual Behavior'],
+                        feature: ['Problem Statement', 'Proposed Solution', 'Acceptance Criteria'],
+                        enhancement: ['Current Behavior', 'Improved Behavior', 'Rationale', 'Acceptance Criteria'],
+                        refactor: ['Target Files', 'Current Pattern', 'Target Pattern', 'Rationale', 'Test Strategy'],
+                        help: ['Question', 'Context'],
+                        docs: ['Target File', 'Proposed Content', 'Rationale'],
+                        chore: ['Task Description', 'Acceptance Criteria']
+                      };
+
+                      // Minimum content length for quality
+                      const MIN_FIELD_LENGTH = 20;
+                      const MIN_BODY_LENGTH = 50;
+
+                      // Detect template type from labels
+                      const typeLabels = ['bug', 'feature', 'enhancement', 'refactor', 'help', 'docs', 'chore'];
+                      const issueType = labels.find(l => typeLabels.includes(l));
+
+                      const issues = [];
+                      const labelsToAdd = [];
+                      const labelsToRemove = [];
+
+                      // Check body length
+                      if (body.length < MIN_BODY_LENGTH) {
+                        issues.push('Issue body is too short. Please provide more detail.');
+                        labelsToAdd.push('needs-edit');
                       }
 
-                      if (issue.title.toLowerCase().includes('bug') && !issue.body?.includes('Steps to Reproduce')) {
-                        warnings.push('- For bug reports, please include steps to reproduce');
+                      // Check required fields if we can identify the type
+                      if (issueType && requiredFields[issueType]) {
+                        const required = requiredFields[issueType];
+                        const missingFields = [];
+                        const shortFields = [];
+
+                        for (const field of required) {
+                          // Look for markdown header pattern: ### Field Name
+                          const headerPattern = new RegExp(`###\\s*${field}[\\s\\S]*?(?=###|$)`, 'i');
+                          const match = body.match(headerPattern);
+
+                          if (!match) {
+                            missingFields.push(field);
+                          } else {
+                            // Extract content after header
+                            const content = match[0].replace(/###\s*[^\n]+\n?/, '').trim();
+                            // Skip "No response" or "_No response_" placeholders
+                            const isPlaceholder = /^_?No response_?$/i.test(content);
+                            if (content.length < MIN_FIELD_LENGTH && !isPlaceholder) {
+                              shortFields.push(field);
+                            } else if (isPlaceholder) {
+                              missingFields.push(field);
+                            }
+                          }
+                        }
+
+                        if (missingFields.length > 0) {
+                          issues.push(`Missing required fields: ${missingFields.join(', ')}`);
+                          labelsToAdd.push('needs-info');
+                        }
+
+                        if (shortFields.length > 0 && !labelsToAdd.includes('needs-edit')) {
+                          issues.push(`Fields need more detail: ${shortFields.join(', ')}`);
+                          labelsToAdd.push('needs-edit');
+                        }
                       }
 
-                      warnings.length > 0 && await github.rest.issues.createComment({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: issue.number,
-                        body: `## Issue Validation\n\nPlease address the following:\n${warnings.join('\n')}`
-                      });
+                      // Check title quality
+                      if (issue.title.length < 15) {
+                        issues.push('Title is too short. Please be more descriptive.');
+                        if (!labelsToAdd.includes('needs-edit')) {
+                          labelsToAdd.push('needs-edit');
+                        }
+                      }
+
+                      // If issue passes all checks, remove any existing quality labels
+                      if (issues.length === 0 && hasQualityLabel) {
+                        for (const label of qualityLabels) {
+                          if (labels.includes(label)) {
+                            labelsToRemove.push(label);
+                          }
+                        }
+                      }
+
+                      // Apply labels
+                      if (labelsToAdd.length > 0) {
+                        // Deduplicate
+                        const uniqueLabels = [...new Set(labelsToAdd)];
+                        await github.rest.issues.addLabels({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: issue.number,
+                          labels: uniqueLabels
+                        });
+                      }
+
+                      // Remove labels if issue was fixed
+                      for (const label of labelsToRemove) {
+                        try {
+                          await github.rest.issues.removeLabel({
+                            owner: context.repo.owner,
+                            repo: context.repo.repo,
+                            issue_number: issue.number,
+                            name: label
+                          });
+                        } catch (e) {
+                          // Label might not exist, ignore
+                        }
+                      }
+
+                      // Post comment with feedback (only on new issues or if issues found)
+                      if (issues.length > 0 && context.payload.action === 'opened') {
+                        const feedback = `## Quality Review
+
+                        This issue needs attention before it can be actioned:
+
+                        ${issues.map(i => `- ${i}`).join('\n')}
+
+                        Please update the issue to address these points. The quality labels will be automatically removed once resolved.`;
+
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: issue.number,
+                          body: feedback
+                        });
+                      }
+
+                      // Log summary
+                      if (issues.length > 0) {
+                        console.log(`Quality issues found: ${issues.join('; ')}`);
+                        console.log(`Labels added: ${labelsToAdd.join(', ')}`);
+                      } else {
+                        console.log('Issue passes quality review');
+                        if (labelsToRemove.length > 0) {
+                          console.log(`Labels removed: ${labelsToRemove.join(', ')}`);
+                        }
+                      }
 
     stale-management:
         if: github.event_name == 'schedule'
@@ -100,8 +194,8 @@ jobs:
                   stale-pr-label: stale
                   days-before-stale: 30
                   days-before-close: 14
-                  exempt-issue-labels: pinned,security,priority/critical,claude-implement,in-progress
-                  exempt-pr-labels: pinned,security,priority/critical
+                  exempt-issue-labels: pinned,security,critical,implement,needs-info,needs-edit
+                  exempt-pr-labels: pinned,security,critical
 
             - name: Generate Aging Report
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
@@ -115,10 +209,14 @@ jobs:
                       });
 
                       const now = new Date();
+                      const DAY_MS = 24 * 60 * 60 * 1000;
+
                       const aging = {
-                        critical: issues.filter(i => i.labels.some(l => l.name === 'priority/critical')).length,
+                        critical: issues.filter(i => i.labels.some(l => l.name === 'critical')).length,
+                        needsInfo: issues.filter(i => i.labels.some(l => l.name === 'needs-info')).length,
+                        needsEdit: issues.filter(i => i.labels.some(l => l.name === 'needs-edit')).length,
                         stale: issues.filter(i => i.labels.some(l => l.name === 'stale')).length,
-                        old: issues.filter(i => (now - new Date(i.created_at)) > 30 * 24 * 60 * 60 * 1000).length,
+                        old: issues.filter(i => (now - new Date(i.created_at)) > 30 * DAY_MS).length,
                         total: issues.length
                       };
 
@@ -127,6 +225,8 @@ jobs:
                       | Category | Count |
                       |----------|-------|
                       | Critical | ${aging.critical} |
+                      | Needs Info | ${aging.needsInfo} |
+                      | Needs Edit | ${aging.needsEdit} |
                       | Stale | ${aging.stale} |
                       | >30 days | ${aging.old} |
                       | Total Open | ${aging.total} |
