@@ -1,0 +1,144 @@
+{
+    "generatedAt": "2025-11-26T05:46:32.422Z",
+    "graph": {
+        "cycles": [],
+        "edges": [],
+        "nodes": [
+            {
+                "name": "@parametric-portal/components",
+                "type": "library"
+            },
+            {
+                "name": "@parametric-portal/theme",
+                "type": "library"
+            },
+            {
+                "name": "@parametric-portal/types",
+                "type": "library"
+            }
+        ]
+    },
+    "imports": [
+        {
+            "alias": "@",
+            "path": "./packages"
+        },
+        {
+            "alias": "@theme",
+            "path": "./packages/theme/src"
+        },
+        {
+            "alias": "@types",
+            "path": "./packages/types/src"
+        }
+    ],
+    "projects": {
+        "@parametric-portal/components": {
+            "dependencies": [],
+            "exports": {
+                "./controls": {
+                    "import": "./dist/controls.js",
+                    "types": "./dist/controls.d.ts"
+                },
+                "./data": {
+                    "import": "./dist/data.js",
+                    "types": "./dist/data.d.ts"
+                },
+                "./elements": {
+                    "import": "./dist/elements.js",
+                    "types": "./dist/elements.d.ts"
+                },
+                "./feedback": {
+                    "import": "./dist/feedback.js",
+                    "types": "./dist/feedback.d.ts"
+                },
+                "./icons": {
+                    "import": "./dist/icons.js",
+                    "types": "./dist/icons.d.ts"
+                },
+                "./navigation": {
+                    "import": "./dist/navigation.js",
+                    "types": "./dist/navigation.d.ts"
+                },
+                "./overlays": {
+                    "import": "./dist/overlays.js",
+                    "types": "./dist/overlays.d.ts"
+                },
+                "./schema": {
+                    "import": "./dist/schema.js",
+                    "types": "./dist/schema.d.ts"
+                },
+                "./selection": {
+                    "import": "./dist/selection.js",
+                    "types": "./dist/selection.d.ts"
+                },
+                "./utility": {
+                    "import": "./dist/utility.js",
+                    "types": "./dist/utility.d.ts"
+                }
+            },
+            "name": "@parametric-portal/components",
+            "publicApi": [
+                "./controls",
+                "./data",
+                "./elements",
+                "./feedback",
+                "./icons",
+                "./navigation",
+                "./overlays",
+                "./schema",
+                "./selection",
+                "./utility"
+            ],
+            "root": "packages/components",
+            "sourceRoot": "packages/components/src",
+            "type": "library"
+        },
+        "@parametric-portal/theme": {
+            "dependencies": [],
+            "exports": {
+                "./fonts": {
+                    "import": "./dist/fonts.js",
+                    "types": "./dist/fonts.d.ts"
+                },
+                "./layouts": {
+                    "import": "./dist/layouts.js",
+                    "types": "./dist/layouts.d.ts"
+                },
+                "./theme": {
+                    "import": "./dist/theme.js",
+                    "types": "./dist/theme.d.ts"
+                }
+            },
+            "name": "@parametric-portal/theme",
+            "publicApi": ["./fonts", "./layouts", "./theme"],
+            "root": "packages/theme",
+            "sourceRoot": "packages/theme/src",
+            "type": "library"
+        },
+        "@parametric-portal/types": {
+            "dependencies": [],
+            "exports": {
+                "./types": {
+                    "import": "./dist/types.js",
+                    "types": "./dist/types.d.ts"
+                },
+                "./utils": {
+                    "import": "./dist/utils.js",
+                    "types": "./dist/utils.d.ts"
+                }
+            },
+            "name": "@parametric-portal/types",
+            "publicApi": ["./types", "./utils"],
+            "root": "packages/types",
+            "sourceRoot": "packages/types/src",
+            "type": "library"
+        }
+    },
+    "version": "1.0.0",
+    "workspace": {
+        "nxVersion": "22.2.0-canary.20251121-9a6c7ad",
+        "packageManager": "pnpm@10.23.0",
+        "root": "/home/user/Parametric_Portal"
+    }
+}

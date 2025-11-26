@@ -1,0 +1,170 @@
+name: Auto Labeler
+
+on:
+    pull_request:
+        types: [opened, synchronize]
+    issues:
+        types: [opened, edited]
+    issue_comment:
+        types: [created]
+
+concurrency:
+    group: auto-labeler-${{ github.event.pull_request.number || github.event.issue.number }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+    pull-requests: write
+    issues: write
+
+jobs:
+    label-pr:
+        if: github.event_name == 'pull_request'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - name: Apply Path Labels
+              uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v5
+              with:
+                  repo-token: "${{ secrets.GITHUB_TOKEN }}"
+
+            - name: Calculate PR Size
+              id: size
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              with:
+                  script: |
+                      const { data: files } = await github.rest.pulls.listFiles({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: context.payload.pull_request.number
+                      });
+
+                      const additions = files.reduce((sum, f) => sum + f.additions, 0);
+                      const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
+                      const total = additions + deletions;
+
+                      const size = total < 10 ? 'XS'
+                        : total < 50 ? 'S'
+                        : total < 200 ? 'M'
+                        : total < 500 ? 'L'
+                        : 'XL';
+
+                      core.setOutput('label', `size/${size}`);
+
+            - name: Apply Size Label
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              with:
+                  script: |
+                      const sizeLabel = '${{ steps.size.outputs.label }}';
+                      const prNumber = context.payload.pull_request.number;
+
+                      // Remove existing size labels
+                      const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: prNumber
+                      });
+
+                      for (const label of labels) {
+                        if (label.name.startsWith('size/')) {
+                          await github.rest.issues.removeLabel({
+                            owner: context.repo.owner,
+                            repo: context.repo.repo,
+                            issue_number: prNumber,
+                            name: label.name
+                          });
+                        }
+                      }
+
+                      // Add new size label
+                      await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: prNumber,
+                        labels: [sizeLabel]
+                      });
+
+            - name: Detect Tech Labels
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+              with:
+                  script: |
+                      const { data: files } = await github.rest.pulls.listFiles({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        pull_number: context.payload.pull_request.number
+                      });
+
+                      const techLabels = new Set(
+                        files.flatMap(file => [
+                          file.filename.endsWith('.tsx') ? 'tech/react' : null,
+                          file.filename.includes('vite.config') ? 'tech/vite' : null,
+                          (file.patch?.includes('Effect.') || file.patch?.includes('pipe(')) ? 'tech/effect' : null,
+                        ].filter(Boolean))
+                      );
+                      techLabels.size > 0 && await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number,
+                        labels: Array.from(techLabels)
+                      });
+
+    label-issue:
+        if: |
+            github.event_name == 'issues' ||
+            (github.event_name == 'issue_comment' &&
+             !github.event.issue.pull_request &&
+             contains(github.event.comment.body, '/triage'))
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - name: Classify Issue
+              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  prompt: |
+                      Classify issue #${{ github.event.issue.number }} and apply appropriate labels.
+
+                      Issue Title: ${{ github.event.issue.title }}
+                      Issue Body: ${{ github.event.issue.body }}
+
+                      Determine and apply labels using `gh issue edit`:
+                      1. Type: type/bug, type/feature, type/enhancement, type/docs, type/refactor, type/test, type/chore
+                      2. Priority: priority/critical, priority/high, priority/medium, priority/low
+                      3. Scope: scope/ui, scope/api, scope/config, scope/deps, scope/perf, scope/security, scope/ci, scope/docs, scope/tests, scope/types
+                      4. Effort: effort/trivial, effort/small, effort/medium, effort/large
+
+                      Be conservative - only apply labels you are confident about.
+                      Use: gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"
+
+                  claude_args: |
+                      --model claude-sonnet-4-5-20250929
+                      --max-turns 3
+                      --allowedTools Bash(gh issue:*)
+
+    welcome-contributor:
+        if: github.event_name == 'pull_request' && github.event.action == 'opened'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Welcome First-Time Contributor
+              uses: actions/first-interaction@34f15e814fe48ac9312ccf29db4e74fa767cbab7 # v1
+              with:
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+                  pr-message: |
+                      Welcome to Parametric Portal! Thanks for your first contribution.
+
+                      Please ensure your PR follows our [REQUIREMENTS.md](./REQUIREMENTS.md) patterns:
+                      - Effect pipelines (no try/catch)
+                      - B constant pattern
+                      - Option monads (no null checks)
+                      - Dispatch tables (no if/else chains)
+
+                      Run `pnpm check && pnpm typecheck && pnpm test` before requesting review.
+                  issue-message: |
+                      Welcome to Parametric Portal! Thanks for opening your first issue.
+
+                      Our team uses automated agents to help triage and respond to issues.
+                      You can use `/triage` to request automatic classification.

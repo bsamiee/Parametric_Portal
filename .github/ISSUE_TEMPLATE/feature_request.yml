@@ -1,0 +1,90 @@
+name: Feature Request
+description: Suggest a new feature or enhancement
+title: "[Feature]: "
+labels: ["type/feature", "needs-triage"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              <!-- AGENT_CONTEXT
+              {"type":"feature","agents":["library-planner","typescript-advanced"]}
+              -->
+              Thanks for suggesting a feature! Please fill out the form below.
+
+    - type: textarea
+      id: problem
+      attributes:
+          label: Problem Statement
+          description: Describe the problem this feature would solve
+          placeholder: I'm always frustrated when...
+      validations:
+          required: true
+
+    - type: textarea
+      id: solution
+      attributes:
+          label: Proposed Solution
+          description: Describe your ideal solution
+      validations:
+          required: true
+
+    - type: textarea
+      id: alternatives
+      attributes:
+          label: Alternatives Considered
+          description: What alternatives have you considered?
+      validations:
+          required: false
+
+    - type: dropdown
+      id: scope
+      attributes:
+          label: Scope
+          description: What areas does this feature affect?
+          multiple: true
+          options:
+              - UI / Components
+              - API / Backend
+              - Build / Tooling
+              - Documentation
+              - Testing
+              - Performance
+              - Security
+              - Types / Schemas
+      validations:
+          required: true
+
+    - type: dropdown
+      id: effort
+      attributes:
+          label: Estimated Effort
+          description: How much effort do you think this requires?
+          options:
+              - Trivial - Less than 1 hour
+              - Small - 1-4 hours
+              - Medium - 1-3 days
+              - Large - 1+ weeks
+      validations:
+          required: false
+
+    - type: textarea
+      id: acceptance
+      attributes:
+          label: Acceptance Criteria
+          description: How will we know this feature is complete?
+          placeholder: |
+              - [ ] Criterion 1
+              - [ ] Criterion 2
+      validations:
+          required: true
+
+    - type: checkboxes
+      id: patterns
+      attributes:
+          label: Required Patterns
+          description: Which patterns should be applied?
+          options:
+              - label: Effect pipeline (no try/catch)
+              - label: Option monad (no null checks)
+              - label: Branded types
+              - label: Dispatch table (no if/else chains)

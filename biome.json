@@ -45,7 +45,7 @@
                             },
                             {
                                 "selector": { "kind": "objectLiteralProperty" },
-                                "match": "background_color|theme_color|short_name|start_url|(.*)",
+                                "match": "background_color|theme_color|short_name|start_url|test_coverage|(.*)",
                                 "formats": ["camelCase", "PascalCase"]
                             },
                             {

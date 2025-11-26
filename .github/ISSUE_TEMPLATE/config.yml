@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+    - name: Documentation
+      url: https://github.com/bsamiee/Parametric_Portal/wiki
+      about: Check the wiki for documentation and guides
+    - name: Request Claude Implementation
+      url: https://github.com/bsamiee/Parametric_Portal/issues/new?labels=claude-implement
+      about: Request Claude to implement a feature or fix
