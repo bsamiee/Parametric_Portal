@@ -28,14 +28,14 @@ catalogs:
       specifier: 0.2.3
       version: 0.2.3
     '@nx/js':
-      specifier: 22.2.0-canary.20251121-9a6c7ad
-      version: 22.2.0-canary.20251121-9a6c7ad
+      specifier: 22.2.0-canary.20251125-7e00ec4
+      version: 22.2.0-canary.20251125-7e00ec4
     '@nx/react':
-      specifier: 22.2.0-canary.20251121-9a6c7ad
-      version: 22.2.0-canary.20251121-9a6c7ad
+      specifier: 22.2.0-canary.20251125-7e00ec4
+      version: 22.2.0-canary.20251125-7e00ec4
     '@nx/vite':
-      specifier: 22.2.0-canary.20251121-9a6c7ad
-      version: 22.2.0-canary.20251121-9a6c7ad
+      specifier: 22.2.0-canary.20251125-7e00ec4
+      version: 22.2.0-canary.20251125-7e00ec4
     '@playwright/test':
       specifier: 1.56.1
       version: 1.56.1
@@ -139,8 +139,8 @@ catalogs:
       specifier: 0.554.0
       version: 0.554.0
     nx:
-      specifier: 22.2.0-canary.20251121-9a6c7ad
-      version: 22.2.0-canary.20251121-9a6c7ad
+      specifier: 22.2.0-canary.20251125-7e00ec4
+      version: 22.2.0-canary.20251125-7e00ec4
     react:
       specifier: 19.3.0-canary-40b4a5bf-20251120
       version: 19.3.0-canary-40b4a5bf-20251120
@@ -241,7 +241,7 @@ importers:
         version: 0.2.3(vitest@4.0.13)
       '@nx/js':
         specifier: 'catalog:'
-        version: 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
+        version: 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)
       '@nx/react':
         specifier: 'catalog:'
         version: 22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)(webpack@5.103.0)
@@ -349,7 +349,7 @@ importers:
         version: 0.554.0(react@19.3.0-canary-40b4a5bf-20251120)
       nx:
         specifier: 'catalog:'
-        version: 22.2.0-canary.20251121-9a6c7ad
+        version: 22.2.0-canary.20251125-7e00ec4
       react-aria:
         specifier: 'catalog:'
         version: 3.44.0(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)
@@ -1978,13 +1978,13 @@ packages:
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
 
-  '@nx/devkit@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-4B7/Kg6ZtUFSedY+EQCIa8xr96YZMskLR3zuIoaMDV6NQKkEXuxwss7xr46sioM9hU68zFrWfApc2Wuqq7effA==}
+  '@nx/devkit@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-WohgRZytGjKJKLN8aSXIkIysuu94Iyb7v+ZuUNKyVDZy+w+vMDNrXiM0S5uCrZSzma6TlV1G0yetN9po36O96A==}
     peerDependencies:
       nx: '>= 21 <= 23 || ^22.0.0-0'
 
-  '@nx/eslint@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-77KKBP5wSnLlwxRp+I49eTRVfrnndp95B9RnjoCPIXmiRmBAAXo4RjKMep8aAjFdHP32thlC0ucQw/HU8WOd7A==}
+  '@nx/eslint@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-1gDxW51PZlo1wJtukuucCXAGcN4YZP1Vi28Zv3cD4yVQQM+G86B7duw7pDbCxk39/bdB5r2A9XdNI8okKXIl7A==}
     peerDependencies:
       '@zkochan/js-yaml': 0.0.7
       eslint: ^8.0.0 || ^9.0.0
@@ -1992,81 +1992,81 @@ packages:
       '@zkochan/js-yaml':
         optional: true
 
-  '@nx/js@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-q+JUDfk+RTm1WMu3A3ScYSgj4qccsroNuRX2TOCKbbwE/EN/o0g/owAU8uZZN/35bD+cTGVdrVzsyx3qG1s6Xg==}
+  '@nx/js@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-n/OYX8fNM/Wirey1vXKfrlrEyoycLtZtiT7xzzSv8UfqJxiN95mIP901lTbD19WV/Db+pV8gVrRwX/NAR9qgRw==}
     peerDependencies:
       verdaccio: ^6.0.5
     peerDependenciesMeta:
       verdaccio:
         optional: true
 
-  '@nx/module-federation@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-NP34IS4M8MzIDuR7veYEf+jynIv5KQ2Blv6M8GI7+DNYVbWj7xt1LPkeq+PoOzSKy+Pp+YrabEH4kUkKfNLFKQ==}
+  '@nx/module-federation@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-PLwjaSgpMz7RU5HIeYGO/yJjG06VXSOt23Ke0Pyn/+odBoJzr64HHy1CofIJfMRmp7ZcGNZcSUEu059ZZjiz/g==}
 
-  '@nx/nx-darwin-arm64@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-Wn3R2g36BaGnh357xazTqdEPSKnvJ/9BEB7rzYG6YCEJ4KHrdcACtZ2sHrbxn2Yj0rzqUT5hAIkdZqKW42NHoA==}
+  '@nx/nx-darwin-arm64@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-5MDCsDslpXToE3tfUs9nUJpWjFptB6yrY8sMicFHzb1YUPwoGSmvkjzKG+ct55syqqgnxmHJHawjGpxFRXoTqQ==}
     cpu: [arm64]
     os: [darwin]
 
-  '@nx/nx-darwin-x64@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-0R+Q+5uMi9ROiVSxVEZwAVwLkgiV35TC1F8ZRho4Uj7Nom/OVqYayjPp05XUs3HzI2aBAxO4llRLdsPSmXdmxg==}
+  '@nx/nx-darwin-x64@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-t15sOsfNJ4+8BedoIKifY8HJZARNptbmtQo4aoz46JsehbU+R40WvrcTVenXmppNdq4SJgSeVodip+NxSjR6Pg==}
     cpu: [x64]
     os: [darwin]
 
-  '@nx/nx-freebsd-x64@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-C36tssV5gW/6uecPSft3ReyeUcmWNcQ6EwpKL0QsQlNCyp4QsfZ/zFFXlWmo/v7XRpN82rmz+kmbHasPqVLf/w==}
+  '@nx/nx-freebsd-x64@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-fJPPoIwjcuP9+tUvkYFbFG60vGcfnz1deF/s/CkoiZvE81uyUMUmpvk5L/luzOwM1t+MXsnm0UIEn/ep03Lnrg==}
     cpu: [x64]
     os: [freebsd]
 
-  '@nx/nx-linux-arm-gnueabihf@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-vSlVovIe3J89mNTHhf2QkBIUthucyUDU4Abqp6/Doq2Yw9CO2Z8V/anYQosEkNtGKyZRrvmsPhh/lUzuJNFkXA==}
+  '@nx/nx-linux-arm-gnueabihf@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-GWxQtXd1Eh7mCkLkcamZch3SqzMDpEFT6PkZAORG2yZcC954gGgI5fgYewo1mZVmlpOK/QKV/kzbdXSwRIwNNg==}
     cpu: [arm]
     os: [linux]
 
-  '@nx/nx-linux-arm64-gnu@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-XuibM1R5ySgk7raUyJ8ZJkViB4xjAiZDfniJvZccEFt0ypLIxYKba7ueoDyFfcR/JlhP4EuQGj4/VdreERf1tw==}
+  '@nx/nx-linux-arm64-gnu@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-zLTmsGLKCJCnZLSrBOjmaaTZcofQZHbvaKV3mab5x9yMpefUlJ7TcCk+LG4jO1pplohLUymkYN81Vs9bg8bKkw==}
     cpu: [arm64]
     os: [linux]
 
-  '@nx/nx-linux-arm64-musl@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-+VNkKlaJ3fkfLUdlyZnABjj0cmzYkASiFPlg0jEGVcXqLcpfCY6GjWztnUoJbCgWThkBU55qFP9AKA+tyC+X9Q==}
+  '@nx/nx-linux-arm64-musl@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-McLBcMy/Re7Lwrf7PbrYp7lpSQq9jyc1ICa8IWFsG6T3iXkQfEj/+V8PN1Tf+nsn5iIltnnDbe3Zy5EehuUvuQ==}
     cpu: [arm64]
     os: [linux]
 
-  '@nx/nx-linux-x64-gnu@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-gEC75kM5EMubGgRkdkAEKIj1/bP4VnvxeFhSJWq7tBtThdfKQbDJXofqrP5FAjRaV0DJHCg43Gaj8zVOCUylsA==}
+  '@nx/nx-linux-x64-gnu@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-TcDpPXlXZNLaASF1L3KFjYwWN1avi9qvbHDoNNzOYAMIHmmJxvlf5hmP4Ute7aph5KMezPUctrAezs5OCWMPzA==}
     cpu: [x64]
     os: [linux]
 
-  '@nx/nx-linux-x64-musl@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-lQbo+NBeMnh7sGqMsbVhlk+dWlng7OMxeBZEmCjfZKd4r3/Brjf8cWRn7uK4QFfhHjkJJnGnOA6gu0GmQwYXEQ==}
+  '@nx/nx-linux-x64-musl@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-f5454ANZ42vzF5OwgGQl7yUOVTmNMW2G3vm4cjkRDHE07p2B5qcRxtqx9ghTIp9/cUP00zcNOpKy0qsm51c++w==}
     cpu: [x64]
     os: [linux]
 
-  '@nx/nx-win32-arm64-msvc@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-6UbairnQ8SMRf8a6HPWdrcA6Jb/6L0WWVteTQhvIWln2ddY9mdCpVNGqwrC6vuE9pNZAu7QnJ/Pry/VqEzXVzg==}
+  '@nx/nx-win32-arm64-msvc@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-nDS5YfX0iHyhhuz7udL7qaGneXNkPRrHs2eKE5FEqsrGp0OITdHRUDOVhV1Fm+3TAlRs8x0Wt9N/ivCRWDonNw==}
     cpu: [arm64]
     os: [win32]
 
-  '@nx/nx-win32-x64-msvc@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-Aer2GMZT5LE4+KgeCdPOk6LHohr+6oooCiwzrO/uBfyD4SbutFGlYxyQ+CQf5ZLnOeqFGLSk+wHOj5DT8hL2gg==}
+  '@nx/nx-win32-x64-msvc@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-FejUhldUOSgwwctfFnL8AfOX5GTDV1BPV8mug2VqXYrvvZJVP9HUwpi+LETa9J2lRfA6+vsRnRCqvscletsXng==}
     cpu: [x64]
     os: [win32]
 
-  '@nx/react@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-luPtypT8yiTI3Hfes1BtXbSmr8Y7pHyZe078KOa5jk+y9R8YXvC39kAv7CvErrZGY2s1rfUDmk9tBgCObzIO3w==}
+  '@nx/react@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-BCCKiF5LGtzlvZrqzVaDZpXkFVjolkw2d3b8JHOO1aDp13TUAXKXDG0r3wlyN2dJ12ulid1NPC1WFXw2BnfG8A==}
 
-  '@nx/rollup@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-WOIoG4KR06bohriHZzICNsIkvHG1RG7TBrQjR2nmDJlzgDUYW4HJVebmZbe8PbPChaZApZ6R2rVPQMYLHBqQFQ==}
+  '@nx/rollup@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-/OX1qs2A/PrALSeXuZxL1JuWMoiFYtopofPppQ+gimVfB1r+mdO4OWuDhCCA+Y4373dk2R279T6vkf7CWAq3Ew==}
 
-  '@nx/vite@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-BlMMTNeDzW4ojoH5WXgUp7IwcZk4T+KK0O/jnzIcKI1FsUHji+YptcQgcCH9Iu5tqG5uc4CcILecanKzpN8S7Q==}
+  '@nx/vite@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-vT+EazqAoeh2bJwkuTyzmJZ1m+wBZmJ7+NXzgkzygxYwW29g7TfRbes8htdrNd7nhzij9Tucbs88E1puDFAjbA==}
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0
       vitest: ^1.3.1 || ^2.0.0 || ^3.0.0 || ^4.0.0
 
-  '@nx/vitest@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-KG8cYb+zzSup4prYEV27yBXIspkNnPynJxf7fCCD2uc+3uZ7TP0VJ3/gx/4DeJdr5SyirB4k0rs5riqtj8R2JA==}
+  '@nx/vitest@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-h6mDcOGA9D5pHIhq05DVCFtOKbDkTbhnH10ko/HM5RpETlTYn1SoIMU7gMCkRbECatnAUdt+F503T/9vuASsjA==}
     peerDependencies:
       vite: ^5.0.0 || ^6.0.0 || ^7.0.0
       vitest: ^1.0.0 || ^2.0.0 || ^3.0.0 || ^4.0.0
@@ -2076,11 +2076,11 @@ packages:
       vitest:
         optional: true
 
-  '@nx/web@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-nDOb5U3GbtIQAZaty+yzNQxjMmlTA80osAFZponfr37//PyRd6+K3LMxUzlv0j/UThKO5GKbq1tWXO1hCImysQ==}
+  '@nx/web@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-9IUvwV79VBjjPo+vlRo2hfuUYE+UY1kqKq+IZr9tZ0W0JIOo1Y3So0P6o3lmGr0L2gpUU8/bsVWqSKbhuUJJYg==}
 
-  '@nx/workspace@22.2.0-canary.20251121-9a6c7ad':
-    resolution: {integrity: sha512-dYkB1TlcqIPJOnFVBg6hBlDXjYcdF284GVgV/HmYmOpPFQUDawzLUzOVHRyv6l/719VaKe53+fU3RUo+DJDcmA==}
+  '@nx/workspace@22.2.0-canary.20251125-7e00ec4':
+    resolution: {integrity: sha512-sJI+spgorrpogoqOgiikbEf8AehDqbduYzmFaJb4kf5M5d2BixWbGIOAxwbHSww9cJ9lQA2BbLK4WIBuCKt8zA==}
 
   '@phenomnomnominal/tsquery@5.0.1':
     resolution: {integrity: sha512-3nVv+e2FQwsW8Aw6qTU6f+1rfcJ3hrcnvH/mu9i8YhxO+9sqbOfpL8m6PbET5+xKOlz/VSbp0RoYWYCtIsnmuA==}
@@ -5704,8 +5704,8 @@ packages:
   nth-check@2.1.1:
     resolution: {integrity: sha512-lqjrjmaOoAnWfMmBPL+XNnynZh2+swxiX3WUE0s4yEHI6m+AwrK2UZOimIRl3X/4QctVqS8AiZjFqyOGrMXb/w==}
 
-  nx@22.2.0-canary.20251121-9a6c7ad:
-    resolution: {integrity: sha512-ibnhHiNE0tYXZvKoYJoh/Dm9ZgAssFsQxWERAatSUip7S/5qK6xFszMsaQFU44b82D6gkhL6+EcmY+Ee2pXlRQ==}
+  nx@22.2.0-canary.20251125-7e00ec4:
+    resolution: {integrity: sha512-oZnhngyx0m7SHLNWF+0h4ABpXqOJchZqbOUTHyG2iQsmLnew01OIlfIRnFNIydC9h4X+f+QCpccrVE0zAGuZLA==}
     hasBin: true
     peerDependencies:
       '@swc-node/register': ^1.8.0
@@ -8974,21 +8974,21 @@ snapshots:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.19.1
 
-  '@nx/devkit@22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)':
+  '@nx/devkit@22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)':
     dependencies:
       '@zkochan/js-yaml': 0.0.7
       ejs: 3.1.10
       enquirer: 2.3.6
       minimatch: 9.0.3
-      nx: 22.2.0-canary.20251121-9a6c7ad
+      nx: 22.2.0-canary.20251125-7e00ec4
       semver: 7.7.3
       tslib: 2.8.1
       yargs-parser: 21.1.1
 
-  '@nx/eslint@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)':
+  '@nx/eslint@22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251125-7e00ec4)':
     dependencies:
-      '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
+      '@nx/devkit': 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
+      '@nx/js': 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)
       eslint: 9.39.1(jiti@2.6.1)
       semver: 7.7.3
       tslib: 2.8.1
@@ -9004,7 +9004,7 @@ snapshots:
       - supports-color
       - verdaccio
 
-  '@nx/js@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)':
+  '@nx/js@22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)':
     dependencies:
       '@babel/core': 7.28.5
       '@babel/plugin-proposal-decorators': 7.28.0(@babel/core@7.28.5)
@@ -9013,8 +9013,8 @@ snapshots:
       '@babel/preset-env': 7.28.5(@babel/core@7.28.5)
       '@babel/preset-typescript': 7.28.5(@babel/core@7.28.5)
       '@babel/runtime': 7.28.4
-      '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/workspace': 22.2.0-canary.20251121-9a6c7ad
+      '@nx/devkit': 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
+      '@nx/workspace': 22.2.0-canary.20251125-7e00ec4
       '@zkochan/js-yaml': 0.0.7
       babel-plugin-const-enum: 1.2.0(@babel/core@7.28.5)
       babel-plugin-macros: 3.1.0
@@ -9045,9 +9045,9 @@ snapshots:
       '@module-federation/enhanced': 0.21.6(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)
       '@module-federation/node': 2.7.25(@rspack/core@1.6.4(@swc/helpers@0.5.17))(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(webpack@5.103.0)
       '@module-federation/sdk': 0.21.6
-      '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/web': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
+      '@nx/devkit': 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
+      '@nx/js': 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)
+      '@nx/web': 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)
       '@rspack/core': 1.6.4(@swc/helpers@0.5.17)
       express: 4.21.2
       http-proxy-middleware: 3.0.5
@@ -9074,34 +9074,34 @@ snapshots:
       - vue-tsc
       - webpack-cli
 
-  '@nx/nx-darwin-arm64@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-darwin-arm64@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-darwin-x64@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-darwin-x64@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-freebsd-x64@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-freebsd-x64@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-linux-arm-gnueabihf@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-linux-arm-gnueabihf@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-linux-arm64-gnu@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-linux-arm64-gnu@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-linux-arm64-musl@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-linux-arm64-musl@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-linux-x64-gnu@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-linux-x64-gnu@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-linux-x64-musl@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-linux-x64-musl@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-win32-arm64-msvc@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-win32-arm64-msvc@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
-  '@nx/nx-win32-x64-msvc@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/nx-win32-x64-msvc@22.2.0-canary.20251125-7e00ec4':
     optional: true
 
   '@nx/react@22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251121-9a6c7ad)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.13)(webpack@5.103.0)':
@@ -9153,8 +9153,8 @@ snapshots:
 
   '@nx/rollup@22.2.0-canary.20251121-9a6c7ad(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@types/babel__core@7.20.5)(nx@22.2.0-canary.20251121-9a6c7ad)(typescript@6.0.0-dev.20251125)':
     dependencies:
-      '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
+      '@nx/devkit': 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
+      '@nx/js': 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)
       '@rollup/plugin-babel': 6.1.0(@babel/core@7.28.5)(@types/babel__core@7.20.5)(rollup@4.53.3)
       '@rollup/plugin-commonjs': 25.0.8(rollup@4.53.3)
       '@rollup/plugin-image': 3.0.3(rollup@4.53.3)
@@ -9227,10 +9227,10 @@ snapshots:
       - typescript
       - verdaccio
 
-  '@nx/web@22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)':
+  '@nx/web@22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)':
     dependencies:
-      '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
-      '@nx/js': 22.2.0-canary.20251121-9a6c7ad(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251121-9a6c7ad)
+      '@nx/devkit': 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
+      '@nx/js': 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)
       detect-port: 1.6.1
       http-server: 14.1.1
       picocolors: 1.1.1
@@ -9244,13 +9244,13 @@ snapshots:
       - supports-color
       - verdaccio
 
-  '@nx/workspace@22.2.0-canary.20251121-9a6c7ad':
+  '@nx/workspace@22.2.0-canary.20251125-7e00ec4':
     dependencies:
-      '@nx/devkit': 22.2.0-canary.20251121-9a6c7ad(nx@22.2.0-canary.20251121-9a6c7ad)
+      '@nx/devkit': 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
       '@zkochan/js-yaml': 0.0.7
       chalk: 4.1.2
       enquirer: 2.3.6
-      nx: 22.2.0-canary.20251121-9a6c7ad
+      nx: 22.2.0-canary.20251125-7e00ec4
       picomatch: 4.0.2
       semver: 7.7.3
       tslib: 2.8.1
@@ -11008,7 +11008,7 @@ snapshots:
 
   '@types/minimatch@6.0.0':
     dependencies:
-      minimatch: 9.0.3
+      minimatch: 10.1.1
 
   '@types/node@20.19.25':
     dependencies:
@@ -13462,7 +13462,7 @@ snapshots:
     dependencies:
       boolbase: 1.0.0
 
-  nx@22.2.0-canary.20251121-9a6c7ad:
+  nx@22.2.0-canary.20251125-7e00ec4:
     dependencies:
       '@napi-rs/wasm-runtime': 0.2.4
       '@yarnpkg/lockfile': 1.1.0
@@ -13500,16 +13500,16 @@ snapshots:
       yargs: 17.7.2
       yargs-parser: 21.1.1
     optionalDependencies:
-      '@nx/nx-darwin-arm64': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-darwin-x64': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-freebsd-x64': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-linux-arm-gnueabihf': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-linux-arm64-gnu': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-linux-arm64-musl': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-linux-x64-gnu': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-linux-x64-musl': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-win32-arm64-msvc': 22.2.0-canary.20251121-9a6c7ad
-      '@nx/nx-win32-x64-msvc': 22.2.0-canary.20251121-9a6c7ad
+      '@nx/nx-darwin-arm64': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-darwin-x64': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-freebsd-x64': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-linux-arm-gnueabihf': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-linux-arm64-gnu': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-linux-arm64-musl': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-linux-x64-gnu': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-linux-x64-musl': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-win32-arm64-msvc': 22.2.0-canary.20251125-7e00ec4
+      '@nx/nx-win32-x64-msvc': 22.2.0-canary.20251125-7e00ec4
     transitivePeerDependencies:
       - debug
 
