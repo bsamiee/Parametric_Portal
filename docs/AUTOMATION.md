@@ -334,7 +334,6 @@ Unified Node.js + pnpm setup used by all workflows. Eliminates ~200 lines of dup
 - [ ] No new secrets required (GITHUB_TOKEN only)
 - [ ] Slash commands (/summarize, /health) functional
 - [ ] All workflows have concurrency groups
-- [ ] First-time contributors receive welcome message
 - [ ] Composite action (.github/actions/setup) working in all workflows
 
 ## Troubleshooting
