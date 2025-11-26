@@ -1,0 +1,89 @@
+# Parametric Portal - Label Definitions
+# Managed by crazy-max/ghaction-github-labeler
+# Changes trigger automatic sync via auto-labeler.yml
+
+# -----------------------------------------------------------------------------
+# Type (required, single per issue)
+# -----------------------------------------------------------------------------
+- name: bug
+  color: "d73a4a"
+  description: "Something isn't working"
+
+- name: feature
+  color: "a2eeef"
+  description: "New feature request"
+
+- name: docs
+  color: "0075ca"
+  description: "Documentation only"
+
+- name: chore
+  color: "d4a373"
+  description: "Maintenance task"
+
+# -----------------------------------------------------------------------------
+# Priority (optional, only for escalation)
+# -----------------------------------------------------------------------------
+- name: critical
+  color: "b60205"
+  description: "Must be addressed immediately"
+
+# -----------------------------------------------------------------------------
+# Action (what should happen)
+# -----------------------------------------------------------------------------
+- name: triage
+  color: "fbca04"
+  description: "Needs classification"
+
+- name: implement
+  color: "7057ff"
+  description: "Ready for implementation"
+
+- name: review
+  color: "e99695"
+  description: "Needs review"
+
+- name: blocked
+  color: "b60205"
+  description: "Cannot proceed"
+
+# -----------------------------------------------------------------------------
+# Provider (who handles - mutually exclusive)
+# -----------------------------------------------------------------------------
+- name: copilot
+  color: "8b949e"
+  description: "Assign to GitHub Copilot"
+
+- name: claude
+  color: "8b949e"
+  description: "Assign to Claude"
+
+- name: gemini
+  color: "8b949e"
+  description: "Assign to Gemini"
+
+- name: codex
+  color: "8b949e"
+  description: "Assign to OpenAI Codex"
+
+# -----------------------------------------------------------------------------
+# Lifecycle (system-managed)
+# -----------------------------------------------------------------------------
+- name: stale
+  color: "57606a"
+  description: "No recent activity"
+
+# -----------------------------------------------------------------------------
+# Exempt (special handling)
+# -----------------------------------------------------------------------------
+- name: pinned
+  color: "006b75"
+  description: "Exempt from stale"
+
+- name: security
+  color: "8957e5"
+  description: "Security issue"
+
+- name: dependencies
+  color: "0550ae"
+  description: "Dependency updates"

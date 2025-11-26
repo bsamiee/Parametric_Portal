@@ -104,5 +104,3 @@
 - **Cognitive Complexity**: ≤25 per function
 - **Build Performance**: <3s dev server start
 - **Bundle Size**: <250KB gzipped (main chunk)
-
-<!-- SYNC_HASH: 87bf235bf5a1f0864e991f5fdff3c0800c776fbfcd60f85a8ac92581354f50c0 -->
