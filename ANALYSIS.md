@@ -170,8 +170,14 @@ Existing groups in renovate.json to be modified (not duplicated):
 |-------|--------------|
 | `effect-ecosystem` | Add `schedule: ["before 6am on Monday"]` |
 | `vite-ecosystem` | Add `automerge: true`, `matchUpdateTypes: ["minor", "patch"]` |
-| `types` | Add `excludePackagePatterns: ["^@types/react"]` |
+| `types` | Add `excludePackagePatterns: ["^@types/react"]` (handled by react-ecosystem) |
 | `react-canary`, `nx-canary`, `github-actions` | No changes (already configured) |
+
+New group to add (prevents version mismatches for stable React):
+
+| Group | Configuration |
+|-------|---------------|
+| `react-ecosystem` | `matchPackageNames: ["react", "react-dom", "@types/react", "@types/react-dom"]`, `automerge: true`, `matchUpdateTypes: ["minor", "patch"]` |
 
 ### 2.4 CI Quality → Issue Pipeline
 

@@ -237,6 +237,17 @@
     - vite-ecosystem: add "automerge": true, "matchUpdateTypes": ["minor", "patch"]
     - types: add "excludePackagePatterns": ["^@types/react"]
   </modifications>
+  <new-group>
+    {
+      "description": "Group React ecosystem (prevents version mismatches)",
+      "groupName": "react-ecosystem",
+      "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+      "matchCurrentVersion": "!/canary|beta|rc/",
+      "automerge": true,
+      "matchUpdateTypes": ["minor", "patch"]
+    }
+  </new-group>
+  <note>react-canary already groups canary/beta/rc versions; this new group handles stable releases</note>
 </task>
 
 <task id="4.2">
