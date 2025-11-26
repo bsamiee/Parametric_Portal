@@ -103,14 +103,12 @@ jobs:
                           (file.patch?.includes('Effect.') || file.patch?.includes('pipe(')) ? 'tech/effect' : null,
                         ].filter(Boolean))
                       );
-                      if (techLabels.size > 0) {
-                        await github.rest.issues.addLabels({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: context.payload.pull_request.number,
-                          labels: Array.from(techLabels)
-                        });
-                      }
+                      techLabels.size > 0 && await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number,
+                        labels: Array.from(techLabels)
+                      });
 
     label-issue:
         if: |
