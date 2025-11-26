@@ -14,7 +14,7 @@
 - **Vite**: `7.2.4` (latest with experimental Environment API)
 - **Vitest**: `4.0.13` (latest with V8 AST-based coverage)
 - **Effect**: `3.19.6` (functional effect system)
-- **Zod**: `4.1.13` (schema validation)
+- **@effect/schema**: `0.75.5` (schema validation)
 - **Tailwind CSS**: `4.1.17` (v4 bleeding-edge)
 - **Lightning CSS**: `1.30.2` (Rust-powered CSS)
 - **Biome**: `2.3.7` (Rust linter/formatter)
@@ -36,7 +36,7 @@
 1. **Bleeding-Edge TypeScript**
    - TypeScript 6.0-dev features
    - Super strong types (no `any` except for unstable experimental APIs)
-   - Branded types for nominal typing (Zod `.brand()`)
+   - Branded types for nominal typing (@effect/schema `S.Brand`)
    - Const type parameters where literal types matter
    - `as const` for all object literals
    - `ReadonlyArray` for all collections
@@ -484,7 +484,7 @@ export { B as CONFIG_TUNING, createConfig };
 2. **Context Framing**: Rich background (REQUIREMENTS.md, exemplars), architectural patterns, stack versions
 3. **Stepwise Structure**: Multi-step protocols, sequential subtasks, iterative refinement loops
 4. **Few-Shot Learning**: 1-5 concrete examples of desired patterns (before/after transformations)
-5. **Security-First**: Type safety emphasis (100% coverage), Effect error channels, Zod validation gates
+5. **Security-First**: Type safety emphasis (100% coverage), Effect error channels, @effect/schema validation gates
 6. **Iterative Refinement**: Continuous improvement, automated optimization, feedback integration
 7. **Adaptive Context**: Self-adjusting to user intent, multimodal when needed (code + diagrams + docs)
 

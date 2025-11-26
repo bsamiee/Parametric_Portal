@@ -16,6 +16,8 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 | **Release** | Conventional commit releases | push to main | - | release.yml |
 | **Bundle Analysis** | Bundle size tracking | pull_request | - | bundle-analysis.yml |
 | **Security** | Multi-layer security scanning | pull_request, push, schedule | - | security.yml |
+| **Semantic Commits** | Conventional commit validation | pull_request | - | semantic-commits.yml |
+| **Protocol Validator** | REQUIREMENTS.md drift detection | pull_request (*.md) | - | validate-protocols.yml |
 
 ## Workflow Architecture
 
@@ -257,6 +259,34 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 
 **Creation**: Run `pnpm labels:create` (idempotent)
 
+## Custom Agent Profiles
+
+10 specialized agents in `.github/agents/*.agent.md` provide domain-specific expertise:
+
+| Agent | Domain | Key Capabilities |
+|-------|--------|------------------|
+| **typescript-advanced** | TS 6.0-dev | Branded types, Effect pipelines, const generics |
+| **react-specialist** | React 19 canary | Compiler optimization, Server Components |
+| **vite-nx-specialist** | Vite 7 + Nx 22 | Environment API, Crystal inference |
+| **testing-specialist** | Vitest 4.0 | Property-based tests, Effect testing |
+| **performance-analyst** | Optimization | Bundle analysis, tree-shaking |
+| **refactoring-architect** | Migration | Effect pipelines, dispatch tables |
+| **library-planner** | Packages | Research, Nx package creation |
+| **integration-specialist** | Consistency | Catalog versions, workspace coherence |
+| **documentation-specialist** | Documentation | Cross-project consistency |
+| **cleanup-specialist** | Density | Algorithmic optimization (25-30 LOC/feature) |
+
+**Usage**: GitHub Copilot and Claude Code invoke agents via MCP tools. All agents follow REQUIREMENTS.md patterns.
+
+## Claude Dev Integration
+
+`.claude/` directory contains prompts for Claude Dev extension:
+- `commands/implement.md` — Implementation workflow
+- `commands/refactor.md` — Refactoring workflow
+- `commands/review-typescript.md` — TypeScript review
+- `commands/test.md` — Testing workflow
+- `settings.json` — Extension configuration
+
 ## Lefthook: Effect Pattern Validation
 
 **Hook**: `pre-commit` → `effect-check`
@@ -291,12 +321,26 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 - Public repos: Free
 - Private repos: 2000 minutes/month free (GitHub Free), then $0.008/minute
 
+## Tools & Scripts
+
+### Context Generation
+- **`pnpm generate:context`** — Executes `tools/generate-context/index.ts`, generates `docs/agent-context/project-map.json` from Nx graph
+- **`pnpm parse:context`** — Parses AGENT_CONTEXT from stdin via `tools/parse-agent-context.ts`
+
+### Protocol Sync
+- **`pnpm sync:protocols`** — Generates AGENTS.md, CLAUDE.md, copilot-instructions.md from REQUIREMENTS.md via `tools/sync-agent-protocols.ts`
+- **`pnpm sync:protocols --dry-run`** — Validates protocol synchronization (CI mode)
+
+### Labels
+- **`pnpm labels:create`** — Idempotently creates 45 GitHub labels via `scripts/create-labels.sh`
+
 ## Verification Checklist
 
 - [ ] All workflows pass YAML syntax validation
 - [ ] `nx affected -t check,typecheck,test` passes
 - [ ] All 45 labels created via `pnpm labels:create`
 - [ ] project-map.json generates successfully via `pnpm generate:context`
+- [ ] Protocol files synchronized via `pnpm sync:protocols --dry-run`
 - [ ] Biome repair doesn't break tests
 - [ ] Dashboard issue created and populated
 - [ ] No new secrets required (GITHUB_TOKEN only)
