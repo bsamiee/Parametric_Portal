@@ -14,7 +14,7 @@
 - **Vite**: `7.2.4` (latest with experimental Environment API)
 - **Vitest**: `4.0.13` (latest with V8 AST-based coverage)
 - **Effect**: `3.19.6` (functional effect system)
-- **Zod**: `4.1.13` (schema validation)
+- **@effect/schema**: `3.19.6` (schema validation)
 - **Tailwind CSS**: `4.1.17` (v4 bleeding-edge)
 - **Lightning CSS**: `1.30.2` (Rust-powered CSS)
 - **Biome**: `2.3.7` (Rust linter/formatter)
