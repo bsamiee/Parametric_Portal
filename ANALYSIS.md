@@ -35,17 +35,18 @@
 <deliverables type="workflows">
 | Workflow | Purpose | Trigger |
 |----------|---------|---------|
-| `pr-review-aggregator.yml` | Synthesize all AI/CI feedback into single comment | `workflow_run`, `pull_request_review` |
-| `auto-labeler.yml` | Path-based PR labels + AI issue classification | `pull_request`, `issues` |
+| `pr-review-aggregator.yml` | Synthesize all AI/CI feedback into single comment | `workflow_run`, `pull_request_review`, `issue_comment` (`/summarize`) |
+| `auto-labeler.yml` | Path-based PR labels + AI issue classification | `pull_request`, `issues`, `issue_comment` (`/triage`) |
 | `issue-lifecycle.yml` | Triage, stale handling, validation, aging | `issues`, `issue_comment`, `schedule` |
 | `renovate-automerge.yml` | Mutation-gated auto-merge for deps | `pull_request`, `check_suite`, `schedule` |
-| `dashboard.yml` | Auto-updating pinned issue with repo health | `schedule`, `workflow_dispatch`, `push` |
+| `dashboard.yml` | Auto-updating pinned issue with repo health | `schedule`, `workflow_dispatch`, `push`, `issue_comment` (`/health`) |
 | `release.yml` | Conventional commit releases | `push` to main, `workflow_dispatch` |
 | `bundle-analysis.yml` | Bundle size tracking with PR comments | `pull_request` |
 | `security.yml` | Audit, CodeQL, secrets scan, license check | `pull_request`, `push`, `schedule` |
 | `claude-code-review-enhanced.yml` | REQUIREMENTS.md compliance review | `pull_request` (after CI) |
 | `biome-repair.yml` | Auto-fix style before human review | `pull_request` |
 | `semantic-commits.yml` | Enforce conventional commits | `pull_request` |
+| `validate-protocols.yml` | Protocol drift validation | `pull_request` (*.md) |
 </deliverables>
 
 <deliverables type="config">
@@ -79,7 +80,14 @@
 | File | Purpose |
 |------|---------|
 | `tools/generate-context/` | Nx graph extraction + API surface generation |
+| `tools/parse-agent-context.ts` | Effect-based AGENT_CONTEXT parser for templates |
 | `tools/sync-agent-protocols.ts` | REQUIREMENTS.md → derivative doc generation |
+</deliverables>
+
+<deliverables type="scripts">
+| File | Purpose |
+|------|---------|
+| `scripts/create-labels.sh` | Idempotent GitHub label creation (45 labels) |
 </deliverables>
 
 ---
@@ -96,8 +104,9 @@
                                 │ tools/sync-agent-protocols.ts
         ┌───────────────────────┼───────────────────────┐
         ▼                       ▼                       ▼
-   AGENTS.md             copilot-instructions      CLAUDE.md
-   (CLI/CI)                   (IDE)               (Claude Code)
+   AGENTS.md          .github/copilot-        CLAUDE.md
+   (CLI/CI)           instructions.md         (Claude Code)
+                           (IDE)
         │                       │                       │
         └───────────────────────┴───────────────────────┘
                                 │
@@ -154,12 +163,32 @@
 
 **Parsing (Effect-compliant):**
 ```typescript
-const parseAgentContext = (body: string) =>
+import { Option as O, pipe } from 'effect';
+import * as S from '@effect/schema/Schema';
+
+const parseAgentContext = (body: string): AgentContext =>
   pipe(
     O.fromNullable(body.match(/<!-- AGENT_CONTEXT\n([\s\S]*?)\n-->/)?.[1]),
-    O.flatMap(json => O.tryCatch(() => JSON.parse(json) as AgentContext)),
+    O.flatMap(O.liftThrowable(JSON.parse)),
+    O.flatMap(S.decodeUnknownOption(AgentContextSchema)),
     O.getOrElse(() => DEFAULT_CONTEXT)
   );
+```
+
+**Slash Command Protocol:**
+
+| Command | Workflow | Effect |
+|---------|----------|--------|
+| `/summarize` | `pr-review-aggregator.yml` | Force re-synthesis of AI reviews on PR |
+| `/triage` | `auto-labeler.yml` | Re-classify PR/issue labels on demand |
+| `/health` | `dashboard.yml` | Generate on-demand health report |
+
+Commands parsed via `issue_comment` trigger with body matching:
+```yaml
+on:
+  issue_comment:
+    types: [created]
+# Filter: contains(github.event.comment.body, '/command')
 ```
 
 ### 2.3 Renovate Domain Strategy
@@ -188,6 +217,22 @@ From TASK_b Section 5 - convert persistent failures to tracked issues:
 | Stryker < 80% | "Mutation Debt: {project}" | `tech-debt`, `testing` |
 | Repeated lint failures | "Quality Debt: {paths}" | `tech-debt`, `refactor` |
 | Compression/PWA failures | "Performance Debt: {target}" | `tech-debt`, `performance` |
+
+### 2.5 Label Taxonomy
+
+**Creation Script**: `scripts/create-labels.sh`
+**Run Command**: `pnpm labels:create` (idempotent)
+
+| Category | Count | Labels |
+|----------|-------|--------|
+| `type/` | 7 | bug, feature, enhancement, docs, refactor, test, chore |
+| `priority/` | 4 | critical, high, medium, low |
+| `scope/` | 10 | ui, api, config, deps, perf, security, ci, docs, tests, types |
+| `effort/` | 4 | trivial, small, medium, large |
+| `tech/` | 3 | react, effect, vite |
+| `size/` | 5 | XS, S, M, L, XL |
+| special | 12 | claude-implement, dashboard, stale, tech-debt, needs-triage, in-progress, pinned, security, automerge, renovate-blocked, good-first-issue, help-wanted |
+| **Total** | **45** | |
 
 ---
 
@@ -234,9 +279,9 @@ From TASK_b Section 5 - convert persistent failures to tracked issues:
 <execution-order>
 | Phase | Focus | Deliverables | Dependencies |
 |-------|-------|--------------|--------------|
-| 1 | Foundation | `tools/generate-context/`, `project-map.json` | None |
-| 2 | Templates | Issue templates, PR template with hooks | Phase 1 |
-| 3 | Core Workflows | `pr-review-aggregator`, `issue-lifecycle`, `auto-labeler` | Phase 2 |
+| 1 | Foundation | `tools/generate-context/`, `project-map.json`, `tools/parse-agent-context.ts` | None |
+| 2 | Templates | Issue templates, PR template, `scripts/create-labels.sh` (45 labels) | Phase 1 |
+| 3 | Core Workflows | `pr-review-aggregator`, `issue-lifecycle`, `auto-labeler`, `claude-code-review-enhanced` | Phase 2 |
 | 4 | Dep Management | `renovate.json` update, `renovate-automerge.yml` | CI passing |
 | 5 | Quality Gates | `biome-repair`, `semantic-commits`, CI enhancements | Phase 3 |
 | 6 | Dashboard | `dashboard.yml`, pinned issue | All workflows |

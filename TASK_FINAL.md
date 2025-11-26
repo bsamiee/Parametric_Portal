@@ -53,7 +53,26 @@
 
 <task id="1.4">
   <file>package.json</file>
-  <action>Add script: "generate:context": "tsx tools/generate-context/index.ts"</action>
+  <action>Add automation scripts</action>
+  <additions>
+    "generate:context": "tsx tools/generate-context/index.ts",
+    "parse:context": "tsx tools/parse-agent-context.ts",
+    "labels:create": "bash scripts/create-labels.sh",
+    "sync:protocols": "tsx tools/sync-agent-protocols.ts"
+  </additions>
+</task>
+
+<task id="1.5">
+  <file>tools/parse-agent-context.ts</file>
+  <action>Create Effect-based AGENT_CONTEXT parser</action>
+  <spec>
+    - Export: parseAgentContext(body: string): Effect.Effect<AgentContext, never, never>
+    - Pattern: /<!-- AGENT_CONTEXT\n([\s\S]*?)\n-->/
+    - Use Option.fromNullable + Schema.decodeUnknown
+    - Return DEFAULT_CONTEXT when missing/invalid
+    - CLI mode: accept body via stdin, output JSON
+  </spec>
+  <pattern>Effect pipeline, Option monad</pattern>
 </task>
 
 ---
@@ -140,15 +159,45 @@
   <note>Content-based detection (e.g., tech/effect) requires custom scripting in auto-labeler.yml, not actions/labeler</note>
 </task>
 
+<task id="2.6">
+  <file>scripts/create-labels.sh</file>
+  <action>Create idempotent label creation script</action>
+  <spec>
+    - Use: gh label create "name" --color "hex" --description "desc" --force
+    - Categories:
+      - type/: bug, feature, enhancement, docs, refactor, test, chore (7)
+      - priority/: critical, high, medium, low (4)
+      - scope/: ui, api, config, deps, perf, security, ci, docs, tests, types (10)
+      - effort/: trivial, small, medium, large (4)
+      - tech/: react, effect, vite (3)
+      - size/: XS, S, M, L, XL (5)
+      - special: claude-implement, dashboard, stale, tech-debt, needs-triage, in-progress, pinned, security, automerge, renovate-blocked, good-first-issue, help-wanted (12)
+    - Total: 45 labels
+    - Exit 0 always (idempotent, --force handles existing)
+  </spec>
+</task>
+
+<task id="2.7">
+  <file>package.json</file>
+  <action>Verify labels:create script exists (added in Task 1.4)</action>
+  <validate>pnpm labels:create runs without error</validate>
+</task>
+
 ---
 
 ## Phase 3: Core Workflows
 
 <task id="3.1" priority="critical">
   <file>.github/workflows/pr-review-aggregator.yml</file>
-  <action>Create unified AI review synthesis workflow</action>
-  <triggers>workflow_run (ci, claude-code-review), pull_request_review</triggers>
+  <action>Create unified AI review synthesis workflow with /summarize command</action>
+  <triggers>
+    - workflow_run (ci, claude-code-review)
+    - pull_request_review
+    - issue_comment [created] (for /summarize command)
+  </triggers>
   <spec>
+    - Parse /summarize command from issue_comment.body
+    - Filter: only on PRs (github.event.issue.pull_request exists)
     - Collect reviews from: claude[bot], copilot[bot], github-actions[bot], humans
     - Collect all check run statuses
     - Use Claude to synthesize into structured summary:
@@ -160,22 +209,32 @@
       ## Nits (non-blocking)
       ## Agent Provenance
     - Post/update comment with marker: <!-- PR-AGGREGATOR-SUMMARY -->
-    - Concurrency: group: pr-aggregator-${{ github.event.pull_request.number }}, cancel-in-progress: true
   </spec>
+  <concurrency>group: pr-aggregator-${{ github.event.pull_request.number || github.event.issue.number }}, cancel-in-progress: true</concurrency>
   <permissions>contents:read, pull-requests:write, checks:read</permissions>
   <model>claude-sonnet-4-5-20250929</model>
 </task>
 
 <task id="3.2">
   <file>.github/workflows/auto-labeler.yml</file>
-  <action>Create path-based + AI classification labeler</action>
-  <triggers>pull_request [opened, synchronize], issues [opened, edited]</triggers>
+  <action>Create path-based + AI classification labeler with /triage command</action>
+  <triggers>
+    - pull_request [opened, synchronize]
+    - issues [opened, edited]
+    - issue_comment [created] (for /triage command)
+  </triggers>
   <spec>
+    - Parse /triage command from issue_comment.body
     - PR: Apply path labels via actions/labeler, size labels (XS/S/M/L/XL)
+    - PR: Apply tech labels based on file content analysis:
+      - *.tsx files → tech/react
+      - Effect. or pipe( in diff → tech/effect
+      - vite.config.* files → tech/vite
     - Issues: Claude classifies → type/*, priority/*, scope/*, effort/*
     - Conservative: only apply confident labels
-    - Welcome first-time contributors
+    - Welcome first-time contributors with actions/first-interaction
   </spec>
+  <concurrency>group: auto-labeler-${{ github.event.pull_request.number || github.event.issue.number }}, cancel-in-progress: true</concurrency>
   <model>claude-sonnet-4-5-20250929</model>
 </task>
 
@@ -184,13 +243,14 @@
   <action>Create comprehensive issue management workflow</action>
   <triggers>issues [opened, labeled], issue_comment, schedule (daily)</triggers>
   <spec>
-    - Parse AGENT_CONTEXT from issue body
+    - Parse AGENT_CONTEXT from issue body (use tools/parse-agent-context.ts)
     - Auto-label based on context
     - Stale: 30 days → stale label, 44 days → close
-    - Exempt: pinned, security, priority/critical, claude-implement
+    - Exempt: pinned, security, priority/critical, claude-implement, in-progress
     - Validate: check empty body, title length, suggest format for bugs
     - Aging report in step summary
   </spec>
+  <concurrency>group: issue-lifecycle-${{ github.event.issue.number || 'scheduled' }}, cancel-in-progress: false</concurrency>
 </task>
 
 <task id="3.4">
@@ -209,6 +269,7 @@
     - Output structured review with compliance table
     - Trigger pr-review-aggregator after completion
   </spec>
+  <concurrency>group: claude-review-${{ github.event.pull_request.number }}, cancel-in-progress: true</concurrency>
   <model>claude-opus-4-5-20251101</model>
 </task>
 
@@ -273,6 +334,7 @@
       - Labels: dependencies, migration, priority/high
       - Body: scope (affected packages), breaking changes, migration steps checklist, linked Renovate PR
   </spec>
+  <concurrency>group: renovate-automerge-${{ github.event.pull_request.number || 'scheduled' }}, cancel-in-progress: false</concurrency>
 </task>
 
 ---
@@ -291,6 +353,7 @@
     - If tests fail: skip commit, add comment warning of semantic breakage
     - Skip for: main branch, bot authors (except renovate)
   </spec>
+  <concurrency>group: biome-repair-${{ github.event.pull_request.number }}, cancel-in-progress: true</concurrency>
   <rationale>Zero style noise in human PR reviews; --unsafe requires test validation</rationale>
 </task>
 
@@ -303,6 +366,7 @@
     - Allowed types: feat, fix, refactor, style, docs, deps, test, chore
     - Require scope for feat/fix
   </spec>
+  <concurrency>group: semantic-commits-${{ github.event.pull_request.number }}, cancel-in-progress: true</concurrency>
 </task>
 
 <task id="5.3">
@@ -320,7 +384,7 @@
           exit 1
         fi
   </additions>
-  <limitation>Grep-based detection has false positives in strings/comments; AST-based validation preferred when Biome GritQL stabilizes</limitation>
+  <limitation>Grep-based detection has false positives in strings/comments; document known edge cases in AUTOMATION.md</limitation>
 </task>
 
 <task id="5.4">
@@ -349,15 +413,64 @@
   </additions>
 </task>
 
+<task id="5.5" priority="high">
+  <file>.github/workflows/ci.yml</file>
+  <action>Add quality debt issue creation on job failure</action>
+  <merge>true</merge>
+  <spec>
+    - On job failure, determine failure type based on failed step:
+      - Stryker/mutation failure → "Mutation Debt: {affected projects}"
+      - Lint/typecheck failure → "Quality Debt: {affected paths}"
+      - Compression/PWA failure → "Performance Debt: {target}"
+    - Search for existing debt issue by title pattern
+    - Create or update issue with:
+      - Failure details and affected projects/paths
+      - Checklist of files/areas to address
+      - Link to failed CI run
+    - Labels per type: tech-debt + (testing|refactor|performance)
+    - One issue per category (update existing, avoid spam)
+  </spec>
+  <permissions>issues: write</permissions>
+  <additions>
+    - name: Create Quality Debt Issue
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const stepName = '${{ github.job }}';
+          const debtType = stepName.includes('mutate') ? 'Mutation' :
+                          stepName.includes('check') ? 'Quality' : 'Performance';
+          const title = `${debtType} Debt: CI Failure`;
+          const labels = ['tech-debt', debtType === 'Mutation' ? 'testing' :
+                         debtType === 'Quality' ? 'refactor' : 'performance'];
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner, repo: context.repo.repo,
+            labels: labels.join(','), state: 'open'
+          });
+          const existing = issues.find(i => i.title.startsWith(debtType));
+          const body = `## CI Failure\n- Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n- Job: ${stepName}`;
+          existing
+            ? await github.rest.issues.update({ ...context.repo, issue_number: existing.number, body: existing.body + '\n\n' + body })
+            : await github.rest.issues.create({ ...context.repo, title, labels, body });
+  </additions>
+</task>
+
 ---
 
 ## Phase 6: Dashboard
 
 <task id="6.1">
   <file>.github/workflows/dashboard.yml</file>
-  <action>Create auto-updating repo health dashboard</action>
-  <triggers>schedule (every 6 hours), workflow_dispatch, push to main</triggers>
+  <action>Create auto-updating repo health dashboard with /health command</action>
+  <triggers>
+    - schedule (every 6 hours)
+    - workflow_dispatch
+    - push to main
+    - issue_comment [created] (for /health command on dashboard issue)
+  </triggers>
   <spec>
+    - Parse /health command from issue_comment.body
+    - Only respond when commented on issue with label: dashboard
     - Collect metrics:
       - Open PRs, merged in 7 days, stale PRs (>14 days)
       - Open issues by type (bugs, features, claude-ready)
@@ -375,6 +488,7 @@
       - Workflows table
       - Timestamp
   </spec>
+  <concurrency>group: dashboard, cancel-in-progress: false</concurrency>
 </task>
 
 ---
@@ -390,8 +504,9 @@
     - Calculate new version from package.json
     - Generate changelog grouped by: Breaking, Features, Fixes, Refactoring, Docs
     - Create git tag and GitHub release
-    - Optional: Claude-enhanced release notes
+    - Claude-enhanced release notes summarizing impact
   </spec>
+  <concurrency>group: release, cancel-in-progress: false</concurrency>
 </task>
 
 <task id="7.2">
@@ -405,6 +520,7 @@
     - Post/update PR comment with size report
     - Warn if significant increase (>10KB gzip)
   </spec>
+  <concurrency>group: bundle-${{ github.event.pull_request.number }}, cancel-in-progress: true</concurrency>
 </task>
 
 <task id="7.3">
@@ -419,6 +535,7 @@
     - license-check: copyleft detection
     Create security issue if critical vulnerabilities found
   </spec>
+  <concurrency>group: security-${{ github.event.pull_request.number || github.ref }}, cancel-in-progress: true</concurrency>
 </task>
 
 ---
@@ -431,11 +548,13 @@
   <sections>
     - AI Agents table: name, role, trigger, model
     - Workflow overview with ASCII diagram
+    - Slash Commands: /summarize, /triage, /health usage and examples
     - PR Lifecycle explanation
     - Issue Management explanation
     - Dependency Management explanation
     - Dashboard explanation
-    - Labels quick reference
+    - Labels quick reference (45 labels by category)
+    - Lefthook effect-check limitations and edge cases
   </sections>
 </task>
 
@@ -472,7 +591,7 @@
   <spec>
     - Read REQUIREMENTS.md as SSoT
     - Extract sections by markdown H2 headers: ## Stack, ## Dogmatic Rules, ## Agent Matrix, ## Quality Targets
-    - Generate: AGENTS.md, copilot-instructions.md, CLAUDE.md
+    - Generate: AGENTS.md (root), .github/copilot-instructions.md, CLAUDE.md (root)
     - Compute SHA256 hash, embed as <!-- SYNC_HASH: xxx -->
     - Dry-run mode for CI validation
   </spec>
@@ -488,11 +607,8 @@
     - Fail if generated files differ from committed
     - Suggest: "Run pnpm sync:protocols to fix"
   </spec>
-</task>
-
-<task id="9.3">
-  <file>package.json</file>
-  <action>Add script: "sync:protocols": "tsx tools/sync-agent-protocols.ts"</action>
+  <concurrency>group: validate-protocols-${{ github.event.pull_request.number }}, cancel-in-progress: true</concurrency>
+  <note>sync:protocols script added in Task 1.4</note>
 </task>
 
 ---
@@ -502,12 +618,16 @@
 <verification>
   <check id="v1">All workflows pass YAML syntax validation</check>
   <check id="v2">nx affected -t check,typecheck,test passes</check>
-  <check id="v3">All labels referenced in .github/labeler.yml and issue templates exist (create with gh label create; see labeler.yml and templates for canonical list)</check>
-  <check id="v4">project-map.json generates successfully</check>
+  <check id="v3">All labels created via pnpm labels:create (45 labels)</check>
+  <check id="v4">project-map.json generates successfully via pnpm generate:context</check>
   <check id="v5">Biome repair workflow doesn't break tests</check>
   <check id="v6">Dashboard issue created and populated</check>
   <check id="v7">No new secrets required</check>
   <check id="v8">Existing workflows unchanged except where specified</check>
+  <check id="v9">Slash commands (/summarize, /triage, /health) functional</check>
+  <check id="v10">Quality debt issues created on CI failure</check>
+  <check id="v11">All workflows have concurrency groups</check>
+  <check id="v12">First-time contributors receive welcome message</check>
 </verification>
 
 ---
@@ -515,7 +635,7 @@
 ## File Inventory
 
 <inventory>
-  <category name="workflows" count="11">
+  <category name="workflows" count="12">
     .github/workflows/pr-review-aggregator.yml
     .github/workflows/auto-labeler.yml
     .github/workflows/issue-lifecycle.yml
@@ -527,6 +647,7 @@
     .github/workflows/release.yml
     .github/workflows/bundle-analysis.yml
     .github/workflows/security.yml
+    .github/workflows/validate-protocols.yml
   </category>
 
   <category name="templates" count="4">
@@ -543,10 +664,15 @@
     lefthook.yml (merge)
   </category>
 
-  <category name="tools" count="3">
+  <category name="tools" count="4">
     tools/generate-context/index.ts
     tools/generate-context/schema.ts
+    tools/parse-agent-context.ts
     tools/sync-agent-protocols.ts
+  </category>
+
+  <category name="scripts" count="1">
+    scripts/create-labels.sh
   </category>
 
   <category name="docs" count="4">
@@ -557,8 +683,8 @@
   </category>
 
   <category name="modified" count="2">
-    ci.yml (extend)
-    package.json (add scripts)
+    ci.yml (extend with context gen + quality debt)
+    package.json (add 4 scripts)
   </category>
 </inventory>
 
@@ -567,12 +693,13 @@
 ## Commit Strategy
 
 <commits>
-  <commit phase="1">feat(tools): add agent context generation with Nx graph extraction</commit>
-  <commit phase="2">feat(github): add semantic issue and PR templates with AGENT_CONTEXT hooks</commit>
-  <commit phase="3">feat(ci): add PR review aggregator and issue lifecycle workflows</commit>
+  <commit phase="1">feat(tools): add agent context generation with Nx graph extraction and parser</commit>
+  <commit phase="2.1">feat(github): add semantic issue and PR templates with AGENT_CONTEXT hooks</commit>
+  <commit phase="2.2">chore(github): add label creation script (45 labels)</commit>
+  <commit phase="3">feat(ci): add PR review aggregator and issue lifecycle workflows with slash commands</commit>
   <commit phase="4">feat(deps): enhance Renovate config with domain grouping and auto-merge gate</commit>
-  <commit phase="5">feat(ci): add Biome auto-repair and semantic commit enforcement</commit>
-  <commit phase="6">feat(ci): add repository dashboard workflow</commit>
+  <commit phase="5">feat(ci): add Biome auto-repair, semantic commits, and quality debt tracking</commit>
+  <commit phase="6">feat(ci): add repository dashboard workflow with /health command</commit>
   <commit phase="7">feat(ci): add release, bundle analysis, and security workflows</commit>
   <commit phase="8">docs: add automation and integrations documentation</commit>
   <commit phase="9">feat(tools): add protocol sync with drift validation</commit>
