@@ -1,0 +1,236 @@
+name: Release
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - 'packages/**'
+            - 'apps/**'
+            - 'package.json'
+    workflow_dispatch:
+        inputs:
+            release_type:
+                description: 'Release type'
+                required: true
+                type: choice
+                options:
+                    - auto
+                    - major
+                    - minor
+                    - patch
+
+permissions:
+    contents: write
+    pull-requests: read
+
+concurrency:
+    group: release
+    cancel-in-progress: false
+
+jobs:
+    release:
+        name: Create Release
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+              with:
+                  fetch-depth: 0
+                  token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+              with:
+                  node-version: 25.2.1
+                  cache: pnpm
+
+            - name: Install Dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Analyze Commits
+              id: analyze
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const releaseType = '${{ github.event.inputs.release_type }}' || 'auto';
+                      
+                      // Get commits since last tag
+                      let commits = [];
+                      try {
+                        const { data: tags } = await github.rest.repos.listTags({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          per_page: 1
+                        });
+                        
+                        if (tags.length > 0) {
+                          const { data: comparison } = await github.rest.repos.compareCommits({
+                            owner: context.repo.owner,
+                            repo: context.repo.repo,
+                            base: tags[0].name,
+                            head: 'main'
+                          });
+                          commits = comparison.commits;
+                        } else {
+                          const { data: allCommits } = await github.rest.repos.listCommits({
+                            owner: context.repo.owner,
+                            repo: context.repo.repo,
+                            per_page: 100
+                          });
+                          commits = allCommits;
+                        }
+                      } catch (e) {
+                        core.info('No previous tags found, using all commits');
+                        const { data: allCommits } = await github.rest.repos.listCommits({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          per_page: 100
+                        });
+                        commits = allCommits;
+                      }
+
+                      // Analyze commit messages
+                      const breaking = commits.filter(c => c.commit.message.includes('!:') || c.commit.message.includes('BREAKING CHANGE'));
+                      const features = commits.filter(c => c.commit.message.startsWith('feat:') || c.commit.message.startsWith('feat('));
+                      const fixes = commits.filter(c => c.commit.message.startsWith('fix:') || c.commit.message.startsWith('fix('));
+                      const refactors = commits.filter(c => c.commit.message.startsWith('refactor:') || c.commit.message.startsWith('refactor('));
+                      const docs = commits.filter(c => c.commit.message.startsWith('docs:') || c.commit.message.startsWith('docs('));
+
+                      // Determine release type
+                      let bump = 'patch';
+                      if (releaseType !== 'auto') {
+                        bump = releaseType;
+                      } else if (breaking.length > 0) {
+                        bump = 'major';
+                      } else if (features.length > 0) {
+                        bump = 'minor';
+                      }
+
+                      return {
+                        bump,
+                        hasChanges: commits.length > 0,
+                        breaking: breaking.map(c => c.commit.message.split('\n')[0]),
+                        features: features.map(c => c.commit.message.split('\n')[0]),
+                        fixes: fixes.map(c => c.commit.message.split('\n')[0]),
+                        refactors: refactors.map(c => c.commit.message.split('\n')[0]),
+                        docs: docs.map(c => c.commit.message.split('\n')[0])
+                      };
+
+            - name: Calculate New Version
+              id: version
+              run: |
+                  current_version=$(node -p "require('./package.json').version")
+                  bump_type="${{ fromJSON(steps.analyze.outputs.result).bump }}"
+                  
+                  IFS='.' read -r major minor patch <<< "$current_version"
+                  
+                  case "$bump_type" in
+                    major)
+                      major=$((major + 1))
+                      minor=0
+                      patch=0
+                      ;;
+                    minor)
+                      minor=$((minor + 1))
+                      patch=0
+                      ;;
+                    patch)
+                      patch=$((patch + 1))
+                      ;;
+                  esac
+                  
+                  new_version="${major}.${minor}.${patch}"
+                  echo "new_version=${new_version}" >> $GITHUB_OUTPUT
+                  echo "tag=v${new_version}" >> $GITHUB_OUTPUT
+
+            - name: Update Package Version
+              if: fromJSON(steps.analyze.outputs.result).hasChanges
+              run: |
+                  npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add package.json
+                  git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
+                  git push
+
+            - name: Generate Changelog
+              id: changelog
+              if: fromJSON(steps.analyze.outputs.result).hasChanges
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const analysis = ${{ steps.analyze.outputs.result }};
+                      
+                      let changelog = '';
+                      
+                      if (analysis.breaking.length > 0) {
+                        changelog += '## 💥 Breaking Changes\n\n';
+                        analysis.breaking.forEach(msg => {
+                          changelog += `- ${msg}\n`;
+                        });
+                        changelog += '\n';
+                      }
+                      
+                      if (analysis.features.length > 0) {
+                        changelog += '## ✨ Features\n\n';
+                        analysis.features.forEach(msg => {
+                          changelog += `- ${msg}\n`;
+                        });
+                        changelog += '\n';
+                      }
+                      
+                      if (analysis.fixes.length > 0) {
+                        changelog += '## 🐛 Bug Fixes\n\n';
+                        analysis.fixes.forEach(msg => {
+                          changelog += `- ${msg}\n`;
+                        });
+                        changelog += '\n';
+                      }
+                      
+                      if (analysis.refactors.length > 0) {
+                        changelog += '## ♻️ Refactoring\n\n';
+                        analysis.refactors.forEach(msg => {
+                          changelog += `- ${msg}\n`;
+                        });
+                        changelog += '\n';
+                      }
+                      
+                      if (analysis.docs.length > 0) {
+                        changelog += '## 📚 Documentation\n\n';
+                        analysis.docs.forEach(msg => {
+                          changelog += `- ${msg}\n`;
+                        });
+                        changelog += '\n';
+                      }
+                      
+                      return changelog;
+
+            - name: Create Git Tag
+              if: fromJSON(steps.analyze.outputs.result).hasChanges
+              run: |
+                  git tag ${{ steps.version.outputs.tag }}
+                  git push origin ${{ steps.version.outputs.tag }}
+
+            - name: Create GitHub Release
+              if: fromJSON(steps.analyze.outputs.result).hasChanges
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const changelog = ${{ steps.changelog.outputs.result }};
+                      const tag = '${{ steps.version.outputs.tag }}';
+                      
+                      await github.rest.repos.createRelease({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        tag_name: tag,
+                        name: `Release ${tag}`,
+                        body: changelog || 'No significant changes.',
+                        draft: false,
+                        prerelease: false
+                      });

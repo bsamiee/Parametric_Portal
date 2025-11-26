@@ -1,0 +1,216 @@
+name: Bundle Analysis
+
+on:
+    pull_request:
+        types: [opened, synchronize]
+        paths:
+            - 'packages/**'
+            - 'apps/**'
+            - 'vite.config.ts'
+            - 'package.json'
+            - 'pnpm-lock.yaml'
+
+permissions:
+    contents: read
+    pull-requests: write
+
+concurrency:
+    group: bundle-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    analyze:
+        name: Analyze Bundle Size
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout PR
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+              with:
+                  node-version: 25.2.1
+                  cache: pnpm
+
+            - name: Install Dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Build Packages
+              run: pnpm exec nx run-many -t build --parallel=4
+
+            - name: Analyze Bundle Sizes (PR)
+              id: analyze-pr
+              run: |
+                  echo "Analyzing PR bundle sizes..."
+                  sizes_json='{"packages":[]}'
+                  
+                  for pkg in packages/*/dist; do
+                    if [ -d "$pkg" ]; then
+                      pkg_name=$(basename $(dirname "$pkg"))
+                      
+                      # Calculate sizes
+                      raw_size=$(du -sb "$pkg" | cut -f1)
+                      
+                      # Find main entry
+                      main_file=$(find "$pkg" -name "*.js" -type f | head -1)
+                      if [ -n "$main_file" ]; then
+                        gzip_size=$(gzip -c "$main_file" | wc -c)
+                        brotli_size=$(brotli -c "$main_file" | wc -c)
+                      else
+                        gzip_size=0
+                        brotli_size=0
+                      fi
+                      
+                      sizes_json=$(echo "$sizes_json" | jq --arg name "$pkg_name" \
+                        --argjson raw "$raw_size" \
+                        --argjson gzip "$gzip_size" \
+                        --argjson brotli "$brotli_size" \
+                        '.packages += [{name: $name, raw: $raw, gzip: $gzip, brotli: $brotli}]')
+                    fi
+                  done
+                  
+                  echo "$sizes_json" > pr-sizes.json
+                  cat pr-sizes.json
+
+            - name: Checkout Base Branch
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+              with:
+                  ref: ${{ github.event.pull_request.base.ref }}
+                  path: base
+
+            - name: Setup Base Branch
+              working-directory: base
+              run: |
+                  pnpm install --frozen-lockfile
+                  pnpm exec nx run-many -t build --parallel=4
+
+            - name: Analyze Bundle Sizes (Base)
+              id: analyze-base
+              working-directory: base
+              run: |
+                  echo "Analyzing base bundle sizes..."
+                  sizes_json='{"packages":[]}'
+                  
+                  for pkg in packages/*/dist; do
+                    if [ -d "$pkg" ]; then
+                      pkg_name=$(basename $(dirname "$pkg"))
+                      
+                      raw_size=$(du -sb "$pkg" | cut -f1)
+                      
+                      main_file=$(find "$pkg" -name "*.js" -type f | head -1)
+                      if [ -n "$main_file" ]; then
+                        gzip_size=$(gzip -c "$main_file" | wc -c)
+                        brotli_size=$(brotli -c "$main_file" | wc -c)
+                      else
+                        gzip_size=0
+                        brotli_size=0
+                      fi
+                      
+                      sizes_json=$(echo "$sizes_json" | jq --arg name "$pkg_name" \
+                        --argjson raw "$raw_size" \
+                        --argjson gzip "$gzip_size" \
+                        --argjson brotli "$brotli_size" \
+                        '.packages += [{name: $name, raw: $raw, gzip: $gzip, brotli: $brotli}]')
+                    fi
+                  done
+                  
+                  echo "$sizes_json" > ../base-sizes.json
+                  cat ../base-sizes.json
+
+            - name: Generate Bundle Report
+              id: report
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const prSizes = JSON.parse(fs.readFileSync('pr-sizes.json', 'utf8'));
+                      const baseSizes = JSON.parse(fs.readFileSync('base-sizes.json', 'utf8'));
+                      
+                      const formatSize = (bytes) => {
+                        if (bytes === 0) return '0 B';
+                        const k = 1024;
+                        const sizes = ['B', 'KB', 'MB'];
+                        const i = Math.floor(Math.log(bytes) / Math.log(k));
+                        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+                      };
+                      
+                      const formatDiff = (current, previous) => {
+                        if (previous === 0) return '+' + formatSize(current);
+                        const diff = current - previous;
+                        const percent = ((diff / previous) * 100).toFixed(1);
+                        const sign = diff > 0 ? '+' : '';
+                        return `${sign}${formatSize(diff)} (${sign}${percent}%)`;
+                      };
+                      
+                      let report = '## 📦 Bundle Size Report\n\n';
+                      report += '| Package | Raw | Gzip | Brotli | Change |\n';
+                      report += '|---------|-----|------|--------|--------|\n';
+                      
+                      let hasSignificantIncrease = false;
+                      
+                      prSizes.packages.forEach(prPkg => {
+                        const basePkg = baseSizes.packages.find(p => p.name === prPkg.name) || 
+                          { raw: 0, gzip: 0, brotli: 0 };
+                        
+                        const gzipDiff = prPkg.gzip - basePkg.gzip;
+                        const icon = gzipDiff > 10240 ? '⚠️' : gzipDiff > 0 ? '📈' : gzipDiff < 0 ? '📉' : '➖';
+                        
+                        if (gzipDiff > 10240) hasSignificantIncrease = true;
+                        
+                        report += `| ${icon} ${prPkg.name} | ${formatSize(prPkg.raw)} | ${formatSize(prPkg.gzip)} | ${formatSize(prPkg.brotli)} | ${formatDiff(prPkg.gzip, basePkg.gzip)} |\n`;
+                      });
+                      
+                      if (hasSignificantIncrease) {
+                        report += '\n⚠️ **Warning**: Bundle size increased by more than 10KB (gzip). Consider optimizing.\n';
+                      }
+                      
+                      return { report, hasWarning: hasSignificantIncrease };
+
+            - name: Find Existing Comment
+              id: find-comment
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const { data: comments } = await github.rest.issues.listComments({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number
+                      });
+                      
+                      const botComment = comments.find(c => 
+                        c.user.login === 'github-actions[bot]' && 
+                        c.body.includes('Bundle Size Report')
+                      );
+                      
+                      return botComment?.id || null;
+
+            - name: Post or Update Comment
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const reportData = ${{ steps.report.outputs.result }};
+                      const commentId = ${{ steps.find-comment.outputs.result }};
+                      
+                      const body = reportData.report;
+                      
+                      if (commentId) {
+                        await github.rest.issues.updateComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          comment_id: commentId,
+                          body
+                        });
+                      } else {
+                        await github.rest.issues.createComment({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: context.payload.pull_request.number,
+                          body
+                        });
+                      }
