@@ -26,10 +26,10 @@
   <file>tools/generate-context/index.ts</file>
   <action>Create Nx graph extraction script using Effect patterns</action>
   <spec>
-    - Execute `nx graph --file=.nx/graph.json`
-    - Parse project dependencies from graph
+    - Execute `nx graph --file=.nx/graph.json` (intermediate, not uploaded)
+    - Parse project dependencies from `.nx/graph.json`
     - Extract public APIs from package.json exports
-    - Output to `docs/agent-context/project-map.json`
+    - Output processed context to `docs/agent-context/project-map.json` (single source of truth for agents)
   </spec>
   <pattern>Effect pipeline, no try/catch</pattern>
 </task>
