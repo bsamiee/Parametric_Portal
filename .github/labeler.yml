@@ -1,0 +1,55 @@
+# Path-based label mappings for actions/labeler
+# Note: Content-based detection (e.g., tech/effect) requires custom scripting in auto-labeler.yml
+
+pkg/components:
+    - changed-files:
+          - any-glob-to-any-file: packages/components/**
+
+pkg/theme:
+    - changed-files:
+          - any-glob-to-any-file: packages/theme/**
+
+pkg/types:
+    - changed-files:
+          - any-glob-to-any-file: packages/types/**
+
+scope/config:
+    - changed-files:
+          - any-glob-to-any-file:
+                - "*.json"
+                - "*.yaml"
+                - "*.yml"
+                - ".github/**"
+                - "!.github/workflows/**"
+
+scope/ci:
+    - changed-files:
+          - any-glob-to-any-file: .github/workflows/**
+
+scope/deps:
+    - changed-files:
+          - any-glob-to-any-file:
+                - package.json
+                - pnpm-lock.yaml
+                - pnpm-workspace.yaml
+                - renovate.json
+
+scope/docs:
+    - changed-files:
+          - any-glob-to-any-file:
+                - "**/*.md"
+                - docs/**
+
+scope/tests:
+    - changed-files:
+          - any-glob-to-any-file:
+                - "**/*.spec.ts"
+                - "**/*.test.ts"
+                - vitest.config.*
+                - stryker.config.*
+
+scope/ui:
+    - changed-files:
+          - any-glob-to-any-file:
+                - "**/*.tsx"
+                - "**/components/**"
