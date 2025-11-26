@@ -93,7 +93,7 @@
             "dependsOn": ["build"],
             "executor": "nx:run-commands",
             "options": {
-                "command": "stryker run --testRunner vitest --coverageAnalysis perTest --reporters html,clear-text,progress --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts'"
+                "command": "stryker run --incremental --testRunner vitest --coverageAnalysis perTest --reporters html,clear-text,progress --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts'"
             }
         },
         "pwa:icons": {

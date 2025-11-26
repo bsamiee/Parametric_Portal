@@ -7,6 +7,13 @@
         "helpers:pinGitHubActionDigests"
     ],
     "labels": ["dependencies"],
+    "platformAutomerge": true,
+    "automergeType": "pr",
+    "automergeStrategy": "squash",
+    "dependencyDashboard": true,
+    "dependencyDashboardTitle": "Dependency Dashboard",
+    "osvVulnerabilityAlerts": true,
+    "postUpdateOptions": ["pnpmDedupe"],
     "lockFileMaintenance": {
         "enabled": true,
         "schedule": ["before 4am on monday"]
@@ -26,6 +33,7 @@
         {
             "automerge": true,
             "description": "Group type definitions",
+            "excludePackagePatterns": ["^@types/react"],
             "groupName": "types",
             "matchPackageNames": ["@types/**"]
         },
@@ -48,6 +56,14 @@
             "labels": ["dependencies", "typescript", "breaking"],
             "matchCurrentVersion": "/dev/",
             "matchPackageNames": ["typescript"]
+        },
+        {
+            "automerge": true,
+            "description": "Group React ecosystem (stable releases)",
+            "groupName": "react-ecosystem",
+            "matchCurrentVersion": "!/canary|beta|rc/",
+            "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"],
+            "matchUpdateTypes": ["minor", "patch"]
         },
         {
             "automerge": false,
@@ -75,13 +91,16 @@
             "description": "Group Effect ecosystem",
             "groupName": "effect-ecosystem",
             "labels": ["dependencies", "effect"],
-            "matchPackageNames": ["effect", "@effect/**"]
+            "matchPackageNames": ["effect", "@effect/**"],
+            "schedule": ["before 6am on Monday"]
         },
         {
+            "automerge": true,
             "description": "Group Vite ecosystem",
             "groupName": "vite-ecosystem",
             "labels": ["dependencies", "vite"],
-            "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"]
+            "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"],
+            "matchUpdateTypes": ["minor", "patch"]
         },
         {
             "description": "Group TanStack",
