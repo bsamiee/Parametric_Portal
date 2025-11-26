@@ -17,7 +17,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/labels.yml` — Declarative label definitions with colors (managed by auto-labeler)
 - `.github/copilot-instructions.md` — IDE agent instructions
 
-### GitHub Workflows (13 total)
+### GitHub Workflows
 - `.github/workflows/ci.yml` — Main CI pipeline with quality gates
 - `.github/workflows/claude-pr-review.yml` — Consolidated PR review: REQUIREMENTS.md compliance + feedback synthesis + /summarize
 - `.github/workflows/auto-labeler.yml` — Declarative label sync
