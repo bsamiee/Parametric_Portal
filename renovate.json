@@ -88,10 +88,12 @@
             "matchPackageNames": ["@biomejs/biome"]
         },
         {
+            "automerge": true,
             "description": "Group Effect ecosystem",
             "groupName": "effect-ecosystem",
             "labels": ["dependencies", "effect"],
             "matchPackageNames": ["effect", "@effect/**"],
+            "matchUpdateTypes": ["minor", "patch"],
             "schedule": ["before 6am on Monday"]
         },
         {

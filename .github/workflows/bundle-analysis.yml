@@ -148,7 +148,7 @@ jobs:
                         return `${sign}${formatSize(diff)} (${sign}${percent}%)`;
                       };
                       
-                      let report = '## 📦 Bundle Size Report\n\n';
+                      let report = '## Bundle Size Report\n\n';
                       report += '| Package | Raw | Gzip | Brotli | Change |\n';
                       report += '|---------|-----|------|--------|--------|\n';
                       
@@ -159,15 +159,15 @@ jobs:
                           { raw: 0, gzip: 0, brotli: 0 };
                         
                         const gzipDiff = prPkg.gzip - basePkg.gzip;
-                        const icon = gzipDiff > 10240 ? '⚠️' : gzipDiff > 0 ? '📈' : gzipDiff < 0 ? '📉' : '➖';
+                        const marker = gzipDiff > 10240 ? '[WARN]' : gzipDiff > 0 ? '[+]' : gzipDiff < 0 ? '[-]' : '[=]';
                         
                         if (gzipDiff > 10240) hasSignificantIncrease = true;
                         
-                        report += `| ${icon} ${prPkg.name} | ${formatSize(prPkg.raw)} | ${formatSize(prPkg.gzip)} | ${formatSize(prPkg.brotli)} | ${formatDiff(prPkg.gzip, basePkg.gzip)} |\n`;
+                        report += `| ${marker} ${prPkg.name} | ${formatSize(prPkg.raw)} | ${formatSize(prPkg.gzip)} | ${formatSize(prPkg.brotli)} | ${formatDiff(prPkg.gzip, basePkg.gzip)} |\n`;
                       });
                       
                       if (hasSignificantIncrease) {
-                        report += '\n⚠️ **Warning**: Bundle size increased by more than 10KB (gzip). Consider optimizing.\n';
+                        report += '\n[WARN] Bundle size increased by more than 10KB (gzip). Consider optimizing.\n';
                       }
                       
                       return { report, hasWarning: hasSignificantIncrease };

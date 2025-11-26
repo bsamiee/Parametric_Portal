@@ -88,7 +88,7 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         issue_number: context.payload.pull_request.number,
-                        body: `⚠️ **Biome Auto-Repair Warning**
+                        body: `[WARN] Biome Auto-Repair Warning
 
                         Biome's \`--unsafe\` flag attempted to fix style issues, but tests failed after the changes.
 
@@ -111,7 +111,7 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         issue_number: context.payload.pull_request.number,
-                        body: `✅ **Biome Auto-Repair Applied**
+                        body: `[OK] Biome Auto-Repair Applied
 
                         Style issues have been automatically fixed and committed. All tests passed after repair.
 

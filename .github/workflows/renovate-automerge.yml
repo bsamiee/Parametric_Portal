@@ -31,22 +31,16 @@ jobs:
               uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
               with:
                   script: |
-                      const pr = context.payload.pull_request || await github.rest.pulls.get({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: context.issue.number
-                      }).then(r => r.data);
-
+                      const pr = context.payload.pull_request;
                       const title = pr.title.toLowerCase();
-                      const body = pr.body || '';
 
-                      // Classify update type
-                      const isMajor = title.includes('major') || body.includes('major');
-                      const isCanary = title.includes('canary') || title.includes('beta') || title.includes('rc');
+                      // Classify update type based on title
+                      const isMajor = title.includes('major');
+                      const isCanary = /canary|beta|rc/.test(title);
                       const isPatch = title.includes('patch');
                       const isMinor = title.includes('minor');
 
-                      // Eligible for auto-merge: patch/minor, not major/canary
+                      // Eligible: patch/minor updates that are not major/canary
                       const eligible = (isPatch || isMinor) && !isMajor && !isCanary;
 
                       return {
@@ -134,7 +128,7 @@ jobs:
                         reason = 'CI checks have not passed or mutation testing is incomplete.';
                       }
 
-                      const comment = `⚠️ **Auto-merge blocked**
+                      const comment = `[BLOCKED] Auto-merge blocked
 
                       **Reason**: ${reason}
 

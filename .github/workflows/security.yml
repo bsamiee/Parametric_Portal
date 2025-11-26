@@ -122,10 +122,10 @@ jobs:
                   
                   # Check for GPL, AGPL, LGPL
                   if grep -iE "(GPL|AGPL|LGPL)" licenses.json; then
-                    echo "⚠️ Warning: Copyleft licenses detected"
+                    echo "[WARN] Copyleft licenses detected"
                     exit 1
                   else
-                    echo "✅ No copyleft licenses detected"
+                    echo "[OK] No copyleft licenses detected"
                   fi
 
     create-security-issue:
@@ -150,7 +150,7 @@ jobs:
                       
                       const existing = issues.find(i => i.title.includes('Security Scan'));
                       
-                      const body = `## 🔒 Security Scan Alert
+                      const body = `## Security Scan Alert
 
                       **Timestamp**: ${new Date().toISOString()}
                       **Run**: ${runUrl}
@@ -175,7 +175,7 @@ jobs:
                         await github.rest.issues.create({
                           owner: context.repo.owner,
                           repo: context.repo.repo,
-                          title: '🔒 Security Scan Alert',
+                          title: '[SECURITY] Security Scan Alert',
                           labels: ['security', 'priority/critical'],
                           body
                         });

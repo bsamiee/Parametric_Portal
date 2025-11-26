@@ -188,13 +188,13 @@ jobs:
                       const health = '${{ steps.health.outputs.health }}';
                       const timestamp = new Date().toISOString();
 
-                      const healthBadge = health === 'healthy' ? '🟢 Healthy' : '🔴 Unhealthy';
+                      const healthBadge = health === 'healthy' ? '[OK] Healthy' : '[FAIL] Unhealthy';
 
-                      const body = `# 📊 Repository Dashboard
+                      const body = `# Repository Dashboard
 
                       **Last Updated**: ${timestamp}
 
-                      ## 🎯 Quick Stats
+                      ## Quick Stats
 
                       | Metric | Value |
                       |--------|-------|
@@ -204,13 +204,13 @@ jobs:
                       | Open Issues | ${metrics.openIssues} |
                       | Latest Release | ${metrics.latestRelease} |
 
-                      ## 📈 Activity (Last 7 Days)
+                      ## Activity (Last 7 Days)
 
                       - **Commits**: ${metrics.commits}
                       - **Contributors**: ${metrics.contributors}
                       - **PRs Merged**: ${metrics.mergedPRs}
 
-                      ## 🔧 Pull Requests
+                      ## Pull Requests
 
                       - **Open**: ${metrics.openPRs} PRs
                       - **Stale** (>14 days): ${metrics.stalePRs} PRs
@@ -219,7 +219,7 @@ jobs:
 
                       [View All PRs →](https://github.com/${context.repo.owner}/${context.repo.repo}/pulls)
 
-                      ## 🐛 Issues
+                      ## Issues
 
                       - **Open Bugs**: ${metrics.bugs}
                       - **Open Features**: ${metrics.features}
@@ -227,15 +227,15 @@ jobs:
 
                       [View All Issues →](https://github.com/${context.repo.owner}/${context.repo.repo}/issues)
 
-                      ## ✅ Health Status
+                      ## Health Status
 
                       | Check | Status |
                       |-------|--------|
                       | Overall | ${healthBadge} |
-                      | TypeCheck | ${health === 'healthy' ? '✅' : '❌'} |
-                      | Biome Lint | ${health === 'healthy' ? '✅' : '❌'} |
+                      | TypeCheck | ${health === 'healthy' ? '[OK]' : '[FAIL]'} |
+                      | Biome Lint | ${health === 'healthy' ? '[OK]' : '[FAIL]'} |
 
-                      ## 🔄 Workflows
+                      ## Workflows
 
                       | Workflow | Status |
                       |----------|--------|
@@ -244,7 +244,7 @@ jobs:
 
                       ---
 
-                      💡 **Tip**: Comment \`/health\` on this issue to trigger a manual update.`;
+                      **Tip**: Comment \`/health\` on this issue to trigger a manual update.`;
 
                       await github.rest.issues.update({
                         owner: context.repo.owner,
