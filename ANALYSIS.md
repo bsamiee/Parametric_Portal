@@ -1,449 +1,244 @@
-# ANALYSIS.md - Self-Describing Agentic Environment Strategy
+# ANALYSIS.md - Agentic Systems Architecture Strategy
 
-## Executive Summary
-
-Transform Parametric Portal from siloed agent interactions into a **synchronized swarm** where Biome, Renovate, and AI Agents (Claude, Copilot) operate cohesively through shared context and semantic interfaces.
-
----
-
-## 1. Task Stream Conflict Resolution
-
-### Overlapping Tasks Discarded
-
-| Task Source | Discarded Item | Reason |
-|-------------|----------------|--------|
-| TASK_a.md | `agent-judge.yml` | Superseded by TASK_b's `ai-pr-summary.yml` with richer aggregation |
-| TASK_a.md | `claude-triage.yml` | Merged into TASK_c's `issue-lifecycle.yml` with state machine |
-| TASK_b.md | `workspace-health.yml` | Subsumed by TASK_c's `dashboard.yml` with metrics collection |
-| TASK_c.md | Separate `auto-labeler.yml` | Consolidated into enhanced triage workflow |
-
-### Retained & Unified
-
-| Domain | Final Workflow | Source Priority |
-|--------|----------------|-----------------|
-| PR Review Aggregation | `pr-review-aggregator.yml` | TASK_c (primary) + TASK_b (structure) |
-| Issue Lifecycle | `issue-lifecycle.yml` | TASK_c (primary) |
-| Renovate Gate | `renovate-automerge.yml` | TASK_a (Stryker gate) + TASK_b (orchestration) |
-| CI Enhancement | `ci.yml` (extended) | TASK_a (graph artifact) + TASK_b (UX) |
-| Dashboard | `dashboard.yml` | TASK_c (primary) |
+<metadata>
+  <version>2.0.0</version>
+  <generated>2025-11-26</generated>
+  <sources>TASK_a.md, TASK_b.md, TASK_c.md</sources>
+  <target>Self-Describing Agentic Environment</target>
+</metadata>
 
 ---
 
-## 2. The Four Pillars Implementation Strategy
+## 1. Source Synthesis
 
-### A. Dual-Protocol Standard (AGENTS.md + copilot-instructions.md)
+### 1.1 Task Stream Inventory
 
-**Current State:**
-- `AGENTS.md`: 458 lines, CLI/CI agent protocol
-- `copilot-instructions.md`: 412 lines, IDE protocol
-- 87% content overlap, but divergent formatting
+| Source | Focus | Key Deliverables |
+|--------|-------|------------------|
+| TASK_a | Lead Engineer Layer | agent-judge, renovate-gate, graph artifact, claude-triage |
+| TASK_b | Full Automation Blueprint | ai-pr-summary, ai-pr-triage, ai-issue-triage, renovate-automerge, workspace-health, CI UX |
+| TASK_c | Claude Code Execution | 11 phases, 9 workflows, templates, docs |
 
-**Sync Strategy:**
+### 1.2 Conflict Resolution
+
+<conflict-resolution>
+| Overlap | Resolution | Rationale |
+|---------|------------|-----------|
+| TASK_a `agent-judge.yml` vs TASK_b `ai-pr-summary.yml` vs TASK_c `pr-review-aggregator.yml` | **Unified:** `pr-review-aggregator.yml` | TASK_c has most complete spec with marker comments, update-in-place |
+| TASK_a `claude-triage.yml` vs TASK_b `ai-issue-triage.yml` vs TASK_c `issue-lifecycle.yml` | **Unified:** `issue-lifecycle.yml` | TASK_c adds stale handling, validation, aging reports |
+| TASK_b `workspace-health.yml` vs TASK_c `dashboard.yml` | **Unified:** `dashboard.yml` | TASK_c specifies pinned issue with metrics, richer output |
+| TASK_a `renovate-gate.yml` vs TASK_b/C `renovate-automerge.yml` | **Merged:** `renovate-automerge.yml` with Stryker gate | Combine mutation scoring from A with orchestration from B/C |
+</conflict-resolution>
+
+### 1.3 Final Workflow Inventory
+
+<deliverables type="workflows">
+| Workflow | Purpose | Trigger |
+|----------|---------|---------|
+| `pr-review-aggregator.yml` | Synthesize all AI/CI feedback into single comment | `workflow_run`, `pull_request_review` |
+| `auto-labeler.yml` | Path-based PR labels + AI issue classification | `pull_request`, `issues` |
+| `issue-lifecycle.yml` | Triage, stale handling, validation, aging | `issues`, `issue_comment`, `schedule` |
+| `renovate-automerge.yml` | Mutation-gated auto-merge for deps | `pull_request`, `check_suite`, `schedule` |
+| `dashboard.yml` | Auto-updating pinned issue with repo health | `schedule`, `workflow_dispatch`, `push` |
+| `release.yml` | Conventional commit releases | `push` to main, `workflow_dispatch` |
+| `bundle-analysis.yml` | Bundle size tracking with PR comments | `pull_request` |
+| `security.yml` | Audit, CodeQL, secrets scan, license check | `pull_request`, `push`, `schedule` |
+| `claude-code-review-enhanced.yml` | REQUIREMENTS.md compliance review | `pull_request` (after CI) |
+| `biome-repair.yml` | Auto-fix style before human review | `pull_request` |
+| `semantic-commits.yml` | Enforce conventional commits | `pull_request` |
+</deliverables>
+
+<deliverables type="config">
+| File | Changes |
+|------|---------|
+| `renovate.json` | Domain grouping, platformAutomerge, vulnerability alerts |
+| `stryker.config.js` | `incremental: true` for speed |
+| `lefthook.yml` | Effect pattern validation, import validation |
+| `.github/labeler.yml` | Path-to-label mappings |
+</deliverables>
+
+<deliverables type="templates">
+| File | Purpose |
+|------|---------|
+| `.github/PULL_REQUEST_TEMPLATE.md` | Semantic hooks + checklist |
+| `.github/ISSUE_TEMPLATE/bug_report.yml` | Form-based with AGENT_CONTEXT |
+| `.github/ISSUE_TEMPLATE/feature_request.yml` | Form-based with pattern selection |
+| `.github/ISSUE_TEMPLATE/config.yml` | Disable blank, add contact links |
+</deliverables>
+
+<deliverables type="docs">
+| File | Purpose |
+|------|---------|
+| `docs/AUTOMATION.md` | Workflow overview, agent table, commands |
+| `docs/INTEGRATIONS.md` | GitHub Apps, branch protection, badges |
+| `docs/agent-context/project-map.json` | Nx graph + public APIs for agents |
+| `docs/agent-context/README.md` | Query protocol for agents |
+</deliverables>
+
+<deliverables type="tools">
+| File | Purpose |
+|------|---------|
+| `tools/generate-context/` | Nx graph extraction + API surface generation |
+| `tools/sync-agent-protocols.ts` | REQUIREMENTS.md → derivative docs |
+</deliverables>
+
+---
+
+## 2. Architecture Design
+
+### 2.1 Agent Context Flow
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    REQUIREMENTS.md                          │
-│              (Single Source of Truth - SSoT)                │
-└─────────────────────────┬───────────────────────────────────┘
-                          │ generates
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-    AGENTS.md      copilot-instructions   CLAUDE.md
-    (CLI/CI)            (IDE)            (Claude Code)
+┌─────────────────────────────────────────────────────────────────────┐
+│                         REQUIREMENTS.md                              │
+│                    (Single Source of Truth)                          │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │ tools/sync-agent-protocols.ts
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+   AGENTS.md             copilot-instructions      CLAUDE.md
+   (CLI/CI)                   (IDE)               (Claude Code)
+        │                       │                       │
+        └───────────────────────┴───────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         GitHub Actions                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │ ci.yml      │  │ pr-review-  │  │ issue-      │  │ renovate-   │ │
+│  │ +context    │  │ aggregator  │  │ lifecycle   │  │ automerge   │ │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
+│         └────────────────┴────────────────┴────────────────┘        │
+│                                   │                                  │
+│                                   ▼                                  │
+│         ┌─────────────────────────────────────────────────┐         │
+│         │           project-map.json (Nx Graph)           │         │
+│         │  - Package deps  - Public APIs  - Import paths  │         │
+│         └─────────────────────────────────────────────────┘         │
+│                                   │                                  │
+│         ┌─────────────────────────┴─────────────────────────┐       │
+│         ▼                         ▼                         ▼       │
+│  ┌─────────────┐          ┌─────────────┐          ┌─────────────┐  │
+│  │ Issue       │          │ PR Template │          │ Agent       │  │
+│  │ Templates   │          │ + CONTEXT   │          │ Matrix      │  │
+│  │ + CONTEXT   │          │             │          │ (10 agents) │  │
+│  └─────────────┘          └─────────────┘          └─────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Local Development                             │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                      lefthook.yml                            │    │
+│  │  - biome check --write  - validate-imports  - effect-check  │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Implementation:**
-1. Extract shared rules into `REQUIREMENTS.md` (already exists, promote to SSoT)
-2. Create `tools/sync-agent-protocols.ts` script to generate derivative files
-3. Add validation in CI: hash comparison ensures derivatives match source
+### 2.2 Semantic Template Design
 
-**Propagation Rules:**
-```xml
-<agent-sync-rule>
-  <source>REQUIREMENTS.md</source>
-  <targets>
-    <target path=".github/copilot-instructions.md" format="markdown"/>
-    <target path="AGENTS.md" format="markdown"/>
-    <target path="CLAUDE.md" format="markdown"/>
-  </targets>
-  <sections>
-    <section id="stack-versions" sync="always"/>
-    <section id="dogmatic-rules" sync="always"/>
-    <section id="agent-matrix" sync="always"/>
-    <section id="quality-targets" sync="always"/>
-  </sections>
-</agent-sync-rule>
-```
-
----
-
-### B. Semantic Hooks in Templates
-
-**Current State:** No issue or PR templates exist.
-
-**Design Principle:** Human-readable surface, machine-parseable substrate.
-
-**Issue Template Schema:**
-```markdown
----
-name: Feature Request
-about: Propose a new feature
-labels: [enhancement]
----
+**AGENT_CONTEXT Hook Format:**
+```html
 <!-- AGENT_CONTEXT
 {
-  "type": "feature",
-  "scope": "packages/*",
-  "agents": ["library-planner", "typescript-advanced"],
-  "priority": "p2",
-  "complexity": "medium",
-  "effect_patterns": ["pipe", "Option", "Effect"],
-  "requires_tests": true
-}
--->
-
-## Description
-<!-- Human description here -->
-
-## Affected Packages
-<!-- AGENT_HINT: parse package names from checklist below -->
-- [ ] @parametric-portal/components
-- [ ] @parametric-portal/theme
-- [ ] @parametric-portal/types
-```
-
-**PR Template Schema:**
-```markdown
-<!-- AGENT_CONTEXT
-{
-  "type": "implementation|bugfix|refactor|docs|deps",
+  "type": "feature|bugfix|refactor|docs|deps",
   "scope": ["packages/components"],
+  "agents": ["typescript-advanced", "testing-specialist"],
+  "patterns": ["Effect-pipeline", "Option-monad", "B-constant"],
+  "priority": "p0|p1|p2|p3",
   "breaking": false,
-  "migration_required": false,
-  "agents_consulted": [],
-  "patterns_applied": ["B-constant", "dispatch-table", "Effect-pipeline"],
-  "test_coverage": "required",
-  "stryker_mutation": "required"
+  "test_coverage": "required|optional"
 }
 -->
 ```
 
-**Agent Consumption Pattern:**
+**Parsing (Effect-compliant):**
 ```typescript
-const extractAgentContext = (body: string): AgentContext =>
+const parseAgentContext = (body: string) =>
   pipe(
-    body,
-    O.fromNullable,
-    O.flatMap(s => O.fromNullable(s.match(/<!-- AGENT_CONTEXT\n([\s\S]*?)\n-->/)?.[1])),
-    O.flatMap(json => O.tryCatch(() => JSON.parse(json))),
-    O.getOrElse(() => DEFAULT_AGENT_CONTEXT)
+    O.fromNullable(body.match(/<!-- AGENT_CONTEXT\n([\s\S]*?)\n-->/)?.[1]),
+    O.flatMap(json => O.tryCatch(() => JSON.parse(json) as AgentContext)),
+    O.getOrElse(() => DEFAULT_CONTEXT)
   );
 ```
 
----
+### 2.3 Renovate Domain Strategy
 
-### C. Graph-Based Context Generation (Nx Advantage)
+| Group | Packages | Auto-merge | Gate |
+|-------|----------|------------|------|
+| `effect-ecosystem` | `effect`, `@effect/*` | No | CI + mutation |
+| `vite-ecosystem` | `vite*`, `vitest*`, `@vitejs/*` | Yes (minor/patch) | CI |
+| `react-ecosystem` | `react*`, `@types/react*` | No | Manual (canary) |
+| `nx-ecosystem` | `nx`, `@nx/*` | No | Manual (canary) |
+| `types` | `@types/*` (except react) | Yes | CI |
+| `github-actions` | `actions/*` | Yes | CI |
 
-**The Problem:** Agents waste 40-60% of context window searching for imports, dependencies, and file locations.
+### 2.4 CI Quality → Issue Pipeline
 
-**Solution Architecture:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    tools/generate-context                    │
-├─────────────────────────────────────────────────────────────┤
-│  1. nx graph --file=graph.json                              │
-│  2. Parse project.json files for targets/deps               │
-│  3. Extract TypeDoc AST for public APIs                     │
-│  4. Compile circular dependency warnings                    │
-│  5. Generate docs/agent-context/project-map.json            │
-└─────────────────────────────────────────────────────────────┘
-```
+From TASK_b Section 5 - convert persistent failures to tracked issues:
 
-**Output Schema (`docs/agent-context/project-map.json`):**
-```json
-{
-  "$schema": "./project-map.schema.json",
-  "generated": "2025-11-26T00:00:00Z",
-  "workspace": {
-    "root": "/home/user/Parametric_Portal",
-    "packageManager": "pnpm@10.23.0",
-    "nxVersion": "22.2.0-canary"
-  },
-  "projects": {
-    "@parametric-portal/components": {
-      "root": "packages/components",
-      "sourceRoot": "packages/components/src",
-      "projectType": "library",
-      "entryPoints": ["controls", "data", "elements", "feedback", "icons", "navigation", "overlays", "schema", "selection", "utility"],
-      "dependencies": ["@parametric-portal/theme", "@parametric-portal/types"],
-      "devDependencies": [],
-      "exports": {
-        "./controls": { "types": "./src/controls/index.ts", "default": "./src/controls/index.ts" }
-      },
-      "publicApi": {
-        "components": ["Button", "Input", "Select"],
-        "hooks": ["useControlledState"],
-        "types": ["ButtonProps", "InputProps"]
-      }
-    }
-  },
-  "graph": {
-    "nodes": ["components", "theme", "types"],
-    "edges": [
-      { "source": "components", "target": "theme" },
-      { "source": "components", "target": "types" }
-    ],
-    "cycles": []
-  },
-  "imports": {
-    "@/": "packages/*/src",
-    "@theme/": "packages/theme/src",
-    "@types/": "packages/types/src"
-  }
-}
-```
-
-**Agent Query Interface:**
-```xml
-<agent-query type="find-package">
-  <input>Button component</input>
-  <lookup>project-map.json → projects → publicApi → components</lookup>
-  <result>packages/components/src/elements/Button.tsx</result>
-</agent-query>
-
-<agent-query type="check-circular">
-  <input>@parametric-portal/components</input>
-  <lookup>project-map.json → graph → cycles</lookup>
-  <result>[]</result>
-</agent-query>
-```
-
-**CI Integration:**
-- Generate on every push to main
-- Upload as workflow artifact
-- Agents fetch artifact before processing
+| Source | Issue Title | Labels |
+|--------|-------------|--------|
+| Stryker < 80% | "Mutation Debt: {project}" | `tech-debt`, `testing` |
+| Repeated lint failures | "Quality Debt: {paths}" | `tech-debt`, `refactor` |
+| Compression/PWA failures | "Performance Debt: {target}" | `tech-debt`, `performance` |
 
 ---
 
-### D. Biome-Renovate Autonomy Loop
+## 3. Operating Principles
 
-**Renovate Enhancement Strategy:**
-
-Current `renovate.json` has basic grouping. Enhance with:
-
-```json
-{
-  "packageRules": [
-    {
-      "description": "Effect ecosystem - batch and gate",
-      "matchPackagePatterns": ["^effect$", "^@effect/"],
-      "groupName": "effect-ecosystem",
-      "groupSlug": "effect",
-      "automerge": false,
-      "requiredStatusChecks": ["ci", "mutation-score"],
-      "labels": ["dependencies", "effect"]
-    },
-    {
-      "description": "Vite ecosystem - auto-merge if tests pass",
-      "matchPackagePatterns": ["^vite$", "^vitest$", "^@vitejs/", "^@vitest/"],
-      "groupName": "vite-ecosystem",
-      "groupSlug": "vite",
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash",
-      "requiredStatusChecks": ["ci", "nx-affected-test"]
-    },
-    {
-      "description": "TypeScript - manual review (breaking changes)",
-      "matchPackageNames": ["typescript"],
-      "automerge": false,
-      "labels": ["dependencies", "typescript", "breaking"]
-    }
-  ]
-}
-```
-
-**Biome Repair Protocol:**
-
-```yaml
-# In agent workflow
-- name: Biome Auto-Repair
-  run: |
-    pnpm biome check --write --unsafe .
-    if git diff --quiet; then
-      echo "No repairs needed"
-    else
-      git add -A
-      git commit -m "style: biome auto-repair [skip ci]"
-      echo "REPAIRS_APPLIED=true" >> $GITHUB_OUTPUT
-    fi
-```
-
-**Agent Pre-Review Mandate:**
-```xml
-<agent-protocol name="biome-first">
-  <step order="1">Run: pnpm biome check --write .</step>
-  <step order="2">If changes: commit with "style: biome auto-fix"</step>
-  <step order="3">Only then: request human review</step>
-  <rationale>Zero style noise in PR reviews</rationale>
-</agent-protocol>
-```
+<principles source="TASK_b Section 0">
+1. **Preserve Existing Behavior** - Extend, don't replace working workflows
+2. **Read Before Acting** - Ingest nx.json, package.json, existing workflows before changes
+3. **Idempotent Operations** - Use marker comments, predictable labels, safe reruns
+4. **High Assurance** - Run `nx affected -t check,typecheck,test` after changes
+5. **Minimal Dependencies** - Reuse existing Actions and secrets
+</principles>
 
 ---
 
-## 3. Integration Strategy
-
-### The Brain: Agent Context Consumption
-
-```
-Agent Request Flow:
-┌─────────────────┐
-│  Issue/PR       │
-│  (with hooks)   │
-└────────┬────────┘
-         │ parse AGENT_CONTEXT
-         ▼
-┌─────────────────┐
-│  Load project-  │
-│  map.json       │
-└────────┬────────┘
-         │ query dependencies
-         ▼
-┌─────────────────┐
-│  Select agents  │
-│  from matrix    │
-└────────┬────────┘
-         │ dispatch
-         ▼
-┌─────────────────┐
-│  Execute with   │
-│  full context   │
-└─────────────────┘
-```
-
-### The Guardrails: Lefthook + Biome
-
-**Prevention of Agent Hallucinations:**
-
-```yaml
-# lefthook.yml enhancement
-pre-commit:
-  parallel: true
-  commands:
-    biome:
-      glob: "*"
-      run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
-      stage_fixed: true
-
-    validate-imports:
-      glob: "*.{ts,tsx}"
-      run: |
-        # Reject invalid path aliases
-        if grep -E "from ['\"]@[a-z]+/" {staged_files} | grep -v -E "@(parametric-portal|types|theme)"; then
-          echo "[ERROR] Invalid import alias detected"
-          exit 1
-        fi
-
-    effect-patterns:
-      glob: "*.{ts,tsx}"
-      run: |
-        # Reject try/catch, require Effect.tryPromise
-        if grep -E "try\s*\{" {staged_files}; then
-          echo "[ERROR] try/catch detected. Use Effect.tryPromise or Effect.try"
-          exit 1
-        fi
-```
-
----
-
-## 4. Tooling Upgrade Justifications
-
-| Change | Justification | Impact |
-|--------|--------------|--------|
-| `renovate.json` domain grouping | Batch related updates, reduce PR noise | -60% dep update PRs |
-| `tools/generate-context` | O(1) context lookup vs. O(n) file search | -40% agent token usage |
-| Semantic templates | Machine-parseable metadata | Instant agent context loading |
-| Protocol sync script | Single source of truth | Zero drift between agent docs |
-| Lefthook import validator | Catch hallucinated imports | Zero invalid builds |
-| Biome pre-review | Style-noise-free reviews | Faster human reviews |
-| Effect TS schema validation | Compile-time pattern enforcement | Zero ROP violations |
-
----
-
-## 5. Risk Assessment
-
-| Risk | Mitigation |
-|------|------------|
-| Template hooks ignored by humans | Provide defaults, validate in CI |
-| project-map.json stale | Regenerate on every main push |
-| Protocol drift | Hash validation in CI |
-| Biome --unsafe breaks code | Run tests after auto-fix |
-| Renovate auto-merge introduces bugs | Stryker mutation gate required |
-
----
-
-## 6. Success Metrics
+## 4. Success Metrics
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Agent context load time | ~30s (file search) | <1s (JSON query) |
+| Agent context load | ~30s (file search) | <1s (JSON query) |
 | PR style comments | ~15/PR | 0 (Biome pre-fix) |
-| Dep update PR noise | ~20/week | ~5/week (grouped) |
-| Agent protocol drift | Unknown | 0 (hash-validated) |
-| Invalid import commits | Occasional | 0 (Lefthook gate) |
+| Dep update PRs | ~20/week | ~5/week (grouped) |
+| Review synthesis | Manual | Automated summary |
+| Issue triage | Manual | Auto-labeled |
+| Stale issues | Untracked | 30-day lifecycle |
 
 ---
 
-## 7. Architecture Diagram
+## 5. Risk Mitigation
 
-```
-                          ┌─────────────────────────────────────┐
-                          │         REQUIREMENTS.md              │
-                          │     (Single Source of Truth)         │
-                          └──────────────┬──────────────────────┘
-                                         │ generates
-            ┌────────────────────────────┼────────────────────────────┐
-            ▼                            ▼                            ▼
-      AGENTS.md                  copilot-instructions            CLAUDE.md
-      (CLI/CI)                        (IDE)                    (Claude Code)
-            │                            │                            │
-            └────────────────────────────┼────────────────────────────┘
-                                         │
-                                         ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              GitHub Actions                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐    │
-│  │ ci.yml       │  │ pr-review-   │  │ issue-       │  │ renovate-    │    │
-│  │ +graph       │  │ aggregator   │  │ lifecycle    │  │ automerge    │    │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘    │
-│         │                 │                 │                 │             │
-│         └─────────────────┴────────┬────────┴─────────────────┘             │
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                    project-map.json (Nx Graph)                       │   │
-│  │   - Package dependencies    - Public APIs    - Import paths         │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐                │
-│  │ Semantic Issue │  │ Semantic PR    │  │ Agent Matrix   │                │
-│  │ Templates      │  │ Templates      │  │ (10 agents)    │                │
-│  └────────────────┘  └────────────────┘  └────────────────┘                │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                         │
-                                         ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Local Development                               │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                         lefthook.yml                                  │  │
-│  │   - biome check --write    - validate-imports    - effect-patterns   │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                                    │                                         │
-│                                    ▼                                         │
-│                           Zero-Hallucination Gate                            │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+| Risk | Mitigation |
+|------|------------|
+| Template hooks ignored | Provide sensible defaults, validate in workflows |
+| project-map.json stale | Regenerate on every main push |
+| Protocol drift | Hash-based CI validation |
+| Biome --unsafe breaks code | Run tests after auto-fix |
+| Auto-merge introduces bugs | Stryker mutation gate (80% threshold) |
+| Workflow proliferation | Consolidate overlapping workflows |
 
 ---
 
-*Generated: 2025-11-26 | Version: 1.0.0*
+## 6. Implementation Sequence
+
+<execution-order>
+| Phase | Focus | Deliverables | Dependencies |
+|-------|-------|--------------|--------------|
+| 1 | Foundation | `tools/generate-context/`, `project-map.json` | None |
+| 2 | Templates | Issue templates, PR template with hooks | Phase 1 |
+| 3 | Core Workflows | `pr-review-aggregator`, `issue-lifecycle`, `auto-labeler` | Phase 2 |
+| 4 | Dep Management | `renovate.json` update, `renovate-automerge.yml` | CI passing |
+| 5 | Quality Gates | `biome-repair`, `semantic-commits`, CI enhancements | Phase 3 |
+| 6 | Dashboard | `dashboard.yml`, pinned issue | All workflows |
+| 7 | Supporting | `release`, `bundle-analysis`, `security` | Phase 5 |
+| 8 | Documentation | `AUTOMATION.md`, `INTEGRATIONS.md` | All phases |
+| 9 | Protocol Sync | `tools/sync-agent-protocols.ts`, validation | Phase 8 |
+</execution-order>
+
+---
+
+*End of ANALYSIS.md*
