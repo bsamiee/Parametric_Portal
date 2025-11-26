@@ -6,3 +6,13 @@ pre-commit:
       run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
       stage_fixed: true
       skip: false
+    effect-check:
+      glob: "*.{ts,tsx}"
+      run: |
+        # Use word boundary for better matching (catches "if (x) try {")
+        # Exclude comments via grep -v
+        if grep -E "\btry\s*\{" {staged_files} | grep -v "^\s*//" | grep -v "^\s*\*"; then
+          echo "[ERROR] try/catch detected. Use Effect.try, Effect.tryPromise, or Effect.gen"
+          exit 1
+        fi
+      skip: false

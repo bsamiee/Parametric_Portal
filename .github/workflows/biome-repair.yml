@@ -1,0 +1,119 @@
+name: Biome Auto-Repair
+
+on:
+    pull_request:
+        types: [opened, synchronize]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+concurrency:
+    group: biome-repair-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    auto-fix:
+        name: Auto-Fix Style Issues
+        runs-on: ubuntu-latest
+        # Skip for main branch and bot authors (except renovate)
+        if: |
+            github.event.pull_request.base.ref != 'main' &&
+            (github.actor == 'renovate[bot]' || !endsWith(github.actor, '[bot]'))
+        steps:
+            - name: Checkout PR
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+              with:
+                  ref: ${{ github.event.pull_request.head.ref }}
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  fetch-depth: 0
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+              with:
+                  node-version: 25.2.1
+                  cache: pnpm
+
+            - name: Install Dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Run Biome Auto-Repair
+              id: repair
+              run: |
+                  echo "running=true" >> $GITHUB_OUTPUT
+                  pnpm exec biome check --write --unsafe . || echo "fixed=true" >> $GITHUB_OUTPUT
+
+            - name: Check for Changes
+              id: changes
+              run: |
+                  if [[ -n $(git status --porcelain) ]]; then
+                    echo "has_changes=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "has_changes=false" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Run Tests to Validate Safety
+              if: steps.changes.outputs.has_changes == 'true'
+              id: test
+              run: |
+                  pnpm test || echo "tests_failed=true" >> $GITHUB_OUTPUT
+
+            - name: Commit and Push Auto-Repairs
+              if: |
+                  steps.changes.outputs.has_changes == 'true' &&
+                  steps.test.outputs.tests_failed != 'true'
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add .
+                  git commit -m "style: biome auto-repair
+
+                  Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+                  git push
+
+            - name: Comment on Semantic Breakage
+              if: |
+                  steps.changes.outputs.has_changes == 'true' &&
+                  steps.test.outputs.tests_failed == 'true'
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number,
+                        body: `⚠️ **Biome Auto-Repair Warning**
+
+                        Biome's \`--unsafe\` flag attempted to fix style issues, but tests failed after the changes.
+
+                        **Action Required**: The unsafe transformations may have introduced semantic changes. Please:
+                        1. Review the suggested fixes manually
+                        2. Run \`pnpm check\` locally to see the issues
+                        3. Apply safe fixes manually or refactor code to comply with Biome rules
+
+                        Tests must pass before merging. Auto-repair has been skipped to prevent breaking changes.`
+                      });
+
+            - name: Comment on Successful Repair
+              if: |
+                  steps.changes.outputs.has_changes == 'true' &&
+                  steps.test.outputs.tests_failed != 'true'
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number,
+                        body: `✅ **Biome Auto-Repair Applied**
+
+                        Style issues have been automatically fixed and committed. All tests passed after repair.
+
+                        You can continue with your review without addressing style nits.`
+                      });
