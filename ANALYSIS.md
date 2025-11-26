@@ -51,10 +51,10 @@
 <deliverables type="config">
 | File | Changes |
 |------|---------|
-| `renovate.json` | Domain grouping, platformAutomerge, vulnerability alerts |
+| `renovate.json` | Domain grouping (6 groups), platformAutomerge, vulnerability alerts |
 | `stryker.config.js` | `incremental: true` for speed |
-| `lefthook.yml` | Effect pattern validation, import validation |
-| `.github/labeler.yml` | Path-to-label mappings |
+| `lefthook.yml` | Effect pattern validation (with grep limitation noted) |
+| `.github/labeler.yml` | Path-to-label mappings (content-based requires custom scripting) |
 </deliverables>
 
 <deliverables type="templates">
@@ -79,7 +79,7 @@
 | File | Purpose |
 |------|---------|
 | `tools/generate-context/` | Nx graph extraction + API surface generation |
-| `tools/sync-agent-protocols.ts` | REQUIREMENTS.md → derivative docs |
+| `tools/sync-agent-protocols.ts` | REQUIREMENTS.md → derivative doc generation |
 </deliverables>
 
 ---
@@ -164,14 +164,14 @@ const parseAgentContext = (body: string) =>
 
 ### 2.3 Renovate Domain Strategy
 
-| Group | Packages | Auto-merge | Gate |
-|-------|----------|------------|------|
-| `effect-ecosystem` | `effect`, `@effect/*` | No | CI + mutation |
-| `vite-ecosystem` | `vite*`, `vitest*`, `@vitejs/*` | Yes (minor/patch) | CI |
-| `react-ecosystem` | `react*`, `@types/react*` | No | Manual (canary) |
-| `nx-ecosystem` | `nx`, `@nx/*` | No | Manual (canary) |
-| `types` | `@types/*` (except react) | Yes | CI |
-| `github-actions` | `actions/*` | Yes | CI |
+| Group | Packages | Auto-merge | Gate | Schedule |
+|-------|----------|------------|------|----------|
+| `effect-ecosystem` | `effect`, `@effect/*` | No | CI + mutation | before 6am Monday |
+| `vite-ecosystem` | `vite*`, `vitest*`, `@vitejs/*` | Yes (minor/patch) | CI | default |
+| `react-ecosystem` | `react*`, `@types/react*` | No | Manual (canary) | default |
+| `nx-ecosystem` | `nx`, `@nx/*` | No | Manual (canary) | default |
+| `types` | `@types/*` (except react) | Yes | CI | default |
+| `github-actions` | GitHub Actions | Yes | CI | default |
 
 ### 2.4 CI Quality → Issue Pipeline
 
@@ -217,7 +217,7 @@ From TASK_b Section 5 - convert persistent failures to tracked issues:
 | Template hooks ignored | Provide sensible defaults, validate in workflows |
 | project-map.json stale | Regenerate on every main push |
 | Protocol drift | Hash-based CI validation |
-| Biome --unsafe breaks code | Run tests after auto-fix |
+| Biome --unsafe breaks code | Run pnpm test after auto-fix; skip commit if tests fail |
 | Auto-merge introduces bugs | Stryker mutation gate (80% threshold) |
 | Workflow proliferation | Consolidate overlapping workflows |
 

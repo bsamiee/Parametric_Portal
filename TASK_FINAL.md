@@ -135,8 +135,9 @@
     - scope/docs: **/*.md, docs/**
     - scope/tests: **/*.spec.ts, **/*.test.ts, vitest.config.*
     - scope/ui: **/*.tsx, **/components/**
-    - tech/effect: files importing 'effect'
+    - claude-implement: (manual label, not path-based)
   </spec>
+  <note>Content-based detection (e.g., tech/effect) requires custom scripting in auto-labeler.yml, not actions/labeler</note>
 </task>
 
 ---
@@ -228,10 +229,12 @@
       "osvVulnerabilityAlerts": true,
       "postUpdateOptions": ["pnpmDedupe"],
       "packageRules": [
-        { "groupName": "effect-ecosystem", "matchPackagePatterns": ["^effect$", "^@effect/"], "automerge": false, "schedule": ["before 6am on monday"] },
+        { "groupName": "effect-ecosystem", "matchPackagePatterns": ["^effect$", "^@effect/"], "automerge": false, "schedule": ["before 6am on Monday"] },
         { "groupName": "vite-ecosystem", "matchPackagePatterns": ["^vite", "^vitest", "^@vitejs/", "^@vitest/"], "automerge": true, "matchUpdateTypes": ["minor", "patch"] },
         { "groupName": "nx-ecosystem", "matchPackagePatterns": ["^nx$", "^@nx/"], "automerge": false },
-        { "groupName": "react-ecosystem", "matchPackagePatterns": ["^react", "^@types/react"], "automerge": false }
+        { "groupName": "react-ecosystem", "matchPackagePatterns": ["^react", "^@types/react"], "automerge": false },
+        { "groupName": "types", "matchPackagePatterns": ["^@types/"], "excludePackagePatterns": ["^@types/react"], "automerge": true },
+        { "groupName": "github-actions", "matchManagers": ["github-actions"], "automerge": true }
       ]
     }
   </additions>
@@ -254,7 +257,10 @@
     - Gate: all checks green + mutation score >= 80%
     - Auto-merge eligible PRs via gh pr merge --squash --auto
     - Blocked: add renovate-blocked label, comment with concerns
-    - For majors: create/update migration campaign issue
+    - For majors: create/update migration campaign issue:
+      - Title: "Migration: {package} v{from} → v{to}"
+      - Labels: dependencies, migration, priority/high
+      - Body: scope (affected packages), breaking changes, migration steps checklist, linked Renovate PR
   </spec>
 </task>
 
@@ -269,10 +275,12 @@
   <spec>
     - Checkout with token for push access
     - Run: pnpm biome check --write --unsafe .
-    - If changes: commit "style: biome auto-repair", push
+    - Run: pnpm test (verify --unsafe didn't break semantics)
+    - If tests pass AND changes exist: commit "style: biome auto-repair", push
+    - If tests fail: skip commit, add comment warning of semantic breakage
     - Skip for: main branch, bot authors (except renovate)
   </spec>
-  <rationale>Zero style noise in human PR reviews</rationale>
+  <rationale>Zero style noise in human PR reviews; --unsafe requires test validation</rationale>
 </task>
 
 <task id="5.2">
@@ -294,11 +302,14 @@
     effect-check:
       glob: "*.{ts,tsx}"
       run: |
-        if grep -E "try\s*\{" {staged_files}; then
+        # Exclude comments and strings via grep -v for common false positives
+        # More robust: use AST-based linting via Biome GritQL when stable
+        if grep -E "^\s*try\s*\{" {staged_files} | grep -v "^\s*//" | grep -v "^\s*\*"; then
           echo "[ERROR] try/catch detected. Use Effect.tryPromise"
           exit 1
         fi
   </additions>
+  <limitation>Grep-based detection has false positives in strings/comments; AST-based validation preferred when Biome GritQL stabilizes</limitation>
 </task>
 
 <task id="5.4">
@@ -323,7 +334,7 @@
     - name: Job Summary
       run: |
         echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
-        nx show projects --affected --json | jq -r '.[]' >> $GITHUB_STEP_SUMMARY
+        nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY
   </additions>
 </task>
 
@@ -414,7 +425,6 @@
     - Dependency Management explanation
     - Dashboard explanation
     - Labels quick reference
-    - Commands quick reference (/triage, /summarize)
   </sections>
 </task>
 
@@ -447,10 +457,10 @@
 
 <task id="9.1">
   <file>tools/sync-agent-protocols.ts</file>
-  <action>Create REQUIREMENTS.md → derivatives sync script</action>
+  <action>Create REQUIREMENTS.md → derivative docs sync script</action>
   <spec>
     - Read REQUIREMENTS.md as SSoT
-    - Extract sections: stack-versions, dogmatic-rules, agent-matrix, quality-targets
+    - Extract sections by markdown H2 headers: ## Stack, ## Dogmatic Rules, ## Agent Matrix, ## Quality Targets
     - Generate: AGENTS.md, copilot-instructions.md, CLAUDE.md
     - Compute SHA256 hash, embed as <!-- SYNC_HASH: xxx -->
     - Dry-run mode for CI validation
