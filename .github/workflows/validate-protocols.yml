@@ -1,0 +1,113 @@
+name: Validate Protocols
+
+on:
+    pull_request:
+        types: [opened, edited, synchronize]
+        paths:
+            - '*.md'
+            - '.github/**/*.md'
+            - 'REQUIREMENTS.md'
+            - 'AGENTS.md'
+            - 'CLAUDE.md'
+            - '.github/copilot-instructions.md'
+            - 'tools/sync-agent-protocols.ts'
+
+permissions:
+    contents: read
+
+concurrency:
+    group: validate-protocols-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    validate:
+        name: Protocol Drift Detection
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+              with:
+                  node-version: '25.2.1'
+
+            - name: Install pnpm
+              uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Get pnpm store directory
+              shell: bash
+              run: |
+                  echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+            - name: Setup pnpm cache
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+              with:
+                  path: ${{ env.STORE_PATH }}
+                  key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+                  restore-keys: |
+                      ${{ runner.os }}-pnpm-store-
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Validate Protocol Synchronization
+              id: validate
+              run: |
+                  echo "### Protocol Drift Detection" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  
+                  if pnpm sync:protocols --dry-run 2>&1 | tee validation.log; then
+                    echo "status=synchronized" >> $GITHUB_OUTPUT
+                    echo "✅ All protocol files are synchronized with REQUIREMENTS.md" >> $GITHUB_STEP_SUMMARY
+                    exit 0
+                  else
+                    echo "status=drift" >> $GITHUB_OUTPUT
+                    echo "❌ Protocol drift detected!" >> $GITHUB_STEP_SUMMARY
+                    echo "" >> $GITHUB_STEP_SUMMARY
+                    echo "**Action Required:** Run \`pnpm sync:protocols\` locally and commit the changes." >> $GITHUB_STEP_SUMMARY
+                    echo "" >> $GITHUB_STEP_SUMMARY
+                    echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+                    cat validation.log >> $GITHUB_STEP_SUMMARY
+                    echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+                    exit 1
+                  fi
+
+            - name: Comment on PR (if drift detected)
+              if: failure() && steps.validate.outputs.status == 'drift'
+              uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const log = fs.existsSync('validation.log') 
+                        ? fs.readFileSync('validation.log', 'utf8')
+                        : 'Validation log not found';
+                      
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.issue.number,
+                        body: `## ⚠️ Protocol Drift Detected
+                      
+                      The protocol files are out of sync with \`REQUIREMENTS.md\`.
+                      
+                      **To fix:**
+                      \`\`\`bash
+                      pnpm sync:protocols
+                      git add AGENTS.md CLAUDE.md .github/copilot-instructions.md
+                      git commit -m "chore: sync protocol files with REQUIREMENTS.md"
+                      \`\`\`
+                      
+                      <details>
+                      <summary>Validation Output</summary>
+                      
+                      \`\`\`
+                      ${log}
+                      \`\`\`
+                      </details>`
+                      });
