@@ -1,5 +1,9 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "automergeStrategy": "squash",
+    "automergeType": "pr",
+    "dependencyDashboard": true,
+    "dependencyDashboardTitle": "Dependency Dashboard",
     "extends": [
         "config:recommended",
         "schedule:weekly",
@@ -11,6 +15,7 @@
         "enabled": true,
         "schedule": ["before 4am on monday"]
     },
+    "osvVulnerabilityAlerts": true,
     "packageRules": [
         {
             "automerge": true,
@@ -26,6 +31,7 @@
         {
             "automerge": true,
             "description": "Group type definitions",
+            "excludePackagePatterns": ["^@types/react", "^@types/react-dom"],
             "groupName": "types",
             "matchPackageNames": ["@types/**"]
         },
@@ -50,6 +56,14 @@
             "matchPackageNames": ["typescript"]
         },
         {
+            "automerge": true,
+            "description": "Group React ecosystem (stable releases)",
+            "groupName": "react-ecosystem",
+            "matchCurrentVersion": "!/canary|beta|rc/",
+            "matchPackageNames": ["react", "react-dom"],
+            "matchUpdateTypes": ["minor", "patch"]
+        },
+        {
             "automerge": false,
             "description": "React canary - manual review",
             "groupName": "react-canary",
@@ -72,16 +86,21 @@
             "matchPackageNames": ["@biomejs/biome"]
         },
         {
+            "automerge": true,
             "description": "Group Effect ecosystem",
             "groupName": "effect-ecosystem",
             "labels": ["dependencies", "effect"],
-            "matchPackageNames": ["effect", "@effect/**"]
+            "matchPackageNames": ["effect", "@effect/**"],
+            "matchUpdateTypes": ["minor", "patch"],
+            "schedule": ["before 6am on Monday"]
         },
         {
+            "automerge": true,
             "description": "Group Vite ecosystem",
             "groupName": "vite-ecosystem",
             "labels": ["dependencies", "vite"],
-            "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"]
+            "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"],
+            "matchUpdateTypes": ["minor", "patch"]
         },
         {
             "description": "Group TanStack",
@@ -102,6 +121,8 @@
             "matchPackageNames": ["tailwindcss", "@tailwindcss/**", "lightningcss"]
         }
     ],
+    "platformAutomerge": true,
+    "postUpdateOptions": ["pnpmDedupe"],
     "prConcurrentLimit": 10,
     "prHourlyLimit": 5,
     "timezone": "America/Los_Angeles",

@@ -6,3 +6,23 @@ pre-commit:
       run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
       stage_fixed: true
       skip: false
+    effect-check:
+      glob: "*.{ts,tsx}"
+      run: |
+        violation=0
+        for file in {staged_files}; do
+          if grep -qE "\btry\s*\{" "$file"; then
+            # Check if matches are in actual code (not comments)
+            matches=$(grep -nE "\btry\s*\{" "$file" | grep -vE "^\s*[0-9]+:\s*(/\*|//|\*)")
+            if [ -n "$matches" ]; then
+              echo "[ERROR] try/catch detected in $file"
+              echo "$matches"
+              violation=1
+            fi
+          fi
+        done
+        if [ "$violation" -eq 1 ]; then
+          echo "Use Effect.try, Effect.tryPromise, or Effect.gen instead"
+          exit 1
+        fi
+      skip: false

@@ -1,0 +1,232 @@
+name: Renovate Auto-Merge
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened]
+    check_suite:
+        types: [completed]
+    schedule:
+        - cron: '0 */4 * * *' # Every 4 hours
+
+permissions:
+    contents: write
+    pull-requests: write
+    issues: write
+
+concurrency:
+    group: renovate-automerge-${{ github.event.pull_request.number || 'scheduled' }}
+    cancel-in-progress: false
+
+jobs:
+    classify-and-gate:
+        name: Classify and Auto-Merge Gate
+        runs-on: ubuntu-latest
+        if: github.actor == 'renovate[bot]'
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+
+            - name: Get PR Details
+              id: pr
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const pr = context.payload.pull_request;
+                      if (!pr) {
+                        core.setFailed('No pull request context available');
+                        return;
+                      }
+                      const title = pr.title.toLowerCase();
+
+                      // Classify update type based on title
+                      const isMajor = title.includes('major');
+                      const isCanary = /canary|beta|rc/.test(title);
+                      const isPatch = title.includes('patch');
+                      const isMinor = title.includes('minor');
+
+                      // Eligible: patch/minor updates that are not major/canary
+                      const eligible = (isPatch || isMinor) && !isMajor && !isCanary;
+
+                      return {
+                        number: pr.number,
+                        title: pr.title,
+                        eligible,
+                        isMajor,
+                        isCanary
+                      };
+
+            - name: Wait for CI Checks
+              if: fromJSON(steps.pr.outputs.result).eligible && github.event_name == 'pull_request'
+              uses: lewagon/wait-on-check-action@595dabb3acf442d47e29c9ec9ba44db0c6bdd18f # v1.3.4
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  check-regexp: '^(ci|mutation-score)$'
+                  wait-interval: 30
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Check Mutation Score
+              if: fromJSON(steps.pr.outputs.result).eligible && github.event_name == 'pull_request'
+              id: mutation
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const { data: checkRuns } = await github.rest.checks.listForRef({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        ref: context.payload.pull_request.head.sha,
+                        check_name: 'mutation-score'
+                      });
+
+                      const mutationCheck = checkRuns.check_runs[0];
+                      if (!mutationCheck) {
+                        core.setOutput('passed', 'false');
+                        core.setOutput('score', 'N/A');
+                        return;
+                      }
+
+                      // Extract score from check output
+                      const output = mutationCheck.output?.summary || '';
+                      const match = output.match(/(\d+)%/);
+                      const score = match ? parseInt(match[1]) : 0;
+
+                      core.setOutput('passed', score >= 80 ? 'true' : 'false');
+                      core.setOutput('score', score.toString());
+
+            - name: Auto-Merge Eligible PR
+              if: |
+                  fromJSON(steps.pr.outputs.result).eligible &&
+                  steps.mutation.outputs.passed == 'true'
+              run: |
+                  gh pr merge ${{ fromJSON(steps.pr.outputs.result).number }} \
+                    --squash \
+                    --auto \
+                    --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Block Ineligible PR
+              if: |
+                  !fromJSON(steps.pr.outputs.result).eligible ||
+                  steps.mutation.outputs.passed == 'false'
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const prData = ${{ steps.pr.outputs.result }};
+                      const score = '${{ steps.mutation.outputs.score }}';
+
+                      await github.rest.issues.addLabels({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: prData.number,
+                        labels: ['renovate-blocked']
+                      });
+
+                      let reason = '';
+                      if (prData.isMajor) {
+                        reason = 'Major version update requires manual review and migration planning.';
+                      } else if (prData.isCanary) {
+                        reason = 'Canary/beta/rc version requires manual review.';
+                      } else if (score !== 'N/A' && parseInt(score) < 80) {
+                        reason = `Mutation score ${score}% below 80% threshold.`;
+                      } else {
+                        reason = 'CI checks have not passed or mutation testing is incomplete.';
+                      }
+
+                      const comment = `[BLOCKED] Auto-merge blocked
+
+                      **Reason**: ${reason}
+
+                      ${prData.isMajor ? '**Action Required**: Review breaking changes and create migration checklist.' : ''}
+                      ${score !== 'N/A' && parseInt(score) < 80 ? '**Action Required**: Improve test coverage to reach 80% mutation score.' : ''}`;
+
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: prData.number,
+                        body: comment
+                      });
+
+    create-migration-issue:
+        name: Create Migration Campaign for Major Updates
+        runs-on: ubuntu-latest
+        if: |
+            github.actor == 'renovate[bot]' &&
+            contains(github.event.pull_request.title, 'major')
+        steps:
+            - name: Extract Package Info
+              id: package
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const title = context.payload.pull_request.title;
+                      const match = title.match(/Update ([\w\-@\/]+) to v?(\d+)/i);
+
+                      if (!match) {
+                        return { packageName: 'Unknown', toVersion: 'Unknown' };
+                      }
+
+                      return {
+                        packageName: match[1],
+                        toVersion: match[2]
+                      };
+
+            - name: Find or Create Migration Issue
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const pkg = ${{ steps.package.outputs.result }};
+                      const prNumber = context.payload.pull_request.number;
+                      const title = `Migration: ${pkg.packageName} v${pkg.toVersion}`;
+
+                      // Search for existing migration issue
+                      const { data: issues } = await github.rest.issues.listForRepo({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        labels: 'dependencies,migration',
+                        state: 'open'
+                      });
+
+                      const existing = issues.find(i => i.title.includes(pkg.packageName));
+
+                      const body = `## Migration Campaign: ${pkg.packageName}
+
+                      **Target Version**: v${pkg.toVersion}
+                      **Renovate PR**: #${prNumber}
+
+                      ### Scope
+                      - [ ] Identify affected packages
+                      - [ ] Review breaking changes
+                      - [ ] Update code for compatibility
+                      - [ ] Update tests
+                      - [ ] Update documentation
+
+                      ### Breaking Changes
+                      _(Add breaking changes from release notes)_
+
+                      ### Migration Steps
+                      - [ ] Review official migration guide
+                      - [ ] Test in development
+                      - [ ] Update dependencies
+                      - [ ] Validate with full test suite
+                      - [ ] Deploy to staging
+                      - [ ] Monitor for issues
+
+                      ### Related
+                      - Renovate PR: #${prNumber}`;
+
+                      if (existing) {
+                        await github.rest.issues.update({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: existing.number,
+                          body: existing.body + `\n\n---\n\nUpdated: ${new Date().toISOString()}\nNew PR: #${prNumber}`
+                        });
+                      } else {
+                        await github.rest.issues.create({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          title,
+                          body,
+                          labels: ['dependencies', 'migration', 'priority/high']
+                        });
+                      }

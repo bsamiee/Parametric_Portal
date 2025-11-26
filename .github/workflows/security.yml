@@ -1,0 +1,188 @@
+name: Security Scanning
+
+on:
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
+    schedule:
+        - cron: '0 0 * * 1' # Weekly on Monday
+
+permissions:
+    contents: read
+    security-events: write
+    issues: write
+
+concurrency:
+    group: security-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    dependency-audit:
+        name: Dependency Audit
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+              with:
+                  node-version: 25.2.1
+                  cache: pnpm
+
+            - name: Run pnpm audit
+              id: audit
+              run: |
+                  pnpm audit --audit-level=moderate --json > audit-results.json
+                  exit_code=$?
+                  if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 1 ]; then
+                    echo "[ERROR] Audit command failed"
+                    cat audit-results.json
+                    exit "$exit_code"
+                  fi
+                  cat audit-results.json
+
+            - name: Check for Critical Vulnerabilities
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const auditResults = JSON.parse(fs.readFileSync('audit-results.json', 'utf8'));
+                      
+                      const critical = auditResults.advisories?.filter(a => a.severity === 'critical') || [];
+                      const high = auditResults.advisories?.filter(a => a.severity === 'high') || [];
+                      
+                      if (critical.length > 0 || high.length > 0) {
+                        core.setFailed(`Found ${critical.length} critical and ${high.length} high severity vulnerabilities`);
+                      }
+
+    codeql:
+        name: CodeQL Analysis
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+
+            - name: Initialize CodeQL
+              uses: github/codeql-action/init@e2b3eafc8d227b0241d48be5f425d47c2d750a13 # v3.26.10
+              with:
+                  languages: javascript-typescript
+                  queries: security-and-quality
+
+            - name: Autobuild
+              uses: github/codeql-action/autobuild@e2b3eafc8d227b0241d48be5f425d47c2d750a13 # v3.26.10
+
+            - name: Perform CodeQL Analysis
+              uses: github/codeql-action/analyze@e2b3eafc8d227b0241d48be5f425d47c2d750a13 # v3.26.10
+              with:
+                  category: '/language:javascript-typescript'
+
+    secrets-scan:
+        name: Secrets Scanning
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+              with:
+                  fetch-depth: 0
+
+            - name: Run Gitleaks
+              uses: gitleaks/gitleaks-action@41a22e89fa1204f9bfd26a8f3b4d96ac1dce3248 # v2.3.6
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GITLEAKS_ENABLE_SUMMARY: true
+
+    license-check:
+        name: License Compliance
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+              with:
+                  node-version: 25.2.1
+                  cache: pnpm
+
+            - name: Install Dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Check for Copyleft Licenses
+              run: |
+                  echo "Checking for copyleft licenses..."
+                  pnpm licenses list --json > licenses.json
+                  
+                  # Check for GPL, AGPL, LGPL
+                  if grep -iE "(GPL|AGPL|LGPL)" licenses.json; then
+                    echo "[ERROR] Copyleft licenses detected"
+                    exit 1
+                  else
+                    echo "[OK] No copyleft licenses detected"
+                  fi
+
+    create-security-issue:
+        name: Create Security Issue
+        runs-on: ubuntu-latest
+        needs: [dependency-audit, codeql, secrets-scan, license-check]
+        if: failure()
+        steps:
+            - name: Create or Update Security Issue
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+                      
+                      // Search for existing security issue
+                      const { data: issues } = await github.rest.issues.listForRepo({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        labels: 'security',
+                        state: 'open'
+                      });
+                      
+                      const existing = issues.find(i => i.title.includes('Security Scan'));
+                      
+                      const body = `## Security Scan Alert
+
+                      **Timestamp**: ${new Date().toISOString()}
+                      **Run**: ${runUrl}
+
+                      ### Action Required
+                      Security vulnerabilities or compliance issues have been detected. Review the scan results and take appropriate action.
+
+                      ### Next Steps
+                      1. Review the failed job in the CI run
+                      2. Address critical and high severity issues
+                      3. Update dependencies or fix code issues
+                      4. Re-run security scan to verify fixes`;
+                      
+                      if (existing) {
+                        await github.rest.issues.update({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          issue_number: existing.number,
+                          body: existing.body + '\n\n---\n\n' + body
+                        });
+                      } else {
+                        await github.rest.issues.create({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          title: '[SECURITY] Security Scan Alert',
+                          labels: ['security', 'priority/critical'],
+                          body
+                        });
+                      }

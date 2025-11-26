@@ -18,6 +18,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      issues: write
 
     steps:
       - name: Checkout
@@ -51,6 +52,12 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Generate Agent Context
+        run: pnpm generate:context
+
+      - name: Generate Nx Graph
+        run: pnpm exec nx graph --file=.nx/project-graph.json
 
       - name: Restore Nx cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -91,3 +98,77 @@ jobs:
           path: '**/coverage'
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent-context
+          path: |
+            docs/agent-context/project-map.json
+            .nx/project-graph.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
+          pnpm exec nx show projects --affected --base=${{ env.BASE }} --head=${{ env.HEAD }} --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create Quality Debt Issue
+        if: failure()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const stepName = '${{ github.job }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            
+            // Classify debt type using dispatch table pattern
+            const debtClassification = {
+              mutate: { debtType: 'Mutation', labels: ['tech-debt', 'testing'] },
+              test: { debtType: 'Mutation', labels: ['tech-debt', 'testing'] },
+              build: { debtType: 'Performance', labels: ['tech-debt', 'performance'] },
+              compression: { debtType: 'Performance', labels: ['tech-debt', 'performance'] }
+            };
+            
+            const matchedKey = Object.keys(debtClassification).find(k => stepName.includes(k));
+            const { debtType = 'Quality', labels = ['tech-debt', 'refactor'] } = 
+              debtClassification[matchedKey] || {};
+            
+            const title = `${debtType} Debt: CI Failure`;
+            
+            // Search for existing debt issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: labels.join(','),
+              state: 'open'
+            });
+            
+            const existing = issues.find(i => i.title.startsWith(debtType));
+            
+            const body = `## CI Failure
+
+            - **Run**: ${runUrl}
+            - **Job**: ${stepName}
+            - **Timestamp**: ${new Date().toISOString()}
+
+            ### Action Required
+            Review the failed CI run and address the issues before merging.`;
+            
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: existing.body + '\n\n---\n\n' + body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                labels,
+                body
+              });
+            }

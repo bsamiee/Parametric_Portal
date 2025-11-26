@@ -1,0 +1,250 @@
+name: Repository Dashboard
+
+on:
+    schedule:
+        - cron: '0 */6 * * *' # Every 6 hours
+    workflow_dispatch:
+    push:
+        branches: [main]
+    issue_comment:
+        types: [created]
+
+permissions:
+    contents: read
+    issues: write
+    pull-requests: read
+
+concurrency:
+    group: dashboard
+    cancel-in-progress: false
+
+jobs:
+    update-dashboard:
+        name: Update Repository Health Dashboard
+        runs-on: ubuntu-latest
+        # Run on schedule, workflow_dispatch, main push, or /health command on dashboard issue
+        if: |
+            github.event_name == 'schedule' ||
+            github.event_name == 'workflow_dispatch' ||
+            github.event_name == 'push' ||
+            (github.event_name == 'issue_comment' &&
+             contains(github.event.comment.body, '/health') &&
+             contains(github.event.issue.labels.*.name, 'dashboard'))
+        steps:
+            - name: Checkout
+              uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+              with:
+                  version: 10.23.0
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@0a44ba7841725637a19e28fa30b79a866c81b0a6 # v4.0.4
+              with:
+                  node-version: 25.2.1
+                  cache: pnpm
+
+            - name: Install Dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Run Health Checks
+              id: health
+              run: |
+                  echo "running=true" >> $GITHUB_OUTPUT
+                  pnpm typecheck && pnpm check && echo "health=healthy" >> $GITHUB_OUTPUT || echo "health=unhealthy" >> $GITHUB_OUTPUT
+
+            - name: Collect Metrics
+              id: metrics
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+                      // Pull Requests
+                      const { data: openPRs } = await github.rest.pulls.list({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        state: 'open'
+                      });
+
+                      const { data: mergedPRs } = await github.rest.pulls.list({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        state: 'closed',
+                        sort: 'updated',
+                        direction: 'desc',
+                        per_page: 100
+                      });
+
+                      const recentMerged = mergedPRs.filter(pr => 
+                        pr.merged_at && new Date(pr.merged_at) > sevenDaysAgo
+                      );
+
+                      const stalePRs = openPRs.filter(pr => 
+                        new Date(pr.updated_at) < new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+                      );
+
+                      // Issues
+                      const { data: openIssues } = await github.rest.issues.listForRepo({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        state: 'open',
+                        per_page: 100
+                      });
+
+                      const bugs = openIssues.filter(i => !i.pull_request && i.labels.some(l => l.name === 'type/bug'));
+                      const features = openIssues.filter(i => !i.pull_request && i.labels.some(l => l.name === 'type/feature'));
+                      const claudeReady = openIssues.filter(i => !i.pull_request && i.labels.some(l => l.name === 'claude-implement'));
+
+                      // Renovate PRs
+                      const renovatePRs = openPRs.filter(pr => pr.user.login === 'renovate[bot]');
+                      const renovateMerged = recentMerged.filter(pr => pr.user.login === 'renovate[bot]');
+
+                      // Commits
+                      const { data: commits } = await github.rest.repos.listCommits({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        since: sevenDaysAgo.toISOString(),
+                        per_page: 100
+                      });
+
+                      const contributors = [...new Set(commits.map(c => c.author?.login).filter(Boolean))];
+
+                      // Latest Release
+                      const latestRelease = await github.rest.repos.getLatestRelease({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo
+                      })
+                        .then(({ data: release }) => release.tag_name)
+                        .catch(() => 'None');
+
+                      return {
+                        openPRs: openPRs.length,
+                        mergedPRs: recentMerged.length,
+                        stalePRs: stalePRs.length,
+                        openIssues: openIssues.filter(i => !i.pull_request).length,
+                        bugs: bugs.length,
+                        features: features.length,
+                        claudeReady: claudeReady.length,
+                        renovateOpen: renovatePRs.length,
+                        renovateMerged: renovateMerged.length,
+                        commits: commits.length,
+                        contributors: contributors.length,
+                        latestRelease
+                      };
+
+            - name: Find or Create Dashboard Issue
+              id: dashboard
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const { data: issues } = await github.rest.issues.listForRepo({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        labels: 'dashboard',
+                        state: 'open'
+                      });
+
+                      let dashboardIssue = issues.find(i => i.title === 'Repository Dashboard');
+
+                      if (!dashboardIssue) {
+                        const { data: newIssue } = await github.rest.issues.create({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          title: 'Repository Dashboard',
+                          body: 'Initializing dashboard...',
+                          labels: ['dashboard', 'pinned']
+                        });
+                        dashboardIssue = newIssue;
+
+                        // Pin the issue
+                        await github.graphql(`
+                          mutation($issueId: ID!) {
+                            pinIssue(input: {issueId: $issueId}) {
+                              issue {
+                                id
+                              }
+                            }
+                          }
+                        `, {
+                          issueId: dashboardIssue.node_id
+                        });
+                      }
+
+                      return dashboardIssue.number;
+
+            - name: Update Dashboard Content
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const issueNumber = ${{ steps.dashboard.outputs.result }};
+                      const metrics = ${{ steps.metrics.outputs.result }};
+                      const health = '${{ steps.health.outputs.health }}';
+                      const timestamp = new Date().toISOString();
+
+                      const healthBadge = health === 'healthy' ? '[OK] Healthy' : '[FAIL] Unhealthy';
+
+                      const body = `# Repository Dashboard
+
+                      **Last Updated**: ${timestamp}
+
+                      ## Quick Stats
+
+                      | Metric | Value |
+                      |--------|-------|
+                      | Open PRs | ${metrics.openPRs} |
+                      | Merged (7d) | ${metrics.mergedPRs} |
+                      | Stale PRs (>14d) | ${metrics.stalePRs} |
+                      | Open Issues | ${metrics.openIssues} |
+                      | Latest Release | ${metrics.latestRelease} |
+
+                      ## Activity (Last 7 Days)
+
+                      - **Commits**: ${metrics.commits}
+                      - **Contributors**: ${metrics.contributors}
+                      - **PRs Merged**: ${metrics.mergedPRs}
+
+                      ## Pull Requests
+
+                      - **Open**: ${metrics.openPRs} PRs
+                      - **Stale** (>14 days): ${metrics.stalePRs} PRs
+                      - **Renovate Open**: ${metrics.renovateOpen} PRs
+                      - **Renovate Merged (7d)**: ${metrics.renovateMerged} PRs
+
+                      [View All PRs →](https://github.com/${context.repo.owner}/${context.repo.repo}/pulls)
+
+                      ## Issues
+
+                      - **Open Bugs**: ${metrics.bugs}
+                      - **Open Features**: ${metrics.features}
+                      - **Claude-Ready**: ${metrics.claudeReady}
+
+                      [View All Issues →](https://github.com/${context.repo.owner}/${context.repo.repo}/issues)
+
+                      ## Health Status
+
+                      | Check | Status |
+                      |-------|--------|
+                      | Overall | ${healthBadge} |
+                      | TypeCheck | ${health === 'healthy' ? '[OK]' : '[FAIL]'} |
+                      | Biome Lint | ${health === 'healthy' ? '[OK]' : '[FAIL]'} |
+
+                      ## Workflows
+
+                      | Workflow | Status |
+                      |----------|--------|
+                      | CI | ![CI](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/ci.yml/badge.svg) |
+                      | Code Review | ![Review](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/claude-code-review-enhanced.yml/badge.svg) |
+
+                      ---
+
+                      **Tip**: Comment \`/health\` on this issue to trigger a manual update.`;
+
+                      await github.rest.issues.update({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: issueNumber,
+                        body
+                      });
