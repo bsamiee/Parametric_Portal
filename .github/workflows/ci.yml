@@ -123,17 +123,17 @@ jobs:
             const stepName = '${{ github.job }}';
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             
-            // Determine debt type based on failed step
-            let debtType = 'Quality';
-            let labels = ['tech-debt', 'refactor'];
+            // Classify debt type using dispatch table pattern
+            const debtClassification = {
+              mutate: { debtType: 'Mutation', labels: ['tech-debt', 'testing'] },
+              test: { debtType: 'Mutation', labels: ['tech-debt', 'testing'] },
+              build: { debtType: 'Performance', labels: ['tech-debt', 'performance'] },
+              compression: { debtType: 'Performance', labels: ['tech-debt', 'performance'] }
+            };
             
-            if (stepName.includes('mutate') || stepName.includes('test')) {
-              debtType = 'Mutation';
-              labels = ['tech-debt', 'testing'];
-            } else if (stepName.includes('build') || stepName.includes('compression')) {
-              debtType = 'Performance';
-              labels = ['tech-debt', 'performance'];
-            }
+            const matchedKey = Object.keys(debtClassification).find(k => stepName.includes(k));
+            const { debtType = 'Quality', labels = ['tech-debt', 'refactor'] } = 
+              debtClassification[matchedKey] || {};
             
             const title = `${debtType} Debt: CI Failure`;
             

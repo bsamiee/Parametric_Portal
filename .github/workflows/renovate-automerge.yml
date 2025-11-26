@@ -32,6 +32,10 @@ jobs:
               with:
                   script: |
                       const pr = context.payload.pull_request;
+                      if (!pr) {
+                        core.setFailed('No pull request context available');
+                        return;
+                      }
                       const title = pr.title.toLowerCase();
 
                       // Classify update type based on title

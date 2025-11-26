@@ -148,27 +148,27 @@ jobs:
                         return `${sign}${formatSize(diff)} (${sign}${percent}%)`;
                       };
                       
-                      let report = '## Bundle Size Report\n\n';
-                      report += '| Package | Raw | Gzip | Brotli | Change |\n';
-                      report += '|---------|-----|------|--------|--------|\n';
-                      
-                      let hasSignificantIncrease = false;
-                      
-                      prSizes.packages.forEach(prPkg => {
+                      const packageRows = prSizes.packages.map(prPkg => {
                         const basePkg = baseSizes.packages.find(p => p.name === prPkg.name) || 
                           { raw: 0, gzip: 0, brotli: 0 };
                         
                         const gzipDiff = prPkg.gzip - basePkg.gzip;
                         const marker = gzipDiff > 10240 ? '[WARN]' : gzipDiff > 0 ? '[+]' : gzipDiff < 0 ? '[-]' : '[=]';
                         
-                        if (gzipDiff > 10240) hasSignificantIncrease = true;
-                        
-                        report += `| ${marker} ${prPkg.name} | ${formatSize(prPkg.raw)} | ${formatSize(prPkg.gzip)} | ${formatSize(prPkg.brotli)} | ${formatDiff(prPkg.gzip, basePkg.gzip)} |\n`;
+                        return {
+                          row: `| ${marker} ${prPkg.name} | ${formatSize(prPkg.raw)} | ${formatSize(prPkg.gzip)} | ${formatSize(prPkg.brotli)} | ${formatDiff(prPkg.gzip, basePkg.gzip)} |\n`,
+                          hasWarning: gzipDiff > 10240
+                        };
                       });
                       
-                      if (hasSignificantIncrease) {
-                        report += '\n[WARN] Bundle size increased by more than 10KB (gzip). Consider optimizing.\n';
-                      }
+                      const hasSignificantIncrease = packageRows.some(p => p.hasWarning);
+                      const tableRows = packageRows.map(p => p.row).join('');
+                      
+                      const report = '## Bundle Size Report\n\n' +
+                        '| Package | Raw | Gzip | Brotli | Change |\n' +
+                        '|---------|-----|------|--------|--------|\n' +
+                        tableRows +
+                        (hasSignificantIncrease ? '\n[WARN] Bundle size increased by more than 10KB (gzip). Consider optimizing.\n' : '');
                       
                       return { report, hasWarning: hasSignificantIncrease };
 

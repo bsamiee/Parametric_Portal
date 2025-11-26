@@ -331,40 +331,53 @@ const validate = (data: unknown): ProjectMap => {
 ### Topological Sort (for build/migration order)
 
 ```typescript
-const topologicalSort = (projectMap: ProjectMap): string[] => {
-  const graph = new Map<string, string[]>();
+const topologicalSort = (projectMap: ProjectMap): ReadonlyArray<string> => {
+  const graph = new Map<string, ReadonlyArray<string>>();
   const inDegree = new Map<string, number>();
 
-  // Build adjacency list
-  Object.keys(projectMap.projects).forEach((pkg) => {
+  // Build adjacency list using reduce instead of forEach
+  Object.keys(projectMap.projects).reduce((acc, pkg) => {
     graph.set(pkg, []);
     inDegree.set(pkg, 0);
-  });
+    return acc;
+  }, undefined);
 
-  projectMap.graph.edges.forEach(({ source, target }) => {
-    graph.get(target)?.push(source);
+  projectMap.graph.edges.reduce((acc, { source, target }) => {
+    const existing = graph.get(target) || [];
+    graph.set(target, [...existing, source]);
     inDegree.set(source, (inDegree.get(source) || 0) + 1);
-  });
+    return acc;
+  }, undefined);
 
-  // Kahn's algorithm
-  const queue = Array.from(inDegree.entries())
+  // Kahn's algorithm using recursion
+  const processQueue = (
+    queue: ReadonlyArray<string>,
+    sorted: ReadonlyArray<string>
+  ): ReadonlyArray<string> => {
+    if (queue.length === 0) return sorted;
+
+    const [current, ...remaining] = queue;
+    const dependents = graph.get(current) || [];
+    
+    const { newQueue, updatedDegrees } = dependents.reduce(
+      (acc, dependent) => {
+        const degree = inDegree.get(dependent)! - 1;
+        inDegree.set(dependent, degree);
+        return degree === 0 
+          ? { ...acc, newQueue: [...acc.newQueue, dependent] }
+          : acc;
+      },
+      { newQueue: remaining, updatedDegrees: inDegree }
+    );
+
+    return processQueue(newQueue, [...sorted, current]);
+  };
+
+  const initialQueue = Array.from(inDegree.entries())
     .filter(([_, degree]) => degree === 0)
     .map(([pkg, _]) => pkg);
 
-  const sorted: string[] = [];
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    sorted.push(current);
-
-    graph.get(current)?.forEach((dependent) => {
-      const degree = inDegree.get(dependent)! - 1;
-      inDegree.set(dependent, degree);
-      if (degree === 0) queue.push(dependent);
-    });
-  }
-
-  return sorted;
+  return processQueue(initialQueue, []);
 };
 ```
 
@@ -374,30 +387,34 @@ const topologicalSort = (projectMap: ProjectMap): string[] => {
 const findBreakingChangeImpact = (
   projectMap: ProjectMap,
   changedPackage: string
-): { immediate: string[]; transitive: string[] } => {
+): { readonly immediate: ReadonlyArray<string>; readonly transitive: ReadonlyArray<string> } => {
   const immediate = projectMap.graph.edges
     .filter((edge) => edge.target === changedPackage)
     .map((edge) => edge.source);
 
-  const transitive = new Set<string>();
-  const queue = [...immediate];
+  // Recursive BFS traversal without loops
+  const findTransitive = (
+    queue: ReadonlyArray<string>,
+    visited: ReadonlySet<string>
+  ): ReadonlySet<string> => {
+    if (queue.length === 0) return visited;
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    transitive.add(current);
-
-    projectMap.graph.edges
+    const [current, ...remaining] = queue;
+    const newVisited = new Set([...visited, current]);
+    
+    const newDependents = projectMap.graph.edges
       .filter((edge) => edge.target === current)
-      .forEach((edge) => {
-        if (!transitive.has(edge.source) && !immediate.includes(edge.source)) {
-          queue.push(edge.source);
-        }
-      });
-  }
+      .map((edge) => edge.source)
+      .filter((source) => !newVisited.has(source) && !immediate.includes(source));
+
+    return findTransitive([...remaining, ...newDependents], newVisited);
+  };
+
+  const transitiveSet = findTransitive(immediate, new Set<string>());
 
   return {
     immediate,
-    transitive: Array.from(transitive).filter((pkg) => !immediate.includes(pkg)),
+    transitive: Array.from(transitiveSet).filter((pkg) => !immediate.includes(pkg)),
   };
 };
 ```

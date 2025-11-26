@@ -113,16 +113,12 @@ jobs:
                       const contributors = [...new Set(commits.map(c => c.author?.login).filter(Boolean))];
 
                       // Latest Release
-                      let latestRelease = 'None';
-                      try {
-                        const { data: release } = await github.rest.repos.getLatestRelease({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo
-                        });
-                        latestRelease = release.tag_name;
-                      } catch (e) {
-                        // No releases yet
-                      }
+                      const latestRelease = await github.rest.repos.getLatestRelease({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo
+                      })
+                        .then(({ data: release }) => release.tag_name)
+                        .catch(() => 'None');
 
                       return {
                         openPRs: openPRs.length,

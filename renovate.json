@@ -31,7 +31,7 @@
         {
             "automerge": true,
             "description": "Group type definitions",
-            "excludePackagePatterns": ["^@types/react"],
+            "excludePackagePatterns": ["^@types/react", "^@types/react-dom"],
             "groupName": "types",
             "matchPackageNames": ["@types/**"]
         },
