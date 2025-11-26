@@ -1,5 +1,9 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "automergeStrategy": "squash",
+    "automergeType": "pr",
+    "dependencyDashboard": true,
+    "dependencyDashboardTitle": "Dependency Dashboard",
     "extends": [
         "config:recommended",
         "schedule:weekly",
@@ -7,17 +11,11 @@
         "helpers:pinGitHubActionDigests"
     ],
     "labels": ["dependencies"],
-    "platformAutomerge": true,
-    "automergeType": "pr",
-    "automergeStrategy": "squash",
-    "dependencyDashboard": true,
-    "dependencyDashboardTitle": "Dependency Dashboard",
-    "osvVulnerabilityAlerts": true,
-    "postUpdateOptions": ["pnpmDedupe"],
     "lockFileMaintenance": {
         "enabled": true,
         "schedule": ["before 4am on monday"]
     },
+    "osvVulnerabilityAlerts": true,
     "packageRules": [
         {
             "automerge": true,
@@ -123,6 +121,8 @@
             "matchPackageNames": ["tailwindcss", "@tailwindcss/**", "lightningcss"]
         }
     ],
+    "platformAutomerge": true,
+    "postUpdateOptions": ["pnpmDedupe"],
     "prConcurrentLimit": 10,
     "prHourlyLimit": 5,
     "timezone": "America/Los_Angeles",
