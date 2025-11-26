@@ -7,7 +7,7 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 | Agent | Role | Trigger | Model | Workflow |
 |-------|------|---------|-------|----------|
 | **PR Review** | REQUIREMENTS.md compliance + feedback synthesis | pull_request (after CI), /summarize | Claude Opus 4.5 | claude-pr-review.yml |
-| **Auto-Labeler** | Label sync + AI triage classification | labels.yml change, triage label | GitHub Models | auto-labeler.yml |
+| **Label Sync** | Declarative label management | labels.yml change | - | auto-labeler.yml |
 | **Issue Lifecycle** | Stale handling, validation | issues, schedule | - | issue-lifecycle.yml |
 | **Renovate Auto-Merge** | Mutation-gated dependency updates | pull_request, check_suite | - | renovate-automerge.yml |
 | **Biome Repair** | Auto-fix style issues | pull_request | - | biome-repair.yml |
@@ -35,9 +35,9 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      Workflow Orchestration                          │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐│
-│  │ CI Pipeline │  │ PR Review   │  │ AI Triage   │  │ Renovate    ││
-│  │             │  │ (claude-pr- │  │ (auto-      │  │ Auto-Merge  ││
-│  │             │  │ review.yml) │  │ labeler.yml)│  │             ││
+│  │ CI Pipeline │  │ PR Review   │  │ Issue       │  │ Renovate    ││
+│  │             │  │ (claude-pr- │  │ Lifecycle   │  │ Auto-Merge  ││
+│  │             │  │ review.yml) │  │             │  │             ││
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘│
 │         │                │                │                │        │
 │         └────────────────┴────────────────┴────────────────┘        │
@@ -132,11 +132,7 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 
 ```
 1. Issue Created (via template)
-   ├─► Default labels applied: [type, triage]
-   ├─► AI triage triggers on 'triage' label
-   ├─► Classification: type label confirmed/changed
-   ├─► 'triage' label removed
-   └─► First-time contributor welcome
+   └─► Type label applied (bug or feature)
 
 2. Stale Detection (Schedule: Daily)
    ├─► 30 days inactive → stale label
@@ -203,7 +199,6 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 ### Action (what should happen)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `triage` | #fbca04 | Needs classification |
 | `implement` | #7057ff | Ready for implementation |
 | `review` | #e99695 | Needs review |
 | `blocked` | #b60205 | Cannot proceed |
@@ -228,7 +223,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 16 labels**
+**Total: 15 labels**
 
 ## Custom Agent Profiles
 
@@ -348,11 +343,6 @@ Unified Node.js + pnpm setup used by all workflows. Eliminates ~200 lines of dup
 **Lefthook false positives?**
 - Known grep limitation
 - Use `LEFTHOOK=0 git commit` to bypass
-
-**AI triage not classifying?**
-- Check `models: read` permission in workflow
-- Verify `.github/prompts/triage.prompt.yml` exists
-- Check GitHub Models API availability
 
 ---
 

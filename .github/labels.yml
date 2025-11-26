@@ -31,10 +31,6 @@
 # -----------------------------------------------------------------------------
 # Action (what should happen)
 # -----------------------------------------------------------------------------
-- name: triage
-  color: "fbca04"
-  description: "Needs classification"
-
 - name: implement
   color: "7057ff"
   description: "Ready for implementation"

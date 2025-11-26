@@ -20,7 +20,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 ### GitHub Workflows (13 total)
 - `.github/workflows/ci.yml` — Main CI pipeline with quality gates
 - `.github/workflows/claude-pr-review.yml` — Consolidated PR review: REQUIREMENTS.md compliance + feedback synthesis + /summarize
-- `.github/workflows/auto-labeler.yml` — Label sync + AI-powered triage classification
+- `.github/workflows/auto-labeler.yml` — Declarative label sync
 - `.github/workflows/issue-lifecycle.yml` — Stale handling, validation
 - `.github/workflows/renovate-automerge.yml` — Mutation-gated dependency updates
 - `.github/workflows/biome-repair.yml` — Auto-fix style issues before review
@@ -37,12 +37,9 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 
 ### GitHub Templates (4 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration and contact links
-- `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (default labels: bug, triage)
-- `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (default labels: feature, triage)
+- `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (default label: bug)
+- `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (default label: feature)
 - `.github/PULL_REQUEST_TEMPLATE.md` — PR template with checklist
-
-### AI Prompts (1 total)
-- `.github/prompts/triage.prompt.yml` — AI classification prompt for issue triage
 
 ### Custom Agent Profiles (10 total)
 - `.github/agents/typescript-advanced.agent.md` — TypeScript 6.0-dev, Effect/Option pipelines
@@ -99,7 +96,6 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 ### Action (what should happen)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `triage` | #fbca04 | Needs classification |
 | `implement` | #7057ff | Ready for implementation |
 | `review` | #e99695 | Needs review |
 | `blocked` | #b60205 | Cannot proceed |
@@ -124,7 +120,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `security` | #8957e5 | Security issue |
 | `dependencies` | #0550ae | Dependency updates |
 
-**Total: 16 labels**
+**Total: 15 labels**
 
 ---
 
@@ -157,60 +153,43 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 │         │                         │                                   │
 │         ▼                         ▼                                   │
 │  ┌──────────────┐          ┌──────────────┐                          │
-│  │ Auto-Labeler │          │ Issue        │                          │
-│  │ (AI triage)  │          │ Lifecycle    │                          │
+│  │ Label Sync   │          │ Issue        │                          │
+│  │              │          │ Lifecycle    │                          │
 │  └──────────────┘          └──────────────┘                          │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
           ┌──────────────────┴──────────────────┐
           ▼                                     ▼
     GitHub Templates (4)              Renovate Auto-Merge
-    (default labels: triage)          (mutation-gated)
+    (type labels applied)             (mutation-gated)
           │                                     │
           ▼                                     ▼
     Issue Created                       Dependency Updates
-    (triage label triggers AI)
-          │
-          ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                         AI Triage Flow                                │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │ 1. Issue created via template → triage label applied         │   │
-│  │ 2. auto-labeler.yml triggers on label                        │   │
-│  │ 3. AI assessment via github/ai-assessment-comment-labeler    │   │
-│  │ 4. Parse response → apply type label (bug/feature/docs/chore)│   │
-│  │ 5. Remove triage label                                       │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Data Flow
 
-1. **Issue Creation**: Templates apply default labels (bug+triage or feature+triage)
-2. **AI Triage**: triage label triggers AI classification → type/priority applied → triage removed
-3. **Context Gen**: Nx graph → generate-context → project-map.json → Custom Agents
-4. **PR Lifecycle**: PR opened → Biome Repair → CI → Code Review → Merge
-5. **Dependency Flow**: Renovate PR → CI + Mutation → Auto-Merge gate → Merge/Block
+1. **Issue Creation**: Templates apply type labels (bug or feature)
+2. **Context Gen**: Nx graph → generate-context → project-map.json → Custom Agents
+3. **PR Lifecycle**: PR opened → Biome Repair → CI → Code Review → Merge
+4. **Dependency Flow**: Renovate PR → CI + Mutation → Auto-Merge gate → Merge/Block
 
 ---
 
 ## Core Components
 
-### Auto-Labeler
+### Label Sync
 
 **auto-labeler.yml**
-Unified workflow for label management and AI-powered issue classification.
+Declarative label management workflow.
 
-**Jobs:**
-1. **sync-labels**: Triggered on `.github/labels.yml` changes, uses `crazy-max/ghaction-github-labeler` to sync label definitions
-2. **ai-triage**: Triggered when `triage` label is added, uses `github/ai-assessment-comment-labeler` with suppressed outputs, parses AI response to apply type labels
-3. **welcome**: First-time contributor greeting
+**Trigger**: Changes to `.github/labels.yml`
 
-**Key Features:**
-- Declarative label management via YAML
-- AI classification using GitHub Models API (free, no extra API key)
-- No side effects (comments/ai: labels suppressed)
-- Template-driven triage trigger (no race conditions)
+**Behavior**:
+- On push to main: Syncs labels to repository (creates, updates, deletes)
+- On PR: Dry-run mode (preview changes without applying)
+
+**Action**: Uses `crazy-max/ghaction-github-labeler` to maintain labels as code
 
 ### Context Generation
 

@@ -1,4 +1,4 @@
-name: Auto Labeler
+name: Label Sync
 
 on:
     push:
@@ -6,18 +6,14 @@ on:
         paths: [".github/labels.yml"]
     pull_request:
         paths: [".github/labels.yml"]
-    issues:
-        types: [labeled]
 
 permissions:
     contents: read
     issues: write
-    models: read
 
 jobs:
     sync-labels:
         name: Sync Label Definitions
-        if: github.event_name == 'push' || github.event_name == 'pull_request'
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
@@ -30,78 +26,3 @@ jobs:
                   yaml-file: .github/labels.yml
                   skip-delete: ${{ github.event_name == 'pull_request' }}
                   dry-run: ${{ github.event_name == 'pull_request' }}
-
-    ai-triage:
-        name: AI Triage Classification
-        if: github.event_name == 'issues' && github.event.label.name == 'triage'
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-            - name: AI Assessment
-              id: assess
-              uses: github/ai-assessment-comment-labeler@5765c3d0d811b0c478eb8377d5aa42f4f7b4e498 # v1
-              with:
-                  token: ${{ secrets.GITHUB_TOKEN }}
-                  issue_number: ${{ github.event.issue.number }}
-                  issue_body: ${{ github.event.issue.body }}
-                  ai_review_label: triage
-                  prompts_directory: .github/prompts
-                  labels_to_prompts_mapping: "triage,triage.prompt.yml"
-                  suppress_labels: true
-                  suppress_comments: true
-
-            - name: Apply Labels
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
-              with:
-                  script: |
-                      const assessments = JSON.parse(`${{ steps.assess.outputs.ai_assessments }}`);
-                      const labelsToAdd = [];
-
-                      for (const assessment of assessments) {
-                        try {
-                          const result = JSON.parse(assessment.response.match(/\{[^}]+\}/)?.[0] || '{}');
-
-                          if (result.type && ['bug', 'feature', 'docs', 'chore'].includes(result.type)) {
-                            labelsToAdd.push(result.type);
-                          }
-
-                          if (result.critical === true) {
-                            labelsToAdd.push('critical');
-                          }
-                        } catch (e) {
-                          core.warning(`Failed to parse assessment: ${e.message}`);
-                        }
-                      }
-
-                      if (labelsToAdd.length > 0) {
-                        await github.rest.issues.addLabels({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: context.issue.number,
-                          labels: labelsToAdd
-                        });
-                      }
-
-                      await github.rest.issues.removeLabel({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: context.issue.number,
-                        name: 'triage'
-                      }).catch(() => {});
-
-    welcome:
-        name: Welcome First-Time Contributor
-        if: github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'triage'
-        runs-on: ubuntu-latest
-        steps:
-            - name: Check First Contribution
-              uses: actions/first-interaction@34f15e814fe48ac9312ccf29db4e74fa767cbab7 # v1
-              with:
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-                  issue-message: |
-                      Welcome to Parametric Portal! Thanks for opening your first issue.
-
-                      Our team uses AI-assisted triage to help classify issues.
-                      Please ensure your issue follows our templates for fastest response.
