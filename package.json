@@ -91,7 +91,7 @@
         "test": "nx run-many -t test",
         "typecheck": "nx run-many -t typecheck"
     },
-    "version": "0.0.0",
+    "version": "0.1.0",
     "workspaces": [
         "apps/*",
         "packages/*"
