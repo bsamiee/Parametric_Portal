@@ -30,7 +30,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/bundle-analysis.yml` — Bundle size tracking with PR comments
 - `.github/workflows/security.yml` — Multi-layer security scanning
 - `.github/workflows/claude.yml` — Claude @mention integration
-- `.github/workflows/claude-issues.yml` — claude-implement label automation
+- `.github/workflows/claude-issues.yml` — implement label automation
 
 ### GitHub Composite Actions (1 total)
 - `.github/actions/setup/action.yml` — Unified Node.js + pnpm setup with caching (used by all workflows)
