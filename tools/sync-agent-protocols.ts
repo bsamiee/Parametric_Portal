@@ -43,22 +43,19 @@ const B = Object.freeze({
         hashPattern: /<!-- SYNC_HASH: ([a-f0-9]+) -->/,
     },
     sections: {
-        agentMatrix: ['## Custom Agent Profiles'],
-        dogmaticRules: ['## Dogmatic Code Philosophy'],
-        qualityTargets: ['### Quality Targets'],
-        stack: ['## Bleeding-Edge Technology Stack'],
+        agentMatrix: '## Custom Agent Profiles',
+        dogmaticRules: '## Dogmatic Code Philosophy',
+        qualityTargets: '### Quality Targets',
+        stack: '## Bleeding-Edge Technology Stack',
     },
     templates: {
         agents: {
-            footer: '',
             header: '# Parametric Portal — Agent Charter (Bleeding-Edge, Dogmatic)\n\n',
         },
         claude: {
-            footer: '',
             header: '# Parametric Portal - Code Standards\n\n',
         },
         copilot: {
-            footer: '',
             header: '# Parametric Portal — Copilot Instructions\n\n',
         },
     },
@@ -78,28 +75,27 @@ const computeHash = (content: string): SyncHash =>
 
 const extractSections = (markdown: string, headers: ReadonlyArray<string>): ReadonlyArray<Section> => {
     const lines = markdown.split('\n');
-    const result: Array<Section> = [];
 
-    for (const targetHeader of headers) {
+    return headers.flatMap((targetHeader): ReadonlyArray<Section> => {
         const headerIndex = lines.findIndex((line) => line.trim() === targetHeader);
-        headerIndex === -1 && result.push({ content: '', header: targetHeader });
 
-        if (headerIndex !== -1) {
-            const nextHeaderIndex = lines.findIndex(
-                (line, idx) => idx > headerIndex && line.startsWith('## ') && !line.startsWith('### '),
-            );
+        return headerIndex === -1
+            ? [{ content: '', header: targetHeader }]
+            : (() => {
+                  const nextHeaderIndex = lines.findIndex(
+                      (line, idx) => idx > headerIndex && line.startsWith('## ') && !line.startsWith('### '),
+                  );
+                  const sectionLines =
+                      nextHeaderIndex === -1 ? lines.slice(headerIndex) : lines.slice(headerIndex, nextHeaderIndex);
 
-            const sectionLines =
-                nextHeaderIndex === -1 ? lines.slice(headerIndex) : lines.slice(headerIndex, nextHeaderIndex);
-
-            result.push({
-                content: sectionLines.join('\n').trim(),
-                header: targetHeader,
-            });
-        }
-    }
-
-    return result;
+                  return [
+                      {
+                          content: sectionLines.join('\n').trim(),
+                          header: targetHeader,
+                      },
+                  ];
+              })();
+    });
 };
 
 const findSectionContent = (sections: ReadonlyArray<Section>, header: string): string =>
@@ -117,8 +113,8 @@ const extractHashFromFile = (content: string): Option.Option<SyncHash> =>
         Option.map((hash) => hash as SyncHash),
     );
 
-const buildFileContent = (header: string, sections: string, hash: SyncHash, footer: string): string =>
-    `${header}${sections}\n\n${footer}${B.markers.hashComment(hash)}\n`;
+const buildFileContent = (header: string, sections: string, hash: SyncHash): string =>
+    `${header}${sections}\n\n${B.markers.hashComment(hash)}\n`;
 
 // --- Effect Pipeline ---------------------------------------------------------
 
@@ -135,10 +131,10 @@ const extractAllSections = (markdown: string): Effect.Effect<Sections, Error, ne
     Effect.try({
         catch: (e) => new Error(`[ERROR] Failed to extract sections: ${String(e)}`),
         try: () => {
-            const stack = extractSections(markdown, B.sections.stack);
-            const dogmatic = extractSections(markdown, B.sections.dogmaticRules);
-            const agents = extractSections(markdown, B.sections.agentMatrix);
-            const quality = extractSections(markdown, B.sections.qualityTargets);
+            const stack = extractSections(markdown, [B.sections.stack]);
+            const dogmatic = extractSections(markdown, [B.sections.dogmaticRules]);
+            const agents = extractSections(markdown, [B.sections.agentMatrix]);
+            const quality = extractSections(markdown, [B.sections.qualityTargets]);
 
             return {
                 sections: [...stack, ...dogmatic, ...agents, ...quality],
@@ -146,37 +142,13 @@ const extractAllSections = (markdown: string): Effect.Effect<Sections, Error, ne
         },
     });
 
-const buildAgentsContent = (sections: Sections): Effect.Effect<string, never, never> =>
+const buildSectionContent = (sections: Sections): Effect.Effect<string, never, never> =>
     Effect.succeed(
         [
-            findSectionContent(sections.sections, B.sections.stack[0]),
-            findSectionContent(sections.sections, B.sections.dogmaticRules[0]),
-            findSectionContent(sections.sections, B.sections.agentMatrix[0]),
-            findSectionContent(sections.sections, B.sections.qualityTargets[0]),
-        ]
-            .filter((s) => s.length > 0)
-            .join('\n\n'),
-    );
-
-const buildCopilotContent = (sections: Sections): Effect.Effect<string, never, never> =>
-    Effect.succeed(
-        [
-            findSectionContent(sections.sections, B.sections.stack[0]),
-            findSectionContent(sections.sections, B.sections.dogmaticRules[0]),
-            findSectionContent(sections.sections, B.sections.agentMatrix[0]),
-            findSectionContent(sections.sections, B.sections.qualityTargets[0]),
-        ]
-            .filter((s) => s.length > 0)
-            .join('\n\n'),
-    );
-
-const buildClaudeContent = (sections: Sections): Effect.Effect<string, never, never> =>
-    Effect.succeed(
-        [
-            findSectionContent(sections.sections, B.sections.stack[0]),
-            findSectionContent(sections.sections, B.sections.dogmaticRules[0]),
-            findSectionContent(sections.sections, B.sections.agentMatrix[0]),
-            findSectionContent(sections.sections, B.sections.qualityTargets[0]),
+            findSectionContent(sections.sections, B.sections.stack),
+            findSectionContent(sections.sections, B.sections.dogmaticRules),
+            findSectionContent(sections.sections, B.sections.agentMatrix),
+            findSectionContent(sections.sections, B.sections.qualityTargets),
         ]
             .filter((s) => s.length > 0)
             .join('\n\n'),
@@ -184,34 +156,25 @@ const buildClaudeContent = (sections: Sections): Effect.Effect<string, never, ne
 
 const generateFiles = (root: string, sections: Sections): Effect.Effect<ReadonlyArray<GeneratedFile>, Error, never> =>
     pipe(
-        Effect.all({
-            agents: buildAgentsContent(sections),
-            claude: buildClaudeContent(sections),
-            copilot: buildCopilotContent(sections),
-        }),
-        Effect.map(({ agents, claude, copilot }) => {
-            const agentsHash = computeHash(agents);
-            const claudeHash = computeHash(claude);
-            const copilotHash = computeHash(copilot);
+        buildSectionContent(sections),
+        Effect.map((content) => {
+            const agentsHash = computeHash(content);
+            const claudeHash = computeHash(content);
+            const copilotHash = computeHash(content);
 
             return [
                 {
-                    content: buildFileContent(B.templates.agents.header, agents, agentsHash, B.templates.agents.footer),
+                    content: buildFileContent(B.templates.agents.header, content, agentsHash),
                     hash: agentsHash,
                     path: join(root, B.files.agentsMd),
                 },
                 {
-                    content: buildFileContent(
-                        B.templates.copilot.header,
-                        copilot,
-                        copilotHash,
-                        B.templates.copilot.footer,
-                    ),
+                    content: buildFileContent(B.templates.copilot.header, content, copilotHash),
                     hash: copilotHash,
                     path: join(root, B.files.copilotInstructions),
                 },
                 {
-                    content: buildFileContent(B.templates.claude.header, claude, claudeHash, B.templates.claude.footer),
+                    content: buildFileContent(B.templates.claude.header, content, claudeHash),
                     hash: claudeHash,
                     path: join(root, B.files.claudeMd),
                 },
@@ -236,7 +199,7 @@ const writeFiles = (files: ReadonlyArray<GeneratedFile>): Effect.Effect<void, Er
 const readExistingFile = (path: string): Effect.Effect<string, never, never> =>
     Effect.succeed(existsSync(path) ? readFileSync(path, 'utf-8') : '');
 
-const checkDrift = (_root: string, expected: ReadonlyArray<GeneratedFile>): Effect.Effect<DriftReport, Error, never> =>
+const checkDrift = (expected: ReadonlyArray<GeneratedFile>): Effect.Effect<DriftReport, Error, never> =>
     pipe(
         Effect.all(
             expected.map((file) =>
@@ -263,15 +226,19 @@ const checkDrift = (_root: string, expected: ReadonlyArray<GeneratedFile>): Effe
 
 const reportDrift = (report: DriftReport): Effect.Effect<void, never, never> =>
     Effect.sync(() => {
-        report.synchronized.length > 0 && process.stderr.write(`[OK] Synchronized (${report.synchronized.length}):\n`);
-        for (const path of report.synchronized) {
-            process.stderr.write(`  ✓ ${path}\n`);
-        }
+        report.synchronized.length > 0 &&
+            process.stderr.write(
+                `[OK] Synchronized (${report.synchronized.length}):\n${report.synchronized
+                    .map((path) => `  [OK] ${path}`)
+                    .join('\n')}\n`,
+            );
 
-        report.drifted.length > 0 && process.stderr.write(`\n[ERROR] Drifted (${report.drifted.length}):\n`);
-        for (const path of report.drifted) {
-            process.stderr.write(`  ✗ ${path}\n`);
-        }
+        report.drifted.length > 0 &&
+            process.stderr.write(
+                `\n[ERROR] Drifted (${report.drifted.length}):\n${report.drifted
+                    .map((path) => `  [ERROR] ${path}`)
+                    .join('\n')}\n`,
+            );
 
         report.drifted.length === 0 && process.stderr.write('\n[OK] All files synchronized with REQUIREMENTS.md\n');
     });
@@ -294,12 +261,13 @@ const mainDryRun = (root: string): Effect.Effect<void, Error, never> =>
         Effect.flatMap(() => readRequirements(root)),
         Effect.flatMap(extractAllSections),
         Effect.flatMap((sections) => generateFiles(root, sections)),
-        Effect.flatMap((files) => checkDrift(root, files)),
+        Effect.flatMap(checkDrift),
         Effect.tap(reportDrift),
         Effect.flatMap((report) =>
-            report.drifted.length > 0
-                ? Effect.fail(new Error('[ERROR] Drift detected - run without --dry-run to sync'))
-                : Effect.succeed(undefined),
+            Effect.if(report.drifted.length > 0, {
+                onFalse: () => Effect.succeed(undefined),
+                onTrue: () => Effect.fail(new Error('[ERROR] Drift detected - run without --dry-run to sync')),
+            }),
         ),
     );
 

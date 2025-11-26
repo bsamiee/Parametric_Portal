@@ -67,14 +67,14 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `tools/generate-context/index.ts` — Nx graph extraction and project map generation (328 lines, Effect)
 - `tools/generate-context/schema.ts` — @effect/schema definitions for ProjectMap (90 lines)
 - `tools/parse-agent-context.ts` — Parse AGENT_CONTEXT from issue/PR bodies (126 lines, Effect)
-- `tools/sync-agent-protocols.ts` — REQUIREMENTS.md → derivative doc sync (319 lines, Effect)
+- `tools/sync-agent-protocols.ts` — REQUIREMENTS.md → derivative doc sync (287 lines, Effect)
 
 ### Scripts (2 total)
 - `scripts/create-labels.sh` — Idempotent GitHub label creation (45 labels)
 - `scripts/generate-pwa-icons.ts` — PWA icon generation (not agentic, utility)
 
 ### Documentation
-- `docs/AUTOMATION.md` — Comprehensive automation guide (339 lines)
+- `docs/AUTOMATION.md` — Comprehensive automation guide (382 lines)
 - `docs/INTEGRATIONS.md` — External integrations and setup
 - `docs/agent-context/README.md` — Project map query protocol
 - `docs/agent-context/project-map.json` — Nx graph + public APIs (generated)

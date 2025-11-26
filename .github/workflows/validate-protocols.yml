@@ -6,10 +6,6 @@ on:
         paths:
             - '*.md'
             - '.github/**/*.md'
-            - 'REQUIREMENTS.md'
-            - 'AGENTS.md'
-            - 'CLAUDE.md'
-            - '.github/copilot-instructions.md'
             - 'tools/sync-agent-protocols.ts'
 
 permissions:
@@ -65,11 +61,11 @@ jobs:
                   
                   if pnpm sync:protocols --dry-run 2>&1 | tee validation.log; then
                     echo "status=synchronized" >> $GITHUB_OUTPUT
-                    echo "✅ All protocol files are synchronized with REQUIREMENTS.md" >> $GITHUB_STEP_SUMMARY
+                    echo "[OK] All protocol files are synchronized with REQUIREMENTS.md" >> $GITHUB_STEP_SUMMARY
                     exit 0
                   else
                     echo "status=drift" >> $GITHUB_OUTPUT
-                    echo "❌ Protocol drift detected!" >> $GITHUB_STEP_SUMMARY
+                    echo "[ERROR] Protocol drift detected!" >> $GITHUB_STEP_SUMMARY
                     echo "" >> $GITHUB_STEP_SUMMARY
                     echo "**Action Required:** Run \`pnpm sync:protocols\` locally and commit the changes." >> $GITHUB_STEP_SUMMARY
                     echo "" >> $GITHUB_STEP_SUMMARY
@@ -93,11 +89,11 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         issue_number: context.issue.number,
-                        body: `## ⚠️ Protocol Drift Detected
+                        body: `## [ERROR] Protocol Drift Detected
                       
-                      The protocol files are out of sync with \`REQUIREMENTS.md\`.
+                      Protocol files are out of sync with \`REQUIREMENTS.md\`.
                       
-                      **To fix:**
+                      **Fix:**
                       \`\`\`bash
                       pnpm sync:protocols
                       git add AGENTS.md CLAUDE.md .github/copilot-instructions.md
