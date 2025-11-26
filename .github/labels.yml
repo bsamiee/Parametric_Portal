@@ -6,103 +6,103 @@
 # Type (required, single per issue)
 # -----------------------------------------------------------------------------
 - name: bug
-  color: "d73a4a"
+  color: "d73a4a"                       # red
   description: "Something isn't working"
 
 - name: feature
-  color: "a2eeef"
+  color: "a2eeef"                       # cyan
   description: "New feature request"
 
 - name: docs
-  color: "0075ca"
+  color: "0075ca"                       # blue
   description: "Documentation only"
 
 - name: chore
-  color: "d4a373"
+  color: "d4a373"                       # tan
   description: "Maintenance task"
 
 - name: refactor
-  color: "fbca04"
+  color: "fbca04"                       # yellow
   description: "Code restructuring without behavior change"
 
 - name: help
-  color: "d876e3"
+  color: "d876e3"                       # pink
   description: "Question or assistance needed"
 
 - name: enhancement
-  color: "84b6eb"
+  color: "84b6eb"                       # light blue
   description: "Improvement to existing feature"
 
 # -----------------------------------------------------------------------------
 # Priority (optional, only for escalation)
 # -----------------------------------------------------------------------------
 - name: critical
-  color: "b60205"
+  color: "b60205"                       # dark red
   description: "Must be addressed immediately"
 
 # -----------------------------------------------------------------------------
 # Action (what should happen)
 # -----------------------------------------------------------------------------
 - name: implement
-  color: "7057ff"
+  color: "7057ff"                       # purple
   description: "Ready for implementation"
 
 - name: review
-  color: "e99695"
+  color: "e99695"                       # salmon
   description: "Needs review"
 
 - name: blocked
-  color: "b60205"
+  color: "b60205"                       # dark red
   description: "Cannot proceed"
 
 # -----------------------------------------------------------------------------
-# Provider (who handles - mutually exclusive)
+# Provider (who handles, mutually exclusive)
 # -----------------------------------------------------------------------------
 - name: copilot
-  color: "8b949e"
+  color: "8b949e"                       # grey
   description: "Assign to GitHub Copilot"
 
 - name: claude
-  color: "8b949e"
+  color: "8b949e"                       # grey
   description: "Assign to Claude"
 
 - name: gemini
-  color: "8b949e"
+  color: "8b949e"                       # grey
   description: "Assign to Gemini"
 
 - name: codex
-  color: "8b949e"
+  color: "8b949e"                       # grey
   description: "Assign to OpenAI Codex"
 
 # -----------------------------------------------------------------------------
 # Lifecycle (system-managed)
 # -----------------------------------------------------------------------------
 - name: stale
-  color: "57606a"
+  color: "57606a"                       # dark grey
   description: "No recent activity"
 
 # -----------------------------------------------------------------------------
 # Quality (system-managed, triggers agent actions)
 # -----------------------------------------------------------------------------
 - name: needs-info
-  color: "f9d0c4"
+  color: "f9d0c4"                       # peach
   description: "Awaiting additional details"
 
 - name: needs-edit
-  color: "fef2c0"
+  color: "fef2c0"                       # pale yellow
   description: "Description needs improvement"
 
 # -----------------------------------------------------------------------------
 # Exempt (special handling)
 # -----------------------------------------------------------------------------
 - name: pinned
-  color: "006b75"
+  color: "006b75"                       # teal
   description: "Exempt from stale"
 
 - name: security
-  color: "8957e5"
+  color: "8957e5"                       # purple
   description: "Security issue"
 
 - name: dependencies
-  color: "0550ae"
+  color: "0550ae"                       # dark blue
   description: "Dependency updates"
