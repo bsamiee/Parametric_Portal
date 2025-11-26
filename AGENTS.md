@@ -36,7 +36,7 @@
 1. **Bleeding-Edge TypeScript**
    - TypeScript 6.0-dev features
    - Super strong types (no `any` except for unstable experimental APIs)
-   - Branded types for nominal typing (Zod `.brand()`)
+   - Branded types for nominal typing (`@effect/schema` `S.Branded`)
    - Const type parameters where literal types matter
    - `as const` for all object literals
    - `ReadonlyArray` for all collections
