@@ -156,13 +156,7 @@ def load_project_map(path: str = 'docs/agent-context/project-map.json') -> Dict:
 def find_dependents(project_map: Dict, target: str) -> Set[str]:
     """Find all packages that depend on target package"""
     edges = project_map['graph']['edges']
-    dependents = set()
-    
-    for edge in edges:
-        if edge['target'] == target:
-            dependents.add(edge['source'])
-    
-    return dependents
+    return {edge['source'] for edge in edges if edge['target'] == target}
 
 def get_export_map(project_map: Dict) -> Dict[str, List[str]]:
     """Get mapping of packages to their public exports"""
