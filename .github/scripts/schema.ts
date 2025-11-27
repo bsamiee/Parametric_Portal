@@ -173,8 +173,8 @@ const B = Object.freeze({
     dashboard: {
         bots: ['renovate[bot]', 'dependabot[bot]'] as const,
         colors: { error: 'red', info: 'blue', success: 'brightgreen', warning: 'yellow' } as const,
-        command: '/update',
         labels: { bug: 'bug', claude: 'claude-implement', feature: 'feature' } as const,
+        marker: 'dashboard-refresh',
         monitoring: { period: 30, unit: 'days' } as const,
         output: {
             displayTitle: 'Repository Overview',

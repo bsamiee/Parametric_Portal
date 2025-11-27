@@ -329,7 +329,7 @@ Auto-fixes style issues before human review. Runs `pnpm biome check --write --un
 Enforces conventional commit format for PR titles. Uses amannn/action-semantic-pull-request to validate type (feat/fix/refactor/style/docs/deps/test/chore), requires scope, validates subject pattern (lowercase, descriptive). Blocks merge on violation. Ignores: bot, dependencies labels.
 
 **dashboard.yml**
-Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or `/update` command on dashboard issue. Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
+Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or checkbox toggle on dashboard issue (Renovate-style `<!-- dashboard-refresh -->` marker). Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
 
 **release.yml**
 Automated releases based on conventional commits. Triggered by push to main (src paths) or workflow_dispatch. Analyzes commits for release type: `feat!` → major, `feat` → minor, `fix` → patch. Generates changelog grouped by Breaking, Features, Fixes, Refactoring, Docs.
@@ -407,12 +407,12 @@ Pre-commit hooks. Two commands: biome (runs `pnpm biome check --write`, auto-sta
 
 ---
 
-## Slash Commands
+## Interactive Triggers
 
-Two on-demand workflow triggers via issue/PR comments:
+On-demand workflow triggers via comments and checkboxes:
 
-- **`/summarize`** — PR Review workflow, synthesizes all feedback
-- **`/update`** — Dashboard workflow, refreshes metrics (dashboard issue only)
+- **`/summarize`** — PR Review workflow, synthesizes all feedback (PR comments)
+- **Dashboard checkbox** — Check the refresh checkbox on dashboard issue footer to trigger update
 
 ---
 
