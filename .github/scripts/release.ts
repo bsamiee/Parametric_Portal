@@ -42,11 +42,13 @@ const changelog = (groups: Groups): string =>
             ),
     );
 
-const bump = (groups: Groups, override?: string): string =>
-    override && override !== 'auto'
-        ? override
-        : (Object.entries(B.release.bump).find(([k]) => groups[k as keyof Groups].length > 0)?.[1] ??
-          B.release.default);
+const bump = (groups: Groups, override?: string): string => {
+    if (override && override !== 'auto') {
+        return override;
+    }
+    const bumpType = B.release.order.find((type) => groups[type].length > 0);
+    return (bumpType && B.release.bump[bumpType as keyof typeof B.release.bump]) ?? B.release.default;
+};
 
 const groupCommits = (commits: ReadonlyArray<Commit>): Groups =>
     Object.fromEntries(B.release.order.map((k) => [k, classify(commits, B.release.conventional[k].p)])) as Groups;
