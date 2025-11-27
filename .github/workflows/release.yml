@@ -46,69 +46,11 @@ jobs:
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const releaseType = '${{ github.event.inputs.release_type }}' || 'auto';
-                      
-                      // Get commits since last tag (Effect-style, no mutation, no try/catch)
-                      const getLatestTag = async () =>
-                        github.rest.repos.listTags({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          per_page: 1,
-                        }).then(({ data }) => data);
-
-                      const getCommitsSinceTag = async (tag) =>
-                        github.rest.repos.compareCommits({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          base: tag,
-                          head: 'main',
-                        }).then(({ data }) => data.commits);
-
-                      const getAllCommits = async () =>
-                        github.rest.repos.listCommits({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          per_page: 100,
-                        }).then(({ data }) => data);
-
-                      const commits = await getLatestTag()
-                        .then(tags =>
-                          tags.length > 0
-                            ? getCommitsSinceTag(tags[0].name)
-                            : getAllCommits()
-                        )
-                        .then(c => c)
-                        .catch(() => {
-                          core.info('No previous tags found, using all commits');
-                          return getAllCommits();
-                        });
-
-                      // Analyze commit messages (pure, const only)
-                      const breaking = commits.filter(c => c.commit.message.includes('!:') || c.commit.message.includes('BREAKING CHANGE'));
-                      const features = commits.filter(c => c.commit.message.startsWith('feat:') || c.commit.message.startsWith('feat('));
-                      const fixes = commits.filter(c => c.commit.message.startsWith('fix:') || c.commit.message.startsWith('fix('));
-                      const refactors = commits.filter(c => c.commit.message.startsWith('refactor:') || c.commit.message.startsWith('refactor('));
-                      const docs = commits.filter(c => c.commit.message.startsWith('docs:') || c.commit.message.startsWith('docs('));
-
-                      // Determine release type (dispatch table, no mutation)
-                      const bump =
-                        releaseType !== 'auto'
-                          ? releaseType
-                          : breaking.length > 0
-                            ? 'major'
-                            : features.length > 0
-                              ? 'minor'
-                              : 'patch';
-
-                      return {
-                        bump,
-                        hasChanges: commits.length > 0,
-                        breaking: breaking.map(c => c.commit.message.split('\n')[0]),
-                        features: features.map(c => c.commit.message.split('\n')[0]),
-                        fixes: fixes.map(c => c.commit.message.split('\n')[0]),
-                        refactors: refactors.map(c => c.commit.message.split('\n')[0]),
-                        docs: docs.map(c => c.commit.message.split('\n')[0])
-                      };
+                      const { analyze } = await import('${{ github.workspace }}/.github/scripts/release.ts');
+                      return await analyze(
+                        { context: { repo: context.repo, payload: context.payload }, core, github },
+                        '${{ github.event.inputs.release_type }}' || 'auto'
+                      );
 
             - name: Calculate New Version
               id: version
@@ -147,31 +89,6 @@ jobs:
                   git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
                   git push
 
-            - name: Generate Changelog
-              id: changelog
-              if: fromJSON(steps.analyze.outputs.result).hasChanges
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-              with:
-                  script: |
-                      const analysis = ${{ steps.analyze.outputs.result }};
-                      
-                      const sections = [
-                        { title: 'Breaking Changes', items: analysis.breaking },
-                        { title: 'Features', items: analysis.features },
-                        { title: 'Bug Fixes', items: analysis.fixes },
-                        { title: 'Refactoring', items: analysis.refactors },
-                        { title: 'Documentation', items: analysis.docs }
-                      ];
-                      
-                      const changelog = sections
-                        .filter(section => section.items.length > 0)
-                        .map(section => 
-                          `## ${section.title}\n\n${section.items.map(msg => `- ${msg}`).join('\n')}\n\n`
-                        )
-                        .join('');
-                      
-                      return changelog;
-
             - name: Create Git Tag
               if: fromJSON(steps.analyze.outputs.result).hasChanges
               run: |
@@ -183,15 +100,10 @@ jobs:
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const changelog = ${{ steps.changelog.outputs.result }};
-                      const tag = '${{ steps.version.outputs.tag }}';
-                      
-                      await github.rest.repos.createRelease({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        tag_name: tag,
-                        name: `Release ${tag}`,
-                        body: changelog || 'No significant changes.',
-                        draft: false,
-                        prerelease: false
-                      });
+                      const { create } = await import('${{ github.workspace }}/.github/scripts/release.ts');
+                      const analysis = ${{ steps.analyze.outputs.result }};
+                      await create(
+                        { context: { repo: context.repo, payload: context.payload }, core, github },
+                        '${{ steps.version.outputs.tag }}',
+                        analysis.changelog
+                      );

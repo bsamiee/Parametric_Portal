@@ -40,35 +40,30 @@ const FontInputSchema = S.Struct({
     weights: WeightSpecSchema,
 });
 
-// --- Constants (Unified Factory → Frozen) -----------------------------------
+// --- Constants ---------------------------------------------------------------
 
-const { formatConfig, virtualModuleId } = Effect.runSync(
-    Effect.all({
-        formatConfig: Effect.succeed({
-            static: { format: 'woff2', tech: undefined },
-            variable: { format: 'woff2', tech: 'variations' },
-        } as const),
-        virtualModuleId: Effect.succeed({
-            resolved: '\0virtual:parametric-fonts' as const,
-            virtual: 'virtual:parametric-fonts' as const,
-        } as const),
-    }),
-);
+const FORMAT_CONFIG = Object.freeze({
+    static: { format: 'woff2', tech: undefined },
+    variable: { format: 'woff2', tech: 'variations' },
+} as const);
 
-const FORMAT_CONFIG = Object.freeze(formatConfig);
-const VIRTUAL_MODULE_ID = Object.freeze(virtualModuleId);
+const VIRTUAL_MODULE_ID = Object.freeze({
+    resolved: '\0virtual:parametric-fonts' as const,
+    virtual: 'virtual:parametric-fonts' as const,
+} as const);
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Unified fn Object (Consolidated Helpers) --------------------------------
 
-const formatWeightRange = (weights: Record<string, FontWeight>): string =>
-    pipe(
-        Object.values(weights),
-        (vals) => ({ max: Math.max(...vals), min: Math.min(...vals) }),
-        ({ min, max }) => (min === max ? `${min}` : `${min} ${max}`),
-    );
-
-const formatFallbackStack = (family: string, fallback: ReadonlyArray<string> | undefined): string =>
-    fallback !== undefined ? `"${family}", ${fallback.join(', ')}` : `"${family}"`;
+const fn = {
+    fallbackStack: (family: string, fallback: ReadonlyArray<string> | undefined): string =>
+        fallback !== undefined ? `"${family}", ${fallback.join(', ')}` : `"${family}"`,
+    weightRange: (weights: Record<string, FontWeight>): string =>
+        pipe(
+            Object.values(weights),
+            (vals) => ({ max: Math.max(...vals), min: Math.min(...vals) }),
+            ({ min, max }) => (min === max ? `${min}` : `${min} ${max}`),
+        ),
+} as const;
 
 // --- Effect Pipelines & Builders --------------------------------------------
 
@@ -80,7 +75,7 @@ const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[],
                 '@font-face {',
                 `  font-family: "${input.family}";`,
                 `  src: url('${input.src}') 			format(${tech !== undefined ? `'${format} ${tech}'` : `'${format}'`});`,
-                `  font-weight: ${formatWeightRange(input.weights)};`,
+                `  font-weight: ${fn.weightRange(input.weights)};`,
                 input.display !== undefined ? `  font-display: ${input.display};` : '',
                 input.features !== undefined
                     ? `  font-feature-settings: ${input.features.map((f) => `"${f}"`).join(', ')};`
@@ -106,7 +101,7 @@ const createSemanticUtilities = (
 const createThemeVariables = (input: FontInput): Effect.Effect<readonly string[], ParseError> =>
     pipe(
         Effect.all({
-            family: Effect.succeed(`--font-${input.name}: ${formatFallbackStack(input.family, input.fallback)};`),
+            family: Effect.succeed(`--font-${input.name}: ${fn.fallbackStack(input.family, input.fallback)};`),
             variations:
                 input.axes !== undefined
                     ? Effect.succeed(

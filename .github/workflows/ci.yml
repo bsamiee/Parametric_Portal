@@ -96,55 +96,14 @@ jobs:
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
-            const stepName = '${{ github.job }}';
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            
-            // Classify debt type using dispatch table pattern
-            const debtClassification = {
-              mutate: { debtType: 'Mutation', labels: ['tech-debt', 'testing'] },
-              test: { debtType: 'Mutation', labels: ['tech-debt', 'testing'] },
-              build: { debtType: 'Performance', labels: ['tech-debt', 'performance'] },
-              compression: { debtType: 'Performance', labels: ['tech-debt', 'performance'] }
-            };
-            
-            const matchedKey = Object.keys(debtClassification).find(k => stepName.includes(k));
-            const { debtType = 'Quality', labels = ['tech-debt', 'refactor'] } = 
-              debtClassification[matchedKey] || {};
-            
-            const title = `${debtType} Debt: CI Failure`;
-            
-            // Search for existing debt issue
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: labels.join(','),
-              state: 'open'
+            const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
+            await run({
+              context: { repo: context.repo, payload: { action: 'created', issue: {} } },
+              core,
+              github,
+              spec: {
+                kind: 'ci',
+                job: '${{ github.job }}',
+                runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+              }
             });
-            
-            const existing = issues.find(i => i.title.startsWith(debtType));
-            
-            const body = `## CI Failure
-
-            - **Run**: ${runUrl}
-            - **Job**: ${stepName}
-            - **Timestamp**: ${new Date().toISOString()}
-
-            ### Action Required
-            Review the failed CI run and address the issues before merging.`;
-            
-            if (existing) {
-              await github.rest.issues.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: existing.number,
-                body: existing.body + '\n\n---\n\n' + body
-              });
-            } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                title,
-                labels,
-                body
-              });
-            }

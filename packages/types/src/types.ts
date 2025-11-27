@@ -54,55 +54,46 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema Definitions (Unbranded Bases) ------------------------------------
 
-const Uuidv7SchemaUnbranded = pipe(S.String, S.pattern(B.patterns.uuidv7));
-const Uuidv7Schema = pipe(Uuidv7SchemaUnbranded, S.brand('Uuidv7'));
-const EmailSchema = pipe(S.String, S.pattern(B.patterns.email), S.brand('Email'));
-const HexColorSchema = pipe(S.String, S.pattern(B.patterns.hexColor), S.brand('HexColor'));
-const IsoDateSchema = pipe(S.String, S.pattern(B.patterns.isoDate), S.brand('IsoDate'));
-const NonEmptyStringSchema = pipe(S.String, S.nonEmptyString(), S.brand('NonEmptyString'));
-const PercentageSchema = pipe(
-    S.Number,
-    S.between(B.ranges.percentage.min, B.ranges.percentage.max),
-    S.brand('Percentage'),
-);
-const PositiveIntSchema = pipe(S.Number, S.int(), S.positive(), S.brand('PositiveInt'));
-const SafeIntegerSchema = pipe(
-    S.Number,
-    S.int(),
-    S.between(B.ranges.safeInteger.min, B.ranges.safeInteger.max),
-    S.brand('SafeInteger'),
-);
-const SlugSchema = pipe(S.String, S.pattern(B.patterns.slug), S.brand('Slug'));
-const UrlSchema = pipe(S.String, S.pattern(B.patterns.url), S.brand('Url'));
-const NonNegativeIntSchema = pipe(S.Number, S.int(), S.nonNegative(), S.brand('NonNegativeInt'));
-
-const patterns = Object.freeze({
-    email: B.patterns.email,
-    hexColor: B.patterns.hexColor,
-    isoDate: B.patterns.isoDate,
-    slug: B.patterns.slug,
-    url: B.patterns.url,
-    uuidv7: B.patterns.uuidv7,
-} as const);
-
-const schemas = Object.freeze({
+const base = {
     email: pipe(S.String, S.pattern(B.patterns.email)),
     hexColor: pipe(S.String, S.pattern(B.patterns.hexColor)),
     int: pipe(S.Number, S.int()),
     isoDate: pipe(S.String, S.pattern(B.patterns.isoDate)),
     nonEmptyString: pipe(S.String, S.nonEmptyString()),
     nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative()),
-    number: S.Number,
     percentage: pipe(S.Number, S.between(B.ranges.percentage.min, B.ranges.percentage.max)),
     positiveInt: pipe(S.Number, S.int(), S.positive()),
     safeInteger: pipe(S.Number, S.int(), S.between(B.ranges.safeInteger.min, B.ranges.safeInteger.max)),
     slug: pipe(S.String, S.pattern(B.patterns.slug)),
-    string: S.String,
     url: pipe(S.String, S.pattern(B.patterns.url)),
+    uuidv7: pipe(S.String, S.pattern(B.patterns.uuidv7)),
+} as const;
+
+// --- Branded Schemas (Derived from Bases) ------------------------------------
+
+const EmailSchema = pipe(base.email, S.brand('Email'));
+const HexColorSchema = pipe(base.hexColor, S.brand('HexColor'));
+const IsoDateSchema = pipe(base.isoDate, S.brand('IsoDate'));
+const NonEmptyStringSchema = pipe(base.nonEmptyString, S.brand('NonEmptyString'));
+const NonNegativeIntSchema = pipe(base.nonNegativeInt, S.brand('NonNegativeInt'));
+const PercentageSchema = pipe(base.percentage, S.brand('Percentage'));
+const PositiveIntSchema = pipe(base.positiveInt, S.brand('PositiveInt'));
+const SafeIntegerSchema = pipe(base.safeInteger, S.brand('SafeInteger'));
+const SlugSchema = pipe(base.slug, S.brand('Slug'));
+const UrlSchema = pipe(base.url, S.brand('Url'));
+const Uuidv7Schema = pipe(base.uuidv7, S.brand('Uuidv7'));
+
+// --- Exported Objects --------------------------------------------------------
+
+const patterns = Object.freeze(B.patterns);
+
+const schemas = Object.freeze({
+    ...base,
+    number: S.Number,
+    string: S.String,
     uuid: S.UUID,
-    uuidv7: Uuidv7SchemaUnbranded,
 } as const);
 
 const brands = Object.freeze({
@@ -128,7 +119,7 @@ const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
 const createIdCache = (cfg: TypesConfig) =>
     Cache.make({
         capacity: cfg.cacheCapacity ?? B.cache.capacity,
-        lookup: (uuid: string) => Effect.succeed(S.is(Uuidv7SchemaUnbranded)(uuid)),
+        lookup: (uuid: string) => Effect.succeed(S.is(base.uuidv7)(uuid)),
         timeToLive: Duration.minutes(cfg.cacheTtlMinutes ?? B.cache.ttlMinutes),
     });
 

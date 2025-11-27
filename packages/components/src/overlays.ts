@@ -1,16 +1,8 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef, useEffect, useState } from 'react';
 import { FocusScope, useDialog, useModal, useOverlay, usePreventScroll } from 'react-aria';
-import type {
-    Animation,
-    AnimationInput,
-    Overlay,
-    OverlayInput as OvInput,
-    OvTuning,
-    Scale,
-    ScaleInput,
-} from './schema.ts';
-import { animStyle, B, cls, computeScale, cssVars, merged, pick, resolve, useForwardedRef } from './schema.ts';
+import type { Inputs, Resolved, TuningFor } from './schema.ts';
+import { animStyle, B, fn, merged, pick, resolve, TUNING_KEYS, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -32,10 +24,10 @@ type DrawerProps = BaseProps & { readonly position?: Position };
 type PopoverProps = BaseProps & { readonly triggerRef: React.RefObject<HTMLElement> };
 type TooltipProps = Omit<BaseProps, 'onClose'> & { readonly triggerRef: React.RefObject<HTMLElement> };
 type OverlayInput<T extends OverlayType = 'modal'> = {
-    readonly animation?: AnimationInput | undefined;
+    readonly animation?: Inputs['animation'] | undefined;
     readonly className?: string;
-    readonly overlay?: OvInput | undefined;
-    readonly scale?: ScaleInput | undefined;
+    readonly overlay?: Inputs['overlay'] | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
 
@@ -43,11 +35,16 @@ type OverlayInput<T extends OverlayType = 'modal'> = {
 
 const focus = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
     createElement(FocusScope, { ...opts, ...({ children: child } as const) });
-const zStyle = (z: number, isUnderlay = false): CSSProperties => ({ zIndex: isUnderlay ? z - 10 : z });
 
 // --- Component Builders -----------------------------------------------------
 
-const mkModal = (i: OverlayInput<'modal'>, v: Record<string, string>, o: Overlay, a: Animation, _s: Scale) =>
+const mkModal = (
+    i: OverlayInput<'modal'>,
+    v: Record<string, string>,
+    o: Resolved['overlay'],
+    a: Resolved['animation'],
+    _s: Resolved['scale'],
+) =>
     forwardRef((props: ModalProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, onClose, size = 'lg', style, title, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -65,7 +62,7 @@ const mkModal = (i: OverlayInput<'modal'>, v: Record<string, string>, o: Overlay
                 ...overlayProps,
                 ...modalProps,
                 ...dialogProps,
-                className: cls(
+                className: fn.cls(
                     'w-full shadow-xl max-h-[90vh] overflow-y-auto',
                     B.ov.size[size],
                     B.ov.var.r,
@@ -78,26 +75,32 @@ const mkModal = (i: OverlayInput<'modal'>, v: Record<string, string>, o: Overlay
             title
                 ? createElement(
                       'div',
-                      { ...titleProps, className: cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py) },
+                      { ...titleProps, className: fn.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py) },
                       title,
                   )
                 : null,
-            createElement('div', { className: cls(B.ov.var.px, B.ov.var.py) }, children),
+            createElement('div', { className: fn.cls(B.ov.var.px, B.ov.var.py) }, children),
         );
         return isOpen
             ? createElement(
                   'div',
                   {
                       ...underlayProps,
-                      className: cls('fixed inset-0 flex items-center justify-center', B.ov.backdrop),
-                      style: zStyle(o.zIndex, true),
+                      className: fn.cls('fixed inset-0 flex items-center justify-center', B.ov.backdrop),
+                      style: fn.zStyle(o, true),
                   },
                   focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
               )
             : null;
     });
 
-const mkDialog = (i: OverlayInput<'dialog'>, v: Record<string, string>, o: Overlay, a: Animation, _s: Scale) =>
+const mkDialog = (
+    i: OverlayInput<'dialog'>,
+    v: Record<string, string>,
+    o: Resolved['overlay'],
+    a: Resolved['animation'],
+    _s: Resolved['scale'],
+) =>
     forwardRef((props: DialogProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             cancelLabel = 'Cancel',
@@ -127,7 +130,7 @@ const mkDialog = (i: OverlayInput<'dialog'>, v: Record<string, string>, o: Overl
                 ...overlayProps,
                 ...modalProps,
                 ...dialogProps,
-                className: cls(
+                className: fn.cls(
                     'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-xl w-full overflow-hidden',
                     B.ov.size[size],
                     B.ov.var.r,
@@ -136,19 +139,19 @@ const mkDialog = (i: OverlayInput<'dialog'>, v: Record<string, string>, o: Overl
                 ),
                 ref,
                 role: 'alertdialog',
-                style: { ...v, ...animStyle(a), ...zStyle(o.zIndex), ...style } as CSSProperties,
+                style: { ...v, ...animStyle(a), ...fn.zStyle(o), ...style } as CSSProperties,
             },
             title
                 ? createElement(
                       'div',
-                      { ...titleProps, className: cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py) },
+                      { ...titleProps, className: fn.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py) },
                       title,
                   )
                 : null,
-            createElement('div', { className: cls(B.ov.var.px, B.ov.var.py) }, children),
+            createElement('div', { className: fn.cls(B.ov.var.px, B.ov.var.py) }, children),
             createElement(
                 'div',
-                { className: cls('border-t flex justify-end gap-3', B.ov.var.px, B.ov.var.py) },
+                { className: fn.cls('border-t flex justify-end gap-3', B.ov.var.px, B.ov.var.py) },
                 createElement(
                     'button',
                     { className: 'px-4 py-2 rounded border', onClick: onClose, type: 'button' },
@@ -166,13 +169,23 @@ const mkDialog = (i: OverlayInput<'dialog'>, v: Record<string, string>, o: Overl
         return isOpen
             ? createElement(
                   'div',
-                  { ...underlayProps, className: cls('fixed inset-0', B.ov.backdrop), style: zStyle(o.zIndex, true) },
+                  {
+                      ...underlayProps,
+                      className: fn.cls('fixed inset-0', B.ov.backdrop),
+                      style: fn.zStyle(o, true),
+                  },
                   focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
               )
             : null;
     });
 
-const mkDrawer = (i: OverlayInput<'drawer'>, v: Record<string, string>, o: Overlay, a: Animation, _s: Scale) =>
+const mkDrawer = (
+    i: OverlayInput<'drawer'>,
+    v: Record<string, string>,
+    o: Resolved['overlay'],
+    a: Resolved['animation'],
+    _s: Resolved['scale'],
+) =>
     forwardRef((props: DrawerProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, onClose, position = o.position, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -189,7 +202,7 @@ const mkDrawer = (i: OverlayInput<'drawer'>, v: Record<string, string>, o: Overl
                 ...rest,
                 ...overlayProps,
                 ...modalProps,
-                className: cls(
+                className: fn.cls(
                     'fixed shadow-xl overflow-hidden',
                     B.ov.pos[position],
                     isHoriz ? 'h-full' : 'w-full',
@@ -198,20 +211,30 @@ const mkDrawer = (i: OverlayInput<'drawer'>, v: Record<string, string>, o: Overl
                     className,
                 ),
                 ref,
-                style: { ...v, ...animStyle(a), ...zStyle(o.zIndex), ...style } as CSSProperties,
+                style: { ...v, ...animStyle(a), ...fn.zStyle(o), ...style } as CSSProperties,
             },
-            createElement('div', { className: cls('h-full overflow-y-auto', B.ov.var.px, B.ov.var.py) }, children),
+            createElement('div', { className: fn.cls('h-full overflow-y-auto', B.ov.var.px, B.ov.var.py) }, children),
         );
         return isOpen
             ? createElement(
                   'div',
-                  { ...underlayProps, className: cls('fixed inset-0', B.ov.backdrop), style: zStyle(o.zIndex, true) },
+                  {
+                      ...underlayProps,
+                      className: fn.cls('fixed inset-0', B.ov.backdrop),
+                      style: fn.zStyle(o, true),
+                  },
                   focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
               )
             : null;
     });
 
-const mkPopover = (i: OverlayInput<'popover'>, v: Record<string, string>, o: Overlay, _a: Animation, s: Scale) =>
+const mkPopover = (
+    i: OverlayInput<'popover'>,
+    v: Record<string, string>,
+    o: Resolved['overlay'],
+    _a: Resolved['animation'],
+    s: Resolved['scale'],
+) =>
     forwardRef((props: PopoverProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, onClose, style, triggerRef, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -228,16 +251,27 @@ const mkPopover = (i: OverlayInput<'popover'>, v: Record<string, string>, o: Ove
                   {
                       ...rest,
                       ...overlayProps,
-                      className: cls('absolute shadow-lg border overflow-hidden', B.ov.var.r, i.className, className),
+                      className: fn.cls(
+                          'absolute shadow-lg border overflow-hidden',
+                          B.ov.var.r,
+                          i.className,
+                          className,
+                      ),
                       ref,
-                      style: { ...v, ...zStyle(o.zIndex), ...pos, ...style } as CSSProperties,
+                      style: { ...v, ...fn.zStyle(o), ...pos, ...style } as CSSProperties,
                   },
-                  createElement('div', { className: cls(B.ov.var.px, B.ov.var.py) }, children),
+                  createElement('div', { className: fn.cls(B.ov.var.px, B.ov.var.py) }, children),
               )
             : null;
     });
 
-const mkTooltip = (i: OverlayInput<'tooltip'>, _v: Record<string, string>, o: Overlay, _a: Animation, s: Scale) =>
+const mkTooltip = (
+    i: OverlayInput<'tooltip'>,
+    _v: Record<string, string>,
+    o: Resolved['overlay'],
+    _a: Resolved['animation'],
+    s: Resolved['scale'],
+) =>
     forwardRef((props: TooltipProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, style, triggerRef, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -252,14 +286,14 @@ const mkTooltip = (i: OverlayInput<'tooltip'>, _v: Record<string, string>, o: Ov
                   'div',
                   {
                       ...rest,
-                      className: cls(
+                      className: fn.cls(
                           'absolute text-xs px-2 py-1 rounded shadow-lg pointer-events-none',
                           i.className,
                           className,
                       ),
                       ref,
                       role: 'tooltip',
-                      style: { ...zStyle(o.zIndex), ...pos, ...style } as CSSProperties,
+                      style: { ...fn.zStyle(o), ...pos, ...style } as CSSProperties,
                   },
                   children,
               )
@@ -281,16 +315,16 @@ const createOV = <T extends OverlayType>(i: OverlayInput<T>) => {
     const s = resolve('scale', i.scale);
     const o = resolve('overlay', (i.type ?? 'modal') === 'sheet' ? { ...i.overlay, position: 'bottom' } : i.overlay);
     const a = resolve('animation', i.animation);
-    const c = computeScale(s);
-    const v = cssVars(c, 'ov');
+    const c = fn.computeScale(s);
+    const v = fn.cssVars(c, 'ov');
     const builder = builders[i.type ?? 'modal'];
     const comp = (
         builder as unknown as (
             i: OverlayInput<T>,
             v: Record<string, string>,
-            o: Overlay,
-            a: Animation,
-            s: Scale,
+            o: Resolved['overlay'],
+            a: Resolved['animation'],
+            s: Resolved['scale'],
         ) => ReturnType<typeof forwardRef>
     )(i, v, o, a, s);
     comp.displayName = `Overlay(${i.type ?? 'modal'})`;
@@ -299,15 +333,13 @@ const createOV = <T extends OverlayType>(i: OverlayInput<T>) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const K = ['animation', 'overlay', 'scale'] as const;
-
-const createOverlays = (tuning?: OvTuning) =>
+const createOverlays = (tuning?: TuningFor<'ov'>) =>
     Object.freeze({
-        create: <T extends OverlayType>(i: OverlayInput<T>) => createOV({ ...i, ...merged(tuning, i, K) }),
-        Dialog: createOV({ type: 'dialog', ...pick(tuning, K) }),
-        Drawer: createOV({ type: 'drawer', ...pick(tuning, K) }),
-        Modal: createOV({ type: 'modal', ...pick(tuning, K) }),
-        Popover: createOV({ type: 'popover', ...pick(tuning, K) }),
+        create: <T extends OverlayType>(i: OverlayInput<T>) => createOV({ ...i, ...merged(tuning, i, TUNING_KEYS.ov) }),
+        Dialog: createOV({ type: 'dialog', ...pick(tuning, TUNING_KEYS.ov) }),
+        Drawer: createOV({ type: 'drawer', ...pick(tuning, TUNING_KEYS.ov) }),
+        Modal: createOV({ type: 'modal', ...pick(tuning, TUNING_KEYS.ov) }),
+        Popover: createOV({ type: 'popover', ...pick(tuning, TUNING_KEYS.ov) }),
         Sheet: createOV({
             type: 'sheet',
             ...pick(tuning, ['animation', 'scale']),

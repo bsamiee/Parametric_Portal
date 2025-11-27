@@ -19,120 +19,44 @@ jobs:
         if: github.event_name == 'issues'
         runs-on: ubuntu-latest
         steps:
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      package.json
+                      pnpm-lock.yaml
+                  sparse-checkout-cone-mode: false
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+
+            - name: Setup Node.js
+              uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+              with:
+                  node-version-file: package.json
+                  cache: pnpm
+
             - name: Quality Review
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const issue = context.payload.issue;
-                      const body = issue.body || '';
-                      const labels = issue.labels.map(l => l.name);
-
-                      // Skip if already has quality label (avoid re-review loops)
-                      const hasQualityLabel = labels.includes('needs-info');
-
-                      // Skip on edit if already flagged (let author self-correct)
-                      // (Removed early return to allow quality check and label removal on edit)
-
-                      // Required fields by template type
-                      const requiredFields = {
-                        bug: ['Bug Description', 'Steps to Reproduce', 'Expected Behavior', 'Actual Behavior'],
-                        feature: ['Problem Statement', 'Proposed Solution', 'Acceptance Criteria'],
-                        enhancement: ['Current Behavior', 'Improved Behavior', 'Rationale', 'Acceptance Criteria'],
-                        refactor: ['Target Files', 'Current Pattern', 'Target Pattern', 'Rationale', 'Test Strategy'],
-                        help: ['Question', 'Context'],
-                        docs: ['Target File', 'Proposed Content', 'Rationale'],
-                        chore: ['Task Description', 'Acceptance Criteria']
-                      };
-
-                      // Minimum content length for quality
-                      const MIN_FIELD_LENGTH = 20;
-                      const MIN_BODY_LENGTH = 50;
-
-                      // Detect template type from labels
-                      const typeLabels = ['bug', 'feature', 'enhancement', 'refactor', 'help', 'docs', 'chore'];
-                      const issueType = labels.find(l => typeLabels.includes(l));
-
-                      const problems = [];
-
-                      // Check body length
-                      if (body.length < MIN_BODY_LENGTH) {
-                        problems.push('Issue body is too short. Please provide more detail.');
-                      }
-
-                      // Check title quality
-                      if (issue.title.length < 15) {
-                        problems.push('Title is too short. Please be more descriptive.');
-                      }
-
-                      // Check required fields if we can identify the type
-                      if (issueType && requiredFields[issueType]) {
-                        const required = requiredFields[issueType];
-
-                        for (const field of required) {
-                          const headerPattern = new RegExp(`###\\s*${field}[\\s\\S]*?(?=###|$)`, 'i');
-                          const match = body.match(headerPattern);
-
-                          if (!match) {
-                            problems.push(`Missing field: ${field}`);
-                          } else {
-                            const content = match[0].replace(/###\s*[^\n]+\n?/, '').trim();
-                            const isPlaceholder = /^_?No response_?$/i.test(content);
-                            if (isPlaceholder || content.length < MIN_FIELD_LENGTH) {
-                              problems.push(`Field needs more detail: ${field}`);
-                            }
-                          }
-                        }
-                      }
-
-                      // Apply or remove needs-info label based on review
-                      if (problems.length > 0) {
-                        await github.rest.issues.addLabels({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: issue.number,
-                          labels: ['needs-info']
-                        });
-
-                        // Comment on new issues only
-                        if (context.payload.action === 'opened') {
-                          await github.rest.issues.createComment({
-                            owner: context.repo.owner,
-                            repo: context.repo.repo,
-                            issue_number: issue.number,
-                            body: `## Quality Review
-
-This issue needs improvement before it can be actioned:
-
-${problems.map(p => `- ${p}`).join('\n')}
-
-Please update the issue to address these points. The \`needs-info\` label will be automatically removed once resolved.`
-                          });
-                        }
-
-                        console.log(`Quality issues: ${problems.join('; ')}`);
-                      } else if (hasQualityLabel) {
-                        // Issue was fixed, remove label
-                        try {
-                          await github.rest.issues.removeLabel({
-                            owner: context.repo.owner,
-                            repo: context.repo.repo,
-                            issue_number: issue.number,
-                            name: 'needs-info'
-                          });
-                          console.log('Issue fixed, removed needs-info label');
-                        } catch (e) {
-                          // Label might not exist
-                        }
-                      } else {
-                        console.log('Issue passes quality review');
-                      }
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/review.ts');
+                      await run({
+                        context: {
+                          repo: context.repo,
+                          payload: context.payload
+                        },
+                        core,
+                        github
+                      });
 
     stale-management:
         if: github.event_name == 'schedule'
         runs-on: ubuntu-latest
         steps:
             - name: Mark Stale Issues
-              uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
+              uses: actions/stale@5f858e3efba33a5ca4407a664cc011ad407f2008 # v10.1.0
               with:
                   repo-token: ${{ secrets.GITHUB_TOKEN }}
                   stale-issue-message: |
@@ -149,38 +73,32 @@ Please update the issue to address these points. The \`needs-info\` label will b
                   exempt-issue-labels: pinned,security,critical,implement,needs-info
                   exempt-pr-labels: pinned,security,critical
 
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      package.json
+                      pnpm-lock.yaml
+                  sparse-checkout-cone-mode: false
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+
+            - name: Setup Node.js
+              uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+              with:
+                  node-version-file: package.json
+                  cache: pnpm
+
             - name: Generate Aging Report
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const { data: issues } = await github.rest.issues.listForRepo({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        state: 'open',
-                        per_page: 100
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/report.ts');
+                      await run({
+                        context: { repo: context.repo, payload: { action: 'scheduled', issue: {} } },
+                        core,
+                        github,
+                        spec: { kind: 'aging' }
                       });
-
-                      const now = new Date();
-                      const DAY_MS = 24 * 60 * 60 * 1000;
-
-                      const aging = {
-                        critical: issues.filter(i => i.labels.some(l => l.name === 'critical')).length,
-                        needsInfo: issues.filter(i => i.labels.some(l => l.name === 'needs-info')).length,
-                        stale: issues.filter(i => i.labels.some(l => l.name === 'stale')).length,
-                        old: issues.filter(i => (now - new Date(i.created_at)) > 30 * DAY_MS).length,
-                        total: issues.length
-                      };
-
-                      const summary = `## Issue Aging Report
-
-                      | Category | Count |
-                      |----------|-------|
-                      | Critical | ${aging.critical} |
-                      | Needs Info | ${aging.needsInfo} |
-                      | Stale | ${aging.stale} |
-                      | >30 days | ${aging.old} |
-                      | Total Open | ${aging.total} |
-
-                      _Generated: ${now.toISOString()}_`;
-
-                      core.summary.addRaw(summary).write();

@@ -1,10 +1,6 @@
 # Parametric Portal - Label Definitions
-# Managed by crazy-max/ghaction-github-labeler
-# Changes trigger automatic sync via auto-labeler.yml
 
-# -----------------------------------------------------------------------------
-# Type (required, single per issue)
-# -----------------------------------------------------------------------------
+# --- Type Labels -------------------------------------------------------------
 - name: bug
   color: "d73a4a"                       # red
   description: "Something isn't working"
@@ -33,16 +29,12 @@
   color: "84b6eb"                       # light blue
   description: "Improvement to existing feature"
 
-# -----------------------------------------------------------------------------
-# Priority (optional, only for escalation)
-# -----------------------------------------------------------------------------
+# --- Priority Labels ---------------------------------------------------------
 - name: critical
   color: "b60205"                       # dark red
   description: "Must be addressed immediately"
 
-# -----------------------------------------------------------------------------
-# Action (what should happen)
-# -----------------------------------------------------------------------------
+# --- Action Labels -----------------------------------------------------------
 - name: implement
   color: "7057ff"                       # purple
   description: "Ready for implementation"
@@ -55,9 +47,7 @@
   color: "b60205"                       # dark red
   description: "Cannot proceed"
 
-# -----------------------------------------------------------------------------
-# Provider (who handles, mutually exclusive)
-# -----------------------------------------------------------------------------
+# --- Agent Labels (Mutually Exclusive) ---------------------------------------
 - name: copilot
   color: "8b949e"                       # grey
   description: "Assign to GitHub Copilot"
@@ -74,27 +64,21 @@
   color: "8b949e"                       # grey
   description: "Assign to OpenAI Codex"
 
-# -----------------------------------------------------------------------------
-# Lifecycle (system-managed)
-# -----------------------------------------------------------------------------
+# --- Lifecycle Labels --------------------------------------------------------
 - name: stale
   color: "57606a"                       # dark grey
   description: "No recent activity"
 
-# -----------------------------------------------------------------------------
-# Quality (system-managed, triggers agent actions)
-# -----------------------------------------------------------------------------
-- name: needs-info
-  color: "f9d0c4"                       # peach
-  description: "Requires improvement before actionable"
-
-# -----------------------------------------------------------------------------
-# Exempt (special handling)
-# -----------------------------------------------------------------------------
 - name: pinned
   color: "006b75"                       # teal
   description: "Exempt from stale"
 
+# --- Quality Labels ----------------------------------------------------------
+- name: needs-info
+  color: "f9d0c4"                       # peach
+  description: "Requires improvement before actionable"
+
+# --- Special Labels (External Sources) ---------------------------------------
 - name: security
   color: "8957e5"                       # purple
   description: "Security issue"
