@@ -28,9 +28,12 @@ type Workflow = { readonly name: string; readonly path: string };
 type WorkflowMetric = {
     readonly failed: number;
     readonly file: string;
+    readonly lastRunId: number;
+    readonly lastRunUrl: string;
     readonly name: string;
     readonly passed: number;
     readonly rate: number;
+    readonly recentRates: ReadonlyArray<number>;
     readonly runs: number;
 };
 
@@ -104,8 +107,29 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
             const total = runs.length;
             const passed = runs.filter((r) => r.conclusion === 'success').length;
             const failed = total - passed;
+            const lastRun = runs[0];
+            // Calculate rolling 7-day windows for sparkline (newest to oldest, reversed for display)
+            const windowSize = 5;
+            const recentRates = Array.from({ length: windowSize }, (_, i) => {
+                const start = i * Math.ceil(total / windowSize);
+                const end = Math.min(start + Math.ceil(total / windowSize), total);
+                const slice = runs.slice(start, end);
+                return slice.length > 0
+                    ? Math.round((slice.filter((r) => r.conclusion === 'success').length / slice.length) * 100)
+                    : 0;
+            }).reverse();
             return total > 0
-                ? { failed, file, name: w.name, passed, rate: Math.round((passed / total) * 100), runs: total }
+                ? {
+                      failed,
+                      file,
+                      lastRunId: lastRun?.id ?? 0,
+                      lastRunUrl: lastRun?.html_url ?? '',
+                      name: w.name,
+                      passed,
+                      rate: Math.round((passed / total) * 100),
+                      recentRates,
+                      runs: total,
+                  }
                 : null;
         }),
     );
@@ -142,13 +166,22 @@ const renderHealthBadges = (m: Metrics, repo: string): string => {
               : colors.error;
     const prColor = m.prStale > 0 ? colors.warning : colors.info;
     const issueColor = m.issueBugs > 0 ? colors.warning : colors.info;
-    const gh = (path: string): string => `https://github.com/${repo}/${path}`;
 
     return [
-        B.gen.link(B.gen.shield('CI', `${m.workflowRate}%25`, ciColor), gh('actions')),
-        B.gen.link(B.gen.shield('PRs', `${m.prOpen}_open`, prColor), gh('pulls')),
-        B.gen.link(B.gen.shield('Issues', `${m.issueOpen}_open`, issueColor), gh('issues')),
+        B.gen.shieldLink('CI', `${m.workflowRate}%25`, ciColor, B.gen.url.actions(repo), 'for-the-badge', 'githubactions'),
+        B.gen.shieldLink('PRs', `${m.prOpen}_open`, prColor, `https://github.com/${repo}/pulls`, 'for-the-badge', 'git'),
+        B.gen.shieldLink('Issues', `${m.issueOpen}_open`, issueColor, `https://github.com/${repo}/issues`, 'for-the-badge', 'target'),
     ].join(' ');
+};
+
+const renderQuickActions = (repo: string): string => {
+    const actions = [
+        { label: '🔍 Actions', url: B.gen.url.actions(repo) },
+        { label: '📦 Releases', url: `https://github.com/${repo}/releases` },
+        { label: '🔒 Security', url: `https://github.com/${repo}/security` },
+        { label: '📊 Insights', url: `https://github.com/${repo}/pulse` },
+    ];
+    return actions.map(({ label, url }) => B.gen.link(`\`${label}\``, url)).join(' · ');
 };
 
 const renderHeader = (m: Metrics, now: Date): string =>
@@ -195,52 +228,54 @@ const renderActivity = (m: Metrics, repo: string): string => {
 
 const renderCI = (m: Metrics, repo: string): string => {
     const { colors, targets } = B.dashboard;
-    const workflowUrl = (file: string): string => `https://github.com/${repo}/actions/workflows/${file}.yml`;
     const statusBadge = (rate: number, file: string): string =>
         B.gen.link(
             rate >= targets.workflowSuccess
-                ? B.gen.shield('', 'pass', colors.success, 'flat-square')
-                : B.gen.shield('', 'warn', colors.warning, 'flat-square'),
-            workflowUrl(file),
+                ? B.gen.shield('', '✓', colors.success, 'flat-square')
+                : B.gen.shield('', '!', colors.warning, 'flat-square'),
+            B.gen.url.workflow(repo, file),
         );
 
     const rows = m.workflows.map((w) => [
-        B.gen.link(w.name, workflowUrl(w.file)),
+        B.gen.link(w.name, B.gen.url.workflow(repo, w.file)),
         String(w.runs),
         `${w.rate}%`,
+        B.gen.sparkline(w.recentRates),
+        w.lastRunId > 0 ? B.gen.link('📋', B.gen.url.logs(repo, w.lastRunId)) : '—',
         statusBadge(w.rate, w.file),
     ]);
 
-    const badges = m.workflows.map((w) => B.gen.badge(repo, w.file)).join(' ');
+    const badges = m.workflows.map((w) => B.gen.badgeLink(repo, w.file)).join(' ');
+
+    const progressSection = m.workflows.length > 0
+        ? `\n\n**Overall CI Health:** ${B.gen.progress(m.workflowRate)}`
+        : '';
 
     const table =
         rows.length > 0
-            ? fn.report('CI Status', ['Workflow', 'Runs', 'Pass Rate', 'Status'], rows, {
-                  align: ['l', 'r', 'c', 'c'],
+            ? fn.report('CI Status', ['Workflow', 'Runs', 'Rate', 'Trend', 'Logs', 'Status'], rows, {
+                  align: ['l', 'r', 'c', 'c', 'c', 'c'],
               })
             : fn.report('CI Status', ['Workflow', 'Status'], [['No workflow runs in period', '—']]);
 
-    return rows.length > 0 ? `${table}\n\n${B.gen.details('Workflow Badges', badges)}` : table;
+    return rows.length > 0
+        ? `${table}${progressSection}\n\n${B.gen.details('Live Workflow Badges', badges)}`
+        : table;
 };
 
 const renderHealth = (m: Metrics): string => {
     const issues = [
         m.prStale > B.dashboard.targets.stalePrs &&
-            `${m.prStale} stale PRs need review (>${B.dashboard.staleDays} days without update)`,
+            `⚠️ **${m.prStale} stale PRs** need review (>${B.dashboard.staleDays} days without update)`,
         m.workflowRate < B.dashboard.targets.workflowSuccess &&
-            `CI success rate at ${m.workflowRate}% (target: ${B.dashboard.targets.workflowSuccess}%)`,
-        m.issueBugs > 0 && `${m.issueBugs} open bugs requiring attention`,
+            `⚠️ **CI success rate** at ${m.workflowRate}% (target: ${B.dashboard.targets.workflowSuccess}%)`,
+        m.issueBugs > 0 && `🐛 **${m.issueBugs} open bugs** requiring attention`,
     ].filter(Boolean) as ReadonlyArray<string>;
 
+    const header = '## Health Check\n\n';
     return issues.length > 0
-        ? fn.body([
-              { k: 'h', l: 2, t: 'Health Check' },
-              { c: issues.join('\n'), k: 'c', y: 'warning' },
-          ])
-        : fn.body([
-              { k: 'h', l: 2, t: 'Health Check' },
-              { c: 'All health targets met.', k: 'c', y: 'note' },
-          ]);
+        ? header + B.gen.alert('warning', issues.join('\n'))
+        : header + B.gen.alert('tip', '✅ All health targets met. Repository is in good shape!');
 };
 
 const renderThresholds = (): string =>
@@ -259,13 +294,14 @@ const format = (m: Metrics, repo: string): string =>
     [
         `# ${B.dashboard.output.displayTitle}`,
         renderHealthBadges(m, repo),
+        renderQuickActions(repo),
         renderHeader(m, new Date()),
         renderActivity(m, repo),
         renderCI(m, repo),
         renderHealth(m),
         renderThresholds(),
         '---',
-        `_Generated by ${B.gen.link(B.dashboard.workflow, `https://github.com/${repo}/blob/main/.github/workflows/${B.dashboard.workflow}`)} · Updated every ${B.dashboard.schedule.interval} ${B.dashboard.schedule.unit} · Comment \`${B.dashboard.command}\` to refresh_`,
+        `${B.gen.sub(`Generated by ${B.gen.link(B.dashboard.workflow, `https://github.com/${repo}/blob/main/.github/workflows/${B.dashboard.workflow}`)} · Updated every ${B.dashboard.schedule.interval} ${B.dashboard.schedule.unit} · Comment \`${B.dashboard.command}\` to refresh`)}`,
     ].join('\n\n');
 
 // --- Entry Point ------------------------------------------------------------

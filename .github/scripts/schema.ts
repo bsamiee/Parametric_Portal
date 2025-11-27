@@ -28,6 +28,8 @@ type PR = {
 type Tag = { readonly name: string };
 type WorkflowRun = {
     readonly conclusion: string | null;
+    readonly html_url: string;
+    readonly id: number;
     readonly run_started_at: string | null;
     readonly status: string;
     readonly updated_at: string;
@@ -182,8 +184,12 @@ const B = Object.freeze({
         workflow: 'dashboard.yml',
     } as const,
     gen: {
+        alert: (type: 'note' | 'tip' | 'important' | 'warning' | 'caution', content: string): string =>
+            `> [!${type.toUpperCase()}]\n> ${content.split('\n').join('\n> ')}`,
         badge: (repo: string, workflow: string): string =>
             `![${workflow}](https://github.com/${repo}/actions/workflows/${workflow}.yml/badge.svg)`,
+        badgeLink: (repo: string, workflow: string): string =>
+            `[![${workflow}](https://github.com/${repo}/actions/workflows/${workflow}.yml/badge.svg)](https://github.com/${repo}/actions/workflows/${workflow}.yml)`,
         callout: {
             caution: '[!CAUTION]',
             important: '[!IMPORTANT]',
@@ -201,19 +207,50 @@ const B = Object.freeze({
         link: (text: string, url: string): string => `[${text}](${url})`,
         marker: (n: string): string => `<!-- ${n} -->`,
         math: (expr: string, block?: boolean): string => (block ? `$$\n${expr}\n$$` : `$${expr}$`),
+        mermaid: (diagram: string): string => `\`\`\`mermaid\n${diagram}\n\`\`\``,
+        progress: (value: number, max = 100, width = 20): string =>
+            ((filled) => `\`[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]\` ${value}%`)(
+                Math.round((value / max) * width),
+            ),
         shield: (
             label: string,
             message: string,
             color: string,
             style?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge',
+            logo?: string,
         ): string =>
-            `![${label}](https://img.shields.io/badge/${encodeURIComponent(label)}-${encodeURIComponent(message)}-${color}${style ? `?style=${style}` : ''})`,
+            `![${label}](https://img.shields.io/badge/${encodeURIComponent(label)}-${encodeURIComponent(message)}-${color}${style || logo ? '?' : ''}${style ? `style=${style}` : ''}${style && logo ? '&' : ''}${logo ? `logo=${logo}&logoColor=white` : ''})`,
+        shieldLink: (
+            label: string,
+            message: string,
+            color: string,
+            url: string,
+            style?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge',
+            logo?: string,
+        ): string =>
+            `[![${label}](https://img.shields.io/badge/${encodeURIComponent(label)}-${encodeURIComponent(message)}-${color}${style || logo ? '?' : ''}${style ? `style=${style}` : ''}${style && logo ? '&' : ''}${logo ? `logo=${logo}&logoColor=white` : ''})](${url})`,
         signs: { [-1]: 'dec', 0: 'same', 1: 'inc' } as const,
+        sparkline: (values: ReadonlyArray<number>): string =>
+            ((chars, max) => values.map((v) => chars[Math.min(Math.floor((v / max) * 7), 7)]).join(''))(
+                ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'],
+                Math.max(...values, 1),
+            ),
         status: { dec: '[-]', fail: '[FAIL]', inc: '[+]', pass: '[PASS]', same: '[=]', warn: '[WARN]' } as const,
         sub: (text: string): string => `<sub>${text}</sub>`,
         sup: (text: string): string => `<sup>${text}</sup>`,
         task: (items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }>): string =>
             items.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n'),
+        trend: (current: number, previous: number): string =>
+            current > previous ? '📈' : current < previous ? '📉' : '➡️',
+        url: {
+            actions: (repo: string): string => `https://github.com/${repo}/actions`,
+            artifacts: (repo: string, runId: number): string =>
+                `https://github.com/${repo}/actions/runs/${runId}#artifacts`,
+            logs: (repo: string, runId: number): string => `https://github.com/${repo}/actions/runs/${runId}`,
+            run: (repo: string, runId: number): string => `https://github.com/${repo}/actions/runs/${runId}`,
+            workflow: (repo: string, file: string): string =>
+                `https://github.com/${repo}/actions/workflows/${file}.yml`,
+        },
     },
     labels: {
         categories: {
