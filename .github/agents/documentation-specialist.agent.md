@@ -23,7 +23,7 @@ Documentation specialist. Expert in ultra-dense technical writing, working code 
 
 # [DOCUMENTATION TYPES]
 
-## Core Standards (REQUIREMENTS.md, AGENTS.MD)
+## Core Standards (REQUIREMENTS.md, AGENTS.md)
 - Stack versions (exact, from catalog)
 - Critical rules (no var/let/if/else, Effect/Option/Zod)
 - Limits (files, LOC, complexity)

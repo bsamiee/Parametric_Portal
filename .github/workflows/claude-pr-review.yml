@@ -50,19 +50,13 @@ jobs:
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const { data: checks } = await github.rest.checks.listForRef({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        ref: '${{ steps.pr.outputs.head_sha }}'
-                      });
-
-                      const status = checks.check_runs.map(c => ({
-                        name: c.name,
-                        status: c.status,
-                        conclusion: c.conclusion
-                      }));
-
-                      core.setOutput('status', JSON.stringify(status));
+                      const { probe } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
+                      const data = await probe(
+                        { context: { repo: context.repo, payload: {} }, core, github },
+                        'pr',
+                        ${{ steps.pr.outputs.number }}
+                      );
+                      core.setOutput('status', JSON.stringify(data.checks));
 
             - name: Run REQUIREMENTS.md Compliance Review
               uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
@@ -140,40 +134,13 @@ jobs:
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const prNumber = ${{ needs.requirements-review.outputs.pr_number }};
-
-                      const { data: reviews } = await github.rest.pulls.listReviews({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: prNumber
-                      });
-
-                      const { data: pr } = await github.rest.pulls.get({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: prNumber
-                      });
-
-                      const { data: checks } = await github.rest.checks.listForRef({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        ref: pr.head.sha
-                      });
-
-                      const summary = {
-                        reviews: reviews.map(r => ({
-                          author: r.user.login,
-                          state: r.state,
-                          body: r.body?.substring(0, 500) || ''
-                        })),
-                        checks: checks.check_runs.map(c => ({
-                          name: c.name,
-                          status: c.status,
-                          conclusion: c.conclusion
-                        }))
-                      };
-
-                      core.setOutput('data', JSON.stringify(summary));
+                      const { probe } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
+                      const data = await probe(
+                        { context: { repo: context.repo, payload: {} }, core, github },
+                        'pr',
+                        ${{ needs.requirements-review.outputs.pr_number }}
+                      );
+                      core.setOutput('data', JSON.stringify({ reviews: data.reviews, checks: data.checks }));
 
             - name: Synthesize Summary
               id: synthesize
@@ -220,33 +187,14 @@ jobs:
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const prNumber = ${{ needs.requirements-review.outputs.pr_number }};
-                      const marker = '<!-- PR-REVIEW-SUMMARY -->';
-                      const summary = `${marker}\n# PR Review Summary\n\n${{ steps.synthesize.outputs.claude_response || '## Summary\n\nNo synthesis available.' }}`;
-
-                      const { data: comments } = await github.rest.issues.listComments({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: prNumber
-                      });
-
-                      const existing = comments.find(c => c.body?.includes(marker));
-
-                      if (existing) {
-                        await github.rest.issues.updateComment({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          comment_id: existing.id,
-                          body: summary
-                        });
-                      } else {
-                        await github.rest.issues.createComment({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: prNumber,
-                          body: summary
-                        });
-                      }
+                      const { post } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
+                      await post(
+                        { context: { repo: context.repo, payload: {} }, core, github },
+                        ${{ needs.requirements-review.outputs.pr_number }},
+                        'PR-REVIEW-SUMMARY',
+                        'PR Review Summary',
+                        `${{ steps.synthesize.outputs.claude_response || '## Summary\n\nNo synthesis available.' }}`
+                      );
 
     # Job 3: On-demand summary via /summarize command
     manual-summarize:
@@ -266,39 +214,13 @@ jobs:
               with:
                   script: |
                       const prNumber = context.payload.issue.number;
-
-                      const { data: reviews } = await github.rest.pulls.listReviews({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: prNumber
-                      });
-
-                      const { data: pr } = await github.rest.pulls.get({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: prNumber
-                      });
-
-                      const { data: checks } = await github.rest.checks.listForRef({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        ref: pr.head.sha
-                      });
-
-                      const summary = {
-                        reviews: reviews.map(r => ({
-                          author: r.user.login,
-                          state: r.state,
-                          body: r.body?.substring(0, 500) || ''
-                        })),
-                        checks: checks.check_runs.map(c => ({
-                          name: c.name,
-                          status: c.status,
-                          conclusion: c.conclusion
-                        }))
-                      };
-
-                      core.setOutput('data', JSON.stringify(summary));
+                      const { probe } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
+                      const data = await probe(
+                        { context: { repo: context.repo, payload: {} }, core, github },
+                        'pr',
+                        prNumber
+                      );
+                      core.setOutput('data', JSON.stringify({ reviews: data.reviews, checks: data.checks }));
                       core.setOutput('pr_number', prNumber);
 
             - name: Synthesize Summary
@@ -346,30 +268,11 @@ jobs:
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
-                      const prNumber = ${{ steps.reviews.outputs.pr_number }};
-                      const marker = '<!-- PR-REVIEW-SUMMARY -->';
-                      const summary = `${marker}\n# PR Review Summary\n\n${{ steps.synthesize.outputs.claude_response || '## Summary\n\nNo synthesis available.' }}`;
-
-                      const { data: comments } = await github.rest.issues.listComments({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: prNumber
-                      });
-
-                      const existing = comments.find(c => c.body?.includes(marker));
-
-                      if (existing) {
-                        await github.rest.issues.updateComment({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          comment_id: existing.id,
-                          body: summary
-                        });
-                      } else {
-                        await github.rest.issues.createComment({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          issue_number: prNumber,
-                          body: summary
-                        });
-                      }
+                      const { post } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
+                      await post(
+                        { context: { repo: context.repo, payload: {} }, core, github },
+                        ${{ steps.reviews.outputs.pr_number }},
+                        'PR-REVIEW-SUMMARY',
+                        'PR Review Summary',
+                        `${{ steps.synthesize.outputs.claude_response || '## Summary\n\nNo synthesis available.' }}`
+                      );

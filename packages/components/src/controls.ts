@@ -4,8 +4,8 @@ import { createElement, forwardRef, useMemo } from 'react';
 import type { AriaButtonOptions, AriaSwitchProps } from 'react-aria';
 import { mergeProps, useButton, useFocusRing, useHover, useSwitch } from 'react-aria';
 import { useToggleState } from 'react-stately';
-import type { BehaviorInput, CtrlTuning, ScaleInput } from './schema.ts';
-import { B, cls, computeScale, cssVars, merged, pick, resolve, stateCls, useForwardedRef } from './schema.ts';
+import type { Inputs, TuningFor } from './schema.ts';
+import { B, fn, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -21,44 +21,35 @@ type ButtonProps = AriaButtonOptions<'button'> & {
 };
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'disabled'> & {
     readonly asChild?: boolean;
-    readonly behavior?: BehaviorInput | undefined;
-    readonly scale?: ScaleInput | undefined;
+    readonly behavior?: Inputs['behavior'] | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
 };
 type TextareaProps = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'disabled'> & {
-    readonly behavior?: BehaviorInput | undefined;
-    readonly scale?: ScaleInput | undefined;
+    readonly behavior?: Inputs['behavior'] | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
 };
 type SwitchProps = AriaSwitchProps & { readonly className?: string };
 type ControlInput<T extends ControlType = 'button'> = {
     readonly asChild?: boolean;
-    readonly behavior?: BehaviorInput | undefined;
+    readonly behavior?: Inputs['behavior'] | undefined;
     readonly className?: string;
     readonly fullWidth?: boolean;
-    readonly scale?: ScaleInput | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
 
 // --- Pure Utility Functions -------------------------------------------------
 
-const baseCls = (fw?: boolean): string =>
-    cls(
-        B.ctrl.var.base,
-        B.ctrl.var.h,
-        B.ctrl.var.px,
-        B.ctrl.var.py,
-        B.ctrl.var.fs,
-        B.ctrl.var.r,
-        B.ctrl.var.g,
-        fw ? 'w-full' : 'w-auto',
-    );
+const { base, h, px, py, fs, r, g } = B.ctrl.var;
+const baseCls = (fw?: boolean): string => fn.cls(base, h, px, py, fs, r, g, fw ? 'w-full' : 'w-auto');
 
 // --- Component Factories ----------------------------------------------------
 
 const createBtn = (i: ControlInput<'button'>) => {
     const beh = resolve('behavior', i.behavior);
     const scl = resolve('scale', i.scale);
-    const vars = cssVars(computeScale(scl), 'ctrl');
-    const base = cls(baseCls(i.fullWidth), stateCls.ctrl(beh), i.className);
+    const vars = fn.cssVars(fn.computeScale(scl), 'ctrl');
+    const base = fn.cls(baseCls(i.fullWidth), stateCls.ctrl(beh), i.className);
     const Comp = forwardRef((props: ButtonProps, fRef: ForwardedRef<HTMLButtonElement>) => {
         const { asChild, children, className, leftIcon, rightIcon, variant = 'default', ...aria } = props;
         const ref = useForwardedRef(fRef);
@@ -66,7 +57,7 @@ const createBtn = (i: ControlInput<'button'>) => {
         const { hoverProps, isHovered } = useHover({ isDisabled: beh.disabled || beh.loading });
         const { focusProps, isFocusVisible } = useFocusRing();
         const mergedProps = mergeProps(buttonProps, hoverProps, focusProps, {
-            className: cls(base, B.ctrl.variant[variant], className),
+            className: fn.cls(base, B.ctrl.variant[variant], className),
             'data-focus': isFocusVisible || undefined,
             'data-hover': isHovered || undefined,
             'data-pressed': isPressed || undefined,
@@ -76,7 +67,7 @@ const createBtn = (i: ControlInput<'button'>) => {
         });
         const content = createElement(
             'span',
-            { className: cls('inline-flex items-center', B.ctrl.var.g) },
+            { className: fn.cls('inline-flex items-center', B.ctrl.var.g) },
             leftIcon,
             children,
             rightIcon,
@@ -92,7 +83,7 @@ const createBtn = (i: ControlInput<'button'>) => {
 const createInp = <T extends ControlType>(i: ControlInput<T>) => {
     const isTextarea = i.type === 'textarea';
     const htmlType = i.type === 'checkbox' ? 'checkbox' : i.type === 'radio' ? 'radio' : 'text';
-    const base = cls(
+    const base = fn.cls(
         baseCls(i.fullWidth),
         'border border-current/20 bg-transparent',
         isTextarea ? 'resize-y min-h-16' : undefined,
@@ -106,14 +97,14 @@ const createInp = <T extends ControlType>(i: ControlInput<T>) => {
             const { beh, vars } = useMemo(() => {
                 const b = resolve('behavior', { ...i.behavior, ...pb });
                 const s = resolve('scale', { ...i.scale, ...ps });
-                return { beh: b, vars: cssVars(computeScale(s), 'ctrl') };
+                return { beh: b, vars: fn.cssVars(fn.computeScale(s), 'ctrl') };
             }, [i.behavior, i.scale, pb, ps]);
             const { hoverProps, isHovered } = useHover({ isDisabled: beh.disabled || beh.loading });
             const { focusProps, isFocusVisible } = useFocusRing();
             const merged = mergeProps(hoverProps, focusProps, rest, {
                 'aria-busy': beh.loading || undefined,
                 'aria-readonly': beh.readonly || undefined,
-                className: cls(base, stateCls.ctrl(beh), className),
+                className: fn.cls(base, stateCls.ctrl(beh), className),
                 'data-focus': isFocusVisible || undefined,
                 'data-hover': isHovered || undefined,
                 'data-readonly': beh.readonly || undefined,
@@ -133,7 +124,7 @@ const createInp = <T extends ControlType>(i: ControlInput<T>) => {
 
 const createSwitch = (i: ControlInput<'switch'>) => {
     const beh = resolve('behavior', i.behavior);
-    const vars = cssVars(computeScale(resolve('scale', i.scale)), 'ctrl');
+    const vars = fn.cssVars(fn.computeScale(resolve('scale', i.scale)), 'ctrl');
     const Comp = forwardRef((props: SwitchProps, fRef: ForwardedRef<HTMLInputElement>) => {
         const { className, ...aria } = props;
         const ref = useForwardedRef(fRef);
@@ -143,7 +134,7 @@ const createSwitch = (i: ControlInput<'switch'>) => {
         return createElement(
             'label',
             {
-                className: cls(
+                className: fn.cls(
                     B.ctrl.switch.track,
                     B.ctrl.var.h,
                     state.isSelected ? B.ctrl.switch.trackOn : undefined,
@@ -157,7 +148,7 @@ const createSwitch = (i: ControlInput<'switch'>) => {
             },
             createElement('input', mergeProps(inputProps, focusProps, { className: 'sr-only', ref })),
             createElement('span', {
-                className: cls(B.ctrl.switch.thumb, state.isSelected ? B.ctrl.switch.thumbOn : undefined),
+                className: fn.cls(B.ctrl.switch.thumb, state.isSelected ? B.ctrl.switch.thumbOn : undefined),
                 style: {
                     height: `calc(var(--ctrl-height) - ${B.algo.switchThumbInsetPx}px)`,
                     width: `calc(var(--ctrl-height) - ${B.algo.switchThumbInsetPx}px)`,
@@ -185,17 +176,15 @@ const create = <T extends ControlType>(i: ControlInput<T>) =>
 
 // --- Factory ----------------------------------------------------------------
 
-const K = ['behavior', 'scale'] as const;
-
-const createControls = (tuning?: CtrlTuning) =>
+const createControls = (tuning?: TuningFor<'ctrl'>) =>
     Object.freeze({
-        Button: create({ type: 'button', ...pick(tuning, K) }),
-        Checkbox: create({ type: 'checkbox', ...pick(tuning, K) }),
-        create: <T extends ControlType>(i: ControlInput<T>) => create({ ...i, ...merged(tuning, i, K) }),
-        Input: create({ type: 'input', ...pick(tuning, K) }),
-        Radio: create({ type: 'radio', ...pick(tuning, K) }),
-        Switch: create({ type: 'switch', ...pick(tuning, K) }),
-        Textarea: create({ type: 'textarea', ...pick(tuning, K) }),
+        Button: create({ type: 'button', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Checkbox: create({ type: 'checkbox', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        create: <T extends ControlType>(i: ControlInput<T>) => create({ ...i, ...merged(tuning, i, TUNING_KEYS.ctrl) }),
+        Input: create({ type: 'input', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Radio: create({ type: 'radio', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Switch: create({ type: 'switch', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Textarea: create({ type: 'textarea', ...pick(tuning, TUNING_KEYS.ctrl) }),
     });
 
 // --- Export -----------------------------------------------------------------

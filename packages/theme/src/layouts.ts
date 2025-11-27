@@ -66,20 +66,19 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-layouts' as const,
 } as const);
 
-// --- Pure Utility Functions --------------------------------------------------
+// --- Unified fn Object (Consolidated Helpers) --------------------------------
 
-const calculateGap = (scale: number): string =>
-    scale === 0 ? '0' : `var(--spacing-${scale}, ${(scale * LAYOUT_CONFIG.gapMultiplier) / LAYOUT_CONFIG.remBase}rem)`;
-
-const generateResponsiveGridFormula = (minWidth: number, maxCols?: number): string => {
-    const minCalc = `min(${minWidth}px, 100%)`;
-    const minmax = `minmax(${minCalc}, 1fr)`;
-
-    return maxCols ? `repeat(${maxCols}, ${minmax})` : `repeat(auto-fit, ${minmax})`;
-};
-
-const formatStickyOffset = (position: 'top' | 'bottom' | 'left' | 'right', gap: string): string =>
-    `${position}: ${gap};`;
+const fn = {
+    gap: (scale: number): string =>
+        scale === 0
+            ? '0'
+            : `var(--spacing-${scale}, ${(scale * LAYOUT_CONFIG.gapMultiplier) / LAYOUT_CONFIG.remBase}rem)`,
+    gridFormula: (minWidth: number, maxCols?: number): string =>
+        ((minmax) => (maxCols ? `repeat(${maxCols}, ${minmax})` : `repeat(auto-fit, ${minmax})`))(
+            `minmax(min(${minWidth}px, 100%), 1fr)`,
+        ),
+    stickyOffset: (position: 'top' | 'bottom' | 'left' | 'right', gap: string): string => `${position}: ${gap};`,
+} as const;
 
 // --- Effect Pipelines & Builders ---------------------------------------------
 
@@ -87,8 +86,8 @@ const generateGridLayout = (input: Extract<LayoutInput, { type: 'grid' }>): Effe
     pipe(
         S.decode(GridLayoutSchema)(input),
         Effect.map((config) => {
-            const gridFormula = generateResponsiveGridFormula(config.minItemWidth, config.maxColumns);
-            const gapValue = calculateGap(config.gap);
+            const gridFormula = fn.gridFormula(config.minItemWidth, config.maxColumns);
+            const gapValue = fn.gap(config.gap);
 
             const alignRule = config.alignItems ? `  align-items: ${config.alignItems};\n` : '';
             const containerRule = config.containerQuery ? `  container-type: inline-size;\n` : '';
@@ -114,7 +113,7 @@ const generateStackLayout = (input: Extract<LayoutInput, { type: 'stack' }>): Ef
         S.decode(StackLayoutSchema)(input),
         Effect.map((config) => {
             const flexDirection = config.direction === 'horizontal' ? 'row' : 'column';
-            const gapValue = calculateGap(config.gap);
+            const gapValue = fn.gap(config.gap);
             const alignItems = config.align ?? 'stretch';
             const containerRule = config.containerQuery ? `  container-type: inline-size;\n` : '';
             const justifyContent = config.justify ?? 'start';
@@ -141,8 +140,8 @@ const generateStickyLayout = (input: Extract<LayoutInput, { type: 'sticky' }>): 
     pipe(
         S.decode(StickyLayoutSchema)(input),
         Effect.map((config) => {
-            const offsetValue = calculateGap(config.offset);
-            const offsetRule = formatStickyOffset(config.position, offsetValue);
+            const offsetValue = fn.gap(config.offset);
+            const offsetRule = fn.stickyOffset(config.position, offsetValue);
             const zIndex = config.zIndex ?? LAYOUT_CONFIG.stickyZindex;
 
             return `
@@ -162,7 +161,7 @@ const generateContainerLayout = (
         S.decode(ContainerLayoutSchema)(input),
         Effect.map((config) => {
             const containerRule = config.containerQuery ? `  container-type: inline-size;\n` : '';
-            const paddingValue = calculateGap(config.padding);
+            const paddingValue = fn.gap(config.padding);
 
             return `
 @theme {

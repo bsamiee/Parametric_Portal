@@ -1,7 +1,7 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef } from 'react';
-import type { Animation, AnimationInput, Computed, FbTuning, Feedback, FeedbackInput, ScaleInput } from './schema.ts';
-import { animStyle, B, cls, computeScale, cssVars, merged, pick, resolve, useForwardedRef } from './schema.ts';
+import type { Computed, Inputs, Resolved, TuningFor } from './schema.ts';
+import { animStyle, B, fn, merged, pick, resolve, TUNING_KEYS, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -18,10 +18,10 @@ type SpinnerProps = HTMLAttributes<SVGElement>;
 type SkeletonProps = HTMLAttributes<HTMLDivElement> & { readonly lines?: number };
 type ToastProps = AlertProps & { readonly title?: string };
 type FBInput<T extends FeedbackType = 'alert'> = {
-    readonly animation?: AnimationInput | undefined;
+    readonly animation?: Inputs['animation'] | undefined;
     readonly className?: string;
-    readonly feedback?: FeedbackInput | undefined;
-    readonly scale?: ScaleInput | undefined;
+    readonly feedback?: Inputs['feedback'] | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
 
@@ -30,8 +30,8 @@ type FBInput<T extends FeedbackType = 'alert'> = {
 const mkAlertBase = (
     i: FBInput<'alert' | 'toast'>,
     v: Record<string, string>,
-    f: Feedback,
-    a: Animation,
+    f: Resolved['feedback'],
+    a: Resolved['animation'],
     opts: { shadow: boolean; title: boolean },
 ) =>
     forwardRef((props: ToastProps, fRef: ForwardedRef<HTMLDivElement>) => {
@@ -41,7 +41,7 @@ const mkAlertBase = (
             'div',
             {
                 ...rest,
-                className: cls(
+                className: fn.cls(
                     'relative flex items-start border',
                     opts.shadow ? 'shadow-lg' : '',
                     B.fb.var.g,
@@ -79,10 +79,10 @@ const mkAlertBase = (
         );
     });
 
-const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Feedback, a: Animation) =>
+const mkAlert = (i: FBInput<'alert'>, v: Record<string, string>, f: Resolved['feedback'], a: Resolved['animation']) =>
     mkAlertBase(i, v, f, a, { shadow: false, title: false });
 
-const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Feedback, a: Animation) =>
+const mkToast = (i: FBInput<'toast'>, v: Record<string, string>, f: Resolved['feedback'], a: Resolved['animation']) =>
     mkAlertBase(i, v, f, a, { shadow: true, title: true });
 
 const mkProgress = (i: FBInput<'progress'>, v: Record<string, string>) =>
@@ -97,7 +97,7 @@ const mkProgress = (i: FBInput<'progress'>, v: Record<string, string>) =>
                 'aria-valuemax': 100,
                 'aria-valuemin': 0,
                 'aria-valuenow': clamped,
-                className: cls(
+                className: fn.cls(
                     'relative w-full overflow-hidden rounded-full bg-current/10',
                     B.fb.var.progressH,
                     i.className,
@@ -124,14 +124,14 @@ const mkSkeleton = (i: FBInput<'skeleton'>, c: Computed, v: Record<string, strin
                 ...rest,
                 'aria-busy': true,
                 'aria-label': 'Loading',
-                className: cls('flex flex-col', B.fb.var.skeletonSp, i.className, className),
+                className: fn.cls('flex flex-col', B.fb.var.skeletonSp, i.className, className),
                 ref,
                 role: 'status',
                 style: { ...v, ...style } as CSSProperties,
             },
             Array.from({ length: lines }, (_, idx) =>
                 createElement('div', {
-                    className: cls('animate-pulse rounded bg-current/10', idx === lines - 1 ? 'w-3/4' : 'w-full'),
+                    className: fn.cls('animate-pulse rounded bg-current/10', idx === lines - 1 ? 'w-3/4' : 'w-full'),
                     key: `skeleton-line-${idx}`,
                     style: { height: c.height },
                 }),
@@ -148,7 +148,7 @@ const mkSpinner = (i: FBInput<'spinner'>, c: Computed) =>
             {
                 ...rest,
                 'aria-label': 'Loading',
-                className: cls('animate-spin', i.className, className),
+                className: fn.cls('animate-spin', i.className, className),
                 fill: 'none',
                 height: c.iconSize,
                 ref,
@@ -182,15 +182,15 @@ const createFB = <T extends FeedbackType>(i: FBInput<T>) => {
     const s = resolve('scale', i.scale);
     const f = resolve('feedback', i.feedback);
     const a = resolve('animation', i.animation);
-    const c = computeScale(s);
-    const v = cssVars(c, 'fb');
+    const c = fn.computeScale(s);
+    const v = fn.cssVars(c, 'fb');
     const builder = builders[i.type ?? 'alert'];
     const comp = (
         builder as (
             i: FBInput<T>,
             v: Record<string, string>,
-            f: Feedback,
-            a: Animation,
+            f: Resolved['feedback'],
+            a: Resolved['animation'],
         ) => ReturnType<typeof forwardRef>
     )(i, v, f, a);
     comp.displayName = `Feedback(${i.type ?? 'alert'})`;
@@ -199,16 +199,14 @@ const createFB = <T extends FeedbackType>(i: FBInput<T>) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const K = ['animation', 'feedback', 'scale'] as const;
-
-const createFeedback = (tuning?: FbTuning) =>
+const createFeedback = (tuning?: TuningFor<'fb'>) =>
     Object.freeze({
-        Alert: createFB({ type: 'alert', ...pick(tuning, K) }),
-        create: <T extends FeedbackType>(i: FBInput<T>) => createFB({ ...i, ...merged(tuning, i, K) }),
+        Alert: createFB({ type: 'alert', ...pick(tuning, TUNING_KEYS.fb) }),
+        create: <T extends FeedbackType>(i: FBInput<T>) => createFB({ ...i, ...merged(tuning, i, TUNING_KEYS.fb) }),
         Progress: createFB({ type: 'progress', ...pick(tuning, ['scale']) }),
         Skeleton: createFB({ type: 'skeleton', ...pick(tuning, ['scale']) }),
         Spinner: createFB({ type: 'spinner', ...pick(tuning, ['scale']) }),
-        Toast: createFB({ type: 'toast', ...pick(tuning, K) }),
+        Toast: createFB({ type: 'toast', ...pick(tuning, TUNING_KEYS.fb) }),
     });
 
 // --- Export -----------------------------------------------------------------

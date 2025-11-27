@@ -13,12 +13,12 @@ import {
 } from 'react-aria';
 import type { Selection as AriaSelection, Key, ListState, Node, TreeState } from 'react-stately';
 import { Item, Section, useComboBoxState, useMenuTriggerState, useSelectState, useTreeState } from 'react-stately';
-import type { MenuTuning, Overlay, ResolvedContext, ScaleInput } from './schema.ts';
+import type { Inputs, ResolvedContext, TuningFor } from './schema.ts';
 import {
     animStyle,
     B,
-    cls,
     createBuilderContext,
+    fn,
     merged,
     pick,
     stateCls,
@@ -68,9 +68,9 @@ type ComboboxProps = HTMLAttributes<HTMLDivElement> & {
 };
 type SelectionInput<T extends SelectionType = 'menu'> = {
     readonly className?: string;
-    readonly scale?: ScaleInput;
+    readonly scale?: Inputs['scale'];
     readonly type?: T;
-} & Partial<MenuTuning>;
+} & Partial<TuningFor<'menu'>>;
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
 // --- Shared Sub-Components --------------------------------------------------
@@ -136,7 +136,7 @@ const SectionComp = <T>({ onAction, onClose, section, state }: SectionCompProps<
         section.rendered &&
             createElement(
                 'div',
-                { className: cls(B.menu.section.header, B.menu.var.itemPx, B.menu.var.itemPy) },
+                { className: fn.cls(B.menu.section.header, B.menu.var.itemPx, B.menu.var.itemPy) },
                 section.rendered,
             ),
         createElement(
@@ -146,7 +146,7 @@ const SectionComp = <T>({ onAction, onClose, section, state }: SectionCompProps<
                 createElement(MenuItemComp, { item, key: item.key, onClose, state, ...(onAction && { onAction }) }),
             ),
         ),
-        createElement('div', { className: cls(B.menu.section.separator, B.menu.var.separatorSp) }),
+        createElement('div', { className: fn.cls(B.menu.section.separator, B.menu.var.separatorSp) }),
     );
 
 // --- Pure Utility Functions -------------------------------------------------
@@ -177,8 +177,7 @@ const buildSections = (items: ReadonlyArray<ItemData | SectionData>) =>
                   textValue: String(it.label),
               }),
     );
-const zStyle = (o: Overlay): CSSProperties => ({ zIndex: o.zIndex });
-const dropdownCls = cls(
+const dropdownCls = fn.cls(
     'absolute left-0 w-full shadow-lg border rounded-md overflow-hidden',
     B.menu.var.dropdownMaxH,
     'overflow-y-auto',
@@ -229,7 +228,7 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
             'div',
             {
                 ...rest,
-                className: cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
+                className: fn.cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
                 ref,
                 style: baseStyle(ctx, style),
             },
@@ -237,7 +236,7 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
                 'button',
                 {
                     ...buttonProps,
-                    className: cls(B.menu.trigger.base, B.menu.var.triggerMinW, 'cursor-pointer'),
+                    className: fn.cls(B.menu.trigger.base, B.menu.var.triggerMinW, 'cursor-pointer'),
                     'data-state': menuState.isOpen ? 'open' : 'closed',
                     disabled: ctx.behavior.disabled,
                     ref: triggerRef,
@@ -254,7 +253,7 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
                         ...triggerMenuProps,
                         className: dropdownCls,
                         ref: menuRef,
-                        style: { ...zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...fn.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
                     },
                     [...treeState.collection].map((item) =>
                         item.type === 'section'
@@ -327,7 +326,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
             'div',
             {
                 ...rest,
-                className: cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
+                className: fn.cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
                 ref,
                 style: baseStyle(ctx, style),
             },
@@ -337,7 +336,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
                 'button',
                 {
                     ...buttonProps,
-                    className: cls(
+                    className: fn.cls(
                         B.menu.trigger.base,
                         B.menu.var.triggerMinW,
                         B.menu.var.itemH,
@@ -352,7 +351,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
                 },
                 createElement(
                     'span',
-                    { ...valueProps, className: cls(!state.selectedItem && 'opacity-50') },
+                    { ...valueProps, className: fn.cls(!state.selectedItem && 'opacity-50') },
                     state.selectedItem?.rendered ?? placeholder,
                 ),
                 createElement('span', { className: B.menu.trigger.indicator }, '\u25BC'),
@@ -364,7 +363,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
                         ...menuProps,
                         className: dropdownCls,
                         ref: listBoxRef,
-                        style: { ...zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...fn.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
                     },
                     [...state.collection].map((item) => createElement(Option, { item, key: item.key, state })),
                 ),
@@ -423,7 +422,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
             'div',
             {
                 ...rest,
-                className: cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
+                className: fn.cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
                 ref,
                 style: baseStyle(ctx, style),
             },
@@ -433,7 +432,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
                 { className: 'flex' },
                 createElement('input', {
                     ...inputProps,
-                    className: cls(
+                    className: fn.cls(
                         'flex-1 border border-r-0 rounded-l-md outline-none',
                         B.menu.var.itemH,
                         B.menu.var.itemPx,
@@ -446,7 +445,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
                     'button',
                     {
                         ...buttonProps,
-                        className: cls('border rounded-r-md cursor-pointer px-2', B.menu.var.itemH),
+                        className: fn.cls('border rounded-r-md cursor-pointer px-2', B.menu.var.itemH),
                         disabled: ctx.behavior.disabled,
                         ref: buttonRef,
                         type: 'button',
@@ -460,7 +459,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
                     {
                         className: dropdownCls,
                         ref: popoverRef,
-                        style: { ...zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...fn.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
                     },
                     createElement(
                         'ul',
@@ -478,15 +477,16 @@ const builders = { combobox: mkCombobox, menu: mkMenu, select: mkSelect } as con
 
 const createSel = <T extends SelectionType>(i: SelectionInput<T>) => {
     const ctx = createBuilderContext('menu', ['animation', 'behavior', 'overlay'] as const, i);
-    const builder = builders[i.type ?? 'menu'];
+    const key = (i.type ?? 'menu') as T;
+    const builder = builders[key];
     const comp = (builder as unknown as (i: SelectionInput<T>, ctx: Ctx) => ReturnType<typeof forwardRef>)(i, ctx);
-    comp.displayName = `Selection(${i.type ?? 'menu'})`;
+    comp.displayName = `Selection(${key})`;
     return comp;
 };
 
 // --- Factory ----------------------------------------------------------------
 
-const createSelection = (tuning?: MenuTuning) =>
+const createSelection = (tuning?: TuningFor<'menu'>) =>
     Object.freeze({
         Combobox: createSel({ type: 'combobox', ...pick(tuning, K) } as SelectionInput<'combobox'>),
         create: <T extends SelectionType>(i: SelectionInput<T>) =>

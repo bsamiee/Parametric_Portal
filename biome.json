@@ -153,6 +153,16 @@
                     }
                 }
             }
+        },
+        {
+            "includes": [".github/scripts/**/*.ts"],
+            "linter": {
+                "rules": {
+                    "style": {
+                        "useNamingConvention": "off"
+                    }
+                }
+            }
         }
     ]
 }

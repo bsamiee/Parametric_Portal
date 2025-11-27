@@ -2,20 +2,22 @@ import type { LucideIcon, LucideProps } from 'lucide-react';
 import { icons } from 'lucide-react';
 import type { CSSProperties, ForwardedRef, SVGAttributes } from 'react';
 import { createElement, forwardRef, memo, useMemo } from 'react';
-import type { ScaleInput } from './schema.ts';
-import { cls, computeScale, merged, resolve, strokeWidth } from './schema.ts';
-
-// Icons has unique strokeWidth tuning (primitive, not schema-based)
-type IconTuning = { readonly scale?: ScaleInput | undefined; readonly strokeWidth?: number | undefined };
+import type { Inputs } from './schema.ts';
+import { fn, merged, resolve } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
+// Icons has unique strokeWidth tuning (primitive, not schema-based)
+type IconTuning = { readonly scale?: Inputs['scale'] | undefined; readonly strokeWidth?: number | undefined };
 
 type IconName = keyof typeof icons;
-type IconProps = SVGAttributes<SVGElement> & { readonly scale?: ScaleInput | undefined; readonly strokeWidth?: number };
+type IconProps = SVGAttributes<SVGElement> & {
+    readonly scale?: Inputs['scale'] | undefined;
+    readonly strokeWidth?: number;
+};
 type IconInput = {
     readonly className?: string;
     readonly name: IconName;
-    readonly scale?: ScaleInput | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
     readonly strokeWidth?: number | undefined;
 };
 type DynamicIconProps = IconProps & { readonly name: IconName };
@@ -35,13 +37,13 @@ const createIcon = (i: IconInput) => {
             const base = i.scale ?? {};
             const props = ps ?? {};
             const s = resolve('scale', { ...base, ...props });
-            const c = computeScale(s);
-            return { size: c.iconSize, stroke: sw ?? i.strokeWidth ?? strokeWidth(s.scale) };
+            const c = fn.computeScale(s);
+            return { size: c.iconSize, stroke: sw ?? i.strokeWidth ?? fn.strokeWidth(s.scale) };
         }, [ps, sw, i.scale, i.strokeWidth]);
         const iconProps: LucideProps = {
             ...rest,
             'aria-hidden': rest['aria-label'] === undefined,
-            className: cls('inline-block flex-shrink-0', i.className, className),
+            className: fn.cls('inline-block flex-shrink-0', i.className, className),
             height: size,
             ref,
             strokeWidth: stroke,
@@ -60,13 +62,13 @@ const DynamicIcon = memo(
         const Icon = getIcon(name);
         const { size, stroke } = useMemo(() => {
             const s = resolve('scale', ps);
-            const c = computeScale(s);
-            return { size: c.iconSize, stroke: sw ?? strokeWidth(s.scale) };
+            const c = fn.computeScale(s);
+            return { size: c.iconSize, stroke: sw ?? fn.strokeWidth(s.scale) };
         }, [ps, sw]);
         const iconProps: LucideProps = {
             ...rest,
             'aria-hidden': rest['aria-label'] === undefined,
-            className: cls('inline-block flex-shrink-0', className),
+            className: fn.cls('inline-block flex-shrink-0', className),
             height: size,
             ref,
             strokeWidth: stroke,

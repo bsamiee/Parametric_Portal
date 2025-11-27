@@ -4,6 +4,7 @@
         "@radix-ui/react-slot": "catalog:",
         "class-variance-authority": "catalog:",
         "clsx": "catalog:",
+        "cmdk": "catalog:",
         "effect": "catalog:",
         "lucide-react": "catalog:",
         "react": "catalog:",
@@ -21,6 +22,10 @@
         "vitest": "catalog:"
     },
     "exports": {
+        "./command": {
+            "import": "./dist/command.js",
+            "types": "./dist/command.d.ts"
+        },
         "./controls": {
             "import": "./dist/controls.js",
             "types": "./dist/controls.d.ts"

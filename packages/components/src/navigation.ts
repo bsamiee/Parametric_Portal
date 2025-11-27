@@ -3,19 +3,8 @@ import { createElement, forwardRef, useRef } from 'react';
 import { useFocusRing, useTab, useTabList, useTabPanel } from 'react-aria';
 import type { Key, Node, TabListState } from 'react-stately';
 import { Item, useTabListState } from 'react-stately';
-import type { Animation, AnimationInput, Behavior, BehaviorInput, NavTuning, ScaleInput } from './schema.ts';
-import {
-    animStyle,
-    B,
-    cls,
-    computeScale,
-    cssVars,
-    merged,
-    pick,
-    resolve,
-    stateCls,
-    useForwardedRef,
-} from './schema.ts';
+import type { Inputs, Resolved, TuningFor } from './schema.ts';
+import { animStyle, B, fn, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -47,10 +36,10 @@ type PaginationProps = HTMLAttributes<HTMLElement> & {
     readonly total: number;
 };
 type NavInput<T extends NavType = 'tabs'> = {
-    readonly animation?: AnimationInput | undefined;
-    readonly behavior?: BehaviorInput | undefined;
+    readonly animation?: Inputs['animation'] | undefined;
+    readonly behavior?: Inputs['behavior'] | undefined;
     readonly className?: string;
-    readonly scale?: ScaleInput | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
 
@@ -112,13 +101,13 @@ const TabComp = <T>({ item, orientation, state, vars }: TabCompProps<T>) => {
         {
             ...tabProps,
             ...focusProps,
-            className: cls(
+            className: fn.cls(
                 orient.tab,
                 B.nav.tabs.tab.base,
                 B.nav.var.px,
                 B.nav.var.py,
                 B.nav.var.fs,
-                isSelected && cls(orient.tabSelected, B.nav.tabs.tab.selected),
+                isSelected && fn.cls(orient.tabSelected, B.nav.tabs.tab.selected),
                 isDisabled && B.nav.tabs.tab.disabled,
                 isFocusVisible && B.nav.tabs.tab.focus,
             ),
@@ -139,14 +128,14 @@ const TabPanelComp = <T>({ state, vars }: TabPanelCompProps<T>) => {
     const { tabPanelProps } = useTabPanel({}, state, ref);
     return createElement(
         'div',
-        { ...tabPanelProps, className: cls(B.nav.var.px, B.nav.var.py), ref, style: vars as CSSProperties },
+        { ...tabPanelProps, className: fn.cls(B.nav.var.px, B.nav.var.py), ref, style: vars as CSSProperties },
         state.selectedItem?.props.children,
     );
 };
 
 // --- Component Builders -----------------------------------------------------
 
-const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Behavior, a: Animation) =>
+const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Resolved['behavior'], a: Resolved['animation']) =>
     forwardRef((props: TabsProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             className,
@@ -188,13 +177,13 @@ const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Behavior, a: 
             'div',
             {
                 ...rest,
-                className: cls('flex', orient.container, B.nav.var.g, stateCls.nav(b), i.className, className),
+                className: fn.cls('flex', orient.container, B.nav.var.g, stateCls.nav(b), i.className, className),
                 ref,
                 style: { ...v, ...animStyle(a), ...style } as CSSProperties,
             },
             createElement(
                 'div',
-                { ...tabListProps, className: cls(orient.list, B.nav.var.g), ref: tabListRef },
+                { ...tabListProps, className: fn.cls(orient.list, B.nav.var.g), ref: tabListRef },
                 [...state.collection].map((item) =>
                     createElement(TabComp, { item, key: item.key, orientation, state, vars: v }),
                 ),
@@ -203,7 +192,7 @@ const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Behavior, a: 
         );
     });
 
-const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: Behavior) =>
+const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: Resolved['behavior']) =>
     forwardRef((props: BreadcrumbProps, fRef: ForwardedRef<HTMLElement>) => {
         const { className, items, separator = '/', style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -212,18 +201,25 @@ const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: B
             {
                 ...rest,
                 'aria-label': 'Breadcrumb',
-                className: cls('flex items-center', B.nav.var.g, B.nav.var.fs, stateCls.nav(b), i.className, className),
+                className: fn.cls(
+                    'flex items-center',
+                    B.nav.var.g,
+                    B.nav.var.fs,
+                    stateCls.nav(b),
+                    i.className,
+                    className,
+                ),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
             createElement(
                 'ol',
-                { className: cls('flex items-center', B.nav.var.g) },
+                { className: fn.cls('flex items-center', B.nav.var.g) },
                 items.map((item, idx) => {
                     const isLast = idx === items.length - 1;
                     return createElement(
                         'li',
-                        { className: cls('flex items-center', B.nav.var.g), key: item.key },
+                        { className: fn.cls('flex items-center', B.nav.var.g), key: item.key },
                         createElement(
                             item.href && !isLast ? 'a' : 'span',
                             {
@@ -240,7 +236,7 @@ const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: B
         );
     });
 
-const mkPagination = (i: NavInput<'pagination'>, v: Record<string, string>, b: Behavior) =>
+const mkPagination = (i: NavInput<'pagination'>, v: Record<string, string>, b: Resolved['behavior']) =>
     forwardRef((props: PaginationProps, fRef: ForwardedRef<HTMLElement>) => {
         const { className, current, onChange, siblingCount = 1, style, total, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -251,7 +247,7 @@ const mkPagination = (i: NavInput<'pagination'>, v: Record<string, string>, b: B
                 {
                     'aria-current': p === current ? 'page' : undefined,
                     'aria-disabled': disabled || undefined,
-                    className: cls(
+                    className: fn.cls(
                         'flex items-center justify-center border',
                         B.nav.var.minW,
                         B.nav.var.h,
@@ -272,7 +268,14 @@ const mkPagination = (i: NavInput<'pagination'>, v: Record<string, string>, b: B
             {
                 ...rest,
                 'aria-label': 'Pagination',
-                className: cls('flex items-center', B.nav.var.g, B.nav.var.fs, stateCls.nav(b), i.className, className),
+                className: fn.cls(
+                    'flex items-center',
+                    B.nav.var.g,
+                    B.nav.var.fs,
+                    stateCls.nav(b),
+                    i.className,
+                    className,
+                ),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
@@ -292,15 +295,15 @@ const createNav = <T extends NavType>(i: NavInput<T>) => {
     const s = resolve('scale', i.scale);
     const b = resolve('behavior', i.behavior);
     const a = resolve('animation', i.animation);
-    const c = computeScale(s);
-    const v = cssVars(c, 'nav');
+    const c = fn.computeScale(s);
+    const v = fn.cssVars(c, 'nav');
     const builder = builders[i.type ?? 'tabs'];
     const comp = (
         builder as unknown as (
             i: NavInput<T>,
             v: Record<string, string>,
-            b: Behavior,
-            a: Animation,
+            b: Resolved['behavior'],
+            a: Resolved['animation'],
         ) => ReturnType<typeof forwardRef>
     )(i, v, b, a);
     comp.displayName = `Nav(${i.type ?? 'tabs'})`;
@@ -309,15 +312,12 @@ const createNav = <T extends NavType>(i: NavInput<T>) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const K = ['animation', 'behavior', 'scale'] as const;
-const Kb = ['behavior', 'scale'] as const;
-
-const createNavigation = (tuning?: NavTuning) =>
+const createNavigation = (tuning?: TuningFor<'nav'>) =>
     Object.freeze({
-        Breadcrumb: createNav({ type: 'breadcrumb', ...pick(tuning, Kb) }),
-        create: <T extends NavType>(i: NavInput<T>) => createNav({ ...i, ...merged(tuning, i, K) }),
-        Pagination: createNav({ type: 'pagination', ...pick(tuning, Kb) }),
-        Tabs: createNav({ type: 'tabs', ...pick(tuning, K) }),
+        Breadcrumb: createNav({ type: 'breadcrumb', ...pick(tuning, ['behavior', 'scale']) }),
+        create: <T extends NavType>(i: NavInput<T>) => createNav({ ...i, ...merged(tuning, i, TUNING_KEYS.nav) }),
+        Pagination: createNav({ type: 'pagination', ...pick(tuning, ['behavior', 'scale']) }),
+        Tabs: createNav({ type: 'tabs', ...pick(tuning, TUNING_KEYS.nav) }),
     });
 
 // --- Export -----------------------------------------------------------------

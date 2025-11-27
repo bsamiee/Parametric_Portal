@@ -10,19 +10,8 @@ import {
 } from 'react-aria';
 import type { Key, Node, SortDescriptor, TableState, TableStateProps } from 'react-stately';
 import { Cell, Column, Row, TableBody, TableHeader, useTableState } from 'react-stately';
-import type { Behavior, BehaviorInput, Computed, DataTuning, ScaleInput } from './schema.ts';
-import {
-    B,
-    cls,
-    computeScale,
-    cssVars,
-    merged,
-    pick,
-    resolve,
-    stateCls,
-    useCollectionEl,
-    useForwardedRef,
-} from './schema.ts';
+import type { Computed, Inputs, Resolved, TuningFor } from './schema.ts';
+import { B, fn, merged, pick, resolve, stateCls, TUNING_KEYS, useCollectionEl, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -67,11 +56,15 @@ type TableProps<T> = HTMLAttributes<HTMLTableElement> & {
     readonly sortDescriptor?: SortDescriptor;
 };
 type DataInput<T extends DataType = 'card'> = {
-    readonly behavior?: BehaviorInput | undefined;
+    readonly behavior?: Inputs['behavior'] | undefined;
     readonly className?: string;
-    readonly scale?: ScaleInput | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
+
+// --- Shared Constants (Destructured) ----------------------------------------
+
+const { px, py, r: dRadius } = B.data.var;
 
 // --- Component Builders -----------------------------------------------------
 
@@ -83,7 +76,7 @@ const mkAvatar = (i: DataInput<'avatar'>, c: Computed) =>
             'span',
             {
                 ...rest,
-                className: cls(
+                className: fn.cls(
                     'inline-flex items-center justify-center overflow-hidden rounded-full',
                     i.className,
                     className,
@@ -109,7 +102,7 @@ const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
             'span',
             {
                 ...rest,
-                className: cls(
+                className: fn.cls(
                     'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
                     i.className,
                     className,
@@ -122,7 +115,7 @@ const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
         );
     });
 
-const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Behavior) =>
+const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Resolved['behavior']) =>
     forwardRef((props: CardProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, footer, header, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -132,8 +125,8 @@ const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Behavior) =>
                 ...rest,
                 'aria-busy': b.loading || undefined,
                 'aria-disabled': b.disabled || undefined,
-                className: cls(
-                    B.data.var.r,
+                className: fn.cls(
+                    dRadius,
                     'border shadow-sm overflow-hidden',
                     stateCls.data(b),
                     i.className,
@@ -142,19 +135,13 @@ const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Behavior) =>
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
-            header
-                ? createElement(
-                      'div',
-                      { className: cls('border-b font-semibold', B.data.var.px, B.data.var.py) },
-                      header,
-                  )
-                : null,
-            createElement('div', { className: cls(B.data.var.px, B.data.var.py) }, children),
-            footer ? createElement('div', { className: cls('border-t', B.data.var.px, B.data.var.py) }, footer) : null,
+            header ? createElement('div', { className: fn.cls('border-b font-semibold', px, py) }, header) : null,
+            createElement('div', { className: fn.cls(px, py) }, children),
+            footer ? createElement('div', { className: fn.cls('border-t', px, py) }, footer) : null,
         );
     });
 
-const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Behavior) =>
+const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Resolved['behavior']) =>
     forwardRef((props: ListProps<T>, fRef: ForwardedRef<HTMLUListElement>) => {
         const { className, items, keyExtractor, renderItem, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -164,7 +151,7 @@ const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Behavior)
                 ...rest,
                 'aria-busy': b.loading || undefined,
                 'aria-disabled': b.disabled || undefined,
-                className: cls('space-y-1', stateCls.data(b), i.className, className),
+                className: fn.cls('space-y-1', stateCls.data(b), i.className, className),
                 ref,
                 role: 'list',
                 style: { ...v, ...style } as CSSProperties,
@@ -187,8 +174,8 @@ const TColHeader = <T>({ column, state }: TColHeaderProps<T>) => {
         merge(
             columnHeaderProps,
             'text-left font-semibold',
-            B.data.var.px,
-            B.data.var.py,
+            px,
+            py,
             column.props?.allowsSorting && B.data.table.header.sortable,
         ),
         column.rendered,
@@ -224,12 +211,16 @@ type TCellProps<T> = { readonly cell: Node<T>; readonly state: TableState<T> };
 const TCell = <T>({ cell, state }: TCellProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLTableCellElement>(B.data.table.cell.focus);
     const { gridCellProps } = useTableCell({ node: cell }, state, ref);
-    return createElement('td', merge(gridCellProps, B.data.var.px, B.data.var.py), cell.rendered);
+    return createElement('td', merge(gridCellProps, px, py), cell.rendered);
 };
 
 // --- Table Builder ----------------------------------------------------------
 
-const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Record<string, string>, b: Behavior) =>
+const mkTable = <T extends Record<string, unknown>>(
+    i: DataInput<'table'>,
+    v: Record<string, string>,
+    b: Resolved['behavior'],
+) =>
     forwardRef((props: TableProps<T>, fRef: ForwardedRef<HTMLTableElement>) => {
         const {
             className,
@@ -321,7 +312,7 @@ const mkTable = <T extends Record<string, unknown>>(i: DataInput<'table'>, v: Re
                 ...gridProps,
                 'aria-busy': b.loading || undefined,
                 'aria-disabled': b.disabled || undefined,
-                className: cls('w-full border-collapse text-sm', stateCls.data(b), i.className, className),
+                className: fn.cls('w-full border-collapse text-sm', stateCls.data(b), i.className, className),
                 ref,
                 style: { ...v, ...style } as CSSProperties,
             },
@@ -349,11 +340,15 @@ const builders = { avatar: mkAvatar, badge: mkBadge, card: mkCard, list: mkList,
 const createDT = <T extends DataType>(i: DataInput<T>) => {
     const s = resolve('scale', i.scale);
     const b = resolve('behavior', i.behavior);
-    const c = computeScale(s);
-    const v = cssVars(c, 'data');
+    const c = fn.computeScale(s);
+    const v = fn.cssVars(c, 'data');
     const builder = builders[i.type ?? 'card'];
     const comp = (
-        builder as (i: DataInput<T>, v: Record<string, string>, b: Behavior) => ReturnType<typeof forwardRef>
+        builder as (
+            i: DataInput<T>,
+            v: Record<string, string>,
+            b: Resolved['behavior'],
+        ) => ReturnType<typeof forwardRef>
     )(i, v, b);
     comp.displayName = `Data(${i.type ?? 'card'})`;
     return comp;
@@ -361,16 +356,14 @@ const createDT = <T extends DataType>(i: DataInput<T>) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const K = ['behavior', 'scale'] as const;
-
-const createData = (tuning?: DataTuning) =>
+const createData = (tuning?: TuningFor<'data'>) =>
     Object.freeze({
         Avatar: createDT({ type: 'avatar', ...pick(tuning, ['scale']) }),
         Badge: createDT({ type: 'badge', ...pick(tuning, ['scale']) }),
-        Card: createDT({ type: 'card', ...pick(tuning, K) }),
-        create: <T extends DataType>(i: DataInput<T>) => createDT({ ...i, ...merged(tuning, i, K) }),
-        List: createDT({ type: 'list', ...pick(tuning, K) }),
-        Table: createDT({ type: 'table', ...pick(tuning, K) }),
+        Card: createDT({ type: 'card', ...pick(tuning, TUNING_KEYS.data) }),
+        create: <T extends DataType>(i: DataInput<T>) => createDT({ ...i, ...merged(tuning, i, TUNING_KEYS.data) }),
+        List: createDT({ type: 'list', ...pick(tuning, TUNING_KEYS.data) }),
+        Table: createDT({ type: 'table', ...pick(tuning, TUNING_KEYS.data) }),
     });
 
 // --- Export -----------------------------------------------------------------

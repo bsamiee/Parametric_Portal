@@ -6,6 +6,19 @@ import { useRef } from 'react';
 import { useFocusRing } from 'react-aria';
 import { twMerge } from 'tailwind-merge';
 
+// --- Helpers (Hoisted) ------------------------------------------------------
+
+const rem = (v: number): string => `${v.toFixed(3)}rem`;
+const optBool = (d: boolean) => S.optionalWith(S.Boolean, { default: () => d });
+const DIS = 'pointer-events-none opacity-50';
+const LOAD = 'animate-pulse';
+const cv = <P extends string, K extends string>(p: P, k: K, u: string) => `${u}[var(--${p}-${k})]` as const;
+const coreVars = <P extends string>(p: P) =>
+    ({ px: cv(p, 'padding-x', 'px-'), py: cv(p, 'padding-y', 'py-'), r: cv(p, 'radius', 'rounded-') }) as const;
+type Sc = { readonly scale: number; readonly density: number; readonly baseUnit: number };
+const mul = (c: Sc, f: number, m = 1): number => c.scale * f * c.density * c.baseUnit * m;
+const add = (c: Sc, b: number, s: number, m = 1): number => (b + c.scale * s) * c.density * c.baseUnit * m;
+
 // --- Schema Definitions -----------------------------------------------------
 
 const PositiveSchema = pipe(S.Number, S.positive());
@@ -25,33 +38,33 @@ const ScaleSchema = S.Struct({
 const BehaviorSchema = S.Struct({
     // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('behavior'), { default: () => 'behavior' as const }),
-    asChild: S.optionalWith(S.Boolean, { default: () => false }),
-    disabled: S.optionalWith(S.Boolean, { default: () => false }),
-    focusable: S.optionalWith(S.Boolean, { default: () => true }),
-    interactive: S.optionalWith(S.Boolean, { default: () => true }),
-    loading: S.optionalWith(S.Boolean, { default: () => false }),
-    readonly: S.optionalWith(S.Boolean, { default: () => false }),
+    asChild: optBool(false),
+    disabled: optBool(false),
+    focusable: optBool(true),
+    interactive: optBool(true),
+    loading: optBool(false),
+    readonly: optBool(false),
 });
 
 const OverlaySchema = S.Struct({
     // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('overlay'), { default: () => 'overlay' as const }),
-    backdrop: S.optionalWith(S.Boolean, { default: () => true }),
-    closeOnEscape: S.optionalWith(S.Boolean, { default: () => true }),
-    closeOnOutsideClick: S.optionalWith(S.Boolean, { default: () => true }),
-    modal: S.optionalWith(S.Boolean, { default: () => true }),
+    backdrop: optBool(true),
+    closeOnEscape: optBool(true),
+    closeOnOutsideClick: optBool(true),
+    modal: optBool(true),
     position: S.optionalWith(S.Union(S.Literal('top'), S.Literal('bottom'), S.Literal('left'), S.Literal('right')), {
         default: () => 'bottom' as const,
     }),
-    trapFocus: S.optionalWith(S.Boolean, { default: () => true }),
+    trapFocus: optBool(true),
     zIndex: S.optionalWith(pipe(S.Number, S.int(), S.between(0, 9999)), { default: () => 50 as never }),
 });
 
 const FeedbackSchema = S.Struct({
     // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('feedback'), { default: () => 'feedback' as const }),
-    autoDismiss: S.optionalWith(S.Boolean, { default: () => true }),
-    dismissible: S.optionalWith(S.Boolean, { default: () => true }),
+    autoDismiss: optBool(true),
+    dismissible: optBool(true),
     duration: S.optionalWith(PositiveSchema, { default: () => 5000 as never }),
 });
 
@@ -61,7 +74,7 @@ const AnimationSchema = S.Struct({
     delay: S.optionalWith(NonNegativeIntSchema, { default: () => 0 as never }),
     duration: S.optionalWith(NonNegativeIntSchema, { default: () => 200 as never }),
     easing: S.optionalWith(S.String, { default: () => 'ease-out' as never }),
-    enabled: S.optionalWith(S.Boolean, { default: () => true }),
+    enabled: optBool(true),
 });
 
 // --- Schema Dispatch Table --------------------------------------------------
@@ -78,48 +91,50 @@ type SchemaKey = keyof typeof Schemas;
 type Resolved = { readonly [K in SchemaKey]: S.Schema.Type<(typeof Schemas)[K]> };
 type Inputs = { readonly [K in SchemaKey]: S.Schema.Encoded<(typeof Schemas)[K]> };
 
-// --- Type Definitions (Export-friendly aliases) -----------------------------
+// --- Dispatch Tables --------------------------------------------------------
 
-type Scale = Resolved['scale'];
-type Behavior = Resolved['behavior'];
-type Overlay = Resolved['overlay'];
-type Feedback = Resolved['feedback'];
-type Animation = Resolved['animation'];
-type ScaleInput = Inputs['scale'];
-type BehaviorInput = Inputs['behavior'];
-type OverlayInput = Inputs['overlay'];
-type FeedbackInput = Inputs['feedback'];
-type AnimationInput = Inputs['animation'];
-type Computed = {
-    readonly [K in
-        | 'badgePaddingX'
-        | 'badgePaddingY'
-        | 'dialogMaxWidth'
-        | 'dropdownGap'
-        | 'dropdownMaxHeight'
-        | 'ellipsisPadding'
-        | 'fontSize'
-        | 'gap'
-        | 'height'
-        | 'iconSize'
-        | 'itemHeight'
-        | 'itemPaddingX'
-        | 'itemPaddingY'
-        | 'listSpacing'
-        | 'minButtonWidth'
-        | 'modalMaxWidth'
-        | 'paddingX'
-        | 'paddingY'
-        | 'popoverOffset'
-        | 'progressHeight'
-        | 'radius'
-        | 'separatorSpacing'
-        | 'skeletonSpacing'
-        | 'smallFontSize'
-        | 'tooltipOffset'
-        | 'triggerMinWidth'
-        | 'xsFontSize']: string;
-};
+const compute = {
+    badgePaddingX: (c: Resolved['scale']) => rem(mul(c, B.algo.badgePxMul)),
+    badgePaddingY: (c: Resolved['scale']) => rem(mul(c, B.algo.badgePyMul)),
+    cmdEmptyPaddingY: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdEmptyPyMul)),
+    cmdHeadingPaddingX: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdHeadingPxMul)),
+    cmdHeadingPaddingY: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdHeadingPyMul)),
+    cmdInputHeight: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdInputHMul)),
+    cmdItemHeight: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdItemHMul)),
+    cmdListMaxHeight: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdListMaxMul)),
+    cmdListMinHeight: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdListMinMul)),
+    cmdShortcutPaddingX: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdShortcutPxMul)),
+    cmdShortcutPaddingY: (c: Resolved['scale']) => rem(mul(c, B.algo.cmdShortcutPyMul)),
+    dialogMaxWidth: (c: Resolved['scale']) => rem(B.algo.dialogMaxMul * c.density * c.baseUnit * 4),
+    dropdownGap: (c: Resolved['scale']) => rem(mul(c, B.algo.dropdownGapMul)),
+    dropdownMaxHeight: (c: Resolved['scale']) => rem(mul(c, B.algo.dropdownMaxMul, 4)),
+    ellipsisPadding: (c: Resolved['scale']) => rem(mul(c, B.algo.ellipsisPxMul)),
+    fontSize: (c: Resolved['scale']) => rem(B.algo.fontBase + c.scale * B.algo.fontStep),
+    gap: (c: Resolved['scale']) => rem(mul(c, B.algo.gapMul)),
+    height: (c: Resolved['scale']) => rem(add(c, B.algo.hBase, B.algo.hStep, 4)),
+    iconSize: (c: Resolved['scale']) =>
+        rem((B.algo.fontBase + c.scale * B.algo.fontStep) * B.algo.iconRatio * c.baseUnit * 4),
+    itemHeight: (c: Resolved['scale']) => rem(add(c, B.algo.hBase, B.algo.hStep * 0.8, 4)),
+    itemPaddingX: (c: Resolved['scale']) => rem(mul(c, B.algo.pxMul * 0.75)),
+    itemPaddingY: (c: Resolved['scale']) => rem(mul(c, B.algo.pyMul * 0.5)),
+    listSpacing: (c: Resolved['scale']) => rem(mul(c, B.algo.listSpMul)),
+    minButtonWidth: (c: Resolved['scale']) => rem(mul(c, B.algo.minBtnWMul, 4)),
+    modalMaxWidth: (c: Resolved['scale']) => rem(B.algo.modalMaxMul * c.density * c.baseUnit * 4),
+    paddingX: (c: Resolved['scale']) => rem(mul(c, B.algo.pxMul)),
+    paddingY: (c: Resolved['scale']) => rem(mul(c, B.algo.pyMul)),
+    popoverOffset: (c: Resolved['scale']) => rem(mul(c, B.algo.popoverOffMul, 4)),
+    progressHeight: (c: Resolved['scale']) => rem(mul(c, B.algo.progressHMul)),
+    radius: (c: Resolved['scale']) =>
+        c.radiusMultiplier >= 1 ? `${B.algo.rMax}px` : rem(c.scale * c.radiusMultiplier * 2 * c.baseUnit),
+    separatorSpacing: (c: Resolved['scale']) => rem(mul(c, B.algo.separatorMul)),
+    skeletonSpacing: (c: Resolved['scale']) => rem(mul(c, B.algo.skeletonSpMul)),
+    smallFontSize: (c: Resolved['scale']) => rem(B.algo.fontBase + (c.scale - 1) * B.algo.fontStep),
+    tooltipOffset: (c: Resolved['scale']) => rem(mul(c, B.algo.tooltipOffMul, 4)),
+    triggerMinWidth: (c: Resolved['scale']) => rem(mul(c, B.algo.triggerMinWMul, 4)),
+    xsFontSize: (c: Resolved['scale']) => rem(B.algo.fontBase + Math.max(1, c.scale - 2) * B.algo.fontStep),
+} as const;
+
+type Computed = { readonly [K in keyof typeof compute]: string };
 
 // --- Constants (Single Unified B - ALL Component Tuning) --------------------
 
@@ -127,8 +142,20 @@ const B = Object.freeze({
     algo: {
         badgePxMul: 0.4,
         badgePyMul: 0.1,
+        cmdEmptyPyMul: 1.5,
+        cmdHeadingPxMul: 0.5,
+        cmdHeadingPyMul: 0.375,
+        cmdInputHMul: 2.5,
+        cmdItemHMul: 2,
+        cmdListMaxMul: 16,
+        cmdListMinMul: 8,
+        cmdLoop: true,
+        cmdShortcutPxMul: 0.25,
+        cmdShortcutPyMul: 0.125,
+        cmdShouldFilter: true,
         dialogMaxMul: 28,
         dropdownGapMul: 0.4,
+        dropdownMaxMul: 12,
         ellipsisPxMul: 0.1,
         fontBase: 0.75,
         fontStep: 0.125,
@@ -144,10 +171,58 @@ const B = Object.freeze({
         pxMul: 2,
         pyMul: 0.5,
         rMax: 9999,
+        separatorMul: 0.25,
         skeletonSpMul: 0.4,
         switchThumbInsetPx: 4,
         switchWidthRatio: 1.75,
         tooltipOffMul: 0.35,
+        triggerMinWMul: 8,
+    },
+    cmd: {
+        defaults: {
+            dialog: { placeholder: 'Type a command or search...', useNav: true },
+            inline: { placeholder: 'Search...', useNav: false },
+            palette: { placeholder: 'Type a command or search...', useNav: true },
+        } as {
+            readonly [K in 'dialog' | 'inline' | 'palette']: { readonly placeholder: string; readonly useNav: boolean };
+        },
+        dialog: { content: 'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg shadow-2xl' },
+        empty: { base: 'flex items-center justify-center opacity-50' },
+        group: { base: 'overflow-hidden', heading: { base: 'font-medium opacity-50' } },
+        initialPage: 'home',
+        input: {
+            base: 'flex w-full border-b bg-transparent outline-none placeholder:opacity-50',
+            icon: 'mr-2 shrink-0 opacity-50',
+        },
+        item: {
+            base: 'relative flex cursor-pointer select-none items-center outline-none transition-colors',
+            disabled: DIS,
+            icon: 'mr-2 shrink-0',
+            selected: 'data-[selected=true]:bg-current/10',
+            shortcut: { base: 'ml-auto tracking-widest opacity-60', key: 'rounded bg-current/10' },
+        },
+        label: 'Command Menu',
+        list: { base: 'overflow-y-auto overflow-x-hidden', heightVar: '--cmdk-list-height' },
+        loading: { base: 'flex items-center justify-center' },
+        root: 'flex flex-col overflow-hidden rounded-lg border shadow-lg',
+        separator: 'h-px bg-current/10',
+        state: { disabled: DIS, loading: `${LOAD} cursor-wait` },
+        var: {
+            ...coreVars('cmd'),
+            emptyPy: cv('cmd', 'empty-padding-y', 'py-'),
+            fs: cv('cmd', 'font-size', 'text-[length:'),
+            g: cv('cmd', 'gap', 'gap-'),
+            headingPx: cv('cmd', 'heading-padding-x', 'px-'),
+            headingPy: cv('cmd', 'heading-padding-y', 'py-'),
+            inputH: cv('cmd', 'input-height', 'h-'),
+            itemH: cv('cmd', 'item-height', 'h-'),
+            listMaxH: cv('cmd', 'list-max-height', 'max-h-'),
+            listMinH: cv('cmd', 'list-min-height', 'min-h-'),
+            shortcutPx: cv('cmd', 'shortcut-padding-x', 'px-'),
+            shortcutPy: cv('cmd', 'shortcut-padding-y', 'py-'),
+            smFs: cv('cmd', 'small-font-size', 'text-[length:'),
+            xsFs: cv('cmd', 'xs-font-size', 'text-[length:'),
+        },
     },
     ctrl: {
         state: {
@@ -162,13 +237,11 @@ const B = Object.freeze({
             trackOn: 'bg-current',
         },
         var: {
+            ...coreVars('ctrl'),
             base: 'inline-flex items-center justify-center font-medium transition-all duration-150',
-            fs: 'text-[length:var(--ctrl-font-size)]',
-            g: 'gap-[var(--ctrl-gap)]',
-            h: 'h-[var(--ctrl-height)]',
-            px: 'px-[var(--ctrl-padding-x)]',
-            py: 'py-[var(--ctrl-padding-y)]',
-            r: 'rounded-[var(--ctrl-radius)]',
+            fs: cv('ctrl', 'font-size', 'text-[length:'),
+            g: cv('ctrl', 'gap', 'gap-'),
+            h: cv('ctrl', 'height', 'h-'),
         },
         variant: {
             default: '',
@@ -200,15 +273,13 @@ const B = Object.freeze({
             },
         },
         var: {
-            badgePx: 'px-[var(--data-badge-padding-x)]',
-            badgePy: 'py-[var(--data-badge-padding-y)]',
-            g: 'gap-[var(--data-gap)]',
-            listSp: 'gap-y-[var(--data-list-spacing)]',
-            px: 'px-[var(--data-padding-x)]',
-            py: 'py-[var(--data-padding-y)]',
-            r: 'rounded-[var(--data-radius)]',
-            smFs: 'text-[length:var(--data-small-font-size)]',
-            xsFs: 'text-[length:var(--data-xs-font-size)]',
+            ...coreVars('data'),
+            badgePx: cv('data', 'badge-padding-x', 'px-'),
+            badgePy: cv('data', 'badge-padding-y', 'py-'),
+            g: cv('data', 'gap', 'gap-'),
+            listSp: cv('data', 'list-spacing', 'gap-y-'),
+            smFs: cv('data', 'small-font-size', 'text-[length:'),
+            xsFs: cv('data', 'xs-font-size', 'text-[length:'),
         },
     },
     el: {
@@ -224,12 +295,7 @@ const B = Object.freeze({
             horizontal: 'h-px w-full',
             vertical: 'h-full w-px',
         } as { readonly [K in 'base' | 'horizontal' | 'vertical']: string },
-        var: {
-            gap: 'gap-[var(--el-gap)]',
-            px: 'px-[var(--el-padding-x)]',
-            py: 'py-[var(--el-padding-y)]',
-            r: 'rounded-[var(--el-radius)]',
-        },
+        var: { ...coreVars('el'), gap: cv('el', 'gap', 'gap-') },
     },
     fb: {
         anim: {
@@ -237,13 +303,11 @@ const B = Object.freeze({
             exit: 'animate-out fade-out slide-out-to-top-2',
         },
         var: {
-            fs: 'text-[length:var(--fb-font-size)]',
-            g: 'gap-[var(--fb-gap)]',
-            progressH: 'h-[var(--fb-progress-height)]',
-            px: 'px-[var(--fb-padding-x)]',
-            py: 'py-[var(--fb-padding-y)]',
-            r: 'rounded-[var(--fb-radius)]',
-            skeletonSp: 'gap-y-[var(--fb-skeleton-spacing)]',
+            ...coreVars('fb'),
+            fs: cv('fb', 'font-size', 'text-[length:'),
+            g: cv('fb', 'gap', 'gap-'),
+            progressH: cv('fb', 'progress-height', 'h-'),
+            skeletonSp: cv('fb', 'skeleton-spacing', 'gap-y-'),
         },
     },
     icon: {
@@ -313,24 +377,23 @@ const B = Object.freeze({
             },
         },
         var: {
-            ellipsisPx: 'px-[var(--nav-ellipsis-padding)]',
-            fs: 'text-[length:var(--nav-font-size)]',
-            g: 'gap-[var(--nav-gap)]',
-            h: 'h-[var(--nav-height)]',
-            minW: 'min-w-[var(--nav-min-button-width)]',
-            px: 'px-[var(--nav-padding-x)]',
-            py: 'py-[var(--nav-padding-y)]',
-            r: 'rounded-[var(--nav-radius)]',
+            ...coreVars('nav'),
+            ellipsisPx: cv('nav', 'ellipsis-padding', 'px-'),
+            fs: cv('nav', 'font-size', 'text-[length:'),
+            g: cv('nav', 'gap', 'gap-'),
+            h: cv('nav', 'height', 'h-'),
+            minW: cv('nav', 'min-button-width', 'min-w-'),
         },
     },
     ov: {
         backdrop: 'bg-black/50',
         pos: {
             bottom: 'inset-x-0 bottom-0',
+            fixed: 'fixed inset-0',
             left: 'inset-y-0 left-0',
             right: 'inset-y-0 right-0',
             top: 'inset-x-0 top-0',
-        } as { readonly [K in 'bottom' | 'left' | 'right' | 'top']: string },
+        } as { readonly [K in 'bottom' | 'fixed' | 'left' | 'right' | 'top']: string },
         size: {
             '2xl': 'max-w-2xl',
             full: 'max-w-full mx-4',
@@ -340,12 +403,10 @@ const B = Object.freeze({
             xl: 'max-w-xl',
         } as { readonly [K in '2xl' | 'full' | 'lg' | 'md' | 'sm' | 'xl']: string },
         var: {
-            dialogMaxW: 'max-w-[var(--ov-dialog-max-width)]',
-            modalMaxW: 'max-w-[var(--ov-modal-max-width)]',
+            ...coreVars('ov'),
+            dialogMaxW: cv('ov', 'dialog-max-width', 'max-w-'),
+            modalMaxW: cv('ov', 'modal-max-width', 'max-w-'),
             popoverOff: 'var(--ov-popover-offset)',
-            px: 'px-[var(--ov-padding-x)]',
-            py: 'py-[var(--ov-padding-y)]',
-            r: 'rounded-[var(--ov-radius)]',
             tooltipOff: 'var(--ov-tooltip-offset)',
         },
     },
@@ -356,82 +417,50 @@ const B = Object.freeze({
             vertical: 'overflow-x-hidden overflow-y-auto',
         } as { readonly [K in 'both' | 'horizontal' | 'vertical']: string },
         scrollbar: { hidden: 'scrollbar-none', visible: 'scrollbar-thin' },
-        var: {
-            h: 'h-[var(--util-height)]',
-            maxH: 'max-h-[var(--util-height)]',
-            px: 'px-[var(--util-padding-x)]',
-            py: 'py-[var(--util-padding-y)]',
-            r: 'rounded-[var(--util-radius)]',
-        },
+        var: { ...coreVars('util'), h: cv('util', 'height', 'h-'), maxH: cv('util', 'height', 'max-h-') },
     },
 } as const);
 
-// --- Dispatch Tables --------------------------------------------------------
+// --- Unified fn Object (Consolidated Helpers) -------------------------------
 
-const compute: { readonly [K in keyof Computed]: (c: Scale) => string } = {
-    badgePaddingX: (c) => `${(c.scale * B.algo.badgePxMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    badgePaddingY: (c) => `${(c.scale * B.algo.badgePyMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    dialogMaxWidth: (c) => `${(B.algo.dialogMaxMul * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    dropdownGap: (c) => `${(c.scale * B.algo.dropdownGapMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    dropdownMaxHeight: (c) => `${(c.scale * 12 * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    ellipsisPadding: (c) => `${(c.scale * B.algo.ellipsisPxMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    fontSize: (c) => `${(B.algo.fontBase + c.scale * B.algo.fontStep).toFixed(3)}rem`,
-    gap: (c) => `${(c.scale * B.algo.gapMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    height: (c) => `${((B.algo.hBase + c.scale * B.algo.hStep) * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    iconSize: (c) =>
-        `${((B.algo.fontBase + c.scale * B.algo.fontStep) * B.algo.iconRatio * c.baseUnit * 4).toFixed(3)}rem`,
-    itemHeight: (c) => `${((B.algo.hBase + c.scale * B.algo.hStep * 0.8) * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    itemPaddingX: (c) => `${(c.scale * B.algo.pxMul * 0.75 * c.density * c.baseUnit).toFixed(3)}rem`,
-    itemPaddingY: (c) => `${(c.scale * B.algo.pyMul * 0.5 * c.density * c.baseUnit).toFixed(3)}rem`,
-    listSpacing: (c) => `${(c.scale * B.algo.listSpMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    minButtonWidth: (c) => `${(c.scale * B.algo.minBtnWMul * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    modalMaxWidth: (c) => `${(B.algo.modalMaxMul * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    paddingX: (c) => `${(c.scale * B.algo.pxMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    paddingY: (c) => `${(c.scale * B.algo.pyMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    popoverOffset: (c) => `${(c.scale * B.algo.popoverOffMul * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    progressHeight: (c) => `${(c.scale * B.algo.progressHMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    radius: (c) =>
-        c.radiusMultiplier >= 1
-            ? `${B.algo.rMax}px`
-            : `${(c.scale * c.radiusMultiplier * 2 * c.baseUnit).toFixed(3)}rem`,
-    separatorSpacing: (c) => `${(c.scale * 0.25 * c.density * c.baseUnit).toFixed(3)}rem`,
-    skeletonSpacing: (c) => `${(c.scale * B.algo.skeletonSpMul * c.density * c.baseUnit).toFixed(3)}rem`,
-    smallFontSize: (c) => `${(B.algo.fontBase + (c.scale - 1) * B.algo.fontStep).toFixed(3)}rem`,
-    tooltipOffset: (c) => `${(c.scale * B.algo.tooltipOffMul * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    triggerMinWidth: (c) => `${(c.scale * 8 * c.density * c.baseUnit * 4).toFixed(3)}rem`,
-    xsFontSize: (c) => `${(B.algo.fontBase + Math.max(1, c.scale - 2) * B.algo.fontStep).toFixed(3)}rem`,
-};
-
-// --- Pure Utility Functions -------------------------------------------------
-
-const cls = (...inputs: ReadonlyArray<string | false | undefined>): string => twMerge(clsx(inputs));
-const strokeWidth = (scale: number): number =>
-    Math.max(B.icon.stroke.min, Math.min(B.icon.stroke.max, B.icon.stroke.base - scale * B.icon.stroke.factor));
-const cssVars = (d: Computed, prefix: string): Record<string, string> =>
-    Object.fromEntries(
-        Object.entries(d).map(([k, v]) => [`--${prefix}-${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, v]),
-    );
-const computeScale = (s: Scale): Computed =>
-    Object.fromEntries(
-        (Object.keys(compute) as ReadonlyArray<keyof Computed>).map((k) => [k, compute[k](s)]),
-    ) as Computed;
+const fn = {
+    cls: (...inputs: ReadonlyArray<string | false | undefined>): string => twMerge(clsx(inputs)),
+    computeScale: (s: Resolved['scale']): Computed =>
+        Object.fromEntries(
+            (Object.keys(compute) as ReadonlyArray<keyof Computed>).map((k) => [k, compute[k](s)]),
+        ) as Computed,
+    cssVars: (d: Computed, prefix: string): Record<string, string> =>
+        Object.fromEntries(
+            Object.entries(d).map(([k, x]) => [`--${prefix}-${k.replace(/([A-Z])/g, '-$1').toLowerCase()}`, x]),
+        ),
+    merge: <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
+        a || b ? ({ ...a, ...b } as T) : undefined,
+    optProps: <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+        Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>,
+    strokeWidth: (n: number): number =>
+        Math.max(B.icon.stroke.min, Math.min(B.icon.stroke.max, B.icon.stroke.base - n * B.icon.stroke.factor)),
+    zStyle: (o: Resolved['overlay'], isUnderlay = false): CSSProperties => ({
+        zIndex: isUnderlay ? o.zIndex - 10 : o.zIndex,
+    }),
+} as const;
 
 // --- State Class Dispatch (Unified for all component categories) ------------
 
-type StateKey = 'ctrl' | 'data' | 'el' | 'fb' | 'menu' | 'nav' | 'ov';
-const stateCls: { readonly [K in StateKey]: (b: Behavior) => string } = {
+type StateKey = 'cmd' | 'ctrl' | 'data' | 'el' | 'fb' | 'menu' | 'nav' | 'ov';
+const stateCls: { readonly [K in StateKey]: (b: Resolved['behavior']) => string } = {
+    cmd: (b) => fn.cls(b.disabled ? B.cmd.state.disabled : undefined, b.loading ? B.cmd.state.loading : undefined),
     ctrl: (b) =>
-        cls(
+        fn.cls(
             b.disabled ? B.ctrl.state.disabled : undefined,
             b.loading ? B.ctrl.state.loading : undefined,
             b.readonly ? B.ctrl.state.readonly : undefined,
         ),
-    data: (b) => cls(b.disabled ? B.data.state.disabled : undefined, b.loading ? B.data.state.loading : undefined),
-    el: (b) => cls(b.disabled ? 'pointer-events-none opacity-50' : undefined, b.loading ? 'animate-pulse' : undefined),
-    fb: (b) => cls(b.disabled ? 'pointer-events-none opacity-50' : undefined),
-    menu: (b) => cls(b.disabled ? B.menu.state.disabled : undefined, b.loading ? B.menu.state.loading : undefined),
-    nav: (b) => cls(b.disabled ? B.nav.state.disabled : undefined),
-    ov: (b) => cls(b.disabled ? 'pointer-events-none' : undefined, b.loading ? 'cursor-wait' : undefined),
+    data: (b) => fn.cls(b.disabled ? B.data.state.disabled : undefined, b.loading ? B.data.state.loading : undefined),
+    el: (b) => fn.cls(b.disabled ? DIS : undefined, b.loading ? LOAD : undefined),
+    fb: (b) => fn.cls(b.disabled ? DIS : undefined),
+    menu: (b) => fn.cls(b.disabled ? B.menu.state.disabled : undefined, b.loading ? B.menu.state.loading : undefined),
+    nav: (b) => fn.cls(b.disabled ? B.nav.state.disabled : undefined),
+    ov: (b) => fn.cls(b.disabled ? 'pointer-events-none' : undefined, b.loading ? 'cursor-wait' : undefined),
 };
 
 // --- useForwardedRef Hook (Eliminates 20+ Boilerplate Instances) ------------
@@ -465,7 +494,7 @@ const useCollectionEl = <T extends HTMLElement>(focusClass?: string): Collection
         merge: <P>(ariaProps: P, ...classes: ReadonlyArray<string | false | undefined>) => ({
             ...ariaProps,
             ...focusProps,
-            className: cls(
+            className: fn.cls(
                 ...classes.filter((c): c is string => typeof c === 'string'),
                 isFocusVisible ? focusClass : undefined,
             ),
@@ -480,27 +509,22 @@ const useCollectionEl = <T extends HTMLElement>(focusClass?: string): Collection
 const resolve = <K extends SchemaKey>(key: K, input?: Inputs[K]): Resolved[K] =>
     S.decodeUnknownSync(Schemas[key] as unknown as S.Schema<Resolved[K], Inputs[K]>)(input ?? {});
 
-const merge = <T extends Record<string, unknown>>(a?: T, b?: T): T | undefined =>
-    a || b ? ({ ...a, ...b } as T) : undefined;
-
 // --- Factory Tuning System (Single Source of Truth) -------------------------
 
-type TuningConfig = {
-    readonly animation?: AnimationInput | undefined;
-    readonly behavior?: BehaviorInput | undefined;
-    readonly feedback?: FeedbackInput | undefined;
-    readonly overlay?: OverlayInput | undefined;
-    readonly scale?: ScaleInput | undefined;
-};
+type TuningConfig = { readonly [K in SchemaKey]?: Inputs[K] | undefined };
 type TuningKey = keyof TuningConfig;
-type CtrlTuning = Pick<TuningConfig, 'behavior' | 'scale'>;
-type DataTuning = Pick<TuningConfig, 'behavior' | 'scale'>;
-type ElTuning = Pick<TuningConfig, 'behavior' | 'scale'>;
-type FbTuning = Pick<TuningConfig, 'animation' | 'feedback' | 'scale'>;
-type MenuTuning = Pick<TuningConfig, 'animation' | 'behavior' | 'overlay' | 'scale'>;
-type NavTuning = Pick<TuningConfig, 'animation' | 'behavior' | 'scale'>;
-type OvTuning = Pick<TuningConfig, 'animation' | 'overlay' | 'scale'>;
-type UtilTuning = Pick<TuningConfig, 'scale'>;
+const TUNING_KEYS = {
+    cmd: ['animation', 'behavior', 'overlay', 'scale'],
+    ctrl: ['behavior', 'scale'],
+    data: ['behavior', 'scale'],
+    el: ['behavior', 'scale'],
+    fb: ['animation', 'feedback', 'scale'],
+    menu: ['animation', 'behavior', 'overlay', 'scale'],
+    nav: ['animation', 'behavior', 'scale'],
+    ov: ['animation', 'overlay', 'scale'],
+    util: ['scale'],
+} as const;
+type TuningFor<K extends keyof typeof TUNING_KEYS> = Pick<TuningConfig, (typeof TUNING_KEYS)[K][number]>;
 
 const pick = <K extends TuningKey>(t: TuningConfig | undefined, keys: ReadonlyArray<K>): Pick<TuningConfig, K> =>
     t
@@ -512,16 +536,16 @@ const merged = <K extends TuningKey>(
     i: TuningConfig,
     keys: ReadonlyArray<K>,
 ): Pick<TuningConfig, K> =>
-    Object.fromEntries(keys.map((k) => [k, merge(t?.[k], i[k])]).filter(([, v]) => v)) as Pick<TuningConfig, K>;
+    Object.fromEntries(keys.map((k) => [k, fn.merge(t?.[k], i[k])]).filter(([, x]) => x)) as Pick<TuningConfig, K>;
 
-const animStyle = (a: Animation): CSSProperties =>
+const animStyle = (a: Resolved['animation']): CSSProperties =>
     a.enabled
         ? { transition: `all ${a.duration}ms ${a.easing}`, transitionDelay: a.delay ? `${a.delay}ms` : undefined }
         : {};
 
 type ResolvedContext<R extends SchemaKey> = {
     readonly computed: Computed;
-    readonly scale: Scale;
+    readonly scale: Resolved['scale'];
     readonly vars: Record<string, string>;
 } & { readonly [K in R]: Resolved[K] };
 
@@ -531,11 +555,11 @@ const createBuilderContext = <K extends string, R extends SchemaKey>(
     input: Partial<TuningConfig>,
 ): ResolvedContext<R> => {
     const s = resolve('scale', input.scale);
-    const c = computeScale(s);
+    const c = fn.computeScale(s);
     const resolved = Object.fromEntries(
         resolvers.map((k) => [k, resolve(k, input[k as keyof TuningConfig] as never)]),
     ) as { readonly [K in R]: Resolved[K] };
-    return { ...resolved, computed: c, scale: s, vars: cssVars(c, cssPrefix) };
+    return { ...resolved, computed: c, scale: s, vars: fn.cssVars(c, cssPrefix) };
 };
 
 // --- Export -----------------------------------------------------------------
@@ -545,45 +569,18 @@ export {
     AnimationSchema,
     B,
     BehaviorSchema,
-    cls,
     compute,
-    computeScale,
     createBuilderContext,
-    cssVars,
     FeedbackSchema,
-    merge,
+    fn,
     merged,
     OverlaySchema,
     pick,
     resolve,
     ScaleSchema,
     stateCls,
-    strokeWidth,
+    TUNING_KEYS,
     useCollectionEl,
     useForwardedRef,
 };
-export type {
-    Animation,
-    AnimationInput,
-    Behavior,
-    BehaviorInput,
-    CollectionElResult,
-    Computed,
-    CtrlTuning,
-    DataTuning,
-    ElTuning,
-    FbTuning,
-    Feedback,
-    FeedbackInput,
-    MenuTuning,
-    NavTuning,
-    Overlay,
-    OverlayInput,
-    OvTuning,
-    ResolvedContext,
-    Scale,
-    ScaleInput,
-    SchemaKey,
-    TuningConfig,
-    UtilTuning,
-};
+export type { CollectionElResult, Computed, Inputs, Resolved, ResolvedContext, SchemaKey, TuningConfig, TuningFor };

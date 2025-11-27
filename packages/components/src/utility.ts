@@ -1,7 +1,7 @@
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef } from 'react';
-import type { ScaleInput, UtilTuning } from './schema.ts';
-import { B, cls, computeScale, cssVars, merged, pick, resolve, useForwardedRef } from './schema.ts';
+import type { Inputs, TuningFor } from './schema.ts';
+import { B, fn, merged, pick, resolve, TUNING_KEYS, useForwardedRef } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -15,14 +15,14 @@ type UtilityInput = {
     readonly className?: string;
     readonly direction?: ScrollDirection;
     readonly hideScrollbar?: boolean;
-    readonly scale?: ScaleInput | undefined;
+    readonly scale?: Inputs['scale'] | undefined;
 };
 
 // --- Component Factory ------------------------------------------------------
 
 const createScrollArea = (i: UtilityInput) => {
     const scl = resolve('scale', i.scale);
-    const vars = cssVars(computeScale(scl), 'util');
+    const vars = fn.cssVars(fn.computeScale(scl), 'util');
     const dir = i.direction ?? 'vertical';
     const Comp = forwardRef((props: ScrollAreaProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, direction = dir, hideScrollbar = i.hideScrollbar, style, ...rest } = props;
@@ -31,7 +31,7 @@ const createScrollArea = (i: UtilityInput) => {
             'div',
             {
                 ...rest,
-                className: cls(
+                className: fn.cls(
                     'relative',
                     B.util.dir[direction],
                     hideScrollbar ? B.util.scrollbar.hidden : B.util.scrollbar.visible,
@@ -52,12 +52,10 @@ const createScrollArea = (i: UtilityInput) => {
 
 // --- Factory ----------------------------------------------------------------
 
-const K = ['scale'] as const;
-
-const createUtility = (tuning?: UtilTuning) =>
+const createUtility = (tuning?: TuningFor<'util'>) =>
     Object.freeze({
-        create: (i: UtilityInput) => createScrollArea({ ...i, ...merged(tuning, i, K) }),
-        ScrollArea: createScrollArea({ ...pick(tuning, K) }),
+        create: (i: UtilityInput) => createScrollArea({ ...i, ...merged(tuning, i, TUNING_KEYS.util) }),
+        ScrollArea: createScrollArea({ ...pick(tuning, TUNING_KEYS.util) }),
     });
 
 // --- Export -----------------------------------------------------------------
