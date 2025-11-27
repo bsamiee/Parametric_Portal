@@ -27,6 +27,7 @@ type Workflow = { readonly name: string; readonly path: string };
 
 type WorkflowMetric = {
     readonly failed: number;
+    readonly file: string;
     readonly name: string;
     readonly passed: number;
     readonly rate: number;
@@ -87,21 +88,24 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
     const depsOpen = openPrs.filter(isBot).length;
     const depsMerged = merged.filter(isBot).length;
 
-    // Workflow metrics (dynamic discovery)
+    // Workflow metrics (dynamic discovery, excludes skipped/cancelled from rate calculation)
     const workflows = allWorkflows ?? [];
+    const excludedConclusions = ['skipped', 'cancelled'] as const;
     const workflowMetrics = await Promise.all(
         workflows.map(async (w): Promise<WorkflowMetric | null> => {
-            const runs = (await call(
+            const file = w.path.split('/').pop()?.replace('.yml', '') ?? '';
+            const allRuns = (await call(
                 ctx,
                 'actions.listWorkflowRuns',
-                w.path.split('/').pop() ?? '',
+                `${file}.yml`,
                 `>=${monitorSince}`,
             )) as ReadonlyArray<WorkflowRun> | undefined;
-            const total = runs?.length ?? 0;
-            const passed = runs?.filter((r) => r.conclusion === 'success').length ?? 0;
+            const runs = allRuns?.filter((r) => r.conclusion && !excludedConclusions.includes(r.conclusion as never)) ?? [];
+            const total = runs.length;
+            const passed = runs.filter((r) => r.conclusion === 'success').length;
             const failed = total - passed;
             return total > 0
-                ? { failed, name: w.name, passed, rate: Math.round((passed / total) * 100), runs: total }
+                ? { failed, file, name: w.name, passed, rate: Math.round((passed / total) * 100), runs: total }
                 : null;
         }),
     );
@@ -128,7 +132,7 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
 
 // --- Section Renderers ------------------------------------------------------
 
-const renderHealthBadges = (m: Metrics): string => {
+const renderHealthBadges = (m: Metrics, repo: string): string => {
     const { colors, targets } = B.dashboard;
     const ciColor =
         m.workflowRate >= targets.workflowSuccess
@@ -138,11 +142,12 @@ const renderHealthBadges = (m: Metrics): string => {
               : colors.error;
     const prColor = m.prStale > 0 ? colors.warning : colors.info;
     const issueColor = m.issueBugs > 0 ? colors.warning : colors.info;
+    const gh = (path: string): string => `https://github.com/${repo}/${path}`;
 
     return [
-        B.gen.shield('CI', `${m.workflowRate}%25`, ciColor),
-        B.gen.shield('PRs', `${m.prOpen}_open`, prColor),
-        B.gen.shield('Issues', `${m.issueOpen}_open`, issueColor),
+        B.gen.link(B.gen.shield('CI', `${m.workflowRate}%25`, ciColor), gh('actions')),
+        B.gen.link(B.gen.shield('PRs', `${m.prOpen}_open`, prColor), gh('pulls')),
+        B.gen.link(B.gen.shield('Issues', `${m.issueOpen}_open`, issueColor), gh('issues')),
     ].join(' ');
 };
 
@@ -190,19 +195,23 @@ const renderActivity = (m: Metrics, repo: string): string => {
 
 const renderCI = (m: Metrics, repo: string): string => {
     const { colors, targets } = B.dashboard;
-    const statusBadge = (rate: number): string =>
-        rate >= targets.workflowSuccess
-            ? B.gen.shield('', 'pass', colors.success, 'flat-square')
-            : B.gen.shield('', 'warn', colors.warning, 'flat-square');
+    const workflowUrl = (file: string): string => `https://github.com/${repo}/actions/workflows/${file}.yml`;
+    const statusBadge = (rate: number, file: string): string =>
+        B.gen.link(
+            rate >= targets.workflowSuccess
+                ? B.gen.shield('', 'pass', colors.success, 'flat-square')
+                : B.gen.shield('', 'warn', colors.warning, 'flat-square'),
+            workflowUrl(file),
+        );
 
-    const rows = m.workflows.map((w) => [w.name, String(w.runs), `${w.rate}%`, statusBadge(w.rate)]);
+    const rows = m.workflows.map((w) => [
+        B.gen.link(w.name, workflowUrl(w.file)),
+        String(w.runs),
+        `${w.rate}%`,
+        statusBadge(w.rate, w.file),
+    ]);
 
-    const badges = m.workflows
-        .map((w) => {
-            const filename = w.name.toLowerCase().replace(/\s+/g, '-');
-            return B.gen.badge(repo, filename);
-        })
-        .join(' ');
+    const badges = m.workflows.map((w) => B.gen.badge(repo, w.file)).join(' ');
 
     const table =
         rows.length > 0
@@ -249,14 +258,14 @@ const renderThresholds = (): string =>
 const format = (m: Metrics, repo: string): string =>
     [
         `# ${B.dashboard.output.displayTitle}`,
-        renderHealthBadges(m),
+        renderHealthBadges(m, repo),
         renderHeader(m, new Date()),
         renderActivity(m, repo),
         renderCI(m, repo),
         renderHealth(m),
         renderThresholds(),
         '---',
-        `_Generated by ${B.gen.link(B.dashboard.workflow, `https://github.com/${repo}/blob/main/.github/workflows/${B.dashboard.workflow}`)} · Updated every ${B.dashboard.schedule.interval} ${B.dashboard.schedule.unit}_`,
+        `_Generated by ${B.gen.link(B.dashboard.workflow, `https://github.com/${repo}/blob/main/.github/workflows/${B.dashboard.workflow}`)} · Updated every ${B.dashboard.schedule.interval} ${B.dashboard.schedule.unit} · Comment \`${B.dashboard.command}\` to refresh_`,
     ].join('\n\n');
 
 // --- Entry Point ------------------------------------------------------------

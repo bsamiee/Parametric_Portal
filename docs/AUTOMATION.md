@@ -11,7 +11,7 @@ Comprehensive guide to the agentic automation systems in Parametric Portal.
 | **Issue Lifecycle** | Quality review + stale management | issues (opened/edited), 6h schedule | - | issue-lifecycle.yml |
 | **Renovate Auto-Merge** | Mutation-gated dependency updates | pull_request, check_suite | - | renovate-automerge.yml |
 | **Biome Repair** | Auto-fix style issues | pull_request | - | biome-repair.yml |
-| **Dashboard** | Repository health metrics | schedule, /health | - | dashboard.yml |
+| **Dashboard** | Repository health metrics | schedule, /update | - | dashboard.yml |
 | **Release** | Conventional commit releases | push to main | - | release.yml |
 | **Bundle Analysis** | Bundle size tracking | pull_request | - | bundle-analysis.yml |
 | **Security** | Multi-layer security scanning | pull_request, push, schedule | - | security.yml |
@@ -93,15 +93,15 @@ Slash commands provide on-demand workflow triggers via issue/PR comments.
 
 ---
 
-### `/health` - Dashboard Refresh
+### `/update` - Dashboard Refresh
 
-**Usage**: Comment `/health` on the pinned dashboard issue (label: `pinned`)
+**Usage**: Comment `/update` on the pinned dashboard issue (label: `dashboard`)
 
 **Effect**:
-- Runs health checks: `pnpm typecheck` + `pnpm check`
 - Collects metrics: PRs, issues, commits, contributors, Renovate activity
+- Calculates workflow success rates (excludes skipped/cancelled runs)
 - Updates dashboard issue with structured markdown report
-- Includes workflow status badges
+- Includes clickable workflow status badges with direct links
 
 ---
 
@@ -185,7 +185,7 @@ All issue templates produce JSON-parseable output via [github/issue-parser](http
 **Auto-Updates**:
 - Schedule: Every 6 hours
 - On main push
-- On `/health` command
+- On `/update` command
 
 **Metrics**:
 - Open PRs, merged (7d), stale (>14d)
@@ -332,7 +332,7 @@ Unified Node.js + pnpm setup used by all workflows. Eliminates ~200 lines of dup
 - [ ] Biome repair doesn't break tests
 - [ ] Dashboard issue created and populated
 - [ ] No new secrets required (GITHUB_TOKEN only)
-- [ ] Slash commands (/summarize, /health) functional
+- [ ] Slash commands (/summarize, /update) functional
 - [ ] All workflows have concurrency groups
 - [ ] Composite action (.github/actions/setup) working in all workflows
 
@@ -344,7 +344,7 @@ Unified Node.js + pnpm setup used by all workflows. Eliminates ~200 lines of dup
 - Check branch protection rules
 
 **Slash command not responding?**
-- Ensure issue has correct label (e.g., `pinned` for `/health`)
+- Ensure issue has correct label (e.g., `dashboard` for `/update`)
 - Verify command is exact (case-sensitive)
 - Check workflow permissions (issues: write)
 

@@ -17,7 +17,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/labels.yml` — Declarative label definitions with colors (managed by auto-labeler)
 - `.github/copilot-instructions.md` — IDE agent instructions
 
-### GitHub Workflows
+### GitHub Workflows (14 total)
 - `.github/workflows/ci.yml` — Main CI pipeline with quality gates
 - `.github/workflows/claude-pr-review.yml` — Consolidated PR review: REQUIREMENTS.md compliance + feedback synthesis + /summarize
 - `.github/workflows/auto-labeler.yml` — Declarative label sync
@@ -31,6 +31,18 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/security.yml` — Multi-layer security scanning
 - `.github/workflows/claude.yml` — Claude @mention integration
 - `.github/workflows/claude-issues.yml` — implement label automation
+- `.github/workflows/claude-maintenance.yml` — Automated maintenance tasks
+
+### GitHub Scripts (7 total)
+Config-driven TypeScript scripts leveraging unified schema infrastructure:
+
+- `.github/scripts/schema.ts` — Core infrastructure: B constant, SpecRegistry types, API ops, mutate handlers (722 LOC)
+- `.github/scripts/dashboard.ts` — Repository metrics collection and rendering (282 LOC)
+- `.github/scripts/probe.ts` — Target-specific data collection for issues/PRs/discussions (233 LOC)
+- `.github/scripts/report.ts` — Universal content generation via STO architecture (137 LOC)
+- `.github/scripts/release.ts` — Changelog generation and release creation (87 LOC)
+- `.github/scripts/review.ts` — Content validation for issues/PRs (66 LOC)
+- `.github/scripts/failure-alert.ts` — CI/security failure alerting (45 LOC)
 
 ### GitHub Composite Actions (1 total)
 - `.github/actions/setup/action.yml` — Unified Node.js + pnpm setup with caching (used by all workflows)
@@ -78,6 +90,56 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `docs/INTEGRATIONS.md` — External integrations and setup
 - `docs/agent-context/README.md` — Project map query protocol
 - `docs/agent-context/project-map.json` — Nx graph + public APIs (generated)
+
+---
+
+## Schema Infrastructure
+
+The `.github/scripts/schema.ts` file is the core of the automation system, implementing:
+
+### Single B Constant
+All configuration in one frozen object with nested domains:
+- `B.alerts` — CI/security alert templates
+- `B.algo` — Algorithm thresholds (stale days, mutation %)
+- `B.api` — GitHub API constants (per_page, states)
+- `B.content` — Report configurations (aging, bundle)
+- `B.dashboard` — Dashboard config (bots, colors, targets, schedule)
+- `B.gen` — Markdown generators (badges, shields, links, callouts)
+- `B.labels` — Label taxonomy (categories, exempt lists)
+- `B.patterns` — Regex patterns for parsing
+- `B.probe` — Data collection defaults
+- `B.release` — Conventional commit mapping
+- `B.reports` — Quality review config
+- `B.requirements` — Required fields per issue type
+- `B.thresholds` — Validation thresholds
+- `B.time` — Time constants (day in ms)
+
+### SpecRegistry Type System
+Polymorphic spec definitions for type-safe operations:
+- `U<'alert'>` — CI/security alert specs
+- `U<'dashboard'>` — Dashboard update specs
+- `U<'filter'>` — Issue filtering (age, label)
+- `U<'validate'>` — Content validation (length, fields)
+- `U<'source'>` — Data sources (fetch, params, payload)
+- `U<'output'>` — Output targets (summary, comment, issue)
+- `U<'format'>` — Formatters (table, body)
+- `U<'mutate'>` — Mutation ops (comment, issue, label, review, release)
+
+### Ops Factory
+Dispatch table mapping operation keys to GitHub API calls:
+- REST API: issues, pulls, repos, actions, checks
+- GraphQL: discussions, issue pinning
+- Automatic pagination and error handling
+
+### Pure Functions (`fn` object)
+Utility functions for common operations:
+- `fn.age()` — Calculate days since date
+- `fn.body()` — Render BodySpec to markdown
+- `fn.filter()` — Apply filter specs to issues
+- `fn.validate()` — Run validation specs
+- `fn.report()` — Generate markdown tables
+- `fn.diff()` — Calculate size differences
+- `fn.size()` — Human-readable byte sizes
 
 ---
 
@@ -158,7 +220,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         GitHub Workflows (13)                         │
+│                         GitHub Workflows (14)                         │
 │  ┌──────────────┐  ┌─────────────────────────────────┐  ┌──────────┐ │
 │  │ CI Pipeline  │→│ claude-pr-review.yml             │←│ Biome    │ │
 │  │              │  │ (consolidated: review+synthesis) │  │ Repair   │ │
@@ -169,6 +231,15 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 │  │ Label Sync   │          │ Issue        │                          │
 │  │              │          │ Lifecycle    │                          │
 │  └──────────────┘          └──────────────┘                          │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      Schema Infrastructure (7 scripts)                │
+│  ┌──────────────────────────────────────────────────────────────────┐│
+│  │ schema.ts → dashboard.ts, probe.ts, report.ts, release.ts, ...  ││
+│  │ B constant + SpecRegistry + Ops Factory + Mutate Handlers        ││
+│  └──────────────────────────────────────────────────────────────────┘│
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
           ┌──────────────────┴──────────────────┐
@@ -186,6 +257,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 2. **Context Gen**: Nx graph → generate-context → project-map.json → Custom Agents
 3. **PR Lifecycle**: PR opened → Biome Repair → CI → Code Review → Merge
 4. **Dependency Flow**: Renovate PR → CI + Mutation → Auto-Merge gate → Merge/Block
+5. **Dashboard**: Schedule/command → schema.ts → collect metrics → render → update issue
 
 ---
 
@@ -212,6 +284,29 @@ Extracts Nx project graph and package metadata to create structured context for 
 **tools/parse-agent-context.ts**
 Parses AGENT_CONTEXT JSON blocks from issue and PR template bodies. Extracts metadata like type (bug/feature), scope, agents, patterns, priority, and test coverage requirements. Returns default context when missing/invalid. CLI mode accepts body via stdin, outputs structured JSON for workflow consumption.
 
+### GitHub Scripts
+
+**schema.ts** (Core Infrastructure)
+Unified schema providing B constant, SpecRegistry type system, ops factory for GitHub API, and mutate handlers. All other scripts import from schema.ts. Implements dispatch tables for polymorphic operations, pure functions for data transformation, and type-safe mutations.
+
+**dashboard.ts**
+Repository health dashboard generator. Collects metrics via parallel API calls: PRs (open, merged, stale), issues (open, closed, bugs), commits, contributors, Renovate activity, workflow success rates. Excludes skipped/cancelled runs from rate calculation. Renders clickable badges linking to GitHub sections.
+
+**probe.ts**
+Target-specific data collection with dispatch table for issues, PRs, and discussions. Extracts reviews, checks, commits, files, comments with truncation. Used by review workflows to gather context before AI processing.
+
+**report.ts**
+Universal content generation via STO (Source → Transform → Output) architecture. Handles aging reports, bundle analysis, and custom reports. Config-driven row builders and output dispatchers.
+
+**release.ts**
+Conventional commit analyzer and release creator. Groups commits by type (breaking, feat, fix, refactor, docs), determines bump type (major/minor/patch), generates changelog. Creates GitHub releases via mutate handler.
+
+**review.ts**
+Content validation for issues and PRs. Checks title length, body length, required fields by template type. Manages `needs-info` label (add on problems, remove when fixed).
+
+**failure-alert.ts**
+Creates/updates issues for CI and security failures. Classifies CI failures by job type (build, test, mutation → tech-debt labels). Security alerts get critical priority label.
+
 ### GitHub Workflows
 
 **claude-pr-review.yml** (Consolidated)
@@ -234,7 +329,7 @@ Auto-fixes style issues before human review. Runs `pnpm biome check --write --un
 Enforces conventional commit format for PR titles. Uses amannn/action-semantic-pull-request to validate type (feat/fix/refactor/style/docs/deps/test/chore), requires scope, validates subject pattern (lowercase, descriptive). Blocks merge on violation. Ignores: bot, dependencies labels.
 
 **dashboard.yml**
-Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or `/health` command on dashboard issue. Collects metrics: open PRs, merged (7d), stale (>14d); open issues by type; Renovate activity; commit activity; latest release.
+Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or `/update` command on dashboard issue. Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
 
 **release.yml**
 Automated releases based on conventional commits. Triggered by push to main (src paths) or workflow_dispatch. Analyzes commits for release type: `feat!` → major, `feat` → minor, `fix` → patch. Generates changelog grouped by Breaking, Features, Fixes, Refactoring, Docs.
@@ -317,7 +412,7 @@ Pre-commit hooks. Two commands: biome (runs `pnpm biome check --write`, auto-sta
 Two on-demand workflow triggers via issue/PR comments:
 
 - **`/summarize`** — PR Review workflow, synthesizes all feedback
-- **`/health`** — Dashboard workflow, refreshes metrics (dashboard issue only)
+- **`/update`** — Dashboard workflow, refreshes metrics (dashboard issue only)
 
 ---
 
@@ -340,7 +435,8 @@ Two on-demand workflow triggers via issue/PR comments:
 - **Dispatch Tables**: Replace if/else with type-safe lookup tables
 - **Branded Types**: Nominal typing via @effect/schema `S.Brand`
 - **Section Separators**: 77-char separators for files >50 LOC
+- **SpecRegistry**: Polymorphic type system for config-driven operations
 
 ---
 
-**Last Updated**: 2025-11-26
+**Last Updated**: 2025-11-27
