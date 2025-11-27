@@ -103,7 +103,7 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
                 `${file}.yml`,
                 `>=${monitorSince}`,
             )) as ReadonlyArray<WorkflowRun> | undefined;
-            const runs = allRuns?.filter((r) => r.conclusion && !excludedConclusions.includes(r.conclusion as never)) ?? [];
+            const runs = allRuns?.filter((r) => r.conclusion && !['skipped', 'cancelled'].includes(r.conclusion)) ?? [];
             const total = runs.length;
             const passed = runs.filter((r) => r.conclusion === 'success').length;
             const failed = total - passed;
