@@ -266,16 +266,16 @@ const renderCI = (m: Metrics, repo: string): string => {
 const renderHealth = (m: Metrics): string => {
     const issues = [
         m.prStale > B.dashboard.targets.stalePrs &&
-            `⚠️ **${m.prStale} stale PRs** need review (>${B.dashboard.staleDays} days without update)`,
+            `[WARN] **${m.prStale} stale PRs** need review (>${B.dashboard.staleDays} days without update)`,
         m.workflowRate < B.dashboard.targets.workflowSuccess &&
-            `⚠️ **CI success rate** at ${m.workflowRate}% (target: ${B.dashboard.targets.workflowSuccess}%)`,
-        m.issueBugs > 0 && `🐛 **${m.issueBugs} open bugs** requiring attention`,
+            `[WARN] **CI success rate** at ${m.workflowRate}% (target: ${B.dashboard.targets.workflowSuccess}%)`,
+        m.issueBugs > 0 && `[BUG] **${m.issueBugs} open bugs** requiring attention`,
     ].filter(Boolean) as ReadonlyArray<string>;
 
     const header = '## Health Check\n\n';
     return issues.length > 0
         ? header + B.gen.alert('warning', issues.join('\n'))
-        : header + B.gen.alert('tip', '✅ All health targets met. Repository is in good shape!');
+        : header + B.gen.alert('tip', '[OK] All health targets met. Repository is in good shape!');
 };
 
 const renderThresholds = (): string =>
