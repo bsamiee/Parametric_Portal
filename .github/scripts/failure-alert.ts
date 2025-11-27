@@ -10,8 +10,9 @@ import { B, createCtx, fn, mutate, type RunParams, type U } from './schema.ts';
 // --- Pure Functions ---------------------------------------------------------
 
 const classifyCI = (job: string) => {
-    const k = Object.keys(B.alerts.ci.classification).find((x) => job.includes(x));
-    return k ? B.alerts.ci.classification[k as keyof typeof B.alerts.ci.classification] : B.alerts.ci.default;
+    const classification = B.alerts.ci.classification;
+    const key = (Object.keys(classification) as Array<keyof typeof classification>).find((k) => job.includes(k));
+    return key ? classification[key] : B.alerts.ci.default;
 };
 
 const build = (s: U<'alert'>): { body: string; labels: ReadonlyArray<string>; pattern: string; title: string } =>
