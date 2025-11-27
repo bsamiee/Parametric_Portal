@@ -194,8 +194,6 @@ const B = Object.freeze({
             `> [!${type.toUpperCase()}]\n> ${content.split('\n').join('\n> ')}`,
         badge: (repo: string, workflow: string): string =>
             `![${workflow}](https://github.com/${repo}/actions/workflows/${workflow}.yml/badge.svg)`,
-        badgeLink: (repo: string, workflow: string): string =>
-            `[![${workflow}](https://github.com/${repo}/actions/workflows/${workflow}.yml/badge.svg)](https://github.com/${repo}/actions/workflows/${workflow}.yml)`,
         code: (lang: string, content: string): string => `\`\`\`${lang}\n${content}\n\`\`\``,
         del: (text: string): string => `<del>${text}</del>`,
         details: (summary: string, content: string, open?: boolean): string =>

@@ -245,22 +245,15 @@ const renderCI = (m: Metrics, repo: string): string => {
         statusBadge(w.rate, w.file),
     ]);
 
-    const badges = m.workflows.map((w) => B.gen.badgeLink(repo, w.file)).join(' ');
-
     const progressSection = m.workflows.length > 0
         ? `\n\n**Overall CI Health:** ${B.gen.progress(m.workflowRate)}`
         : '';
 
-    const table =
-        rows.length > 0
-            ? fn.report('CI Status', ['Workflow', 'Runs', 'Rate', 'Trend', 'Logs', 'Status'], rows, {
-                  align: ['l', 'r', 'c', 'c', 'c', 'c'],
-              })
-            : fn.report('CI Status', ['Workflow', 'Status'], [['No workflow runs in period', '—']]);
-
     return rows.length > 0
-        ? `${table}${progressSection}\n\n${B.gen.details('Live Workflow Badges', badges)}`
-        : table;
+        ? fn.report('CI Status', ['Workflow', 'Runs', 'Rate', 'Trend', 'Logs', 'Status'], rows, {
+              align: ['l', 'r', 'c', 'c', 'c', 'c'],
+          }) + progressSection
+        : fn.report('CI Status', ['Workflow', 'Status'], [['No workflow runs in period', '—']]);
 };
 
 const renderHealth = (m: Metrics): string => {
