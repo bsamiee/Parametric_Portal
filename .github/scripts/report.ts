@@ -111,7 +111,7 @@ const formatters = {
                     fn.report(fmt.t, fmt.h, rows, {
                         footer:
                             fmt.w && rows.some((r) => r[0]?.includes(B.gen.status.warn)) && marker
-                                ? `${marker}\n\n> ${B.gen.callout.warning}\n> ${fmt.w}`
+                                ? `${marker}\n\n${B.gen.alert('warning', fmt.w)}`
                                 : (marker ?? fn.timestamp(now)),
                     }))(cfg.out.o === 'comment' ? B.gen.marker((cfg.out as CommentOut).m) : undefined))(
                 cfg.fmt as TableFmt,

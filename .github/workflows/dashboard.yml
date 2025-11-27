@@ -4,8 +4,8 @@ on:
     schedule:
         - cron: '0 */6 * * *' # Every 6 hours
     workflow_dispatch:
-    issue_comment:
-        types: [created]
+    issues:
+        types: [edited]
 
 permissions:
     actions: read
@@ -21,13 +21,13 @@ jobs:
     update-dashboard:
         name: Update Repository Dashboard
         runs-on: ubuntu-latest
-        # Run on schedule, workflow_dispatch, or /update command on dashboard issue
+        # Run on schedule, workflow_dispatch, or checkbox checked on dashboard issue
         if: |
             github.event_name == 'schedule' ||
             github.event_name == 'workflow_dispatch' ||
-            (github.event_name == 'issue_comment' &&
-             contains(github.event.comment.body, '/update') &&
-             contains(github.event.issue.labels.*.name, 'dashboard'))
+            (github.event_name == 'issues' &&
+             contains(github.event.issue.labels.*.name, 'dashboard') &&
+             contains(github.event.issue.body, '[x] <!-- dashboard-refresh -->'))
         steps:
             - name: Checkout
               uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6

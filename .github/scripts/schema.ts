@@ -28,6 +28,8 @@ type PR = {
 type Tag = { readonly name: string };
 type WorkflowRun = {
     readonly conclusion: string | null;
+    readonly html_url: string;
+    readonly id: number;
     readonly run_started_at: string | null;
     readonly status: string;
     readonly updated_at: string;
@@ -78,6 +80,12 @@ const debt = (cat: 'perf' | 'test' | 'quality') =>
         quality: { labels: [S.techDebt, 'refactor'] as const, type: 'Quality' as const },
         test: { labels: [S.techDebt, 'testing'] as const, type: 'Mutation' as const },
     })[cat];
+
+// --- Helpers (extracted for DRY) --------------------------------------------
+
+const shieldUrl = (l: string, m: string, c: string, s?: string, g?: string): string =>
+    `https://img.shields.io/badge/${encodeURIComponent(l)}-${encodeURIComponent(m)}-${c}${s || g ? '?' : ''}${s ? `style=${s}` : ''}${s && g ? '&' : ''}${g ? `logo=${g}&logoColor=white` : ''}`;
+const prop = <K extends string>(k: K) => (x: unknown) => (x as Record<K, unknown>)[k];
 
 // --- Constants (Single B) ---------------------------------------------------
 
@@ -165,8 +173,8 @@ const B = Object.freeze({
     dashboard: {
         bots: ['renovate[bot]', 'dependabot[bot]'] as const,
         colors: { error: 'red', info: 'blue', success: 'brightgreen', warning: 'yellow' } as const,
-        command: '/update',
         labels: { bug: 'bug', claude: 'claude-implement', feature: 'feature' } as const,
+        marker: 'dashboard-refresh',
         monitoring: { period: 30, unit: 'days' } as const,
         output: {
             displayTitle: 'Repository Overview',
@@ -182,15 +190,10 @@ const B = Object.freeze({
         workflow: 'dashboard.yml',
     } as const,
     gen: {
+        alert: (type: 'note' | 'tip' | 'important' | 'warning' | 'caution', content: string): string =>
+            `> [!${type.toUpperCase()}]\n> ${content.split('\n').join('\n> ')}`,
         badge: (repo: string, workflow: string): string =>
             `![${workflow}](https://github.com/${repo}/actions/workflows/${workflow}.yml/badge.svg)`,
-        callout: {
-            caution: '[!CAUTION]',
-            important: '[!IMPORTANT]',
-            note: '[!NOTE]',
-            tip: '[!TIP]',
-            warning: '[!WARNING]',
-        } as const,
         code: (lang: string, content: string): string => `\`\`\`${lang}\n${content}\n\`\`\``,
         del: (text: string): string => `<del>${text}</del>`,
         details: (summary: string, content: string, open?: boolean): string =>
@@ -201,19 +204,36 @@ const B = Object.freeze({
         link: (text: string, url: string): string => `[${text}](${url})`,
         marker: (n: string): string => `<!-- ${n} -->`,
         math: (expr: string, block?: boolean): string => (block ? `$$\n${expr}\n$$` : `$${expr}$`),
-        shield: (
-            label: string,
-            message: string,
-            color: string,
-            style?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge',
-        ): string =>
-            `![${label}](https://img.shields.io/badge/${encodeURIComponent(label)}-${encodeURIComponent(message)}-${color}${style ? `?style=${style}` : ''})`,
+        mermaid: (diagram: string): string => `\`\`\`mermaid\n${diagram}\n\`\`\``,
+        progress: (value: number, max = 100, width = 20): string =>
+            ((filled) => `\`[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]\` ${value}%`)(
+                Math.round((value / max) * width),
+            ),
+        shield: (l: string, m: string, c: string, s?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge', g?: string): string =>
+            `![${l}](${shieldUrl(l, m, c, s, g)})`,
+        shieldLink: (l: string, m: string, c: string, u: string, s?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge', g?: string): string =>
+            `[![${l}](${shieldUrl(l, m, c, s, g)})](${u})`,
         signs: { [-1]: 'dec', 0: 'same', 1: 'inc' } as const,
+        sparkline: (values: ReadonlyArray<number>): string =>
+            ((chars, max) => values.map((v) => chars[Math.min(Math.floor((v / max) * 7), 7)]).join(''))(
+                ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'],
+                Math.max(...values, 1),
+            ),
         status: { dec: '[-]', fail: '[FAIL]', inc: '[+]', pass: '[PASS]', same: '[=]', warn: '[WARN]' } as const,
         sub: (text: string): string => `<sub>${text}</sub>`,
         sup: (text: string): string => `<sup>${text}</sup>`,
         task: (items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }>): string =>
             items.map((i) => `- [${i.done ? 'x' : ' '}] ${i.text}`).join('\n'),
+        trend: (current: number, previous: number): string =>
+            B.gen.status[current > previous ? 'inc' : current < previous ? 'dec' : 'same'],
+        url: {
+            actions: (repo: string): string => `https://github.com/${repo}/actions`,
+            artifacts: (repo: string, runId: number): string =>
+                `https://github.com/${repo}/actions/runs/${runId}#artifacts`,
+            logs: (repo: string, runId: number): string => `https://github.com/${repo}/actions/runs/${runId}`,
+            workflow: (repo: string, file: string): string =>
+                `https://github.com/${repo}/actions/workflows/${file}.yml`,
+        },
     },
     labels: {
         categories: {
@@ -286,10 +306,11 @@ type Mode = 'replace' | 'append' | 'prepend';
 
 // --- Unified Spec System (SpecRegistry) -------------------------------------
 
+type AlertType = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 type Section =
     | { readonly k: 'a'; readonly items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }> }
     | { readonly k: 'b'; readonly i: ReadonlyArray<string> | string }
-    | { readonly k: 'c'; readonly y: keyof typeof B.gen.callout; readonly c: string }
+    | { readonly k: 'c'; readonly y: AlertType; readonly c: string }
     | { readonly k: 'd' }
     | { readonly k: 'f'; readonly l: string; readonly v: string }
     | { readonly k: 'h'; readonly l: 2 | 3; readonly t: string }
@@ -442,7 +463,7 @@ const fn = {
                 ({
                     a: () => B.gen.task(get<'a'>(s).items),
                     b: () => list(get<'b'>(s).i, () => '-'),
-                    c: () => `> ${B.gen.callout[get<'c'>(s).y]}\n> ${$(get<'c'>(s).c)}`,
+                    c: () => B.gen.alert(get<'c'>(s).y, $(get<'c'>(s).c)),
                     d: () => '---',
                     f: () => `- **${get<'f'>(s).l}**: ${$(get<'f'>(s).v)}`,
                     h: () => `${'#'.repeat(get<'h'>(s).l)} ${$(get<'h'>(s).t)}`,
@@ -564,45 +585,25 @@ const ops: Record<string, Op> = {
     'actions.listWorkflowRuns': {
         a: ['actions', 'listWorkflowRunsForRepo'],
         m: ([workflow, created]) => ({ created, per_page: B.api.perPage, workflow_id: workflow }),
-        o: (x) => (x as { workflow_runs: unknown }).workflow_runs,
+        o: prop('workflow_runs'),
     },
-    'actions.listWorkflows': {
-        a: ['actions', 'listRepoWorkflows'],
-        m: () => ({ per_page: B.api.perPage }),
-        o: (x) => (x as { workflows: unknown }).workflows,
-    },
-    'check.listForRef': {
-        a: ['checks', 'listForRef'],
-        m: ([ref]) => ({ ref }),
-        o: (x) => (x as { check_runs: unknown }).check_runs,
-    },
+    'actions.listWorkflows': { a: ['actions', 'listRepoWorkflows'], m: () => ({ per_page: B.api.perPage }), o: prop('workflows') },
+    'check.listForRef': { a: ['checks', 'listForRef'], m: ([ref]) => ({ ref }), o: prop('check_runs') },
     'comment.create': { a: ['issues', 'createComment'], m: ([n, body]) => ({ body, issue_number: n }) },
     'comment.list': { a: ['issues', 'listComments'], m: ([n]) => ({ issue_number: n }) },
     'comment.update': { a: ['issues', 'updateComment'], m: ([id, body]) => ({ body, comment_id: id }) },
-    'discussion.get': {
-        m: ([n]) => ({ n }),
-        o: (x) => (x as { repository: { discussion: unknown } }).repository.discussion,
-        q: B.probe.gql.discussion,
-    },
+    'discussion.get': { m: ([n]) => ({ n }), o: (x) => prop('discussion')(prop('repository')(x)), q: B.probe.gql.discussion },
     'issue.addLabels': { a: ['issues', 'addLabels'], m: ([n, labels]) => ({ issue_number: n, labels }) },
     'issue.create': { a: ['issues', 'create'], m: ([title, labels, body]) => ({ body, labels, title }) },
     'issue.get': { a: ['issues', 'get'], m: ([n]) => ({ issue_number: n }) },
-    'issue.list': {
-        a: ['issues', 'listForRepo'],
-        m: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }),
-    },
+    'issue.list': { a: ['issues', 'listForRepo'], m: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }) },
     'issue.pin': { m: ([issueId]) => ({ issueId }), q: B.probe.gql.pinIssue, s: true },
     'issue.removeLabel': { a: ['issues', 'removeLabel'], m: ([n, name]) => ({ issue_number: n, name }), s: true },
     'issue.update': { a: ['issues', 'update'], m: ([n, body]) => ({ body, issue_number: n }) },
     'pull.get': { a: ['pulls', 'get'], m: ([n]) => ({ pull_number: n }) },
     'pull.list': {
         a: ['pulls', 'list'],
-        m: ([state, sort, direction]) => ({
-            direction: direction ?? 'desc',
-            per_page: B.api.perPage,
-            sort: sort ?? 'updated',
-            state,
-        }),
+        m: ([state, sort, direction]) => ({ direction: direction ?? 'desc', per_page: B.api.perPage, sort: sort ?? 'updated', state }),
     },
     'pull.listCommits': { a: ['pulls', 'listCommits'], m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }) },
     'pull.listFiles': { a: ['pulls', 'listFiles'], m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }) },
@@ -611,26 +612,11 @@ const ops: Record<string, Op> = {
         m: ([n]) => ({ pull_number: n }),
         o: (x) => [...((x as { users: unknown[] }).users ?? []), ...((x as { teams: unknown[] }).teams ?? [])],
     },
-    'pull.listReviewComments': {
-        a: ['pulls', 'listReviewComments'],
-        m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }),
-    },
+    'pull.listReviewComments': { a: ['pulls', 'listReviewComments'], m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }) },
     'pull.listReviews': { a: ['pulls', 'listReviews'], m: ([n]) => ({ pull_number: n }) },
-    'release.create': {
-        a: ['repos', 'createRelease'],
-        m: ([tag, name, body, draft, prerelease]) => ({ body, draft, name, prerelease, tag_name: tag }),
-    },
-    'release.latest': {
-        a: ['repos', 'getLatestRelease'],
-        m: () => ({}),
-        o: (x) => (x as { tag_name: string }).tag_name,
-        s: true,
-    },
-    'repo.compareCommits': {
-        a: ['repos', 'compareCommits'],
-        m: ([base, head]) => ({ base, head }),
-        o: (x) => (x as { commits: unknown }).commits,
-    },
+    'release.create': { a: ['repos', 'createRelease'], m: ([tag, name, body, draft, prerelease]) => ({ body, draft, name, prerelease, tag_name: tag }) },
+    'release.latest': { a: ['repos', 'getLatestRelease'], m: () => ({}), o: prop('tag_name'), s: true },
+    'repo.compareCommits': { a: ['repos', 'compareCommits'], m: ([base, head]) => ({ base, head }), o: prop('commits') },
     'repo.listCommits': { a: ['repos', 'listCommits'], m: ([since]) => ({ per_page: B.api.perPage, since }) },
     'review.create': { a: ['pulls', 'createReview'], m: ([pr, body, event]) => ({ body, event, pull_number: pr }) },
     'tag.list': { a: ['repos', 'listTags'], m: () => ({ per_page: 1 }), o: (x) => x },
