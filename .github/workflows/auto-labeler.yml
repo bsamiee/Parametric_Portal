@@ -1,129 +1,28 @@
-name: Auto Labeler
+name: Label Sync
 
 on:
+    push:
+        branches: [main]
+        paths: [".github/labels.yml"]
     pull_request:
-        types: [opened, synchronize]
-    issues:
-        types: [opened, edited]
-    issue_comment:
-        types: [created]
-
-concurrency:
-    group: auto-labeler-${{ github.event.pull_request.number || github.event.issue.number }}
-    cancel-in-progress: true
+        paths: [".github/labels.yml"]
 
 permissions:
     contents: read
-    pull-requests: write
     issues: write
 
 jobs:
-    label-pr:
-        if: github.event_name == 'pull_request'
+    sync-labels:
+        name: Sync Label Definitions
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-            - name: Apply Path Labels
-              uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9 # v5
+            - name: Sync Labels
+              uses: crazy-max/ghaction-github-labeler@de749cf181958193cb7debf1219836ba3d6511c9 # v5
               with:
-                  repo-token: "${{ secrets.GITHUB_TOKEN }}"
-
-            - name: Apply Size Label
-              uses: CodelyTV/pr-size-labeler@4ec67706cd878fbc1c8db0a5dcd28b6bb412e85a # v1
-              with:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  xs_label: size/XS
-                  xs_max_size: 9
-                  s_label: size/S
-                  s_max_size: 49
-                  m_label: size/M
-                  m_max_size: 199
-                  l_label: size/L
-                  l_max_size: 499
-                  xl_label: size/XL
-                  fail_if_xl: false
-
-            - name: Detect Tech Labels
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-              with:
-                  script: |
-                      const { data: files } = await github.rest.pulls.listFiles({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        pull_number: context.payload.pull_request.number
-                      });
-
-                      const techLabels = new Set(
-                        files.flatMap(file => [
-                          file.filename.endsWith('.tsx') ? 'tech/react' : null,
-                          file.filename.includes('vite.config') ? 'tech/vite' : null,
-                          (file.patch?.includes('Effect.') || file.patch?.includes('pipe(')) ? 'tech/effect' : null,
-                        ].filter(Boolean))
-                      );
-                      techLabels.size > 0 && await github.rest.issues.addLabels({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: context.payload.pull_request.number,
-                        labels: Array.from(techLabels)
-                      });
-
-    label-issue:
-        if: |
-            github.event_name == 'issues' ||
-            (github.event_name == 'issue_comment' &&
-             !github.event.issue.pull_request &&
-             contains(github.event.comment.body, '/triage'))
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
-
-            - name: Classify Issue
-              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
-              with:
-                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-                  prompt: |
-                      Classify issue #${{ github.event.issue.number }} and apply appropriate labels.
-
-                      Issue Title: ${{ github.event.issue.title }}
-                      Issue Body: ${{ github.event.issue.body }}
-
-                      Determine and apply labels using `gh issue edit`:
-                      1. Type: type/bug, type/feature, type/enhancement, type/docs, type/refactor, type/test, type/chore
-                      2. Priority: priority/critical, priority/high, priority/medium, priority/low
-                      3. Scope: scope/ui, scope/api, scope/config, scope/deps, scope/perf, scope/security, scope/ci, scope/docs, scope/tests, scope/types
-                      4. Effort: effort/trivial, effort/small, effort/medium, effort/large
-
-                      Be conservative - only apply labels you are confident about.
-                      Use: gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2"
-
-                  claude_args: |
-                      --model claude-sonnet-4-5-20250929
-                      --max-turns 3
-                      --allowedTools Bash(gh issue:*)
-
-    welcome-contributor:
-        if: github.event_name == 'pull_request' && github.event.action == 'opened'
-        runs-on: ubuntu-latest
-        steps:
-            - name: Welcome First-Time Contributor
-              uses: actions/first-interaction@34f15e814fe48ac9312ccf29db4e74fa767cbab7 # v1
-              with:
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-                  pr-message: |
-                      Welcome to Parametric Portal! Thanks for your first contribution.
-
-                      Please ensure your PR follows our [REQUIREMENTS.md](./REQUIREMENTS.md) patterns:
-                      - Effect pipelines (no try/catch)
-                      - B constant pattern
-                      - Option monads (no null checks)
-                      - Dispatch tables (no if/else chains)
-
-                      Run `pnpm check && pnpm typecheck && pnpm test` before requesting review.
-                  issue-message: |
-                      Welcome to Parametric Portal! Thanks for opening your first issue.
-
-                      Our team uses automated agents to help triage and respond to issues.
-                      You can use `/triage` to request automatic classification.
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  yaml-file: .github/labels.yml
+                  skip-delete: true
+                  dry-run: ${{ github.event_name == 'pull_request' }}

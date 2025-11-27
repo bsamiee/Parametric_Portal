@@ -1,59 +1,59 @@
 name: Bug Report
 description: Report a bug or unexpected behavior
 title: "[Bug]: "
-labels: ["type/bug", "needs-triage"]
+labels: ["bug"]
 body:
     - type: markdown
       attributes:
           value: |
               <!-- AGENT_CONTEXT
-              {"type":"bug","agents":["testing-specialist","typescript-advanced"]}
+              {"type":"bug","agents":["testing-specialist","typescript-advanced"],"patterns":["effect-pipeline","option-monad"],"priority_hint":"medium"}
               -->
-              Thanks for taking the time to report a bug! Please fill out the form below.
+              **Agent-parseable bug report.** All fields map to JSON keys via `id` attribute.
 
     - type: checkboxes
-      id: existing-search
+      id: existing_search
       attributes:
           label: Existing Issues
-          description: Have you searched for existing issues?
+          description: Confirm you've searched for duplicates
           options:
-              - label: I have searched for existing issues and this is a new bug
+              - label: I have searched existing issues and this is a new bug
                 required: true
 
     - type: textarea
       id: description
       attributes:
           label: Bug Description
-          description: A clear and concise description of the bug
-          placeholder: What happened?
+          description: Clear, concise description of the bug
+          placeholder: "When [action], [unexpected result] occurs instead of [expected result]"
       validations:
           required: true
 
     - type: textarea
-      id: repro-steps
+      id: repro_steps
       attributes:
           label: Steps to Reproduce
-          description: How can we reproduce the bug?
+          description: Minimal steps to reproduce the bug
           placeholder: |
-              1. Go to '...'
-              2. Click on '...'
-              3. See error
+              1. Navigate to '...'
+              2. Click '...'
+              3. Observe error
       validations:
           required: true
 
     - type: textarea
-      id: expected
+      id: expected_behavior
       attributes:
           label: Expected Behavior
-          description: What did you expect to happen?
+          description: What should happen?
       validations:
           required: true
 
     - type: textarea
-      id: actual
+      id: actual_behavior
       attributes:
           label: Actual Behavior
-          description: What actually happened?
+          description: What actually happens?
       validations:
           required: true
 
@@ -61,12 +61,28 @@ body:
       id: severity
       attributes:
           label: Severity
-          description: How severe is this bug?
+          description: Impact level of this bug
           options:
-              - Critical - Application crash or data loss
-              - High - Major feature broken
-              - Medium - Feature partially broken
-              - Low - Minor inconvenience
+              - critical
+              - high
+              - medium
+              - low
+      validations:
+          required: true
+
+    - type: dropdown
+      id: scope
+      attributes:
+          label: Affected Areas
+          description: Which areas are affected?
+          multiple: true
+          options:
+              - ui
+              - api
+              - build
+              - types
+              - testing
+              - config
       validations:
           required: true
 
@@ -74,19 +90,29 @@ body:
       id: environment
       attributes:
           label: Environment
-          description: Provide relevant environment details
+          description: Runtime environment details
           placeholder: |
-              - Node version:
-              - Browser:
-              - OS:
+              node: 25.2.1
+              browser: Chrome 131
+              os: macOS 15.1
+          render: yaml
       validations:
           required: false
 
     - type: textarea
       id: logs
       attributes:
-          label: Logs / Error Messages
-          description: Paste any relevant logs or error messages
+          label: Error Logs
+          description: Relevant error messages or stack traces
           render: shell
+      validations:
+          required: false
+
+    - type: input
+      id: affected_packages
+      attributes:
+          label: Affected Packages
+          description: Comma-separated list of affected Nx packages
+          placeholder: "@parametric/ui, @parametric/core"
       validations:
           required: false
