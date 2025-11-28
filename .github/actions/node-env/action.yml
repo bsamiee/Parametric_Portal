@@ -35,11 +35,11 @@ inputs:
         description: Stop agents when first non-dependent run group succeeds
         default: 'true'
     nx-auto-fix:
-        description: Enable Nx self-healing auto-apply-fixes for check tasks (lint/format)
+        description: Enable Nx self-healing auto-apply-fixes for all tasks
         default: 'false'
     nx-fix-tasks:
-        description: Glob patterns for tasks eligible for auto-fix (e.g., *check*,*lint*)
-        default: '*check*'
+        description: Glob patterns for tasks eligible for auto-fix (e.g., *check*,*lint* or * for all)
+        default: '*'
 
 outputs:
     nx-base:

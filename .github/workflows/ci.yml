@@ -38,7 +38,7 @@ jobs:
                   nx-agents: '3'
                   nx-stop-on-success: 'true'
                   nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
-                  nx-fix-tasks: '*check*'
+                  nx-fix-tasks: '*'
 
             - name: Setup Git Identity
               if: github.event_name == 'pull_request'
@@ -47,12 +47,12 @@ jobs:
             - name: Generate Nx Graph
               run: pnpm exec nx graph --file=.nx/project-graph.json
 
-            # Biome auto-repair: run with --write to fix issues, then check for changes
+            # Biome auto-repair: run with --write --unsafe to aggressively fix all issues
             - name: Biome Auto-Repair
               id: biome-repair
               if: github.event_name == 'pull_request'
               run: |
-                  pnpm exec nx-cloud record -- pnpm exec biome check --write .
+                  pnpm exec nx-cloud record -- pnpm exec biome check --write --unsafe .
                   if [[ -n $(git status --porcelain) ]]; then
                     echo "has_changes=true" >> $GITHUB_OUTPUT
                   else

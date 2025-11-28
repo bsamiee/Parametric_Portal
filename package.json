@@ -83,6 +83,7 @@
         "affected": "nx affected",
         "build": "nx run-many -t build",
         "check": "nx run-many -t check",
+        "fix": "biome check --write --unsafe .",
         "fix-ci": "nx fix-ci --merge --verbose",
         "graph": "nx graph",
         "labels:create": "bash scripts/create-labels.sh",
