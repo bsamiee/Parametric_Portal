@@ -35,7 +35,7 @@ inputs:
         description: Stop agents when first non-dependent run group succeeds
         default: 'true'
     nx-auto-fix:
-        description: Enable Nx self-healing auto-apply-fixes for all tasks
+        description: Enable Nx Cloud auto-apply-fixes feature
         default: 'false'
     nx-fix-tasks:
         description: Glob patterns for tasks eligible for auto-fix (e.g., *check*,*lint* or * for all)
@@ -98,6 +98,6 @@ runs:
                 --distribute-on="$AGENTS linux-medium-jvm" \
                 --stop-agents-after=build \
                 ${{ inputs.nx-stop-on-success == 'true' && '--stop-agents-on-failure' || '' }} \
-                ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes --fix-tasks="{0}"', inputs.nx-fix-tasks) || '' }}
+                ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes={0} --fix-tasks={0}', inputs.nx-fix-tasks) || '' }}
           env:
               AGENTS: ${{ inputs.nx-agents }}

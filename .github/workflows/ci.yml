@@ -24,7 +24,7 @@ jobs:
             - name: Checkout
               uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
-                  ref: ${{ github.event.pull_request.head.ref || github.ref }}
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 0
 
@@ -47,12 +47,13 @@ jobs:
             - name: Generate Nx Graph
               run: pnpm exec nx graph --file=.nx/project-graph.json
 
-            # Biome auto-repair: run with --write --unsafe to aggressively fix all issues
+            # Biome auto-repair: run with --write --unsafe for aggressive auto-fixing
+            # Note: --unsafe enables transformations that may alter code behavior; fixes are validated by subsequent CI checks
             - name: Biome Auto-Repair
               id: biome-repair
               if: github.event_name == 'pull_request'
               run: |
-                  pnpm exec nx-cloud record -- pnpm exec biome check --write --unsafe .
+                  pnpm exec biome check --write --unsafe .
                   if [[ -n $(git status --porcelain) ]]; then
                     echo "has_changes=true" >> $GITHUB_OUTPUT
                   else
@@ -64,11 +65,14 @@ jobs:
               id: commit-fixes
               if: github.event_name == 'pull_request' && steps.biome-repair.outputs.has_changes == 'true'
               run: |
-                  git add .
-                  git commit -m "style: biome auto-repair
-
-                  Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-                  git push
+                  git add -u
+                  git commit -m "style: biome auto-repair" \
+                      -m "" \
+                      -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+                  if ! git push; then
+                    echo "::error::Failed to push biome fixes. This may occur if the PR is from a fork or if there are concurrent commits."
+                    exit 1
+                  fi
                   echo "committed=true" >> $GITHUB_OUTPUT
 
             - name: Comment on Biome Repair
