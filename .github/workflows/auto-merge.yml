@@ -1,0 +1,57 @@
+name: Auto-Merge
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+concurrency:
+    group: auto-merge-${{ github.event.pull_request.number }}
+    cancel-in-progress: false
+
+jobs:
+    merge:
+        name: Dependabot Auto-Merge
+        runs-on: ubuntu-latest
+        if: github.actor == 'dependabot[bot]'
+        steps:
+            - name: Fetch Dependabot Metadata
+              id: metadata
+              uses: dependabot/fetch-metadata@v2
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Wait for CI
+              uses: lewagon/wait-on-check-action@595dabb3acf442d47e29c9ec9ba44db0c6bdd18f # v1.3.4
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  check-regexp: '^ci$'
+                  wait-interval: 30
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Auto-Merge Patch Updates
+              if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
+              run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Auto-Merge Minor Updates
+              if: steps.metadata.outputs.update-type == 'version-update:semver-minor'
+              run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Block Major Updates
+              if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+              run: |
+                  echo "::warning::Major update requires manual review"
+                  gh pr comment ${{ github.event.pull_request.number }} \
+                    --body "⚠️ **Auto-merge blocked**: Major version update requires manual review.
+
+                  **Package**: ${{ steps.metadata.outputs.dependency-names }}
+                  **Update**: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}"
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

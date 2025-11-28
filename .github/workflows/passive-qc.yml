@@ -1,0 +1,81 @@
+name: Passive QC
+
+on:
+    schedule:
+        - cron: "0 */6 * * *" # Every 6 hours
+
+concurrency:
+    group: passive-qc
+    cancel-in-progress: false
+
+permissions:
+    contents: read
+    issues: write
+
+jobs:
+    sync-labels:
+        name: Sync Labels (backup)
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+
+            - name: Sync Labels
+              uses: crazy-max/ghaction-github-labeler@24d110aa46a59976b8a7f35518cb7f14f434c916 # v5.3.0
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  yaml-file: .github/labels.yml
+                  skip-delete: true
+
+    stale-management:
+        name: Stale Management
+        runs-on: ubuntu-latest
+        steps:
+            - name: Mark Stale Issues
+              uses: actions/stale@5f858e3efba33a5ca4407a664cc011ad407f2008 # v10.1.0
+              with:
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+                  stale-issue-message: |
+                      This issue has been automatically marked as stale due to inactivity.
+                      It will be closed in 7 days if there is no further activity.
+                      Comment to keep it open.
+                  stale-pr-message: |
+                      This PR has been automatically marked as stale due to inactivity.
+                      It will be closed in 7 days if there is no further activity.
+                  stale-issue-label: stale
+                  stale-pr-label: stale
+                  days-before-stale: 3
+                  days-before-close: 7
+                  exempt-issue-labels: pinned,security,critical
+                  exempt-pr-labels: pinned,security,critical
+
+    aging-report:
+        name: Aging Report
+        needs: stale-management
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      package.json
+                      pnpm-lock.yaml
+
+            - name: Setup Environment
+              uses: ./.github/actions/node-env
+              with:
+                  node-version-file: package.json
+                  install: 'false'
+
+            - name: Generate Aging Report
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/report.ts');
+                      await run({
+                        context: { repo: context.repo, payload: { action: 'scheduled', issue: {} } },
+                        core,
+                        github,
+                        spec: { kind: 'aging' }
+                      });

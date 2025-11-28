@@ -1,0 +1,45 @@
+name: Style Fix
+description: Formatting, linting, or code style changes
+title: "[STYLE]: "
+labels: ["style"]
+body:
+    - type: dropdown
+      id: style_type
+      attributes:
+          label: Style Issue
+          options:
+              - formatting
+              - linting
+              - naming
+              - imports
+              - consistency
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Files or patterns to fix (empty for repo-wide)
+          placeholder: "src/**/*.ts, packages/ui/"
+      validations:
+          required: false
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Description
+          description: What style issue needs addressing?
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true

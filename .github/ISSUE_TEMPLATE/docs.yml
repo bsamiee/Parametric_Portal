@@ -1,63 +1,37 @@
 name: Documentation
 description: Create or update documentation
-title: "[Docs]: "
+title: "[DOCS]: "
 labels: ["docs"]
 body:
-    - type: markdown
-      attributes:
-          value: |
-              <!-- AGENT_CONTEXT
-              {"type":"docs","agents":["documentation-specialist"],"patterns":[],"priority_hint":"low"}
-              -->
-              **Agent-parseable documentation request.** All fields map to JSON keys via `id` attribute.
-
     - type: dropdown
-      id: documentation_type
+      id: doc_type
       attributes:
           label: Documentation Type
-          description: What type of documentation change?
           options:
-              - new-documentation
-              - update-existing
+              - new
+              - update
               - fix-error
-              - improve-clarity
               - add-examples
-              - api-reference
       validations:
           required: true
 
     - type: input
-      id: target_file
+      id: target
       attributes:
-          label: Target File
-          description: Path to documentation file
-          placeholder: "docs/AUTOMATION.md, README.md, REQUIREMENTS.md"
+          label: Target
+          description: Documentation file to create/update
+          placeholder: "docs/AUTOMATION.md, README.md, CLAUDE.md"
       validations:
           required: true
 
     - type: textarea
-      id: current_content
-      attributes:
-          label: Current Content
-          description: What currently exists (if updating)
-          placeholder: "Quote or describe the current documentation state"
-      validations:
-          required: false
-
-    - type: textarea
-      id: proposed_content
+      id: description
       attributes:
           label: Proposed Content
           description: What should the documentation say?
           placeholder: |
               ## Section Title
-
-              Description of the feature...
-
-              ### Example
-              ```typescript
-              // Code example
-              ```
+              Description of the topic...
       validations:
           required: true
 
@@ -65,36 +39,17 @@ body:
       id: rationale
       attributes:
           label: Rationale
-          description: Why is this documentation change needed?
-          placeholder: "Users have reported confusion about [topic], this clarifies [aspect]"
+          description: Why is this documentation needed?
       validations:
           required: true
 
     - type: dropdown
-      id: scope
+      id: priority
       attributes:
-          label: Documentation Scope
-          description: Which areas does this documentation cover?
-          multiple: true
+          label: Priority
           options:
-              - api-reference
-              - architecture
-              - getting-started
-              - patterns
-              - workflows
-              - tooling
-              - contributing
+              - low
+              - medium
+              - high
       validations:
           required: true
-
-    - type: checkboxes
-      id: related_files
-      attributes:
-          label: Cross-Reference Updates
-          description: Other files that may need updating
-          options:
-              - label: REQUIREMENTS.md
-              - label: AGENTS.md
-              - label: CLAUDE.md
-              - label: docs/AUTOMATION.md
-              - label: docs/AGENTIC-INFRASTRUCTURE.md

@@ -1,0 +1,64 @@
+name: Active QC
+
+on:
+    pull_request:
+        types: [opened, edited, synchronize]
+    push:
+        branches: [main]
+        paths: [".github/labels.yml"]
+
+permissions:
+    contents: read
+    pull-requests: write
+
+concurrency:
+    group: active-qc-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+    cancel-in-progress: true
+
+jobs:
+    pr-title:
+        name: PR Title
+        if: github.event_name == 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+              with:
+                  sparse-checkout: .github
+
+            - name: Setup Environment
+              uses: ./.github/actions/node-env
+
+            - name: Parse Title and Apply Labels
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/pr-meta.ts');
+                      const result = await run({
+                          context: { repo: context.repo, payload: context.payload },
+                          core,
+                          github,
+                          spec: {
+                              number: context.payload.pull_request.number,
+                              title: context.payload.pull_request.title,
+                          }
+                      });
+                      result.valid
+                          ? core.info(`✓ ${result.type}(${result.scope})${result.breaking ? '!' : ''}: valid`)
+                          : core.setFailed(result.error);
+
+    sync-labels:
+        name: Sync Labels
+        if: github.event_name == 'push'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+
+            - name: Sync Labels
+              uses: crazy-max/ghaction-github-labeler@24d110aa46a59976b8a7f35518cb7f14f434c916 # v5.3.0
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  yaml-file: .github/labels.yml
+                  skip-delete: true

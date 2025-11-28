@@ -1,88 +1,121 @@
-# Parametric Portal - Label Definitions
+# =============================================================================
+# SEMANTIC COLOR SYSTEM
+# =============================================================================
+# Red (#d73a4a, #b60205)  → Danger: bugs, security, critical, blocked, breaking
+# Green (#1a7f37)         → Success: fixes, approved
+# Blue (#0969da)          → Features: new functionality
+# Cyan (#0891b2)          → Docs: information, documentation
+# Yellow (#dbab09)        → Caution: refactor, testing, pending
+# Orange (#e16f24)        → Action: performance, review needed
+# Pink (#d876e3)          → Support: help, questions
+# Purple (#8957e5)        → Ready: implement, special
+# Teal (#0d9488)          → Highlight: dashboard, pinned
+# Grey (#6e7781)          → Neutral: agents, stale, system
+# Tan (#a1887f)           → Maintenance: chores, routine
+# =============================================================================
 
-# --- Type Labels -------------------------------------------------------------
-- name: bug
-  color: "d73a4a"                       # red
-  description: "Something isn't working"
+# --- Commit Type Labels ------------------------------------------------------
 
-- name: feature
-  color: "a2eeef"                       # cyan
-  description: "New feature request"
+- name: fix
+  color: "1a7f37"                       # green
+  description: "Bug fix"
+
+- name: feat
+  color: "0969da"                       # blue
+  description: "New feature"
 
 - name: docs
-  color: "0075ca"                       # blue
+  color: "0891b2"                       # cyan
   description: "Documentation only"
 
-- name: chore
-  color: "d4a373"                       # tan
-  description: "Maintenance task"
+- name: style
+  color: "6f42c1"                       # violet
+  description: "Formatting, no logic change"
 
 - name: refactor
-  color: "fbca04"                       # yellow
+  color: "dbab09"                       # yellow
   description: "Code restructuring without behavior change"
+
+- name: test
+  color: "f59e0b"                       # amber
+  description: "Adding or updating tests"
+
+- name: chore
+  color: "a1887f"                       # tan
+  description: "Maintenance task"
+
+- name: perf
+  color: "e16f24"                       # orange
+  description: "Performance improvement"
+
+# --- Issue-Only Type Labels (no commit prefix) -------------------------------
 
 - name: help
   color: "d876e3"                       # pink
   description: "Question or assistance needed"
 
-- name: enhancement
-  color: "84b6eb"                       # light blue
-  description: "Improvement to existing feature"
-
 # --- Priority Labels ---------------------------------------------------------
+
 - name: critical
   color: "b60205"                       # dark red
   description: "Must be addressed immediately"
 
 # --- Action Labels -----------------------------------------------------------
+
 - name: implement
-  color: "7057ff"                       # purple
+  color: "8957e5"                       # purple
   description: "Ready for implementation"
 
 - name: review
-  color: "e99695"                       # salmon
+  color: "e16f24"                       # orange
   description: "Needs review"
 
 - name: blocked
-  color: "b60205"                       # dark red
+  color: "d73a4a"                       # red
   description: "Cannot proceed"
 
 # --- Agent Labels (Mutually Exclusive) ---------------------------------------
+
 - name: copilot
-  color: "8b949e"                       # grey
+  color: "6e7781"                       # neutral grey
   description: "Assign to GitHub Copilot"
 
 - name: claude
-  color: "8b949e"                       # grey
+  color: "6e7781"                       # neutral grey
   description: "Assign to Claude"
 
 - name: gemini
-  color: "8b949e"                       # grey
+  color: "6e7781"                       # neutral grey
   description: "Assign to Gemini"
 
 - name: codex
-  color: "8b949e"                       # grey
+  color: "6e7781"                       # neutral grey
   description: "Assign to OpenAI Codex"
 
 # --- Lifecycle Labels --------------------------------------------------------
+
 - name: stale
   color: "57606a"                       # dark grey
   description: "No recent activity"
 
 - name: pinned
-  color: "006b75"                       # teal
+  color: "0d9488"                       # teal
   description: "Exempt from stale"
 
-# --- Quality Labels ----------------------------------------------------------
-- name: needs-info
-  color: "f9d0c4"                       # peach
-  description: "Requires improvement before actionable"
+# --- Special Labels ----------------------------------------------------------
 
-# --- Special Labels (External Sources) ---------------------------------------
 - name: security
-  color: "8957e5"                       # purple
+  color: "d73a4a"                       # red
   description: "Security issue"
 
 - name: dependencies
   color: "0550ae"                       # dark blue
-  description: "Dependency updates"
+  description: "Dependency updates (bot-applied)"
+
+- name: breaking
+  color: "b60205"                       # dark red
+  description: "Breaking change"
+
+- name: dashboard
+  color: "0d9488"                       # teal
+  description: "Repository metrics dashboard"

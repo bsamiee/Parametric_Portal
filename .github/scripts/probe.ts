@@ -1,69 +1,55 @@
 #!/usr/bin/env tsx
 /**
- * Probe Script - Target-Specific Data Collection
- * Polymorphic data collection via dispatch table for external processing
- *
- * @module probe
+ * GitHub entity data extractor with polymorphic handlers.
+ * Fetches issues, PRs, or discussions with normalized output shapes.
  */
 
-import { B, type Ctx, call, createCtx, fn, mutate, type RunParams } from './schema.ts';
+import {
+    B,
+    type Ctx,
+    call,
+    createCtx,
+    fn,
+    type Label,
+    mutate,
+    type ReactionGroups,
+    type RunParams,
+    type User,
+} from './schema.ts';
 
 // --- Target Handlers (Dispatch Table) ---------------------------------------
 
+type DiscussionReply = {
+    readonly author: User;
+    readonly body: string;
+    readonly createdAt: string;
+    readonly reactionGroups: ReactionGroups;
+};
+type DiscussionComment = DiscussionReply & { readonly replies: { readonly nodes: ReadonlyArray<DiscussionReply> } };
+type Discussion = {
+    readonly answer: { readonly author: User; readonly body: string; readonly createdAt: string } | null;
+    readonly author: User;
+    readonly body: string;
+    readonly category: Label;
+    readonly comments: { readonly nodes: ReadonlyArray<DiscussionComment> };
+    readonly createdAt: string;
+    readonly labels: { readonly nodes: ReadonlyArray<Label> };
+    readonly reactionGroups: ReactionGroups;
+    readonly title: string;
+};
+
+const mapReply = (r: DiscussionReply) => ({
+    author: r.author.login,
+    body: fn.trunc(r.body),
+    createdAt: r.createdAt,
+    reactions: fn.reactions(r.reactionGroups),
+});
+
 const handlers = {
     discussion: async (ctx: Ctx, n: number) => {
-        const d = (await call(ctx, 'discussion.get', n)) as {
-            readonly answer: {
-                readonly author: { readonly login: string };
-                readonly body: string;
-                readonly createdAt: string;
-            } | null;
-            readonly author: { readonly login: string };
-            readonly body: string;
-            readonly category: { readonly name: string };
-            readonly comments: {
-                readonly nodes: ReadonlyArray<{
-                    readonly author: { readonly login: string };
-                    readonly body: string;
-                    readonly createdAt: string;
-                    readonly reactionGroups: ReadonlyArray<{
-                        readonly content: string;
-                        readonly users: { readonly totalCount: number };
-                    }>;
-                    readonly replies: {
-                        readonly nodes: ReadonlyArray<{
-                            readonly author: { readonly login: string };
-                            readonly body: string;
-                            readonly createdAt: string;
-                            readonly reactionGroups: ReadonlyArray<{
-                                readonly content: string;
-                                readonly users: { readonly totalCount: number };
-                            }>;
-                        }>;
-                    };
-                }>;
-            };
-            readonly createdAt: string;
-            readonly labels: { readonly nodes: ReadonlyArray<{ readonly name: string }> };
-            readonly reactionGroups: ReadonlyArray<{
-                readonly content: string;
-                readonly users: { readonly totalCount: number };
-            }>;
-            readonly title: string;
-        };
+        const d = (await call(ctx, 'discussion.get', n)) as Discussion;
         return {
-            comments: d.comments.nodes.map((c) => ({
-                author: c.author.login,
-                body: fn.trunc(c.body),
-                createdAt: c.createdAt,
-                reactions: fn.reactions(c.reactionGroups),
-                replies: c.replies.nodes.map((r) => ({
-                    author: r.author.login,
-                    body: fn.trunc(r.body),
-                    createdAt: r.createdAt,
-                    reactions: fn.reactions(r.reactionGroups),
-                })),
-            })),
+            comments: d.comments.nodes.map((c) => ({ ...mapReply(c), replies: c.replies.nodes.map(mapReply) })),
             discussion: {
                 answer: d.answer
                     ? { author: d.answer.author.login, body: fn.trunc(d.answer.body), createdAt: d.answer.createdAt }
@@ -72,7 +58,7 @@ const handlers = {
                 body: fn.trunc(d.body),
                 category: d.category.name,
                 createdAt: d.createdAt,
-                labels: d.labels.nodes.map((l) => l.name),
+                labels: fn.names(d.labels.nodes),
                 number: n,
                 reactions: fn.reactions(d.reactionGroups),
                 title: d.title,
@@ -81,34 +67,30 @@ const handlers = {
     },
 
     issue: async (ctx: Ctx, n: number) => {
+        type I = {
+            readonly assignees: ReadonlyArray<User>;
+            readonly body: string | null;
+            readonly created_at: string;
+            readonly labels: ReadonlyArray<Label>;
+            readonly milestone: { readonly title: string } | null;
+            readonly number: number;
+            readonly state: string;
+            readonly title: string;
+            readonly user: User;
+        };
+        type C = ReadonlyArray<{ readonly body?: string; readonly created_at: string; readonly user: User }>;
         const [issue, comments] = await Promise.all([
-            call(ctx, 'issue.get', n) as Promise<{
-                readonly assignees: ReadonlyArray<{ readonly login: string }>;
-                readonly body: string | null;
-                readonly created_at: string;
-                readonly labels: ReadonlyArray<{ readonly name: string }>;
-                readonly milestone: { readonly title: string } | null;
-                readonly number: number;
-                readonly state: string;
-                readonly title: string;
-                readonly user: { readonly login: string };
-            }>,
-            call(ctx, 'comment.list', n) as Promise<
-                ReadonlyArray<{
-                    readonly body?: string;
-                    readonly created_at: string;
-                    readonly user: { readonly login: string };
-                }>
-            >,
+            call(ctx, 'issue.get', n) as Promise<I>,
+            call(ctx, 'comment.list', n) as Promise<C>,
         ]);
         return {
             comments: comments.map(fn.comment),
             issue: {
-                assignees: issue.assignees.map((a) => a.login),
+                assignees: fn.logins(issue.assignees),
                 author: issue.user.login,
                 body: fn.trunc(issue.body),
                 createdAt: issue.created_at,
-                labels: issue.labels.map((l) => l.name),
+                labels: fn.names(issue.labels),
                 milestone: issue.milestone?.title ?? null,
                 number: issue.number,
                 state: issue.state,
@@ -118,82 +100,68 @@ const handlers = {
     },
 
     pr: async (ctx: Ctx, n: number) => {
-        const pr = (await call(ctx, 'pull.get', n)) as {
-            readonly assignees: ReadonlyArray<{ readonly login: string }>;
+        type P = {
+            readonly assignees: ReadonlyArray<User>;
             readonly body: string | null;
             readonly draft: boolean;
             readonly head: { readonly sha: string };
-            readonly labels: ReadonlyArray<{ readonly name: string }>;
+            readonly labels: ReadonlyArray<Label>;
             readonly number: number;
             readonly title: string;
         };
+        type Rev = ReadonlyArray<{ readonly body: string | null; readonly state: string; readonly user: User }>;
+        type Chk = ReadonlyArray<{
+            readonly conclusion: string | null;
+            readonly name: string;
+            readonly status: string;
+        }>;
+        type Cmt = ReadonlyArray<{ readonly body?: string; readonly created_at: string; readonly user: User }>;
+        type RC = ReadonlyArray<{
+            readonly body: string;
+            readonly line?: number;
+            readonly path: string;
+            readonly user: User;
+        }>;
+        type F = ReadonlyArray<{
+            readonly additions: number;
+            readonly deletions: number;
+            readonly filename: string;
+            readonly status: string;
+        }>;
+        type Co = ReadonlyArray<{
+            readonly author: User | null;
+            readonly commit: { readonly message: string };
+            readonly sha: string;
+        }>;
+        const pr = (await call(ctx, 'pull.get', n)) as P;
         const [reviews, checks, comments, reviewComments, files, commits, requestedReviewers] = await Promise.all([
-            call(ctx, 'pull.listReviews', n) as Promise<
-                ReadonlyArray<{
-                    readonly body: string | null;
-                    readonly state: string;
-                    readonly user: { readonly login: string };
-                }>
-            >,
-            call(ctx, 'check.listForRef', pr.head.sha) as Promise<
-                ReadonlyArray<{ readonly conclusion: string | null; readonly name: string; readonly status: string }>
-            >,
-            call(ctx, 'comment.list', n) as Promise<
-                ReadonlyArray<{
-                    readonly body?: string;
-                    readonly created_at: string;
-                    readonly user: { readonly login: string };
-                }>
-            >,
-            call(ctx, 'pull.listReviewComments', n) as Promise<
-                ReadonlyArray<{
-                    readonly body: string;
-                    readonly line?: number;
-                    readonly path: string;
-                    readonly user: { readonly login: string };
-                }>
-            >,
-            call(ctx, 'pull.listFiles', n) as Promise<
-                ReadonlyArray<{
-                    readonly additions: number;
-                    readonly deletions: number;
-                    readonly filename: string;
-                    readonly status: string;
-                }>
-            >,
-            call(ctx, 'pull.listCommits', n) as Promise<
-                ReadonlyArray<{
-                    readonly author: { readonly login: string } | null;
-                    readonly commit: { readonly message: string };
-                    readonly sha: string;
-                }>
-            >,
-            call(ctx, 'pull.listRequestedReviewers', n) as Promise<ReadonlyArray<{ readonly login: string }>>,
+            call(ctx, 'pull.listReviews', n) as Promise<Rev>,
+            call(ctx, 'check.listForRef', pr.head.sha) as Promise<Chk>,
+            call(ctx, 'comment.list', n) as Promise<Cmt>,
+            call(ctx, 'pull.listReviewComments', n) as Promise<RC>,
+            call(ctx, 'pull.listFiles', n) as Promise<F>,
+            call(ctx, 'pull.listCommits', n) as Promise<Co>,
+            call(ctx, 'pull.listRequestedReviewers', n) as Promise<ReadonlyArray<User>>,
         ]);
         return {
-            checks: checks.map((c) => ({ conclusion: c.conclusion, name: c.name, status: c.status })),
+            checks,
             comments: comments.map(fn.comment),
             commits: commits.map((c) => ({
                 author: c.author?.login ?? B.probe.defaults.unknownAuthor,
                 message: c.commit.message.split('\n')[0],
                 sha: c.sha.substring(0, B.probe.shaLength),
             })),
-            files: files.map((f) => ({
-                additions: f.additions,
-                deletions: f.deletions,
-                filename: f.filename,
-                status: f.status,
-            })),
+            files,
             pr: {
-                assignees: pr.assignees.map((a) => a.login),
+                assignees: fn.logins(pr.assignees),
                 body: fn.trunc(pr.body),
                 draft: pr.draft,
-                labels: pr.labels.map((l) => l.name),
+                labels: fn.names(pr.labels),
                 number: pr.number,
                 sha: pr.head.sha,
                 title: pr.title,
             },
-            requestedReviewers: requestedReviewers.map((r) => r.login),
+            requestedReviewers: fn.logins(requestedReviewers),
             reviewComments: reviewComments.map((c) => ({
                 author: c.user.login,
                 body: fn.trunc(c.body),

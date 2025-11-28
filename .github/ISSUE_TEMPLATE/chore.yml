@@ -1,29 +1,27 @@
 name: Chore
 description: Maintenance task or housekeeping
-title: "[Chore]: "
+title: "[CHORE]: "
 labels: ["chore"]
 body:
-    - type: markdown
-      attributes:
-          value: |
-              <!-- AGENT_CONTEXT
-              {"type":"chore","agents":["cleanup-specialist","integration-specialist"],"patterns":[],"priority_hint":"low"}
-              -->
-              **Agent-parseable chore request.** All fields map to JSON keys via `id` attribute.
-
     - type: dropdown
       id: chore_type
       attributes:
           label: Chore Type
-          description: What type of maintenance task?
           options:
               - dependency-update
               - ci-workflow
               - tooling-config
-              - cleanup-dead-code
+              - cleanup
               - version-bump
-              - lint-fix
-              - type-cleanup
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Files or packages to modify
+          placeholder: "package.json, .github/workflows/ci.yml"
       validations:
           required: true
 
@@ -35,62 +33,24 @@ body:
       validations:
           required: true
 
-    - type: input
-      id: target_files
-      attributes:
-          label: Target Files
-          description: Comma-separated list of files to modify
-          placeholder: "package.json, .github/workflows/ci.yml"
-      validations:
-          required: false
-
-    - type: dropdown
-      id: scope
-      attributes:
-          label: Scope
-          description: Which areas are affected?
-          multiple: true
-          options:
-              - dependencies
-              - ci-cd
-              - tooling
-              - config
-              - scripts
-              - types
-      validations:
-          required: true
-
     - type: textarea
       id: acceptance_criteria
       attributes:
           label: Acceptance Criteria
-          description: How will we know this task is complete?
+          description: How will we know this is complete?
           placeholder: |
               - [ ] CI passes
               - [ ] No new warnings
-              - [ ] Documentation updated if needed
       validations:
           required: true
 
     - type: dropdown
-      id: breaking_change
+      id: priority
       attributes:
-          label: Breaking Change
-          description: Could this affect other workflows?
-          options:
-              - "no"
-              - "yes"
-      validations:
-          required: true
-
-    - type: dropdown
-      id: urgency
-      attributes:
-          label: Urgency
-          description: How urgent is this task?
+          label: Priority
           options:
               - low
               - medium
               - high
       validations:
-          required: false
+          required: true

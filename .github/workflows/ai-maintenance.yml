@@ -1,4 +1,4 @@
-name: Claude Maintenance
+name: AI Maintenance
 
 on:
   schedule:
@@ -33,14 +33,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
         with:
           fetch-depth: 0
 
       - name: Setup Environment
-        uses: ./.github/actions/setup
+        uses: ./.github/actions/node-env
         with:
-          install-dependencies: 'false'
+          install: 'false'
 
       - name: Claude Weekly Maintenance
         uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
@@ -67,7 +67,7 @@ jobs:
             ## 4. ISSUE TRIAGE
             - List issues without labels: `gh issue list --label ""`
             - Suggest labels for unlabeled issues
-            - Identify issues that could use `claude-implement` label
+            - Identify issues ready for implementation
 
             Create a summary issue with findings titled:
             "Weekly Maintenance Report - [DATE]"
@@ -89,14 +89,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
         with:
           fetch-depth: 0
 
       - name: Setup Environment
-        uses: ./.github/actions/setup
+        uses: ./.github/actions/node-env
         with:
-          install-dependencies: 'false'
+          install: 'false'
 
       - name: Run Manual Task
         uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1

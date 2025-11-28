@@ -82,9 +82,7 @@
     "scripts": {
         "build": "nx run-many -t build",
         "check": "pnpm exec biome ci .",
-        "generate:context": "tsx tools/generate-context/index.ts",
         "labels:create": "bash scripts/create-labels.sh",
-        "parse:context": "tsx tools/parse-agent-context.ts",
         "prepare": "lefthook install",
         "pwa:icons": "nx run-many -t pwa:icons",
         "sync:protocols": "tsx tools/sync-agent-protocols.ts",

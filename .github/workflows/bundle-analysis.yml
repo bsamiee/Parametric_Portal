@@ -24,10 +24,10 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout PR
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
 
             - name: Setup Environment
-              uses: ./.github/actions/setup
+              uses: ./.github/actions/node-env
 
             - name: Build Packages
               run: pnpm exec nx run-many -t build --parallel=4
@@ -67,7 +67,7 @@ jobs:
                   cat pr-sizes.json
 
             - name: Checkout Base Branch
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
                   ref: ${{ github.event.pull_request.base.ref }}
                   path: base
@@ -84,13 +84,13 @@ jobs:
               run: |
                   echo "Analyzing base bundle sizes..."
                   sizes_json='{"packages":[]}'
-                  
+
                   for pkg in packages/*/dist; do
                     if [ -d "$pkg" ]; then
                       pkg_name=$(basename $(dirname "$pkg"))
-                      
+
                       raw_size=$(du -sb "$pkg" | cut -f1)
-                      
+
                       main_file=$(find "$pkg" -name "*.js" -type f | head -1)
                       if [ -n "$main_file" ]; then
                         gzip_size=$(gzip -c "$main_file" | wc -c)
@@ -99,7 +99,7 @@ jobs:
                         gzip_size=0
                         brotli_size=0
                       fi
-                      
+
                       sizes_json=$(echo "$sizes_json" | jq --arg name "$pkg_name" \
                         --argjson raw "$raw_size" \
                         --argjson gzip "$gzip_size" \
@@ -107,7 +107,7 @@ jobs:
                         '.packages += [{name: $name, raw: $raw, gzip: $gzip, brotli: $brotli}]')
                     fi
                   done
-                  
+
                   echo "$sizes_json" > ../base-sizes.json
                   cat ../base-sizes.json
 

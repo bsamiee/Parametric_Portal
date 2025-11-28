@@ -1,4 +1,4 @@
-name: Claude Code
+name: AI Assist
 
 on:
   issue_comment:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  claude:
+  assist:
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -31,14 +31,14 @@ jobs:
       actions: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
         with:
           fetch-depth: 0
 
       - name: Setup Environment
-        uses: ./.github/actions/setup
+        uses: ./.github/actions/node-env
         with:
-          install-dependencies: 'false'
+          install: 'false'
 
       - name: Run Claude Code
         id: claude

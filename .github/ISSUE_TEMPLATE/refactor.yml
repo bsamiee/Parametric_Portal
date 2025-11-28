@@ -1,22 +1,14 @@
 name: Refactor
 description: Restructure code without changing behavior
-title: "[Refactor]: "
+title: "[REFACTOR]: "
 labels: ["refactor"]
 body:
-    - type: markdown
-      attributes:
-          value: |
-              <!-- AGENT_CONTEXT
-              {"type":"refactor","agents":["refactoring-architect","cleanup-specialist","typescript-advanced"],"patterns":["effect-pipeline","option-monad","dispatch-table","single-b-constant"],"priority_hint":"low"}
-              -->
-              **Agent-parseable refactor request.** All fields map to JSON keys via `id` attribute.
-
     - type: input
-      id: target_files
+      id: target
       attributes:
-          label: Target Files
-          description: Comma-separated list of files to refactor
-          placeholder: "src/lib/utils.ts, src/services/api.ts"
+          label: Target
+          description: Files or packages to refactor
+          placeholder: "src/lib/utils.ts, @parametric/core"
       validations:
           required: true
 
@@ -24,11 +16,10 @@ body:
       id: current_pattern
       attributes:
           label: Current Pattern
-          description: Describe the existing code structure
+          description: What's wrong with the current code?
           placeholder: |
               - Uses try/catch for error handling
-              - Has if/else chains for type dispatch
-              - Multiple scattered constants
+              - Has if/else chains
       validations:
           required: true
 
@@ -36,11 +27,10 @@ body:
       id: target_pattern
       attributes:
           label: Target Pattern
-          description: Describe the desired code structure
+          description: What should the refactored code look like?
           placeholder: |
-              - Effect pipeline for all async/failable operations
+              - Effect pipeline for async/failable operations
               - Dispatch table for type-safe lookups
-              - Single B constant per file
       validations:
           required: true
 
@@ -49,58 +39,27 @@ body:
       attributes:
           label: Rationale
           description: Why is this refactor necessary?
-          placeholder: "Aligns with REQUIREMENTS.md patterns, improves [metric]"
       validations:
           required: true
 
     - type: dropdown
-      id: scope
+      id: priority
       attributes:
-          label: Scope
-          description: Which areas are affected?
-          multiple: true
+          label: Priority
           options:
-              - ui
-              - api
-              - build
-              - types
-              - testing
-              - config
+              - low
+              - medium
+              - high
+              - critical
       validations:
           required: true
 
     - type: dropdown
-      id: breaking_change
+      id: breaking
       attributes:
           label: Breaking Change
-          description: Does this change public API?
           options:
               - "no"
               - "yes"
       validations:
           required: true
-
-    - type: textarea
-      id: test_strategy
-      attributes:
-          label: Test Strategy
-          description: How will we verify behavior is unchanged?
-          placeholder: |
-              - Existing tests must pass without modification
-              - Snapshot tests verify output equivalence
-              - Manual verification of [specific flows]
-      validations:
-          required: true
-
-    - type: checkboxes
-      id: target_patterns
-      attributes:
-          label: Target Patterns
-          description: Which patterns should the refactored code follow?
-          options:
-              - label: effect-pipeline
-              - label: option-monad
-              - label: branded-types
-              - label: dispatch-table
-              - label: single-b-constant
-              - label: expression-based

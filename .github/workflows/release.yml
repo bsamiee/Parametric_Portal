@@ -33,13 +33,13 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
                   fetch-depth: 0
                   token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Setup Environment
-              uses: ./.github/actions/setup
+              uses: ./.github/actions/node-env
 
             - name: Analyze Commits
               id: analyze
@@ -57,9 +57,9 @@ jobs:
               run: |
                   current_version=$(node -p "require('./package.json').version")
                   bump_type="${{ fromJSON(steps.analyze.outputs.result).bump }}"
-                  
+
                   IFS='.' read -r major minor patch <<< "$current_version"
-                  
+
                   case "$bump_type" in
                     major)
                       major=$((major + 1))
@@ -74,17 +74,19 @@ jobs:
                       patch=$((patch + 1))
                       ;;
                   esac
-                  
+
                   new_version="${major}.${minor}.${patch}"
                   echo "new_version=${new_version}" >> $GITHUB_OUTPUT
                   echo "tag=v${new_version}" >> $GITHUB_OUTPUT
+
+            - name: Setup Git Identity
+              if: fromJSON(steps.analyze.outputs.result).hasChanges
+              uses: ./.github/actions/git-identity
 
             - name: Update Package Version
               if: fromJSON(steps.analyze.outputs.result).hasChanges
               run: |
                   npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
-                  git config user.name "github-actions[bot]"
-                  git config user.email "github-actions[bot]@users.noreply.github.com"
                   git add package.json
                   git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
                   git push

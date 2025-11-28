@@ -1,36 +1,40 @@
-<!-- AGENT_CONTEXT
-{"type":"implementation","scope":[],"breaking":false,"patterns":[],"test_coverage":"required"}
--->
-<!-- @claude Please review against REQUIREMENTS.md patterns -->
+## [Summary]
 
-## Summary
+<!-- Describe what this PR does and why -->
 
-<!-- Provide a brief description of the changes -->
+## [Related Issues]
 
-## Type
+<!-- Link related issues: "Fixes #123" or "Closes #456" -->
 
-- [ ] Feature
-- [ ] Bug fix
-- [ ] Refactor
-- [ ] Docs
-- [ ] Dependencies
+## [Changes]
 
-## Related Issues
-
-Fixes #
-
-## Changes
-
-<!-- List the key changes -->
+<!-- List key changes in bullet points -->
 
 -
 
-## Checklist
+## [Human Review Checklist]
 
-- [ ] `pnpm check` passes
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm test` passes
-- [ ] Effect patterns used (no try/catch)
-- [ ] B constant pattern followed
-- [ ] Tests added/updated
-- [ ] Documentation updated (if needed)
+<!-- These require human judgment - CI cannot verify -->
+
+- [ ] Tests cover the new/changed behavior
+- [ ] Documentation updated (if user-facing changes)
+- [ ] No unnecessary complexity added
+
+---
+
+<details>
+<summary>Automated Checks (enforced by CI)</summary>
+
+| Check | Workflow | Status Check |
+|-------|----------|--------------|
+| Code style & linting | `pnpm check` | `Code Quality` |
+| Type safety | `pnpm typecheck` | `Code Quality` |
+| Tests pass | `pnpm test` | `Code Quality` |
+| PR title format | PR Metadata | `PR Metadata` |
+| Effect patterns | Claude review | `requirements-review` |
+| B constant pattern | Claude review | `requirements-review` |
+| No try/catch | Claude review | `requirements-review` |
+
+**Merge is blocked** until all status checks pass via GitHub Rulesets.
+
+</details>

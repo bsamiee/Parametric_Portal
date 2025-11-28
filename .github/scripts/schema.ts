@@ -1,31 +1,33 @@
 #!/usr/bin/env tsx
 /**
- * GitHub Workflow Scripts - Unified Schema v3
- * Bleeding-edge polymorphic design with unified U<Kind> spec system
- *
- * @module schema
+ * Central configuration and type definitions for workflow automation.
+ * Contains B constant (config DSL), type registry, API operations, mutation handlers.
  */
+import { ENV } from './env.ts';
 
 // --- Base Type Definitions --------------------------------------------------
 
+type User = { readonly login: string };
+type Label = { readonly name: string };
+type ReactionGroups = ReadonlyArray<{ readonly content: string; readonly users: { readonly totalCount: number } }>;
 type Repo = { readonly owner: string; readonly repo: string };
 type Issue = {
     readonly body: string | null;
     readonly closed_at?: string;
     readonly created_at: string;
-    readonly labels: ReadonlyArray<{ readonly name: string }>;
+    readonly labels: ReadonlyArray<Label>;
     readonly number: number;
     readonly title: string;
 };
 type Comment = { readonly body?: string; readonly id: number };
-type Commit = { readonly commit: { readonly message: string }; readonly author?: { readonly login: string } | null };
+type Commit = { readonly commit: { readonly message: string }; readonly author?: User | null };
 type PR = {
     readonly merged_at: string | null;
     readonly number: number;
     readonly updated_at: string;
-    readonly user: { readonly login: string };
+    readonly user: User;
 };
-type Tag = { readonly name: string };
+type Tag = Label;
 type WorkflowRun = {
     readonly conclusion: string | null;
     readonly html_url: string;
@@ -54,19 +56,11 @@ type RunParams = {
 };
 type Pkg = { readonly name: string; readonly raw: number; readonly gzip: number; readonly brotli: number };
 type Sizes = { readonly packages: ReadonlyArray<Pkg> };
-type Reviewable = {
-    readonly body: string;
-    readonly labels: ReadonlyArray<string>;
-    readonly number: number;
-    readonly title: string;
-};
-
 // --- Constants (String Interning) -------------------------------------------
 
 const S = Object.freeze({
     actionRequired: 'Action Required',
     job: '{{job}}',
-    needsInfo: 'needs-info',
     runUrl: '{{runUrl}}',
     security: 'security',
     techDebt: 'tech-debt',
@@ -85,7 +79,10 @@ const debt = (cat: 'perf' | 'test' | 'quality') =>
 
 const shieldUrl = (l: string, m: string, c: string, s?: string, g?: string): string =>
     `https://img.shields.io/badge/${encodeURIComponent(l)}-${encodeURIComponent(m)}-${c}${s || g ? '?' : ''}${s ? `style=${s}` : ''}${s && g ? '&' : ''}${g ? `logo=${g}&logoColor=white` : ''}`;
-const prop = <K extends string>(k: K) => (x: unknown) => (x as Record<K, unknown>)[k];
+const prop =
+    <K extends string>(...keys: readonly K[]) =>
+    (x: unknown) =>
+        keys.reduce((acc, k) => (acc as Record<K, unknown>)?.[k], x);
 
 // --- Constants (Single B) ---------------------------------------------------
 
@@ -100,24 +97,13 @@ const B = Object.freeze({
                 { k: 'h', l: 3, t: S.actionRequired },
                 { c: 'Review the failed CI run and address the issues before merging.', k: 't' },
             ] as const,
-            classification: {
-                build: debt('perf'),
-                compression: debt('perf'),
-                mutate: debt('test'),
-                test: debt('test'),
-            } as const,
             default: debt('quality'),
             pattern: 'Debt:',
-        },
-        quality: {
-            body: [
-                { k: 'h', l: 2, t: '{{title}}' },
-                { c: 'This issue needs improvement before it can be actioned:', k: 't' },
-                { i: 'problems', k: 'b' },
-                {
-                    c: `Please update the issue to address these points. The \`{{label}}\` label will be automatically removed once resolved.`,
-                    k: 't',
-                },
+            rules: [
+                { p: /build/i, v: debt('perf') },
+                { p: /compression/i, v: debt('perf') },
+                { p: /mutate/i, v: debt('test') },
+                { p: /test/i, v: debt('test') },
             ] as const,
         },
         security: {
@@ -145,35 +131,18 @@ const B = Object.freeze({
     } as const,
     algo: { closeRatio: 14 / 30, mutationPct: 80, staleDays: 30 },
     api: { perPage: 100, state: { all: 'all', closed: 'closed', open: 'open' } as const },
-    content: {
-        aging: {
-            filters: [
-                { l: 'Critical', s: { cat: 'priority', kind: 'label' } },
-                { l: 'Needs Info', s: { cat: 'quality', kind: 'label' } },
-                { l: 'Stale', s: { cat: 'lifecycle', idx: 1, kind: 'label' } },
-            ],
-            fmt: { f: 'table', h: ['Category', 'Count'], t: 'Issue Aging Report' },
-            out: { o: 'summary' },
-            row: 'count',
-            src: { a: ['open'], op: 'issue.list', s: 'fetch' },
-        },
-        bundle: {
-            default: { brotli: 0, gzip: 0, name: '', raw: 0 },
-            fmt: {
-                f: 'table',
-                h: ['Package', 'Raw', 'Gzip', 'Brotli', 'Change'],
-                t: 'Bundle Size Report',
-                w: 'Bundle size changed >10KB gzip',
-            },
-            out: { m: 'bundle', o: 'comment' },
-            row: 'diff',
-            src: { s: 'params' },
-        },
-    } as const,
+    bump: { breaking: 'major', feat: 'minor' } as const,
     dashboard: {
+        actions: [
+            { label: '[Actions]', path: 'actions' },
+            { label: '[Releases]', path: 'releases' },
+            { label: '[Security]', path: 'security' },
+            { label: '[Insights]', path: 'pulse' },
+        ] as const,
         bots: ['renovate[bot]', 'dependabot[bot]'] as const,
         colors: { error: 'red', info: 'blue', success: 'brightgreen', warning: 'yellow' } as const,
-        labels: { bug: 'bug', claude: 'claude-implement', feature: 'feature' } as const,
+        excludeConclusions: ['skipped', 'cancelled'] as const,
+        labels: { feat: 'feat', fix: 'fix' } as const,
         marker: 'dashboard-refresh',
         monitoring: { period: 30, unit: 'days' } as const,
         output: {
@@ -181,13 +150,66 @@ const B = Object.freeze({
             label: 'dashboard',
             labels: ['dashboard', 'pinned'] as const,
             pattern: '[DASHBOARD]',
+            pin: true,
             title: '[DASHBOARD] Repository Overview',
         },
         schedule: { interval: 6, unit: 'hours' } as const,
+        sparklineWidth: 5,
         staleDays: 14,
         targets: { stalePrs: 0, workflowSuccess: 90, workflowWarning: 70 } as const,
         window: 7,
         workflow: 'dashboard.yml',
+    } as const,
+    gating: {
+        actions: {
+            canary: '',
+            major: 'Review breaking changes and create migration checklist.',
+            mutation: 'Improve test coverage to reach mutation score threshold.',
+        } as const,
+        body: {
+            block: [
+                { k: 'h', l: 2, t: '{{title}}' },
+                { k: 'f', l: 'Reason', v: '{{reason}}' },
+                { k: 's' },
+                { k: 'h', l: 3, t: S.actionRequired },
+                { c: '{{action}}', k: 't' },
+            ],
+            migration: [
+                { k: 'h', l: 2, t: 'Migration: {{package}}' },
+                { k: 'f', l: 'Version', v: 'v{{version}}' },
+                { k: 'f', l: 'Source PR', v: '#{{pr}}' },
+                { k: 'h', l: 3, t: 'Checklist' },
+                {
+                    items: [
+                        { text: 'Review breaking changes' },
+                        { text: 'Update affected code' },
+                        { text: 'Run full test suite' },
+                    ],
+                    k: 'a',
+                },
+            ],
+        } as const,
+        default: { eligible: false, reason: 'major' as const },
+        defaults: {
+            check: 'mutation-score',
+            marker: 'GATE-BLOCK',
+            migrate: true,
+            migrationLabels: ['dependencies', 'migration', 'priority/high'],
+            migrationPattern: 'Migration:',
+            title: '[BLOCKED] Auto-merge blocked',
+        } as const,
+        messages: {
+            canary: 'Canary/beta/rc version requires manual review.',
+            major: 'Major version update requires manual review.',
+            mutation: 'Mutation score below threshold.',
+        } as const,
+        patterns: { package: /update ([\w\-@/]+) to v?(\d+)/i, score: /(\d+)%/ } as const,
+        rules: [
+            { p: /major/i, v: { eligible: false, reason: 'major' as const } },
+            { p: /canary|beta|rc|alpha|preview/i, v: { eligible: false, reason: 'canary' as const } },
+            { p: /minor/i, v: { eligible: true, reason: null } },
+            { p: /patch/i, v: { eligible: true, reason: null } },
+        ] as const,
     } as const,
     gen: {
         alert: (type: 'note' | 'tip' | 'important' | 'warning' | 'caution', content: string): string =>
@@ -209,10 +231,21 @@ const B = Object.freeze({
             ((filled) => `\`[${'█'.repeat(filled)}${'░'.repeat(width - filled)}]\` ${value}%`)(
                 Math.round((value / max) * width),
             ),
-        shield: (l: string, m: string, c: string, s?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge', g?: string): string =>
-            `![${l}](${shieldUrl(l, m, c, s, g)})`,
-        shieldLink: (l: string, m: string, c: string, u: string, s?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge', g?: string): string =>
-            `[![${l}](${shieldUrl(l, m, c, s, g)})](${u})`,
+        shield: (
+            l: string,
+            m: string,
+            c: string,
+            s?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge',
+            g?: string,
+        ): string => `![${l}](${shieldUrl(l, m, c, s, g)})`,
+        shieldLink: (
+            l: string,
+            m: string,
+            c: string,
+            u: string,
+            s?: 'flat' | 'flat-square' | 'plastic' | 'for-the-badge',
+            g?: string,
+        ): string => `[![${l}](${shieldUrl(l, m, c, s, g)})](${u})`,
         signs: { [-1]: 'dec', 0: 'same', 1: 'inc' } as const,
         sparkline: (values: ReadonlyArray<number>): string =>
             ((chars, max) => values.map((v) => chars[Math.min(Math.floor((v / max) * 7), 7)]).join(''))(
@@ -241,17 +274,16 @@ const B = Object.freeze({
             agent: ['claude', 'codex', 'copilot', 'gemini'] as const,
             lifecycle: ['pinned', 'stale'] as const,
             priority: ['critical'] as const,
-            quality: [S.needsInfo] as const,
             special: ['dependencies', S.security] as const,
-            type: ['bug', 'chore', 'docs', 'enhancement', 'feature', 'help', 'refactor'] as const,
         },
-        exempt: ['critical', 'implement', S.needsInfo, 'pinned', S.security] as const,
+        exempt: ['critical', 'implement', 'pinned', S.security] as const,
     },
     patterns: {
         header: (f: string) => new RegExp(`###\\s*${f}[\\s\\S]*?(?=###|$)`, 'i'),
         headerStrip: /###\s*[^\n]+\n?/,
         placeholder: /^_?No response_?$/i,
     },
+    pr: { pattern: /^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/i } as const,
     probe: {
         bodyTruncate: 500,
         defaults: { unknownAuthor: 'unknown' } as const,
@@ -264,43 +296,28 @@ const B = Object.freeze({
         titles: { prReview: 'PR Review Summary' } as const,
     } as const,
     release: {
-        bump: { breaking: 'major', feat: 'minor' } as const,
-        conventional: {
-            breaking: { p: ['!:', 'BREAKING CHANGE'], t: 'Breaking Changes' },
-            docs: { p: ['docs:', 'docs('], t: 'Documentation' },
-            feat: { p: ['feat:', 'feat('], t: 'Features' },
-            fix: { p: ['fix:', 'fix('], t: 'Bug Fixes' },
-            refactor: { p: ['refactor:', 'refactor('], t: 'Refactoring' },
-        } as const,
         default: 'patch' as const,
-        order: ['breaking', 'feat', 'fix', 'refactor', 'docs'] as const,
+        emptyChangelog: 'No significant changes.' as const,
     } as const,
-    reports: {
-        quality: {
-            label: S.needsInfo,
-            msgs: {
-                body: 'Issue body is too short. Please provide more detail.',
-                title: 'Title is too short. Please be more descriptive.',
-            },
-            title: 'Quality Review',
-        },
-    } as const,
-    requirements: {
-        bug: ['Bug Description', 'Steps to Reproduce', 'Expected Behavior', 'Actual Behavior'],
-        chore: ['Task Description', 'Acceptance Criteria'],
-        docs: ['Target File', 'Proposed Content', 'Rationale'],
-        enhancement: ['Current Behavior', 'Improved Behavior', 'Rationale', 'Acceptance Criteria'],
-        feature: ['Problem Statement', 'Proposed Solution', 'Acceptance Criteria'],
-        help: ['Question', 'Context'],
-        refactor: ['Target Files', 'Current Pattern', 'Target Pattern', 'Rationale', 'Test Strategy'],
-    } as const,
-    thresholds: { body: 50, bundleKb: 10, field: 20, title: 15 },
+    thresholds: { bundleKb: ENV.bundleThresholdKb },
     time: { day: 86400000 },
+    typeOrder: ['breaking', 'feat', 'fix', 'refactor', 'chore', 'docs', 'style', 'test', 'perf'] as const,
+    types: {
+        breaking: { p: ['!:', 'BREAKING CHANGE'], t: 'Breaking Changes' },
+        chore: { p: ['chore:', 'chore('], t: 'Maintenance' },
+        docs: { p: ['docs:', 'docs('], t: 'Documentation' },
+        feat: { p: ['feat:', 'feat('], t: 'Features' },
+        fix: { p: ['fix:', 'fix('], t: 'Bug Fixes' },
+        perf: { p: ['perf:', 'perf('], t: 'Performance' },
+        refactor: { p: ['refactor:', 'refactor('], t: 'Refactoring' },
+        style: { p: ['style:', 'style('], t: 'Styling' },
+        test: { p: ['test:', 'test('], t: 'Testing' },
+    } as const,
 } as const);
 
 // --- Derived Types ----------------------------------------------------------
 
-type IssueType = (typeof B.labels.categories.type)[number];
+type TypeKey = keyof typeof B.types;
 type LabelCat = keyof typeof B.labels.categories;
 type Mode = 'replace' | 'append' | 'prepend';
 
@@ -335,10 +352,6 @@ type SpecRegistry = {
     readonly filter: {
         readonly age: { readonly kind: 'age'; readonly days?: number };
         readonly label: { readonly kind: 'label'; readonly cat: LabelCat; readonly idx?: number };
-    };
-    readonly validate: {
-        readonly length: { readonly kind: 'length'; readonly key: keyof typeof B.thresholds; readonly msg: string };
-        readonly fields: { readonly kind: 'fields'; readonly type: IssueType };
     };
     readonly source: {
         readonly fetch: { readonly s: 'fetch'; readonly op: string; readonly a?: ReadonlyArray<unknown> };
@@ -427,26 +440,6 @@ const filterHandlers: {
     label: (s, i) => i.labels.some((l) => l.name === B.labels.categories[s.cat][s.idx ?? 0]),
 };
 
-const validateHandlers: {
-    readonly [K in U<'validate'>['kind']]: (
-        s: Extract<U<'validate'>, { kind: K }>,
-        v: string,
-        b?: string,
-    ) => ReadonlyArray<string>;
-} = {
-    fields: (s, _, b) =>
-        B.requirements[s.type].flatMap((name) => {
-            const m = (b ?? '').match(B.patterns.header(name));
-            const c = m?.[0].replace(B.patterns.headerStrip, '').trim() ?? '';
-            return m
-                ? !B.patterns.placeholder.test(c) && c.length >= B.thresholds.field
-                    ? []
-                    : [`Field needs more detail: ${name}`]
-                : [`Missing field: ${name}`];
-        }),
-    length: (s, v) => (v.length < B.thresholds[s.key] ? [s.msg] : []),
-};
-
 // --- Pure Functions (Flattened) ---------------------------------------------
 
 const fn = {
@@ -481,17 +474,20 @@ const fn = {
             )
             .join('\n\n');
     },
-    comment: (c: {
-        readonly body?: string;
-        readonly created_at: string;
-        readonly user: { readonly login: string };
-    }) => ({
+    classify: <R>(input: string, rules: ReadonlyArray<{ readonly p: RegExp; readonly v: R }>, def: R): R =>
+        rules.find((r) => r.p.test(input))?.v ?? def,
+    classifyDebt: (job: string) => fn.classify(job, B.alerts.ci.rules, B.alerts.ci.default),
+    classifyGating: (title: string) =>
+        fn.classify<{ readonly eligible: boolean; readonly reason: 'canary' | 'major' | null }>(
+            title.toLowerCase(),
+            B.gating.rules,
+            B.gating.default,
+        ),
+    comment: (c: { readonly body?: string; readonly created_at: string; readonly user: User }) => ({
         author: c.user.login,
         body: fn.trunc(c.body ?? null),
         createdAt: c.created_at,
     }),
-    detectType: (labels: ReadonlyArray<string>): IssueType | undefined =>
-        B.labels.categories.type.find((t) => labels.includes(t)),
     diff: (c: number, p: number): string =>
         p === 0
             ? `+${fn.size(c)}`
@@ -504,11 +500,11 @@ const fn = {
             `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} (UTC)`)((n: number) =>
             String(n).padStart(2, '0'),
         ),
-    hasLabel: (labels: ReadonlyArray<{ readonly name: string }>, target: string): boolean =>
-        labels.some((l) => l.name === target),
-    reactions: (
-        groups: ReadonlyArray<{ readonly content: string; readonly users: { readonly totalCount: number } }>,
-    ): Record<string, number> => Object.fromEntries(groups.map((g) => [g.content, g.users.totalCount])),
+    hasLabel: (labels: ReadonlyArray<Label>, target: string): boolean => labels.some((l) => l.name === target),
+    logins: (arr: ReadonlyArray<User>): ReadonlyArray<string> => arr.map((x) => x.login),
+    names: (arr: ReadonlyArray<Label>): ReadonlyArray<string> => arr.map((x) => x.name),
+    reactions: (groups: ReactionGroups): Record<string, number> =>
+        Object.fromEntries(groups.map((g) => [g.content, g.users.totalCount])),
     report: (
         title: string,
         headers: ReadonlyArray<string>,
@@ -527,14 +523,12 @@ const fn = {
                 ].join('\n'))(
                 headers.map((_, i) => ({ c: ':------:', l: ':------', r: '------:' })[(o.align ?? [])[i] ?? 'l']),
             ))(opts ?? {}),
-    review: (body: string, title: string, labels: ReadonlyArray<string>): ReadonlyArray<string> => {
-        const type = fn.detectType(labels);
-        return [
-            ...fn.validate({ key: 'body', kind: 'length', msg: B.reports.quality.msgs.body }, body),
-            ...fn.validate({ key: 'title', kind: 'length', msg: B.reports.quality.msgs.title }, title),
-            ...(type ? fn.validate({ kind: 'fields', type }, body, body) : []),
-        ];
-    },
+    resolveType: (input: string | ReadonlyArray<string>, mode: 'label' | 'commit'): TypeKey | undefined =>
+        mode === 'label'
+            ? (Object.keys(B.types) as ReadonlyArray<TypeKey>).find((k) => (input as ReadonlyArray<string>).includes(k))
+            : (Object.entries(B.types) as ReadonlyArray<[TypeKey, (typeof B.types)[TypeKey]]>).find(([_, v]) =>
+                  v.p.some((pat) => (input as string).toLowerCase().includes(pat.replace('(', ''))),
+              )?.[0],
     rowsCount: (
         issues: ReadonlyArray<Issue>,
         filters: ReadonlyArray<{ readonly l: string; readonly s: Extract<U<'filter'>, { kind: 'label' }> }>,
@@ -559,7 +553,9 @@ const fn = {
     size: (b: number): string =>
         b === 0
             ? '0 B'
-            : `${(b / 1024 ** Math.floor(Math.log(b) / Math.log(1024))).toFixed(2)} ${['B', 'KB', 'MB'][Math.floor(Math.log(b) / Math.log(1024))]}`,
+            : ((i) => `${(b / 1024 ** i).toFixed(2)} ${['B', 'KB', 'MB'][i]}`)(
+                  Math.floor(Math.log(b) / Math.log(1024)),
+              ),
     status: (d: number, t = B.thresholds.bundleKb * 1024): string =>
         B.gen.status[Math.abs(d) > t ? 'warn' : B.gen.signs[Math.sign(d) as -1 | 0 | 1]],
     target: (value: number, threshold: number, op: 'gt' | 'lt' | 'gte' | 'lte'): 'pass' | 'warn' | 'fail' =>
@@ -568,8 +564,6 @@ const fn = {
             : 'warn',
     timestamp: (d: Date): string => `_Generated: ${d.toISOString()}_`,
     trunc: (s: string | null, n = B.probe.bodyTruncate): string => (s ?? '').substring(0, n),
-    validate: (spec: U<'validate'>, value: string, body?: string): ReadonlyArray<string> =>
-        validateHandlers[spec.kind](spec as never, value, body),
 } as const;
 
 // --- Ops Factory ------------------------------------------------------------
@@ -587,23 +581,39 @@ const ops: Record<string, Op> = {
         m: ([workflow, created]) => ({ created, per_page: B.api.perPage, workflow_id: workflow }),
         o: prop('workflow_runs'),
     },
-    'actions.listWorkflows': { a: ['actions', 'listRepoWorkflows'], m: () => ({ per_page: B.api.perPage }), o: prop('workflows') },
+    'actions.listWorkflows': {
+        a: ['actions', 'listRepoWorkflows'],
+        m: () => ({ per_page: B.api.perPage }),
+        o: prop('workflows'),
+    },
     'check.listForRef': { a: ['checks', 'listForRef'], m: ([ref]) => ({ ref }), o: prop('check_runs') },
     'comment.create': { a: ['issues', 'createComment'], m: ([n, body]) => ({ body, issue_number: n }) },
     'comment.list': { a: ['issues', 'listComments'], m: ([n]) => ({ issue_number: n }) },
     'comment.update': { a: ['issues', 'updateComment'], m: ([id, body]) => ({ body, comment_id: id }) },
-    'discussion.get': { m: ([n]) => ({ n }), o: (x) => prop('discussion')(prop('repository')(x)), q: B.probe.gql.discussion },
+    'discussion.get': {
+        m: ([n]) => ({ n }),
+        o: prop('repository', 'discussion'),
+        q: B.probe.gql.discussion,
+    },
     'issue.addLabels': { a: ['issues', 'addLabels'], m: ([n, labels]) => ({ issue_number: n, labels }) },
     'issue.create': { a: ['issues', 'create'], m: ([title, labels, body]) => ({ body, labels, title }) },
     'issue.get': { a: ['issues', 'get'], m: ([n]) => ({ issue_number: n }) },
-    'issue.list': { a: ['issues', 'listForRepo'], m: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }) },
+    'issue.list': {
+        a: ['issues', 'listForRepo'],
+        m: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }),
+    },
     'issue.pin': { m: ([issueId]) => ({ issueId }), q: B.probe.gql.pinIssue, s: true },
     'issue.removeLabel': { a: ['issues', 'removeLabel'], m: ([n, name]) => ({ issue_number: n, name }), s: true },
     'issue.update': { a: ['issues', 'update'], m: ([n, body]) => ({ body, issue_number: n }) },
     'pull.get': { a: ['pulls', 'get'], m: ([n]) => ({ pull_number: n }) },
     'pull.list': {
         a: ['pulls', 'list'],
-        m: ([state, sort, direction]) => ({ direction: direction ?? 'desc', per_page: B.api.perPage, sort: sort ?? 'updated', state }),
+        m: ([state, sort, direction]) => ({
+            direction: direction ?? 'desc',
+            per_page: B.api.perPage,
+            sort: sort ?? 'updated',
+            state,
+        }),
     },
     'pull.listCommits': { a: ['pulls', 'listCommits'], m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }) },
     'pull.listFiles': { a: ['pulls', 'listFiles'], m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }) },
@@ -612,14 +622,24 @@ const ops: Record<string, Op> = {
         m: ([n]) => ({ pull_number: n }),
         o: (x) => [...((x as { users: unknown[] }).users ?? []), ...((x as { teams: unknown[] }).teams ?? [])],
     },
-    'pull.listReviewComments': { a: ['pulls', 'listReviewComments'], m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }) },
+    'pull.listReviewComments': {
+        a: ['pulls', 'listReviewComments'],
+        m: ([n]) => ({ per_page: B.api.perPage, pull_number: n }),
+    },
     'pull.listReviews': { a: ['pulls', 'listReviews'], m: ([n]) => ({ pull_number: n }) },
-    'release.create': { a: ['repos', 'createRelease'], m: ([tag, name, body, draft, prerelease]) => ({ body, draft, name, prerelease, tag_name: tag }) },
+    'release.create': {
+        a: ['repos', 'createRelease'],
+        m: ([tag, name, body, draft, prerelease]) => ({ body, draft, name, prerelease, tag_name: tag }),
+    },
     'release.latest': { a: ['repos', 'getLatestRelease'], m: () => ({}), o: prop('tag_name'), s: true },
-    'repo.compareCommits': { a: ['repos', 'compareCommits'], m: ([base, head]) => ({ base, head }), o: prop('commits') },
+    'repo.compareCommits': {
+        a: ['repos', 'compareCommits'],
+        m: ([base, head]) => ({ base, head }),
+        o: prop('commits'),
+    },
     'repo.listCommits': { a: ['repos', 'listCommits'], m: ([since]) => ({ per_page: B.api.perPage, since }) },
     'review.create': { a: ['pulls', 'createReview'], m: ([pr, body, event]) => ({ body, event, pull_number: pr }) },
-    'tag.list': { a: ['repos', 'listTags'], m: () => ({ per_page: 1 }), o: (x) => x },
+    'tag.list': { a: ['repos', 'listTags'], m: () => ({ per_page: 1 }) },
 } as const;
 
 const call = async (c: Ctx, k: string, ...a: ReadonlyArray<unknown>): Promise<unknown> => {
@@ -628,7 +648,9 @@ const call = async (c: Ctx, k: string, ...a: ReadonlyArray<unknown>): Promise<un
     const run = async () =>
         o.q
             ? t(await c.github.graphql(o.q, { owner: c.owner, repo: c.repo, ...o.m(a) }))
-            : t((await c.github.rest[o.a![0]][o.a![1]]({ owner: c.owner, repo: c.repo, ...o.m(a) })).data);
+            : ((api) => t((api as { data: unknown }).data))(
+                  await c.github.rest[o.a?.[0] ?? ''][o.a?.[1] ?? '']({ owner: c.owner, repo: c.repo, ...o.m(a) }),
+              );
     return o.s ? run().catch(() => undefined) : run();
 };
 
@@ -690,18 +712,20 @@ export type {
     G,
     GitHub,
     Issue,
-    IssueType,
+    TypeKey,
     Kind,
+    Label,
     LabelCat,
     Mode,
     Pkg,
     PR,
+    ReactionGroups,
     Repo,
-    Reviewable,
     RunParams,
     Section,
     Sizes,
     Tag,
     U,
+    User,
     WorkflowRun,
 };

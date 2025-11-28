@@ -1,30 +1,29 @@
 name: Help Request
 description: Ask a question or request assistance
-title: "[Help]: "
+title: "[HELP]: "
 labels: ["help"]
 body:
-    - type: markdown
-      attributes:
-          value: |
-              <!-- AGENT_CONTEXT
-              {"type":"help","agents":["documentation-specialist","typescript-advanced"],"patterns":[],"priority_hint":"low"}
-              -->
-              **Agent-parseable help request.** All fields map to JSON keys via `id` attribute.
-
     - type: dropdown
-      id: help_category
+      id: help_type
       attributes:
           label: Help Category
-          description: What type of help do you need?
           options:
-              - understanding-codebase
-              - debugging-issue
-              - implementation-guidance
-              - architecture-decision
-              - tooling-setup
-              - pattern-application
+              - understanding-code
+              - debugging
+              - implementation
+              - architecture
+              - tooling
       validations:
           required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Related Files
+          description: Files or packages related to your question
+          placeholder: "src/lib/utils.ts, @parametric/core"
+      validations:
+          required: false
 
     - type: textarea
       id: question
@@ -40,56 +39,16 @@ body:
       attributes:
           label: Context
           description: Background information relevant to your question
-          placeholder: |
-              I'm trying to implement [feature] and encountered [situation].
-              The codebase uses [patterns] but I'm unsure how to apply them here.
       validations:
           required: true
 
-    - type: textarea
-      id: attempted_solutions
-      attributes:
-          label: What I've Tried
-          description: Solutions you've already attempted
-          placeholder: |
-              1. Tried [approach A] - resulted in [outcome]
-              2. Searched docs for [term] - didn't find [expected]
-      validations:
-          required: false
-
-    - type: input
-      id: relevant_files
-      attributes:
-          label: Relevant Files
-          description: Comma-separated list of related files
-          placeholder: "src/lib/utils.ts, src/hooks/useAuth.ts"
-      validations:
-          required: false
-
     - type: dropdown
-      id: urgency
+      id: priority
       attributes:
-          label: Urgency
-          description: How urgent is this request?
+          label: Priority
           options:
               - low
               - medium
               - high
       validations:
           required: true
-
-    - type: dropdown
-      id: scope
-      attributes:
-          label: Related Areas
-          description: Which areas does this relate to?
-          multiple: true
-          options:
-              - ui
-              - api
-              - build
-              - types
-              - testing
-              - config
-      validations:
-          required: false

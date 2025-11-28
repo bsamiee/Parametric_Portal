@@ -1,22 +1,23 @@
 name: Feature Request
 description: Propose a new feature or capability
-title: "[Feature]: "
-labels: ["feature"]
+title: "[FEAT]: "
+labels: ["feat"]
 body:
-    - type: markdown
-      attributes:
-          value: |
-              <!-- AGENT_CONTEXT
-              {"type":"feature","agents":["library-planner","typescript-advanced"],"patterns":["effect-pipeline","option-monad","branded-types","dispatch-table"],"priority_hint":"medium"}
-              -->
-              **Agent-parseable feature request.** All fields map to JSON keys via `id` attribute.
-
     - type: textarea
-      id: problem_statement
+      id: description
       attributes:
           label: Problem Statement
           description: What problem does this feature solve?
-          placeholder: "Users currently cannot [action] because [limitation], resulting in [negative outcome]"
+          placeholder: "Users currently cannot [action] because [limitation]"
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Package or area for this feature
+          placeholder: "@parametric/ui, src/lib/, new package"
       validations:
           required: true
 
@@ -24,76 +25,37 @@ body:
       id: proposed_solution
       attributes:
           label: Proposed Solution
-          description: Your ideal implementation
+          description: How should this work?
       validations:
           required: true
-
-    - type: textarea
-      id: alternatives_considered
-      attributes:
-          label: Alternatives Considered
-          description: What alternatives have you explored?
-      validations:
-          required: false
-
-    - type: dropdown
-      id: scope
-      attributes:
-          label: Scope
-          description: Which areas does this feature affect?
-          multiple: true
-          options:
-              - ui
-              - api
-              - build
-              - types
-              - testing
-              - config
-      validations:
-          required: true
-
-    - type: dropdown
-      id: effort_estimate
-      attributes:
-          label: Estimated Effort
-          description: How much work is this?
-          options:
-              - trivial
-              - small
-              - medium
-              - large
-      validations:
-          required: false
 
     - type: textarea
       id: acceptance_criteria
       attributes:
           label: Acceptance Criteria
-          description: How will we know this feature is complete?
+          description: How will we know this is complete?
           placeholder: |
               - [ ] Criterion 1
               - [ ] Criterion 2
-              - [ ] Tests pass with 80% coverage
       validations:
           required: true
 
-    - type: checkboxes
-      id: required_patterns
+    - type: dropdown
+      id: priority
       attributes:
-          label: Required Patterns
-          description: Which architectural patterns apply?
+          label: Priority
           options:
-              - label: effect-pipeline
-              - label: option-monad
-              - label: branded-types
-              - label: dispatch-table
-              - label: single-b-constant
+              - low
+              - medium
+              - high
+              - critical
+      validations:
+          required: true
 
     - type: dropdown
-      id: breaking_change
+      id: breaking
       attributes:
           label: Breaking Change
-          description: Does this introduce breaking changes?
           options:
               - "no"
               - "yes"

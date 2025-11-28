@@ -69,7 +69,7 @@ Third-party services, GitHub Apps, and configuration recommendations for Paramet
 - Required checks:
   - `quality` (from ci.yml)
   - `mutation-score` (if using Stryker)
-  - `Validate Conventional Commits` (from semantic-commits.yml)
+  - `PR Metadata` (from pr-meta.yml)
 
 **Pull Request Reviews**:
 - ✅ Require pull request reviews before merging
@@ -149,7 +149,7 @@ Add to your `README.md`:
 **CLAUDE_CODE_OAUTH_TOKEN** (if using Claude Code for extended features)
 - **Purpose**: Extended Claude API access for code review
 - **Acquisition**: Contact Anthropic for enterprise API access
-- **Usage**: claude-code-review-enhanced.yml
+- **Usage**: claude-pr-review.yml, claude.yml, claude-maintenance.yml
 
 **NX_CLOUD_ACCESS_TOKEN** (if using Nx Cloud)
 - **Purpose**: Remote caching and distributed task execution
@@ -395,5 +395,5 @@ strategy:
 
 ---
 
-**Last Updated**: 2025-11-26
+**Last Updated**: 2025-11-28
 **Maintained By**: Parametric Portal Team

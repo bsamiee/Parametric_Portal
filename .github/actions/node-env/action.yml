@@ -1,0 +1,32 @@
+name: Node Environment
+description: Node.js + pnpm setup with caching
+inputs:
+    node-version:
+        description: Node.js version (ignored if node-version-file is set)
+        default: '25.2.1'
+    node-version-file:
+        description: File containing Node.js version (e.g., package.json)
+        required: false
+    pnpm-version:
+        description: pnpm version
+        default: '10.23.0'
+    install:
+        description: Run pnpm install
+        default: 'true'
+    frozen-lockfile:
+        description: Use --frozen-lockfile flag
+        default: 'true'
+runs:
+    using: composite
+    steps:
+        - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+          with:
+              version: ${{ inputs.pnpm-version }}
+        - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6
+          with:
+              node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
+              node-version-file: ${{ inputs.node-version-file }}
+              cache: pnpm
+        - if: inputs.install == 'true'
+          shell: bash
+          run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}

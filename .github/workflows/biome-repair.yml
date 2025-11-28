@@ -18,14 +18,17 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout PR
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
                   ref: ${{ github.event.pull_request.head.ref }}
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 0
 
             - name: Setup Environment
-              uses: ./.github/actions/setup
+              uses: ./.github/actions/node-env
+
+            - name: Setup Git Identity
+              uses: ./.github/actions/git-identity
 
             - name: Run Biome Auto-Repair
               id: repair
@@ -65,11 +68,8 @@ jobs:
                   steps.changes.outputs.has_changes == 'true' &&
                   steps.test.outputs.tests_failed != 'true'
               run: |
-                  git config user.name "github-actions[bot]"
-                  git config user.email "github-actions[bot]@users.noreply.github.com"
                   git add .
                   git commit -m "style: biome auto-repair
-
                   Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
                   git push
 

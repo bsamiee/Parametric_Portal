@@ -1,0 +1,61 @@
+name: Test Request
+description: Create new tests or improve coverage
+title: "[TEST]: "
+labels: ["test"]
+body:
+    - type: dropdown
+      id: test_type
+      attributes:
+          label: Test Type
+          options:
+              - unit
+              - integration
+              - e2e
+              - property-based
+              - mutation
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: File, function, or module to test
+          placeholder: "src/lib/utils.ts, calculateTotal(), @parametric/core"
+      validations:
+          required: true
+
+    - type: textarea
+      id: expected_behavior
+      attributes:
+          label: Expected Behavior
+          description: What should the tests verify?
+          placeholder: |
+              - Returns correct value for valid input
+              - Throws on invalid input
+              - Handles edge cases
+      validations:
+          required: true
+
+    - type: textarea
+      id: test_cases
+      attributes:
+          label: Test Cases
+          description: Specific scenarios to cover
+          placeholder: |
+              - [ ] Happy path
+              - [ ] Edge case: empty input
+              - [ ] Error case: invalid type
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true

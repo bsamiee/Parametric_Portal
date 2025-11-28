@@ -24,12 +24,12 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
 
             - name: Setup Environment
-              uses: ./.github/actions/setup
+              uses: ./.github/actions/node-env
               with:
-                  install-dependencies: 'false'
+                  install: 'false'
 
             - name: Run pnpm audit
               id: audit
@@ -49,14 +49,14 @@ jobs:
                   script: |
                       const fs = require('fs');
                       const auditResults = JSON.parse(fs.readFileSync('audit-results.json', 'utf8'));
-                      
+
                       // pnpm audit JSON structure: { advisories: { [id]: advisory }, metadata: { vulnerabilities: { critical, high, ... } } }
                       const vulns = auditResults.metadata?.vulnerabilities || {};
                       const critical = vulns.critical || 0;
                       const high = vulns.high || 0;
-                      
+
                       core.info(`Vulnerability summary: ${critical} critical, ${high} high`);
-                      
+
                       if (critical > 0 || high > 0) {
                         // Log advisory details
                         const advisories = auditResults.advisories || {};
@@ -73,7 +73,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
 
             - name: Initialize CodeQL
               uses: github/codeql-action/init@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
@@ -94,7 +94,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
                   fetch-depth: 0
 
@@ -109,16 +109,16 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
 
             - name: Setup Environment
-              uses: ./.github/actions/setup
+              uses: ./.github/actions/node-env
 
             - name: Check for Copyleft Licenses
               run: |
                   echo "Checking for copyleft licenses..."
                   pnpm licenses list --json > licenses.json
-                  
+
                   # Check for GPL, AGPL, LGPL
                   if grep -iE "(GPL|AGPL|LGPL)" licenses.json; then
                     echo "[ERROR] Copyleft licenses detected"
@@ -134,7 +134,7 @@ jobs:
         if: failure()
         steps:
             - name: Checkout
-              uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5 # v6
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
 
             - name: Create Security Alert
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8

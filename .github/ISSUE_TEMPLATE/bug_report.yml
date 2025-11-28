@@ -1,31 +1,23 @@
 name: Bug Report
 description: Report a bug or unexpected behavior
-title: "[Bug]: "
-labels: ["bug"]
+title: "[FIX]: "
+labels: ["fix"]
 body:
-    - type: markdown
-      attributes:
-          value: |
-              <!-- AGENT_CONTEXT
-              {"type":"bug","agents":["testing-specialist","typescript-advanced"],"patterns":["effect-pipeline","option-monad"],"priority_hint":"medium"}
-              -->
-              **Agent-parseable bug report.** All fields map to JSON keys via `id` attribute.
-
-    - type: checkboxes
-      id: existing_search
-      attributes:
-          label: Existing Issues
-          description: Confirm you've searched for duplicates
-          options:
-              - label: I have searched existing issues and this is a new bug
-                required: true
-
     - type: textarea
       id: description
       attributes:
           label: Bug Description
-          description: Clear, concise description of the bug
+          description: What went wrong?
           placeholder: "When [action], [unexpected result] occurs instead of [expected result]"
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: File, function, or package affected
+          placeholder: "src/lib/utils.ts, calculateTotal(), @parametric/core"
       validations:
           required: true
 
@@ -33,11 +25,10 @@ body:
       id: repro_steps
       attributes:
           label: Steps to Reproduce
-          description: Minimal steps to reproduce the bug
+          description: Minimal steps to trigger the bug
           placeholder: |
-              1. Navigate to '...'
-              2. Click '...'
-              3. Observe error
+              1. Call function with X
+              2. Observe error Y
       validations:
           required: true
 
@@ -49,55 +40,17 @@ body:
       validations:
           required: true
 
-    - type: textarea
-      id: actual_behavior
-      attributes:
-          label: Actual Behavior
-          description: What actually happens?
-      validations:
-          required: true
-
     - type: dropdown
-      id: severity
+      id: priority
       attributes:
-          label: Severity
-          description: Impact level of this bug
+          label: Priority
           options:
-              - critical
-              - high
-              - medium
               - low
+              - medium
+              - high
+              - critical
       validations:
           required: true
-
-    - type: dropdown
-      id: scope
-      attributes:
-          label: Affected Areas
-          description: Which areas are affected?
-          multiple: true
-          options:
-              - ui
-              - api
-              - build
-              - types
-              - testing
-              - config
-      validations:
-          required: true
-
-    - type: textarea
-      id: environment
-      attributes:
-          label: Environment
-          description: Runtime environment details
-          placeholder: |
-              node: 25.2.1
-              browser: Chrome 131
-              os: macOS 15.1
-          render: yaml
-      validations:
-          required: false
 
     - type: textarea
       id: logs
@@ -105,14 +58,5 @@ body:
           label: Error Logs
           description: Relevant error messages or stack traces
           render: shell
-      validations:
-          required: false
-
-    - type: input
-      id: affected_packages
-      attributes:
-          label: Affected Packages
-          description: Comma-separated list of affected Nx packages
-          placeholder: "@parametric/ui, @parametric/core"
       validations:
           required: false
