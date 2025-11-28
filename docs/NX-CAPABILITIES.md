@@ -10,20 +10,20 @@ Complete inventory of Nx features: what's enabled, what's available, and configu
 
 | Feature | Status | Config Location |
 |---------|--------|-----------------|
-| Nx 22.2.0-canary | ✅ | nx.json L97-101 |
-| @nx/js, @nx/react, @nx/vite | ✅ | nx.json plugins |
-| Crystal inference | ✅ | nx.json L173 |
+| Nx 22.2.0-canary | ✅ | nx.json L5-12 |
+| @nx/js, @nx/react, @nx/vite | ✅ | nx.json L42-53 |
+| Crystal inference | ✅ | nx.json L233 |
 | Local cache (GitHub Actions) | ✅ | .github/actions/nx-setup/ |
 | Affected commands | ✅ | ci.yml |
 | nrwl/nx-set-shas | ✅ | nx-setup/action.yml |
-| 12 target defaults | ✅ | nx.json L161-271 |
-| Named inputs | ✅ | nx.json L103-141 |
-| Parallel execution (4) | ✅ | nx.json L144 |
+| 12 target defaults | ✅ | nx.json L149-232 |
+| Named inputs | ✅ | nx.json L13-38 |
+| Parallel execution (4) | ✅ | nx.json L41 |
 | Project graph artifact | ✅ | ci.yml |
-| **Nx Cloud Remote Cache** | ✅ | nx.json nxCloudId |
+| **Nx Cloud Remote Cache** | ✅ | nx.json L40 |
 | **CI Pipeline Insights** | ✅ | Automatic with Cloud |
 | **Self-Healing CI** | ✅ | ci.yml (nx fix-ci) |
-| **Nx Release** | ✅ | nx.json L5-95 |
+| **Nx Release** | ✅ | nx.json L55-148 |
 | **Conventional Commits** | ✅ | nx.json release.conventionalCommits |
 | **GitHub Release Creation** | ✅ | nx.json createRelease: "github" |
 | **Changelog Generation** | ✅ | nx.json workspaceChangelog |
@@ -53,6 +53,7 @@ The full release configuration in `nx.json`:
     },
     "version": {
       "conventionalCommits": true,
+      "fallbackCurrentVersionResolver": "disk",
       "preVersionCommand": "pnpm exec nx run-many -t build --parallel=4"
     },
     "changelog": {
@@ -279,7 +280,7 @@ When CI exceeds 10 minutes, consider enabling distributed task execution:
 
 ## Implementation Checklist
 
-### Completed ✅
+### Completed
 - [x] Nx Cloud workspace connected (`nxCloudId` in nx.json)
 - [x] `NX_CLOUD_ACCESS_TOKEN` in GitHub secrets
 - [x] Token configured in ci.yml env block
@@ -293,6 +294,7 @@ When CI exceeds 10 minutes, consider enabling distributed task execution:
 - [x] Conventional commits type configuration
 - [x] GitHub release creation enabled
 - [x] Changelog generation configured
+- [x] Version fallback to disk when no git tags
 
 ### Optional (Developer Choice)
 - [ ] Install Nx Console extension

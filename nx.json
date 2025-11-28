@@ -142,6 +142,7 @@
         "releaseTagPattern": "v{version}",
         "version": {
             "conventionalCommits": true,
+            "fallbackCurrentVersionResolver": "disk",
             "preVersionCommand": "pnpm exec nx run-many -t build --parallel=4"
         }
     },

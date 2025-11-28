@@ -86,10 +86,18 @@ jobs:
               run: |
                   echo "## Release Preview" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
-                  pnpm exec nx release ${{ steps.args.outputs.args }} --verbose 2>&1 | tee release-preview.txt || true
+                  set +e
+                  pnpm exec nx release ${{ steps.args.outputs.args }} --verbose 2>&1 | tee release-preview.txt
+                  EXIT_CODE=$?
+                  set -e
                   echo '```' >> $GITHUB_STEP_SUMMARY
                   cat release-preview.txt >> $GITHUB_STEP_SUMMARY
                   echo '```' >> $GITHUB_STEP_SUMMARY
+                  if [ $EXIT_CODE -ne 0 ]; then
+                    echo "" >> $GITHUB_STEP_SUMMARY
+                    echo "**[!] Preview completed with exit code $EXIT_CODE**" >> $GITHUB_STEP_SUMMARY
+                    echo "::warning::Release preview exited with code $EXIT_CODE"
+                  fi
 
             - name: Execute Release
               if: github.event.inputs.dry_run != 'true'
