@@ -106,22 +106,10 @@
         },
         "check": {
             "cache": true,
-            "executor": "nx:run-commands",
-            "inputs": ["default", "sharedGlobals"],
-            "options": {
-                "command": "biome check --write ."
-            }
+            "inputs": ["default", "sharedGlobals"]
         },
         "dev": {
             "cache": false
-        },
-        "format": {
-            "cache": true,
-            "executor": "nx:run-commands",
-            "inputs": ["default", "sharedGlobals"],
-            "options": {
-                "command": "biome format --write ."
-            }
         },
         "inspect:build": {
             "cache": false,
