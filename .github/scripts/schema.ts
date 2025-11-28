@@ -131,7 +131,6 @@ const B = Object.freeze({
     } as const,
     algo: { closeRatio: 14 / 30, mutationPct: 80, staleDays: 30 },
     api: { perPage: 100, state: { all: 'all', closed: 'closed', open: 'open' } as const },
-    bump: { breaking: 'major', feat: 'minor' } as const,
     dashboard: {
         actions: [
             { label: '[Actions]', path: 'actions' },
@@ -301,10 +300,24 @@ const B = Object.freeze({
     } as const,
     thresholds: { bundleKb: ENV.bundleThresholdKb },
     time: { day: 86400000 },
-    typeOrder: ['breaking', 'feat', 'fix', 'refactor', 'chore', 'docs', 'style', 'test', 'perf'] as const,
+    typeOrder: [
+        'breaking',
+        'feat',
+        'fix',
+        'refactor',
+        'perf',
+        'chore',
+        'docs',
+        'style',
+        'test',
+        'ci',
+        'build',
+    ] as const,
     types: {
         breaking: { p: ['!:', 'BREAKING CHANGE'], t: 'Breaking Changes' },
+        build: { p: ['build:', 'build('], t: null },
         chore: { p: ['chore:', 'chore('], t: 'Maintenance' },
+        ci: { p: ['ci:', 'ci('], t: null },
         docs: { p: ['docs:', 'docs('], t: 'Documentation' },
         feat: { p: ['feat:', 'feat('], t: 'Features' },
         fix: { p: ['fix:', 'fix('], t: 'Bug Fixes' },

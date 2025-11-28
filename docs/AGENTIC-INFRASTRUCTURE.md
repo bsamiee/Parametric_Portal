@@ -181,6 +181,8 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `test` | #f59e0b | Adding or updating tests |
 | `chore` | #a1887f | Maintenance task |
 | `perf` | #e16f24 | Performance improvement |
+| `ci` | #6e7781 | CI/CD pipeline changes |
+| `build` | #6e7781 | Build system or tooling |
 
 ### Issue-Only Type Labels
 | Label | Color | Description |
@@ -221,7 +223,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 | `breaking` | #b60205 | Breaking change |
 | `dashboard` | #0d9488 | Repository metrics dashboard |
 
-**Total: 22 labels**
+**Total: 24 labels**
 
 ---
 
