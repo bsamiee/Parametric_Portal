@@ -48,6 +48,14 @@
   color: "e16f24"                       # orange
   description: "Performance improvement"
 
+- name: ci
+  color: "6e7781"                       # grey
+  description: "CI/CD pipeline changes"
+
+- name: build
+  color: "6e7781"                       # grey
+  description: "Build system or tooling"
+
 # --- Issue-Only Type Labels (no commit prefix) -------------------------------
 
 - name: help

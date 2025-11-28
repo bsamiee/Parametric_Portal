@@ -306,7 +306,9 @@ const B = Object.freeze({
     time: { day: 86400000 },
     types: {
         breaking: { p: ['!:', 'BREAKING CHANGE'] },
+        build: { p: ['build:', 'build('] },
         chore: { p: ['chore:', 'chore('] },
+        ci: { p: ['ci:', 'ci('] },
         docs: { p: ['docs:', 'docs('] },
         feat: { p: ['feat:', 'feat('] },
         fix: { p: ['fix:', 'fix('] },

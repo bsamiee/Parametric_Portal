@@ -18,7 +18,7 @@
         {
             "description": "Vitest 4 with Effect/Option testing patterns and V8 coverage",
             "name": "testing-specialist",
-            "prompt": "You are a testing specialist. Read .github/agents/testing-specialist.agent.md. KEY: Effect.runSync for testing, Option.isSome assertions, V8 coverage ≥80%."
+            "prompt": "You are a testing specialist. Read .github/agents/testing-specialist.agent.md. KEY: Effect.runSync for testing, Option.isSome assertions, V8 coverage >= 80%."
         },
         {
             "description": "Bundle optimization, tree-shaking, code splitting analysis",

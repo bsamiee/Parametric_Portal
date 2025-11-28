@@ -46,10 +46,10 @@ outputs:
 runs:
     using: composite
     steps:
-        - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4
+        - uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
           with:
               version: ${{ inputs.pnpm-version }}
-        - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v6
+        - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
           with:
               node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
               node-version-file: ${{ inputs.node-version-file }}
