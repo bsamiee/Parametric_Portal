@@ -20,18 +20,23 @@ Complete inventory of Nx features: what's enabled, what's missing, and how to en
 | Named inputs | ✅ | nx.json L13-38 |
 | Parallel execution (4) | ✅ | nx.json L40 |
 | Project graph artifact | ✅ | ci.yml |
+| **Nx Cloud Remote Cache** | ✅ | nx.json nxCloudId |
+| **Flaky Task Retry** | ✅ | Nx Cloud dashboard (aggressive) |
+| **CI Pipeline Insights** | ✅ | Automatic with Cloud |
+
+**Workspace ID**: `6929c006315634b45342f623`
+**Dashboard**: https://cloud.nx.app
 
 ---
 
-## Missing Capabilities
+## Remaining Capabilities
 
-### Priority 1: Immediate (Free, High Impact)
+### Priority 1: Optional (Free)
 
 | Capability | Description | Effort |
 |------------|-------------|--------|
-| **Nx Cloud Remote Cache** | Share cache across CI/developers, 10-50% faster builds | 15 min |
 | **Nx Console** | VS Code/JetBrains extension for graph UI, generators | 2 min |
-| **CI Pipeline Insights** | Task timing, cache hit rates in dashboard | Automatic with Cloud |
+| **Developer Login** | Local remote cache access via `nx login` | 1 min |
 
 ### Priority 2: Nx Cloud Free Tier
 
@@ -308,16 +313,18 @@ Free tier is sufficient for most projects. Pro recommended when CI > 10 min.
 ## Implementation Checklist
 
 ### Immediate (Do Now)
-- [ ] Run `npx nx connect` to create Nx Cloud workspace
-- [ ] Add `NX_CLOUD_ACCESS_TOKEN` to GitHub secrets
-- [ ] Add token to ci.yml env block
-- [ ] Install Nx Console extension
+- [x] Run `npx nx connect` to create Nx Cloud workspace
+- [x] Add `NX_CLOUD_ACCESS_TOKEN` to GitHub secrets
+- [x] Add token to ci.yml env block
+- [x] Enable workspace data caching in Nx Cloud
+- [x] Enable flaky task retry in Nx Cloud
+- [ ] Install Nx Console extension (optional)
 
 ### This Week
-- [ ] Run `npx nx login` on dev machine
+- [ ] Run `pnpm exec nx login` on dev machine (for local remote cache)
 - [ ] Add Nx Release config to nx.json
-- [ ] Test release with `npx nx release --dry-run`
-- [ ] Configure Nx MCP for Claude/Cursor
+- [ ] Test release with `pnpm exec nx release --dry-run`
+- [ ] Configure Nx MCP for Claude/Cursor (optional)
 
 ### Future (When Needed)
 - [ ] Add module boundary tags to packages
