@@ -49,7 +49,7 @@
         "lefthook": "catalog:",
         "lightningcss": "catalog:",
         "lucide-react": "catalog:",
-        "nx": "catalog:",
+        "nx": "22.2.0-canary.20251125-7e00ec4",
         "react-aria": "catalog:",
         "react-compiler-runtime": "catalog:",
         "react-stately": "catalog:",

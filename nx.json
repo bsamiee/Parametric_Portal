@@ -4,11 +4,11 @@
     "extends": "nx/presets/npm.json",
     "installation": {
         "plugins": {
-            "@nx/js": "22.2.0-canary.20251121-9a6c7ad",
-            "@nx/react": "22.2.0-canary.20251121-9a6c7ad",
-            "@nx/vite": "22.2.0-canary.20251121-9a6c7ad"
+            "@nx/js": "22.2.0-canary.20251125-7e00ec4",
+            "@nx/react": "22.2.0-canary.20251125-7e00ec4",
+            "@nx/vite": "22.2.0-canary.20251125-7e00ec4"
         },
-        "version": "22.2.0-canary.20251121-9a6c7ad"
+        "version": "22.2.0-canary.20251125-7e00ec4"
     },
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
@@ -37,6 +37,7 @@
             "sharedGlobals"
         ]
     },
+    "nxCloudId": "6927da8c08e1be8a3c0123aa",
     "parallel": 4,
     "plugins": [
         {
