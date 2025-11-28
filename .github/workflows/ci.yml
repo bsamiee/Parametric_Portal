@@ -27,19 +27,20 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
         with:
           fetch-depth: 0
+          filter: tree:0
 
       - name: Setup Environment
         uses: ./.github/actions/node-env
-
-      - name: Generate Nx Graph
-        run: pnpm exec nx graph --file=.nx/project-graph.json
 
       - name: Setup Nx
         id: nx
         uses: ./.github/actions/nx-setup
 
+      - name: Generate Nx Graph
+        run: pnpm exec nx-cloud record -- pnpm exec nx graph --file=.nx/project-graph.json
+
       - name: Check code style and linting
-        run: pnpm check
+        run: pnpm exec nx-cloud record -- pnpm check
 
       - name: Type check
         run: pnpm exec nx affected -t typecheck --parallel=4
@@ -49,6 +50,11 @@ jobs:
 
       - name: Test
         run: pnpm exec nx affected -t test --parallel=4
+
+      - name: Self-Healing CI
+        if: always()
+        run: pnpm exec nx fix-ci
+        continue-on-error: true
 
       - name: Upload test coverage
         if: always()

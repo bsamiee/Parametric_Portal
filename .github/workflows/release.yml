@@ -10,7 +10,7 @@ on:
     workflow_dispatch:
         inputs:
             release_type:
-                description: 'Release type'
+                description: 'Release type (auto uses conventional commits)'
                 required: true
                 type: choice
                 options:
@@ -18,14 +18,25 @@ on:
                     - major
                     - minor
                     - patch
+            dry_run:
+                description: 'Dry run (preview without changes)'
+                required: false
+                type: boolean
+                default: false
 
 permissions:
     contents: write
     pull-requests: read
+    id-token: write
 
 concurrency:
     group: release
     cancel-in-progress: false
+
+env:
+    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
 jobs:
     release:
@@ -36,76 +47,71 @@ jobs:
               uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
                   fetch-depth: 0
+                  filter: tree:0
                   token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Setup Environment
               uses: ./.github/actions/node-env
 
-            - name: Analyze Commits
-              id: analyze
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-              with:
-                  script: |
-                      const { analyze } = await import('${{ github.workspace }}/.github/scripts/release.ts');
-                      return await analyze(
-                        { context: { repo: context.repo, payload: context.payload }, core, github },
-                        '${{ github.event.inputs.release_type }}' || 'auto'
-                      );
-
-            - name: Calculate New Version
-              id: version
-              run: |
-                  current_version=$(node -p "require('./package.json').version")
-                  bump_type="${{ fromJSON(steps.analyze.outputs.result).bump }}"
-
-                  IFS='.' read -r major minor patch <<< "$current_version"
-
-                  case "$bump_type" in
-                    major)
-                      major=$((major + 1))
-                      minor=0
-                      patch=0
-                      ;;
-                    minor)
-                      minor=$((minor + 1))
-                      patch=0
-                      ;;
-                    patch)
-                      patch=$((patch + 1))
-                      ;;
-                  esac
-
-                  new_version="${major}.${minor}.${patch}"
-                  echo "new_version=${new_version}" >> $GITHUB_OUTPUT
-                  echo "tag=v${new_version}" >> $GITHUB_OUTPUT
+            - name: Setup Nx
+              uses: ./.github/actions/nx-setup
 
             - name: Setup Git Identity
-              if: fromJSON(steps.analyze.outputs.result).hasChanges
               uses: ./.github/actions/git-identity
 
-            - name: Update Package Version
-              if: fromJSON(steps.analyze.outputs.result).hasChanges
+            - name: Determine Release Arguments
+              id: args
               run: |
-                  npm version ${{ steps.version.outputs.new_version }} --no-git-tag-version
-                  git add package.json
-                  git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
-                  git push
+                  RELEASE_TYPE="${{ github.event.inputs.release_type || 'auto' }}"
+                  DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
 
-            - name: Create Git Tag
-              if: fromJSON(steps.analyze.outputs.result).hasChanges
+                  # Build nx release arguments
+                  ARGS="--skip-publish"
+
+                  if [ "$DRY_RUN" = "true" ]; then
+                    ARGS="$ARGS --dry-run"
+                  fi
+
+                  # For manual version bumps, specify the version type
+                  if [ "$RELEASE_TYPE" != "auto" ]; then
+                    ARGS="$ARGS --specifier=$RELEASE_TYPE"
+                  fi
+
+                  echo "args=$ARGS" >> $GITHUB_OUTPUT
+                  echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+                  echo "dry_run=$DRY_RUN" >> $GITHUB_OUTPUT
+
+            - name: Preview Release (Dry Run)
+              if: github.event.inputs.dry_run == 'true'
               run: |
-                  git tag ${{ steps.version.outputs.tag }}
-                  git push origin ${{ steps.version.outputs.tag }}
+                  echo "## Release Preview" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  pnpm exec nx release ${{ steps.args.outputs.args }} --verbose 2>&1 | tee release-preview.txt || true
+                  echo '```' >> $GITHUB_STEP_SUMMARY
+                  cat release-preview.txt >> $GITHUB_STEP_SUMMARY
+                  echo '```' >> $GITHUB_STEP_SUMMARY
 
-            - name: Create GitHub Release
-              if: fromJSON(steps.analyze.outputs.result).hasChanges
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-              with:
-                  script: |
-                      const { create } = await import('${{ github.workspace }}/.github/scripts/release.ts');
-                      const analysis = ${{ steps.analyze.outputs.result }};
-                      await create(
-                        { context: { repo: context.repo, payload: context.payload }, core, github },
-                        '${{ steps.version.outputs.tag }}',
-                        analysis.changelog
-                      );
+            - name: Execute Release
+              if: github.event.inputs.dry_run != 'true'
+              id: release
+              run: |
+                  # Run nx release with configured settings from nx.json
+                  # This will:
+                  # 1. Analyze conventional commits (if auto)
+                  # 2. Determine version bump
+                  # 3. Update package.json versions
+                  # 4. Generate CHANGELOG.md
+                  # 5. Create git commit and tag
+                  # 6. Create GitHub release (via createRelease: "github" in nx.json)
+                  pnpm exec nx release ${{ steps.args.outputs.args }} --yes
+
+            - name: Job Summary
+              if: always() && github.event.inputs.dry_run != 'true'
+              run: |
+                  echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Release Type**: ${{ steps.args.outputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Version**: $(node -p \"require('./package.json').version\")" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Recent Tags" >> $GITHUB_STEP_SUMMARY
+                  git tag --sort=-creatordate | head -5 | while read tag; do echo "- $tag"; done >> $GITHUB_STEP_SUMMARY

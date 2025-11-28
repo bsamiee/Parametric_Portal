@@ -11,10 +11,7 @@
         "version": "22.2.0-canary.20251125-7e00ec4"
     },
     "namedInputs": {
-        "default": [
-            "{projectRoot}/**/*",
-            "sharedGlobals"
-        ],
+        "default": ["{projectRoot}/**/*", "sharedGlobals"],
         "production": [
             "default",
             "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
@@ -44,10 +41,7 @@
     "parallel": 4,
     "plugins": [
         {
-            "exclude": [
-                "vite.config.ts",
-                "vitest.config.ts"
-            ],
+            "exclude": ["vite.config.ts", "vitest.config.ts"],
             "options": {
                 "buildTargetName": "build",
                 "previewTargetName": "preview",
@@ -58,12 +52,102 @@
             "plugin": "@nx/vite/plugin"
         }
     ],
+    "release": {
+        "changelog": {
+            "projectChangelogs": false,
+            "workspaceChangelog": {
+                "createRelease": "github",
+                "file": "CHANGELOG.md",
+                "renderOptions": {
+                    "applyUsernameToAuthors": true,
+                    "authors": true,
+                    "commitReferences": true,
+                    "versionTitleDate": true
+                }
+            }
+        },
+        "conventionalCommits": {
+            "types": {
+                "build": {
+                    "changelog": {
+                        "hidden": true
+                    },
+                    "semverBump": "none"
+                },
+                "chore": {
+                    "changelog": {
+                        "hidden": true
+                    },
+                    "semverBump": "none"
+                },
+                "ci": {
+                    "changelog": {
+                        "hidden": true
+                    },
+                    "semverBump": "none"
+                },
+                "docs": {
+                    "changelog": {
+                        "title": "Documentation"
+                    },
+                    "semverBump": "none"
+                },
+                "feat": {
+                    "changelog": {
+                        "title": "Features"
+                    },
+                    "semverBump": "minor"
+                },
+                "fix": {
+                    "changelog": {
+                        "title": "Bug Fixes"
+                    },
+                    "semverBump": "patch"
+                },
+                "perf": {
+                    "changelog": {
+                        "title": "Performance Improvements"
+                    },
+                    "semverBump": "patch"
+                },
+                "refactor": {
+                    "changelog": {
+                        "title": "Code Refactoring"
+                    },
+                    "semverBump": "none"
+                },
+                "style": {
+                    "changelog": {
+                        "hidden": true
+                    },
+                    "semverBump": "none"
+                },
+                "test": {
+                    "changelog": {
+                        "hidden": true
+                    },
+                    "semverBump": "none"
+                }
+            }
+        },
+        "git": {
+            "commit": true,
+            "commitMessage": "chore(release): v{version}",
+            "stageChanges": true,
+            "tag": true
+        },
+        "projects": ["packages/*"],
+        "projectsRelationship": "fixed",
+        "releaseTagPattern": "v{version}",
+        "version": {
+            "conventionalCommits": true,
+            "preVersionCommand": "pnpm exec nx run-many -t build --parallel=4"
+        }
+    },
     "targetDefaults": {
         "analyze": {
             "cache": true,
-            "dependsOn": [
-                "build"
-            ],
+            "dependsOn": ["build"],
             "executor": "nx:run-commands",
             "options": {
                 "command": "npx serve .vite -l 8080"
@@ -71,32 +155,20 @@
         },
         "build": {
             "cache": true,
-            "dependsOn": [
-                "^build"
-            ],
-            "inputs": [
-                "production",
-                "^production"
-            ],
-            "outputs": [
-                "{projectRoot}/dist"
-            ]
+            "dependsOn": ["^build"],
+            "inputs": ["production", "^production"],
+            "outputs": ["{projectRoot}/dist"]
         },
         "check": {
             "cache": true,
-            "inputs": [
-                "default",
-                "sharedGlobals"
-            ]
+            "inputs": ["default", "sharedGlobals"]
         },
         "dev": {
             "cache": false
         },
         "inspect:build": {
             "cache": false,
-            "dependsOn": [
-                "build"
-            ],
+            "dependsOn": ["build"],
             "executor": "nx:run-commands",
             "options": {
                 "command": "npx serve .vite-inspect -l 8081"
@@ -111,9 +183,7 @@
         },
         "mutate": {
             "cache": false,
-            "dependsOn": [
-                "build"
-            ],
+            "dependsOn": ["build"],
             "executor": "nx:run-commands",
             "options": {
                 "command": "stryker run --incremental --testRunner vitest --coverageAnalysis perTest --reporters html,clear-text,progress --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts'"
@@ -137,29 +207,17 @@
         },
         "test": {
             "cache": true,
-            "inputs": [
-                "default",
-                "^production"
-            ],
-            "outputs": [
-                "{projectRoot}/coverage"
-            ]
+            "inputs": ["default", "^production"],
+            "outputs": ["{projectRoot}/coverage"]
         },
         "typecheck": {
             "cache": true,
-            "dependsOn": [
-                "^typecheck"
-            ],
-            "inputs": [
-                "typescript",
-                "sharedGlobals"
-            ]
+            "dependsOn": ["^typecheck"],
+            "inputs": ["typescript", "sharedGlobals"]
         },
         "validate:compression": {
             "cache": false,
-            "dependsOn": [
-                "build"
-            ],
+            "dependsOn": ["build"],
             "executor": "nx:run-commands",
             "options": {
                 "commands": [

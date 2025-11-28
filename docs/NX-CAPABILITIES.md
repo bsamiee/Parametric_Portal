@@ -1,6 +1,6 @@
 # Nx Capabilities Reference
 
-Complete inventory of Nx features: what's enabled, what's missing, and how to enable everything.
+Complete inventory of Nx features: what's enabled, what's available, and configuration details.
 
 **Last Updated**: 2025-11-28
 
@@ -10,120 +10,58 @@ Complete inventory of Nx features: what's enabled, what's missing, and how to en
 
 | Feature | Status | Config Location |
 |---------|--------|-----------------|
-| Nx 22.2.0-canary | ✅ | nx.json L2-12 |
+| Nx 22.2.0-canary | ✅ | nx.json L97-101 |
 | @nx/js, @nx/react, @nx/vite | ✅ | nx.json plugins |
-| Crystal inference | ✅ | nx.json L138 |
-| Local cache (GitHub Actions) | ✅ | .github/actions/nx-cache/ |
+| Crystal inference | ✅ | nx.json L173 |
+| Local cache (GitHub Actions) | ✅ | .github/actions/nx-setup/ |
 | Affected commands | ✅ | ci.yml |
-| nrwl/nx-set-shas | ✅ | nx-cache/action.yml |
-| 12 target defaults | ✅ | nx.json L54-136 |
-| Named inputs | ✅ | nx.json L13-38 |
-| Parallel execution (4) | ✅ | nx.json L40 |
+| nrwl/nx-set-shas | ✅ | nx-setup/action.yml |
+| 12 target defaults | ✅ | nx.json L161-271 |
+| Named inputs | ✅ | nx.json L103-141 |
+| Parallel execution (4) | ✅ | nx.json L144 |
 | Project graph artifact | ✅ | ci.yml |
 | **Nx Cloud Remote Cache** | ✅ | nx.json nxCloudId |
-| **Flaky Task Retry** | ✅ | Nx Cloud dashboard (aggressive) |
 | **CI Pipeline Insights** | ✅ | Automatic with Cloud |
+| **Self-Healing CI** | ✅ | ci.yml (nx fix-ci) |
+| **Nx Release** | ✅ | nx.json L5-95 |
+| **Conventional Commits** | ✅ | nx.json release.conventionalCommits |
+| **GitHub Release Creation** | ✅ | nx.json createRelease: "github" |
+| **Changelog Generation** | ✅ | nx.json workspaceChangelog |
+| **Command Recording** | ✅ | ci.yml (nx-cloud record) |
+| **Optimized Checkout** | ✅ | ci.yml (filter: tree:0) |
 
 **Workspace ID**: `6929c006315634b45342f623`
 **Dashboard**: https://cloud.nx.app
 
 ---
 
-## Remaining Capabilities
+## Nx Release Configuration
 
-### Priority 1: Optional (Free)
-
-| Capability | Description | Effort |
-|------------|-------------|--------|
-| **Nx Console** | VS Code/JetBrains extension for graph UI, generators | 2 min |
-| **Developer Login** | Local remote cache access via `nx login` | 1 min |
-
-### Priority 2: Nx Cloud Free Tier
-
-| Capability | Description | Effort |
-|------------|-------------|--------|
-| **Flaky Task Detection** | Auto-identify flaky tests, see analytics | Config change |
-| **Flaky Task Retry** | Auto-retry failed tasks on different agent | Config change |
-| **Personal Access Tokens** | Developer auth for local remote cache | Developer action |
-
-### Priority 3: Nx Cloud Pro ($249/mo)
-
-| Capability | Description | Benefit |
-|------------|-------------|---------|
-| **Nx Agents (DTE)** | Distribute tasks across 5+ machines | 3-10x faster CI |
-| **Self-Healing CI** | AI auto-fix lint/test failures | Reduced PR friction |
-| **Dynamic Agents** | Scale agent count by PR size | Cost optimization |
-
-### Priority 4: Built-in (No External Setup)
-
-| Capability | Description | Effort |
-|------------|-------------|--------|
-| **Nx Release** | Built-in versioning, changelog, GitHub releases | Config + workflow |
-| **Module Boundaries** | Enforce dependency rules via tags | Config change |
-| **Local Generators** | Custom scaffolding for new packages | Create plugin |
-| **Nx MCP Server** | LLM workspace context for Claude/Cursor | MCP config |
-| **Task Graph** | Visualize task dependencies | `nx graph --targets` |
-
----
-
-## Code Changes Required
-
-### 1. Enable Nx Cloud Remote Cache
-
-Add to `nx.json` after running `npx nx connect`:
-
-```json
-{
-  "nxCloudId": "YOUR_CLOUD_ID"
-}
-```
-
-### 2. CI Workflow Token
-
-Add to `.github/workflows/ci.yml`:
-
-```yaml
-jobs:
-  main:
-    runs-on: ubuntu-latest
-    env:
-      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-```
-
-### 3. Enable Flaky Task Retry
-
-Add to `nx.json`:
-
-```json
-{
-  "tasksRunnerOptions": {
-    "default": {
-      "options": {
-        "useDaemonProcess": true
-      }
-    }
-  }
-}
-```
-
-Configure retry count in Nx Cloud workspace settings.
-
-### 4. Nx Release Configuration
-
-Add to `nx.json` (replaces custom release.ts):
+The full release configuration in `nx.json`:
 
 ```json
 {
   "release": {
     "projects": ["packages/*"],
+    "projectsRelationship": "fixed",
+    "releaseTagPattern": "v{version}",
+    "git": {
+      "commit": true,
+      "commitMessage": "chore(release): v{version}",
+      "tag": true,
+      "stageChanges": true
+    },
     "version": {
-      "conventionalCommits": true
+      "conventionalCommits": true,
+      "preVersionCommand": "pnpm exec nx run-many -t build --parallel=4"
     },
     "changelog": {
       "workspaceChangelog": {
+        "file": "CHANGELOG.md",
         "createRelease": "github",
         "renderOptions": {
           "authors": true,
+          "applyUsernameToAuthors": true,
           "commitReferences": true,
           "versionTitleDate": true
         }
@@ -134,120 +72,140 @@ Add to `nx.json` (replaces custom release.ts):
       "types": {
         "feat": { "semverBump": "minor", "changelog": { "title": "Features" } },
         "fix": { "semverBump": "patch", "changelog": { "title": "Bug Fixes" } },
-        "perf": { "semverBump": "patch", "changelog": { "title": "Performance" } },
-        "refactor": { "semverBump": "patch", "changelog": { "title": "Refactoring" } },
+        "perf": { "semverBump": "patch", "changelog": { "title": "Performance Improvements" } },
+        "refactor": { "semverBump": "none", "changelog": { "title": "Code Refactoring" } },
         "docs": { "semverBump": "none", "changelog": { "title": "Documentation" } },
-        "chore": { "changelog": false },
-        "test": { "changelog": false },
-        "style": { "changelog": false }
+        "test": { "semverBump": "none", "changelog": { "hidden": true } },
+        "chore": { "semverBump": "none", "changelog": { "hidden": true } },
+        "style": { "semverBump": "none", "changelog": { "hidden": true } },
+        "ci": { "semverBump": "none", "changelog": { "hidden": true } },
+        "build": { "semverBump": "none", "changelog": { "hidden": true } }
       }
-    },
-    "git": {
-      "commit": true,
-      "tag": true,
-      "commitMessage": "chore(release): {version}"
     }
   }
 }
 ```
 
-### 5. Release Workflow Migration
+### Commit Type → Version Bump Mapping
 
-Replace custom release.ts in `.github/workflows/release.yml`:
+| Commit Type | Version Bump | Changelog Section |
+|-------------|--------------|-------------------|
+| `feat` | minor | Features |
+| `fix` | patch | Bug Fixes |
+| `perf` | patch | Performance Improvements |
+| `refactor` | none | Code Refactoring |
+| `docs` | none | Documentation |
+| `test` | none | (hidden) |
+| `chore` | none | (hidden) |
+| `style` | none | (hidden) |
+| `ci` | none | (hidden) |
+| `build` | none | (hidden) |
+| `BREAKING CHANGE` / `!` | major | Breaking Changes |
 
-```yaml
-- name: Version and Changelog
-  run: |
-    npx nx release version --skip-publish
-    npx nx release changelog
+### Release Workflow
 
-- name: Create GitHub Release
-  run: npx nx release publish --dry-run
-  # Remove --dry-run when ready
-```
-
-### 6. Module Boundaries (Optional)
-
-Add to `nx.json`:
-
-```json
-{
-  "targetDefaults": {
-    "lint": {
-      "inputs": ["default", "{workspaceRoot}/.eslintrc.json"]
-    }
-  }
-}
-```
-
-Add project tags to each `package.json`:
-
-```json
-{
-  "nx": {
-    "tags": ["scope:shared", "type:util"]
-  }
-}
-```
-
-### 7. Nx Agents (Pro Plan Only)
-
-Add to CI workflow:
+The release workflow (`.github/workflows/release.yml`) uses Nx Release:
 
 ```yaml
-- name: Start CI Run
-  run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js"
+# Auto release (conventional commits)
+pnpm exec nx release --skip-publish --yes
 
-- name: Run Tasks
-  run: |
-    npx nx affected -t lint test build --parallel=3
+# Manual release with specific bump
+pnpm exec nx release --skip-publish --specifier=minor --yes
+
+# Dry run preview
+pnpm exec nx release --skip-publish --dry-run --verbose
 ```
 
-### 8. Self-Healing CI (Pro Plan Only)
+---
 
-Add to start-ci-run:
+## CI Pipeline Features
+
+### Self-Healing CI
+
+Enabled via `nx fix-ci` command that runs after all tasks (even on failure):
 
 ```yaml
-- name: Start CI Run with Self-Healing
-  run: |
-    npx nx-cloud start-ci-run \
-      --distribute-on="3 linux-medium-js" \
-      --fix-tasks="lint,test"
+- name: Self-Healing CI
+  if: always()
+  run: pnpm exec nx fix-ci
+  continue-on-error: true
 ```
+
+Provides AI-powered recommendations for fixing CI failures (requires Nx Cloud AI features).
+
+### Command Recording
+
+Key commands are recorded to Nx Cloud for debugging:
+
+```yaml
+- name: Generate Nx Graph
+  run: pnpm exec nx-cloud record -- pnpm exec nx graph --file=.nx/project-graph.json
+
+- name: Check code style and linting
+  run: pnpm exec nx-cloud record -- pnpm check
+```
+
+### Optimized Checkout
+
+Uses `filter: tree:0` for faster partial clone:
+
+```yaml
+- name: Checkout
+  uses: actions/checkout@v6
+  with:
+    fetch-depth: 0
+    filter: tree:0
+```
+
+---
+
+## Available Capabilities
+
+### Free (Already Available)
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| **Nx Console** | VS Code/JetBrains extension for graph UI, generators | Optional |
+| **Developer Login** | Local remote cache access via `nx login` | Optional |
+| **Flaky Task Detection** | Auto-identify flaky tests in Cloud dashboard | ✅ |
+| **Personal Access Tokens** | Developer auth for local remote cache | Optional |
+
+### Nx Cloud Pro ($249/mo) - Future
+
+| Capability | Description | Benefit |
+|------------|-------------|---------|
+| **Nx Agents (DTE)** | Distribute tasks across 5+ machines | 3-10x faster CI |
+| **Dynamic Agents** | Scale agent count by PR size | Cost optimization |
+| **AI Self-Healing** | Enhanced AI-powered fix suggestions | Reduced PR friction |
+
+### Built-in (No External Setup)
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| **Nx Release** | Built-in versioning, changelog, GitHub releases | ✅ Configured |
+| **Module Boundaries** | Enforce dependency rules via tags | Not configured |
+| **Local Generators** | Custom scaffolding for new packages | Not configured |
+| **Nx MCP Server** | LLM workspace context for Claude/Cursor | Optional |
+| **Task Graph** | Visualize task dependencies | Available |
 
 ---
 
 ## External Setup Guide
 
-### Step 1: Create Nx Cloud Account
+### Step 1: Developer Local Cache Access
+
+Each developer runs once:
 
 ```bash
-# Open Nx Cloud
-open https://cloud.nx.app
+# Authenticate with Nx Cloud
+pnpm exec nx login
 
-# Connect workspace (interactive)
-npx nx connect
-
-# This adds nxCloudId to nx.json automatically
+# Verify connection
+pnpm exec nx cloud whoami
 ```
 
-### Step 2: Get CI Access Token
-
-1. Go to [cloud.nx.app](https://cloud.nx.app)
-2. Select your workspace
-3. Navigate to **Workspace Settings** → **CI Access Tokens**
-4. Click **Generate Token** (read-write for CI)
-5. Copy the token
-
-### Step 3: Add GitHub Secret
-
-1. Go to your GitHub repository
-2. **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret**
-4. Name: `NX_CLOUD_ACCESS_TOKEN`
-5. Value: paste the token from Step 2
-
-### Step 4: Install Nx Console
+### Step 2: Install Nx Console (Optional)
 
 **VS Code:**
 ```bash
@@ -258,19 +216,7 @@ code --install-extension nrwl.angular-console
 - Open **Preferences** → **Plugins** → **Marketplace**
 - Search "Nx Console" → Install
 
-### Step 5: Developer Local Cache Access
-
-Each developer runs once:
-
-```bash
-# Authenticate with Nx Cloud
-npx nx login
-
-# Verify connection
-npx nx cloud whoami
-```
-
-### Step 6: Configure Nx MCP Server (LLM Integration)
+### Step 3: Configure Nx MCP Server (Optional)
 
 For Claude Code, add to `.claude/settings.json`:
 
@@ -285,46 +231,74 @@ For Claude Code, add to `.claude/settings.json`:
 }
 ```
 
-For Cursor, add to MCP settings:
+---
 
+## Module Boundaries (Optional)
+
+To enforce dependency rules, add project tags:
+
+**In package.json:**
 ```json
 {
   "nx": {
-    "command": "npx",
-    "args": ["nx", "mcp"]
+    "tags": ["scope:shared", "type:util"]
+  }
+}
+```
+
+**In nx.json (targetDefaults):**
+```json
+{
+  "targetDefaults": {
+    "lint": {
+      "inputs": ["default", "{workspaceRoot}/biome.json"]
+    }
   }
 }
 ```
 
 ---
 
-## Nx Cloud Pricing
+## Nx Agents Distribution (Pro Only)
 
-| Plan | Cost | Key Features |
-|------|------|--------------|
-| **Hobby** | Free | 500 CI hrs/mo, remote cache, insights, flaky detection |
-| **Pro** | $249/mo | Unlimited hours, 5 Nx Agents, Self-Healing CI |
-| **Business** | Custom | Unlimited agents, SSO, priority support |
+When CI exceeds 10 minutes, consider enabling distributed task execution:
 
-Free tier is sufficient for most projects. Pro recommended when CI > 10 min.
+```yaml
+- name: Start CI Run
+  run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
+
+- name: Run Tasks
+  run: pnpm exec nx affected -t lint test build --parallel=3
+
+- name: Self-Healing
+  if: always()
+  run: pnpm exec nx fix-ci
+```
 
 ---
 
 ## Implementation Checklist
 
-### Immediate (Do Now)
-- [x] Run `npx nx connect` to create Nx Cloud workspace
-- [x] Add `NX_CLOUD_ACCESS_TOKEN` to GitHub secrets
-- [x] Add token to ci.yml env block
-- [x] Enable workspace data caching in Nx Cloud
-- [x] Enable flaky task retry in Nx Cloud
-- [ ] Install Nx Console extension (optional)
+### Completed ✅
+- [x] Nx Cloud workspace connected (`nxCloudId` in nx.json)
+- [x] `NX_CLOUD_ACCESS_TOKEN` in GitHub secrets
+- [x] Token configured in ci.yml env block
+- [x] Workspace data caching enabled
+- [x] Flaky task retry configured in Cloud
+- [x] Nx Release fully configured in nx.json
+- [x] Release workflow using `nx release`
+- [x] Self-Healing CI with `nx fix-ci`
+- [x] Command recording with `nx-cloud record`
+- [x] Optimized checkout with `filter: tree:0`
+- [x] Conventional commits type configuration
+- [x] GitHub release creation enabled
+- [x] Changelog generation configured
 
-### This Week
-- [ ] Run `pnpm exec nx login` on dev machine (for local remote cache)
-- [ ] Add Nx Release config to nx.json
-- [ ] Test release with `pnpm exec nx release --dry-run`
-- [ ] Configure Nx MCP for Claude/Cursor (optional)
+### Optional (Developer Choice)
+- [ ] Install Nx Console extension
+- [ ] Run `pnpm exec nx login` on dev machine
+- [ ] Configure Nx MCP for Claude/Cursor
+- [ ] Enable AI features in Nx Cloud settings
 
 ### Future (When Needed)
 - [ ] Add module boundary tags to packages
@@ -336,44 +310,57 @@ Free tier is sufficient for most projects. Pro recommended when CI > 10 min.
 ## Command Reference
 
 ```bash
-# Connect to Nx Cloud
-npx nx connect
+# Nx Cloud
+pnpm exec nx login              # Developer authentication
+pnpm exec nx cloud whoami       # Verify connection
 
-# Developer login
-npx nx login
-npx nx cloud whoami
+# Project Graph
+pnpm exec nx graph              # View project graph
+pnpm exec nx graph --targets    # View task graph
 
-# View project graph
-npx nx graph
+# Release
+pnpm exec nx release --dry-run                    # Preview release
+pnpm exec nx release --skip-publish --yes         # Execute release
+pnpm exec nx release --specifier=minor --dry-run  # Preview minor bump
 
-# View task graph
-npx nx graph --targets
+# Affected Commands
+pnpm exec nx affected -t build    # Build affected projects
+pnpm exec nx affected -t test     # Test affected projects
+pnpm exec nx affected -t typecheck # Typecheck affected projects
 
-# Release (dry-run)
-npx nx release --dry-run
+# Show Projects
+pnpm exec nx show projects --affected   # List affected projects
+pnpm exec nx show project <name>        # Show project details
 
-# Release (actual)
-npx nx release
-
-# Affected commands
-npx nx affected -t build
-npx nx affected -t test
-npx nx affected -t lint
-
-# Show affected projects
-npx nx show projects --affected
+# Self-Healing
+pnpm exec nx fix-ci               # Get AI fix recommendations
 ```
+
+---
+
+## Nx Cloud Pricing
+
+| Plan | Cost | Key Features |
+|------|------|--------------|
+| **Hobby** | Free | 500 CI hrs/mo, remote cache, insights, flaky detection |
+| **Pro** | $249/mo | Unlimited hours, 5 Nx Agents, AI Self-Healing |
+| **Business** | Custom | Unlimited agents, SSO, priority support |
+
+Free tier is sufficient for most projects. Pro recommended when CI > 10 min.
 
 ---
 
 ## Reference Links
 
 - [Nx Cloud Features](https://nx.dev/ci/features)
+- [Nx Cloud CI Setup](https://nx.dev/docs/guides/nx-cloud/setup-ci)
+- [Nx Cloud AI Features](https://nx.dev/docs/guides/nx-cloud/enable-ai-features)
 - [Nx Release Guide](https://nx.dev/docs/guides/nx-release)
+- [Conventional Commits Types](https://nx.dev/docs/guides/nx-release/customize-conventional-commit-types)
+- [GitHub Releases](https://nx.dev/docs/guides/nx-release/automate-github-releases)
 - [Nx Agents (DTE)](https://nx.dev/docs/features/ci-features/distribute-task-execution)
 - [Self-Healing CI](https://nx.dev/docs/features/ci-features/self-healing-ci)
 - [Flaky Tasks](https://nx.dev/docs/features/ci-features/flaky-tasks)
 - [Nx MCP/LLM](https://nx.dev/docs/features/enhance-ai)
 - [Module Boundaries](https://nx.dev/docs/recipes/enforce-module-boundaries)
-- [Local Generators](https://nx.dev/docs/extending-nx/local-generators)
 - [Nx Console](https://nx.dev/docs/getting-started/editor-setup)
