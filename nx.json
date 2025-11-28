@@ -133,6 +133,7 @@
         "git": {
             "commit": true,
             "commitMessage": "chore(release): v{version}",
+            "push": true,
             "stageChanges": true,
             "tag": true
         },

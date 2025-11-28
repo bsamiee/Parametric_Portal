@@ -31,7 +31,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/ai-assist.yml` — Claude @mention integration
 - `.github/workflows/ai-maintenance.yml` — Weekly AI-driven maintenance tasks
 
-### GitHub Scripts (9 total)
+### GitHub Scripts (10 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
 - `.github/scripts/env.ts` — Environment-driven configuration for multi-language support (ts/cs)
@@ -39,15 +39,16 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/dashboard.ts` — Metrics collector with dispatch table section renderers
 - `.github/scripts/probe.ts` — Data extraction layer with target-type dispatch (issue/pr/discussion)
 - `.github/scripts/report.ts` — Config-driven report generator (source→format→output pipeline)
-- `.github/scripts/release.ts` — Commit analyzer using B.types classification
+- `.github/scripts/release.ts` — Commit analyzer using B.types classification (legacy, now using native nx release)
 - `.github/scripts/failure-alert.ts` — Alert creator using fn.classifyDebt and B.alerts
 - `.github/scripts/gate.ts` — Eligibility gate using fn.classifyGating rules
 - `.github/scripts/pr-meta.ts` — Title parser using B.pr.pattern and B.types mapping
+- `.github/scripts/bundle-sizes.ts` — Bundle size analyzer for monorepo packages (raw/gzip/brotli)
 
 ### GitHub Composite Actions (3 total)
 - `.github/actions/node-env/action.yml` — Node.js + pnpm setup with caching (used by all workflows)
 - `.github/actions/git-identity/action.yml` — Git user configuration for commits
-- `.github/actions/nx-setup/action.yml` — Nx caching (local + Nx Cloud remote) and affected command setup via nrwl/nx-set-shas
+- `.github/actions/nx-setup/action.yml` — Nx affected command setup via nrwl/nx-set-shas (caching via Nx Cloud)
 
 ### GitHub Templates (10 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
@@ -341,7 +342,7 @@ Auto-fixes style issues. Runs `biome check --write --unsafe`, validates with tes
 Repository health dashboard. Triggered by schedule, workflow_dispatch, or checkbox toggle. Uses dashboard.ts for metrics.
 
 **release.yml**
-Conventional commit releases. Analyzes commits: `feat!` → major, `feat` → minor, `fix` → patch. Generates grouped changelog.
+Native Nx Release workflow with conventional commits. Uses `nx release` with git.push enabled. Analyzes commits: `feat!` → major, `feat` → minor, `fix` → patch. Generates changelog and creates GitHub release. Supports dry-run mode and manual version specifiers.
 
 **bundle-analysis.yml**
 Bundle size tracking in PRs. Compares raw/gzip/brotli sizes with main. Warns if >10KB gzip increase.
@@ -364,7 +365,7 @@ Node.js + pnpm setup with caching. Inputs: node-version (25.2.1), pnpm-version (
 Git user configuration. Inputs: name, email (defaults to github-actions[bot]).
 
 **.github/actions/nx-setup/action.yml**
-Nx caching and affected commands. Provides: (1) local cache for `.nx/cache`, (2) Nx Cloud remote caching via token, (3) base/head SHA via nrwl/nx-set-shas. Outputs: cache-hit, base, head.
+Nx affected command setup. Uses nrwl/nx-set-shas for base/head SHA determination. Caching handled by Nx Cloud (configured via NX_CLOUD_ACCESS_TOKEN env var). Outputs: base, head.
 
 ### GitHub Templates
 

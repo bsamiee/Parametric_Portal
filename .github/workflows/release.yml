@@ -102,8 +102,12 @@ jobs:
                   # 3. Update package.json versions
                   # 4. Generate CHANGELOG.md
                   # 5. Create git commit and tag
-                  # 6. Create GitHub release (via createRelease: "github" in nx.json)
+                  # 6. Push to origin (via git.push: true in nx.json)
+                  # 7. Create GitHub release (via createRelease: "github" in nx.json)
                   pnpm exec nx release ${{ steps.args.outputs.args }} --yes
+
+                  # Capture the new version for summary
+                  echo "version=$(node -p \"require('./package.json').version\")" >> $GITHUB_OUTPUT
 
             - name: Job Summary
               if: always() && github.event.inputs.dry_run != 'true'
@@ -111,7 +115,7 @@ jobs:
                   echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "- **Release Type**: ${{ steps.args.outputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-                  echo "- **Version**: $(node -p \"require('./package.json').version\")" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Version**: ${{ steps.release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Recent Tags" >> $GITHUB_STEP_SUMMARY
-                  git tag --sort=-creatordate | head -5 | while read tag; do echo "- $tag"; done >> $GITHUB_STEP_SUMMARY
+                  git tag --sort=-creatordate | head -5 | while read tag; do echo "- \`$tag\`"; done >> $GITHUB_STEP_SUMMARY
