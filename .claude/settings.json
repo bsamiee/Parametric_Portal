@@ -96,7 +96,7 @@
             "mcp__perplexity__*",
             "mcp__exa__*"
         ],
-        "deny": [],
-        "ask": []
+        "ask": [],
+        "deny": []
     }
 }
