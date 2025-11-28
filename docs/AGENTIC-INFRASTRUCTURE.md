@@ -31,7 +31,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/ai-assist.yml` — Claude @mention integration
 - `.github/workflows/ai-maintenance.yml` — Weekly AI-driven maintenance tasks
 
-### GitHub Scripts (10 total)
+### GitHub Scripts (9 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
 - `.github/scripts/env.ts` — Environment-driven configuration for multi-language support (ts/cs)
@@ -39,7 +39,6 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/dashboard.ts` — Metrics collector with dispatch table section renderers
 - `.github/scripts/probe.ts` — Data extraction layer with target-type dispatch (issue/pr/discussion)
 - `.github/scripts/report.ts` — Config-driven report generator (source→format→output pipeline)
-- `.github/scripts/release.ts` — Commit analyzer using B.types classification (legacy, now using native nx release)
 - `.github/scripts/failure-alert.ts` — Alert creator using fn.classifyDebt and B.alerts
 - `.github/scripts/gate.ts` — Eligibility gate using fn.classifyGating rules
 - `.github/scripts/pr-meta.ts` — Title parser using B.pr.pattern and B.types mapping
@@ -306,9 +305,6 @@ Data extraction layer with `handlers` dispatch table for issue/pr/discussion tar
 **report.ts**
 Config-driven report generator. Pipeline: source dispatch → row builders → format dispatch → output dispatch. Extensible via new config entries.
 
-**release.ts**
-Commit analyzer using `B.types` patterns for classification and `B.bump` for version determination. Groups commits via `matchesType()`, generates changelog via `fn.body()` with Section specs, creates releases via `mutate` release handler.
-
 **failure-alert.ts**
 Alert creator using `fn.classifyDebt()` for CI failures. Maps job names → debt categories via `B.alerts.ci.rules`. Renders body via `fn.body()` with `B.alerts` templates, upserts issue via `mutate` issue handler.
 
@@ -317,6 +313,9 @@ Eligibility gate using `fn.classifyGating()` rules from `B.gating.rules`. Extrac
 
 **pr-meta.ts**
 Title parser using `B.pr.pattern` regex and `B.types` commit-to-label mapping. Validates type exists in map, validates scope, applies labels via `mutate` label handler.
+
+**bundle-sizes.ts**
+Bundle size analyzer for monorepo packages. Pure functional implementation using `reduce`/`filter`/`map`. Outputs JSON with raw/gzip/brotli sizes per package. Used by bundle-analysis workflow.
 
 ### GitHub Workflows
 
