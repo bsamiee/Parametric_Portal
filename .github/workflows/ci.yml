@@ -16,13 +16,16 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 15
         permissions:
-            contents: read
+            contents: write
             actions: read
             issues: write
+            pull-requests: write
         steps:
             - name: Checkout
               uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
               with:
+                  ref: ${{ github.event.pull_request.head.ref || github.ref }}
+                  token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 0
 
             - name: Setup Environment
@@ -34,11 +37,55 @@ jobs:
                   nx-distribute: 'true'
                   nx-agents: '3'
                   nx-stop-on-success: 'true'
+                  nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+                  nx-fix-tasks: '*check*'
+
+            - name: Setup Git Identity
+              if: github.event_name == 'pull_request'
+              uses: ./.github/actions/git-identity
 
             - name: Generate Nx Graph
               run: pnpm exec nx graph --file=.nx/project-graph.json
 
-            - name: Lint (Biome)
+            # Biome auto-repair: run with --write to fix issues, then check for changes
+            - name: Biome Auto-Repair
+              id: biome-repair
+              if: github.event_name == 'pull_request'
+              run: |
+                  pnpm exec nx-cloud record -- pnpm exec biome check --write .
+                  if [[ -n $(git status --porcelain) ]]; then
+                    echo "has_changes=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "has_changes=false" >> $GITHUB_OUTPUT
+                  fi
+
+            # Commit biome fixes before running other checks
+            - name: Commit Biome Fixes
+              id: commit-fixes
+              if: github.event_name == 'pull_request' && steps.biome-repair.outputs.has_changes == 'true'
+              run: |
+                  git add .
+                  git commit -m "style: biome auto-repair
+
+                  Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+                  git push
+                  echo "committed=true" >> $GITHUB_OUTPUT
+
+            - name: Comment on Biome Repair
+              if: steps.commit-fixes.outputs.committed == 'true'
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number,
+                        body: `[OK] **Biome Auto-Repair Applied**
+
+                        Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
+                      });
+
+            - name: Lint (Biome CI)
               run: pnpm exec nx-cloud record -- pnpm exec biome ci .
 
             - name: Type check
@@ -73,8 +120,8 @@ jobs:
                   echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
 
-            # Self-healing CI - automatically fixes common issues
-            - name: Nx Fix CI
+            # Nx Self-Healing CI - automatically proposes and applies fixes
+            - name: Nx Self-Healing CI
               if: always()
               run: pnpm exec nx fix-ci --merge --verbose
               continue-on-error: true
