@@ -17,7 +17,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/labels.yml` — Declarative label definitions with colors (managed by active-qc + passive-qc workflows)
 - `.github/copilot-instructions.md` — IDE agent instructions
 
-### GitHub Workflows (12 total)
+### GitHub Workflows (11 total)
 - `.github/workflows/ci.yml` — Main CI pipeline with quality gates
 - `.github/workflows/active-qc.yml` — PR title validation + label sync (event-driven)
 - `.github/workflows/passive-qc.yml` — Stale management + aging report + label sync backup (scheduled)
@@ -25,11 +25,12 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/workflows/auto-merge.yml` — Dependabot PR auto-merge (Renovate uses native platformAutomerge)
 - `.github/workflows/biome-repair.yml` — Auto-fix style issues before review
 - `.github/workflows/dashboard.yml` — Repository health metrics dashboard
-- `.github/workflows/release.yml` — Conventional commit-based releases
 - `.github/workflows/bundle-analysis.yml` — Bundle size tracking with PR comments
 - `.github/workflows/security.yml` — Multi-layer security scanning
 - `.github/workflows/ai-assist.yml` — Claude @mention integration
 - `.github/workflows/ai-maintenance.yml` — Weekly AI-driven maintenance tasks
+
+**Note**: Releases are handled via `npx nx release` (configured in nx.json).
 
 ### GitHub Scripts (8 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
@@ -38,10 +39,10 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/dashboard.ts` — Metrics collector with dispatch table section renderers
 - `.github/scripts/probe.ts` — Data extraction layer with target-type dispatch (issue/pr/discussion)
 - `.github/scripts/report.ts` — Config-driven report generator (source→format→output pipeline)
-- `.github/scripts/release.ts` — Commit analyzer using B.types classification
 - `.github/scripts/failure-alert.ts` — Alert creator using fn.classifyDebt and B.alerts
 - `.github/scripts/gate.ts` — Eligibility gate using fn.classifyGating rules
 - `.github/scripts/pr-meta.ts` — Title parser using B.pr.pattern and B.types mapping
+- `.github/scripts/env.ts` — Environment-driven configuration (lang, bundleThresholdKb, nxCloudWorkspaceId)
 
 ### GitHub Composite Actions (3 total)
 - `.github/actions/node-env/action.yml` — Node.js + pnpm setup with caching (used by all workflows)
@@ -223,7 +224,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 ┌──────────────────────────────────────────────────────────────────────┐
 │                      Schema Infrastructure (8 scripts)                │
 │  ┌──────────────────────────────────────────────────────────────────┐│
-│  │ schema.ts → dashboard.ts, probe.ts, report.ts, release.ts, ...  ││
+│  │ schema.ts → dashboard.ts, probe.ts, report.ts, failure-alert.ts ││
 │  │ B constant + SpecRegistry + Ops Factory + Mutate Handlers        ││
 │  └──────────────────────────────────────────────────────────────────┘│
 └────────────────────────────┬─────────────────────────────────────────┘
@@ -263,9 +264,6 @@ Data extraction layer with `handlers` dispatch table for issue/pr/discussion tar
 
 **report.ts**
 Config-driven report generator using `B.content` configs. Pipeline: source dispatch (fetch/params/payload) → row builders (count/diff/list) → format dispatch (table/body) → output dispatch (summary/comment/issue). Fully extensible via new B.content entries.
-
-**release.ts**
-Commit analyzer using `B.types` patterns for classification and `B.bump` for version determination. Groups commits via `matchesType()`, generates changelog via `fn.body()` with Section specs, creates releases via `mutate` release handler.
 
 **failure-alert.ts**
 Alert creator using `fn.classifyDebt()` for CI failures (maps job names → debt categories via `B.alerts.ci.rules`). Renders body via `fn.body()` with `B.alerts` templates, upserts issue via `mutate` issue handler.
@@ -308,9 +306,6 @@ Auto-fixes style issues before human review. Runs `pnpm biome check --write --un
 
 **dashboard.yml**
 Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or checkbox toggle on dashboard issue (Renovate-style `<!-- dashboard-refresh -->` marker). Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
-
-**release.yml**
-Automated releases based on conventional commits. Triggered by push to main (src paths) or workflow_dispatch. Analyzes commits for release type: `feat!` → major, `feat` → minor, `fix` → patch. Generates changelog grouped by Breaking, Features, Fixes, Refactoring, Docs.
 
 **bundle-analysis.yml**
 Tracks bundle size changes in PRs. Builds all packages, analyzes sizes (raw, gzip, brotli), compares with main branch. Posts/updates PR comment with size report, warns if significant increase (>10KB gzip).

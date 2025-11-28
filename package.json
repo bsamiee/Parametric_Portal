@@ -80,11 +80,16 @@
     "packageManager": "pnpm@10.23.0",
     "private": true,
     "scripts": {
+        "affected": "nx affected",
         "build": "nx run-many -t build",
-        "check": "pnpm exec biome ci .",
+        "check": "nx run-many -t check",
+        "fix-ci": "nx fix-ci --merge --verbose",
+        "graph": "nx graph",
         "labels:create": "bash scripts/create-labels.sh",
+        "lint": "biome ci .",
         "prepare": "lefthook install",
         "pwa:icons": "nx run-many -t pwa:icons",
+        "release": "nx release",
         "sync:protocols": "tsx tools/sync-agent-protocols.ts",
         "test": "nx run-many -t test",
         "typecheck": "nx run-many -t typecheck"
