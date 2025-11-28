@@ -57,9 +57,7 @@
             "projectChangelogs": false,
             "workspaceChangelog": {
                 "createRelease": "github",
-                "file": "CHANGELOG.md",
                 "renderOptions": {
-                    "applyUsernameToAuthors": true,
                     "authors": true,
                     "commitReferences": true,
                     "versionTitleDate": true
@@ -68,82 +66,27 @@
         },
         "conventionalCommits": {
             "types": {
-                "build": {
-                    "changelog": {
-                        "hidden": true
-                    },
-                    "semverBump": "none"
-                },
-                "chore": {
-                    "changelog": {
-                        "hidden": true
-                    },
-                    "semverBump": "none"
-                },
-                "ci": {
-                    "changelog": {
-                        "hidden": true
-                    },
-                    "semverBump": "none"
-                },
-                "docs": {
-                    "changelog": {
-                        "title": "Documentation"
-                    },
-                    "semverBump": "none"
-                },
-                "feat": {
-                    "changelog": {
-                        "title": "Features"
-                    },
-                    "semverBump": "minor"
-                },
-                "fix": {
-                    "changelog": {
-                        "title": "Bug Fixes"
-                    },
-                    "semverBump": "patch"
-                },
-                "perf": {
-                    "changelog": {
-                        "title": "Performance Improvements"
-                    },
-                    "semverBump": "patch"
-                },
-                "refactor": {
-                    "changelog": {
-                        "title": "Code Refactoring"
-                    },
-                    "semverBump": "none"
-                },
-                "style": {
-                    "changelog": {
-                        "hidden": true
-                    },
-                    "semverBump": "none"
-                },
-                "test": {
-                    "changelog": {
-                        "hidden": true
-                    },
-                    "semverBump": "none"
-                }
+                "build": { "changelog": false },
+                "chore": { "changelog": false },
+                "ci": { "changelog": false },
+                "docs": { "changelog": { "title": "Documentation" }, "semverBump": "none" },
+                "feat": { "changelog": { "title": "Features" }, "semverBump": "minor" },
+                "fix": { "changelog": { "title": "Bug Fixes" }, "semverBump": "patch" },
+                "perf": { "changelog": { "title": "Performance" }, "semverBump": "patch" },
+                "refactor": { "changelog": { "title": "Refactoring" }, "semverBump": "patch" },
+                "style": { "changelog": false },
+                "test": { "changelog": false }
             }
         },
         "git": {
             "commit": true,
-            "commitMessage": "chore(release): v{version}",
-            "push": true,
-            "stageChanges": true,
+            "commitMessage": "chore(release): {version}",
             "tag": true
         },
         "projects": ["packages/*"],
-        "projectsRelationship": "fixed",
-        "releaseTagPattern": "v{version}",
         "version": {
             "conventionalCommits": true,
-            "fallbackCurrentVersionResolver": "disk",
-            "preVersionCommand": "pnpm exec nx run-many -t build --parallel=4"
+            "fallbackCurrentVersionResolver": "disk"
         }
     },
     "targetDefaults": {
@@ -163,10 +106,22 @@
         },
         "check": {
             "cache": true,
-            "inputs": ["default", "sharedGlobals"]
+            "executor": "nx:run-commands",
+            "inputs": ["default", "sharedGlobals"],
+            "options": {
+                "command": "biome check --write ."
+            }
         },
         "dev": {
             "cache": false
+        },
+        "format": {
+            "cache": true,
+            "executor": "nx:run-commands",
+            "inputs": ["default", "sharedGlobals"],
+            "options": {
+                "command": "biome format --write ."
+            }
         },
         "inspect:build": {
             "cache": false,

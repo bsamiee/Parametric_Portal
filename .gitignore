@@ -67,8 +67,3 @@ lerna-debug.log*
 .AppleDouble
 .LSOverride
 Thumbs.db
-
-# --- Misc ---------------------------------------------------------------------
-.archive/
-.claude/
-.kiro/

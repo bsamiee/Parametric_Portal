@@ -64,6 +64,12 @@
             }
         ]
     },
+    "mcpServers": {
+        "nx": {
+            "args": ["nx", "mcp"],
+            "command": "npx"
+        }
+    },
     "model": "claude-opus-4-5-20251101",
     "permissions": {
         "allow": [
@@ -90,6 +96,7 @@
             "mcp__perplexity__*",
             "mcp__exa__*"
         ],
-        "deny": ["Bash(rm -rf:*)", "Bash(git push --force:*)", "Bash(git reset --hard:*)"]
+        "ask": [],
+        "deny": []
     }
 }

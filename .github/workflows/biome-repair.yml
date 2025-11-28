@@ -26,6 +26,9 @@ jobs:
 
             - name: Setup Environment
               uses: ./.github/actions/node-env
+              with:
+                  nx: 'true'
+                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
             - name: Setup Git Identity
               uses: ./.github/actions/git-identity
@@ -57,7 +60,7 @@ jobs:
               if: steps.changes.outputs.has_changes == 'true'
               id: test
               run: |
-                  if pnpm test; then
+                  if pnpm exec nx affected -t test --parallel=4; then
                     echo "tests_failed=false" >> $GITHUB_OUTPUT
                   else
                     echo "tests_failed=true" >> $GITHUB_OUTPUT

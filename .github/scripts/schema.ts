@@ -54,8 +54,6 @@ type RunParams = {
     readonly core: Core;
     readonly github: GitHub;
 };
-type Pkg = { readonly name: string; readonly raw: number; readonly gzip: number; readonly brotli: number };
-type Sizes = { readonly packages: ReadonlyArray<Pkg> };
 // --- Constants (String Interning) -------------------------------------------
 
 const S = Object.freeze({
@@ -141,9 +139,20 @@ const B = Object.freeze({
         bots: ['renovate[bot]', 'dependabot[bot]'] as const,
         colors: { error: 'red', info: 'blue', success: 'brightgreen', warning: 'yellow' } as const,
         excludeConclusions: ['skipped', 'cancelled'] as const,
+        externalLinks: [
+            {
+                enabled: () => ENV.nxCloudWorkspaceId !== '',
+                label: '[Nx Cloud]',
+                url: () => `https://cloud.nx.app/orgs/workspace/${ENV.nxCloudWorkspaceId}`,
+            },
+        ] as const,
         labels: { feat: 'feat', fix: 'fix' } as const,
         marker: 'dashboard-refresh',
         monitoring: { period: 30, unit: 'days' } as const,
+        nxCloud: {
+            enabled: ENV.nxCloudWorkspaceId !== '',
+            url: (id: string) => (id ? `https://cloud.nx.app/orgs/workspace/${id}` : ''),
+        },
         output: {
             displayTitle: 'Repository Overview',
             label: 'dashboard',
@@ -294,37 +303,19 @@ const B = Object.freeze({
         shaLength: 7,
         titles: { prReview: 'PR Review Summary' } as const,
     } as const,
-    release: {
-        default: 'patch' as const,
-        emptyChangelog: 'No significant changes.' as const,
-    } as const,
-    thresholds: { bundleKb: ENV.bundleThresholdKb },
     time: { day: 86400000 },
-    typeOrder: [
-        'breaking',
-        'feat',
-        'fix',
-        'refactor',
-        'perf',
-        'chore',
-        'docs',
-        'style',
-        'test',
-        'ci',
-        'build',
-    ] as const,
     types: {
-        breaking: { p: ['!:', 'BREAKING CHANGE'], t: 'Breaking Changes' },
-        build: { p: ['build:', 'build('], t: null },
-        chore: { p: ['chore:', 'chore('], t: 'Maintenance' },
-        ci: { p: ['ci:', 'ci('], t: null },
-        docs: { p: ['docs:', 'docs('], t: 'Documentation' },
-        feat: { p: ['feat:', 'feat('], t: 'Features' },
-        fix: { p: ['fix:', 'fix('], t: 'Bug Fixes' },
-        perf: { p: ['perf:', 'perf('], t: 'Performance' },
-        refactor: { p: ['refactor:', 'refactor('], t: 'Refactoring' },
-        style: { p: ['style:', 'style('], t: 'Styling' },
-        test: { p: ['test:', 'test('], t: 'Testing' },
+        breaking: { p: ['!:', 'BREAKING CHANGE'] },
+        build: { p: ['build:', 'build('] },
+        chore: { p: ['chore:', 'chore('] },
+        ci: { p: ['ci:', 'ci('] },
+        docs: { p: ['docs:', 'docs('] },
+        feat: { p: ['feat:', 'feat('] },
+        fix: { p: ['fix:', 'fix('] },
+        perf: { p: ['perf:', 'perf('] },
+        refactor: { p: ['refactor:', 'refactor('] },
+        style: { p: ['style:', 'style('] },
+        test: { p: ['test:', 'test('] },
     } as const,
 } as const);
 
@@ -501,10 +492,6 @@ const fn = {
         body: fn.trunc(c.body ?? null),
         createdAt: c.created_at,
     }),
-    diff: (c: number, p: number): string =>
-        p === 0
-            ? `+${fn.size(c)}`
-            : ((d) => `${d > 0 ? '+' : ''}${fn.size(d)} (${d > 0 ? '+' : ''}${((d / p) * 100).toFixed(1)}%)`)(c - p),
     filter: (spec: U<'filter'>, issue: Issue, now: Date): boolean =>
         filterHandlers[spec.kind](spec as never, issue, now),
     formatTime: (d: Date): string =>
@@ -554,23 +541,8 @@ const fn = {
             ['Total Open', String(issues.length)],
         ];
     },
-    rowsDiff: <T extends { readonly name: string }>(
-        current: ReadonlyArray<T>,
-        previous: ReadonlyArray<T>,
-        row: (c: T, p: T) => ReadonlyArray<string>,
-        defaultVal: T,
-    ): ReadonlyArray<ReadonlyArray<string>> =>
-        current.map((c) => row(c, previous.find((x) => x.name === c.name) ?? defaultVal)),
     rowsList: (data: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<ReadonlyArray<string>> =>
         data.map((r) => Object.values(r).map(String)),
-    size: (b: number): string =>
-        b === 0
-            ? '0 B'
-            : ((i) => `${(b / 1024 ** i).toFixed(2)} ${['B', 'KB', 'MB'][i]}`)(
-                  Math.floor(Math.log(b) / Math.log(1024)),
-              ),
-    status: (d: number, t = B.thresholds.bundleKb * 1024): string =>
-        B.gen.status[Math.abs(d) > t ? 'warn' : B.gen.signs[Math.sign(d) as -1 | 0 | 1]],
     target: (value: number, threshold: number, op: 'gt' | 'lt' | 'gte' | 'lte'): 'pass' | 'warn' | 'fail' =>
         ({ gt: value > threshold, gte: value >= threshold, lt: value < threshold, lte: value <= threshold })[op]
             ? 'pass'
@@ -730,13 +702,11 @@ export type {
     Label,
     LabelCat,
     Mode,
-    Pkg,
     PR,
     ReactionGroups,
     Repo,
     RunParams,
     Section,
-    Sizes,
     Tag,
     U,
     User,

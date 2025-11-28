@@ -4,6 +4,7 @@
  * Composes parallel API calls, formats via fn.report, outputs via mutate.
  */
 
+import { ENV } from './env.ts';
 import {
     B,
     type Commit,
@@ -146,7 +147,13 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
 // --- Section Renderers (Dispatch Table) -------------------------------------
 
 const sections: Record<string, (m: Metrics, repo: string) => string> = {
-    actions: (_, repo) => B.dashboard.actions.map((a) => B.gen.link(`\`${a.label}\``, url(repo, a.path))).join(' · '),
+    actions: (_, repo) => {
+        const internal = B.dashboard.actions.map((a) => B.gen.link(`\`${a.label}\``, url(repo, a.path)));
+        const external = B.dashboard.externalLinks
+            .filter((l) => l.enabled())
+            .map((l) => B.gen.link(`\`${l.label}\``, l.url()));
+        return [...internal, ...external].join(' · ');
+    },
     activity: (m, repo) => {
         const botQuery = B.dashboard.bots.map((b) => `author%3Aapp%2F${b.replace('[bot]', '')}`).join('+');
         return fn.report(
@@ -182,7 +189,7 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
                 : m.workflowRate >= targets.workflowWarning
                   ? colors.warning
                   : colors.error;
-        return [
+        const badges = [
             B.gen.shieldLink(
                 'CI',
                 `${m.workflowRate}%25`,
@@ -207,7 +214,19 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
                 'for-the-badge',
                 'target',
             ),
-        ].join(' ');
+        ];
+        B.dashboard.nxCloud.enabled &&
+            badges.push(
+                B.gen.shieldLink(
+                    'Nx Cloud',
+                    'view',
+                    colors.info,
+                    B.dashboard.nxCloud.url(ENV.nxCloudWorkspaceId),
+                    'for-the-badge',
+                    'nx',
+                ),
+            );
+        return badges.join(' ');
     },
     ci: (m, repo) => {
         const statusBadge = (rate: number, file: string): string =>
@@ -231,7 +250,7 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
         ]);
         const progress = m.workflows.length > 0 ? `\n\n**Overall CI Health:** ${B.gen.progress(m.workflowRate)}` : '';
         return rows.length > 0
-            ? fn.report('CI Status', ['Workflow', 'Runs', 'Rate', 'Trend', 'Logs', 'Status'], rows, {
+            ? fn.report('CI Status', ['Workflow', 'Runs', 'Rate', 'Trend', 'Latest', 'Status'], rows, {
                   align: ['l', 'r', 'c', 'c', 'c', 'c'],
               }) + progress
             : fn.report('CI Status', ['Workflow', 'Status'], [['No workflow runs in period', '-']]);

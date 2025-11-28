@@ -1,97 +1,97 @@
 name: CI
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Code Quality
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: read
-      issues: write
-    env:
-      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+    quality:
+        name: Code Quality
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        permissions:
+            contents: read
+            actions: read
+            issues: write
+        steps:
+            - name: Checkout
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+              with:
+                  fetch-depth: 0
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-        with:
-          fetch-depth: 0
-          filter: tree:0
+            - name: Setup Environment
+              id: env
+              uses: ./.github/actions/node-env
+              with:
+                  nx: 'true'
+                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+                  nx-distribute: 'true'
+                  nx-agents: '3'
+                  nx-stop-on-success: 'true'
 
-      - name: Setup Environment
-        uses: ./.github/actions/node-env
+            - name: Generate Nx Graph
+              run: pnpm exec nx graph --file=.nx/project-graph.json
 
-      - name: Setup Nx
-        id: nx
-        uses: ./.github/actions/nx-setup
+            - name: Lint (Biome)
+              run: pnpm exec nx-cloud record -- pnpm exec biome ci .
 
-      - name: Generate Nx Graph
-        run: pnpm exec nx-cloud record -- pnpm exec nx graph --file=.nx/project-graph.json
+            - name: Type check
+              run: pnpm exec nx affected -t typecheck --parallel=4
 
-      - name: Check code style and linting
-        run: pnpm exec nx-cloud record -- pnpm check
+            - name: Build
+              run: pnpm exec nx affected -t build --parallel=4
 
-      - name: Type check
-        run: pnpm exec nx affected -t typecheck --parallel=4
+            - name: Test
+              run: pnpm exec nx affected -t test --parallel=4
 
-      - name: Build
-        run: pnpm exec nx affected -t build --parallel=4
+            - name: Upload test coverage
+              if: always()
+              uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+              with:
+                  name: coverage-reports
+                  path: '**/coverage'
+                  if-no-files-found: ignore
+                  retention-days: 7
 
-      - name: Test
-        run: pnpm exec nx affected -t test --parallel=4
+            - name: Upload Nx Graph
+              uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+              with:
+                  name: nx-graph
+                  path: .nx/project-graph.json
+                  if-no-files-found: warn
+                  retention-days: 7
 
-      - name: Self-Healing CI
-        if: always()
-        run: pnpm exec nx fix-ci
-        continue-on-error: true
+            - name: Job Summary
+              if: always()
+              run: |
+                  echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
+                  pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload test coverage
-        if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: coverage-reports
-          path: '**/coverage'
-          if-no-files-found: ignore
-          retention-days: 7
+            # Self-healing CI - automatically fixes common issues
+            - name: Nx Fix CI
+              if: always()
+              run: pnpm exec nx fix-ci --merge --verbose
+              continue-on-error: true
 
-      - name: Upload Nx Graph
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-        with:
-          name: nx-graph
-          path: .nx/project-graph.json
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Job Summary
-        if: always()
-        run: |
-          echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
-          pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
-
-      - name: Create Quality Debt Issue
-        if: failure()
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
-        with:
-          script: |
-            const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
-            await run({
-              context: { repo: context.repo, payload: { action: 'created', issue: {} } },
-              core,
-              github,
-              spec: {
-                kind: 'ci',
-                job: '${{ github.job }}',
-                runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
-              }
-            });
+            - name: Create Quality Debt Issue
+              if: failure()
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
+                      await run({
+                        context: { repo: context.repo, payload: { action: 'created', issue: {} } },
+                        core,
+                        github,
+                        spec: {
+                          kind: 'ci',
+                          job: '${{ github.job }}',
+                          runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+                        }
+                      });
