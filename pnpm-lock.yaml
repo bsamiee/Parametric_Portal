@@ -36,6 +36,9 @@ catalogs:
     '@nx/vite':
       specifier: 22.2.0-canary.20251125-7e00ec4
       version: 22.2.0-canary.20251125-7e00ec4
+    '@nx/vitest':
+      specifier: 22.2.0-canary.20251125-7e00ec4
+      version: 22.2.0-canary.20251125-7e00ec4
     '@playwright/test':
       specifier: 1.56.1
       version: 1.56.1
@@ -246,6 +249,9 @@ importers:
         specifier: 'catalog:'
         version: 22.2.0-canary.20251125-7e00ec4(@babel/core@7.28.5)(@babel/traverse@7.28.5)(@swc/helpers@0.5.17)(@types/babel__core@7.20.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.1(jiti@2.6.1))(nx@22.2.0-canary.20251125-7e00ec4)(react-dom@19.2.0(react@19.3.0-canary-fd524fe0-20251121))(react@19.3.0-canary-fd524fe0-20251121)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.14)(webpack@5.103.0)
       '@nx/vite':
+        specifier: 'catalog:'
+        version: 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.14)
+      '@nx/vitest':
         specifier: 'catalog:'
         version: 22.2.0-canary.20251125-7e00ec4(@babel/traverse@7.28.5)(nx@22.2.0-canary.20251125-7e00ec4)(typescript@6.0.0-dev.20251125)(vite@7.2.4(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1))(vitest@4.0.14)
       '@playwright/test':

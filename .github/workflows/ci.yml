@@ -38,29 +38,25 @@ jobs:
                   nx-agents: '3'
                   nx-stop-on-success: 'true'
                   nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
-                  nx-fix-tasks: '*'
+                  nx-fix-tasks: '*lint*,*check*,*format*'
 
             - name: Setup Git Identity
               if: github.event_name == 'pull_request'
               uses: ./.github/actions/git-identity
 
-            - name: Generate Nx Graph
-              run: pnpm exec nx graph --file=.nx/project-graph.json
-
-            # Biome auto-repair: run with --write --unsafe for aggressive auto-fixing
-            # Note: --unsafe enables transformations that may alter code behavior; fixes are validated by subsequent CI checks
+            # Biome auto-repair on PRs: aggressive auto-fixing before checks
+            # Note: --unsafe enables transformations that may alter code behavior
             - name: Biome Auto-Repair
               id: biome-repair
               if: github.event_name == 'pull_request'
               run: |
-                  pnpm exec biome check --write --unsafe .
+                  pnpm exec nx-cloud record -- pnpm exec biome check --write --unsafe .
                   if [[ -n $(git status --porcelain) ]]; then
                     echo "has_changes=true" >> $GITHUB_OUTPUT
                   else
                     echo "has_changes=false" >> $GITHUB_OUTPUT
                   fi
 
-            # Commit biome fixes before running other checks
             - name: Commit Biome Fixes
               id: commit-fixes
               if: github.event_name == 'pull_request' && steps.biome-repair.outputs.has_changes == 'true'
@@ -89,10 +85,11 @@ jobs:
                         Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
                       });
 
-            - name: Lint (Biome CI)
+            # Run all quality checks via Nx affected - leverages caching and proper task orchestration
+            - name: Lint (Biome)
               run: pnpm exec nx-cloud record -- pnpm exec biome ci .
 
-            - name: Type check
+            - name: Type Check
               run: pnpm exec nx affected -t typecheck --parallel=4
 
             - name: Build
@@ -101,31 +98,29 @@ jobs:
             - name: Test
               run: pnpm exec nx affected -t test --parallel=4
 
-            - name: Upload test coverage
+            - name: Upload Artifacts
               if: always()
               uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
               with:
-                  name: coverage-reports
-                  path: '**/coverage'
+                  name: ci-artifacts
+                  path: |
+                      **/coverage
+                      .nx/project-graph.json
                   if-no-files-found: ignore
-                  retention-days: 7
-
-            - name: Upload Nx Graph
-              uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-              with:
-                  name: nx-graph
-                  path: .nx/project-graph.json
-                  if-no-files-found: warn
                   retention-days: 7
 
             - name: Job Summary
               if: always()
               run: |
-                  echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
+                  echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Nx Cloud" >> $GITHUB_STEP_SUMMARY
+                  echo "View detailed task results on [Nx Cloud](https://cloud.nx.app)" >> $GITHUB_STEP_SUMMARY
 
             # Nx Self-Healing CI - automatically proposes and applies fixes
-            - name: Nx Self-Healing CI
+            - name: Nx Self-Healing
               if: always()
               run: pnpm exec nx fix-ci --merge --verbose
               continue-on-error: true

@@ -16,6 +16,7 @@
         "@nx/js": "catalog:",
         "@nx/react": "catalog:",
         "@nx/vite": "catalog:",
+        "@nx/vitest": "catalog:",
         "@playwright/test": "catalog:",
         "@radix-ui/react-label": "catalog:",
         "@radix-ui/react-separator": "catalog:",
@@ -82,7 +83,7 @@
     "scripts": {
         "affected": "nx affected",
         "build": "nx run-many -t build",
-        "check": "nx run-many -t check",
+        "check": "biome ci .",
         "fix": "biome check --write .",
         "fix-ci": "nx fix-ci --merge --verbose",
         "fix:unsafe": "biome check --write --unsafe .",
@@ -92,6 +93,7 @@
         "prepare": "lefthook install",
         "pwa:icons": "nx run-many -t pwa:icons",
         "release": "nx release",
+        "reset": "nx reset",
         "sync:protocols": "tsx tools/sync-agent-protocols.ts",
         "test": "nx run-many -t test",
         "typecheck": "nx run-many -t typecheck"

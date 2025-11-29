@@ -6,12 +6,21 @@
         "plugins": {
             "@nx/js": "22.2.0-canary.20251125-7e00ec4",
             "@nx/react": "22.2.0-canary.20251125-7e00ec4",
-            "@nx/vite": "22.2.0-canary.20251125-7e00ec4"
+            "@nx/vite": "22.2.0-canary.20251125-7e00ec4",
+            "@nx/vitest": "22.2.0-canary.20251125-7e00ec4"
         },
         "version": "22.2.0-canary.20251125-7e00ec4"
     },
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
+        "lint": [
+            "{projectRoot}/**/*.ts",
+            "{projectRoot}/**/*.tsx",
+            "{projectRoot}/**/*.js",
+            "{projectRoot}/**/*.jsx",
+            "{projectRoot}/**/*.json",
+            "{workspaceRoot}/biome.json"
+        ],
         "production": [
             "default",
             "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
@@ -46,10 +55,16 @@
                 "buildTargetName": "build",
                 "previewTargetName": "preview",
                 "serveStaticTargetName": "serve-static",
-                "serveTargetName": "dev",
-                "testTargetName": "test"
+                "serveTargetName": "dev"
             },
             "plugin": "@nx/vite/plugin"
+        },
+        {
+            "exclude": ["vitest.config.ts"],
+            "options": {
+                "testTargetName": "test"
+            },
+            "plugin": "@nx/vitest"
         }
     ],
     "release": {
@@ -106,10 +121,17 @@
         },
         "check": {
             "cache": true,
-            "inputs": ["default", "sharedGlobals"]
+            "inputs": ["lint"]
         },
         "dev": {
             "cache": false
+        },
+        "fix": {
+            "cache": false,
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "biome check --write {projectRoot}"
+            }
         },
         "inspect:build": {
             "cache": false,
@@ -124,6 +146,14 @@
             "executor": "nx:run-commands",
             "options": {
                 "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && nx dev"
+            }
+        },
+        "lint": {
+            "cache": true,
+            "executor": "nx:run-commands",
+            "inputs": ["lint"],
+            "options": {
+                "command": "biome ci {projectRoot}"
             }
         },
         "mutate": {
@@ -148,6 +178,13 @@
             "options": {
                 "command": "tsx watch scripts/generate-pwa-icons.ts",
                 "cwd": "{projectRoot}"
+            }
+        },
+        "reset": {
+            "cache": false,
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "nx reset"
             }
         },
         "test": {

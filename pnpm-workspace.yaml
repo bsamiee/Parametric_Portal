@@ -13,6 +13,7 @@ catalog:
   '@nx/js': 22.2.0-canary.20251125-7e00ec4
   '@nx/react': 22.2.0-canary.20251125-7e00ec4
   '@nx/vite': 22.2.0-canary.20251125-7e00ec4
+  '@nx/vitest': 22.2.0-canary.20251125-7e00ec4
   '@playwright/test': 1.56.1
   '@radix-ui/react-label': 2.1.8
   '@radix-ui/react-separator': 1.1.8
