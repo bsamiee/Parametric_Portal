@@ -9,7 +9,7 @@ inputs:
         required: false
     pnpm-version:
         description: pnpm version
-        default: '10.23.0'
+        default: '10.24.0'
     install:
         description: Run pnpm install
         default: 'true'
