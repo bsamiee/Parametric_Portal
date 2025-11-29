@@ -110,6 +110,10 @@
             "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
         },
         {
+            "includes": ["**/generators/*/generator.ts"],
+            "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
+        },
+        {
             "includes": ["biome.json"],
             "assist": { "actions": { "source": { "useSortedKeys": "off" } } }
         },

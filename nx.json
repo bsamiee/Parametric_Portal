@@ -77,7 +77,6 @@
         {
             "options": {
                 "analytics": true,
-                "inferTargets": false,
                 "validateEnv": true
             },
             "plugin": "./tools/nx-plugin"
