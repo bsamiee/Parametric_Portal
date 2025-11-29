@@ -122,38 +122,32 @@ const createNodesV2: CreateNodesV2<PluginOptions> = [
 
 // --- createDependencies (Project Graph Plugin) ------------------------------
 
+const detectPackageDep = (
+    source: string,
+    target: string,
+    pkgJsonPath: string,
+    projects: CreateDependenciesContext['projects'],
+): RawProjectGraphDependency | undefined =>
+    source !== target && projects[source].root.includes('packages') && projects[target].root.includes('packages')
+        ? { source, sourceFile: pkgJsonPath, target, type: B.graph.depType }
+        : undefined;
+
 const createDependencies: CreateDependencies<PluginOptions> = async (
     _options: PluginOptions | undefined,
     context: CreateDependenciesContext,
 ): Promise<ReadonlyArray<RawProjectGraphDependency>> => {
-    const deps: RawProjectGraphDependency[] = [];
     const projectNames = Object.keys(context.projects);
 
-    projectNames.forEach((source) => {
+    return projectNames.flatMap((source) => {
         const project = context.projects[source];
         const pkgJsonPath = `${project.root}/package.json`;
-        const fileData = context.fileMap.projectFileMap[source]?.find((f) => f.file === pkgJsonPath);
+        const hasFileData = context.fileMap.projectFileMap[source]?.some((f) => f.file === pkgJsonPath);
+        const hasFilesToProcess = context.filesToProcess.projectFileMap[source]?.some((f) => f.file === pkgJsonPath);
 
-        fileData &&
-            (() => {
-                const content = context.filesToProcess.projectFileMap[source]?.find((f) => f.file === pkgJsonPath);
-                content &&
-                    projectNames
-                        .filter((target) => target !== source && project.root.includes('packages'))
-                        .forEach((target) => {
-                            const targetProject = context.projects[target];
-                            targetProject.root.includes('packages') &&
-                                deps.push({
-                                    source,
-                                    sourceFile: pkgJsonPath,
-                                    target,
-                                    type: B.graph.depType,
-                                });
-                        });
-            })();
-    });
-
-    return deps;
+        return hasFileData && hasFilesToProcess
+            ? projectNames.map((target) => detectPackageDep(source, target, pkgJsonPath, context.projects)).filter(Boolean)
+            : [];
+    }) as ReadonlyArray<RawProjectGraphDependency>;
 };
 
 // --- preTasksExecution (Task Lifecycle Hook) --------------------------------
