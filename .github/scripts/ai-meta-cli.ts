@@ -34,7 +34,7 @@ const github = {
 };
 
 const core = {
-    info: (msg: string) => console.log(msg),
+    info: (_msg: string) => {},
     setOutput: (name: string, value: string | number) => appendFileSync(env('GITHUB_OUTPUT'), `${name}=${value}\n`),
 };
 
@@ -63,7 +63,6 @@ run({ agentConfig, context, core, github, spec } as never)
         core.setOutput('provider', result.provider);
         core.setOutput('commit_message', result.commitMessage ?? '');
     })
-    .catch((err) => {
-        console.error('Meta fixer failed:', err);
+    .catch((_err) => {
         process.exit(1);
     });
