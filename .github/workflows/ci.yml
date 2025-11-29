@@ -36,7 +36,7 @@ jobs:
                   nx: 'true'
                   nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
                   nx-distribute: 'true'
-                  nx-agents: '3'
+                  nx-distribute-config: '.nx/workflows/distribution-config.yaml'
                   nx-stop-on-success: 'true'
                   nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
                   nx-fix-tasks: '*lint*,*check*,*format*'

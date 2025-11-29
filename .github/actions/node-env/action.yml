@@ -28,8 +28,11 @@ inputs:
     nx-distribute:
         description: Enable Nx Agents for distributed task execution
         default: 'false'
+    nx-distribute-config:
+        description: Path to dynamic agent distribution config (e.g., .nx/workflows/distribution-config.yaml)
+        default: ''
     nx-agents:
-        description: Number of Nx Agents for distribution (1-10)
+        description: Number of Nx Agents for distribution (fallback if no config specified)
         default: '3'
     nx-stop-on-success:
         description: Stop agents when first non-dependent run group succeeds
@@ -94,8 +97,9 @@ runs:
           if: inputs.nx == 'true' && inputs.nx-distribute == 'true' && inputs.nx-cloud-token != ''
           shell: bash
           run: |
+              DISTRIBUTE_ON="${{ inputs.nx-distribute-config != '' && inputs.nx-distribute-config || format('{0} linux-medium-js', env.AGENTS) }}"
               npx nx-cloud start-ci-run \
-                --distribute-on="$AGENTS linux-medium-js" \
+                --distribute-on="$DISTRIBUTE_ON" \
                 --stop-agents-after=typecheck,build,test \
                 ${{ inputs.nx-stop-on-success == 'true' && '--stop-agents-on-failure' || '' }} \
                 ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes={0}', inputs.nx-fix-tasks) || '' }} \
