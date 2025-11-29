@@ -119,23 +119,25 @@ jobs:
                   echo "Checking for copyleft licenses in production dependencies..."
                   pnpm licenses list --json > licenses.json
 
-                  # Extract non-dev dependencies with copyleft licenses
-                  # LGPL in dev dependencies (like sharp's libvips bindings) are acceptable
-                  # MIT OR GPL dual-licensed packages (like jszip) are acceptable when MIT is chosen
-                  COPYLEFT_PROD=$(cat licenses.json | jq -r '
-                    .[] | select(.license | test("^(A?GPL)"; "i")) |
-                    select(.license | test("^LGPL") | not) |
-                    select(.license | test("MIT OR") | not) |
+                  # Check for strict copyleft (GPL, AGPL) that are NOT:
+                  # 1. Dual-licensed with MIT (MIT OR GPL)
+                  # 2. LGPL (which is acceptable for linking)
+                  # Note: jszip uses "MIT OR GPL-3.0-or-later" - MIT takes precedence
+                  # Note: sharp's libvips bindings use LGPL-3.0-or-later - acceptable for dynamic linking
+                  COPYLEFT=$(cat licenses.json | jq -r '
+                    .[] |
+                    select(.license | test("GPL|AGPL"; "i")) |
+                    select(.license | test("^LGPL"; "i") | not) |
+                    select(.license | test("MIT OR"; "i") | not) |
                     "\(.name): \(.license)"
                   ' 2>/dev/null || echo "")
 
-                  if [[ -n "$COPYLEFT_PROD" ]]; then
-                    echo "[ERROR] Copyleft licenses detected in production dependencies:"
-                    echo "$COPYLEFT_PROD"
+                  if [[ -n "$COPYLEFT" ]]; then
+                    echo "[ERROR] Strict copyleft licenses detected:"
+                    echo "$COPYLEFT"
                     exit 1
                   else
                     echo "[OK] No problematic copyleft licenses detected"
-                    echo "Note: LGPL in dev deps (sharp bindings) and MIT OR GPL dual-licensed packages are acceptable"
                   fi
 
     create-security-issue:
