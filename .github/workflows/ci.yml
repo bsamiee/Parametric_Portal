@@ -73,7 +73,7 @@ jobs:
                   echo "committed=true" >> $GITHUB_OUTPUT
 
             - name: Comment on Biome Repair
-              if: steps.commit-fixes.outputs.committed == 'true'
+              if: github.event_name == 'pull_request' && steps.commit-fixes.outputs.committed == 'true'
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
@@ -81,9 +81,9 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         issue_number: context.payload.pull_request.number,
-                        body: `[OK] **Biome Auto-Repair Applied**
+                        body: `✅ **Biome Auto-Repair Applied**
 
-                        Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
+Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
                       });
 
             # Run all quality checks via Nx affected - leverages caching and proper task orchestration
@@ -114,11 +114,15 @@ jobs:
               if: always()
               run: |
                   echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "### Nx Cloud" >> $GITHUB_STEP_SUMMARY
-                  echo "View detailed task results on [Nx Cloud](https://cloud.nx.app)" >> $GITHUB_STEP_SUMMARY
+                  echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
+                  echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_WORKSPACE_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
+                  echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
+              env:
+                  NX_CLOUD_WORKSPACE_ID: '6929c006315634b45342f623'
 
             # Nx Self-Healing CI - automatically proposes and applies fixes
             - name: Nx Self-Healing
