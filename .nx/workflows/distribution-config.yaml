@@ -1,6 +1,7 @@
 # Dynamic Agents Configuration
 # Nx Cloud uses PR-size-based agent allocation for cost efficiency
 # See: https://nx.dev/docs/features/ci-features/dynamic-agents
+# See: https://nx.dev/docs/guides/nx-cloud/optimize-your-ttg
 
 distribute-on:
     # Small PRs (1-33% of projects affected): 2 agents for quick feedback
@@ -11,3 +12,11 @@ distribute-on:
 
     # Large PRs (67-100% of projects affected): 4 agents for speed
     large-changeset: 4 linux-medium-js
+
+# Retry flaky tasks automatically to keep pipelines green
+# See: https://nx.dev/docs/features/ci-features/flaky-tasks
+flaky-tasks:
+    # Enable automatic retry of flaky tasks
+    enabled: true
+    # Maximum number of retry attempts for flaky tasks
+    max-retries: 2

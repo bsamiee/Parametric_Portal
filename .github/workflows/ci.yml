@@ -87,18 +87,21 @@ jobs:
 Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
                       });
 
-            # Run all quality checks via Nx affected - leverages caching and proper task orchestration
+            # Run all quality checks via Nx affected - leverages caching, distribution, and proper task orchestration
+            # Parallelism is controlled by nx.json 'parallel' setting (4) and Nx Agents distribution
             - name: Lint (Biome)
-              run: pnpm exec nx affected -t lint --parallel=4
+              run: pnpm exec nx affected -t lint
 
             - name: Type Check
-              run: pnpm exec nx affected -t typecheck --parallel=4
+              run: pnpm exec nx affected -t typecheck
 
             - name: Build
-              run: pnpm exec nx affected -t build --parallel=4
+              run: pnpm exec nx affected -t build
 
+            # Tests run in parallel via Nx Agents with automatic flaky task retry
+            # Caching and distribution optimize Time to Green (TTG)
             - name: Test
-              run: pnpm exec nx affected -t test --parallel=4
+              run: pnpm exec nx affected -t test
 
             # Generate project graph for artifacts (may not exist after affected-only runs)
             - name: Generate Project Graph
@@ -125,11 +128,15 @@ Style issues have been automatically fixed and committed. CI will re-run with th
                   echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Cache Status" >> $GITHUB_STEP_SUMMARY
+                  echo "Remote cache: **Nx Replay enabled** (see Nx Cloud for hit rate)" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
                   # Extract nxCloudId from nx.json (single source of truth)
                   NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
                   if [[ -n "$NX_CLOUD_ID" ]]; then
                     echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
+                    echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/analytics) - Time to Green analytics" >> $GITHUB_STEP_SUMMARY
                   fi
                   echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 

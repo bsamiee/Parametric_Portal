@@ -39,6 +39,12 @@
             "{workspaceRoot}/.npmrc",
             "{workspaceRoot}/pnpm-workspace.yaml"
         ],
+        "testing": [
+            "default",
+            "{projectRoot}/tests/**/*",
+            "{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)",
+            "{workspaceRoot}/vitest.config.ts"
+        ],
         "typescript": [
             "{projectRoot}/**/*.ts",
             "{projectRoot}/**/*.tsx",
@@ -184,7 +190,7 @@
         },
         "test": {
             "cache": true,
-            "inputs": ["default", "^production"],
+            "inputs": ["testing", "^production"],
             "outputs": ["{projectRoot}/coverage"]
         },
         "typecheck": {
