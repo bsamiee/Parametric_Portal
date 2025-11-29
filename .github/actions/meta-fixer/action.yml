@@ -38,46 +38,20 @@ runs:
 
         - uses: ./.github/actions/node-env
 
-        - name: Fetch Commits
-          id: commits
-          if: inputs.target == 'commit' && github.event_name == 'pull_request'
-          uses: actions/github-script@v7
-          with:
-              script: |
-                  const commits = await github.rest.pulls.listCommits({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      pull_number: context.payload.pull_request.number,
-                  });
-                  return commits.data.map(c => ({ message: c.commit.message, sha: c.sha }));
-
         - name: Run Meta Fixer
           id: run
-          uses: actions/github-script@v7
+          shell: bash
           env:
               ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
-          with:
-              script: |
-                  const { run } = await import('${{ github.workspace }}/.github/scripts/ai-meta.ts');
-                  const commits = ${{ steps.commits.outputs.result || '[]' }};
-                  const result = await run({
-                      context: { repo: context.repo, payload: context.payload },
-                      core,
-                      github,
-                      spec: {
-                          target: '${{ inputs.target }}',
-                          limit: parseInt('${{ inputs.limit }}', 10),
-                          n: '${{ inputs.number }}' ? parseInt('${{ inputs.number }}', 10) : undefined,
-                          commits,
-                      },
-                      agentConfig: {
-                          key: process.env.ANTHROPIC_API_KEY || '',
-                          token: process.env.GITHUB_TOKEN || '',
-                      },
-                  });
-                  core.setOutput('fixed', result.fixed);
-                  core.setOutput('provider', result.provider);
-                  core.setOutput('commit_message', result.commitMessage || '');
+              GITHUB_TOKEN: ${{ github.token }}
+              META_TARGET: ${{ inputs.target }}
+              META_NUMBER: ${{ inputs.number }}
+              META_LIMIT: ${{ inputs.limit }}
+              GH_REPO: ${{ github.repository }}
+              GH_EVENT: ${{ github.event_name }}
+              GH_PR_NUMBER: ${{ github.event.pull_request.number }}
+          run: |
+              npx tsx .github/scripts/ai-meta-cli.ts
 
         - name: Amend Commit
           if: inputs.target == 'commit' && steps.run.outputs.fixed != '0' && steps.run.outputs.commit_message != ''

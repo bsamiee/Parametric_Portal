@@ -17,6 +17,7 @@
         "@nx/react": "catalog:",
         "@nx/vite": "catalog:",
         "@nx/vitest": "catalog:",
+        "@octokit/rest": "catalog:",
         "@playwright/test": "catalog:",
         "@radix-ui/react-label": "catalog:",
         "@radix-ui/react-separator": "catalog:",
