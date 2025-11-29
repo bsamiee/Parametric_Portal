@@ -32,7 +32,8 @@ playwright/.cache/
 
 # --- Caches (Nx, Vite inspect only) ------------------------------------------
 .cache/
-.nx/
+.nx/*
+!.nx/workflows/
 .vite-inspect/
 .vite/
 

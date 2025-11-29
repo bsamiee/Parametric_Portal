@@ -27,6 +27,7 @@ jobs:
                   ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 0
+                  filter: tree:0
 
             - name: Setup Environment
               id: env
@@ -35,20 +36,18 @@ jobs:
                   nx: 'true'
                   nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
                   nx-distribute: 'true'
-                  nx-agents: '3'
+                  nx-distribute-config: '.nx/workflows/distribution-config.yaml'
                   nx-stop-on-success: 'true'
                   nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
-                  nx-fix-tasks: '*'
+                  nx-fix-tasks: '*lint*,*check*,*format*'
 
             - name: Setup Git Identity
               if: github.event_name == 'pull_request'
               uses: ./.github/actions/git-identity
 
-            - name: Generate Nx Graph
-              run: pnpm exec nx graph --file=.nx/project-graph.json
-
-            # Biome auto-repair: run with --write --unsafe for aggressive auto-fixing
-            # Note: --unsafe enables transformations that may alter code behavior; fixes are validated by subsequent CI checks
+            # Biome auto-repair on PRs: aggressive auto-fixing before checks
+            # Note: --unsafe enables transformations that may alter code behavior
+            # Note: Does NOT use nx-cloud record (pre-CI cleanup, not a cacheable task)
             - name: Biome Auto-Repair
               id: biome-repair
               if: github.event_name == 'pull_request'
@@ -60,7 +59,6 @@ jobs:
                     echo "has_changes=false" >> $GITHUB_OUTPUT
                   fi
 
-            # Commit biome fixes before running other checks
             - name: Commit Biome Fixes
               id: commit-fixes
               if: github.event_name == 'pull_request' && steps.biome-repair.outputs.has_changes == 'true'
@@ -76,7 +74,7 @@ jobs:
                   echo "committed=true" >> $GITHUB_OUTPUT
 
             - name: Comment on Biome Repair
-              if: steps.commit-fixes.outputs.committed == 'true'
+              if: github.event_name == 'pull_request' && steps.commit-fixes.outputs.committed == 'true'
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
               with:
                   script: |
@@ -86,13 +84,14 @@ jobs:
                         issue_number: context.payload.pull_request.number,
                         body: `[OK] **Biome Auto-Repair Applied**
 
-                        Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
+Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
                       });
 
-            - name: Lint (Biome CI)
-              run: pnpm exec nx-cloud record -- pnpm exec biome ci .
+            # Run all quality checks via Nx affected - leverages caching and proper task orchestration
+            - name: Lint (Biome)
+              run: pnpm exec nx affected -t lint --parallel=4
 
-            - name: Type check
+            - name: Type Check
               run: pnpm exec nx affected -t typecheck --parallel=4
 
             - name: Build
@@ -101,31 +100,41 @@ jobs:
             - name: Test
               run: pnpm exec nx affected -t test --parallel=4
 
-            - name: Upload test coverage
+            # Generate project graph for artifacts (may not exist after affected-only runs)
+            - name: Generate Project Graph
+              if: always()
+              run: pnpm exec nx graph --file=.nx/project-graph.json
+              continue-on-error: true
+
+            - name: Upload Coverage and Project Graph
               if: always()
               uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
               with:
-                  name: coverage-reports
-                  path: '**/coverage'
+                  name: ci-artifacts
+                  path: |
+                      **/coverage
+                      .nx/project-graph.json
                   if-no-files-found: ignore
-                  retention-days: 7
-
-            - name: Upload Nx Graph
-              uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
-              with:
-                  name: nx-graph
-                  path: .nx/project-graph.json
-                  if-no-files-found: warn
                   retention-days: 7
 
             - name: Job Summary
               if: always()
               run: |
-                  echo "## Affected Projects" >> $GITHUB_STEP_SUMMARY
+                  echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
+                  # Extract nxCloudId from nx.json (single source of truth)
+                  NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
+                  if [[ -n "$NX_CLOUD_ID" ]]; then
+                    echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
+                  fi
+                  echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 
             # Nx Self-Healing CI - automatically proposes and applies fixes
-            - name: Nx Self-Healing CI
+            - name: Nx Self-Healing
               if: always()
               run: pnpm exec nx fix-ci --merge --verbose
               continue-on-error: true

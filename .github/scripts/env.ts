@@ -14,7 +14,8 @@ type Lang = 'ts' | 'cs';
 
 const ENV = Object.freeze({
     lang: (process.env.REPO_LANG ?? 'ts') as Lang,
-    nxCloudWorkspaceId: process.env.NX_CLOUD_WORKSPACE_ID ?? '',
+    // Nx Cloud workspace ID - fallback must match nx.json nxCloudId (line 49)
+    nxCloudWorkspaceId: process.env.NX_CLOUD_WORKSPACE_ID ?? '6929c006315634b45342f623',
 } as const);
 
 // --- Language Commands (for workflow prompts) -------------------------------

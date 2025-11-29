@@ -1,0 +1,13 @@
+# Dynamic Agents Configuration
+# Nx Cloud uses PR-size-based agent allocation for cost efficiency
+# See: https://nx.dev/docs/features/ci-features/dynamic-agents
+
+distribute-on:
+    # Small PRs (1-33% of projects affected): 2 agents for quick feedback
+    small-changeset: 2 linux-medium-js
+
+    # Medium PRs (34-66% of projects affected): 3 agents (balanced)
+    medium-changeset: 3 linux-medium-js
+
+    # Large PRs (67-100% of projects affected): 4 agents for speed
+    large-changeset: 4 linux-medium-js

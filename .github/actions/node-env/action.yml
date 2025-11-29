@@ -28,8 +28,11 @@ inputs:
     nx-distribute:
         description: Enable Nx Agents for distributed task execution
         default: 'false'
+    nx-distribute-config:
+        description: Path to dynamic agent distribution config (e.g., .nx/workflows/distribution-config.yaml)
+        default: ''
     nx-agents:
-        description: Number of Nx Agents for distribution (1-10)
+        description: Number of Nx Agents for distribution (fallback if no config specified)
         default: '3'
     nx-stop-on-success:
         description: Stop agents when first non-dependent run group succeeds
@@ -60,6 +63,31 @@ runs:
               node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
               node-version-file: ${{ inputs.node-version-file }}
               cache: pnpm
+
+        # Nx Cloud remote cache - set token early for nx-cloud CLI
+        - name: Configure Nx Cloud
+          if: inputs.nx == 'true' && inputs.nx-cloud-token != ''
+          shell: bash
+          run: echo "NX_CLOUD_ACCESS_TOKEN=${{ inputs.nx-cloud-token }}" >> $GITHUB_ENV
+
+        # Start distributed CI run BEFORE dependencies (TTG optimization)
+        # See: https://nx.dev/docs/guides/nx-cloud/optimize-your-ttg
+        - name: Start Nx Agents
+          if: inputs.nx == 'true' && inputs.nx-distribute == 'true' && inputs.nx-cloud-token != ''
+          shell: bash
+          run: |
+              # Use dynamic config file if provided, otherwise use fixed agent count and machine type
+              DISTRIBUTE_ON="${{ inputs.nx-distribute-config != '' && inputs.nx-distribute-config || format('{0} linux-medium-js', env.AGENTS) }}"
+              npx nx-cloud start-ci-run \
+                --distribute-on="$DISTRIBUTE_ON" \
+                --stop-agents-after=typecheck,build,test \
+                ${{ inputs.nx-stop-on-success == 'true' && '--stop-agents-on-failure' || '' }} \
+                ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes={0}', inputs.nx-fix-tasks) || '' }} \
+                ${{ inputs.nx-auto-fix == 'true' && format('--fix-tasks={0}', inputs.nx-fix-tasks) || '' }}
+          env:
+              AGENTS: ${{ inputs.nx-agents }}
+
+        # Install dependencies after Nx Agents start
         - if: inputs.install == 'true'
           shell: bash
           run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}
@@ -75,12 +103,6 @@ runs:
                   ${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}-
                   ${{ runner.os }}-nx-
 
-        # Nx Cloud remote cache
-        - name: Configure Nx Cloud
-          if: inputs.nx == 'true' && inputs.nx-cloud-token != ''
-          shell: bash
-          run: echo "NX_CLOUD_ACCESS_TOKEN=${{ inputs.nx-cloud-token }}" >> $GITHUB_ENV
-
         # Set base/head SHAs for affected commands
         - name: Set affected SHAs
           id: shas
@@ -88,16 +110,3 @@ runs:
           uses: nrwl/nx-set-shas@dbe0650947e5f2c81f59190a38512cf49126fe6b # v4.3.0
           with:
               main-branch-name: ${{ inputs.nx-main-branch }}
-
-        # Start distributed CI run with Nx Agents
-        - name: Start Nx Agents
-          if: inputs.nx == 'true' && inputs.nx-distribute == 'true' && inputs.nx-cloud-token != ''
-          shell: bash
-          run: |
-              npx nx-cloud start-ci-run \
-                --distribute-on="$AGENTS linux-medium-jvm" \
-                --stop-agents-after=build \
-                ${{ inputs.nx-stop-on-success == 'true' && '--stop-agents-on-failure' || '' }} \
-                ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes={0} --fix-tasks={0}', inputs.nx-fix-tasks) || '' }}
-          env:
-              AGENTS: ${{ inputs.nx-agents }}
