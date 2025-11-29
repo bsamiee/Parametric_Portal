@@ -27,6 +27,7 @@ jobs:
                   ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 0
+                  filter: tree:0
 
             - name: Setup Environment
               id: env
