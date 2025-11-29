@@ -87,7 +87,6 @@
         "fix": "biome check --write .",
         "fix-ci": "nx fix-ci --merge --verbose",
         "fix:unsafe": "biome check --write --unsafe .",
-        "generate:library": "nx g @parametric/nx-plugin:library",
         "graph": "nx graph",
         "lint": "biome ci .",
         "prepare": "lefthook install",
