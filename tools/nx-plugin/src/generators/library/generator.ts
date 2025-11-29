@@ -2,93 +2,36 @@
  * Library Generator - Creates new packages following workspace conventions
  * @see https://nx.dev/docs/extending-nx/local-generators
  */
-import {
-    type Tree,
-    addProjectConfiguration,
-    formatFiles,
-    generateFiles,
-    joinPathFragments,
-    names,
-} from '@nx/devkit';
-
-// --- Type Definitions -------------------------------------------------------
-
-type LibrarySchema = {
-    readonly name: string;
-    readonly description?: string;
-    readonly directory?: string;
-    readonly tags?: string;
-};
-
-type NormalizedOptions = LibrarySchema & {
-    readonly className: string;
-    readonly constantName: string;
-    readonly fileName: string;
-    readonly projectName: string;
-    readonly projectRoot: string;
-    readonly tagList: ReadonlyArray<string>;
-};
+import { type Tree, addProjectConfiguration, formatFiles, generateFiles, joinPathFragments, names } from '@nx/devkit';
 
 // --- Constants (Single B) ---------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        description: (name: string) => `${name} library`,
-        directory: 'packages',
-    },
-    patterns: {
-        tagSeparator: ',',
-    },
-    project: {
-        type: 'library' as const,
-    },
-    templates: {
-        dir: joinPathFragments(__dirname, 'files'),
-    },
-} as const);
+const B = {
+    defaults: { dir: 'packages', desc: (n: string) => `${n} library` },
+    project: { type: 'library' as const },
+    templates: { dir: joinPathFragments(__dirname, 'files') },
+} as const;
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Types (Inferred) -------------------------------------------------------
 
-const normalizeOptions = (schema: LibrarySchema): NormalizedOptions => {
-    const n = names(schema.name);
-    const projectRoot = joinPathFragments(schema.directory ?? B.defaults.directory, n.fileName);
-    return {
-        ...schema,
-        className: n.className,
-        constantName: n.constantCase,
-        description: schema.description ?? B.defaults.description(n.className),
-        fileName: n.fileName,
-        projectName: `@parametric-portal/${n.fileName}`,
-        projectRoot,
-        tagList: schema.tags?.split(B.patterns.tagSeparator).map((t) => t.trim()) ?? [],
-    };
+type Schema = { readonly name: string; readonly description?: string; readonly directory?: string; readonly tags?: string };
+type Opts = Schema & { readonly className: string; readonly constantName: string; readonly fileName: string; readonly projectName: string; readonly projectRoot: string; readonly tagList: ReadonlyArray<string> };
+
+// --- Pure Utilities ---------------------------------------------------------
+
+const normalize = (s: Schema): Opts => {
+    const n = names(s.name);
+    const root = joinPathFragments(s.directory ?? B.defaults.dir, n.fileName);
+    return { ...s, className: n.className, constantName: n.constantCase, description: s.description ?? B.defaults.desc(n.className), fileName: n.fileName, projectName: `@parametric-portal/${n.fileName}`, projectRoot: root, tagList: s.tags?.split(',').map((t) => t.trim()) ?? [] };
 };
 
-const createProjectConfig = (opts: NormalizedOptions) => ({
-    name: opts.projectName,
-    projectType: B.project.type,
-    root: opts.projectRoot,
-    sourceRoot: `${opts.projectRoot}/src`,
-    tags: [...opts.tagList],
-    targets: {},
-});
+// --- Generator --------------------------------------------------------------
 
-// --- Generator Entry Point --------------------------------------------------
-
-const generator = async (tree: Tree, schema: LibrarySchema): Promise<void> => {
-    const opts = normalizeOptions(schema);
-
-    addProjectConfiguration(tree, opts.projectName, createProjectConfig(opts));
-
-    generateFiles(tree, B.templates.dir, opts.projectRoot, {
-        ...opts,
-        template: '',
-    });
-
+const generator = async (tree: Tree, schema: Schema): Promise<void> => {
+    const o = normalize(schema);
+    addProjectConfiguration(tree, o.projectName, { name: o.projectName, projectType: B.project.type, root: o.projectRoot, sourceRoot: `${o.projectRoot}/src`, tags: [...o.tagList], targets: {} });
+    generateFiles(tree, B.templates.dir, o.projectRoot, { ...o, template: '' });
     await formatFiles(tree);
 };
 
-// --- Export -----------------------------------------------------------------
-
 export { generator as default, generator };
-export type { LibrarySchema, NormalizedOptions };
