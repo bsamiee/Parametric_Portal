@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * PR title validator using [TYPE]: format.
- * Parses [TYPE]!: description, validates against B.types, applies labels.
+ * Parses [TYPE!]: description, validates against B.types, applies labels.
  */
 
 import { B, createCtx, mutate, type RunParams, type TypeKey } from './schema.ts';
@@ -36,7 +36,7 @@ const validate = (p: Parsed | null): string | null =>
         ? validTypes.includes(p.type as TypeKey)
             ? null
             : `Invalid type "${p.type}". Valid: ${validTypes.join(', ')}`
-        : 'Invalid PR title format. Expected: [TYPE]: description';
+        : 'Invalid PR title format. Expected: [TYPE]: description or [TYPE!]: for breaking';
 
 const labels = (type: TypeKey, breaking: boolean): ReadonlyArray<string> => [type, ...(breaking ? ['breaking'] : [])];
 

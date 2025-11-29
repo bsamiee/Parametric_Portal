@@ -291,7 +291,7 @@ const B = Object.freeze({
         headerStrip: /###\s*[^\n]+\n?/,
         placeholder: /^_?No response_?$/i,
     },
-    pr: { pattern: /^\[([A-Z]+)\](!)?:\s*(.+)$/i } as const,
+    pr: { pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i } as const,
     probe: {
         bodyTruncate: 500,
         defaults: { unknownAuthor: 'unknown' } as const,

@@ -45,7 +45,7 @@ jobs:
                           }
                       });
                       result.valid
-                          ? core.info(`✓ ${result.type}(${result.scope})${result.breaking ? '!' : ''}: valid`)
+                          ? core.info(`✓ [${result.type.toUpperCase()}${result.breaking ? '!' : ''}]: valid`)
                           : core.setFailed(result.error);
 
     sync-labels:

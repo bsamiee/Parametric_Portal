@@ -16,7 +16,7 @@
 │  }                                                                           │
 │  (10 commit types - breaking is a MODIFIER via !, not a type)               │
 │                                                                              │
-│  B.pr.pattern = /^\[([A-Z]+)\](!)?:\s*(.+)$/i                               │
+│  B.pr.pattern = /^\[([A-Z]+)(!?)\]:\s*(.+)$/i                               │
 │  (matches: [TYPE]: description or [TYPE!]: description)                     │
 │                                                                              │
 │  B.labels.categories = { action, agent, lifecycle, priority, special }      │
