@@ -1,7 +1,6 @@
 packages:
   - apps/*
   - packages/*
-  - tools/*
 
 catalog:
   '@biomejs/biome': 2.3.7
@@ -11,7 +10,6 @@ catalog:
   '@effect/schema': 0.75.5
   '@effect/vitest': 0.25.1
   '@fast-check/vitest': 0.2.3
-  '@nx/devkit': 22.2.0-canary.20251125-7e00ec4
   '@nx/js': 22.2.0-canary.20251125-7e00ec4
   '@nx/react': 22.2.0-canary.20251125-7e00ec4
   '@nx/vite': 22.2.0-canary.20251125-7e00ec4
