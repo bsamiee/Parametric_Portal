@@ -100,6 +100,7 @@ Style issues have been automatically fixed and committed. CI will re-run with th
 
             # Tests run in parallel via Nx Agents with automatic flaky task retry
             # Caching and distribution optimize Time to Green (TTG)
+            # See: https://nx.dev/docs/features/ci-features/flaky-tasks
             - name: Test
               run: pnpm exec nx affected -t test
 
