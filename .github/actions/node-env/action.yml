@@ -76,6 +76,7 @@ runs:
           if: inputs.nx == 'true' && inputs.nx-distribute == 'true' && inputs.nx-cloud-token != ''
           shell: bash
           run: |
+              # Use dynamic config file if provided, otherwise use fixed agent count and machine type
               DISTRIBUTE_ON="${{ inputs.nx-distribute-config != '' && inputs.nx-distribute-config || format('{0} linux-medium-js', env.AGENTS) }}"
               npx nx-cloud start-ci-run \
                 --distribute-on="$DISTRIBUTE_ON" \

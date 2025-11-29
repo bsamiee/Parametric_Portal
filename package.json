@@ -83,7 +83,7 @@
     "scripts": {
         "affected": "nx affected",
         "build": "nx run-many -t build",
-        "check": "biome ci .",
+        "check": "nx run-many -t check",
         "fix": "biome check --write .",
         "fix-ci": "nx fix-ci --merge --verbose",
         "fix:unsafe": "biome check --write --unsafe .",
