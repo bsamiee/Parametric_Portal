@@ -73,6 +73,14 @@
                 "testTargetName": "test"
             },
             "plugin": "@nx/vitest"
+        },
+        {
+            "options": {
+                "analytics": true,
+                "inferTargets": false,
+                "validateEnv": true
+            },
+            "plugin": "./tools/nx-plugin"
         }
     ],
     "release": {

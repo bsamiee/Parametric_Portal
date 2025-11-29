@@ -78,7 +78,7 @@
         "node": "25.2.1"
     },
     "name": "parametric-portal",
-    "packageManager": "pnpm@10.23.0",
+    "packageManager": "pnpm@10.24.0",
     "private": true,
     "scripts": {
         "affected": "nx affected",

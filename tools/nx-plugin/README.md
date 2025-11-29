@@ -8,23 +8,13 @@ Local Nx plugin providing workspace-specific functionality.
 - **Project Graph Plugin** (`createNodesV2`, `createDependencies`): Workspace dependency detection  
 - **Task Lifecycle Hooks** (`preTasksExecution`, `postTasksExecution`): Env validation + metrics
 
-## Activation
+## Activation Status
 
-Plugin requires TypeScript transpilation at runtime. Add to `nx.json` when transpiler is available:
+**✅ Plugin is active** - registered in `nx.json`.
 
-```json
-{
-  "plugins": [
-    {
-      "options": { "analytics": true, "inferTargets": false, "validateEnv": true },
-      "plugin": "./tools/nx-plugin"
-    }
-  ]
-}
-```
-
-**Note**: Requires `@swc-node/register` + `@swc/core` OR `ts-node` for runtime TS loading.
-Current SWC baseUrl issue tracked upstream - plugin code ready when resolved.
+### Requirements
+- `baseUrl: "."` must be set in `tsconfig.base.json` (SWC workaround for Nx issue #32009)
+- Plugin pattern scoped to `{apps,packages}/*/package.json`
 
 ## Generator Usage
 
