@@ -1,0 +1,18 @@
+/**
+ * <%= className %> - <%= description %>
+ * @packageDocumentation
+ */
+
+// --- Type Definitions -------------------------------------------------------
+
+// --- Constants (Single B) ---------------------------------------------------
+
+const B = Object.freeze({
+    version: '0.0.1',
+} as const);
+
+// --- Pure Utility Functions -------------------------------------------------
+
+// --- Export -----------------------------------------------------------------
+
+export { B as <%= constantName %>_TUNING };

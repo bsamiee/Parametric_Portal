@@ -27,6 +27,9 @@ catalogs:
     '@fast-check/vitest':
       specifier: 0.2.3
       version: 0.2.3
+    '@nx/devkit':
+      specifier: 22.2.0-canary.20251125-7e00ec4
+      version: 22.2.0-canary.20251125-7e00ec4
     '@nx/js':
       specifier: 22.2.0-canary.20251125-7e00ec4
       version: 22.2.0-canary.20251125-7e00ec4
@@ -551,6 +554,12 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.0.14(@types/node@24.10.1)(@vitest/ui@4.0.14)(happy-dom@20.0.10)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
+
+  tools/nx-plugin:
+    dependencies:
+      '@nx/devkit':
+        specifier: 'catalog:'
+        version: 22.2.0-canary.20251125-7e00ec4(nx@22.2.0-canary.20251125-7e00ec4)
 
 packages:
 

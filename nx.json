@@ -178,7 +178,7 @@
             "cache": false,
             "executor": "nx:run-commands",
             "options": {
-                "command": "tsx --no-warnings scripts/generate-pwa-icons.ts",
+                "command": "tsx --no-warnings tools/scripts/generate-pwa-icons.ts",
                 "cwd": "{projectRoot}"
             }
         },
@@ -186,7 +186,7 @@
             "cache": false,
             "executor": "nx:run-commands",
             "options": {
-                "command": "tsx watch scripts/generate-pwa-icons.ts",
+                "command": "tsx watch tools/scripts/generate-pwa-icons.ts",
                 "cwd": "{projectRoot}"
             }
         },
