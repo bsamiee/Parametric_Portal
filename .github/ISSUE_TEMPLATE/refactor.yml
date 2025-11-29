@@ -3,6 +3,17 @@ description: Restructure code without changing behavior
 title: "[REFACTOR]: "
 labels: ["refactor"]
 body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will this refactor change public APIs?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
     - type: input
       id: target
       attributes:
@@ -51,15 +62,5 @@ body:
               - medium
               - high
               - critical
-      validations:
-          required: true
-
-    - type: dropdown
-      id: breaking
-      attributes:
-          label: Breaking Change
-          options:
-              - "no"
-              - "yes"
       validations:
           required: true

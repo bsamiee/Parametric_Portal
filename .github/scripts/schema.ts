@@ -291,7 +291,7 @@ const B = Object.freeze({
         headerStrip: /###\s*[^\n]+\n?/,
         placeholder: /^_?No response_?$/i,
     },
-    pr: { pattern: /^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/i } as const,
+    pr: { pattern: /^\[([A-Z]+)\](!)?:\s*(.+)$/i } as const,
     probe: {
         bodyTruncate: 500,
         defaults: { unknownAuthor: 'unknown' } as const,
@@ -305,7 +305,6 @@ const B = Object.freeze({
     } as const,
     time: { day: 86400000 },
     types: {
-        breaking: { p: ['!:', 'BREAKING CHANGE'] },
         build: { p: ['build:', 'build('] },
         chore: { p: ['chore:', 'chore('] },
         ci: { p: ['ci:', 'ci('] },

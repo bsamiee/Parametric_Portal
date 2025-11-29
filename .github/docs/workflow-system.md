@@ -12,12 +12,12 @@
 │                          SCHEMA.TS (Central Hub)                            │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  B.types = {                                                                 │
-│    breaking: { p: ['!:', 'BREAKING CHANGE'] },                              │
 │    build, chore, ci, docs, feat, fix, perf, refactor, style, test          │
 │  }                                                                           │
+│  (10 commit types - breaking is a MODIFIER via !, not a type)               │
 │                                                                              │
-│  B.pr.pattern = /^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/i                      │
-│  (matches: type(scope)!: description)                                       │
+│  B.pr.pattern = /^\[([A-Z]+)\](!)?:\s*(.+)$/i                               │
+│  (matches: [TYPE]: description or [TYPE!]: description)                     │
 │                                                                              │
 │  B.labels.categories = { action, agent, lifecycle, priority, special }      │
 │  B.labels.exempt = ['critical', 'implement', 'pinned', 'security']          │
@@ -46,10 +46,10 @@
 
 ## Scripts Reference
 
-### schema.ts (715 lines) - Central Configuration
+### schema.ts (~715 lines) - Central Configuration
 - **B constant**: Single frozen object with all configuration
-- **B.types**: Valid conventional commit types (11 types)
-- **B.pr.pattern**: Regex for PR title validation
+- **B.types**: Valid conventional commit types (10 types, no `breaking`)
+- **B.pr.pattern**: Regex for PR title validation (`[TYPE]:` format)
 - **B.labels**: Label categories and exemptions
 - **B.alerts**: CI and security alert templates
 - **B.gating**: Merge eligibility rules
@@ -132,37 +132,49 @@ Dependabot PR → auto-merge.yml → gate.ts
 
 ## Valid Commit Types
 
-| Type | Prefixes | Description |
-|------|----------|-------------|
-| `feat` | `feat:`, `feat(` | New feature |
-| `fix` | `fix:`, `fix(` | Bug fix |
-| `docs` | `docs:`, `docs(` | Documentation |
-| `style` | `style:`, `style(` | Formatting |
-| `refactor` | `refactor:`, `refactor(` | Restructuring |
-| `test` | `test:`, `test(` | Tests |
-| `chore` | `chore:`, `chore(` | Maintenance |
-| `perf` | `perf:`, `perf(` | Performance |
-| `ci` | `ci:`, `ci(` | CI/CD changes |
-| `build` | `build:`, `build(` | Build system |
-| `breaking` | `!:`, `BREAKING CHANGE` | Breaking change |
+| Type | Commit Prefix | Issue Template | Can Break? |
+|------|---------------|----------------|------------|
+| `feat` | `feat:`, `feat(` | `[FEAT]:` | Yes |
+| `fix` | `fix:`, `fix(` | `[FIX]:` | Yes |
+| `docs` | `docs:`, `docs(` | `[DOCS]:` | No |
+| `style` | `style:`, `style(` | `[STYLE]:` | No |
+| `refactor` | `refactor:`, `refactor(` | `[REFACTOR]:` | Yes |
+| `test` | `test:`, `test(` | `[TEST]:` | No |
+| `chore` | `chore:`, `chore(` | `[CHORE]:` | Yes |
+| `perf` | `perf:`, `perf(` | `[PERF]:` | Yes |
+| `ci` | `ci:`, `ci(` | `[CI]:` | No |
+| `build` | `build:`, `build(` | `[BUILD]:` | Yes |
+| `help` | _(issue only)_ | `[HELP]:` | No |
+
+**Breaking Change Modifier**: Add `!` after type for major semver bump:
+- Commit: `feat!: drop legacy API` → triggers MAJOR version
+- Issue: `[FEAT!]: drop legacy API` → adds `breaking` label
 
 ---
 
-## PR Title Format
+## PR/Issue Title Format
 
 ```
-type(scope)!: description
-│     │    │   │
-│     │    │   └─ Brief description (required)
-│     │    └───── Breaking change marker (optional)
-│     └────────── Scope (optional)
-└──────────────── Type from B.types (required)
+[TYPE]: description      or      [TYPE!]: description
+  │      │                          │  │    │
+  │      │                          │  │    └─ Brief description (required)
+  │      │                          │  └────── Breaking change marker (optional)
+  │      └─ Brief description       └───────── Type from B.types (required)
+  └──────── Type (required)
+
+Commit format: type: description  or  type!: description
 ```
 
-**Examples:**
+**PR/Issue Title Examples:**
+- `[FEAT]: add user authentication`
+- `[FIX]: handle null responses`
+- `[CHORE!]: drop Node 18 support` (breaking change)
+- `[DOCS]: update installation guide`
+
+**Commit Message Examples:**
 - `feat: add user authentication`
 - `fix(api): handle null responses`
-- `chore!: drop Node 18 support`
+- `chore!: drop Node 18 support` (breaking change)
 - `docs(readme): update installation`
 
 ---
@@ -172,10 +184,15 @@ type(scope)!: description
 Labels are defined in `.github/labels.yml` and synced via `ghaction-github-labeler`.
 
 **Commit Type Labels** (applied by pr-meta.ts):
-- `fix`, `feat`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `ci`, `build`
+- `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `style`, `test`
+
+**Issue-Only Type Labels** (no commit prefix):
+- `help` - Question or assistance needed
+
+**Modifier Labels** (applied with `!` in title):
+- `breaking` - Breaking change (triggers major semver)
 
 **Special Labels**:
-- `breaking` - Applied with `!` marker
 - `security` - Security issues
 - `dependencies` - Dependabot updates
 - `dashboard` - Dashboard issue
@@ -208,6 +225,12 @@ Configured in `nx.json`:
 }
 ```
 
+**Breaking Change Handling** (Nx native):
+- `!` modifier on ANY type triggers **MAJOR** version bump
+- Examples: `feat!:`, `fix!:`, `chore!:` → all trigger major
+- `BREAKING CHANGE` in commit footer also triggers major
+- No separate `breaking` type needed - Nx handles this natively
+
 ---
 
 ## Known Limitations
@@ -222,9 +245,9 @@ Configured in `nx.json`:
 ## Troubleshooting
 
 ### PR Title Fails Validation
-- Check format: `type(scope): description`
-- Verify type is in: breaking, build, chore, ci, docs, feat, fix, perf, refactor, style, test
-- Ensure colon-space separator (`: `)
+- Check format: `[TYPE]: description` or `[TYPE!]: description` for breaking
+- Valid types: build, chore, ci, docs, feat, fix, perf, refactor, style, test
+- Ensure colon-space separator after bracket (`: `)
 
 ### Labels Not Applied
 - Check pr-meta.ts ran successfully

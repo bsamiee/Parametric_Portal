@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
- * PR title validator using conventional commit format.
- * Parses type(scope)!: description, validates against B.types, applies labels.
+ * PR title validator using [TYPE]: format.
+ * Parses [TYPE]!: description, validates against B.types, applies labels.
  */
 
 import { B, createCtx, mutate, type RunParams, type TypeKey } from './schema.ts';
@@ -27,7 +27,7 @@ const validTypes = Object.keys(B.types) as ReadonlyArray<TypeKey>;
 // --- Pure Functions ---------------------------------------------------------
 
 const parse = (title: string): Parsed | null =>
-    ((m) => (m ? { breaking: !!m[3], scope: m[2] ?? '', subject: m[4], type: m[1].toLowerCase() } : null))(
+    ((m) => (m ? { breaking: !!m[2], scope: '', subject: m[3], type: m[1].toLowerCase() } : null))(
         title.match(B.pr.pattern),
     );
 
@@ -36,7 +36,7 @@ const validate = (p: Parsed | null): string | null =>
         ? validTypes.includes(p.type as TypeKey)
             ? null
             : `Invalid type "${p.type}". Valid: ${validTypes.join(', ')}`
-        : 'Invalid PR title format. Expected: type(scope): description';
+        : 'Invalid PR title format. Expected: [TYPE]: description';
 
 const labels = (type: TypeKey, breaking: boolean): ReadonlyArray<string> => [type, ...(breaking ? ['breaking'] : [])];
 
