@@ -1,0 +1,89 @@
+name: Meta Fixer
+description: Auto-fix GitHub object metadata (titles, labels, commits) with AI fallback
+
+inputs:
+    target:
+        description: 'Target: title|label|body|commit|all'
+        required: true
+    number:
+        description: 'Issue/PR number (optional - fixes single item)'
+        required: false
+    limit:
+        description: 'Max items per category (default: 10)'
+        required: false
+        default: '10'
+    anthropic_api_key:
+        description: 'Anthropic API key for Claude'
+        required: false
+
+outputs:
+    fixed:
+        description: 'Number of items fixed'
+        value: ${{ steps.run.outputs.fixed }}
+    provider:
+        description: 'Provider used (local|claude|github|none)'
+        value: ${{ steps.run.outputs.provider }}
+    commit_message:
+        description: 'Fixed commit message (when target=commit)'
+        value: ${{ steps.run.outputs.commit_message }}
+
+runs:
+    using: composite
+    steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+          with:
+              ref: ${{ github.event.pull_request.head.ref || github.ref }}
+              fetch-depth: 2
+
+        - uses: ./.github/actions/node-env
+
+        - name: Fetch Commits
+          id: commits
+          if: inputs.target == 'commit' && github.event_name == 'pull_request'
+          uses: actions/github-script@v7
+          with:
+              script: |
+                  const commits = await github.rest.pulls.listCommits({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: context.payload.pull_request.number,
+                  });
+                  return commits.data.map(c => ({ message: c.commit.message, sha: c.sha }));
+
+        - name: Run Meta Fixer
+          id: run
+          uses: actions/github-script@v7
+          env:
+              ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/ai-meta.ts');
+                  const commits = ${{ steps.commits.outputs.result || '[]' }};
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          target: '${{ inputs.target }}',
+                          limit: parseInt('${{ inputs.limit }}', 10),
+                          n: '${{ inputs.number }}' ? parseInt('${{ inputs.number }}', 10) : undefined,
+                          commits,
+                      },
+                      agentConfig: {
+                          key: process.env.ANTHROPIC_API_KEY || '',
+                          token: process.env.GITHUB_TOKEN || '',
+                      },
+                  });
+                  core.setOutput('fixed', result.fixed);
+                  core.setOutput('provider', result.provider);
+                  core.setOutput('commit_message', result.commitMessage || '');
+
+        - name: Amend Commit
+          if: inputs.target == 'commit' && steps.run.outputs.fixed != '0' && steps.run.outputs.commit_message != ''
+          shell: bash
+          run: |
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git commit --amend -m "${{ steps.run.outputs.commit_message }}"
+              git push --force-with-lease

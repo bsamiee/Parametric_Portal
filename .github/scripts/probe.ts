@@ -4,20 +4,13 @@
  * Fetches issues, PRs, or discussions with normalized output shapes.
  */
 
-import {
-    B,
-    type Ctx,
-    call,
-    createCtx,
-    fn,
-    type Label,
-    mutate,
-    type ReactionGroups,
-    type RunParams,
-    type User,
-} from './schema.ts';
+import { B, type Ctx, call, createCtx, fn, type Label, md, mutate, type RunParams, type User } from './schema.ts';
 
-// --- Target Handlers (Dispatch Table) ---------------------------------------
+// --- Types ------------------------------------------------------------------
+
+type ReactionGroups = ReadonlyArray<{ readonly content: string; readonly users: { readonly totalCount: number } }>;
+
+// --- Handlers ---------------------------------------------------------------
 
 type DiscussionReply = {
     readonly author: User;
@@ -147,7 +140,7 @@ const handlers = {
             checks,
             comments: comments.map(fn.comment),
             commits: commits.map((c) => ({
-                author: c.author?.login ?? B.probe.defaults.unknownAuthor,
+                author: c.author?.login ?? 'unknown',
                 message: c.commit.message.split('\n')[0],
                 sha: c.sha.substring(0, B.probe.shaLength),
             })),
@@ -173,7 +166,7 @@ const handlers = {
     },
 } as const;
 
-// --- Entry Points -----------------------------------------------------------
+// --- Entry Point ------------------------------------------------------------
 
 const probe = async <K extends keyof typeof handlers>(params: RunParams, kind: K, n: number) =>
     handlers[kind](createCtx(params), n);
@@ -186,9 +179,9 @@ const post = async (params: RunParams, n: number, marker: string, title: string,
             mode: 'replace',
             n,
             t: 'comment',
-        }))(B.gen.marker(marker)).then(() => params.core.info(`Posted ${title} to PR #${n}`));
+        }))(md.marker(marker)).then(() => params.core.info(`Posted ${title} to PR #${n}`));
 
-// --- Derived Types (Downstream DX) ------------------------------------------
+// --- Derived Types ----------------------------------------------------------
 
 type DiscussionProbe = Awaited<ReturnType<typeof handlers.discussion>>;
 type IssueProbe = Awaited<ReturnType<typeof handlers.issue>>;
