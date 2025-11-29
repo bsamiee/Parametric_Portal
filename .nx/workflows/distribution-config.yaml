@@ -15,8 +15,10 @@ distribute-on:
 
 # Retry flaky tasks automatically to keep pipelines green
 # See: https://nx.dev/docs/features/ci-features/flaky-tasks
+# Flaky tasks are detected when a task fails in CI but passes on retry.
+# Nx Cloud tracks flaky task history and re-runs them automatically in the background.
 flaky-tasks:
     # Enable automatic retry of flaky tasks
     enabled: true
-    # Maximum number of retry attempts for flaky tasks
+    # Maximum number of retry attempts for flaky tasks (range: 1-3 recommended)
     max-retries: 2

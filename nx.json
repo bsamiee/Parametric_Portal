@@ -40,10 +40,12 @@
             "{workspaceRoot}/pnpm-workspace.yaml"
         ],
         "testing": [
-            "default",
+            "{projectRoot}/src/**/*",
             "{projectRoot}/tests/**/*",
             "{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)",
-            "{workspaceRoot}/vitest.config.ts"
+            "{workspaceRoot}/vitest.config.ts",
+            "{workspaceRoot}/vite.config.ts",
+            "sharedGlobals"
         ],
         "typescript": [
             "{projectRoot}/**/*.ts",
