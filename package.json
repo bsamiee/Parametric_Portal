@@ -98,6 +98,7 @@
         "test": "nx run-many -t test",
         "typecheck": "nx run-many -t typecheck"
     },
+    "type": "module",
     "version": "0.4.0",
     "workspaces": [
         "apps/*",
