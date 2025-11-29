@@ -81,7 +81,7 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         issue_number: context.payload.pull_request.number,
-                        body: `✅ **Biome Auto-Repair Applied**
+                        body: `[OK] **Biome Auto-Repair Applied**
 
 Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
                       });

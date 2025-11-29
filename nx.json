@@ -72,7 +72,9 @@
             "projectChangelogs": false,
             "workspaceChangelog": {
                 "createRelease": "github",
+                "file": "./CHANGELOG.md",
                 "renderOptions": {
+                    "applyUsernameToAuthors": true,
                     "authors": true,
                     "commitReferences": true,
                     "versionTitleDate": true
