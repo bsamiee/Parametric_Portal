@@ -1,129 +1,113 @@
-# =============================================================================
-# SEMANTIC COLOR SYSTEM
-# =============================================================================
-# Red (#d73a4a, #b60205)  → Danger: bugs, security, critical, blocked, breaking
-# Green (#1a7f37)         → Success: fixes, approved
-# Blue (#0969da)          → Features: new functionality
-# Cyan (#0891b2)          → Docs: information, documentation
-# Yellow (#dbab09)        → Caution: refactor, testing, pending
-# Orange (#e16f24)        → Action: performance, review needed
-# Pink (#d876e3)          → Support: help, questions
-# Purple (#8957e5)        → Ready: implement, special
-# Teal (#0d9488)          → Highlight: dashboard, pinned
-# Grey (#6e7781)          → Neutral: agents, stale, system
-# Tan (#a1887f)           → Maintenance: chores, routine
-# =============================================================================
-
 # --- Commit Type Labels ------------------------------------------------------
 
 - name: fix
-  color: "1a7f37"                       # green
+  color: "f05223"
   description: "Bug fix"
 
-- name: feat
-  color: "0969da"                       # blue
-  description: "New feature"
+- name: a2eeef
+  color: "0969da"
+  description: "New feature request"
 
 - name: docs
-  color: "0891b2"                       # cyan
-  description: "Documentation only"
+  color: "0067a6"
+  description: "Improvements or additions to documentation"
 
 - name: style
-  color: "6f42c1"                       # violet
+  color: "6c3082"
   description: "Formatting, no logic change"
 
 - name: refactor
-  color: "dbab09"                       # yellow
+  color: "3a140e"
   description: "Code restructuring without behavior change"
 
 - name: test
-  color: "f59e0b"                       # amber
+  color: "6f4f38"
   description: "Adding or updating tests"
 
 - name: chore
-  color: "a1887f"                       # tan
+  color: "c4b091"
   description: "Maintenance task"
 
 - name: perf
-  color: "e16f24"                       # orange
+  color: "9aca3c"
   description: "Performance improvement"
 
 - name: ci
-  color: "6e7781"                       # grey
+  color: "650e3d"
   description: "CI/CD pipeline changes"
 
 - name: build
-  color: "6e7781"                       # grey
+  color: "93c572"
   description: "Build system or tooling"
 
 # --- Issue-Only Type Labels (no commit prefix) -------------------------------
 
 - name: help
-  color: "d876e3"                       # pink
+  color: "702963"
   description: "Question or assistance needed"
 
 # --- Priority Labels ---------------------------------------------------------
 
 - name: critical
-  color: "b60205"                       # dark red
+  color: "ff473e"
   description: "Must be addressed immediately"
 
 # --- Action Labels -----------------------------------------------------------
 
 - name: implement
-  color: "8957e5"                       # purple
+  color: "ee3a95"
   description: "Ready for implementation"
 
 - name: review
-  color: "e16f24"                       # orange
+  color: "FFF58A"
   description: "Needs review"
 
 - name: blocked
-  color: "d73a4a"                       # red
+  color: "fed700"
   description: "Cannot proceed"
 
 # --- Agent Labels (Mutually Exclusive) ---------------------------------------
 
 - name: copilot
-  color: "6e7781"                       # neutral grey
+  color: "848482"
   description: "Assign to GitHub Copilot"
 
 - name: claude
-  color: "6e7781"                       # neutral grey
+  color: "848482"
   description: "Assign to Claude"
 
 - name: gemini
-  color: "6e7781"                       # neutral grey
+  color: "848482"
   description: "Assign to Gemini"
 
 - name: codex
-  color: "6e7781"                       # neutral grey
+  color: "848482"
   description: "Assign to OpenAI Codex"
 
 # --- Lifecycle Labels --------------------------------------------------------
 
 - name: stale
-  color: "57606a"                       # dark grey
+  color: "2a3439"
   description: "No recent activity"
 
 - name: pinned
-  color: "0d9488"                       # teal
+  color: "123524"
   description: "Exempt from stale"
 
 # --- Special Labels ----------------------------------------------------------
 
 - name: security
-  color: "d73a4a"                       # red
+  color: "FF2DD1"
   description: "Security issue"
 
 - name: dependencies
-  color: "0550ae"                       # dark blue
+  color: "1D2952"
   description: "Dependency updates (bot-applied)"
 
 - name: breaking
-  color: "b60205"                       # dark red
+  color: "701c1c"
   description: "Breaking change"
 
 - name: dashboard
-  color: "0d9488"                       # teal
+  color: "00a693"
   description: "Repository metrics dashboard"
