@@ -82,9 +82,7 @@ jobs:
                         owner: context.repo.owner,
                         repo: context.repo.repo,
                         issue_number: context.payload.pull_request.number,
-                        body: `[OK] **Biome Auto-Repair Applied**
-
-Style issues have been automatically fixed and committed. CI will re-run with the fixed code.`
+                        body: '[OK] **Biome Auto-Repair Applied**\n\nStyle issues have been automatically fixed and committed. CI will re-run with the fixed code.'
                       });
 
             # Run all quality checks via Nx affected - leverages caching and proper task orchestration

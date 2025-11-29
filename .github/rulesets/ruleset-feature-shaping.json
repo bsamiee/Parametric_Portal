@@ -1,0 +1,33 @@
+{
+    "bypass_actors": [],
+    "conditions": {
+        "ref_name": {
+            "exclude": ["refs/heads/main", "refs/heads/renovate/**", "refs/heads/dependabot/**"],
+            "include": ["refs/heads/*"]
+        }
+    },
+    "enforcement": "active",
+    "name": "20-feature-shaping",
+    "rules": [
+        {
+            "parameters": {
+                "required_status_checks": [
+                    {
+                        "context": "CI / Code Quality",
+                        "integration_id": null
+                    },
+                    {
+                        "context": "Active QC / PR Title",
+                        "integration_id": null
+                    }
+                ],
+                "strict_required_status_checks_policy": false
+            },
+            "type": "required_status_checks"
+        },
+        {
+            "type": "non_fast_forward"
+        }
+    ],
+    "target": "branch"
+}

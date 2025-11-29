@@ -1,0 +1,44 @@
+{
+    "bypass_actors": [],
+    "conditions": {
+        "ref_name": {
+            "exclude": [],
+            "include": ["refs/tags/v*"]
+        }
+    },
+    "enforcement": "active",
+    "name": "30-release-tags",
+    "rules": [
+        {
+            "parameters": {
+                "required_status_checks": [
+                    {
+                        "context": "CI / Code Quality",
+                        "integration_id": null
+                    },
+                    {
+                        "context": "Security Scanning / Dependency Audit",
+                        "integration_id": null
+                    },
+                    {
+                        "context": "Security Scanning / CodeQL Analysis",
+                        "integration_id": null
+                    }
+                ],
+                "strict_required_status_checks_policy": true
+            },
+            "type": "required_status_checks"
+        },
+        {
+            "parameters": {
+                "name": "^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+                "negate": false
+            },
+            "type": "tag_name_pattern"
+        },
+        {
+            "type": "non_fast_forward"
+        }
+    ],
+    "target": "tag"
+}

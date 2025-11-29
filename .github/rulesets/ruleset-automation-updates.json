@@ -1,0 +1,43 @@
+{
+    "bypass_actors": [],
+    "conditions": {
+        "ref_name": {
+            "exclude": [],
+            "include": ["refs/heads/renovate/**", "refs/heads/dependabot/**"]
+        }
+    },
+    "enforcement": "active",
+    "name": "10-automation-updates",
+    "rules": [
+        {
+            "parameters": {
+                "required_status_checks": [
+                    {
+                        "context": "CI / Code Quality",
+                        "integration_id": null
+                    },
+                    {
+                        "context": "Security Scanning / Dependency Audit",
+                        "integration_id": null
+                    }
+                ],
+                "strict_required_status_checks_policy": true
+            },
+            "type": "required_status_checks"
+        },
+        {
+            "type": "non_fast_forward"
+        },
+        {
+            "parameters": {
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": false
+            },
+            "type": "pull_request"
+        }
+    ],
+    "target": "branch"
+}
