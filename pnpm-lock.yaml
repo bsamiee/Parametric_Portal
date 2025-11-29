@@ -27,9 +27,6 @@ catalogs:
     '@fast-check/vitest':
       specifier: 0.2.3
       version: 0.2.3
-    '@nx/devkit':
-      specifier: 22.2.0-canary.20251125-7e00ec4
-      version: 22.2.0-canary.20251125-7e00ec4
     '@nx/js':
       specifier: 22.2.0-canary.20251125-7e00ec4
       version: 22.2.0-canary.20251125-7e00ec4
