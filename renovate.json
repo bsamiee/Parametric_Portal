@@ -3,7 +3,8 @@
     "automergeStrategy": "squash",
     "automergeType": "pr",
     "dependencyDashboard": true,
-    "dependencyDashboardTitle": "Dependency Dashboard",
+    "dependencyDashboardLabels": ["chore", "dependencies"],
+    "dependencyDashboardTitle": "[CHORE]: Dependency Dashboard",
     "extends": [
         "config:recommended",
         "schedule:weekly",
