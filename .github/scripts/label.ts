@@ -16,7 +16,12 @@ type LabelSpec = { readonly action: LabelAction; readonly label: string; readonl
 
 const behaviors: Record<NonNullable<Behavior>, (ctx: Ctx, spec: LabelSpec) => Promise<void>> = {
     comment: async (ctx, spec) => {
-        await mutate(ctx, { body: `Label \`${spec.label}\` applied`, marker: `LABEL-${spec.label}`, n: spec.n, t: 'comment' });
+        await mutate(ctx, {
+            body: `Label \`${spec.label}\` applied`,
+            marker: `LABEL-${spec.label}`,
+            n: spec.n,
+            t: 'comment',
+        });
     },
     pin: async (ctx, spec) => {
         await call(ctx, 'issue.pin', spec.nodeId);

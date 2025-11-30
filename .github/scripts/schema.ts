@@ -471,12 +471,12 @@ const ops: Record<string, Op> = {
         map: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }),
     },
     'issue.pin': { map: ([issueId]) => ({ issueId }), query: B.probe.gql.pinIssue, safe: true },
-    'issue.unpin': { map: ([id]) => ({ id }), query: B.labels.gql.unpin, safe: true },
     'issue.removeLabel': {
         api: ['issues', 'removeLabel'],
         map: ([number, name]) => ({ issue_number: number, name }),
         safe: true,
     },
+    'issue.unpin': { map: ([id]) => ({ id }), query: B.labels.gql.unpin, safe: true },
     'issue.update': { api: ['issues', 'update'], map: ([number, body]) => ({ body, issue_number: number }) },
     'issue.updateMeta': {
         api: ['issues', 'update'],
