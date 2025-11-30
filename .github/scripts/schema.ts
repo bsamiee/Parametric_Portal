@@ -108,20 +108,20 @@ const md = Object.freeze({
 // --- Section Types ----------------------------------------------------------
 
 type Section =
-    | { readonly k: 'list'; readonly items: ReadonlyArray<string>; readonly ordered?: boolean }
-    | { readonly k: 'task'; readonly items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }> }
-    | { readonly k: 'field'; readonly label: string; readonly value: string }
-    | { readonly k: 'heading'; readonly level: 2 | 3; readonly text: string }
-    | { readonly k: 'text'; readonly content: string }
-    | { readonly k: 'code'; readonly lang: string; readonly content: string }
-    | { readonly k: 'details'; readonly summary: string; readonly content: string; readonly open?: boolean }
+    | { readonly kind: 'list'; readonly items: ReadonlyArray<string>; readonly ordered?: boolean }
+    | { readonly kind: 'task'; readonly items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }> }
+    | { readonly kind: 'field'; readonly label: string; readonly value: string }
+    | { readonly kind: 'heading'; readonly level: 2 | 3; readonly text: string }
+    | { readonly kind: 'text'; readonly content: string }
+    | { readonly kind: 'code'; readonly lang: string; readonly content: string }
+    | { readonly kind: 'details'; readonly summary: string; readonly content: string; readonly open?: boolean }
     | {
-          readonly k: 'alert';
+          readonly kind: 'alert';
           readonly type: 'note' | 'tip' | 'important' | 'warning' | 'caution';
           readonly content: string;
       }
-    | { readonly k: 'divider' }
-    | { readonly k: 'timestamp' };
+    | { readonly kind: 'divider' }
+    | { readonly kind: 'timestamp' };
 
 type BodySpec = ReadonlyArray<Section>;
 
@@ -139,18 +139,6 @@ type MarkerKey = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 const TYPES = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build'] as const;
 const MARKERS = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;
 
-// --- Format Functions -------------------------------------------------------
-
-const fmt = Object.freeze({
-    commit: (t: TypeKey, brk: boolean): string => `${t}${brk ? '!' : ''}:`,
-    marker: (m: string): string => `[!${m}]`,
-    title: (t: TypeKey, brk: boolean): string => `[${t.toUpperCase()}${brk ? '!' : ''}]:`,
-} as const);
-
-const alerts = Object.freeze(
-    Object.fromEntries(MARKERS.map((m) => [m.toLowerCase(), fmt.marker(m)])) as Record<MarkerKey, string>,
-);
-
 // --- Constants (B) ----------------------------------------------------------
 
 const B = Object.freeze({
@@ -160,6 +148,35 @@ const B = Object.freeze({
         bodyPat: /###\s*Breaking Change\s*\n+\s*yes/i,
         commitPat: [/^\w+!:/, /^BREAKING[\s-]CHANGE:/im] as const,
         label: 'breaking' as const,
+    } as const,
+    dashboard: {
+        actions: [
+            { label: '[Actions]', path: 'actions' },
+            { label: '[Releases]', path: 'releases' },
+            { label: '[Security]', path: 'security' },
+            { label: '[Insights]', path: 'pulse' },
+        ] as const,
+        bots: ['renovate[bot]', 'dependabot[bot]'] as const,
+        colors: { error: 'red', info: 'blue', success: 'brightgreen', warning: 'yellow' } as const,
+        excludeConclusions: ['skipped', 'cancelled'] as const,
+        labels: { feat: 'feat', fix: 'fix' } as const,
+        marker: 'dashboard-refresh',
+        monitoring: { period: 30, unit: 'days' } as const,
+        nxCloud: { url: (id: string) => (id ? `https://cloud.nx.app/orgs/workspace/${id}` : '') },
+        output: {
+            displayTitle: 'Repository Overview',
+            label: 'dashboard',
+            labels: ['dashboard', 'pinned'] as const,
+            pattern: '[DASHBOARD]',
+            pin: true,
+            title: '[DASHBOARD] Repository Overview',
+        },
+        schedule: { interval: 6, unit: 'hours' } as const,
+        sparklineWidth: 5,
+        staleDays: 14,
+        targets: { stalePrs: 0, workflowSuccess: 90, workflowWarning: 70 } as const,
+        window: 7,
+        workflow: 'dashboard.yml',
     } as const,
     labels: {
         categories: {
@@ -172,6 +189,9 @@ const B = Object.freeze({
         exempt: ['critical', 'implement', 'pinned', 'security'] as const,
     },
     meta: {
+        alerts: Object.freeze(
+            Object.fromEntries(MARKERS.map((m) => [m.toLowerCase(), `[!${m}]`])) as Record<MarkerKey, string>,
+        ),
         caps: {
             assigned: ['issue', 'pr'] as const,
             committable: ['commit'] as const,
@@ -182,6 +202,11 @@ const B = Object.freeze({
             reviewable: ['pr'] as const,
             titled: ['issue', 'pr', 'discussion'] as const,
         } as const,
+        fmt: Object.freeze({
+            commit: (t: TypeKey, brk: boolean): string => `${t}${brk ? '!' : ''}:`,
+            marker: (m: string): string => `[!${m}]`,
+            title: (t: TypeKey, brk: boolean): string => `[${t.toUpperCase()}${brk ? '!' : ''}]:`,
+        } as const),
         infer: [
             { pattern: /fix|bug|patch|resolve|correct/i, value: 'fix' },
             { pattern: /feat|add|new|implement|introduce/i, value: 'feat' },
@@ -193,6 +218,7 @@ const B = Object.freeze({
             { pattern: /build|depend|bump|upgrade/i, value: 'build' },
             { pattern: /ci|workflow|action|pipeline/i, value: 'ci' },
         ] as const,
+        models: { claude: 'claude-sonnet-4-20250514', fallback: 'openai/gpt-4o' } as const,
         ops: {
             commit: { list: 'pull.listCommits' },
             discussion: { get: 'discussion.get' },
@@ -277,40 +303,40 @@ const fn = {
     body: (spec: BodySpec, vars: Record<string, string> = {}): string => {
         const interpolate = (text: string): string =>
             Object.entries(vars).reduce((acc, [key, val]) => acc.replaceAll(`{{${key}}}`, val), text);
-        const render: Record<Section['k'], (section: Section) => string> = {
+        const render: Record<Section['kind'], (section: Section) => string> = {
             alert: (section) =>
                 md.alert(
-                    (section as Extract<Section, { k: 'alert' }>).type,
-                    interpolate((section as Extract<Section, { k: 'alert' }>).content),
+                    (section as Extract<Section, { kind: 'alert' }>).type,
+                    interpolate((section as Extract<Section, { kind: 'alert' }>).content),
                 ),
             code: (section) =>
                 md.code(
-                    (section as Extract<Section, { k: 'code' }>).lang,
-                    interpolate((section as Extract<Section, { k: 'code' }>).content),
+                    (section as Extract<Section, { kind: 'code' }>).lang,
+                    interpolate((section as Extract<Section, { kind: 'code' }>).content),
                 ),
             details: (section) =>
                 md.details(
-                    interpolate((section as Extract<Section, { k: 'details' }>).summary),
-                    interpolate((section as Extract<Section, { k: 'details' }>).content),
-                    (section as Extract<Section, { k: 'details' }>).open,
+                    interpolate((section as Extract<Section, { kind: 'details' }>).summary),
+                    interpolate((section as Extract<Section, { kind: 'details' }>).content),
+                    (section as Extract<Section, { kind: 'details' }>).open,
                 ),
             divider: () => '---',
             field: (section) =>
-                `- **${(section as Extract<Section, { k: 'field' }>).label}**: ${interpolate((section as Extract<Section, { k: 'field' }>).value)}`,
+                `- **${(section as Extract<Section, { kind: 'field' }>).label}**: ${interpolate((section as Extract<Section, { kind: 'field' }>).value)}`,
             heading: (section) =>
-                `${'#'.repeat((section as Extract<Section, { k: 'heading' }>).level)} ${interpolate((section as Extract<Section, { k: 'heading' }>).text)}`,
+                `${'#'.repeat((section as Extract<Section, { kind: 'heading' }>).level)} ${interpolate((section as Extract<Section, { kind: 'heading' }>).text)}`,
             list: (section) =>
-                (section as Extract<Section, { k: 'list' }>).items
+                (section as Extract<Section, { kind: 'list' }>).items
                     .map(
                         (item, index) =>
-                            `${(section as Extract<Section, { k: 'list' }>).ordered ? `${index + 1}.` : '-'} ${interpolate(item)}`,
+                            `${(section as Extract<Section, { kind: 'list' }>).ordered ? `${index + 1}.` : '-'} ${interpolate(item)}`,
                     )
                     .join('\n'),
-            task: (section) => md.task((section as Extract<Section, { k: 'task' }>).items),
-            text: (section) => interpolate((section as Extract<Section, { k: 'text' }>).content),
+            task: (section) => md.task((section as Extract<Section, { kind: 'task' }>).items),
+            text: (section) => interpolate((section as Extract<Section, { kind: 'text' }>).content),
             timestamp: () => `_Generated: ${new Date().toISOString()}_`,
         };
-        return spec.map((section) => render[section.k](section)).join('\n\n');
+        return spec.map((section) => render[section.kind](section)).join('\n\n');
     },
     classify: <R>(
         input: string,
@@ -611,7 +637,7 @@ const createCtx = (params: RunParams): Ctx => ({
 
 // --- Export -----------------------------------------------------------------
 
-export { alerts, B, call, createCtx, fmt, fn, MARKERS, md, mutate, TYPES };
+export { B, call, createCtx, fn, MARKERS, md, mutate, TYPES };
 export type {
     BodySpec,
     Comment,

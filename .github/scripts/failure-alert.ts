@@ -14,12 +14,12 @@ type Rule<V> = { readonly pattern: RegExp; readonly value: V };
 const ALERTS = Object.freeze({
     ci: {
         body: [
-            { k: 'heading', level: 2, text: 'CI Failure' },
-            { k: 'field', label: 'Run', value: '{{runUrl}}' },
-            { k: 'field', label: 'Job', value: '{{job}}' },
-            { k: 'timestamp' },
-            { k: 'heading', level: 3, text: 'Action Required' },
-            { content: 'Review the failed CI run and address the issues before merging.', k: 'text' },
+            { kind: 'heading', level: 2, text: 'CI Failure' },
+            { kind: 'field', label: 'Run', value: '{{runUrl}}' },
+            { kind: 'field', label: 'Job', value: '{{job}}' },
+            { kind: 'timestamp' },
+            { kind: 'heading', level: 3, text: 'Action Required' },
+            { content: 'Review the failed CI run and address the issues before merging.', kind: 'text' },
         ] as BodySpec,
         default: { labels: ['tech-debt', 'refactor'], type: 'Quality' } as DebtClass,
         pattern: 'Debt:',
@@ -32,15 +32,15 @@ const ALERTS = Object.freeze({
     },
     security: {
         body: [
-            { k: 'heading', level: 2, text: 'Security Scan Alert' },
-            { k: 'timestamp' },
-            { k: 'field', label: 'Run', value: '{{runUrl}}' },
-            { k: 'heading', level: 3, text: 'Action Required' },
-            { content: 'Security vulnerabilities or compliance issues have been detected.', k: 'text' },
-            { k: 'heading', level: 3, text: 'Next Steps' },
+            { kind: 'heading', level: 2, text: 'Security Scan Alert' },
+            { kind: 'timestamp' },
+            { kind: 'field', label: 'Run', value: '{{runUrl}}' },
+            { kind: 'heading', level: 3, text: 'Action Required' },
+            { content: 'Security vulnerabilities or compliance issues have been detected.', kind: 'text' },
+            { kind: 'heading', level: 3, text: 'Next Steps' },
             {
                 items: ['Review the failed job', 'Address critical issues', 'Update dependencies', 'Re-run scan'],
-                k: 'list',
+                kind: 'list',
                 ordered: true,
             },
         ] as BodySpec,

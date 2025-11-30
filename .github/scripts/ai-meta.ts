@@ -9,7 +9,6 @@ import {
     type Ctx,
     call,
     createCtx,
-    fmt,
     fn,
     type Issue,
     type Label,
@@ -74,7 +73,8 @@ const RULES: Record<
         write: (ctx, number, value) => mutate(ctx, { action: 'add', labels: [value], n: number, t: 'label' }),
     },
     title: {
-        fix: (issue) => `${fmt.title(infer(issue.title), isBreak(issue.title, issue.body))} ${strip(issue.title)}`,
+        fix: (issue) =>
+            `${B.meta.fmt.title(infer(issue.title), isBreak(issue.title, issue.body))} ${strip(issue.title)}`,
         ok: (issue) => B.pr.pattern.test(issue.title),
         prompt: (issue) =>
             `Fix to [TYPE]: format. Types: ${TYPES.join(',')}. Current: "${issue.title}". Return ONLY title.`,
@@ -93,9 +93,9 @@ const ai = (config: Config, prompt: string): Promise<string | null> =>
                     ? {
                           max_tokens: 256,
                           messages: [{ content: prompt, role: 'user' }],
-                          model: 'claude-sonnet-4-20250514',
+                          model: B.meta.models.claude,
                       }
-                    : { messages: [{ content: prompt, role: 'user' }], model: 'openai/gpt-4o' },
+                    : { messages: [{ content: prompt, role: 'user' }], model: B.meta.models.fallback },
             ),
             headers: config.key
                 ? { 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'x-api-key': config.key }
