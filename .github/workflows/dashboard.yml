@@ -29,6 +29,13 @@ jobs:
              contains(github.event.issue.body, '[x] <!-- dashboard-refresh -->'))
         steps:
             - uses: actions/checkout@v4
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      .github/actions
+                      package.json
+                      pnpm-workspace.yaml
+                      nx.json
 
             - uses: ./.github/actions/node-env
 

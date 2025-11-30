@@ -32,12 +32,11 @@ jobs:
                       .github/scripts
                       .github/actions
                       package.json
-                      pnpm-lock.yaml
+                      pnpm-workspace.yaml
 
             - uses: ./.github/actions/node-env
               with:
                   node-version-file: package.json
-                  install: 'false'
 
             - uses: actions/github-script@v7
               env:

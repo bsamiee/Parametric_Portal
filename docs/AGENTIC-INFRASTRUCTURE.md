@@ -312,21 +312,24 @@ Jobs:
 **passive-qc.yml** (Scheduled)
 Scheduled quality control running every 6 hours.
 
-**Triggers**: Schedule only (every 6 hours)
+**Triggers**: Schedule only (every 6 hours at :15)
 
 Jobs:
 1. **sync-labels**: Backup label sync as safety net.
 2. **stale-management**: 3 days inactive → stale label, then 7 more days → close (10 days total). Exemptions: pinned, security, critical.
 3. **aging-report**: Generates issue metrics report (critical, stale, >3 days, total).
+4. **meta-consistency**: Runs ai-meta.ts to fix titles/labels/bodies across up to 10 items.
 
 **auto-merge.yml**
 Dependabot auto-merge for patch/minor/security updates. Automatically merges safe dependency updates after CI passes.
 
 **ai-maintenance.yml**
-Weekly AI maintenance + manual tasks via Claude. Handles repository maintenance tasks that benefit from AI assistance.
+Weekly AI maintenance + manual tasks via Claude (Mondays at 9am UTC). Handles repository maintenance tasks that benefit from AI assistance.
 
 **dashboard.yml**
-Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or checkbox toggle on dashboard issue (Renovate-style `<!-- dashboard-refresh -->` marker). Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
+Auto-updating repository health dashboard. Triggered by 6-hour schedule (at :00), workflow_dispatch, or checkbox toggle on dashboard issue (Renovate-style `<!-- dashboard-refresh -->` marker). Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
+
+> **Schedule Note**: Dashboard runs at :00 and Passive QC runs at :15 to prevent race conditions on shared resources.
 
 **security.yml**
 Multi-layer security scanning. Jobs: dependency-audit (`pnpm audit`), CodeQL (JavaScript/TypeScript analysis), secrets-scan (Gitleaks), license-check (copyleft detection). Creates security issue if critical vulnerabilities found.
