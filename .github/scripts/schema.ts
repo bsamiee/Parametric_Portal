@@ -14,6 +14,7 @@ type Issue = {
     readonly closed_at?: string;
     readonly created_at: string;
     readonly labels: ReadonlyArray<Label>;
+    readonly node_id: string;
     readonly number: number;
     readonly title: string;
 };
@@ -609,7 +610,10 @@ const mutateHandlers: {
                 const result = await call(ctx, 'issue.create', spec.title, spec.labels, body);
                 spec.pin && (await call(ctx, 'issue.pin', (result as { node_id: string }).node_id));
             },
-            update: () => call(ctx, 'issue.update', existing?.number, body),
+            update: async () => {
+                await call(ctx, 'issue.update', existing?.number, body);
+                spec.pin && existing && (await call(ctx, 'issue.pin', existing.node_id));
+            },
         };
         await actions[existing ? 'update' : 'create']();
     },

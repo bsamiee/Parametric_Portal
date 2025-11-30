@@ -8,7 +8,6 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 
 ### Root-Level Protocol Files
 - `REQUIREMENTS.md` — Single Source of Truth (SSoT) for all coding standards and agent protocols
-- `AGENTS.md` — Agent charter for CLI/CI agents
 - `CLAUDE.md` — Code standards for Claude Code
 
 ### Configuration Files
@@ -16,20 +15,22 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `lefthook.yml` — Pre-commit hooks including Effect pattern validation
 - `.github/labels.yml` — Declarative label definitions with colors (managed by active-qc + passive-qc workflows)
 - `.github/copilot-instructions.md` — IDE agent instructions
+- `stryker.config.js` — Mutation testing configuration (80% threshold, Vitest runner)
 
-### GitHub Workflows (8 total)
-- `.github/workflows/active-qc.yml` — Event-driven QC: PR title/label validation, label sync on push
+### GitHub Workflows (9 total)
+- `.github/workflows/active-qc.yml` — Event-driven QC: PR commit sync, title/label validation, label sync on push, issue pinning
 - `.github/workflows/ai-maintenance.yml` — Weekly AI maintenance + manual tasks via Claude
 - `.github/workflows/auto-merge.yml` — Dependabot auto-merge for patch/minor/security
 - `.github/workflows/ci.yml` — Main CI: normalize commits, Biome auto-repair, Nx affected tasks
+- `.github/workflows/claude-code-review.yml` — Claude AI code review with structured summary and inline comments
+- `.github/workflows/claude.yml` — Claude Code agentic automation triggered via @claude mentions
 - `.github/workflows/dashboard.yml` — Repository health metrics dashboard (6-hour schedule + checkbox trigger)
 - `.github/workflows/passive-qc.yml` — Scheduled QC: stale management, aging report, meta consistency
-- `.github/workflows/pr-review.yml` — REQUIREMENTS.md compliance + feedback synthesis + /summarize
 - `.github/workflows/security.yml` — Multi-layer: dependency audit, CodeQL, Gitleaks, license check
 
 **Note**: Releases are handled via `npx nx release` (configured in nx.json).
 
-### GitHub Scripts (9 total)
+### GitHub Scripts (10 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
 - `.github/scripts/schema.ts` — Core infrastructure: B constant, types, markdown generators, ops factory, mutate handlers
@@ -37,10 +38,11 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/probe.ts` — Data extraction layer for issues/PRs/discussions
 - `.github/scripts/report.ts` — Config-driven report generator
 - `.github/scripts/failure-alert.ts` — CI/security failure alert creator
-- `.github/scripts/gate.ts` — Eligibility gating for PRs
+- `.github/scripts/gate.ts` — Eligibility gating for PRs with mutation score verification
 - `.github/scripts/ai-meta.ts` — Universal metadata fixer with AI fallback
 - `.github/scripts/label.ts` — Label-triggered behavior executor (pin, unpin, comment)
-- `.github/scripts/env.ts` — Environment configuration (lang, bundleThresholdKb, nxCloudWorkspaceId)
+- `.github/scripts/pr-sync.ts` — PR commit synchronization: analyzes commits to update title/labels on push
+- `.github/scripts/env.ts` — Environment configuration (lang, nxCloudWorkspaceId)
 
 ### GitHub Composite Actions (5 total)
 - `.github/actions/node-env/action.yml` — Node.js + pnpm + Nx setup with caching + distributed execution
@@ -83,13 +85,6 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.claude/commands/review-typescript.md` — TypeScript review command prompt
 - `.claude/commands/test.md` — Testing command prompt
 
-### Scripts (1 total)
-- `scripts/generate-pwa-icons.ts` — PWA icon generation (utility)
-
-### Documentation
-- `docs/AUTOMATION.md` — Comprehensive automation guide
-- `docs/INTEGRATIONS.md` — External integrations and setup
-
 ---
 
 ## Schema Infrastructure
@@ -98,17 +93,15 @@ The `.github/scripts/schema.ts` file is the core of the automation system, imple
 
 ### Single B Constant
 All configuration in one frozen object with nested domains:
-- `B.alerts` — CI/security alert templates
-- `B.algo` — Algorithm thresholds (stale days, mutation %)
-- `B.api` — GitHub API constants (per_page, states)
-- `B.content` — Report configurations (aging, bundle)
-- `B.dashboard` — Dashboard config (bots, colors, targets, schedule)
-- `B.gen` — Markdown generators (badges, shields, links, callouts)
+- `B.algo` — Algorithm thresholds (closeRatio, mutationPct 80%, staleDays 30)
+- `B.api` — GitHub API constants (perPage 100, states)
+- `B.breaking` — Breaking change detection patterns and label
+- `B.dashboard` — Dashboard config (bots, colors, targets, schedule, output)
 - `B.labels` — Label taxonomy (categories, behaviors, exempt lists, GraphQL mutations)
-- `B.patterns` — Regex patterns for parsing
-- `B.probe` — Data collection defaults
-- `B.release` — Conventional commit mapping
-- `B.thresholds` — Validation thresholds (bundle size)
+- `B.meta` — Metadata config (alerts, caps, fmt, infer rules, models, ops)
+- `B.patterns` — Regex patterns for parsing (commit, header, placeholder)
+- `B.pr` — PR title patterns (bash and JS regex)
+- `B.probe` — Data collection defaults (bodyTruncate, shaLength, markers)
 - `B.time` — Time constants (day in ms)
 
 ### SpecRegistry Type System
@@ -207,12 +200,12 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 │                 Coding Standards + Agent Protocols                    │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
-          ┌──────────────────┼──────────────────┐
-          ▼                  ▼                  ▼
-    AGENTS.md         copilot-instructions    CLAUDE.md
-    (CLI/CI)              (.github/)          (Claude Code)
-          │                  │                  │
-          └──────────────────┴──────────────────┘
+          ┌──────────────────┴──────────────────┐
+          ▼                                     ▼
+    copilot-instructions                  CLAUDE.md
+        (.github/)                       (Claude Code)
+          │                                     │
+          └──────────────────┬──────────────────┘
                              │
                              ▼
                     Custom Agents (10)
@@ -220,25 +213,27 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                          GitHub Workflows (8)                         │
+│                          GitHub Workflows (9)                         │
 │  ┌──────────────┐  ┌─────────────────────────────────┐               │
-│  │ CI Pipeline  │→│ pr-review.yml                    │               │
-│  │ (ci.yml)     │  │ (compliance + feedback synthesis)│               │
+│  │ CI Pipeline  │→│ claude-code-review.yml            │               │
+│  │ (ci.yml)     │  │ (AI review + inline comments)    │               │
 │  └──────┬───────┘  └──────────────┬──────────────────┘               │
 │         │                         │                                   │
 │         ▼                         ▼                                   │
 │  ┌───────────────────┐     ┌──────────────┐                          │
 │  │ active-qc.yml     │     │ AI Maint     │                          │
 │  │ + passive-qc.yml  │     │ (weekly)     │                          │
-│  └───────────────────┘     └──────────────┘                          │
+│  │ + pr-sync         │     └──────────────┘                          │
+│  └───────────────────┘                                               │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                      Schema Infrastructure (8 scripts)                │
+│                     Schema Infrastructure (10 scripts)                │
 │  ┌──────────────────────────────────────────────────────────────────┐│
 │  │ schema.ts → dashboard.ts, probe.ts, report.ts, failure-alert.ts ││
-│  │ B constant + SpecRegistry + Ops Factory + Mutate Handlers        ││
+│  │ gate.ts, ai-meta.ts, label.ts, pr-sync.ts, env.ts               ││
+│  │ B constant + Ops Factory + Mutate Handlers                       ││
 │  └──────────────────────────────────────────────────────────────────┘│
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
@@ -254,9 +249,10 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 ### Data Flow
 
 1. **Issue Creation**: Templates apply type labels (fix, feat, perf, style, test, docs, refactor, chore, build, ci, help)
-2. **PR Lifecycle**: PR opened → CI (Biome auto-repair) → Code Review → Merge
-3. **Dependency Flow**: Dependabot PR → CI → Auto-Merge gate → Merge/Block
-4. **Dashboard**: Schedule/command → schema.ts → collect metrics → render → update issue
+2. **PR Lifecycle**: PR opened → CI (Biome auto-repair) → PR Sync (commit analysis) → Code Review → Merge
+3. **PR Commit Sync**: Commit pushed → pr-sync.ts analyzes commits → Updates PR title/labels to match reality
+4. **Dependency Flow**: Dependabot PR → CI → Auto-Merge gate → Merge/Block
+5. **Dashboard**: Schedule/command → schema.ts → collect metrics → render → update + pin issue
 
 ---
 
@@ -290,6 +286,9 @@ Universal metadata fixer with AI fallback. Parses PR/issue titles, validates aga
 **label.ts**
 Label-triggered behavior executor with polymorphic dispatch. Single factory handles labeled/unlabeled events via `B.labels.behaviors` config. Dispatches to pin/unpin/comment handlers based on label name and action type.
 
+**pr-sync.ts**
+PR commit synchronization analyzer. On synchronize (commit push) events, fetches PR commits, analyzes them to determine dominant type and breaking changes, updates PR title/labels to reflect reality. Ensures PR titles aren't stale (e.g., `[CHORE]` that's really a `feat`, or missing `!` for breaking changes).
+
 ### GitHub Workflows
 
 **ci.yml** (Main CI)
@@ -301,13 +300,14 @@ REQUIREMENTS.md compliance checking, feedback synthesis, and /summarize command.
 **active-qc.yml** (Event-Driven)
 Event-driven quality control for PR/push/issue events.
 
-**Triggers**: `pull_request` (opened, edited, synchronize), `issues` (opened, edited, labeled), or `push` to main (labels.yml only)
+**Triggers**: `pull_request` (opened, edited, synchronize), `issues` (opened, edited, labeled, unlabeled), or `push` to main (labels.yml only)
 
 Jobs:
-1. **pr-meta**: Validates PR title format, applies type labels via ai-meta.ts.
-2. **issue-meta**: Validates issue metadata when opened/edited.
-3. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
-4. **pin-issue**: Pins issues when the `pinned` label is added (uses GraphQL pinIssue mutation).
+1. **pr-sync**: On commit push (synchronize), analyzes PR commits to update title/labels to match reality. Detects breaking changes, infers type from commits, syncs breaking label.
+2. **pr-meta**: On PR opened/edited, validates PR title format, applies type labels via ai-meta.ts.
+3. **issue-meta**: Validates issue metadata when opened/edited.
+4. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
+5. **pin-issue**: Pins issues when the `pinned` label is added (uses GraphQL pinIssue mutation).
 
 **passive-qc.yml** (Scheduled)
 Scheduled quality control running every 6 hours.
@@ -436,10 +436,37 @@ On-demand workflow triggers via comments, checkboxes, and labels:
 
 1. **Pre-commit**: Lefthook runs Biome + Effect pattern validation
 2. **PR opened**: CI auto-fixes style, ai-meta.ts validates title + applies labels
-3. **CI**: Build, test, typecheck via Nx affected
-4. **Post-CI**: pr-review.yml checks REQUIREMENTS.md compliance
-5. **Merge gate**: All checks green, reviews approved, semantic title validated
-6. **Dependabot gate**: Auto-merge for patch/minor/security updates
+3. **PR sync**: On commit push, pr-sync.ts updates title/labels to match commit reality
+4. **CI**: Build, test, typecheck via Nx affected
+5. **Code review**: claude-code-review.yml checks REQUIREMENTS.md compliance
+6. **Merge gate**: All checks green, reviews approved, semantic title validated
+7. **Dependabot gate**: Auto-merge for patch/minor/security updates
+
+---
+
+## Mutation Testing (Stryker)
+
+Stryker mutation testing is integrated at the tooling level but runs on-demand (not in CI by default due to execution time).
+
+### Configuration
+- `stryker.config.js` — Minimal config (Vitest runner, 80% threshold)
+- `nx.json` targetDefaults.mutate — Nx target for running mutation tests
+- `B.algo.mutationPct: 80` — Schema constant for mutation score threshold
+
+### Running Mutation Tests
+```bash
+nx mutate <project>  # Run on specific project
+```
+
+### Integration Points
+- `gate.ts` — PR eligibility gate checks mutation score from check runs
+- `failure-alert.ts` — Creates debt issues for mutation test failures
+- Expects check named `mutation-score` for eligibility verification
+
+### Threshold
+- **Break threshold**: 50% (mutation score below this fails the run)
+- **High threshold**: 80% (target for healthy test suites)
+- **Low threshold**: 60% (warning level)
 
 ---
 
@@ -451,7 +478,6 @@ On-demand workflow triggers via comments, checkboxes, and labels:
 - **Dispatch Tables**: Replace if/else with type-safe lookup tables
 - **Branded Types**: Nominal typing via @effect/schema `S.Brand`
 - **Section Separators**: 77-char separators for files >50 LOC
-- **SpecRegistry**: Polymorphic type system for config-driven operations
 
 ---
 

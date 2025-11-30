@@ -44,7 +44,7 @@ const ALERTS = Object.freeze({
                 ordered: true,
             },
         ] as BodySpec,
-        labels: ['security', 'priority/critical'] as const,
+        labels: ['security', 'critical'] as const,
         pattern: 'Security Scan',
         title: '[SECURITY] Security Scan Alert',
     },
