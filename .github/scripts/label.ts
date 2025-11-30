@@ -17,8 +17,8 @@ type LabelSpec = {
     readonly number: number;
 };
 type LabelResult = { readonly executed: boolean; readonly behavior: Behavior };
-type LabelOp = 'add' | 'remove' | 'set' | 'behavior';
-type BulkSpec = { readonly numbers: ReadonlyArray<number>; readonly labels: ReadonlyArray<string>; readonly op: LabelOp };
+type BulkOp = 'add' | 'remove' | 'set';
+type BulkSpec = { readonly numbers: ReadonlyArray<number>; readonly labels: ReadonlyArray<string>; readonly op: BulkOp };
 
 // --- Dispatch Tables --------------------------------------------------------
 
@@ -29,9 +29,9 @@ const behaviorHandlers: Record<NonNullable<Behavior>, (ctx: Ctx, spec: LabelSpec
     unpin: async (ctx, spec) => { await call(ctx, 'issue.unpin', spec.nodeId); },
 };
 
-const bulkHandlers: Record<Exclude<LabelOp, 'behavior'>, (ctx: Ctx, n: number, labels: ReadonlyArray<string>) => Promise<void>> = {
+const bulkHandlers: Record<BulkOp, (ctx: Ctx, n: number, labels: ReadonlyArray<string>) => Promise<void>> = {
     add: async (ctx, n, labels) => { await call(ctx, 'issue.addLabels', n, [...labels]); },
-    remove: async (ctx, n, labels) => { for (const label of labels) await call(ctx, 'issue.removeLabel', n, label); },
+    remove: async (ctx, n, labels) => { await Promise.all(labels.map((label) => call(ctx, 'issue.removeLabel', n, label))); },
     set: async (ctx, n, labels) => { await call(ctx, 'issue.updateMeta', n, { labels: [...labels] }); },
 };
 
@@ -74,7 +74,7 @@ const behavior = async (params: RunParams & { readonly spec: LabelSpec }): Promi
 
 const bulk = async (params: RunParams & { readonly spec: BulkSpec }): Promise<{ readonly processed: number }> => {
     const ctx = createCtx(params);
-    const handler = bulkHandlers[params.spec.op as Exclude<LabelOp, 'behavior'>];
+    const handler = bulkHandlers[params.spec.op];
     await Promise.all(params.spec.numbers.map((n) => handler(ctx, n, params.spec.labels)));
     params.core.info(`[LABEL] Bulk ${params.spec.op}: ${params.spec.numbers.length} items`);
     return { processed: params.spec.numbers.length };
@@ -86,4 +86,4 @@ const run = behavior;
 // --- Export -----------------------------------------------------------------
 
 export { behavior, bulk, categorize, filterByLabel, hasLabel, isExempt, resolve, run };
-export type { Behavior, BulkSpec, LabelAction, LabelOp, LabelResult, LabelSpec };
+export type { Behavior, BulkOp, BulkSpec, LabelAction, LabelResult, LabelSpec };
