@@ -19,7 +19,12 @@
     "conditions": {
         "ref_name": {
             "exclude": [],
-            "include": ["refs/heads/renovate/**", "refs/heads/dependabot/**"]
+            "include": [
+                "refs/heads/renovate/**",
+                "refs/heads/dependabot/**",
+                "refs/heads/claude/**",
+                "refs/heads/copilot/**"
+            ]
         }
     },
     "enforcement": "active",
@@ -28,7 +33,7 @@
     "rules": [
         {
             "parameters": {
-                "do_not_enforce_on_create": false,
+                "do_not_enforce_on_create": true,
                 "required_status_checks": [
                     {
                         "context": "CI / Code Quality",
@@ -38,6 +43,20 @@
                 "strict_required_status_checks_policy": false
             },
             "type": "required_status_checks"
+        },
+        {
+            "type": "required_linear_history"
+        },
+        {
+            "parameters": {
+                "allowed_merge_methods": ["squash"],
+                "dismiss_stale_reviews_on_push": false,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": false
+            },
+            "type": "pull_request"
         }
     ],
     "source": "bsamiee/Parametric_Portal",
