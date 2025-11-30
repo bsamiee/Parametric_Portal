@@ -10,8 +10,9 @@ runs:
               SUBJECT=$(git log -1 --pretty=%s)
               BODY=$(git log -1 --pretty=%b)
 
-              # Pattern: [TYPE!]: description or [TYPE]: description
-              if [[ "$SUBJECT" =~ ^\[([A-Z]+)(!)?\]:\s*(.+)$ ]]; then
+              # Read pattern from commit-pattern.txt (single source of truth)
+              PATTERN=$(cat .github/actions/normalize-commit/commit-pattern.txt)
+              if [[ "$SUBJECT" =~ $PATTERN ]]; then
                 TYPE="${BASH_REMATCH[1]}"
                 BREAKING="${BASH_REMATCH[2]}"
                 DESC="${BASH_REMATCH[3]}"
