@@ -49,11 +49,10 @@ const hasType = (labels: ReadonlyArray<Label>): boolean => labels.some((l) => TY
 const isBreaking = (commits: ReadonlyArray<Commit>): boolean =>
     commits.some((c) => B.breaking.commitPat.some((p) => p.test(c.commit.message)));
 const dominant = (commits: ReadonlyArray<Commit>): TypeKey => {
-    const counts: Record<string, number> = {};
-    for (const c of commits) {
-        const type = infer(c.commit.message);
-        counts[type] = (counts[type] ?? 0) + 1;
-    }
+    const counts = commits.reduce<Record<string, number>>(
+        (acc, c) => ({ ...acc, [infer(c.commit.message)]: (acc[infer(c.commit.message)] ?? 0) + 1 }),
+        {},
+    );
     return (Object.entries(counts).sort(([, a], [, b]) => b - a)[0]?.[0] as TypeKey) ?? 'chore';
 };
 const titleType = (title: string): TypeKey | null =>
