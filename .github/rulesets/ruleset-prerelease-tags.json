@@ -4,12 +4,28 @@
             "actor_id": 6,
             "actor_type": "RepositoryRole",
             "bypass_mode": "always"
+        },
+        {
+            "actor_id": 2740,
+            "actor_type": "Integration",
+            "bypass_mode": "always"
+        },
+        {
+            "actor_id": 29110,
+            "actor_type": "Integration",
+            "bypass_mode": "always"
         }
     ],
     "conditions": {
         "ref_name": {
             "exclude": [],
-            "include": ["refs/tags/canary-*", "refs/tags/next-*", "refs/tags/rc-*"]
+            "include": [
+                "refs/tags/canary-*",
+                "refs/tags/next-*",
+                "refs/tags/rc-*",
+                "refs/tags/alpha-*",
+                "refs/tags/beta-*"
+            ]
         }
     },
     "enforcement": "active",
@@ -18,7 +34,7 @@
     "rules": [
         {
             "parameters": {
-                "do_not_enforce_on_create": false,
+                "do_not_enforce_on_create": true,
                 "required_status_checks": [
                     {
                         "context": "CI / Code Quality",
@@ -28,6 +44,9 @@
                 "strict_required_status_checks_policy": false
             },
             "type": "required_status_checks"
+        },
+        {
+            "type": "non_fast_forward"
         }
     ],
     "source": "bsamiee/Parametric_Portal",
