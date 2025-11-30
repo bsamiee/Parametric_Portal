@@ -4,7 +4,7 @@ on:
     pull_request:
         types: [opened, edited, synchronize]
     issues:
-        types: [opened, edited]
+        types: [opened, edited, labeled]
     push:
         branches: [main]
         paths: [".github/labels.yml"]
@@ -40,7 +40,9 @@ jobs:
 
     issue-meta:
         name: Issue Meta
-        if: github.event_name == 'issues'
+        if: |
+            github.event_name == 'issues' &&
+            (github.event.action == 'opened' || github.event.action == 'edited')
         runs-on: ubuntu-latest
         timeout-minutes: 5
         steps:
@@ -70,3 +72,32 @@ jobs:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
                   yaml-file: .github/labels.yml
                   skip-delete: true
+
+    pin-issue:
+        name: Pin Issue
+        if: |
+            github.event_name == 'issues' &&
+            github.event.action == 'labeled' &&
+            github.event.label.name == 'pinned'
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
+        steps:
+            - name: Pin Issue
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  script: |
+                      const issueNodeId = context.payload.issue.node_id;
+                      core.info(`Pinning issue #${context.payload.issue.number} (node_id: ${issueNodeId})`);
+                      try {
+                        await github.graphql(`
+                          mutation($issueId: ID!) {
+                            pinIssue(input: { issueId: $issueId }) {
+                              issue { id }
+                            }
+                          }
+                        `, { issueId: issueNodeId });
+                        core.info(`[OK] Issue #${context.payload.issue.number} pinned successfully`);
+                      } catch (error) {
+                        // Issue may already be pinned or repo may have max pinned issues
+                        core.warning(`Could not pin issue: ${error.message}`);
+                      }
