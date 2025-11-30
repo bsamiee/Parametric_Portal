@@ -1,0 +1,47 @@
+name: Label Handler
+description: Executes label-triggered behaviors (pin, unpin, comment)
+
+inputs:
+    action:
+        description: 'Label event: labeled or unlabeled'
+        required: true
+    label:
+        description: 'Label name that triggered the event'
+        required: true
+    node_id:
+        description: 'Issue/PR node_id for GraphQL mutations'
+        required: true
+    number:
+        description: 'Issue/PR number'
+        required: true
+
+outputs:
+    executed:
+        description: 'Whether a behavior was executed'
+        value: ${{ steps.run.outputs.executed }}
+
+runs:
+    using: composite
+    steps:
+        - uses: ./.github/actions/node-env
+
+        - name: Execute Label Behavior
+          id: run
+          uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+          env:
+              NODE_OPTIONS: --import tsx
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/label.ts');
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          action: '${{ inputs.action }}',
+                          label: '${{ inputs.label }}',
+                          nodeId: '${{ inputs.node_id }}',
+                          n: parseInt('${{ inputs.number }}'),
+                      },
+                  });
+                  core.setOutput('executed', result.executed);

@@ -29,7 +29,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 
 **Note**: Releases are handled via `npx nx release` (configured in nx.json).
 
-### GitHub Scripts (8 total)
+### GitHub Scripts (9 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
 - `.github/scripts/schema.ts` — Core infrastructure: B constant, types, markdown generators, ops factory, mutate handlers
@@ -39,13 +39,15 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/failure-alert.ts` — CI/security failure alert creator
 - `.github/scripts/gate.ts` — Eligibility gating for PRs
 - `.github/scripts/ai-meta.ts` — Universal metadata fixer with AI fallback
+- `.github/scripts/label.ts` — Label-triggered behavior executor (pin, unpin, comment)
 - `.github/scripts/env.ts` — Environment configuration (lang, bundleThresholdKb, nxCloudWorkspaceId)
 
-### GitHub Composite Actions (4 total)
+### GitHub Composite Actions (5 total)
 - `.github/actions/node-env/action.yml` — Node.js + pnpm + Nx setup with caching + distributed execution
 - `.github/actions/git-identity/action.yml` — Git user configuration for commits
 - `.github/actions/meta-fixer/action.yml` — Universal metadata fixer action using ai-meta.ts
 - `.github/actions/normalize-commit/action.yml` — Transform [TYPE!]: to type!: format
+- `.github/actions/label/action.yml` — Label-triggered behavior executor (pin, unpin, comment)
 
 ### GitHub Templates (12 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
@@ -102,7 +104,7 @@ All configuration in one frozen object with nested domains:
 - `B.content` — Report configurations (aging, bundle)
 - `B.dashboard` — Dashboard config (bots, colors, targets, schedule)
 - `B.gen` — Markdown generators (badges, shields, links, callouts)
-- `B.labels` — Label taxonomy (categories, exempt lists)
+- `B.labels` — Label taxonomy (categories, behaviors, exempt lists, GraphQL mutations)
 - `B.patterns` — Regex patterns for parsing
 - `B.probe` — Data collection defaults
 - `B.release` — Conventional commit mapping
@@ -285,6 +287,9 @@ Eligibility gate using `fn.classifyGating()` rules from `B.gating.rules`. Extrac
 **ai-meta.ts**
 Universal metadata fixer with AI fallback. Parses PR/issue titles, validates against commit type patterns, applies appropriate labels, and uses AI when pattern matching fails.
 
+**label.ts**
+Label-triggered behavior executor with polymorphic dispatch. Single factory handles labeled/unlabeled events via `B.labels.behaviors` config. Dispatches to pin/unpin/comment handlers based on label name and action type.
+
 ### GitHub Workflows
 
 **ci.yml** (Main CI)
@@ -339,6 +344,9 @@ Universal metadata fixer action using ai-meta.ts. Validates and fixes PR/issue m
 
 **.github/actions/normalize-commit/action.yml**
 Transform [TYPE!]: to type!: format. Normalizes commit message formats from different sources to conventional commit style.
+
+**.github/actions/label/action.yml**
+Label-triggered behavior executor using label.ts. Handles labeled/unlabeled events and dispatches to appropriate behaviors (pin, unpin, comment) based on `B.labels.behaviors` config. Inputs: `action` (labeled/unlabeled), `label` (name), `node_id` (GraphQL ID), `number` (issue/PR number).
 
 ### GitHub Templates
 

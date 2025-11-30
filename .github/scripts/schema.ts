@@ -179,6 +179,10 @@ const B = Object.freeze({
         workflow: 'dashboard.yml',
     } as const,
     labels: {
+        behaviors: {
+            pinned: { onAdd: 'pin', onRemove: 'unpin' },
+            stale: { onAdd: 'comment', onRemove: null },
+        } as const,
         categories: {
             action: ['blocked', 'implement', 'review'] as const,
             agent: ['claude', 'codex', 'copilot', 'gemini'] as const,
@@ -187,6 +191,10 @@ const B = Object.freeze({
             special: ['dependencies', 'security'] as const,
         },
         exempt: ['critical', 'implement', 'pinned', 'security'] as const,
+        gql: {
+            pin: `mutation($id:ID!){pinIssue(input:{issueId:$id}){issue{id}}}`,
+            unpin: `mutation($id:ID!){unpinIssue(input:{issueId:$id}){issue{id}}}`,
+        } as const,
     },
     meta: {
         alerts: Object.freeze(
@@ -463,6 +471,7 @@ const ops: Record<string, Op> = {
         map: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }),
     },
     'issue.pin': { map: ([issueId]) => ({ issueId }), query: B.probe.gql.pinIssue, safe: true },
+    'issue.unpin': { map: ([id]) => ({ id }), query: B.labels.gql.unpin, safe: true },
     'issue.removeLabel': {
         api: ['issues', 'removeLabel'],
         map: ([number, name]) => ({ issue_number: number, name }),

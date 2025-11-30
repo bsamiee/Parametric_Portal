@@ -82,22 +82,15 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 2
         steps:
-            - name: Pin Issue
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+            - name: Checkout
+              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
               with:
-                  script: |
-                      const issueNodeId = context.payload.issue.node_id;
-                      core.info(`Pinning issue #${context.payload.issue.number} (node_id: ${issueNodeId})`);
-                      try {
-                        await github.graphql(`
-                          mutation($issueId: ID!) {
-                            pinIssue(input: { issueId: $issueId }) {
-                              issue { id }
-                            }
-                          }
-                        `, { issueId: issueNodeId });
-                        core.info(`[OK] Issue #${context.payload.issue.number} pinned successfully`);
-                      } catch (error) {
-                        // Issue may already be pinned or repo may have max pinned issues
-                        core.warning(`Could not pin issue: ${error.message}`);
-                      }
+                  sparse-checkout: .github
+
+            - name: Handle Label
+              uses: ./.github/actions/label
+              with:
+                  action: ${{ github.event.action }}
+                  label: ${{ github.event.label.name }}
+                  node_id: ${{ github.event.issue.node_id }}
+                  number: ${{ github.event.issue.number }}
