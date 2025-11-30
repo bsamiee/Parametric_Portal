@@ -53,7 +53,7 @@ jobs:
                       ### Files Changed
                       | File | Changes |
                       | ---- | ------- |
-                      [One row per changed file with brief description]
+                      | `path/to/file.ts` | Brief description of changes |
 
                       ### REQUIREMENTS.md Compliance
                       | Rule | Status | Notes |
@@ -70,9 +70,9 @@ jobs:
                       - **Merge Ready**: YES | NEEDS CHANGES
 
                       ## Rules
+                      - No emojis - use `[x]` for checkmarks, `[OK]`/`[FAIL]` for status
                       - Be concise and factual
                       - Only flag real violations, not style preferences
-                      - Reference CLAUDE.md for project conventions
 
                   claude_args: >-
                       --model claude-sonnet-4-5-20250929
@@ -171,6 +171,7 @@ jobs:
                       - `body`: Explanation + suggestion block
 
                       ## Rules
+                      - If NO violations found, do NOT submit any review - exit silently
                       - PRIORITIZE REQUIREMENTS.md violations (`any`, `var/let`, `if/else`, `try/catch`), but also flag critical issues (security, performance, logic errors)
                       - Each comment MUST have a \`\`\`suggestion block with the fix
                       - Maximum 10 comments per review (focus on most critical)

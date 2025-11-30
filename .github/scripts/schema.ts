@@ -244,8 +244,8 @@ const B = Object.freeze({
         placeholder: /^_?No response_?$/i,
     },
     pr: {
-        bash: String.raw`^\[([A-Za-z]+)(!?)\]:[[:space:]]*(.+)$`,
-        pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i,
+        bash: String.raw`^\[([A-Za-z]+)(!?)\]:[[:space:]]*(.+)$`, // POSIX regex for bash
+        pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i, // JS regex (keep in sync with bash)
     } as const,
     probe: {
         bodyTruncate: 500,
