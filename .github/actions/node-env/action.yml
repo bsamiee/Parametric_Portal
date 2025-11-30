@@ -55,7 +55,7 @@ outputs:
 runs:
     using: composite
     steps:
-        - uses: pnpm/action-setup@c5ba7f7862a0f64c1b1a05fbac13e0b8e86ba08c # v4
+        - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
           with:
               version: ${{ inputs.pnpm-version }}
         - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
@@ -95,7 +95,7 @@ runs:
         # Nx local cache
         - name: Restore Nx cache
           if: inputs.nx == 'true'
-          uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+          uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
           with:
               path: .nx/cache
               key: ${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
@@ -107,6 +107,6 @@ runs:
         - name: Set affected SHAs
           id: shas
           if: inputs.nx == 'true'
-          uses: nrwl/nx-set-shas@dbe0650947e5f2c81f59190a38512cf49126fe6b # v4.3.0
+          uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
           with:
               main-branch-name: ${{ inputs.nx-main-branch }}

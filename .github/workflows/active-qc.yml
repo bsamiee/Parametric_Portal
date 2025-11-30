@@ -4,7 +4,7 @@ on:
     pull_request:
         types: [opened, edited, synchronize]
     issues:
-        types: [opened, edited, labeled]
+        types: [opened, edited, labeled, unlabeled]
     push:
         branches: [main]
         paths: [".github/labels.yml"]
@@ -74,10 +74,10 @@ jobs:
                   skip-delete: true
 
     pin-issue:
-        name: Pin Issue
+        name: Pin/Unpin Issue
         if: |
             github.event_name == 'issues' &&
-            github.event.action == 'labeled' &&
+            (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
             github.event.label.name == 'pinned'
         runs-on: ubuntu-latest
         timeout-minutes: 2

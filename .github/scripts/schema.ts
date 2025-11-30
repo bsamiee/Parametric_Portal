@@ -248,7 +248,6 @@ const B = Object.freeze({
         bodyTruncate: 500,
         gql: {
             discussion: `query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){discussion(number:$n){body title author{login}createdAt category{name}labels(first:10){nodes{name}}answer{author{login}body createdAt}reactionGroups{content users{totalCount}}comments(first:100){nodes{body author{login}createdAt reactionGroups{content users{totalCount}}replies(first:50){nodes{body author{login}createdAt reactionGroups{content users{totalCount}}}}}}}}}`,
-            pinIssue: `mutation($issueId:ID!){pinIssue(input:{issueId:$issueId}){issue{id}}}`,
         } as const,
         markers: { prReview: 'PR-REVIEW-SUMMARY' } as const,
         shaLength: 7,
@@ -470,13 +469,13 @@ const ops: Record<string, Op> = {
         api: ['issues', 'listForRepo'],
         map: ([state, labels]) => ({ labels, per_page: B.api.perPage, state }),
     },
-    'issue.pin': { map: ([issueId]) => ({ issueId }), query: B.probe.gql.pinIssue, safe: true },
+    'issue.pin': { map: ([issueId]) => ({ issueId }), query: B.labels.gql.pin, safe: true },
     'issue.removeLabel': {
         api: ['issues', 'removeLabel'],
         map: ([number, name]) => ({ issue_number: number, name }),
         safe: true,
     },
-    'issue.unpin': { map: ([id]) => ({ id }), query: B.labels.gql.unpin, safe: true },
+    'issue.unpin': { map: ([issueId]) => ({ issueId }), query: B.labels.gql.unpin, safe: true },
     'issue.update': { api: ['issues', 'update'], map: ([number, body]) => ({ body, issue_number: number }) },
     'issue.updateMeta': {
         api: ['issues', 'update'],
