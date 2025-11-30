@@ -1,5 +1,11 @@
 {
-    "bypass_actors": [],
+    "bypass_actors": [
+        {
+            "actor_id": 5,
+            "actor_type": "RepositoryRole",
+            "bypass_mode": "always"
+        }
+    ],
     "conditions": {
         "ref_name": {
             "exclude": [],
@@ -35,9 +41,6 @@
                 "negate": false
             },
             "type": "tag_name_pattern"
-        },
-        {
-            "type": "non_fast_forward"
         }
     ],
     "target": "tag"

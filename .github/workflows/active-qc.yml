@@ -31,11 +31,11 @@ jobs:
               with:
                   sparse-checkout: .github
 
-            - name: Fix All
+            - name: Fix Meta
               uses: ./.github/actions/meta-fixer
               with:
-                  target: all
-                  number: ${{ github.event.pull_request.number }}
+                  targets: title,label,body
+                  limit: '1'
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
     issue-meta:
@@ -49,11 +49,11 @@ jobs:
               with:
                   sparse-checkout: .github
 
-            - name: Fix All
+            - name: Fix Meta
               uses: ./.github/actions/meta-fixer
               with:
-                  target: all
-                  number: ${{ github.event.issue.number }}
+                  targets: title,label,body
+                  limit: '1'
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
     sync-labels:

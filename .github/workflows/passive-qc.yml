@@ -72,6 +72,8 @@ jobs:
 
             - name: Generate Aging Report
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const { run } = await import('${{ github.workspace }}/.github/scripts/report.ts');
@@ -93,9 +95,9 @@ jobs:
               with:
                   sparse-checkout: .github
 
-            - name: Fix All Scopes
+            - name: Fix Meta
               uses: ./.github/actions/meta-fixer
               with:
-                  target: all
+                  targets: title,label,body
                   limit: '10'
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
