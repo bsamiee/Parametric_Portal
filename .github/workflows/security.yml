@@ -89,7 +89,7 @@ jobs:
               uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4.7.1
               with:
                   fail-on-severity: high
-                  allow-licenses: MIT
+                  allow-licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause
 
     codeql:
         name: CodeQL Analysis
