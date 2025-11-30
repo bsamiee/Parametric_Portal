@@ -10,8 +10,13 @@ runs:
               SUBJECT=$(git log -1 --pretty=%s)
               BODY=$(git log -1 --pretty=%b)
 
-              # Read pattern from commit-pattern.txt (single source of truth)
-              PATTERN=$(cat .github/actions/normalize-commit/commit-pattern.txt)
+              # Extract pattern from schema.ts (single source of truth)
+              PATTERN=$(npx tsx -e "import { B } from './.github/scripts/schema.ts'; console.log(B.pr.bash)")
+              if [[ -z "$PATTERN" ]]; then
+                echo "::error::Failed to extract commit pattern from schema.ts"
+                exit 1
+              fi
+
               if [[ "$SUBJECT" =~ $PATTERN ]]; then
                 TYPE="${BASH_REMATCH[1]}"
                 BREAKING="${BASH_REMATCH[2]}"

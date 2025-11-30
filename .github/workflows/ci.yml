@@ -23,12 +23,17 @@ jobs:
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 1
 
+            - uses: ./.github/actions/node-env
+
             - uses: ./.github/actions/normalize-commit
 
     quality:
         name: Code Quality
         needs: [normalize-commit]
-        if: always()
+        if: |
+            always() &&
+            !cancelled() &&
+            (needs.normalize-commit.result == 'success' || needs.normalize-commit.result == 'skipped')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         permissions:
@@ -172,3 +177,28 @@ jobs:
                           runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
                         }
                       });
+
+    release:
+        name: Release
+        needs: [quality]
+        if: github.event_name == 'push' && needs.quality.result == 'success' && !contains(github.event.head_commit.message, 'chore(release)')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - uses: ./.github/actions/node-env
+              with:
+                  nx: 'true'
+                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+            - uses: ./.github/actions/git-identity
+
+            - name: Release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: pnpm nx release
