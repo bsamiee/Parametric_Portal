@@ -11,7 +11,6 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    # Normalize [TYPE!]: → type!: for Nx release compatibility (only on push to main)
     normalize-commit:
         name: Normalize Commit
         if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
@@ -19,14 +18,12 @@ jobs:
         permissions:
             contents: write
         steps:
-            - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+            - uses: actions/checkout@v4
               with:
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 1
 
-            - name: Normalize
-              uses: ./.github/actions/normalize-commit
+            - uses: ./.github/actions/normalize-commit
 
     quality:
         name: Code Quality
@@ -40,8 +37,7 @@ jobs:
             issues: write
             pull-requests: write
         steps:
-            - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+            - uses: actions/checkout@v4
               with:
                   ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
                   token: ${{ secrets.GITHUB_TOKEN }}
@@ -64,9 +60,6 @@ jobs:
               if: github.event_name == 'pull_request'
               uses: ./.github/actions/git-identity
 
-            # Biome auto-repair on PRs: aggressive auto-fixing before checks
-            # Note: --unsafe enables transformations that may alter code behavior
-            # Note: Does NOT use nx-cloud record (pre-CI cleanup, not a cacheable task)
             - name: Biome Auto-Repair
               id: biome-repair
               if: github.event_name == 'pull_request'
@@ -94,7 +87,7 @@ jobs:
 
             - name: Comment on Biome Repair
               if: github.event_name == 'pull_request' && steps.commit-fixes.outputs.committed == 'true'
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              uses: actions/github-script@v7
               with:
                   script: |
                       await github.rest.issues.createComment({
@@ -104,8 +97,6 @@ jobs:
                         body: '[OK] **Biome Auto-Repair Applied**\n\nStyle issues have been automatically fixed and committed. CI will re-run with the fixed code.'
                       });
 
-            # Run all quality checks via Nx affected - leverages caching and proper task orchestration
-            # Note: Parallelism controlled by nx.json "parallel" setting (currently 4)
             - name: Lint (Biome)
               run: pnpm exec nx affected -t lint
 
@@ -115,13 +106,9 @@ jobs:
             - name: Build
               run: pnpm exec nx affected -t build
 
-            # Tests run in parallel via Nx Agents with automatic flaky task retry
-            # Caching and distribution optimize Time to Green (TTG)
-            # See: https://nx.dev/docs/features/ci-features/flaky-tasks
             - name: Test
               run: pnpm exec nx affected -t test
 
-            # Generate project graph for artifacts (may not exist after affected-only runs)
             - name: Generate Project Graph
               if: always()
               run: pnpm exec nx graph --file=.nx/project-graph.json
@@ -129,7 +116,7 @@ jobs:
 
             - name: Upload Coverage and Project Graph
               if: always()
-              uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+              uses: actions/upload-artifact@v4
               with:
                   name: ci-artifacts
                   path: |
@@ -155,7 +142,6 @@ jobs:
                   done
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
-                  # Extract nxCloudId from nx.json (single source of truth)
                   NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
                   if [[ -n "$NX_CLOUD_ID" ]]; then
                     echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
@@ -163,7 +149,6 @@ jobs:
                   fi
                   echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 
-            # Nx Self-Healing CI - automatically proposes and applies fixes
             - name: Nx Self-Healing
               if: always()
               run: pnpm exec nx fix-ci --merge --verbose
@@ -171,7 +156,7 @@ jobs:
 
             - name: Create Quality Debt Issue
               if: failure()
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              uses: actions/github-script@v7
               env:
                   NODE_OPTIONS: --import tsx
               with:
