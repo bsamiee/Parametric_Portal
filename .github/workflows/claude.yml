@@ -78,7 +78,15 @@ jobs:
                   claude_args: |
                       --model claude-sonnet-4-5-20250929
                       --max-turns 10
-                      --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"
+                      --allowedTools "
+                        mcp__github_inline_comment__create_inline_comment,
+                        Bash(gh pr comment:*),
+                        Bash(gh pr diff:*),
+                        Bash(gh pr view:*),
+                        Read,
+                        Grep,
+                        Glob
+                      "
 
     # Interactive assistant for @claude mentions
     assistant:
@@ -103,15 +111,25 @@ jobs:
                   claude_args: |
                       --model claude-sonnet-4-5-20250929
                       --max-turns 15
-                      --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh:*),Bash(pnpm:*),Bash(git:*),Read,Write,Edit,Grep,Glob"
+                      --allowedTools "
+                        mcp__github_inline_comment__create_inline_comment,
+                        Bash(gh:*),
+                        Bash(pnpm:*),
+                        Bash(git:*),
+                        Read,
+                        Write,
+                        Edit,
+                        Grep,
+                        Glob
+                      "
 
     # Issue implementation for assigned/labeled issues
     implement:
         name: Claude Implement
         if: |
             github.event_name == 'issues' &&
-            (github.event.action == 'labeled' && github.event.label.name == 'claude') ||
-            (github.event.action == 'assigned' && github.event.assignee.login == 'claude')
+            ((github.event.action == 'labeled' && github.event.label.name == 'claude') ||
+            (github.event.action == 'assigned' && github.event.assignee.login == 'claude'))
         runs-on: ubuntu-latest
         timeout-minutes: 30
         steps:
@@ -152,4 +170,13 @@ jobs:
                   claude_args: |
                       --model claude-sonnet-4-5-20250929
                       --max-turns 25
-                      --allowedTools "Bash(gh:*),Bash(pnpm:*),Bash(git:*),Read,Write,Edit,Grep,Glob"
+                      --allowedTools "
+                        Bash(gh:*),
+                        Bash(pnpm:*),
+                        Bash(git:*),
+                        Read,
+                        Write,
+                        Edit,
+                        Grep,
+                        Glob
+                      "
