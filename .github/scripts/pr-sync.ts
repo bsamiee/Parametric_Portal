@@ -20,6 +20,8 @@ import {
 
 // --- Types ------------------------------------------------------------------
 
+type LabelAction = { readonly action: 'add' | 'remove'; readonly label: string };
+
 type SyncSpec = {
     readonly prNumber: number;
     readonly action: 'opened' | 'synchronize' | 'edited';
@@ -80,7 +82,11 @@ const formatTitle = (type: TypeKey, breaking: boolean, subject: string): string 
 const analyze = (
     pr: PR,
     commits: ReadonlyArray<Commit>,
-): { readonly titleFix: string | null; readonly labelFixes: ReadonlyArray<string>; readonly breaking: boolean } => {
+): {
+    readonly titleFix: string | null;
+    readonly labelActions: ReadonlyArray<LabelAction>;
+    readonly breaking: boolean;
+} => {
     const commitBreaking = isBreaking(commits);
     const titleBreaking = B.pr.pattern.exec(pr.title)?.[2] === '!';
     const bodyBreaking = B.breaking.bodyPat.test(pr.body ?? '');
@@ -88,20 +94,20 @@ const analyze = (
     const commitType = inferTypeFromCommits(commits);
     const titleType = extractTitleType(pr.title);
     const subject = strip(pr.title);
-    const labelFixes: Array<string> = [];
     const currentLabels = pr.labels.map((label) => label.name);
     const hasTypeLabel = hasType(pr.labels);
     const hasBreakingLabel = currentLabels.includes(B.breaking.label);
-    !hasTypeLabel && commitType && labelFixes.push(commitType);
-    actualBreaking && !hasBreakingLabel && labelFixes.push(B.breaking.label);
-    !actualBreaking && hasBreakingLabel && labelFixes.push(`-${B.breaking.label}`);
+    const labelActions: Array<LabelAction> = [];
+    !hasTypeLabel && commitType && labelActions.push({ action: 'add', label: commitType });
+    actualBreaking && !hasBreakingLabel && labelActions.push({ action: 'add', label: B.breaking.label });
+    !actualBreaking && hasBreakingLabel && labelActions.push({ action: 'remove', label: B.breaking.label });
     const needsTitleFix =
         (titleType !== commitType && commits.length > 0) ||
         actualBreaking !== titleBreaking ||
         !B.pr.pattern.test(pr.title);
     return {
         breaking: actualBreaking,
-        labelFixes,
+        labelActions,
         titleFix: needsTitleFix ? formatTitle(commitType, actualBreaking, subject) : null,
     };
 };
@@ -110,27 +116,27 @@ const analyze = (
 
 const run = async (params: RunParams & { readonly spec: SyncSpec }): Promise<SyncResult> => {
     const ctx = createCtx(params);
-    const changes: Array<string> = [];
     const pr = (await call(ctx, 'pull.get', params.spec.prNumber)) as PR;
     const commits = ((await call(ctx, 'pull.listCommits', params.spec.prNumber)) ?? []) as ReadonlyArray<Commit>;
-    const { titleFix, labelFixes, breaking } = analyze(pr, commits);
+    const { titleFix, labelActions, breaking } = analyze(pr, commits);
+    const changes: Array<string> = [];
     titleFix && (await call(ctx, 'pull.update', params.spec.prNumber, { title: titleFix }));
     titleFix && changes.push(`title: ${pr.title} → ${titleFix}`);
-    const addLabels = labelFixes.filter((label) => !label.startsWith('-'));
-    const removeLabels = labelFixes.filter((label) => label.startsWith('-')).map((label) => label.slice(1));
+    const addLabels = labelActions.filter((la) => la.action === 'add').map((la) => la.label);
+    const removeLabels = labelActions.filter((la) => la.action === 'remove').map((la) => la.label);
     addLabels.length > 0 &&
         (await mutate(ctx, { action: 'add', labels: addLabels, n: params.spec.prNumber, t: 'label' }));
     addLabels.length > 0 && changes.push(`labels added: ${addLabels.join(', ')}`);
-    await Promise.all(
+    const removedMessages = await Promise.all(
         removeLabels.map(async (label) => {
             await call(ctx, 'issue.removeLabel', params.spec.prNumber, label);
-            changes.push(`label removed: ${label}`);
+            return `label removed: ${label}`;
         }),
     );
     params.core.info(
-        `[PR-SYNC] PR #${params.spec.prNumber}: ${changes.length > 0 ? changes.join('; ') : 'no changes needed'} (breaking: ${breaking})`,
+        `[PR-SYNC] PR #${params.spec.prNumber}: ${[...changes, ...removedMessages].length > 0 ? [...changes, ...removedMessages].join('; ') : 'no changes needed'} (breaking: ${breaking})`,
     );
-    return { changes, updated: changes.length > 0 };
+    return { changes: [...changes, ...removedMessages], updated: [...changes, ...removedMessages].length > 0 };
 };
 
 // --- Export -----------------------------------------------------------------
