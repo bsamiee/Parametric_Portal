@@ -4,20 +4,13 @@
  * Fetches issues, PRs, or discussions with normalized output shapes.
  */
 
-import {
-    B,
-    type Ctx,
-    call,
-    createCtx,
-    fn,
-    type Label,
-    mutate,
-    type ReactionGroups,
-    type RunParams,
-    type User,
-} from './schema.ts';
+import { B, type Ctx, call, createCtx, fn, type Label, md, mutate, type RunParams, type User } from './schema.ts';
 
-// --- Target Handlers (Dispatch Table) ---------------------------------------
+// --- Types ------------------------------------------------------------------
+
+type ReactionGroups = ReadonlyArray<{ readonly content: string; readonly users: { readonly totalCount: number } }>;
+
+// --- Handlers ---------------------------------------------------------------
 
 type DiscussionReply = {
     readonly author: User;
@@ -38,36 +31,43 @@ type Discussion = {
     readonly title: string;
 };
 
-const mapReply = (r: DiscussionReply) => ({
-    author: r.author.login,
-    body: fn.trunc(r.body),
-    createdAt: r.createdAt,
-    reactions: fn.reactions(r.reactionGroups),
+const mapReply = (reply: DiscussionReply) => ({
+    author: reply.author.login,
+    body: fn.trunc(reply.body),
+    createdAt: reply.createdAt,
+    reactions: fn.reactions(reply.reactionGroups),
 });
 
 const handlers = {
-    discussion: async (ctx: Ctx, n: number) => {
-        const d = (await call(ctx, 'discussion.get', n)) as Discussion;
+    discussion: async (ctx: Ctx, number: number) => {
+        const discussion = (await call(ctx, 'discussion.get', number)) as Discussion;
         return {
-            comments: d.comments.nodes.map((c) => ({ ...mapReply(c), replies: c.replies.nodes.map(mapReply) })),
+            comments: discussion.comments.nodes.map((comment) => ({
+                ...mapReply(comment),
+                replies: comment.replies.nodes.map(mapReply),
+            })),
             discussion: {
-                answer: d.answer
-                    ? { author: d.answer.author.login, body: fn.trunc(d.answer.body), createdAt: d.answer.createdAt }
+                answer: discussion.answer
+                    ? {
+                          author: discussion.answer.author.login,
+                          body: fn.trunc(discussion.answer.body),
+                          createdAt: discussion.answer.createdAt,
+                      }
                     : null,
-                author: d.author.login,
-                body: fn.trunc(d.body),
-                category: d.category.name,
-                createdAt: d.createdAt,
-                labels: fn.names(d.labels.nodes),
-                number: n,
-                reactions: fn.reactions(d.reactionGroups),
-                title: d.title,
+                author: discussion.author.login,
+                body: fn.trunc(discussion.body),
+                category: discussion.category.name,
+                createdAt: discussion.createdAt,
+                labels: fn.names(discussion.labels.nodes),
+                number,
+                reactions: fn.reactions(discussion.reactionGroups),
+                title: discussion.title,
             },
         };
     },
 
-    issue: async (ctx: Ctx, n: number) => {
-        type I = {
+    issue: async (ctx: Ctx, number: number) => {
+        type IssueData = {
             readonly assignees: ReadonlyArray<User>;
             readonly body: string | null;
             readonly created_at: string;
@@ -78,10 +78,10 @@ const handlers = {
             readonly title: string;
             readonly user: User;
         };
-        type C = ReadonlyArray<{ readonly body?: string; readonly created_at: string; readonly user: User }>;
+        type CommentData = ReadonlyArray<{ readonly body?: string; readonly created_at: string; readonly user: User }>;
         const [issue, comments] = await Promise.all([
-            call(ctx, 'issue.get', n) as Promise<I>,
-            call(ctx, 'comment.list', n) as Promise<C>,
+            call(ctx, 'issue.get', number) as Promise<IssueData>,
+            call(ctx, 'comment.list', number) as Promise<CommentData>,
         ]);
         return {
             comments: comments.map(fn.comment),
@@ -99,8 +99,8 @@ const handlers = {
         };
     },
 
-    pr: async (ctx: Ctx, n: number) => {
-        type P = {
+    pr: async (ctx: Ctx, number: number) => {
+        type PrData = {
             readonly assignees: ReadonlyArray<User>;
             readonly body: string | null;
             readonly draft: boolean;
@@ -109,47 +109,47 @@ const handlers = {
             readonly number: number;
             readonly title: string;
         };
-        type Rev = ReadonlyArray<{ readonly body: string | null; readonly state: string; readonly user: User }>;
-        type Chk = ReadonlyArray<{
+        type ReviewData = ReadonlyArray<{ readonly body: string | null; readonly state: string; readonly user: User }>;
+        type CheckData = ReadonlyArray<{
             readonly conclusion: string | null;
             readonly name: string;
             readonly status: string;
         }>;
-        type Cmt = ReadonlyArray<{ readonly body?: string; readonly created_at: string; readonly user: User }>;
-        type RC = ReadonlyArray<{
+        type CommentData = ReadonlyArray<{ readonly body?: string; readonly created_at: string; readonly user: User }>;
+        type ReviewCommentData = ReadonlyArray<{
             readonly body: string;
             readonly line?: number;
             readonly path: string;
             readonly user: User;
         }>;
-        type F = ReadonlyArray<{
+        type FileData = ReadonlyArray<{
             readonly additions: number;
             readonly deletions: number;
             readonly filename: string;
             readonly status: string;
         }>;
-        type Co = ReadonlyArray<{
+        type CommitData = ReadonlyArray<{
             readonly author: User | null;
             readonly commit: { readonly message: string };
             readonly sha: string;
         }>;
-        const pr = (await call(ctx, 'pull.get', n)) as P;
+        const pr = (await call(ctx, 'pull.get', number)) as PrData;
         const [reviews, checks, comments, reviewComments, files, commits, requestedReviewers] = await Promise.all([
-            call(ctx, 'pull.listReviews', n) as Promise<Rev>,
-            call(ctx, 'check.listForRef', pr.head.sha) as Promise<Chk>,
-            call(ctx, 'comment.list', n) as Promise<Cmt>,
-            call(ctx, 'pull.listReviewComments', n) as Promise<RC>,
-            call(ctx, 'pull.listFiles', n) as Promise<F>,
-            call(ctx, 'pull.listCommits', n) as Promise<Co>,
-            call(ctx, 'pull.listRequestedReviewers', n) as Promise<ReadonlyArray<User>>,
+            call(ctx, 'pull.listReviews', number) as Promise<ReviewData>,
+            call(ctx, 'check.listForRef', pr.head.sha) as Promise<CheckData>,
+            call(ctx, 'comment.list', number) as Promise<CommentData>,
+            call(ctx, 'pull.listReviewComments', number) as Promise<ReviewCommentData>,
+            call(ctx, 'pull.listFiles', number) as Promise<FileData>,
+            call(ctx, 'pull.listCommits', number) as Promise<CommitData>,
+            call(ctx, 'pull.listRequestedReviewers', number) as Promise<ReadonlyArray<User>>,
         ]);
         return {
             checks,
             comments: comments.map(fn.comment),
-            commits: commits.map((c) => ({
-                author: c.author?.login ?? B.probe.defaults.unknownAuthor,
-                message: c.commit.message.split('\n')[0],
-                sha: c.sha.substring(0, B.probe.shaLength),
+            commits: commits.map((commit) => ({
+                author: commit.author?.login ?? 'unknown',
+                message: commit.commit.message.split('\n')[0],
+                sha: commit.sha.substring(0, B.probe.shaLength),
             })),
             files,
             pr: {
@@ -162,33 +162,37 @@ const handlers = {
                 title: pr.title,
             },
             requestedReviewers: fn.logins(requestedReviewers),
-            reviewComments: reviewComments.map((c) => ({
-                author: c.user.login,
-                body: fn.trunc(c.body),
-                line: c.line,
-                path: c.path,
+            reviewComments: reviewComments.map((comment) => ({
+                author: comment.user.login,
+                body: fn.trunc(comment.body),
+                line: comment.line,
+                path: comment.path,
             })),
-            reviews: reviews.map((r) => ({ author: r.user.login, body: fn.trunc(r.body), state: r.state })),
+            reviews: reviews.map((review) => ({
+                author: review.user.login,
+                body: fn.trunc(review.body),
+                state: review.state,
+            })),
         };
     },
 } as const;
 
-// --- Entry Points -----------------------------------------------------------
+// --- Entry Point ------------------------------------------------------------
 
-const probe = async <K extends keyof typeof handlers>(params: RunParams, kind: K, n: number) =>
-    handlers[kind](createCtx(params), n);
+const probe = async <K extends keyof typeof handlers>(params: RunParams, kind: K, number: number) =>
+    handlers[kind](createCtx(params), number);
 
-const post = async (params: RunParams, n: number, marker: string, title: string, body: string): Promise<void> =>
-    ((m) =>
+const post = async (params: RunParams, number: number, marker: string, title: string, body: string): Promise<void> =>
+    ((formattedMarker) =>
         mutate(createCtx(params), {
-            body: `${m}\n# ${title}\n\n${body}`,
-            marker: m,
+            body: `${formattedMarker}\n# ${title}\n\n${body}`,
+            marker: formattedMarker,
             mode: 'replace',
-            n,
+            n: number,
             t: 'comment',
-        }))(B.gen.marker(marker)).then(() => params.core.info(`Posted ${title} to PR #${n}`));
+        }))(md.marker(marker)).then(() => params.core.info(`Posted ${title} to PR #${number}`));
 
-// --- Derived Types (Downstream DX) ------------------------------------------
+// --- Derived Types ----------------------------------------------------------
 
 type DiscussionProbe = Awaited<ReturnType<typeof handlers.discussion>>;
 type IssueProbe = Awaited<ReturnType<typeof handlers.issue>>;

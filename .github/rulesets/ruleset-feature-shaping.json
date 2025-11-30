@@ -1,5 +1,11 @@
 {
-    "bypass_actors": [],
+    "bypass_actors": [
+        {
+            "actor_id": 6,
+            "actor_type": "RepositoryRole",
+            "bypass_mode": "always"
+        }
+    ],
     "conditions": {
         "ref_name": {
             "exclude": ["refs/heads/main", "refs/heads/renovate/**", "refs/heads/dependabot/**"],
@@ -7,27 +13,28 @@
         }
     },
     "enforcement": "active",
-    "name": "20-feature-shaping",
+    "id": 10586282,
+    "name": "Feature Shaping",
     "rules": [
         {
             "parameters": {
+                "do_not_enforce_on_create": false,
                 "required_status_checks": [
                     {
                         "context": "CI / Code Quality",
                         "integration_id": null
                     },
                     {
-                        "context": "Active QC / PR Title",
+                        "context": "Active QC / PR Meta",
                         "integration_id": null
                     }
                 ],
                 "strict_required_status_checks_policy": false
             },
             "type": "required_status_checks"
-        },
-        {
-            "type": "non_fast_forward"
         }
     ],
+    "source": "bsamiee/Parametric_Portal",
+    "source_type": "Repository",
     "target": "branch"
 }

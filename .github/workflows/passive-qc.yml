@@ -2,15 +2,17 @@ name: Passive QC
 
 on:
     schedule:
-        - cron: "0 */6 * * *" # Every 6 hours
+        - cron: "0 */6 * * *"
 
 concurrency:
     group: passive-qc
     cancel-in-progress: false
 
 permissions:
-    contents: read
+    contents: write
     issues: write
+    pull-requests: write
+    models: read
 
 jobs:
     sync-labels:
@@ -70,6 +72,8 @@ jobs:
 
             - name: Generate Aging Report
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const { run } = await import('${{ github.workspace }}/.github/scripts/report.ts');
@@ -79,3 +83,21 @@ jobs:
                         github,
                         spec: { kind: 'aging' }
                       });
+
+    meta-consistency:
+        name: Meta Consistency
+        needs: aging-report
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+              with:
+                  sparse-checkout: .github
+
+            - name: Fix Meta
+              uses: ./.github/actions/meta-fixer
+              with:
+                  targets: title,label,body
+                  limit: '10'
+                  anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -48,6 +48,8 @@ jobs:
             - name: Collect CI Status
               id: ci
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const { probe } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
@@ -132,6 +134,8 @@ jobs:
             - name: Collect Reviews
               id: reviews
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const { probe } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
@@ -185,6 +189,8 @@ jobs:
 
             - name: Post Summary Comment
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const { post } = await import('${{ github.workspace }}/.github/scripts/probe.ts');
@@ -211,6 +217,8 @@ jobs:
             - name: Collect Reviews
               id: reviews
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const prNumber = context.payload.issue.number;
@@ -266,6 +274,8 @@ jobs:
 
             - name: Post Summary Comment
               uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              env:
+                  NODE_OPTIONS: --import tsx
               with:
                   script: |
                       const { post } = await import('${{ github.workspace }}/.github/scripts/probe.ts');

@@ -17,6 +17,7 @@
         "@nx/react": "catalog:",
         "@nx/vite": "catalog:",
         "@nx/vitest": "catalog:",
+        "@octokit/rest": "catalog:",
         "@playwright/test": "catalog:",
         "@radix-ui/react-label": "catalog:",
         "@radix-ui/react-separator": "catalog:",
@@ -78,7 +79,7 @@
         "node": "25.2.1"
     },
     "name": "parametric-portal",
-    "packageManager": "pnpm@10.23.0",
+    "packageManager": "pnpm@10.24.0",
     "private": true,
     "scripts": {
         "affected": "nx affected",
@@ -88,16 +89,15 @@
         "fix-ci": "nx fix-ci --merge --verbose",
         "fix:unsafe": "biome check --write --unsafe .",
         "graph": "nx graph",
-        "labels:create": "bash scripts/create-labels.sh",
         "lint": "biome ci .",
         "prepare": "lefthook install",
         "pwa:icons": "nx run-many -t pwa:icons",
         "release": "nx release",
         "reset": "nx reset",
-        "sync:protocols": "tsx tools/sync-agent-protocols.ts",
         "test": "nx run-many -t test",
         "typecheck": "nx run-many -t typecheck"
     },
+    "type": "module",
     "version": "0.4.0",
     "workspaces": [
         "apps/*",
