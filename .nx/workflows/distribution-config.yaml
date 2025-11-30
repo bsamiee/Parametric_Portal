@@ -3,9 +3,15 @@
 # See: https://nx.dev/docs/features/ci-features/dynamic-agents
 # See: https://nx.dev/docs/guides/nx-cloud/optimize-your-ttg
 
-# Automatic retry for flaky tests - reduce CI noise
+# Retry flaky tasks automatically to keep pipelines green
+# See: https://nx.dev/docs/features/ci-features/flaky-tasks
+# Flaky tasks are detected when a task fails in CI but passes on retry.
+# Nx Cloud tracks flaky task history and re-runs them automatically in the background.
+# Analytics available at: https://cloud.nx.app/orgs/workspace/{nxCloudId}/analytics
 flaky-tasks:
+    # Enable automatic retry of flaky tasks
     enabled: true
+    # Maximum number of retry attempts for flaky tasks (range: 1-3 recommended)
     max-retries: 2
 
 distribute-on:

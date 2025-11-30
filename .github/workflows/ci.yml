@@ -115,6 +115,9 @@ jobs:
             - name: Build
               run: pnpm exec nx affected -t build
 
+            # Tests run in parallel via Nx Agents with automatic flaky task retry
+            # Caching and distribution optimize Time to Green (TTG)
+            # See: https://nx.dev/docs/features/ci-features/flaky-tasks
             - name: Test
               run: pnpm exec nx affected -t test
 
@@ -156,7 +159,7 @@ jobs:
                   NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
                   if [[ -n "$NX_CLOUD_ID" ]]; then
                     echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
-                    echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/runs) - Time to Green insights" >> $GITHUB_STEP_SUMMARY
+                    echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/analytics) - Time to Green analytics" >> $GITHUB_STEP_SUMMARY
                   fi
                   echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 
