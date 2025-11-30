@@ -105,17 +105,18 @@ jobs:
                       });
 
             # Run all quality checks via Nx affected - leverages caching and proper task orchestration
+            # Note: Parallelism controlled by nx.json "parallel" setting (currently 4)
             - name: Lint (Biome)
-              run: pnpm exec nx affected -t lint --parallel=4
+              run: pnpm exec nx affected -t lint
 
             - name: Type Check
-              run: pnpm exec nx affected -t typecheck --parallel=4
+              run: pnpm exec nx affected -t typecheck
 
             - name: Build
-              run: pnpm exec nx affected -t build --parallel=4
+              run: pnpm exec nx affected -t build
 
             - name: Test
-              run: pnpm exec nx affected -t test --parallel=4
+              run: pnpm exec nx affected -t test
 
             # Generate project graph for artifacts (may not exist after affected-only runs)
             - name: Generate Project Graph
@@ -142,11 +143,20 @@ jobs:
                   echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Cache Status" >> $GITHUB_STEP_SUMMARY
+                  echo "| Target | Cache Hit |" >> $GITHUB_STEP_SUMMARY
+                  echo "|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+                  for target in lint typecheck build test; do
+                    HIT_COUNT=$(pnpm exec nx show projects --affected --json 2>/dev/null | jq 'length // 0')
+                    echo "| $target | $HIT_COUNT projects affected |" >> $GITHUB_STEP_SUMMARY
+                  done
+                  echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
                   # Extract nxCloudId from nx.json (single source of truth)
                   NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
                   if [[ -n "$NX_CLOUD_ID" ]]; then
                     echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
+                    echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/runs) - Time to Green insights" >> $GITHUB_STEP_SUMMARY
                   fi
                   echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 
