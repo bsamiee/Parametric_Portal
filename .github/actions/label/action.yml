@@ -1,5 +1,5 @@
 name: Label Handler
-description: Executes label-triggered behaviors (pin, unpin) via GraphQL
+description: Executes label-triggered behaviors (pin, unpin, comment) via schema-driven dispatch
 
 inputs:
     action:
@@ -19,45 +19,39 @@ outputs:
     executed:
         description: 'Whether a behavior was executed'
         value: ${{ steps.run.outputs.executed }}
+    behavior:
+        description: 'Behavior that was executed (pin, unpin, comment, or null)'
+        value: ${{ steps.run.outputs.behavior }}
 
 runs:
     using: composite
     steps:
+        - name: Checkout
+          uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+          with:
+              sparse-checkout: .github/scripts
+              sparse-checkout-cone-mode: false
+
+        - uses: ./.github/actions/node-env
+
         - name: Execute Label Behavior
           id: run
           uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+          env:
+              NODE_OPTIONS: --import tsx
           with:
               script: |
-                  const action = '${{ inputs.action }}';
-                  const label = '${{ inputs.label }}';
-                  const nodeId = '${{ inputs.node_id }}';
-                  const number = parseInt('${{ inputs.number }}');
-
-                  // Label behaviors config (mirroring B.labels.behaviors from schema.ts)
-                  const behaviors = {
-                      pinned: { onAdd: 'pin', onRemove: 'unpin' },
-                  };
-
-                  // GraphQL mutations (mirroring B.labels.gql from schema.ts)
-                  const gql = {
-                      pin: `mutation($issueId:ID!){pinIssue(input:{issueId:$issueId}){issue{id}}}`,
-                      unpin: `mutation($issueId:ID!){unpinIssue(input:{issueId:$issueId}){issue{id}}}`,
-                  };
-
-                  // Resolve behavior from label + action
-                  const behaviorKey = action === 'labeled' ? 'onAdd' : 'onRemove';
-                  const behavior = behaviors[label]?.[behaviorKey];
-
-                  if (behavior && gql[behavior]) {
-                      try {
-                          await github.graphql(gql[behavior], { issueId: nodeId });
-                          core.info(`[OK] Issue #${number} ${behavior}ned successfully`);
-                          core.setOutput('executed', true);
-                      } catch (error) {
-                          core.warning(`Could not ${behavior} issue: ${error.message}`);
-                          core.setOutput('executed', false);
-                      }
-                  } else {
-                      core.info(`[LABEL] ${label} ${action}: no-op`);
-                      core.setOutput('executed', false);
-                  }
+                  const { behavior } = await import('${{ github.workspace }}/.github/scripts/label.ts');
+                  const result = await behavior({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          action: '${{ inputs.action }}',
+                          label: '${{ inputs.label }}',
+                          nodeId: '${{ inputs.node_id }}',
+                          number: parseInt('${{ inputs.number }}'),
+                      },
+                  });
+                  core.setOutput('executed', result.executed);
+                  core.setOutput('behavior', result.behavior ?? 'null');
