@@ -13,10 +13,12 @@
         }
     },
     "enforcement": "active",
-    "name": "00-main-quality-gate",
+    "id": 10586321,
+    "name": "Main Quality Gate",
     "rules": [
         {
             "parameters": {
+                "do_not_enforce_on_create": false,
                 "required_status_checks": [
                     {
                         "context": "CI / Code Quality",
@@ -48,14 +50,32 @@
         },
         {
             "parameters": {
+                "allowed_merge_methods": ["merge", "squash", "rebase"],
+                "automatic_copilot_code_review_enabled": false,
                 "dismiss_stale_reviews_on_push": true,
                 "require_code_owner_review": false,
                 "require_last_push_approval": false,
                 "required_approving_review_count": 0,
-                "required_review_thread_resolution": true
+                "required_review_thread_resolution": true,
+                "required_reviewers": []
             },
             "type": "pull_request"
+        },
+        {
+            "parameters": {
+                "review_draft_pull_requests": false,
+                "review_on_push": true
+            },
+            "type": "copilot_code_review"
+        },
+        {
+            "parameters": {
+                "severity": "warnings"
+            },
+            "type": "code_quality"
         }
     ],
+    "source": "bsamiee/Parametric_Portal",
+    "source_type": "Repository",
     "target": "branch"
 }

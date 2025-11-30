@@ -13,10 +13,12 @@
         }
     },
     "enforcement": "active",
-    "name": "40-prerelease-tags",
+    "id": 10586347,
+    "name": "Pre-release Tags",
     "rules": [
         {
             "parameters": {
+                "do_not_enforce_on_create": false,
                 "required_status_checks": [
                     {
                         "context": "CI / Code Quality",
@@ -28,5 +30,7 @@
             "type": "required_status_checks"
         }
     ],
+    "source": "bsamiee/Parametric_Portal",
+    "source_type": "Repository",
     "target": "tag"
 }

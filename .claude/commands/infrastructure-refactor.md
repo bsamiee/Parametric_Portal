@@ -87,6 +87,7 @@ IMPORTANT: Wherever you see [REQUIRED READING]: sub-agents MUST read these files
 - @.github/scripts/schema.ts
 - .github/scripts/ai-meta.ts
 - .github/actions/meta-fixer/action.yml
+- .github/actions/normalize-commit
 - .github/workflows/active-qc.yml
 - .github/workflows/passive-qc.yml
 
