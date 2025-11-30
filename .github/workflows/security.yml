@@ -6,8 +6,7 @@ on:
     push:
         branches: [main]
     schedule:
-        - cron: '0 0 * * 1' # Weekly on Monday
-    # Allow Dependabot security updates to trigger this workflow
+        - cron: '0 0 * * 1'
     pull_request_target:
         types: [opened, synchronize]
         branches: [main]
@@ -26,16 +25,13 @@ jobs:
     dependency-audit:
         name: Dependency Audit
         runs-on: ubuntu-latest
-        # Only run on safe contexts (not pull_request_target from forks)
         if: |
             github.event_name != 'pull_request_target' ||
             github.event.pull_request.head.repo.full_name == github.repository
         steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+            - uses: actions/checkout@v4
 
-            - name: Setup Environment
-              uses: ./.github/actions/node-env
+            - uses: ./.github/actions/node-env
               with:
                   install: 'false'
 
@@ -52,21 +48,16 @@ jobs:
                   cat audit-results.json
 
             - name: Check for Critical Vulnerabilities
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              uses: actions/github-script@v7
               with:
                   script: |
                       const fs = require('fs');
                       const auditResults = JSON.parse(fs.readFileSync('audit-results.json', 'utf8'));
-
-                      // pnpm audit JSON structure: { advisories: { [id]: advisory }, metadata: { vulnerabilities: { critical, high, ... } } }
                       const vulns = auditResults.metadata?.vulnerabilities || {};
                       const critical = vulns.critical || 0;
                       const high = vulns.high || 0;
-
                       core.info(`Vulnerability summary: ${critical} critical, ${high} high`);
-
                       if (critical > 0 || high > 0) {
-                        // Log advisory details
                         const advisories = auditResults.advisories || {};
                         for (const [id, advisory] of Object.entries(advisories)) {
                           if (advisory.severity === 'critical' || advisory.severity === 'high') {
@@ -76,17 +67,14 @@ jobs:
                         core.setFailed(`Found ${critical} critical and ${high} high severity vulnerabilities`);
                       }
 
-    # Dependency review for PRs - checks if new dependencies introduce vulnerabilities
     dependency-review:
         name: Dependency Review
         runs-on: ubuntu-latest
         if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
         steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+            - uses: actions/checkout@v4
 
-            - name: Dependency Review
-              uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4.7.1
+            - uses: actions/dependency-review-action@v4
               with:
                   fail-on-severity: high
                   allow-licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause
@@ -95,36 +83,29 @@ jobs:
         name: CodeQL Analysis
         runs-on: ubuntu-latest
         steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+            - uses: actions/checkout@v4
 
-            - name: Initialize CodeQL
-              uses: github/codeql-action/init@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
+            - uses: github/codeql-action/init@v3
               with:
                   languages: javascript-typescript
                   queries: security-and-quality
 
-            - name: Autobuild
-              uses: github/codeql-action/autobuild@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
+            - uses: github/codeql-action/autobuild@v3
 
-            - name: Perform CodeQL Analysis
-              uses: github/codeql-action/analyze@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
+            - uses: github/codeql-action/analyze@v3
               with:
                   category: '/language:javascript-typescript'
 
     secrets-scan:
         name: Secrets Scanning
         runs-on: ubuntu-latest
-        # Gitleaks action doesn't support pull_request_target event
         if: github.event_name != 'pull_request_target'
         steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+            - uses: actions/checkout@v4
               with:
                   fetch-depth: 0
 
-            - name: Run Gitleaks
-              uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+            - uses: gitleaks/gitleaks-action@v2
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITLEAKS_ENABLE_SUMMARY: true
@@ -133,24 +114,19 @@ jobs:
         name: License Compliance
         runs-on: ubuntu-latest
         steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+            - uses: actions/checkout@v4
 
-            - name: Setup Environment
-              uses: ./.github/actions/node-env
+            - uses: ./.github/actions/node-env
 
             - name: Check for MIT License Compliance
               run: |
                   echo "Checking that all dependencies use MIT license..."
                   pnpm licenses list --json > licenses.json
-
-                  # Find any non-MIT licenses
                   NON_MIT=$(cat licenses.json | jq -r '
                     .[] |
                     select(.license | test("^MIT$"; "i") | not) |
                     "\(.name): \(.license)"
                   ' 2>/dev/null || echo "")
-
                   if [[ -n "$NON_MIT" ]]; then
                     echo "[ERROR] Non-MIT licenses detected:"
                     echo "$NON_MIT"
@@ -165,11 +141,9 @@ jobs:
         needs: [dependency-audit, codeql, secrets-scan, license-check]
         if: failure() && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
         steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+            - uses: actions/checkout@v4
 
-            - name: Create Security Alert
-              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+            - uses: actions/github-script@v7
               with:
                   script: |
                       const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
@@ -180,7 +154,6 @@ jobs:
                         spec: { kind: 'security', runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` }
                       });
 
-    # Summary job for PR status checks
     security-summary:
         name: Security Summary
         runs-on: ubuntu-latest
@@ -199,7 +172,6 @@ jobs:
                   echo "| Secrets Scan | ${{ needs.secrets-scan.result }} |" >> $GITHUB_STEP_SUMMARY
                   echo "| License Compliance | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
 
-                  # Fail if any required job failed (skip skipped jobs)
                   if [[ "${{ needs.dependency-audit.result }}" == "failure" ]] || \
                      [[ "${{ needs.codeql.result }}" == "failure" ]] || \
                      [[ "${{ needs.secrets-scan.result }}" == "failure" ]] || \

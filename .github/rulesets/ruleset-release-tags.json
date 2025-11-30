@@ -31,11 +31,24 @@
                     {
                         "context": "Security Scanning / CodeQL Analysis",
                         "integration_id": null
+                    },
+                    {
+                        "context": "Security Scanning / License Compliance",
+                        "integration_id": null
                     }
                 ],
                 "strict_required_status_checks_policy": true
             },
             "type": "required_status_checks"
+        },
+        {
+            "type": "deletion"
+        },
+        {
+            "type": "non_fast_forward"
+        },
+        {
+            "type": "update"
         }
     ],
     "source": "bsamiee/Parametric_Portal",

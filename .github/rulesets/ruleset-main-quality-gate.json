@@ -4,6 +4,16 @@
             "actor_id": 6,
             "actor_type": "RepositoryRole",
             "bypass_mode": "always"
+        },
+        {
+            "actor_id": 2740,
+            "actor_type": "Integration",
+            "bypass_mode": "always"
+        },
+        {
+            "actor_id": 29110,
+            "actor_type": "Integration",
+            "bypass_mode": "always"
         }
     ],
     "conditions": {
@@ -49,8 +59,11 @@
             "type": "required_linear_history"
         },
         {
+            "type": "non_fast_forward"
+        },
+        {
             "parameters": {
-                "allowed_merge_methods": ["merge", "squash", "rebase"],
+                "allowed_merge_methods": ["squash"],
                 "automatic_copilot_code_review_enabled": false,
                 "dismiss_stale_reviews_on_push": true,
                 "require_code_owner_review": false,
@@ -73,6 +86,9 @@
                 "severity": "warnings"
             },
             "type": "code_quality"
+        },
+        {
+            "type": "deletion"
         }
     ],
     "source": "bsamiee/Parametric_Portal",

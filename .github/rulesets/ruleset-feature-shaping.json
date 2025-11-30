@@ -8,7 +8,13 @@
     ],
     "conditions": {
         "ref_name": {
-            "exclude": ["refs/heads/main", "refs/heads/renovate/**", "refs/heads/dependabot/**"],
+            "exclude": [
+                "refs/heads/main",
+                "refs/heads/renovate/**",
+                "refs/heads/dependabot/**",
+                "refs/heads/claude/**",
+                "refs/heads/copilot/**"
+            ],
             "include": ["refs/heads/*"]
         }
     },
@@ -32,6 +38,20 @@
                 "strict_required_status_checks_policy": false
             },
             "type": "required_status_checks"
+        },
+        {
+            "type": "required_linear_history"
+        },
+        {
+            "parameters": {
+                "allowed_merge_methods": ["squash"],
+                "dismiss_stale_reviews_on_push": true,
+                "require_code_owner_review": false,
+                "require_last_push_approval": false,
+                "required_approving_review_count": 0,
+                "required_review_thread_resolution": false
+            },
+            "type": "pull_request"
         }
     ],
     "source": "bsamiee/Parametric_Portal",

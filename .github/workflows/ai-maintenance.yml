@@ -1,137 +1,131 @@
 name: AI Maintenance
 
 on:
-  schedule:
-    - cron: '0 9 * * 1'  # Monday 9 AM UTC - Weekly maintenance
-  workflow_dispatch:
-    inputs:
-      task:
-        description: 'Maintenance task to run'
-        required: true
-        type: choice
-        options:
-          - dependency-audit
-          - stale-pr-review
-          - code-quality-report
-          - documentation-sync
+    schedule:
+        - cron: '0 9 * * 1'
+    workflow_dispatch:
+        inputs:
+            task:
+                description: 'Maintenance task to run'
+                required: true
+                type: choice
+                options:
+                    - dependency-audit
+                    - stale-pr-review
+                    - code-quality-report
+                    - documentation-sync
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
+    group: ${{ github.workflow }}
+    cancel-in-progress: false
 
 jobs:
-  weekly-maintenance:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      id-token: write
-      actions: read
+    weekly-maintenance:
+        if: github.event_name == 'schedule'
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        permissions:
+            contents: read
+            pull-requests: write
+            issues: write
+            id-token: write
+            actions: read
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-        with:
-          fetch-depth: 0
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - name: Setup Environment
-        uses: ./.github/actions/node-env
-        with:
-          install: 'false'
+            - uses: ./.github/actions/node-env
+              with:
+                  install: 'false'
 
-      - name: Claude Weekly Maintenance
-        uses: anthropics/claude-code-action@cc28cf34ba37e7abe223f1198e98333275a7139d # v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            Perform weekly maintenance tasks:
+            - uses: anthropics/claude-code-action@v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  prompt: |
+                      Perform weekly maintenance tasks:
 
-            ## 1. STALE PR REVIEW
-            - List open PRs older than 7 days: `gh pr list --state open`
-            - For each stale PR, add a comment asking for status update
-            - Flag PRs with failing CI
+                      ## 1. STALE PR REVIEW
+                      - List open PRs older than 7 days: `gh pr list --state open`
+                      - For each stale PR, add a comment asking for status update
+                      - Flag PRs with failing CI
 
-            ## 2. DEPENDENCY CHECK
-            - Review pnpm-workspace.yaml catalog for outdated deps
-            - Check pnpm outdated for security vulnerabilities
-            - Note major version updates available
+                      ## 2. DEPENDENCY CHECK
+                      - Review pnpm-workspace.yaml catalog for outdated deps
+                      - Check pnpm outdated for security vulnerabilities
+                      - Note major version updates available
 
-            ## 3. CODE QUALITY SUMMARY
-            - Run `pnpm typecheck` and report any errors
-            - Run `pnpm check` (Biome) and summarize violations
-            - Check cognitive complexity in recent changes
+                      ## 3. CODE QUALITY SUMMARY
+                      - Run `pnpm typecheck` and report any errors
+                      - Run `pnpm check` (Biome) and summarize violations
+                      - Check cognitive complexity in recent changes
 
-            ## 4. ISSUE TRIAGE
-            - List issues without labels: `gh issue list --label ""`
-            - Suggest labels for unlabeled issues
-            - Identify issues ready for implementation
+                      ## 4. ISSUE TRIAGE
+                      - List issues without labels: `gh issue list --label ""`
+                      - Suggest labels for unlabeled issues
+                      - Identify issues ready for implementation
 
-            Create a summary issue with findings titled:
-            "Weekly Maintenance Report - [DATE]"
+                      Create a summary issue with findings titled:
+                      "Weekly Maintenance Report - [DATE]"
 
-          claude_args: |
-            --model claude-sonnet-4-5-20250929
-            --max-turns 10
-            --allowedTools Read,Grep,Glob,Bash(pnpm:*),Bash(gh:*),Bash(git:*)
+                  claude_args: |
+                      --model claude-sonnet-4-5-20250929
+                      --max-turns 10
+                      --allowedTools Read,Grep,Glob,Bash(pnpm:*),Bash(gh:*),Bash(git:*)
 
-  manual-task:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      id-token: write
+    manual-task:
+        if: github.event_name == 'workflow_dispatch'
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        permissions:
+            contents: read
+            pull-requests: write
+            issues: write
+            id-token: write
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-        with:
-          fetch-depth: 0
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - name: Setup Environment
-        uses: ./.github/actions/node-env
-        with:
-          install: 'false'
+            - uses: ./.github/actions/node-env
+              with:
+                  install: 'false'
 
-      - name: Run Manual Task
-        uses: anthropics/claude-code-action@cc28cf34ba37e7abe223f1198e98333275a7139d # v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          prompt: |
-            Run maintenance task: ${{ inputs.task }}
+            - uses: anthropics/claude-code-action@v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  prompt: |
+                      Run maintenance task: ${{ inputs.task }}
 
-            ## TASK DEFINITIONS
+                      ## TASK DEFINITIONS
 
-            **dependency-audit**:
-            - Review pnpm-workspace.yaml catalog versions
-            - Run pnpm outdated to check for updates
-            - Check for known vulnerabilities
-            - Create issue if critical updates needed
+                      **dependency-audit**:
+                      - Review pnpm-workspace.yaml catalog versions
+                      - Run pnpm outdated to check for updates
+                      - Check for known vulnerabilities
+                      - Create issue if critical updates needed
 
-            **stale-pr-review**:
-            - Review all open PRs
-            - Comment on PRs needing attention
-            - Close abandoned PRs (>30 days, no activity)
+                      **stale-pr-review**:
+                      - Review all open PRs
+                      - Comment on PRs needing attention
+                      - Close abandoned PRs (>30 days, no activity)
 
-            **code-quality-report**:
-            - Run pnpm typecheck and pnpm check
-            - Analyze code for REQUIREMENTS.md violations
-            - Check for if/else, var/let, any usage
-            - Generate quality metrics report
+                      **code-quality-report**:
+                      - Run pnpm typecheck and pnpm check
+                      - Analyze code for REQUIREMENTS.md violations
+                      - Check for if/else, var/let, any usage
+                      - Generate quality metrics report
 
-            **documentation-sync**:
-            - Verify REQUIREMENTS.md matches implementation
-            - Check CLAUDE.md accuracy
-            - Flag outdated examples
+                      **documentation-sync**:
+                      - Verify REQUIREMENTS.md matches implementation
+                      - Check CLAUDE.md accuracy
+                      - Flag outdated examples
 
-            Report findings as GitHub issue or PR comment as appropriate.
+                      Report findings as GitHub issue or PR comment as appropriate.
 
-          claude_args: |
-            --model claude-sonnet-4-5-20250929
-            --max-turns 8
-            --allowedTools Read,Grep,Glob,Bash(pnpm:*),Bash(gh:*),Bash(git:*)
+                  claude_args: |
+                      --model claude-sonnet-4-5-20250929
+                      --max-turns 8
+                      --allowedTools Read,Grep,Glob,Bash(pnpm:*),Bash(gh:*),Bash(git:*)
