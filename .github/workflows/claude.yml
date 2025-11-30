@@ -52,5 +52,5 @@ jobs:
           claude_args: >-
             --model claude-sonnet-4-5-20250929
             --max-turns 8
-            --allowed-tools Read,Write,Edit,Grep,Glob,Bash(gh pr:*,gh issue:*,pnpm *,git *)
+            --allowed-tools Read,Write,Edit,Grep,Glob,Bash(gh pr *),Bash(gh issue *),Bash(pnpm *),Bash(git *)
 
