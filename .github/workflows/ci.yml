@@ -30,7 +30,10 @@ jobs:
     quality:
         name: Code Quality
         needs: [normalize-commit]
-        if: always()
+        if: |
+            always() &&
+            !cancelled() &&
+            (needs.normalize-commit.result == 'success' || needs.normalize-commit.result == 'skipped')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         permissions:
