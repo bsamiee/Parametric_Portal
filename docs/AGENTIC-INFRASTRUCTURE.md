@@ -298,27 +298,37 @@ Main CI pipeline with commit normalization, Biome auto-repair, and Nx affected t
 REQUIREMENTS.md compliance checking, feedback synthesis, and /summarize command. Validates code patterns against standards and provides structured review feedback.
 
 **active-qc.yml** (Event-Driven)
-Event-driven quality control for PR/push/issue events.
+Event-driven quality control for PR/push/issue events with optimized sparse checkouts.
 
 **Triggers**: `pull_request` (opened, edited, synchronize), `issues` (opened, edited, labeled, unlabeled), or `push` to main (labels.yml only)
+
+**Optimizations**:
+- Sparse checkout for all jobs (only `.github`, `package.json`, `pnpm-workspace.yaml`)
+- Jobs are mutually exclusive via conditions (no wasted parallel runs)
+- Job order: PR jobs → Issue jobs → Label sync (grouped by event type)
 
 Jobs:
 1. **pr-sync**: On commit push (synchronize), analyzes PR commits to update title/labels to match reality. Detects breaking changes, infers type from commits, syncs breaking label.
 2. **pr-meta**: On PR opened/edited, validates PR title format, applies type labels via ai-meta.ts.
 3. **issue-meta**: Validates issue metadata when opened/edited.
-4. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
-5. **pin-issue**: Pins issues when the `pinned` label is added (uses GraphQL pinIssue mutation).
+4. **pin-issue**: Pins issues when the `pinned` label is added (uses GraphQL pinIssue mutation).
+5. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
 
 **passive-qc.yml** (Scheduled)
-Scheduled quality control running every 6 hours.
+Scheduled quality control running every 6 hours with sequential job execution.
 
 **Triggers**: Schedule only (every 6 hours at :15)
 
-Jobs:
-1. **sync-labels**: Backup label sync as safety net.
-2. **stale-management**: 3 days inactive → stale label, then 7 more days → close (10 days total). Exemptions: pinned, security, critical.
-3. **aging-report**: Generates issue metrics report (critical, stale, >3 days, total).
-4. **meta-consistency**: Runs ai-meta.ts to fix titles/labels/bodies across up to 10 items.
+**Optimizations**:
+- Jobs run in sequence via `needs` chain for deterministic execution
+- Sparse checkout for label sync (only `.github/labels.yml`)
+- Stale management runs before aging report to ensure report reflects current state
+
+Jobs (sequential):
+1. **sync-labels**: Backup label sync as safety net (no needs).
+2. **stale-management**: 3 days inactive → stale label, then 7 more days → close (10 days total). Exemptions: pinned, security, critical. (needs: sync-labels)
+3. **aging-report**: Generates issue metrics report (critical, stale, >3 days, total). (needs: stale-management)
+4. **meta-consistency**: Runs ai-meta.ts to fix titles/labels/bodies across up to 10 items. (needs: aging-report)
 
 **auto-merge.yml**
 Dependabot auto-merge for patch/minor/security updates. Automatically merges safe dependency updates after CI passes.
@@ -332,7 +342,23 @@ Auto-updating repository health dashboard. Triggered by 6-hour schedule (at :00)
 > **Schedule Note**: Dashboard runs at :00 and Passive QC runs at :15 to prevent race conditions on shared resources.
 
 **security.yml**
-Multi-layer security scanning. Jobs: dependency-audit (`pnpm audit`), CodeQL (JavaScript/TypeScript analysis), secrets-scan (Gitleaks), license-check (copyleft detection). Creates security issue if critical vulnerabilities found.
+Multi-layer security scanning with parallel execution for speed.
+
+**Optimizations**:
+- Security jobs run in parallel (dependency-audit, codeql, secrets-scan, license-check)
+- Sparse checkout for jobs that don't need full repo
+- Post-scan jobs (create-security-issue, security-summary) run after all scans complete
+
+Jobs (parallel):
+- **dependency-audit**: pnpm audit for critical/high vulnerabilities
+- **dependency-review**: New dependency review on PRs
+- **codeql**: JavaScript/TypeScript static analysis
+- **secrets-scan**: Gitleaks secret detection
+- **license-check**: MIT license compliance
+
+Jobs (post-scan):
+- **create-security-issue**: Creates issue on failure (non-PR events)
+- **security-summary**: Summary table in job output
 
 ### Composite Actions
 
@@ -343,13 +369,13 @@ Node.js + pnpm + Nx setup with caching and distributed execution. Eliminates dup
 Configure git user for commits. Inputs: `name` (default: github-actions[bot]), `email` (default: github-actions[bot]@users.noreply.github.com). Used by ci, auto-merge, and other workflows that commit changes.
 
 **.github/actions/meta-fixer/action.yml**
-Universal metadata fixer action using ai-meta.ts. Validates and fixes PR/issue metadata including titles, labels, and descriptions.
+Universal metadata fixer action using ai-meta.ts. Validates and fixes PR/issue metadata including titles, labels, and descriptions. **Note**: Caller must checkout `.github` and `package.json` before using. Does not perform its own checkout to avoid redundant operations.
 
 **.github/actions/normalize-commit/action.yml**
 Transform [TYPE!]: to type!: format. Normalizes commit message formats from different sources to conventional commit style.
 
 **.github/actions/label/action.yml**
-Label-triggered behavior executor using label.ts. Handles labeled/unlabeled events and dispatches to appropriate behaviors (pin, unpin, comment) based on `B.labels.behaviors` config. Inputs: `action` (labeled/unlabeled), `label` (name), `node_id` (GraphQL ID), `number` (issue/PR number).
+Label-triggered behavior executor using label.ts. Handles labeled/unlabeled events and dispatches to appropriate behaviors (pin, unpin, comment) based on `B.labels.behaviors` config. **Note**: Caller must checkout `.github` and `package.json` before using. Inputs: `action` (labeled/unlabeled), `label` (name), `node_id` (GraphQL ID), `number` (issue/PR number).
 
 ### GitHub Templates
 

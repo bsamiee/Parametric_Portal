@@ -20,6 +20,7 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    # --- PR Metadata Jobs (mutually exclusive via conditions) -----------------
     pr-sync:
         name: PR Commit Sync
         if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
@@ -62,7 +63,10 @@ jobs:
         steps:
             - uses: actions/checkout@v4
               with:
-                  sparse-checkout: .github
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
 
             - uses: ./.github/actions/meta-fixer
               with:
@@ -70,17 +74,19 @@ jobs:
                   limit: '1'
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
+    # --- Issue Metadata Jobs --------------------------------------------------
     issue-meta:
         name: Issue Meta
-        if: |
-            github.event_name == 'issues' &&
-            (github.event.action == 'opened' || github.event.action == 'edited')
+        if: github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'edited')
         runs-on: ubuntu-latest
         timeout-minutes: 5
         steps:
             - uses: actions/checkout@v4
               with:
-                  sparse-checkout: .github
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
 
             - uses: ./.github/actions/meta-fixer
               with:
@@ -88,37 +94,39 @@ jobs:
                   limit: '1'
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
+    pin-issue:
+        name: Pin/Unpin Issue
+        if: github.event_name == 'issues' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name == 'pinned'
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
+
+            - uses: ./.github/actions/label
+              with:
+                  action: ${{ github.event.action }}
+                  label: ${{ github.event.label.name }}
+                  node_id: ${{ github.event.issue.node_id }}
+                  number: ${{ github.event.issue.number }}
+
+    # --- Label Sync (push event only) -----------------------------------------
     sync-labels:
         name: Sync Labels
         if: github.event_name == 'push'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+              with:
+                  sparse-checkout: .github/labels.yml
+                  sparse-checkout-cone-mode: false
 
             - uses: crazy-max/ghaction-github-labeler@v5
               with:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
                   yaml-file: .github/labels.yml
                   skip-delete: true
-
-    pin-issue:
-        name: Pin/Unpin Issue
-        if: |
-            github.event_name == 'issues' &&
-            (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
-            github.event.label.name == 'pinned'
-        runs-on: ubuntu-latest
-        timeout-minutes: 2
-        steps:
-            - name: Checkout
-              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
-              with:
-                  sparse-checkout: .github
-
-            - name: Handle Label
-              uses: ./.github/actions/label
-              with:
-                  action: ${{ github.event.action }}
-                  label: ${{ github.event.label.name }}
-                  node_id: ${{ github.event.issue.node_id }}
-                  number: ${{ github.event.issue.number }}

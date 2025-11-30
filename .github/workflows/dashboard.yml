@@ -2,6 +2,7 @@ name: Repository Dashboard
 
 on:
     schedule:
+        # Run at :00 (passive-qc runs at :15 to avoid race conditions)
         - cron: '0 */6 * * *'
     workflow_dispatch:
     issues:
@@ -38,6 +39,8 @@ jobs:
                       nx.json
 
             - uses: ./.github/actions/node-env
+              with:
+                  node-version-file: package.json
 
             - uses: actions/github-script@v7
               env:

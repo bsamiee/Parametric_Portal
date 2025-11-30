@@ -19,11 +19,17 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    # --- Parallel Security Scans (run concurrently for speed) -----------------
     dependency-audit:
         name: Dependency Audit
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+              with:
+                  sparse-checkout: |
+                      package.json
+                      pnpm-lock.yaml
+                      .npmrc
 
             - uses: ./.github/actions/node-env
               with:
@@ -108,6 +114,12 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+              with:
+                  sparse-checkout: |
+                      .github/actions
+                      package.json
+                      pnpm-lock.yaml
+                      pnpm-workspace.yaml
 
             - uses: ./.github/actions/node-env
 
@@ -128,6 +140,7 @@ jobs:
                     echo "[OK] All dependencies use MIT license"
                   fi
 
+    # --- Post-Scan Jobs (depend on parallel scans) ----------------------------
     create-security-issue:
         name: Create Security Issue
         runs-on: ubuntu-latest

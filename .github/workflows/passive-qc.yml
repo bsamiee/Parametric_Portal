@@ -16,11 +16,15 @@ permissions:
     models: read
 
 jobs:
+    # --- Jobs run in sequence via needs chain for deterministic execution -----
     sync-labels:
         name: Sync Labels (backup)
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+              with:
+                  sparse-checkout: .github/labels.yml
+                  sparse-checkout-cone-mode: false
 
             - uses: crazy-max/ghaction-github-labeler@v5
               with:
@@ -30,6 +34,7 @@ jobs:
 
     stale-management:
         name: Stale Management
+        needs: sync-labels
         runs-on: ubuntu-latest
         steps:
             - uses: actions/stale@v9
@@ -87,7 +92,10 @@ jobs:
         steps:
             - uses: actions/checkout@v4
               with:
-                  sparse-checkout: .github
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
 
             - uses: ./.github/actions/meta-fixer
               with:
