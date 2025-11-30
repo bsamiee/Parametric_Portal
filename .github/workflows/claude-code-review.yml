@@ -45,10 +45,14 @@ jobs:
 
             Please review this pull request and provide feedback on:
             - Code quality and best practices
+            - REQUIREMENTS.md compliance transgressions and corrections
             - Potential bugs or issues
             - Performance considerations
-            - Security concerns
-            - Test coverage
+            - Explicitly check for FORBIDDEN PATTERNS: use of `any`, `var`/`let`, `if/else`, loops (`for`, `while`, `.map`, `.filter`), and `try/catch`.
+            - Explicitly check for REQUIRED PATTERNS: single B constant (all config in one frozen object), dispatch tables (no if/else), Effect/Option monads for IO/nullables, section separators (`// --- Section Name ---`), discriminated union schemas, and catalog-driven versions.
+            - Reference REQUIREMENTS.md and AGENTS.MD for canonical patterns and anti-patterns.
+            - In your review, cite specific lines and patterns that violate or comply with these rules. Suggest concrete fixes using the project's canonical patterns.
+            - MUST provide properly formatted code blocks for all review comments, showing diffs with suggestions read to implement.
 
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
