@@ -185,7 +185,7 @@ const icons = () => [
 ];
 const imgOpt = (q: { readonly avif: number; readonly jpeg: number; readonly png: number; readonly webp: number }) => ({
     avif: { lossless: false, quality: q.avif },
-    exclude: /^virtual:|node_modules/,
+    exclude: /^(virtual:|node_modules)/,
     includePublic: true,
     jpeg: { progressive: true, quality: q.jpeg },
     logStats: true,
