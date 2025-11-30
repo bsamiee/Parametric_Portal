@@ -83,6 +83,7 @@ jobs:
         name: CodeQL Analysis
         runs-on: ubuntu-latest
         steps:
+            # Full checkout required - CodeQL needs to analyze all source files
             - uses: actions/checkout@v4
 
             - uses: github/codeql-action/init@v3
@@ -100,6 +101,7 @@ jobs:
         name: Secrets Scanning
         runs-on: ubuntu-latest
         steps:
+            # Full checkout with history required - Gitleaks scans entire git history
             - uses: actions/checkout@v4
               with:
                   fetch-depth: 0
