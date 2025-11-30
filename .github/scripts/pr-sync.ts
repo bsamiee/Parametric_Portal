@@ -49,11 +49,11 @@ const hasType = (labels: ReadonlyArray<Label>): boolean => labels.some((l) => TY
 const isBreaking = (commits: ReadonlyArray<Commit>): boolean =>
     commits.some((c) => B.breaking.commitPat.some((p) => p.test(c.commit.message)));
 const dominant = (commits: ReadonlyArray<Commit>): TypeKey => {
-    const counts = commits.reduce<Record<string, number>>(
-        (acc, c) => ({ ...acc, [infer(c.commit.message)]: (acc[infer(c.commit.message)] ?? 0) + 1 }),
-        {},
-    );
-    return (Object.entries(counts).sort(([, a], [, b]) => b - a)[0]?.[0] as TypeKey) ?? 'chore';
+    const types = commits.map((c) => infer(c.commit.message));
+    const countsMap = new Map<string, number>();
+    types.map((type) => countsMap.set(type, (countsMap.get(type) ?? 0) + 1));
+    const entries = Array.from(countsMap.entries());
+    return (entries.sort(([, a], [, b]) => b - a)[0]?.[0] as TypeKey) ?? 'chore';
 };
 const titleType = (title: string): TypeKey | null =>
     ((m) => (m ? (m[1].toLowerCase() as TypeKey) : null))(B.pr.pattern.exec(title));
@@ -70,10 +70,11 @@ const analyze = (pr: PR, commits: ReadonlyArray<Commit>): Analysis => {
     const prType = titleType(pr.title);
     const subject = strip(pr.title);
     const labels = pr.labels.map((l) => l.name);
-    const ops: Array<LabelOp> = [];
-    !hasType(pr.labels) && commitType && ops.push({ name: commitType, op: 'add' });
-    actualBrk && !labels.includes(B.breaking.label) && ops.push({ name: B.breaking.label, op: 'add' });
-    !actualBrk && labels.includes(B.breaking.label) && ops.push({ name: B.breaking.label, op: 'remove' });
+    const ops: ReadonlyArray<LabelOp> = [
+        !hasType(pr.labels) && commitType ? { name: commitType, op: 'add' } : null,
+        actualBrk && !labels.includes(B.breaking.label) ? { name: B.breaking.label, op: 'add' } : null,
+        !actualBrk && labels.includes(B.breaking.label) ? { name: B.breaking.label, op: 'remove' } : null,
+    ].filter((op): op is LabelOp => op !== null);
     const needsFix =
         (prType !== commitType && commits.length > 0) || actualBrk !== titleBrk || !B.pr.pattern.test(pr.title);
     return { breaking: actualBrk, labelOps: ops, titleFix: needsFix ? format(commitType, actualBrk, subject) : null };
@@ -86,27 +87,35 @@ const run = async (params: RunParams & { readonly spec: SyncSpec }): Promise<Syn
     const pr = (await call(ctx, 'pull.get', params.spec.prNumber)) as PR;
     const commits = ((await call(ctx, 'pull.listCommits', params.spec.prNumber)) ?? []) as ReadonlyArray<Commit>;
     const { titleFix, labelOps, breaking } = analyze(pr, commits);
-    const changes: Array<string> = [];
 
     // Title update via REST call (direct API, no mutation handler needed)
-    titleFix &&
-        (await call(ctx, 'pull.update', params.spec.prNumber, { title: titleFix })) &&
-        changes.push(`title: ${pr.title} → ${titleFix}`);
+    const titleChange = titleFix
+        ? (await call(ctx, 'pull.update', params.spec.prNumber, { title: titleFix }))
+            ? [`title: ${pr.title} → ${titleFix}`]
+            : []
+        : [];
 
     // Label operations via mutate handlers (polymorphic dispatch)
     const adds = labelOps.filter((o) => o.op === 'add').map((o) => o.name);
     const removes = labelOps.filter((o) => o.op === 'remove').map((o) => o.name);
-    adds.length > 0 &&
-        (await mutate(ctx, { action: 'add', labels: adds, n: params.spec.prNumber, t: 'label' })) &&
-        changes.push(`labels+: ${adds.join(',')}`);
-    removes.length > 0 &&
-        (await Promise.all(
-            removes.map(async (name) => {
-                await call(ctx, 'issue.removeLabel', params.spec.prNumber, name);
-                changes.push(`labels-: ${name}`);
-            }),
-        ));
+    const addChanges: ReadonlyArray<string> =
+        adds.length > 0
+            ? await (async () => {
+                  await mutate(ctx, { action: 'add', labels: adds, n: params.spec.prNumber, t: 'label' });
+                  return [`labels+: ${adds.join(',')}`];
+              })()
+            : [];
+    const removeChanges =
+        removes.length > 0
+            ? await Promise.all(
+                  removes.map(async (name) => {
+                      await call(ctx, 'issue.removeLabel', params.spec.prNumber, name);
+                      return `labels-: ${name}`;
+                  }),
+              )
+            : [];
 
+    const changes: ReadonlyArray<string> = [...titleChange, ...addChanges, ...removeChanges];
     params.core.info(
         `[PR-SYNC] PR #${params.spec.prNumber}: ${changes.length > 0 ? changes.join('; ') : 'no changes'} (breaking: ${breaking})`,
     );

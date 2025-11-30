@@ -1,11 +1,13 @@
 name: Claude Code Review
 
 on:
-    pull_request:
-        types: [opened, synchronize, ready_for_review, reopened]
+    issue_comment:
+        types: [created]
+    pull_request_review_comment:
+        types: [created]
 
 concurrency:
-    group: claude-review-${{ github.event.pull_request.number }}
+    group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
     cancel-in-progress: true
 
 permissions:
@@ -15,75 +17,11 @@ permissions:
     id-token: write
 
 jobs:
-    # --- Job 1: Structured Summary Review ----------------------------------------
-    summary-review:
-        if: ${{ !github.event.pull_request.draft }}
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        outputs:
-            head_sha: ${{ github.event.pull_request.head.sha }}
-
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
-
-            - name: Summary Review
-              uses: anthropics/claude-code-action@v1
-              with:
-                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-                  additional_permissions: |
-                      actions: read
-                  prompt: |
-                      Review PR #${{ github.event.pull_request.number }} and create a SUMMARY review.
-
-                      ## Instructions
-                      1. Get the PR diff: `gh pr diff ${{ github.event.pull_request.number }}`
-                      2. Read REQUIREMENTS.md for compliance patterns
-                      3. Create a structured summary following the format below
-                      4. Submit using: `gh pr review ${{ github.event.pull_request.number }} --comment --body "<your summary>"`
-
-                      ## Required Format
-                      Use this exact markdown structure:
-
-                      ## Pull Request Overview
-                      [1-2 sentence summary of what this PR does]
-
-                      ### Files Changed
-                      | File | Changes |
-                      | ---- | ------- |
-                      | `path/to/file.ts` | Brief description of changes |
-
-                      ### REQUIREMENTS.md Compliance
-                      | Rule | Status | Notes |
-                      |------|--------|-------|
-                      | No `any` type | [OK]/[FAIL] | |
-                      | No `var`/`let` | [OK]/[FAIL] | |
-                      | No `if/else` chains | [OK]/[FAIL] | |
-                      | No `try/catch` | [OK]/[FAIL] | |
-                      | Dispatch tables used | [OK]/[FAIL] | |
-                      | Effect/Option patterns | [OK]/[FAIL] | |
-
-                      ### Assessment
-                      - **Risk**: LOW | MEDIUM | HIGH
-                      - **Merge Ready**: YES | NEEDS CHANGES
-
-                      ## Rules
-                      - No emojis - use `[x]` for checkmarks, `[OK]`/`[FAIL]` for status
-                      - Be concise and factual
-                      - Only flag real violations, not style preferences
-
-                  claude_args: >-
-                      --model claude-sonnet-4-5-20250929
-                      --max-turns 5
-                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr review *)
-
-    # --- Job 2: Inline Review Comments -------------------------------------------
-    # Uses batch review API to group all comments under one review (like Copilot)
-    inline-reviews:
-        needs: summary-review
-        if: ${{ !github.event.pull_request.draft }}
+    # --- On-Demand Code Review (triggered by @claude mention) -------------------
+    claude-review:
+        if: |
+            (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+            (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
         runs-on: ubuntu-latest
         timeout-minutes: 15
 
@@ -93,93 +31,14 @@ jobs:
               with:
                   fetch-depth: 0
 
-            - name: Inline Reviews
+            - name: Claude Code Review
               uses: anthropics/claude-code-action@v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   additional_permissions: |
                       actions: read
-                  prompt: |
-                      Create INLINE review comments for PR #${{ github.event.pull_request.number }}.
-
-                      ## Instructions
-                      1. Get the PR diff: `gh pr diff ${{ github.event.pull_request.number }}`
-                      2. Read REQUIREMENTS.md for forbidden/required patterns
-                      3. Collect ALL violations first, then submit as ONE batch review
-
-                      ## CRITICAL: Use Batch Review API (Not Individual Comments)
-                      Submit all comments in a SINGLE review to avoid spam. Use a file-based approach:
-
-                      ### Step 1: Create the review payload file
-                      ```bash
-                      cat > /tmp/review.json << 'REVIEW_EOF'
-                      {
-                        "commit_id": "${{ needs.summary-review.outputs.head_sha }}",
-                        "event": "COMMENT",
-                        "body": "Code review complete. See inline comments for specific issues.",
-                        "comments": [
-                          {
-                            "path": "src/example.ts",
-                            "line": 42,
-                            "side": "RIGHT",
-                            "body": "This violates the no-`any` rule.\n\n```suggestion\nconst value: string = getData();\n```"
-                          }
-                        ]
-                      }
-                      REVIEW_EOF
-                      ```
-
-                      ### Step 2: Submit the review
-                      ```bash
-                      gh api -X POST "/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-                        --input /tmp/review.json
-                      rm /tmp/review.json
-                      ```
-
-                      ## Multi-line Suggestions (for replacing multiple lines)
-                      Use `start_line` and `start_side` for ranges:
-                      ```json
-                      {
-                        "path": "src/file.ts",
-                        "start_line": 10,
-                        "start_side": "RIGHT",
-                        "line": 15,
-                        "side": "RIGHT",
-                        "body": "Replace if/else with dispatch table.\n\n```suggestion\nconst handlers = { a: () => 1, b: () => 2 };\nreturn handlers[key]();\n```"
-                      }
-                      ```
-
-                      ## Comment Body Format
-                      Each comment body should follow this structure:
-                      ```
-                      **Issue**: [Brief description of the violation]
-
-                      \`\`\`suggestion
-                      // Replacement code here
-                      \`\`\`
-                      ```
-
-                      > **Note**: The escaped backticks (`\`\`\``) in the example above are for YAML escaping.
-                      > When constructing the actual JSON payload, use unescaped triple backticks.
-
-                      ## Parameters Reference
-                      - `path`: Relative file path from repo root
-                      - `line`: End line number (or only line for single-line)
-                      - `side`: "RIGHT" for new/changed code, "LEFT" for deleted code (must match `start_side` for multi-line)
-                      - `start_line`: First line of multi-line range (optional)
-                      - `start_side`: Side for start of range (must match `side` for valid multi-line suggestions)
-                      - `body`: Explanation + suggestion block
-
-                      ## Rules
-                      - If NO violations found, do NOT submit any review - exit silently
-                      - PRIORITIZE REQUIREMENTS.md violations (`any`, `var/let`, `if/else`, `try/catch`), but also flag critical issues (security, performance, logic errors)
-                      - Each comment MUST have a \`\`\`suggestion block with the fix
-                      - Maximum 10 comments per review (focus on most critical)
-                      - Group related issues when possible (e.g., multiple `let` in same function)
-                      - Read the actual file to understand context before suggesting fixes
-                      - Submit ALL comments in ONE batch review, never individual comments
-
+                  # No prompt - let Claude respond to the @claude mention interactively
                   claude_args: >-
-                      --model claude-opus-4-5-20251101
+                      --model claude-sonnet-4-5-20250929
                       --max-turns 10
-                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh api *),Bash(cat *),Bash(rm *)
+                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr review *),Bash(gh api *),Bash(cat *),Bash(rm *)

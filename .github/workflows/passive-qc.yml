@@ -66,6 +66,7 @@ jobs:
                       .github/actions
                       package.json
                       pnpm-workspace.yaml
+                      pnpm-lock.yaml
 
             - uses: ./.github/actions/node-env
               with:
@@ -96,6 +97,7 @@ jobs:
                       .github
                       package.json
                       pnpm-workspace.yaml
+                      pnpm-lock.yaml
 
             - uses: ./.github/actions/meta-fixer
               with:
