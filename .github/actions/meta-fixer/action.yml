@@ -54,7 +54,7 @@ runs:
               npx tsx .github/scripts/ai-meta-cli.ts
 
         - name: Amend Commit
-          if: inputs.target == 'commit' && steps.run.outputs.fixed != '0' && steps.run.outputs.commit_message != ''
+          if: (inputs.target == 'commit' || inputs.target == 'all') && steps.run.outputs.commit_message != ''
           shell: bash
           run: |
               git config user.name "github-actions[bot]"

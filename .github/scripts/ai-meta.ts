@@ -208,7 +208,10 @@ const fixTarget = (
 const run = async (p: RunParams & { spec: FixSpec; agentConfig: AgentConfig }): Promise<FixResult> => {
     const ctx = createCtx(p);
     const { spec, agentConfig } = p;
-    const targets: ReadonlyArray<Target> = spec.target === 'all' ? ['title', 'label', 'body'] : [spec.target];
+    const hasCommits = (spec.commits?.length ?? 0) > 0;
+    const baseTargets: ReadonlyArray<Target> = ['title', 'label', 'body'];
+    const targets: ReadonlyArray<Target> =
+        spec.target === 'all' ? (hasCommits ? [...baseTargets, 'commit'] : baseTargets) : [spec.target];
     const limit = spec.limit ?? 10;
 
     const allResults: ReadonlyArray<FixRet> =
@@ -220,7 +223,7 @@ const run = async (p: RunParams & { spec: FixSpec; agentConfig: AgentConfig }): 
             : (await Promise.all(targets.map((t) => fixTarget(ctx, agentConfig, t, limit, spec.commits)))).flat();
 
     const fixed = allResults.reduce((a, r) => a + r.n, 0);
-    const commitResult = allResults.find((r) => r.value && spec.target === 'commit');
+    const commitResult = allResults.find((r) => r.value && targets.includes('commit'));
     const provider = (allResults.find((r) => r.provider !== 'none')?.provider as FixResult['provider']) ?? 'none';
 
     p.core.info(`[META] ${provider}: fixed ${fixed} items`);
