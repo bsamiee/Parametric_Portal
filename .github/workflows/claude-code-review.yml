@@ -22,7 +22,6 @@ jobs:
         timeout-minutes: 10
         outputs:
             head_sha: ${{ github.event.pull_request.head.sha }}
-            pr_number: ${{ github.event.pull_request.number }}
 
         steps:
             - name: Checkout
@@ -78,7 +77,7 @@ jobs:
                   claude_args: >-
                       --model claude-sonnet-4-5-20250929
                       --max-turns 5
-                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr review:*)
+                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr review *)
 
     # --- Job 2: Inline Review Comments -------------------------------------------
     # Uses batch review API to group all comments under one review (like Copilot)
@@ -109,27 +108,32 @@ jobs:
                       3. Collect ALL violations first, then submit as ONE batch review
 
                       ## CRITICAL: Use Batch Review API (Not Individual Comments)
-                      Submit all comments in a SINGLE review to avoid spam. Use the reviews endpoint:
+                      Submit all comments in a SINGLE review to avoid spam. Use a file-based approach:
 
+                      ### Step 1: Create the review payload file
                       ```bash
-                      gh api -X POST "/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
-                        -f commit_id="${{ needs.summary-review.outputs.head_sha }}" \
-                        -f event="COMMENT" \
-                        -f body="Code review complete. See inline comments for specific issues." \
-                        --raw-field comments='[
+                      cat > /tmp/review.json << 'REVIEW_EOF'
+                      {
+                        "commit_id": "${{ needs.summary-review.outputs.head_sha }}",
+                        "event": "COMMENT",
+                        "body": "Code review complete. See inline comments for specific issues.",
+                        "comments": [
                           {
                             "path": "src/example.ts",
                             "line": 42,
                             "side": "RIGHT",
                             "body": "This violates the no-`any` rule.\n\n```suggestion\nconst value: string = getData();\n```"
-                          },
-                          {
-                            "path": "src/utils.ts",
-                            "line": 15,
-                            "side": "RIGHT",
-                            "body": "Use `const` instead of `let`.\n\n```suggestion\nconst count = 0;\n```"
                           }
-                        ]'
+                        ]
+                      }
+                      REVIEW_EOF
+                      ```
+
+                      ### Step 2: Submit the review
+                      ```bash
+                      gh api -X POST "/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+                        --input /tmp/review.json
+                      rm /tmp/review.json
                       ```
 
                       ## Multi-line Suggestions (for replacing multiple lines)
@@ -155,18 +159,21 @@ jobs:
                       \`\`\`
                       ```
 
+                      > **Note**: The escaped backticks (`\`\`\``) in the example above are for YAML escaping.
+                      > When constructing the actual JSON payload, use unescaped triple backticks.
+
                       ## Parameters Reference
                       - `path`: Relative file path from repo root
                       - `line`: End line number (or only line for single-line)
-                      - `side`: "RIGHT" for new/changed code, "LEFT" for deleted code
+                      - `side`: "RIGHT" for new/changed code, "LEFT" for deleted code (must match `start_side` for multi-line)
                       - `start_line`: First line of multi-line range (optional)
-                      - `start_side`: Side for start of range (optional)
+                      - `start_side`: Side for start of range (must match `side` for valid multi-line suggestions)
                       - `body`: Explanation + suggestion block
 
                       ## Rules
-                      - ONLY flag REQUIREMENTS.md violations: `any`, `var/let`, `if/else`, `try/catch`
+                      - PRIORITIZE REQUIREMENTS.md violations (`any`, `var/let`, `if/else`, `try/catch`), but also flag critical issues (security, performance, logic errors)
                       - Each comment MUST have a \`\`\`suggestion block with the fix
-                      - Maximum 5 comments per review (focus on most critical)
+                      - Maximum 10 comments per review (focus on most critical)
                       - Group related issues when possible (e.g., multiple `let` in same function)
                       - Read the actual file to understand context before suggesting fixes
                       - Submit ALL comments in ONE batch review, never individual comments
@@ -174,4 +181,4 @@ jobs:
                   claude_args: >-
                       --model claude-opus-4-5-20251101
                       --max-turns 10
-                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh api:*)
+                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh api *),Bash(cat *),Bash(rm *)
