@@ -89,8 +89,7 @@ jobs:
               uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4.7.1
               with:
                   fail-on-severity: high
-                  deny-licenses: GPL-3.0, AGPL-3.0
-                  allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, LGPL-3.0, LGPL-2.1
+                  allow-licenses: MIT
 
     codeql:
         name: CodeQL Analysis
@@ -116,6 +115,8 @@ jobs:
     secrets-scan:
         name: Secrets Scanning
         runs-on: ubuntu-latest
+        # Gitleaks action doesn't support pull_request_target event
+        if: github.event_name != 'pull_request_target'
         steps:
             - name: Checkout
               uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -138,30 +139,24 @@ jobs:
             - name: Setup Environment
               uses: ./.github/actions/node-env
 
-            - name: Check for Copyleft Licenses
+            - name: Check for MIT License Compliance
               run: |
-                  echo "Checking for copyleft licenses in production dependencies..."
+                  echo "Checking that all dependencies use MIT license..."
                   pnpm licenses list --json > licenses.json
 
-                  # Check for strict copyleft (GPL, AGPL) that are NOT:
-                  # 1. Dual-licensed with MIT (MIT OR GPL)
-                  # 2. LGPL (which is acceptable for linking)
-                  # Note: jszip uses "MIT OR GPL-3.0-or-later" - MIT takes precedence
-                  # Note: sharp's libvips bindings use LGPL-3.0-or-later - acceptable for dynamic linking
-                  COPYLEFT=$(cat licenses.json | jq -r '
+                  # Find any non-MIT licenses
+                  NON_MIT=$(cat licenses.json | jq -r '
                     .[] |
-                    select(.license | test("GPL|AGPL"; "i")) |
-                    select(.license | test("^LGPL"; "i") | not) |
-                    select(.license | test("MIT OR"; "i") | not) |
+                    select(.license | test("^MIT$"; "i") | not) |
                     "\(.name): \(.license)"
                   ' 2>/dev/null || echo "")
 
-                  if [[ -n "$COPYLEFT" ]]; then
-                    echo "[ERROR] Strict copyleft licenses detected:"
-                    echo "$COPYLEFT"
+                  if [[ -n "$NON_MIT" ]]; then
+                    echo "[ERROR] Non-MIT licenses detected:"
+                    echo "$NON_MIT"
                     exit 1
                   else
-                    echo "[OK] No problematic copyleft licenses detected"
+                    echo "[OK] All dependencies use MIT license"
                   fi
 
     create-security-issue:

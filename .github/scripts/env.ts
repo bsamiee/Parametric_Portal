@@ -6,19 +6,19 @@
 
 declare const process: { readonly env: Record<string, string | undefined> };
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types ------------------------------------------------------------------
 
 type Lang = 'ts' | 'cs';
 
-// --- Environment Config -----------------------------------------------------
+// --- Config -----------------------------------------------------------------
 
 const ENV = Object.freeze({
     lang: (process.env.REPO_LANG ?? 'ts') as Lang,
-    // Nx Cloud workspace ID - fallback must match nx.json nxCloudId (line 49)
+    // Nx Cloud workspace ID - fallback must match nx.json nxCloudId
     nxCloudWorkspaceId: process.env.NX_CLOUD_WORKSPACE_ID ?? '6929c006315634b45342f623',
 } as const);
 
-// --- Language Commands (for workflow prompts) -------------------------------
+// --- Commands ---------------------------------------------------------------
 
 const CMD = Object.freeze({
     cs: { build: 'dotnet build', lint: 'dotnet format --verify-no-changes', test: 'dotnet test' },

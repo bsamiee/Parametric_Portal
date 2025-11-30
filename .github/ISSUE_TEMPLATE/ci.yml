@@ -1,0 +1,53 @@
+name: CI/CD Change
+description: Modify GitHub Actions workflows or CI configuration
+title: "[CI]: "
+labels: ["ci"]
+body:
+    - type: dropdown
+      id: ci_type
+      attributes:
+          label: CI Change Type
+          options:
+              - workflow-update
+              - new-workflow
+              - fix-failure
+              - optimize
+              - security
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Workflow file(s) to modify
+          placeholder: ".github/workflows/ci.yml, .github/actions/node-env"
+      validations:
+          required: true
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Description
+          description: What CI changes are needed?
+      validations:
+          required: true
+
+    - type: textarea
+      id: rationale
+      attributes:
+          label: Rationale
+          description: Why is this CI change needed?
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true

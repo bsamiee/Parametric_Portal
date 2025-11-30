@@ -3,6 +3,17 @@ description: Propose a new feature or capability
 title: "[FEAT]: "
 labels: ["feat"]
 body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will this feature change existing APIs or behavior?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
     - type: textarea
       id: description
       attributes:
@@ -49,15 +60,5 @@ body:
               - medium
               - high
               - critical
-      validations:
-          required: true
-
-    - type: dropdown
-      id: breaking
-      attributes:
-          label: Breaking Change
-          options:
-              - "no"
-              - "yes"
       validations:
           required: true
