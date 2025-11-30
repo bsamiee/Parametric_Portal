@@ -243,7 +243,10 @@ const B = Object.freeze({
         headerStrip: /###\s*[^\n]+\n?/,
         placeholder: /^_?No response_?$/i,
     },
-    pr: { pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i } as const,
+    pr: {
+        bash: String.raw`^\[([A-Za-z]+)(!?)\]:[[:space:]]*(.+)$`,
+        pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i,
+    } as const,
     probe: {
         bodyTruncate: 500,
         gql: {

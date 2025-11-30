@@ -172,3 +172,28 @@ jobs:
                           runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
                         }
                       });
+
+    release:
+        name: Release
+        needs: [quality]
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'chore(release)')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - uses: ./.github/actions/node-env
+              with:
+                  nx: 'true'
+                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+            - uses: ./.github/actions/git-identity
+
+            - name: Release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: pnpm nx release
