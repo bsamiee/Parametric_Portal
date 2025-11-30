@@ -1,0 +1,68 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # This is an optional setting that allows Claude to read CI results on PRs
+          additional_permissions: |
+            actions: read
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - REQUIREMENTS.md compliance transgressions and corrections
+            - Potential bugs or issues
+            - Performance considerations
+            - Explicitly check for FORBIDDEN PATTERNS: use of `any`, `var`/`let`, `if/else`, loops (`for`, `while`, `.map`, `.filter`), and `try/catch`.
+            - Explicitly check for REQUIRED PATTERNS: single B constant (all config in one frozen object), dispatch tables (no if/else), Effect/Option monads for IO/nullables, section separators (`// --- Section Name ---`), discriminated union schemas, and catalog-driven versions.
+            - Reference REQUIREMENTS.md and AGENTS.MD for canonical patterns and anti-patterns.
+            - In your review, cite specific lines and patterns that violate or comply with these rules. Suggest concrete fixes using the project's canonical patterns.
+            - MUST provide properly formatted code blocks for all review comments, showing diffs with suggestions read to implement.
+
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
+          claude_args: '--allowed-tools Read,Grep,Glob,Bash(gh issue view *),Bash(gh search *),Bash(gh issue list *),Bash(gh pr comment *),Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr list *)'
+
