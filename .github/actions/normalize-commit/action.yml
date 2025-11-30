@@ -1,5 +1,5 @@
 name: Normalize Commit
-description: Transform [TYPE!]: to type!: format for Nx release compatibility
+description: 'Transform [TYPE!]: to type!: format for Nx release compatibility'
 
 runs:
     using: composite
