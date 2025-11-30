@@ -1,6 +1,6 @@
 # Claude Code Action - Official Anthropic Integration
 # Reference: https://github.com/anthropics/claude-code-action
-# Version: v1.0.21 (2025-11)
+# Version: v1 (tracks latest v1.x release)
 
 name: Claude Code
 
@@ -36,12 +36,12 @@ jobs:
         timeout-minutes: 15
         steps:
             - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
               with:
                   fetch-depth: 1
 
             - name: Claude Code Review
-              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1.0.21
+              uses: anthropics/claude-code-action@cc28cf34ba37e7abe223f1198e98333275a7139d # v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   track_progress: true
@@ -78,15 +78,7 @@ jobs:
                   claude_args: |
                       --model claude-sonnet-4-5-20250929
                       --max-turns 10
-                      --allowedTools "
-                        mcp__github_inline_comment__create_inline_comment,
-                        Bash(gh pr comment:*),
-                        Bash(gh pr diff:*),
-                        Bash(gh pr view:*),
-                        Read,
-                        Grep,
-                        Glob
-                      "
+                      --allowedTools mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob
 
     # Interactive assistant for @claude mentions
     assistant:
@@ -98,12 +90,12 @@ jobs:
         timeout-minutes: 20
         steps:
             - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
               with:
                   fetch-depth: 0
 
             - name: Claude Assistant
-              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1.0.21
+              uses: anthropics/claude-code-action@cc28cf34ba37e7abe223f1198e98333275a7139d # v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   trigger_phrase: "@claude"
@@ -111,17 +103,7 @@ jobs:
                   claude_args: |
                       --model claude-sonnet-4-5-20250929
                       --max-turns 15
-                      --allowedTools "
-                        mcp__github_inline_comment__create_inline_comment,
-                        Bash(gh:*),
-                        Bash(pnpm:*),
-                        Bash(git:*),
-                        Read,
-                        Write,
-                        Edit,
-                        Grep,
-                        Glob
-                      "
+                      --allowedTools mcp__github_inline_comment__create_inline_comment,Bash(gh:*),Bash(pnpm:*),Bash(git:*),Read,Write,Edit,Grep,Glob
 
     # Issue implementation for assigned/labeled issues
     implement:
@@ -134,12 +116,12 @@ jobs:
         timeout-minutes: 30
         steps:
             - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v6
+              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
               with:
                   fetch-depth: 0
 
             - name: Claude Implement
-              uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1.0.21
+              uses: anthropics/claude-code-action@cc28cf34ba37e7abe223f1198e98333275a7139d # v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   label_trigger: "claude"
@@ -170,13 +152,4 @@ jobs:
                   claude_args: |
                       --model claude-sonnet-4-5-20250929
                       --max-turns 25
-                      --allowedTools "
-                        Bash(gh:*),
-                        Bash(pnpm:*),
-                        Bash(git:*),
-                        Read,
-                        Write,
-                        Edit,
-                        Grep,
-                        Glob
-                      "
+                      --allowedTools Bash(gh:*),Bash(pnpm:*),Bash(git:*),Read,Write,Edit,Grep,Glob
