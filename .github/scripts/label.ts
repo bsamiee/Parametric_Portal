@@ -22,17 +22,26 @@ type Behavior = 'pin' | 'unpin' | 'comment';
 
 const handlers: Record<Behavior, (ctx: Ctx, spec: LabelSpec) => Promise<void>> = {
     comment: (ctx, spec) =>
-        mutate(ctx, { body: `Label \`${spec.label}\` applied`, marker: `LABEL-${spec.label}`, n: spec.number, t: 'comment' }),
-    pin: async (ctx, spec) => { await call(ctx, 'issue.pin', spec.nodeId); },
-    unpin: async (ctx, spec) => { await call(ctx, 'issue.unpin', spec.nodeId); },
+        mutate(ctx, {
+            body: `Label \`${spec.label}\` applied`,
+            marker: `LABEL-${spec.label}`,
+            n: spec.number,
+            t: 'comment',
+        }),
+    pin: async (ctx, spec) => {
+        await call(ctx, 'issue.pin', spec.nodeId);
+    },
+    unpin: async (ctx, spec) => {
+        await call(ctx, 'issue.unpin', spec.nodeId);
+    },
 };
 
 // --- Pure Functions ---------------------------------------------------------
 
 const resolve = (label: string, action: LabelSpec['action']): Behavior | null =>
-    (B.labels.behaviors as Record<string, { readonly onAdd: Behavior | null; readonly onRemove: Behavior | null }>)[label]?.[
-        action === 'labeled' ? 'onAdd' : 'onRemove'
-    ] ?? null;
+    (B.labels.behaviors as Record<string, { readonly onAdd: Behavior | null; readonly onRemove: Behavior | null }>)[
+        label
+    ]?.[action === 'labeled' ? 'onAdd' : 'onRemove'] ?? null;
 
 // --- Entry Point ------------------------------------------------------------
 
@@ -41,7 +50,7 @@ const run = async (params: RunParams & { readonly spec: LabelSpec }): Promise<La
     const behavior = resolve(params.spec.label, params.spec.action);
     behavior && (await handlers[behavior](ctx, params.spec));
     params.core.info(`[LABEL] ${params.spec.label} ${params.spec.action}: ${behavior ?? 'no-op'}`);
-    return { executed: behavior !== null, behavior };
+    return { behavior, executed: behavior !== null };
 };
 
 // --- Export -----------------------------------------------------------------
