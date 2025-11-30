@@ -1,68 +1,184 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+    pull_request:
+        types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+    group: claude-review-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+    pull-requests: write
+    issues: read
+    id-token: write
+
 jobs:
-  claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    # --- Job 1: Structured Summary Review ----------------------------------------
+    summary-review:
+        if: ${{ !github.event.pull_request.draft }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        outputs:
+            head_sha: ${{ github.event.pull_request.head.sha }}
 
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: read
-      id-token: write
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+            - name: Summary Review
+              uses: anthropics/claude-code-action@v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  additional_permissions: |
+                      actions: read
+                  prompt: |
+                      Review PR #${{ github.event.pull_request.number }} and create a SUMMARY review.
 
-      - name: Run Claude Code Review
-        id: claude-review
-        uses: anthropics/claude-code-action@v1
-        with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # This is an optional setting that allows Claude to read CI results on PRs
-          additional_permissions: |
-            actions: read
-          prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+                      ## Instructions
+                      1. Get the PR diff: `gh pr diff ${{ github.event.pull_request.number }}`
+                      2. Read REQUIREMENTS.md for compliance patterns
+                      3. Create a structured summary following the format below
+                      4. Submit using: `gh pr review ${{ github.event.pull_request.number }} --comment --body "<your summary>"`
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - REQUIREMENTS.md compliance transgressions and corrections
-            - Potential bugs or issues
-            - Performance considerations
-            - Explicitly check for FORBIDDEN PATTERNS: use of `any`, `var`/`let`, `if/else`, loops (`for`, `while`, `.map`, `.filter`), and `try/catch`.
-            - Explicitly check for REQUIRED PATTERNS: single B constant (all config in one frozen object), dispatch tables (no if/else), Effect/Option monads for IO/nullables, section separators (`// --- Section Name ---`), discriminated union schemas, and catalog-driven versions.
-            - Reference REQUIREMENTS.md and AGENTS.MD for canonical patterns and anti-patterns.
-            - In your review, cite specific lines and patterns that violate or comply with these rules. Suggest concrete fixes using the project's canonical patterns.
-            - MUST provide properly formatted code blocks for all review comments, showing diffs with suggestions read to implement.
+                      ## Required Format
+                      Use this exact markdown structure:
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+                      ## Pull Request Overview
+                      [1-2 sentence summary of what this PR does]
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+                      ### Files Changed
+                      | File | Changes |
+                      | ---- | ------- |
+                      [One row per changed file with brief description]
 
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          claude_args: '--allowed-tools Read,Grep,Glob,Bash(gh issue view *),Bash(gh search *),Bash(gh issue list *),Bash(gh pr comment *),Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr list *)'
+                      ### REQUIREMENTS.md Compliance
+                      | Rule | Status | Notes |
+                      |------|--------|-------|
+                      | No `any` type | [OK]/[FAIL] | |
+                      | No `var`/`let` | [OK]/[FAIL] | |
+                      | No `if/else` chains | [OK]/[FAIL] | |
+                      | No `try/catch` | [OK]/[FAIL] | |
+                      | Dispatch tables used | [OK]/[FAIL] | |
+                      | Effect/Option patterns | [OK]/[FAIL] | |
 
+                      ### Assessment
+                      - **Risk**: LOW | MEDIUM | HIGH
+                      - **Merge Ready**: YES | NEEDS CHANGES
+
+                      ## Rules
+                      - Be concise and factual
+                      - Only flag real violations, not style preferences
+                      - Reference CLAUDE.md for project conventions
+
+                  claude_args: >-
+                      --model claude-sonnet-4-5-20250929
+                      --max-turns 5
+                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr review *)
+
+    # --- Job 2: Inline Review Comments -------------------------------------------
+    # Uses batch review API to group all comments under one review (like Copilot)
+    inline-reviews:
+        needs: summary-review
+        if: ${{ !github.event.pull_request.draft }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Inline Reviews
+              uses: anthropics/claude-code-action@v1
+              with:
+                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+                  additional_permissions: |
+                      actions: read
+                  prompt: |
+                      Create INLINE review comments for PR #${{ github.event.pull_request.number }}.
+
+                      ## Instructions
+                      1. Get the PR diff: `gh pr diff ${{ github.event.pull_request.number }}`
+                      2. Read REQUIREMENTS.md for forbidden/required patterns
+                      3. Collect ALL violations first, then submit as ONE batch review
+
+                      ## CRITICAL: Use Batch Review API (Not Individual Comments)
+                      Submit all comments in a SINGLE review to avoid spam. Use a file-based approach:
+
+                      ### Step 1: Create the review payload file
+                      ```bash
+                      cat > /tmp/review.json << 'REVIEW_EOF'
+                      {
+                        "commit_id": "${{ needs.summary-review.outputs.head_sha }}",
+                        "event": "COMMENT",
+                        "body": "Code review complete. See inline comments for specific issues.",
+                        "comments": [
+                          {
+                            "path": "src/example.ts",
+                            "line": 42,
+                            "side": "RIGHT",
+                            "body": "This violates the no-`any` rule.\n\n```suggestion\nconst value: string = getData();\n```"
+                          }
+                        ]
+                      }
+                      REVIEW_EOF
+                      ```
+
+                      ### Step 2: Submit the review
+                      ```bash
+                      gh api -X POST "/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews" \
+                        --input /tmp/review.json
+                      rm /tmp/review.json
+                      ```
+
+                      ## Multi-line Suggestions (for replacing multiple lines)
+                      Use `start_line` and `start_side` for ranges:
+                      ```json
+                      {
+                        "path": "src/file.ts",
+                        "start_line": 10,
+                        "start_side": "RIGHT",
+                        "line": 15,
+                        "side": "RIGHT",
+                        "body": "Replace if/else with dispatch table.\n\n```suggestion\nconst handlers = { a: () => 1, b: () => 2 };\nreturn handlers[key]();\n```"
+                      }
+                      ```
+
+                      ## Comment Body Format
+                      Each comment body should follow this structure:
+                      ```
+                      **Issue**: [Brief description of the violation]
+
+                      \`\`\`suggestion
+                      // Replacement code here
+                      \`\`\`
+                      ```
+
+                      > **Note**: The escaped backticks (`\`\`\``) in the example above are for YAML escaping.
+                      > When constructing the actual JSON payload, use unescaped triple backticks.
+
+                      ## Parameters Reference
+                      - `path`: Relative file path from repo root
+                      - `line`: End line number (or only line for single-line)
+                      - `side`: "RIGHT" for new/changed code, "LEFT" for deleted code (must match `start_side` for multi-line)
+                      - `start_line`: First line of multi-line range (optional)
+                      - `start_side`: Side for start of range (must match `side` for valid multi-line suggestions)
+                      - `body`: Explanation + suggestion block
+
+                      ## Rules
+                      - PRIORITIZE REQUIREMENTS.md violations (`any`, `var/let`, `if/else`, `try/catch`), but also flag critical issues (security, performance, logic errors)
+                      - Each comment MUST have a \`\`\`suggestion block with the fix
+                      - Maximum 10 comments per review (focus on most critical)
+                      - Group related issues when possible (e.g., multiple `let` in same function)
+                      - Read the actual file to understand context before suggesting fixes
+                      - Submit ALL comments in ONE batch review, never individual comments
+
+                  claude_args: >-
+                      --model claude-opus-4-5-20251101
+                      --max-turns 10
+                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh api *),Bash(cat *),Bash(rm *)
