@@ -1,0 +1,60 @@
+version: 2
+
+# DEPENDABOT STRATEGY: Security-Only Fallback
+# ============================================
+# Renovate is the PRIMARY dependency manager (renovate.json).
+# Dependabot serves as a SECURITY SAFETY NET only.
+#
+# Configuration:
+# - `open-pull-requests-limit: 0` disables VERSION updates entirely
+# - Security updates are controlled by GitHub Settings > Security > Dependabot
+# - Enable "Dependabot security updates" in repo settings
+# - Enable "Dependabot alerts" for vulnerability notifications
+#
+# This means:
+# - Dependabot will NOT create PRs for new versions (Renovate handles that)
+# - Dependabot WILL create PRs for known security vulnerabilities
+# - Security PRs use the grouped configuration below for efficiency
+
+updates:
+    # Security-only: disable version updates, let Renovate handle versions
+    - package-ecosystem: 'npm'
+      directory: '/'
+      schedule:
+          interval: 'weekly'
+          day: 'monday'
+          time: '04:00'
+          timezone: 'UTC'
+      # CRITICAL: Set to 0 to disable version updates (Renovate is primary)
+      open-pull-requests-limit: 0
+      labels:
+          - 'dependencies'
+          - 'security'
+      commit-message:
+          prefix: 'fix(deps)'
+          include: 'scope'
+      # Group security updates to reduce PR noise
+      groups:
+          security-patches:
+              applies-to: security-updates
+              patterns:
+                  - '*'
+              update-types:
+                  - 'patch'
+                  - 'minor'
+
+    # GitHub Actions: security-only (Renovate also handles these)
+    - package-ecosystem: 'github-actions'
+      directory: '/'
+      schedule:
+          interval: 'weekly'
+          day: 'monday'
+          time: '04:00'
+          timezone: 'UTC'
+      open-pull-requests-limit: 0
+      labels:
+          - 'dependencies'
+          - 'security'
+          - 'ci'
+      commit-message:
+          prefix: 'fix(ci)'

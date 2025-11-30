@@ -1,0 +1,52 @@
+sequential {
+    `throw new Error($message)` where {
+        register_diagnostic(span=$message, message="Avoid throwing errors directly. Use Effect.fail() for explicit, typed error handling in Railway-Oriented Programming", severity="error")
+    },
+    `Effect.sync($fn)` where {
+        $fn <: contains `throw`,
+        register_diagnostic(span=$fn, message="Use Effect.try() instead of Effect.sync() for operations that may throw - Effect.sync() assumes infallible execution", severity="error")
+    },
+    `Effect.gen(function* () { $body })` where {
+        not $body <: contains `yield*`,
+        register_diagnostic(span=$body, message="Effect.gen without yield* is unnecessary overhead - use Effect.succeed() or pipe() for non-generator code", severity="warn")
+    },
+    `async $name($params) { $body }` where {
+        $body <: contains `Effect`,
+        register_diagnostic(span=$name, message="Avoid mixing async/await with Effect - use Effect.gen with yield* for consistent async Effect code and proper error handling", severity="warn")
+    },
+    `Effect.promise(() => $expr)` where {
+        not $expr <: contains `catch`,
+        register_diagnostic(span=$expr, message="Use Effect.tryPromise() for promises that may reject to handle errors explicitly in the Effect error channel", severity="warn")
+    },
+    `pipe($input)` where {
+        not $input <: contains `,`,
+        register_diagnostic(span=$input, message="pipe() with a single argument provides no composition benefit - use the value directly", severity="info")
+    },
+    `Effect.all([$effects])` where {
+        $effects <: contains `Effect.succeed($value)`,
+        register_diagnostic(span=$effects, message="Effect.all() with Effect.succeed() is redundant - consider Effect.struct() or remove Effect.succeed() wrapper", severity="info")
+    },
+    `Effect.map($effect, $fn)` where {
+        register_diagnostic(span=$_, message="Prefer pipe(Effect, Effect.map(fn)) over Effect.map(Effect, fn) for better composition and readability", severity="info")
+    },
+    `Effect.flatMap($effect, $fn)` where {
+        register_diagnostic(span=$_, message="Prefer pipe(Effect, Effect.flatMap(fn)) over Effect.flatMap(Effect, fn) for consistent pipeline style", severity="info")
+    },
+    `$var.pipe($operations)` where {
+        register_diagnostic(span=$_, message="Prefer pipe($var, operations) over $var.pipe(operations) for consistency with Effect ecosystem conventions", severity="info")
+    },
+    `Option.getOrElse($option, $default)` where {
+        register_diagnostic(span=$_, message="Prefer pipe(Option, Option.getOrElse(() => default)) for consistent pipeline style and lazy default evaluation", severity="info")
+    },
+    `Option.getOrNull($option)` where {
+        register_diagnostic(span=$_, message="Option.getOrNull() defeats the purpose of Option - use Option.getOrElse() or Option.match() instead", severity="warn")
+    },
+    `Effect.runSync($effect)` where {
+        $effect <: contains `Effect.fail`,
+        register_diagnostic(span=$_, message="Effect.runSync() with fallible Effects is dangerous - use Effect.runPromise() or handle errors with Effect.catchAll()", severity="warn")
+    },
+    `try { $body } catch ($err) { $handler }` where {
+        $body <: contains `Effect`,
+        register_diagnostic(span=$_, message="Don't use try/catch with Effect - errors are in the Effect type signature, use Effect.catchAll() or Effect.catchTag()", severity="error")
+    }
+}

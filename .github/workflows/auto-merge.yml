@@ -1,0 +1,78 @@
+name: Auto-Merge
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+concurrency:
+    group: auto-merge-${{ github.event.pull_request.number }}
+    cancel-in-progress: false
+
+jobs:
+    merge:
+        name: Dependabot Auto-Merge
+        runs-on: ubuntu-latest
+        if: github.actor == 'dependabot[bot]'
+        steps:
+            - id: metadata
+              uses: dependabot/fetch-metadata@v2
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - uses: lewagon/wait-on-check-action@v1.4.1
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  check-name: 'Code Quality'
+                  wait-interval: 30
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - uses: lewagon/wait-on-check-action@v1.4.1
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  check-name: 'Dependency Audit'
+                  wait-interval: 30
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Auto-Merge Security Updates
+              if: steps.metadata.outputs.alert-state == 'OPEN' || contains(github.event.pull_request.labels.*.name, 'security')
+              run: |
+                  echo "[OK] Security update detected - auto-merging"
+                  gh pr merge ${{ github.event.pull_request.number }} --squash --auto --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Auto-Merge Patch Updates
+              if: |
+                  steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
+                  steps.metadata.outputs.alert-state != 'OPEN'
+              run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Auto-Merge Minor Updates
+              if: |
+                  steps.metadata.outputs.update-type == 'version-update:semver-minor' &&
+                  steps.metadata.outputs.alert-state != 'OPEN'
+              run: gh pr merge ${{ github.event.pull_request.number }} --squash --auto --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Block Major Updates
+              if: |
+                  steps.metadata.outputs.update-type == 'version-update:semver-major' &&
+                  steps.metadata.outputs.alert-state != 'OPEN'
+              run: |
+                  echo "::warning::Major update requires manual review"
+                  gh pr comment ${{ github.event.pull_request.number }} \
+                    --body "[WARN] **Auto-merge blocked**: Major version update requires manual review.
+
+                  **Package**: ${{ steps.metadata.outputs.dependency-names }}
+                  **Update**: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}
+
+                  If this fixes a security vulnerability, add the \`security\` label to enable auto-merge."
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

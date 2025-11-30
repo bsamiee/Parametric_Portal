@@ -1,0 +1,66 @@
+name: Chore
+description: Maintenance task or housekeeping
+title: "[CHORE]: "
+labels: ["chore"]
+body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will this chore affect compatibility (e.g., drop Node version)?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
+    - type: dropdown
+      id: chore_type
+      attributes:
+          label: Chore Type
+          options:
+              - dependency-update
+              - tooling-config
+              - cleanup
+              - version-bump
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Files or packages to modify
+          placeholder: "package.json, pnpm-workspace.yaml"
+      validations:
+          required: true
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Task Description
+          description: What needs to be done?
+      validations:
+          required: true
+
+    - type: textarea
+      id: acceptance_criteria
+      attributes:
+          label: Acceptance Criteria
+          description: How will we know this is complete?
+          placeholder: |
+              - [ ] CI passes
+              - [ ] No new warnings
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true

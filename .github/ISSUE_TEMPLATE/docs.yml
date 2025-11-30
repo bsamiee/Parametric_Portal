@@ -1,0 +1,55 @@
+name: Documentation
+description: Create or update documentation
+title: "[DOCS]: "
+labels: ["docs"]
+body:
+    - type: dropdown
+      id: doc_type
+      attributes:
+          label: Documentation Type
+          options:
+              - new
+              - update
+              - fix-error
+              - add-examples
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Documentation file to create/update
+          placeholder: "docs/AUTOMATION.md, README.md, CLAUDE.md"
+      validations:
+          required: true
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Proposed Content
+          description: What should the documentation say?
+          placeholder: |
+              ## Section Title
+              Description of the topic...
+      validations:
+          required: true
+
+    - type: textarea
+      id: rationale
+      attributes:
+          label: Rationale
+          description: Why is this documentation needed?
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true

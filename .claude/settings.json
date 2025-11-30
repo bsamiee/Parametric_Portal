@@ -1,0 +1,102 @@
+{
+    "agents": [
+        {
+            "description": "Advanced TypeScript 6.0-dev with Effect/Option FP/ROP patterns",
+            "name": "typescript-advanced",
+            "prompt": "You are a TypeScript specialist. Read .github/agents/typescript-advanced.agent.md. KEY: Branded types via S.brand(), Effect/Option pipelines, NO any/var/let/if-else."
+        },
+        {
+            "description": "React 19 canary with Compiler, Server Components, use() hook",
+            "name": "react-specialist",
+            "prompt": "You are a React 19 specialist. Read .github/agents/react-specialist.agent.md. KEY: Server Components, use() hook, Compiler integration, Effect error boundaries."
+        },
+        {
+            "description": "Vite 7 + Nx 22 configuration with dispatch tables and polymorphic createConfig",
+            "name": "vite-nx-specialist",
+            "prompt": "You are a Vite/Nx specialist. Read .github/agents/vite-nx-specialist.agent.md. KEY: Single B constant, dispatch tables, polymorphic createConfig(), Crystal inference."
+        },
+        {
+            "description": "Vitest 4 with Effect/Option testing patterns and V8 coverage",
+            "name": "testing-specialist",
+            "prompt": "You are a testing specialist. Read .github/agents/testing-specialist.agent.md. KEY: Effect.runSync for testing, Option.isSome assertions, V8 coverage >= 80%."
+        },
+        {
+            "description": "Bundle optimization, tree-shaking, code splitting analysis",
+            "name": "performance-analyst",
+            "prompt": "You are a performance analyst. Read .github/agents/performance-analyst.agent.md. KEY: Bundle <250KB gzipped, manual chunks via B.chunks, visualizer analysis."
+        },
+        {
+            "description": "Large refactors, B constant consolidation, pipeline migration",
+            "name": "refactoring-architect",
+            "prompt": "You are a refactoring architect. Read .github/agents/refactoring-architect.agent.md. KEY: Consolidate to single B constant, migrate if/else to dispatch tables."
+        },
+        {
+            "description": "New Nx package creation with catalog dependencies",
+            "name": "library-planner",
+            "prompt": "You are a library planner. Read .github/agents/library-planner.agent.md. KEY: pnpm catalog:, createConfig({ mode: 'library' }), composite tsconfig."
+        },
+        {
+            "description": "Cross-package consistency, single B constants, workspace patterns",
+            "name": "integration-specialist",
+            "prompt": "You are an integration specialist. Read .github/agents/integration-specialist.agent.md. KEY: Catalog consistency, shared B constants, workspace-wide patterns."
+        },
+        {
+            "description": "Technical documentation aligned with dogmatic patterns",
+            "name": "documentation-specialist",
+            "prompt": "You are a documentation specialist. Read .github/agents/documentation-specialist.agent.md. KEY: Concise docs, code examples with B constant/dispatch patterns."
+        },
+        {
+            "description": "Code polish, algorithmic density (25-30 LOC/feature)",
+            "name": "cleanup-specialist",
+            "prompt": "You are a cleanup specialist. Read .github/agents/cleanup-specialist.agent.md. KEY: 25-30 LOC/feature density, remove redundancy, verify pnpm typecheck && pnpm check."
+        }
+    ],
+    "customInstructions": "CRITICAL: Read REQUIREMENTS.md before ANY code changes. Dogmatic FP/ROP patterns are mandatory.",
+    "hooks": {
+        "SessionStart": [
+            {
+                "hooks": [
+                    {
+                        "command": "echo '📋 Loaded: REQUIREMENTS.md standards active. 10 agents available via Task tool.'",
+                        "type": "command"
+                    }
+                ]
+            }
+        ]
+    },
+    "mcpServers": {
+        "nx": {
+            "args": ["nx", "mcp"],
+            "command": "npx"
+        }
+    },
+    "model": "claude-opus-4-5-20251101",
+    "permissions": {
+        "allow": [
+            "Read",
+            "Write",
+            "Edit",
+            "Bash(pnpm:*)",
+            "Bash(nx:*)",
+            "Bash(git:*)",
+            "Bash(gh:*)",
+            "Bash(node:*)",
+            "Glob",
+            "Grep",
+            "Task",
+            "WebSearch",
+            "WebFetch(domain:vitejs.dev)",
+            "WebFetch(domain:biomejs.dev)",
+            "WebFetch(domain:effect.website)",
+            "WebFetch(domain:nx.dev)",
+            "WebFetch(domain:react.dev)",
+            "mcp__context7__*",
+            "mcp__github__*",
+            "mcp__tavily__*",
+            "mcp__perplexity__*",
+            "mcp__exa__*"
+        ],
+        "ask": [],
+        "deny": []
+    }
+}

@@ -1,0 +1,198 @@
+name: CI
+
+on:
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    # --- Normalize Commit (Independent) -----------------------------------------------
+    # Transforms [TYPE!]: to type!: format for Nx release compatibility.
+    # Runs independently - when it force-pushes, concurrency cancels this workflow
+    # and a new workflow starts with the normalized commit.
+    normalize-commit:
+        name: Normalize Commit
+        if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  fetch-depth: 1
+            - uses: ./.github/actions/node-env
+            - uses: ./.github/actions/normalize-commit
+
+    # --- Quality Gate -----------------------------------------------------------------
+    quality:
+        name: Code Quality
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        permissions:
+            contents: write
+            actions: read
+            issues: write
+            pull-requests: write
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  fetch-depth: 0
+                  filter: tree:0
+
+            - name: Setup Environment
+              id: env
+              uses: ./.github/actions/node-env
+              with:
+                  nx: 'true'
+                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+                  nx-distribute: 'true'
+                  nx-distribute-config: '.nx/workflows/distribution-config.yaml'
+                  nx-stop-on-success: 'true'
+                  nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+                  nx-fix-tasks: '*lint*,*check*,*format*'
+
+            - name: Setup Git Identity
+              if: github.event_name == 'pull_request'
+              uses: ./.github/actions/git-identity
+
+            - name: Biome Auto-Repair
+              id: biome-repair
+              if: github.event_name == 'pull_request'
+              run: |
+                  pnpm exec biome check --write --unsafe .
+                  if [[ -n $(git status --porcelain) ]]; then
+                    echo "has_changes=true" >> $GITHUB_OUTPUT
+                  else
+                    echo "has_changes=false" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Commit Biome Fixes
+              id: commit-fixes
+              if: github.event_name == 'pull_request' && steps.biome-repair.outputs.has_changes == 'true'
+              run: |
+                  git add -u
+                  git commit -m "style: biome auto-repair" \
+                      -m "" \
+                      -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+                  if ! git push; then
+                    echo "::error::Failed to push biome fixes. This may occur if the PR is from a fork or if there are concurrent commits."
+                    exit 1
+                  fi
+                  echo "committed=true" >> $GITHUB_OUTPUT
+
+            - name: Comment on Biome Repair
+              if: github.event_name == 'pull_request' && steps.commit-fixes.outputs.committed == 'true'
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      await github.rest.issues.createComment({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: context.payload.pull_request.number,
+                        body: '[OK] **Biome Auto-Repair Applied**\n\nStyle issues have been automatically fixed and committed. CI will re-run with the fixed code.'
+                      });
+
+            - name: Lint (Biome)
+              run: pnpm exec nx affected -t lint
+
+            - name: Type Check
+              run: pnpm exec nx affected -t typecheck
+
+            - name: Build
+              run: pnpm exec nx affected -t build
+
+            - name: Test
+              run: pnpm exec nx affected -t test
+
+            - name: Generate Project Graph
+              if: always()
+              run: pnpm exec nx graph --file=.nx/project-graph.json
+              continue-on-error: true
+
+            - name: Upload Coverage and Project Graph
+              if: always()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+              with:
+                  name: ci-artifacts
+                  path: |
+                      **/coverage
+                      .nx/project-graph.json
+                  if-no-files-found: ignore
+                  retention-days: 7
+
+            - name: Job Summary
+              if: always()
+              run: |
+                  echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
+                  pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Cache Status" >> $GITHUB_STEP_SUMMARY
+                  echo "| Target | Cache Hit |" >> $GITHUB_STEP_SUMMARY
+                  echo "|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+                  for target in lint typecheck build test; do
+                    HIT_COUNT=$(pnpm exec nx show projects --affected --json 2>/dev/null | jq 'length // 0')
+                    echo "| $target | $HIT_COUNT projects affected |" >> $GITHUB_STEP_SUMMARY
+                  done
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
+                  NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
+                  if [[ -n "$NX_CLOUD_ID" ]]; then
+                    echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
+                    echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/analytics) - Time to Green analytics" >> $GITHUB_STEP_SUMMARY
+                  fi
+                  echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
+
+            - name: Create Quality Debt Issue
+              if: failure()
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              env:
+                  NODE_OPTIONS: --import tsx
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
+                      await run({
+                        context: { repo: context.repo, payload: { action: 'created', issue: {} } },
+                        core,
+                        github,
+                        spec: {
+                          kind: 'ci',
+                          job: '${{ github.job }}',
+                          runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+                        }
+                      });
+
+    # --- Release ----------------------------------------------------------------------
+    release:
+        name: Release
+        needs: [quality]
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'chore(release)')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  fetch-depth: 0
+
+            - uses: ./.github/actions/node-env
+              with:
+                  nx: 'true'
+                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+
+            - uses: ./.github/actions/git-identity
+
+            - name: Release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: pnpm nx release

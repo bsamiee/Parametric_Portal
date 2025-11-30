@@ -1,0 +1,81 @@
+name: Performance
+description: Performance optimization or regression
+title: "[PERF]: "
+labels: ["perf"]
+body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will this optimization change APIs or behavior?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
+    - type: dropdown
+      id: perf_type
+      attributes:
+          label: Performance Area
+          options:
+              - bundle-size
+              - runtime
+              - build-time
+              - memory
+              - tree-shaking
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: File, package, or area to optimize
+          placeholder: "@parametric/ui, src/lib/heavy.ts"
+      validations:
+          required: true
+
+    - type: textarea
+      id: current_metrics
+      attributes:
+          label: Current Metrics
+          description: Baseline performance measurements
+          placeholder: |
+              Bundle: 450KB gzipped
+              Build: 45s
+          render: yaml
+      validations:
+          required: true
+
+    - type: textarea
+      id: target_metrics
+      attributes:
+          label: Target Metrics
+          description: Performance goals
+          placeholder: |
+              Bundle: <250KB gzipped
+              Build: <30s
+          render: yaml
+      validations:
+          required: true
+
+    - type: textarea
+      id: analysis
+      attributes:
+          label: Analysis
+          description: Root cause or optimization opportunity
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+              - critical
+      validations:
+          required: true

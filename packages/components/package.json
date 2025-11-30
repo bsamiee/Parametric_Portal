@@ -1,0 +1,81 @@
+{
+    "dependencies": {
+        "@effect/schema": "catalog:",
+        "@radix-ui/react-slot": "catalog:",
+        "class-variance-authority": "catalog:",
+        "clsx": "catalog:",
+        "cmdk": "catalog:",
+        "effect": "catalog:",
+        "lucide-react": "catalog:",
+        "react": "catalog:",
+        "react-aria": "catalog:",
+        "react-stately": "catalog:",
+        "tailwind-merge": "catalog:"
+    },
+    "devDependencies": {
+        "@fast-check/vitest": "catalog:",
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "fast-check": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
+    },
+    "exports": {
+        "./command": {
+            "import": "./dist/command.js",
+            "types": "./dist/command.d.ts"
+        },
+        "./controls": {
+            "import": "./dist/controls.js",
+            "types": "./dist/controls.d.ts"
+        },
+        "./data": {
+            "import": "./dist/data.js",
+            "types": "./dist/data.d.ts"
+        },
+        "./elements": {
+            "import": "./dist/elements.js",
+            "types": "./dist/elements.d.ts"
+        },
+        "./feedback": {
+            "import": "./dist/feedback.js",
+            "types": "./dist/feedback.d.ts"
+        },
+        "./icons": {
+            "import": "./dist/icons.js",
+            "types": "./dist/icons.d.ts"
+        },
+        "./navigation": {
+            "import": "./dist/navigation.js",
+            "types": "./dist/navigation.d.ts"
+        },
+        "./overlays": {
+            "import": "./dist/overlays.js",
+            "types": "./dist/overlays.d.ts"
+        },
+        "./schema": {
+            "import": "./dist/schema.js",
+            "types": "./dist/schema.d.ts"
+        },
+        "./selection": {
+            "import": "./dist/selection.js",
+            "types": "./dist/selection.d.ts"
+        },
+        "./utility": {
+            "import": "./dist/utility.js",
+            "types": "./dist/utility.d.ts"
+        }
+    },
+    "name": "@parametric-portal/components",
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.5.0"
+}
