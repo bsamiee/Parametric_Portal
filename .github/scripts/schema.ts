@@ -192,8 +192,8 @@ const B = Object.freeze({
         },
         exempt: ['critical', 'implement', 'pinned', 'security'] as const,
         gql: {
-            pin: `mutation($id:ID!){pinIssue(input:{issueId:$id}){issue{id}}}`,
-            unpin: `mutation($id:ID!){unpinIssue(input:{issueId:$id}){issue{id}}}`,
+            pin: `mutation($issueId:ID!){pinIssue(input:{issueId:$issueId}){issue{id}}}`,
+            unpin: `mutation($issueId:ID!){unpinIssue(input:{issueId:$issueId}){issue{id}}}`,
         } as const,
     },
     meta: {
