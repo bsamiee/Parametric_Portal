@@ -1,18 +1,8 @@
 {
     "bypass_actors": [
         {
-            "actor_id": 6,
+            "actor_id": 5,
             "actor_type": "RepositoryRole",
-            "bypass_mode": "always"
-        },
-        {
-            "actor_id": 2740,
-            "actor_type": "Integration",
-            "bypass_mode": "always"
-        },
-        {
-            "actor_id": 29110,
-            "actor_type": "Integration",
             "bypass_mode": "always"
         }
     ],
@@ -23,7 +13,7 @@
         }
     },
     "enforcement": "active",
-    "id": 10586321,
+    "id": 10589928,
     "name": "Main Quality Gate",
     "rules": [
         {
