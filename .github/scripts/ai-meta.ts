@@ -36,6 +36,7 @@ const strip = (text: string): string =>
         .trim();
 const hasType = (labels: ReadonlyArray<Label>): boolean =>
     labels.some((label) => (TYPES as ReadonlyArray<string>).includes(label.name));
+const isDashboard = (labels: ReadonlyArray<Label>): boolean => labels.some((label) => label.name === 'dashboard');
 const isBreak = (title: string, body: string | null): boolean =>
     B.pr.pattern.exec(title)?.[2] === '!' || B.breaking.bodyPat.test(body ?? '');
 
@@ -148,8 +149,8 @@ const run = async (params: RunParams & { spec: Spec; cfg: Config }): Promise<{ f
     const items = await Promise.all(
         (['issue', 'pr'] as const).map((category) =>
             call(ctx, B.meta.ops[category].list, 'open', '').then((result) =>
-                (result as ReadonlyArray<Issue & { pull_request?: unknown }>).filter((issue) =>
-                    category === 'issue' ? !issue.pull_request : true,
+                (result as ReadonlyArray<Issue & { pull_request?: unknown }>).filter(
+                    (issue) => (category === 'issue' ? !issue.pull_request : true) && !isDashboard(issue.labels),
                 ),
             ),
         ),
