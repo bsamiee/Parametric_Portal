@@ -1,3 +1,14 @@
+## 0.5.1 (2025-11-30)
+
+### Refactoring
+
+- comprehensive GitHub workflow infrastructure audit and optimization ([#76](https://github.com/bsamiee/Parametric_Portal/pull/76), [#77](https://github.com/bsamiee/Parametric_Portal/issues/77))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Copilot @Copilot
+
 ## 0.5.0 (2025-11-30)
 
 ### Features
