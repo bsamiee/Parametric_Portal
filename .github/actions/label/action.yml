@@ -41,8 +41,8 @@ runs:
               NODE_OPTIONS: --import tsx
           with:
               script: |
-                  const { behavior } = await import('${{ github.workspace }}/.github/scripts/label.ts');
-                  const result = await behavior({
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/label.ts');
+                  const result = await run({
                       context: { repo: context.repo, payload: context.payload },
                       core,
                       github,
