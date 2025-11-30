@@ -70,7 +70,7 @@ const analyze = (pr: PR, commits: ReadonlyArray<Commit>): Analysis => {
     const prType = titleType(pr.title);
     const subject = strip(pr.title);
     const labels = pr.labels.map((l) => l.name);
-    const ops: Array<LabelOp> = [];
+    const ops: ReadonlyArray<LabelOp> = [
     !hasType(pr.labels) && commitType && ops.push({ name: commitType, op: 'add' });
     actualBrk && !labels.includes(B.breaking.label) && ops.push({ name: B.breaking.label, op: 'add' });
     !actualBrk && labels.includes(B.breaking.label) && ops.push({ name: B.breaking.label, op: 'remove' });
