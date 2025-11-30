@@ -9,7 +9,7 @@ import { type BodySpec, createCtx, fn, mutate, type RunParams } from './schema.t
 // --- Domain Config (ALERTS) -------------------------------------------------
 
 type DebtClass = { readonly labels: ReadonlyArray<string>; readonly type: string };
-type Rule<V> = { readonly p: RegExp; readonly v: V };
+type Rule<V> = { readonly pattern: RegExp; readonly value: V };
 
 const ALERTS = Object.freeze({
     ci: {
@@ -24,10 +24,10 @@ const ALERTS = Object.freeze({
         default: { labels: ['tech-debt', 'refactor'], type: 'Quality' } as DebtClass,
         pattern: 'Debt:',
         rules: [
-            { p: /build/i, v: { labels: ['tech-debt', 'performance'], type: 'Performance' } },
-            { p: /compression/i, v: { labels: ['tech-debt', 'performance'], type: 'Performance' } },
-            { p: /mutate/i, v: { labels: ['tech-debt', 'testing'], type: 'Mutation' } },
-            { p: /test/i, v: { labels: ['tech-debt', 'testing'], type: 'Mutation' } },
+            { pattern: /build/i, value: { labels: ['tech-debt', 'performance'], type: 'Performance' } },
+            { pattern: /compression/i, value: { labels: ['tech-debt', 'performance'], type: 'Performance' } },
+            { pattern: /mutate/i, value: { labels: ['tech-debt', 'testing'], type: 'Mutation' } },
+            { pattern: /test/i, value: { labels: ['tech-debt', 'testing'], type: 'Mutation' } },
         ] as ReadonlyArray<Rule<DebtClass>>,
     },
     security: {
@@ -60,17 +60,17 @@ type AlertSpec =
 
 const run = async (params: RunParams & { readonly spec: AlertSpec }): Promise<void> => {
     const ctx = createCtx(params);
-    const s = params.spec;
+    const spec = params.spec;
     const cfg =
-        s.kind === 'ci'
-            ? ((c) => ({
-                  body: fn.body(ALERTS.ci.body, { job: s.job, runUrl: s.runUrl }),
-                  labels: c.labels,
+        spec.kind === 'ci'
+            ? ((classification) => ({
+                  body: fn.body(ALERTS.ci.body, { job: spec.job, runUrl: spec.runUrl }),
+                  labels: classification.labels,
                   pattern: ALERTS.ci.pattern,
-                  title: `${c.type} Debt: CI Failure`,
-              }))(fn.classify(s.job, ALERTS.ci.rules, ALERTS.ci.default))
+                  title: `${classification.type} Debt: CI Failure`,
+              }))(fn.classify(spec.job, ALERTS.ci.rules, ALERTS.ci.default))
             : {
-                  body: fn.body(ALERTS.security.body, { runUrl: s.runUrl }),
+                  body: fn.body(ALERTS.security.body, { runUrl: spec.runUrl }),
                   labels: [...ALERTS.security.labels],
                   pattern: ALERTS.security.pattern,
                   title: ALERTS.security.title,
@@ -83,7 +83,7 @@ const run = async (params: RunParams & { readonly spec: AlertSpec }): Promise<vo
         t: 'issue',
         title: cfg.title,
     });
-    params.core.info(`${s.kind} alert created/updated`);
+    params.core.info(`${spec.kind} alert created/updated`);
 };
 
 // --- Export -----------------------------------------------------------------

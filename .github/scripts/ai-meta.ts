@@ -1,236 +1,169 @@
 #!/usr/bin/env tsx
 /**
- * Polymorphic fixer for GitHub object metadata with AI fallback.
- * Pipeline: local inference → Claude → GitHub Models.
+ * Universal GitHub metadata fixer. Validates titles, labels, bodies, commits.
+ * Three-tier: local inference → Claude → GitHub Models.
  */
 
-import {
-    cleanTitle,
-    formatCommit,
-    formatTitle,
-    hasTypeLabel,
-    inferType,
-    isBreaking,
-    needsFix,
-    parseCommit,
-    parseTitle,
-    validTypes,
-} from './meta-validate.ts';
 import {
     B,
     type Ctx,
     call,
     createCtx,
+    fmt,
+    fn,
     type Issue,
-    type MetaCat,
+    type Label,
     mutate,
     type RunParams,
     type Target,
+    TYPES,
+    type TypeKey,
 } from './schema.ts';
 
-// --- Types ------------------------------------------------------------------
+// --- Type Definitions -------------------------------------------------------
 
-type CommitInfo = { readonly message: string; readonly sha: string };
-type AgentConfig = { readonly key?: string; readonly token: string };
-type FixSpec = {
-    readonly target: Target | 'all';
-    readonly n?: number;
-    readonly limit?: number;
-    readonly commits?: ReadonlyArray<CommitInfo>;
-};
-type FixResult = {
-    readonly fixed: number;
-    readonly provider: 'local' | 'claude' | 'github' | 'none';
-    readonly commitMessage?: string;
-};
-type FixRet = { readonly n: number; readonly provider: string; readonly value?: string };
+type Config = { readonly key?: string; readonly token: string };
+type Spec = { readonly targets?: ReadonlyArray<Target>; readonly limit?: number };
+type Commit = { readonly message: string; readonly sha: string };
 
-// --- Helpers ----------------------------------------------------------------
+// --- Pure Utility Functions -------------------------------------------------
 
-const op = (cat: MetaCat, o: 'list' | 'update'): string | undefined =>
-    (B.meta.ops[cat] as Record<string, string | undefined>)?.[o];
-
-const cleanMsg = (msg: string): string =>
-    msg
-        .replace(/^(\w+)(!?)(\(.+\))?:\s*/i, '')
-        .split('\n')[0]
+const infer = (text: string): TypeKey => fn.classify(text, B.meta.infer, 'chore') as TypeKey;
+const strip = (text: string): string =>
+    text
+        .replace(/^\[.*?\]:?\s*/i, '')
+        .replace(/^(\w+)(\(.*?\))?:?\s*/i, '')
         .trim();
-
-const badCommit = (commits?: ReadonlyArray<CommitInfo>) => commits?.find((c) => !parseCommit(c.message).valid);
-
-// --- AI Providers -----------------------------------------------------------
-
-const providers = {
-    claude: (key: string, prompt: string) =>
-        fetch('https://api.anthropic.com/v1/messages', {
-            body: JSON.stringify({
-                max_tokens: 256,
-                messages: [{ content: prompt, role: 'user' }],
-                model: 'claude-sonnet-4-20250514',
-            }),
-            headers: { 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'x-api-key': key },
-            method: 'POST',
-        })
-            .then((r) => r.json())
-            .then((d) => (d as { content: { text: string }[] }).content[0]?.text ?? null),
-    github: (token: string, prompt: string) =>
-        fetch('https://models.github.ai/inference/chat/completions', {
-            body: JSON.stringify({ messages: [{ content: prompt, role: 'user' }], model: 'openai/gpt-4o' }),
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            method: 'POST',
-        })
-            .then((r) => r.json())
-            .then((d) => (d as { choices: { message: { content: string } }[] }).choices[0]?.message?.content ?? null),
-} as const;
-
-const ask = (cfg: AgentConfig, prompt: string): Promise<string | null> =>
-    (cfg.key ? providers.claude(cfg.key, prompt) : providers.github(cfg.token, prompt)).catch(() => null);
+const hasType = (labels: ReadonlyArray<Label>): boolean =>
+    labels.some((label) => (TYPES as ReadonlyArray<string>).includes(label.name));
+const isBreak = (title: string, body: string | null): boolean =>
+    B.pr.pattern.exec(title)?.[2] === '!' || B.breaking.bodyPat.test(body ?? '');
 
 // --- Dispatch Tables --------------------------------------------------------
 
-const localFix: Record<Target, (i: Issue, commits?: ReadonlyArray<CommitInfo>) => string | null> = {
-    body: () => null,
-    commit: (_, commits) => {
-        const bad = badCommit(commits);
-        return bad ? formatCommit(inferType(bad.message), null, cleanMsg(bad.message), false) : null;
+const COMMIT_PAT = /^(\w+)(!?)(?:\(.+\))?:\s*(.+)$/;
+
+const RULES: Record<
+    Target,
+    {
+        readonly ok: (issue: Issue, commits?: ReadonlyArray<Commit>) => boolean;
+        readonly fix: (issue: Issue, commits?: ReadonlyArray<Commit>) => string | null;
+        readonly write: (ctx: Ctx, number: number, value: string) => Promise<unknown>;
+        readonly prompt: (issue: Issue) => string;
+    }
+> = {
+    body: {
+        fix: () => null,
+        ok: (issue) => (issue.body?.trim().length ?? 0) >= 20,
+        prompt: (issue) => `Generate markdown body for: "${issue.title}". Return ONLY body.`,
+        write: (ctx, number, value) => call(ctx, 'issue.updateMeta', number, { body: value }),
     },
-    label: (i) => (hasTypeLabel(i.labels) ? null : inferType(i.title)),
-    title: (i) =>
-        parseTitle(i.title).valid
-            ? null
-            : formatTitle(inferType(i.title), cleanTitle(i.title), isBreaking(i.title, i.body)),
+    commit: {
+        fix: (_, commits) =>
+            ((bad) =>
+                bad ? `${infer(bad.message)}${isBreak(bad.message, null) ? '!' : ''}: ${strip(bad.message)}` : null)(
+                commits?.find((commit) => !COMMIT_PAT.test(commit.message)),
+            ),
+        ok: (_, commits) => commits?.every((commit) => COMMIT_PAT.test(commit.message)) ?? true,
+        prompt: (issue) => `Fix commit to conventional: type: desc. Current: "${issue.title}". Return ONLY message.`,
+        write: () => Promise.resolve(),
+    },
+    label: {
+        fix: (issue) => infer(issue.title),
+        ok: (issue) => hasType(issue.labels),
+        prompt: (issue) => `Classify: ${TYPES.join(',')}. Title: "${issue.title}". Return ONE type.`,
+        write: (ctx, number, value) => mutate(ctx, { action: 'add', labels: [value], n: number, t: 'label' }),
+    },
+    title: {
+        fix: (issue) => `${fmt.title(infer(issue.title), isBreak(issue.title, issue.body))} ${strip(issue.title)}`,
+        ok: (issue) => B.pr.pattern.test(issue.title),
+        prompt: (issue) =>
+            `Fix to [TYPE]: format. Types: ${TYPES.join(',')}. Current: "${issue.title}". Return ONLY title.`,
+        write: (ctx, number, value) => call(ctx, 'issue.updateMeta', number, { title: value }),
+    },
 };
 
-const aiPrompts: Record<Target, (i: Issue) => string> = {
-    body: (i) => `Generate concise markdown body for: "${i.title}". Return ONLY the body.`,
-    commit: (i) => `Fix commit to conventional: type(scope): desc. Current: "${i.title}". Return ONLY message.`,
-    label: (i) => `Classify into ONE type: ${validTypes.join(', ')}. Title: "${i.title}". Return ONLY type.`,
-    title: (i) => `Fix to [TYPE]: format. Types: ${validTypes.join(', ')}. Current: "${i.title}". Return ONLY title.`,
-};
+// --- AI Providers -----------------------------------------------------------
 
-const applyFix: Record<Target, (ctx: Ctx, n: number, v: string) => Promise<unknown>> = {
-    body: (ctx, n, v) => call(ctx, 'issue.updateMeta', n, { body: v }),
-    commit: () => Promise.resolve(),
-    label: (ctx, n, v) => mutate(ctx, { action: 'add', labels: [v], n, t: 'label' }),
-    title: (ctx, n, v) => call(ctx, 'issue.updateMeta', n, { title: v }),
-};
+const ai = (config: Config, prompt: string): Promise<string | null> =>
+    fetch(
+        config.key ? 'https://api.anthropic.com/v1/messages' : 'https://models.github.ai/inference/chat/completions',
+        {
+            body: JSON.stringify(
+                config.key
+                    ? {
+                          max_tokens: 256,
+                          messages: [{ content: prompt, role: 'user' }],
+                          model: 'claude-sonnet-4-20250514',
+                      }
+                    : { messages: [{ content: prompt, role: 'user' }], model: 'openai/gpt-4o' },
+            ),
+            headers: config.key
+                ? { 'anthropic-version': '2023-06-01', 'content-type': 'application/json', 'x-api-key': config.key }
+                : { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json' },
+            method: 'POST',
+        },
+    )
+        .then((response) => response.json())
+        .then(
+            (data) =>
+                (data as { content?: ReadonlyArray<{ text: string }> }).content?.[0]?.text ??
+                (data as { choices?: ReadonlyArray<{ message: { content: string } }> }).choices?.[0]?.message
+                    ?.content ??
+                null,
+        )
+        .catch(() => null);
 
-const needsFixPred: Record<Target, (i: Issue, commits?: ReadonlyArray<CommitInfo>) => boolean> = {
-    body: (i) => !i.body || i.body.trim().length < 20,
-    commit: (_, commits) => !!badCommit(commits),
-    label: (i) => !hasTypeLabel(i.labels),
-    title: (i) => needsFix('title', i.title),
-};
+// --- Effect Pipeline --------------------------------------------------------
 
-// --- Fix Pipeline -----------------------------------------------------------
+const fix = (ctx: Ctx, config: Config, target: Target, issue: Issue): Promise<number> =>
+    RULES[target].ok(issue)
+        ? Promise.resolve(0)
+        : ((local) =>
+              (local ? Promise.resolve(local) : ai(config, RULES[target].prompt(issue))).then((value) =>
+                  value ? RULES[target].write(ctx, issue.number, value.trim().split('\n')[0]).then(() => 1) : 0,
+              ))(RULES[target].fix(issue));
 
-const aiFix = (cfg: AgentConfig, target: Target, i: Issue): Promise<string | null> =>
-    ask(cfg, aiPrompts[target](i)).then((v) => v?.trim().split('\n')[0] ?? null);
-
-const apply = (ctx: Ctx, target: Target, n: number, v: string, provider: string): Promise<FixRet> =>
-    (target === 'commit' ? Promise.resolve() : applyFix[target](ctx, n, v)).then(() => ({ n: 1, provider, value: v }));
-
-const fixOne = (
-    ctx: Ctx,
-    cfg: AgentConfig,
-    target: Target,
-    i: Issue,
-    commits?: ReadonlyArray<CommitInfo>,
-): Promise<FixRet> =>
-    needsFixPred[target](i, commits)
-        ? Promise.resolve(localFix[target](i, commits)).then((local) =>
-              local
-                  ? apply(ctx, target, i.number, local, 'local')
-                  : aiFix(cfg, target, i).then((ai) =>
-                        ai
-                            ? apply(ctx, target, i.number, ai, cfg.key ? 'claude' : 'github')
-                            : { n: 0, provider: 'none' },
-                    ),
-          )
-        : Promise.resolve({ n: 0, provider: 'none' });
-
-const syncBreaking = async (ctx: Ctx, n: number, i: Issue): Promise<FixRet> => {
-    const titleBrk = B.pr.pattern.exec(i.title)?.[2] === '!';
-    const bodyBrk = B.breaking.bodyPat.test(i.body ?? '');
-    const hasLbl = i.labels.some((l) => l.name === B.breaking.label);
-    const isBrk = titleBrk || bodyBrk;
-    const m = i.title.match(B.pr.pattern);
-    const changed =
-        ((isBrk && !hasLbl && (await mutate(ctx, { action: 'add', labels: [B.breaking.label], n, t: 'label' }))) ||
-            (!isBrk &&
-                hasLbl &&
-                (await mutate(ctx, { action: 'remove', labels: [B.breaking.label], n, t: 'label' }))) ||
-            (isBrk &&
-                !titleBrk &&
-                m &&
-                (await call(ctx, 'issue.updateMeta', n, {
-                    title: formatTitle(m[1].toLowerCase() as never, m[3], true),
-                })))) ??
-        false;
-    return { n: changed ? 1 : 0, provider: 'local' };
-};
-
-const processCat = async (
-    ctx: Ctx,
-    cfg: AgentConfig,
-    target: Target,
-    lim: number,
-    cat: MetaCat,
-): Promise<ReadonlyArray<FixRet>> => {
-    const items = (await call(ctx, op(cat, 'list') ?? '', 'open', '')) as ReadonlyArray<Issue>;
-    const filtered = cat === 'issue' ? items.filter((i) => !(i as { pull_request?: unknown }).pull_request) : items;
-    const toFix = filtered.filter((i) => needsFixPred[target](i)).slice(0, lim);
-    return Promise.all([
-        ...toFix.map((i) => fixOne(ctx, cfg, target, i)),
-        ...toFix.map((i) => syncBreaking(ctx, i.number, i)),
-    ]);
-};
-
-const fixTarget = (
-    ctx: Ctx,
-    cfg: AgentConfig,
-    target: Target,
-    lim: number,
-    commits?: ReadonlyArray<CommitInfo>,
-): Promise<ReadonlyArray<FixRet>> =>
-    target === 'commit'
-        ? commits?.length
-            ? fixOne(ctx, cfg, target, {} as Issue, commits).then((r) => [r])
-            : Promise.resolve([])
-        : Promise.all(
-              (['issue', 'pr'] as const)
-                  .filter((c) => !!op(c, 'list'))
-                  .map((c) => processCat(ctx, cfg, target, lim, c)),
-          ).then((r) => r.flat());
+const sync = (ctx: Ctx, issue: Issue): Promise<number> =>
+    ((breaking, hasLabel) =>
+        breaking !== hasLabel
+            ? mutate(ctx, {
+                  action: breaking ? 'add' : 'remove',
+                  labels: [B.breaking.label],
+                  n: issue.number,
+                  t: 'label',
+              }).then(() => 1)
+            : Promise.resolve(0))(
+        isBreak(issue.title, issue.body),
+        issue.labels.some((label) => label.name === B.breaking.label),
+    );
 
 // --- Entry Point ------------------------------------------------------------
 
-const run = async (p: RunParams & { spec: FixSpec; agentConfig: AgentConfig }): Promise<FixResult> => {
-    const ctx = createCtx(p);
-    const { spec, agentConfig } = p;
-    const hasCommits = (spec.commits?.length ?? 0) > 0;
-    const baseTargets: ReadonlyArray<Target> = ['title', 'label', 'body'];
-    const targets: ReadonlyArray<Target> =
-        spec.target === 'all' ? (hasCommits ? [...baseTargets, 'commit'] : baseTargets) : [spec.target];
-    const limit = spec.limit ?? 10;
-
-    const allResults: ReadonlyArray<FixRet> =
-        spec.n !== undefined
-            ? await call(ctx, 'issue.get', spec.n)
-                  .catch(() => call(ctx, 'pull.get', spec.n))
-                  .then((i) => Promise.all(targets.map((t) => fixOne(ctx, agentConfig, t, i as Issue, spec.commits))))
-                  .catch(() => [{ n: 0, provider: 'none' }])
-            : (await Promise.all(targets.map((t) => fixTarget(ctx, agentConfig, t, limit, spec.commits)))).flat();
-
-    const fixed = allResults.reduce((a, r) => a + r.n, 0);
-    const commitResult = allResults.find((r) => r.value && targets.includes('commit'));
-    const provider = (allResults.find((r) => r.provider !== 'none')?.provider as FixResult['provider']) ?? 'none';
-
-    p.core.info(`[META] ${provider}: fixed ${fixed} items`);
-    return { commitMessage: commitResult?.value, fixed, provider };
+const run = async (params: RunParams & { spec: Spec; cfg: Config }): Promise<{ fixed: number; provider: string }> => {
+    const ctx = createCtx(params);
+    const targets = (params.spec.targets ?? ['title', 'label', 'body']).filter(
+        (target): target is Exclude<Target, 'commit'> => target !== 'commit',
+    );
+    const items = await Promise.all(
+        (['issue', 'pr'] as const).map((category) =>
+            call(ctx, B.meta.ops[category].list, 'open', '').then((result) =>
+                (result as ReadonlyArray<Issue & { pull_request?: unknown }>).filter((issue) =>
+                    category === 'issue' ? !issue.pull_request : true,
+                ),
+            ),
+        ),
+    ).then((results) => results.flat().slice(0, params.spec.limit ?? 10));
+    const results = await Promise.all([
+        ...items.flatMap((issue) => targets.map((target) => fix(ctx, params.cfg, target, issue))),
+        ...items.map((issue) => sync(ctx, issue)),
+    ]);
+    const fixed = results.reduce((acc, count) => acc + count, 0);
+    params.core.info(`[META] fixed ${fixed} items`);
+    return { fixed, provider: fixed > 0 ? 'mixed' : 'none' };
 };
 
 // --- Export -----------------------------------------------------------------
 
 export { run };
-export type { AgentConfig, FixResult, FixSpec };
+export type { Commit, Config, Spec };

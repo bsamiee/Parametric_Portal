@@ -1,15 +1,13 @@
 name: Meta Fixer
-description: Auto-fix GitHub object metadata (titles, labels, commits) with AI fallback
+description: Universal GitHub metadata fixer (titles, labels, bodies) with AI fallback
 
 inputs:
-    target:
-        description: 'Target: title|label|body|commit|all'
-        required: true
-    number:
-        description: 'Issue/PR number (optional - fixes single item)'
+    targets:
+        description: 'Targets: title,label,body (comma-separated, default: all)'
         required: false
+        default: 'title,label,body'
     limit:
-        description: 'Max items per category (default: 10)'
+        description: 'Max items to process (default: 10)'
         required: false
         default: '10'
     anthropic_api_key:
@@ -21,11 +19,8 @@ outputs:
         description: 'Number of items fixed'
         value: ${{ steps.run.outputs.fixed }}
     provider:
-        description: 'Provider used (local|claude|github|none)'
+        description: 'Provider used (mixed|none)'
         value: ${{ steps.run.outputs.provider }}
-    commit_message:
-        description: 'Fixed commit message (when target=commit)'
-        value: ${{ steps.run.outputs.commit_message }}
 
 runs:
     using: composite
@@ -34,30 +29,26 @@ runs:
           uses: actions/checkout@v4
           with:
               ref: ${{ github.event.pull_request.head.ref || github.ref }}
-              fetch-depth: 2
 
         - uses: ./.github/actions/node-env
 
         - name: Run Meta Fixer
           id: run
-          shell: bash
+          uses: actions/github-script@v7
           env:
               ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
-              GITHUB_TOKEN: ${{ github.token }}
-              META_TARGET: ${{ inputs.target }}
-              META_NUMBER: ${{ inputs.number }}
-              META_LIMIT: ${{ inputs.limit }}
-              GH_REPO: ${{ github.repository }}
-              GH_EVENT: ${{ github.event_name }}
-              GH_PR_NUMBER: ${{ github.event.pull_request.number }}
-          run: |
-              npx tsx .github/scripts/ai-meta-cli.ts
-
-        - name: Amend Commit
-          if: (inputs.target == 'commit' || inputs.target == 'all') && steps.run.outputs.commit_message != ''
-          shell: bash
-          run: |
-              git config user.name "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
-              git commit --amend -m "${{ steps.run.outputs.commit_message }}"
-              git push --force-with-lease
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/ai-meta.ts');
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          targets: '${{ inputs.targets }}'.split(',').map(s => s.trim()),
+                          limit: parseInt('${{ inputs.limit }}'),
+                      },
+                      cfg: { key: process.env.ANTHROPIC_API_KEY ?? '', token: process.env.GITHUB_TOKEN ?? '' },
+                  });
+                  core.setOutput('fixed', result.fixed);
+                  core.setOutput('provider', result.provider);

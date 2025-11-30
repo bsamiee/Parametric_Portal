@@ -10,16 +10,16 @@ import { type Ctx, call, createCtx, fn, type Issue, type LabelCat, mutate, type 
 
 type ContentSpec = { readonly kind: string } & Record<string, unknown>;
 type ContentConfig = {
-    readonly src: { readonly s: 'fetch'; readonly op: string; readonly a?: ReadonlyArray<unknown> };
-    readonly fmt: { readonly f: 'table'; readonly t: string; readonly h: ReadonlyArray<string> };
+    readonly src: { readonly source: 'fetch'; readonly op: string; readonly args?: ReadonlyArray<unknown> };
+    readonly fmt: { readonly format: 'table'; readonly title: string; readonly headers: ReadonlyArray<string> };
     readonly out: {
-        readonly o: 'summary' | 'comment' | 'issue';
-        readonly m?: string;
-        readonly p?: string;
-        readonly l?: ReadonlyArray<string>;
-        readonly t?: string;
+        readonly output: 'summary' | 'comment' | 'issue';
+        readonly marker?: string;
+        readonly pattern?: string;
+        readonly labels?: ReadonlyArray<string>;
+        readonly title?: string;
     };
-    readonly filters?: ReadonlyArray<{ readonly l: string; readonly cat: LabelCat; readonly idx?: number }>;
+    readonly filters?: ReadonlyArray<{ readonly label: string; readonly cat: LabelCat; readonly idx?: number }>;
     readonly row?: 'count' | 'list';
 };
 
@@ -28,13 +28,13 @@ type ContentConfig = {
 const CONTENT: Record<string, ContentConfig> = Object.freeze({
     aging: {
         filters: [
-            { cat: 'priority', l: 'Critical' },
-            { cat: 'lifecycle', idx: 1, l: 'Stale' },
+            { cat: 'priority', label: 'Critical' },
+            { cat: 'lifecycle', idx: 1, label: 'Stale' },
         ],
-        fmt: { f: 'table', h: ['Category', 'Count'], t: 'Issue Aging Report' },
-        out: { o: 'summary' },
+        fmt: { format: 'table', headers: ['Category', 'Count'], title: 'Issue Aging Report' },
+        out: { output: 'summary' },
         row: 'count',
-        src: { a: ['open'], op: 'issue.list', s: 'fetch' },
+        src: { args: ['open'], op: 'issue.list', source: 'fetch' },
     },
 } as const);
 
@@ -43,9 +43,9 @@ const CONTENT: Record<string, ContentConfig> = Object.freeze({
 type SourceFn = (ctx: Ctx, cfg: ContentConfig, spec: ContentSpec, p: RunParams) => Promise<unknown>;
 
 const sources: Record<string, SourceFn> = {
-    fetch: async (ctx, cfg) => call(ctx, cfg.src.op, ...(cfg.src.a ?? [])),
+    fetch: async (ctx, cfg) => call(ctx, cfg.src.op, ...(cfg.src.args ?? [])),
     params: async (_, __, spec) => Promise.resolve(spec),
-    payload: async (_, __, ___, p) => Promise.resolve(p.context.payload),
+    payload: async (_, __, ___, params) => Promise.resolve(params.context.payload),
 };
 
 // --- Builders ---------------------------------------------------------------
@@ -61,26 +61,26 @@ const buildRows = (cfg: ContentConfig, data: unknown): ReadonlyArray<ReadonlyArr
 // --- Outputs ----------------------------------------------------------------
 
 const outputs = {
-    comment: async (ctx: Ctx, _: RunParams, body: string, cfg: ContentConfig, n: number): Promise<void> => {
+    comment: async (ctx: Ctx, _: RunParams, body: string, cfg: ContentConfig, number: number): Promise<void> => {
         await mutate(ctx, {
             body,
-            marker: cfg.out.m ?? '',
-            n,
+            marker: cfg.out.marker ?? '',
+            n: number,
             t: 'comment',
         });
     },
     issue: async (ctx: Ctx, _: RunParams, body: string, cfg: ContentConfig): Promise<void> => {
         await mutate(ctx, {
             body,
-            label: cfg.out.l?.[0] ?? '',
-            labels: [...(cfg.out.l ?? [])],
-            pattern: cfg.out.p ?? '',
+            label: cfg.out.labels?.[0] ?? '',
+            labels: [...(cfg.out.labels ?? [])],
+            pattern: cfg.out.pattern ?? '',
             t: 'issue',
-            title: cfg.out.t ?? cfg.fmt.t,
+            title: cfg.out.title ?? cfg.fmt.title,
         });
     },
-    summary: async (_: Ctx, p: RunParams, body: string): Promise<void> => {
-        p.core.summary.addRaw(body).write();
+    summary: async (_: Ctx, params: RunParams, body: string): Promise<void> => {
+        params.core.summary.addRaw(body).write();
     },
 } as const;
 
@@ -90,7 +90,7 @@ const formatters = {
     body: (_cfg: ContentConfig, spec: ContentSpec): string => fn.body([], spec as Record<string, string>),
     table: (cfg: ContentConfig, data: unknown, now: Date): string => {
         const rows = buildRows(cfg, data);
-        return fn.report(cfg.fmt.t, cfg.fmt.h, rows, { footer: fn.timestamp(now) });
+        return fn.report(cfg.fmt.title, cfg.fmt.headers, rows, { footer: fn.timestamp(now) });
     },
 } as const;
 
@@ -100,9 +100,9 @@ const run = async (params: RunParams & { readonly spec: ContentSpec }): Promise<
     const ctx = createCtx(params);
     const cfg = CONTENT[params.spec.kind as keyof typeof CONTENT];
     const now = new Date();
-    const data = await sources[cfg.src.s](ctx, cfg, params.spec, params);
-    const body = cfg.fmt.f === 'table' ? formatters.table(cfg, data, now) : formatters.body(cfg, params.spec);
-    await outputs[cfg.out.o](ctx, params, body, cfg, (params.spec as { n?: number }).n ?? 0);
+    const data = await sources[cfg.src.source](ctx, cfg, params.spec, params);
+    const body = cfg.fmt.format === 'table' ? formatters.table(cfg, data, now) : formatters.body(cfg, params.spec);
+    await outputs[cfg.out.output](ctx, params, body, cfg, (params.spec as { number?: number }).number ?? 0);
     params.core.info(`${params.spec.kind} report generated`);
 };
 

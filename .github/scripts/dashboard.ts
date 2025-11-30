@@ -10,7 +10,6 @@ import {
     type Commit,
     type Ctx,
     call,
-    check,
     createCtx,
     fn,
     type Issue,
@@ -21,7 +20,7 @@ import {
     type WorkflowRun,
 } from './schema.ts';
 
-// --- Domain Config (DASHBOARD) ----------------------------------------------
+// --- Domain Configuration ---------------------------------------------------
 
 const DASHBOARD = Object.freeze({
     actions: [
@@ -97,7 +96,7 @@ type Metrics = {
 
 const { colors, targets } = DASHBOARD;
 const since = (days: number): Date => new Date(Date.now() - days * B.time.day);
-const isBot = (p: PR): boolean => DASHBOARD.bots.some((b) => p.user.login === b);
+const isBot = (pr: PR): boolean => DASHBOARD.bots.some((bot) => pr.user.login === bot);
 const url = (repo: string, path: string, query = ''): string =>
     `https://github.com/${repo}/${path}${query ? `?q=${query}` : ''}`;
 
@@ -117,42 +116,42 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
         call(ctx, 'release.latest') as Promise<string | undefined>,
         call(ctx, 'actions.listWorkflows') as Promise<ReadonlyArray<Workflow> | undefined>,
     ]);
-    const actualOpenIssues = openIssues.filter((i) => !i.pull_request);
+    const actualOpenIssues = openIssues.filter((issue) => !issue.pull_request);
     const actualClosedIssues = closedIssues.filter(
-        (i) => !i.pull_request && i.closed_at && new Date(i.closed_at) > sinceDate,
+        (issue) => !issue.pull_request && issue.closed_at && new Date(issue.closed_at) > sinceDate,
     );
-    const merged = closedPrs.filter((p) => p.merged_at && new Date(p.merged_at) > sinceDate);
-    const stale = openPrs.filter((p) => fn.age(p.updated_at, new Date()) > DASHBOARD.staleDays);
+    const merged = closedPrs.filter((pr) => pr.merged_at && new Date(pr.merged_at) > sinceDate);
+    const stale = openPrs.filter((pr) => fn.age(pr.updated_at, new Date()) > DASHBOARD.staleDays);
     const workflowMetrics = await Promise.all(
-        (allWorkflows ?? []).map(async (w): Promise<WorkflowMetric | null> => {
-            const file = w.path.split('/').pop()?.replace('.yml', '') ?? '';
+        (allWorkflows ?? []).map(async (workflow): Promise<WorkflowMetric | null> => {
+            const file = workflow.path.split('/').pop()?.replace('.yml', '') ?? '';
             const allRuns = (await call(ctx, 'actions.listWorkflowRuns', `${file}.yml`, `>=${monitorSince}`)) as
                 | ReadonlyArray<WorkflowRun>
                 | undefined;
             const runs =
                 allRuns?.filter(
-                    (r) =>
-                        r.conclusion &&
+                    (run) =>
+                        run.conclusion &&
                         !DASHBOARD.excludeConclusions.includes(
-                            r.conclusion as (typeof DASHBOARD.excludeConclusions)[number],
+                            run.conclusion as (typeof DASHBOARD.excludeConclusions)[number],
                         ),
                 ) ?? [];
             const total = runs.length;
-            const passed = runs.filter((r) => r.conclusion === 'success').length;
+            const passed = runs.filter((run) => run.conclusion === 'success').length;
             const lastRun = runs[0];
             const chunk = Math.ceil(total / DASHBOARD.sparklineWidth);
-            const recentRates = Array.from({ length: DASHBOARD.sparklineWidth }, (_, i) =>
+            const recentRates = Array.from({ length: DASHBOARD.sparklineWidth }, (_, index) =>
                 ((slice) =>
                     slice.length > 0
-                        ? Math.round((slice.filter((r) => r.conclusion === 'success').length / slice.length) * 100)
-                        : 0)(runs.slice(i * chunk, Math.min((i + 1) * chunk, total))),
+                        ? Math.round((slice.filter((run) => run.conclusion === 'success').length / slice.length) * 100)
+                        : 0)(runs.slice(index * chunk, Math.min((index + 1) * chunk, total))),
             ).reverse();
             return total > 0
                 ? {
                       failed: total - passed,
                       file,
                       lastRunId: lastRun?.id ?? 0,
-                      name: w.name,
+                      name: workflow.name,
                       passed,
                       rate: Math.round((passed / total) * 100),
                       recentRates,
@@ -161,17 +160,18 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
                 : null;
         }),
     );
-    const activeWorkflows = workflowMetrics.filter((w): w is WorkflowMetric => w !== null);
+    const activeWorkflows = workflowMetrics.filter((wf): wf is WorkflowMetric => wf !== null);
     const [totalRuns, totalPassed] = activeWorkflows.reduce<[number, number]>(
-        ([r, p], w) => [r + w.runs, p + w.passed],
+        ([runs, passes], wf) => [runs + wf.runs, passes + wf.passed],
         [0, 0],
     );
     return {
         commits: commits.length,
-        contributors: new Set(commits.map((c) => c.author?.login).filter(Boolean)).size,
+        contributors: new Set(commits.map((commit) => commit.author?.login).filter(Boolean)).size,
         depsMerged: merged.filter(isBot).length,
         depsOpen: openPrs.filter(isBot).length,
-        issueBugs: actualOpenIssues.filter((i) => check('label', i.labels, DASHBOARD.labels.fix)).length,
+        issueBugs: actualOpenIssues.filter((issue) => issue.labels.some((label) => label.name === DASHBOARD.labels.fix))
+            .length,
         issueClosed: actualClosedIssues.length,
         issueOpen: actualOpenIssues.length,
         prMerged: merged.length,
@@ -185,53 +185,53 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
 
 // --- Section Renderers ------------------------------------------------------
 
-const sections: Record<string, (m: Metrics, repo: string) => string> = {
+const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
     actions: (_, repo) => {
-        const internal = DASHBOARD.actions.map((a) => md.link(`\`${a.label}\``, url(repo, a.path)));
+        const internal = DASHBOARD.actions.map((action) => md.link(`\`${action.label}\``, url(repo, action.path)));
         const external = DASHBOARD.externalLinks
-            .filter((l) => l.enabled())
-            .map((l) => md.link(`\`${l.label}\``, l.url()));
+            .filter((link) => link.enabled())
+            .map((link) => md.link(`\`${link.label}\``, link.url()));
         return [...internal, ...external].join(' · ');
     },
-    activity: (m, repo) => {
-        const botQuery = DASHBOARD.bots.map((b) => `author%3Aapp%2F${b.replace('[bot]', '')}`).join('+');
+    activity: (metrics, repo) => {
+        const botQuery = DASHBOARD.bots.map((bot) => `author%3Aapp%2F${bot.replace('[bot]', '')}`).join('+');
         return fn.report(
             'Activity',
             ['Resource', 'Open', `Merged/Closed (${DASHBOARD.window}d)`, 'Attention'],
             [
                 [
                     md.link('Pull Requests', url(repo, 'pulls')),
-                    String(m.prOpen),
-                    `${m.prMerged} merged`,
-                    m.prStale > 0 ? `${m.prStale} stale` : '-',
+                    String(metrics.prOpen),
+                    `${metrics.prMerged} merged`,
+                    metrics.prStale > 0 ? `${metrics.prStale} stale` : '-',
                 ],
                 [
                     md.link('Issues', url(repo, 'issues')),
-                    String(m.issueOpen),
-                    `${m.issueClosed} closed`,
-                    m.issueBugs > 0 ? `${m.issueBugs} bugs` : '-',
+                    String(metrics.issueOpen),
+                    `${metrics.issueClosed} closed`,
+                    metrics.issueBugs > 0 ? `${metrics.issueBugs} bugs` : '-',
                 ],
                 [
                     md.link('Dependencies', url(repo, 'pulls', `is%3Apr+${botQuery}`)),
-                    String(m.depsOpen),
-                    `${m.depsMerged} merged`,
+                    String(metrics.depsOpen),
+                    `${metrics.depsMerged} merged`,
                     '-',
                 ],
             ],
             { align: ['l', 'r', 'c', 'c'] },
         );
     },
-    badges: (m, repo) => {
+    badges: (metrics, repo) => {
         const ciColor =
-            m.workflowRate >= targets.workflowSuccess
+            metrics.workflowRate >= targets.workflowSuccess
                 ? colors.success
-                : m.workflowRate >= targets.workflowWarning
+                : metrics.workflowRate >= targets.workflowWarning
                   ? colors.warning
                   : colors.error;
         const badges = [
             md.shieldLink(
                 'CI',
-                `${m.workflowRate}%25`,
+                `${metrics.workflowRate}%25`,
                 ciColor,
                 md.url.actions(repo),
                 'for-the-badge',
@@ -239,16 +239,16 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
             ),
             md.shieldLink(
                 'PRs',
-                `${m.prOpen}_open`,
-                m.prStale > 0 ? colors.warning : colors.info,
+                `${metrics.prOpen}_open`,
+                metrics.prStale > 0 ? colors.warning : colors.info,
                 url(repo, 'pulls'),
                 'for-the-badge',
                 'git',
             ),
             md.shieldLink(
                 'Issues',
-                `${m.issueOpen}_open`,
-                m.issueBugs > 0 ? colors.warning : colors.info,
+                `${metrics.issueOpen}_open`,
+                metrics.issueBugs > 0 ? colors.warning : colors.info,
                 url(repo, 'issues'),
                 'for-the-badge',
                 'target',
@@ -267,7 +267,7 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
             );
         return badges.join(' ');
     },
-    ci: (m, repo) => {
+    ci: (metrics, repo) => {
         const statusBadge = (rate: number, file: string): string =>
             md.link(
                 rate >= targets.workflowSuccess
@@ -279,15 +279,16 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
             ((diff) => (diff > 0 ? `+${diff}%` : diff < 0 ? `${diff}%` : '-'))(
                 rates.length >= 2 ? rates[rates.length - 1] - rates[0] : 0,
             );
-        const rows = m.workflows.map((w) => [
-            md.link(w.name, md.url.workflow(repo, w.file)),
-            String(w.runs),
-            `${w.rate}%`,
-            trendPct(w.recentRates),
-            w.lastRunId > 0 ? md.link('Logs', md.url.logs(repo, w.lastRunId)) : '-',
-            statusBadge(w.rate, w.file),
+        const rows = metrics.workflows.map((wf) => [
+            md.link(wf.name, md.url.workflow(repo, wf.file)),
+            String(wf.runs),
+            `${wf.rate}%`,
+            trendPct(wf.recentRates),
+            wf.lastRunId > 0 ? md.link('Logs', md.url.logs(repo, wf.lastRunId)) : '-',
+            statusBadge(wf.rate, wf.file),
         ]);
-        const progress = m.workflows.length > 0 ? `\n\n**Overall CI Health:** ${md.progress(m.workflowRate)}` : '';
+        const progress =
+            metrics.workflows.length > 0 ? `\n\n**Overall CI Health:** ${md.progress(metrics.workflowRate)}` : '';
         return rows.length > 0
             ? fn.report('CI Status', ['Workflow', 'Runs', 'Rate', 'Trend', 'Latest', 'Status'], rows, {
                   align: ['l', 'r', 'c', 'c', 'c', 'c'],
@@ -298,15 +299,15 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
         const workflowUrl = `https://github.com/${repo}/blob/main/.github/workflows/${DASHBOARD.workflow}`;
         return `- [ ] <!-- ${DASHBOARD.marker} -->Check this box to trigger a dashboard refresh\n\n<p align="center"><sub>Generated by <a href="${workflowUrl}">${DASHBOARD.workflow}</a></sub></p>\n<p align="center"><sub>Updated every ${DASHBOARD.schedule.interval} ${DASHBOARD.schedule.unit}</sub></p>`;
     },
-    header: (m) =>
-        `> **${m.release}** · ${m.commits} commits (${DASHBOARD.window}d) · ${m.contributors} contributors\n> _Updated: ${fn.formatTime(new Date())}_`,
-    health: (m) => {
+    header: (metrics) =>
+        `> **${metrics.release}** · ${metrics.commits} commits (${DASHBOARD.window}d) · ${metrics.contributors} contributors\n> _Updated: ${fn.formatTime(new Date())}_`,
+    health: (metrics) => {
         const issues = [
-            m.prStale > DASHBOARD.targets.stalePrs &&
-                `[WARN] **${m.prStale} stale PRs** need review (>${DASHBOARD.staleDays} days without update)`,
-            m.workflowRate < DASHBOARD.targets.workflowSuccess &&
-                `[WARN] **CI success rate** at ${m.workflowRate}% (target: ${DASHBOARD.targets.workflowSuccess}%)`,
-            m.issueBugs > 0 && `[FIX] **${m.issueBugs} open bugs** requiring attention`,
+            metrics.prStale > DASHBOARD.targets.stalePrs &&
+                `[WARN] **${metrics.prStale} stale PRs** need review (>${DASHBOARD.staleDays} days without update)`,
+            metrics.workflowRate < DASHBOARD.targets.workflowSuccess &&
+                `[WARN] **CI success rate** at ${metrics.workflowRate}% (target: ${DASHBOARD.targets.workflowSuccess}%)`,
+            metrics.issueBugs > 0 && `[FIX] **${metrics.issueBugs} open bugs** requiring attention`,
         ].filter(Boolean) as ReadonlyArray<string>;
         return `## Health Check\n\n${issues.length > 0 ? md.alert('warning', issues.join('\n')) : md.alert('tip', '[OK] All health targets met. Repository is in good shape!')}`;
     },
@@ -321,27 +322,27 @@ const sections: Record<string, (m: Metrics, repo: string) => string> = {
         ),
 };
 
-const format = (m: Metrics, repo: string): string =>
+const format = (metrics: Metrics, repo: string): string =>
     [
         `# ${DASHBOARD.output.displayTitle}`,
-        sections.badges(m, repo),
-        sections.actions(m, repo),
-        sections.header(m, repo),
-        sections.activity(m, repo),
-        sections.ci(m, repo),
-        sections.health(m, repo),
-        sections.thresholds(m, repo),
+        sections.badges(metrics, repo),
+        sections.actions(metrics, repo),
+        sections.header(metrics, repo),
+        sections.activity(metrics, repo),
+        sections.ci(metrics, repo),
+        sections.health(metrics, repo),
+        sections.thresholds(metrics, repo),
         '---',
-        sections.footer(m, repo),
+        sections.footer(metrics, repo),
     ].join('\n\n');
 
 // --- Entry Point ------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: DashboardSpec }): Promise<void> =>
     ((ctx, repo) =>
-        collect(ctx).then((m) =>
+        collect(ctx).then((metrics) =>
             mutate(ctx, {
-                body: format(m, repo),
+                body: format(metrics, repo),
                 label: DASHBOARD.output.label,
                 labels: [...DASHBOARD.output.labels],
                 mode: 'replace',

@@ -10,7 +10,7 @@ import { B, type BodySpec, call, createCtx, fn, md, mutate, type RunParams } fro
 
 type ReasonKey = 'canary' | 'major' | 'mutation';
 type GateClass = { readonly eligible: boolean; readonly reason?: ReasonKey };
-type Rule<V> = { readonly p: RegExp; readonly v: V };
+type Rule<V> = { readonly pattern: RegExp; readonly value: V };
 
 const GATING = Object.freeze({
     actions: {
@@ -49,10 +49,10 @@ const GATING = Object.freeze({
     } as const,
     patterns: { package: /update ([\w\-@/]+) to v?(\d+)/i, score: /(\d+)%/ } as const,
     rules: [
-        { p: /major/i, v: { eligible: false, reason: 'major' } },
-        { p: /canary|beta|rc|alpha|preview/i, v: { eligible: false, reason: 'canary' } },
-        { p: /minor/i, v: { eligible: true } },
-        { p: /patch/i, v: { eligible: true } },
+        { pattern: /major/i, value: { eligible: false, reason: 'major' } },
+        { pattern: /canary|beta|rc|alpha|preview/i, value: { eligible: false, reason: 'canary' } },
+        { pattern: /minor/i, value: { eligible: true } },
+        { pattern: /patch/i, value: { eligible: true } },
     ] as ReadonlyArray<Rule<GateClass>>,
 } as const);
 
@@ -73,17 +73,17 @@ type GateResult = { readonly eligible: boolean };
 // --- Helpers ----------------------------------------------------------------
 
 const parsePackage = (title: string): { readonly pkg: string; readonly version: string } | null =>
-    ((m) => m && { pkg: m[1], version: m[2] })(title.match(GATING.patterns.package)) ?? null;
+    ((match) => match && { pkg: match[1], version: match[2] })(title.match(GATING.patterns.package)) ?? null;
 
 const extractScore = (runs: ReadonlyArray<CheckRun>, checkName: string): number =>
-    parseInt(runs.find((r) => r.name === checkName)?.output?.summary?.match(GATING.patterns.score)?.[1] ?? '0', 10);
+    parseInt(runs.find((run) => run.name === checkName)?.output?.summary?.match(GATING.patterns.score)?.[1] ?? '0', 10);
 
 // --- Entry Point ------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: GateSpec }): Promise<GateResult> => {
     const ctx = createCtx(params);
     const spec = params.spec;
-    const c = fn.classify(spec.title.toLowerCase(), GATING.rules, GATING.default);
+    const classification = fn.classify(spec.title.toLowerCase(), GATING.rules, GATING.default);
 
     const ops = {
         block: async (reason: string, action: string): Promise<void> => {
@@ -116,19 +116,22 @@ const run = async (params: RunParams & { readonly spec: GateSpec }): Promise<Gat
                 title: `Migration: ${pkg} v${version}`,
             }),
     };
-    c.reason && (await ops.block(GATING.messages[c.reason], GATING.actions[c.reason]));
-    const mutationResult = c.eligible ? await ops.checkMutation() : { passed: true, score: 100 };
-    const eligible = c.eligible && mutationResult.passed;
+    classification.reason &&
+        (await ops.block(GATING.messages[classification.reason], GATING.actions[classification.reason]));
+    const mutationResult = classification.eligible ? await ops.checkMutation() : { passed: true, score: 100 };
+    const eligible = classification.eligible && mutationResult.passed;
     !mutationResult.passed &&
-        c.eligible &&
+        classification.eligible &&
         (await ops.block(
             `${GATING.messages.mutation} (${mutationResult.score}% < ${B.algo.mutationPct}%)`,
             GATING.actions.mutation,
         ));
-    c.reason === 'major' &&
+    classification.reason === 'major' &&
         (spec.migrate ?? true) &&
-        (await ((p) => (p ? ops.migrate(p.pkg, p.version) : Promise.resolve()))(parsePackage(spec.title)));
-    params.core.info(`Gate: ${eligible ? 'eligible' : 'blocked'} (${c.reason ?? 'ok'})`);
+        (await ((parsed) => (parsed ? ops.migrate(parsed.pkg, parsed.version) : Promise.resolve()))(
+            parsePackage(spec.title),
+        ));
+    params.core.info(`Gate: ${eligible ? 'eligible' : 'blocked'} (${classification.reason ?? 'ok'})`);
     return { eligible };
 };
 
