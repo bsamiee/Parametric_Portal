@@ -25,16 +25,12 @@
 <details>
 <summary>Automated Checks (enforced by CI)</summary>
 
-| Check | Workflow | Status Check |
-|-------|----------|--------------|
-| Code style & linting | `pnpm check` | `Code Quality` |
-| Type safety | `pnpm typecheck` | `Code Quality` |
-| Tests pass | `pnpm test` | `Code Quality` |
-| PR title format | PR Metadata | `PR Metadata` |
-| Effect patterns | Claude review | `requirements-review` |
-| B constant pattern | Claude review | `requirements-review` |
-| No try/catch | Claude review | `requirements-review` |
-
-**Merge is blocked** until all status checks pass via GitHub Rulesets.
+| Check | Workflow |
+|-------|----------|
+| Code style & linting | CI / Code Quality |
+| Type safety | CI / Code Quality |
+| Tests pass | CI / Code Quality |
+| Security scanning | Security Scanning |
+| Claude code review | Claude Code Review |
 
 </details>

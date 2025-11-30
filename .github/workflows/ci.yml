@@ -11,6 +11,10 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    # --- Normalize Commit (Independent) -----------------------------------------------
+    # Transforms [TYPE!]: to type!: format for Nx release compatibility.
+    # Runs independently - when it force-pushes, concurrency cancels this workflow
+    # and a new workflow starts with the normalized commit.
     normalize-commit:
         name: Normalize Commit
         if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
@@ -22,18 +26,12 @@ jobs:
               with:
                   token: ${{ secrets.GITHUB_TOKEN }}
                   fetch-depth: 1
-
             - uses: ./.github/actions/node-env
-
             - uses: ./.github/actions/normalize-commit
 
+    # --- Quality Gate -----------------------------------------------------------------
     quality:
         name: Code Quality
-        needs: [normalize-commit]
-        if: |
-            always() &&
-            !cancelled() &&
-            (needs.normalize-commit.result == 'success' || needs.normalize-commit.result == 'skipped')
         runs-on: ubuntu-latest
         timeout-minutes: 15
         permissions:
@@ -154,11 +152,6 @@ jobs:
                   fi
                   echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 
-            - name: Nx Self-Healing
-              if: always()
-              run: pnpm exec nx fix-ci --merge --verbose
-              continue-on-error: true
-
             - name: Create Quality Debt Issue
               if: failure()
               uses: actions/github-script@v7
@@ -178,14 +171,11 @@ jobs:
                         }
                       });
 
+    # --- Release ----------------------------------------------------------------------
     release:
         name: Release
         needs: [quality]
-        if: |
-            always() &&
-            github.event_name == 'push' &&
-            needs.quality.result == 'success' &&
-            !contains(github.event.head_commit.message, 'chore(release)')
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'chore(release)')
         runs-on: ubuntu-latest
         timeout-minutes: 10
         permissions:

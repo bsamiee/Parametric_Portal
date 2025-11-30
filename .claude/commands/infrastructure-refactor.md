@@ -34,7 +34,7 @@
 
 
 [CONTEXT] 
-- We are in a monorepo project, building a repo agnostic workflow that is going to be used across many mono-repos, and your specialization and background is why you have been tasked with this. The agentic and automation infrastrucutre is designed to be entirely agentic first, all forms, fields, and workflows are designed to cohesively come together for a fully automated, agent run system, it is not meant for humans, though it must be human readable, and intelligble. For example, the issue_templates are designed to have the exact same values, formatting, and ordering and key value pairs for this exact reason, issues are not for humans, but for a prompt + dispatch layer, either user initiated, or agent or automation initiated, to prompt/initiate agentic behavior. Likewise, rulesets are made entirely to be permissive, not restrictive, they are simply guradrails, and rail-roads for agentic workflows, not for typical/standard usage
+- We are in a monorepo project, building a repo agnostic workflow that is going to be used across many mono-repos, and your specialization and background is why you have been tasked with this. The agentic and automation infrastrucutre is designed to be entirely agentic first, all forms, fields, and workflows are designed to cohesively come together for a fully automated, agent run system, it is not meant for humans, though it must be human readable, and intelligble. For example, the issue_templates are designed to have the exact same values, formatting, and ordering and key value pairs for this exact reason, issues are not for humans, but for a prompt + dispatch layer, either user initiated, or agent or automation initiated, to prompt/initiate agentic behavior
 - We have a three-paradigm “maintenance” system, active, passive, ai. Active is event triggered, passive is scheduled, and AI is mixed but fundamentally agentic, nto trigger based. Our ai-meta.ts and actions/meta-fixer/ is an action that is meant to be used in passive/active systems for complex actions that are better handled by AI than pure logic.
 
 [PAIN_POINTS]
@@ -69,7 +69,6 @@ IMPORTANT: Wherever you see [REQUIRED READING]: sub-agents MUST read these files
 - .github/workflows
 - .github/ISSUE_TEMPLATE
 - .github/actions
-- .github/rulesets
 - .nx/workflows/
 - ..claude
 - .github/labels.yml

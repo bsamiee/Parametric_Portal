@@ -386,7 +386,7 @@ Fields: style_type (dropdown), target, description, priority (dropdown).
 Fields: help_type (dropdown), question, context, attempted_solutions, relevant_files.
 
 **PULL_REQUEST_TEMPLATE.md**
-PR template with Summary, Related Issues, Changes, and Human Review Checklist sections. Includes expandable "Automated Checks" section listing CI status checks (quality, PR Metadata, requirements-review). Human checklist covers: tests for new behavior, documentation updates, complexity concerns. All automated checks enforced via GitHub Rulesets.
+PR template with Summary, Related Issues, Changes, and Human Review Checklist sections. Includes expandable "Automated Checks" section listing CI status checks. Human checklist covers: tests for new behavior, documentation updates, complexity concerns.
 
 ### Custom Agent Profiles
 
