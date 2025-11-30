@@ -23,8 +23,8 @@ type Behavior = 'pin' | 'unpin' | 'comment';
 const handlers: Record<Behavior, (ctx: Ctx, spec: LabelSpec) => Promise<void>> = {
     comment: (ctx, spec) =>
         mutate(ctx, { body: `Label \`${spec.label}\` applied`, marker: `LABEL-${spec.label}`, n: spec.number, t: 'comment' }),
-    pin: (ctx, spec) => call(ctx, 'issue.pin', spec.nodeId) as Promise<void>,
-    unpin: (ctx, spec) => call(ctx, 'issue.unpin', spec.nodeId) as Promise<void>,
+    pin: async (ctx, spec) => { await call(ctx, 'issue.pin', spec.nodeId); },
+    unpin: async (ctx, spec) => { await call(ctx, 'issue.unpin', spec.nodeId); },
 };
 
 // --- Pure Functions ---------------------------------------------------------
