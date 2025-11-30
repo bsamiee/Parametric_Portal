@@ -50,7 +50,7 @@ const run = async (params: RunParams & { readonly spec: LabelSpec }): Promise<La
     const behavior = resolve(params.spec.label, params.spec.action);
     behavior && (await handlers[behavior](ctx, params.spec));
     params.core.info(`[LABEL] ${params.spec.label} ${params.spec.action}: ${behavior ?? 'no-op'}`);
-    return { executed: behavior !== null, behavior };
+    return { behavior, executed: behavior !== null };
 };
 
 // --- Export -----------------------------------------------------------------
