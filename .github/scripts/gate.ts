@@ -21,15 +21,15 @@ const GATING = Object.freeze({
     body: {
         block: [
             { k: 'heading', level: 2, text: '{{title}}' },
-            { k: 'field', l: 'Reason', v: '{{reason}}' },
+            { k: 'field', label: 'Reason', value: '{{reason}}' },
             { k: 'timestamp' },
             { k: 'heading', level: 3, text: 'Action Required' },
             { content: '{{action}}', k: 'text' },
         ] as BodySpec,
         migration: [
             { k: 'heading', level: 2, text: 'Migration: {{package}}' },
-            { k: 'field', l: 'Version', v: 'v{{version}}' },
-            { k: 'field', l: 'Source PR', v: '#{{pr}}' },
+            { k: 'field', label: 'Version', value: 'v{{version}}' },
+            { k: 'field', label: 'Source PR', value: '#{{pr}}' },
             { k: 'heading', level: 3, text: 'Checklist' },
             {
                 items: [

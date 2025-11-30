@@ -42,8 +42,6 @@ const isBreak = (title: string, body: string | null): boolean =>
 
 // --- Dispatch Tables --------------------------------------------------------
 
-const COMMIT_PAT = /^(\w+)(!?)(?:\(.+\))?:\s*(.+)$/;
-
 const RULES: Record<
     Target,
     {
@@ -63,9 +61,9 @@ const RULES: Record<
         fix: (_, commits) =>
             ((bad) =>
                 bad ? `${infer(bad.message)}${isBreak(bad.message, null) ? '!' : ''}: ${strip(bad.message)}` : null)(
-                commits?.find((commit) => !COMMIT_PAT.test(commit.message)),
+                commits?.find((commit) => !B.patterns.commit.test(commit.message)),
             ),
-        ok: (_, commits) => commits?.every((commit) => COMMIT_PAT.test(commit.message)) ?? true,
+        ok: (_, commits) => commits?.every((commit) => B.patterns.commit.test(commit.message)) ?? true,
         prompt: (issue) => `Fix commit to conventional: type: desc. Current: "${issue.title}". Return ONLY message.`,
         write: () => Promise.resolve(),
     },

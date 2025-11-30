@@ -15,8 +15,8 @@ const ALERTS = Object.freeze({
     ci: {
         body: [
             { k: 'heading', level: 2, text: 'CI Failure' },
-            { k: 'field', l: 'Run', v: '{{runUrl}}' },
-            { k: 'field', l: 'Job', v: '{{job}}' },
+            { k: 'field', label: 'Run', value: '{{runUrl}}' },
+            { k: 'field', label: 'Job', value: '{{job}}' },
             { k: 'timestamp' },
             { k: 'heading', level: 3, text: 'Action Required' },
             { content: 'Review the failed CI run and address the issues before merging.', k: 'text' },
@@ -34,7 +34,7 @@ const ALERTS = Object.freeze({
         body: [
             { k: 'heading', level: 2, text: 'Security Scan Alert' },
             { k: 'timestamp' },
-            { k: 'field', l: 'Run', v: '{{runUrl}}' },
+            { k: 'field', label: 'Run', value: '{{runUrl}}' },
             { k: 'heading', level: 3, text: 'Action Required' },
             { content: 'Security vulnerabilities or compliance issues have been detected.', k: 'text' },
             { k: 'heading', level: 3, text: 'Next Steps' },

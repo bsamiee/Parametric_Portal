@@ -174,8 +174,8 @@ const B = Object.freeze({
     meta: {
         caps: {
             assigned: ['issue', 'pr'] as const,
+            committable: ['commit'] as const,
             labeled: ['issue', 'pr', 'discussion'] as const,
-            messaged: ['commit'] as const,
             milestoned: ['issue', 'pr'] as const,
             noted: ['release'] as const,
             projectable: ['issue', 'pr'] as const,
@@ -204,6 +204,7 @@ const B = Object.freeze({
         } as const,
     } as const,
     patterns: {
+        commit: /^(\w+)(!?)(?:\(.+\))?:\s*(.+)$/,
         header: (f: string) => new RegExp(`###\\s*${f}[\\s\\S]*?(?=###|$)`, 'i'),
         headerStrip: /###\s*[^\n]+\n?/,
         placeholder: /^_?No response_?$/i,
