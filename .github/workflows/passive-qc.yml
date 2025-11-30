@@ -2,6 +2,7 @@ name: Passive QC
 
 on:
     schedule:
+        # Run at :15 to avoid race conditions with dashboard.yml (:00)
         - cron: '15 */6 * * *'
 
 concurrency:
