@@ -4,7 +4,7 @@ on:
     pull_request:
         types: [opened, edited, synchronize]
     issues:
-        types: [opened, edited]
+        types: [opened, edited, labeled, unlabeled]
     push:
         branches: [main]
         paths: [".github/labels.yml"]
@@ -38,7 +38,9 @@ jobs:
 
     issue-meta:
         name: Issue Meta
-        if: github.event_name == 'issues'
+        if: |
+            github.event_name == 'issues' &&
+            (github.event.action == 'opened' || github.event.action == 'edited')
         runs-on: ubuntu-latest
         timeout-minutes: 5
         steps:
@@ -64,3 +66,25 @@ jobs:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
                   yaml-file: .github/labels.yml
                   skip-delete: true
+
+    pin-issue:
+        name: Pin/Unpin Issue
+        if: |
+            github.event_name == 'issues' &&
+            (github.event.action == 'labeled' || github.event.action == 'unlabeled') &&
+            github.event.label.name == 'pinned'
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
+        steps:
+            - name: Checkout
+              uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+              with:
+                  sparse-checkout: .github
+
+            - name: Handle Label
+              uses: ./.github/actions/label
+              with:
+                  action: ${{ github.event.action }}
+                  label: ${{ github.event.label.name }}
+                  node_id: ${{ github.event.issue.node_id }}
+                  number: ${{ github.event.issue.number }}

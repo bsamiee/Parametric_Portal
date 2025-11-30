@@ -17,47 +17,51 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/labels.yml` — Declarative label definitions with colors (managed by active-qc + passive-qc workflows)
 - `.github/copilot-instructions.md` — IDE agent instructions
 
-### GitHub Workflows (11 total)
-- `.github/workflows/ci.yml` — Main CI pipeline with quality gates
-- `.github/workflows/active-qc.yml` — PR title validation + label sync (event-driven)
-- `.github/workflows/passive-qc.yml` — Stale management + aging report + label sync backup (scheduled)
-- `.github/workflows/pr-review.yml` — Consolidated PR review: REQUIREMENTS.md compliance + feedback synthesis + /summarize
-- `.github/workflows/auto-merge.yml` — Dependabot PR auto-merge (Renovate uses native platformAutomerge)
-- `.github/workflows/biome-repair.yml` — Auto-fix style issues before review
-- `.github/workflows/dashboard.yml` — Repository health metrics dashboard
-- `.github/workflows/bundle-analysis.yml` — Bundle size tracking with PR comments
-- `.github/workflows/security.yml` — Multi-layer security scanning
-- `.github/workflows/ai-assist.yml` — Claude @mention integration
-- `.github/workflows/ai-maintenance.yml` — Weekly AI-driven maintenance tasks
+### GitHub Workflows (8 total)
+- `.github/workflows/active-qc.yml` — Event-driven QC: PR title/label validation, label sync on push
+- `.github/workflows/ai-maintenance.yml` — Weekly AI maintenance + manual tasks via Claude
+- `.github/workflows/auto-merge.yml` — Dependabot auto-merge for patch/minor/security
+- `.github/workflows/ci.yml` — Main CI: normalize commits, Biome auto-repair, Nx affected tasks
+- `.github/workflows/dashboard.yml` — Repository health metrics dashboard (6-hour schedule + checkbox trigger)
+- `.github/workflows/passive-qc.yml` — Scheduled QC: stale management, aging report, meta consistency
+- `.github/workflows/pr-review.yml` — REQUIREMENTS.md compliance + feedback synthesis + /summarize
+- `.github/workflows/security.yml` — Multi-layer: dependency audit, CodeQL, Gitleaks, license check
 
 **Note**: Releases are handled via `npx nx release` (configured in nx.json).
 
-### GitHub Scripts (8 total)
+### GitHub Scripts (9 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
-- `.github/scripts/schema.ts` — Polymorphic workflow infrastructure (B constant DSL, SpecRegistry, ops factory, mutate)
-- `.github/scripts/dashboard.ts` — Metrics collector with dispatch table section renderers
-- `.github/scripts/probe.ts` — Data extraction layer with target-type dispatch (issue/pr/discussion)
-- `.github/scripts/report.ts` — Config-driven report generator (source→format→output pipeline)
-- `.github/scripts/failure-alert.ts` — Alert creator using fn.classifyDebt and B.alerts
-- `.github/scripts/gate.ts` — Eligibility gate using fn.classifyGating rules
-- `.github/scripts/pr-meta.ts` — Title parser using B.pr.pattern and B.types mapping
-- `.github/scripts/env.ts` — Environment-driven configuration (lang, bundleThresholdKb, nxCloudWorkspaceId)
+- `.github/scripts/schema.ts` — Core infrastructure: B constant, types, markdown generators, ops factory, mutate handlers
+- `.github/scripts/dashboard.ts` — Metrics collector + section renderers for dashboard
+- `.github/scripts/probe.ts` — Data extraction layer for issues/PRs/discussions
+- `.github/scripts/report.ts` — Config-driven report generator
+- `.github/scripts/failure-alert.ts` — CI/security failure alert creator
+- `.github/scripts/gate.ts` — Eligibility gating for PRs
+- `.github/scripts/ai-meta.ts` — Universal metadata fixer with AI fallback
+- `.github/scripts/label.ts` — Label-triggered behavior executor (pin, unpin, comment)
+- `.github/scripts/env.ts` — Environment configuration (lang, bundleThresholdKb, nxCloudWorkspaceId)
 
-### GitHub Composite Actions (3 total)
-- `.github/actions/node-env/action.yml` — Node.js + pnpm setup with caching (used by all workflows)
+### GitHub Composite Actions (5 total)
+- `.github/actions/node-env/action.yml` — Node.js + pnpm + Nx setup with caching + distributed execution
 - `.github/actions/git-identity/action.yml` — Git user configuration for commits
-- `.github/actions/nx-cache/action.yml` — Universal Nx caching and affected command setup
+- `.github/actions/meta-fixer/action.yml` — Universal metadata fixer action using ai-meta.ts
+- `.github/actions/normalize-commit/action.yml` — Transform [TYPE!]: to type!: format
+- `.github/actions/label/action.yml` — Label-triggered behavior executor (pin, unpin, comment)
 
-### GitHub Templates (9 total)
+### GitHub Templates (12 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
-- `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (label: bug)
-- `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (label: feature)
-- `.github/ISSUE_TEMPLATE/enhancement.yml` — Enhancement form (label: enhancement)
+- `.github/ISSUE_TEMPLATE/bug_report.yml` — Bug report form (label: fix)
+- `.github/ISSUE_TEMPLATE/feature_request.yml` — Feature request form (label: feat)
 - `.github/ISSUE_TEMPLATE/refactor.yml` — Refactor request form (label: refactor)
-- `.github/ISSUE_TEMPLATE/help.yml` — Help request form (label: help)
+- `.github/ISSUE_TEMPLATE/perf.yml` — Performance improvement form (label: perf)
+- `.github/ISSUE_TEMPLATE/test.yml` — Test request form (label: test)
 - `.github/ISSUE_TEMPLATE/docs.yml` — Documentation form (label: docs)
 - `.github/ISSUE_TEMPLATE/chore.yml` — Maintenance task form (label: chore)
+- `.github/ISSUE_TEMPLATE/build.yml` — Build system form (label: build)
+- `.github/ISSUE_TEMPLATE/ci.yml` — CI/CD changes form (label: ci)
+- `.github/ISSUE_TEMPLATE/style.yml` — Formatting/style form (label: style)
+- `.github/ISSUE_TEMPLATE/help.yml` — Help request form (label: help)
 - `.github/PULL_REQUEST_TEMPLATE.md` — PR template with checklist
 
 ### Custom Agent Profiles (10 total)
@@ -100,7 +104,7 @@ All configuration in one frozen object with nested domains:
 - `B.content` — Report configurations (aging, bundle)
 - `B.dashboard` — Dashboard config (bots, colors, targets, schedule)
 - `B.gen` — Markdown generators (badges, shields, links, callouts)
-- `B.labels` — Label taxonomy (categories, exempt lists)
+- `B.labels` — Label taxonomy (categories, behaviors, exempt lists, GraphQL mutations)
 - `B.patterns` — Regex patterns for parsing
 - `B.probe` — Data collection defaults
 - `B.release` — Conventional commit mapping
@@ -138,51 +142,60 @@ Utility functions for common operations:
 
 Labels are managed declaratively via `.github/labels.yml` and synced automatically.
 
-### Type (required, single per issue)
+### Commit Type Labels (issue templates apply these)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `bug` | #d73a4a | Something isn't working |
-| `feature` | #a2eeef | New feature request |
-| `docs` | #0075ca | Documentation only |
-| `chore` | #d4a373 | Maintenance task |
-| `refactor` | #fbca04 | Code restructuring without behavior change |
-| `help` | #d876e3 | Question or assistance needed |
+| `fix` | #f05223 | Bug fix |
+| `feat` | #0969da | New feature request |
+| `docs` | #0067a6 | Improvements or additions to documentation |
+| `style` | #6c3082 | Formatting, no logic change |
+| `refactor` | #3a140e | Code restructuring without behavior change |
+| `test` | #6f4f38 | Adding or updating tests |
+| `chore` | #c4b091 | Maintenance task |
+| `perf` | #9aca3c | Performance improvement |
+| `ci` | #650e3d | CI/CD pipeline changes |
+| `build` | #93c572 | Build system or tooling |
+
+### Issue-Only Type Labels
+| Label | Color | Description |
+|-------|-------|-------------|
+| `help` | #702963 | Question or assistance needed |
 
 ### Priority (optional, escalation only)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `critical` | #b60205 | Must be addressed immediately |
+| `critical` | #ff473e | Must be addressed immediately |
 
 ### Action (what should happen)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `implement` | #7057ff | Ready for implementation |
-| `review` | #e99695 | Needs review |
-| `blocked` | #b60205 | Cannot proceed |
+| `implement` | #ee3a95 | Ready for implementation |
+| `review` | #FFF58A | Needs review |
+| `blocked` | #fed700 | Cannot proceed |
 
-### Provider (who handles - mutually exclusive)
+### Agent Labels (Mutually Exclusive)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `copilot` | #8b949e | Assign to GitHub Copilot |
-| `claude` | #8b949e | Assign to Claude |
-| `gemini` | #8b949e | Assign to Gemini |
-| `codex` | #8b949e | Assign to OpenAI Codex |
+| `copilot` | #848482 | Assign to GitHub Copilot |
+| `claude` | #848482 | Assign to Claude |
+| `gemini` | #848482 | Assign to Gemini |
+| `codex` | #848482 | Assign to OpenAI Codex |
 
 ### Lifecycle (system-managed)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `stale` | #57606a | No recent activity |
-| `pinned` | #006b75 | Exempt from stale |
+| `stale` | #2a3439 | No recent activity |
+| `pinned` | #123524 | Exempt from stale |
 
 ### Special (system-managed)
 | Label | Color | Description |
 |-------|-------|-------------|
-| `security` | #8957e5 | Security issue |
-| `dependencies` | #0550ae | Dependency updates |
-| `breaking` | #b60205 | Breaking change |
-| `dashboard` | #006b75 | Repository health dashboard |
+| `security` | #FF2DD1 | Security issue |
+| `dependencies` | #1D2952 | Dependency updates (bot-applied) |
+| `breaking` | #701c1c | Breaking change |
+| `dashboard` | #00a693 | Repository metrics dashboard |
 
-**Total: 21 labels**
+**Total: 25 labels**
 
 ---
 
@@ -207,17 +220,17 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         GitHub Workflows (12)                         │
-│  ┌──────────────┐  ┌─────────────────────────────────┐  ┌──────────┐ │
-│  │ CI Pipeline  │→│ pr-review.yml                    │←│ Biome    │ │
-│  │              │  │ (compliance + feedback synthesis)│  │ Repair   │ │
-│  └──────┬───────┘  └──────────────┬──────────────────┘  └──────────┘ │
+│                          GitHub Workflows (8)                         │
+│  ┌──────────────┐  ┌─────────────────────────────────┐               │
+│  │ CI Pipeline  │→│ pr-review.yml                    │               │
+│  │ (ci.yml)     │  │ (compliance + feedback synthesis)│               │
+│  └──────┬───────┘  └──────────────┬──────────────────┘               │
 │         │                         │                                   │
 │         ▼                         ▼                                   │
-│  ┌──────────────┐          ┌──────────────┐                          │
-│  │ Sys Maint    │          │ AI Maint     │                          │
-│  │ (labels+stale│          │ (weekly)     │                          │
-│  └──────────────┘          └──────────────┘                          │
+│  ┌───────────────────┐     ┌──────────────┐                          │
+│  │ active-qc.yml     │     │ AI Maint     │                          │
+│  │ + passive-qc.yml  │     │ (weekly)     │                          │
+│  └───────────────────┘     └──────────────┘                          │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
                              ▼
@@ -231,8 +244,8 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
           ┌──────────────────┴──────────────────┐
           ▼                                     ▼
-    GitHub Templates (9)              Renovate Auto-Merge
-    (type labels applied)             (mutation-gated)
+    GitHub Templates (12)             Dependabot Auto-Merge
+    (type labels applied)             (auto-merge.yml)
           │                                     │
           ▼                                     ▼
     Issue Created                       Dependency Updates
@@ -240,9 +253,9 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 
 ### Data Flow
 
-1. **Issue Creation**: Templates apply type labels (fix, feat, perf, style, test, docs, refactor, chore, help)
-2. **PR Lifecycle**: PR opened → Biome Repair → CI → Code Review → Merge
-3. **Dependency Flow**: Renovate PR → CI + Mutation → Auto-Merge gate → Merge/Block
+1. **Issue Creation**: Templates apply type labels (fix, feat, perf, style, test, docs, refactor, chore, build, ci, help)
+2. **PR Lifecycle**: PR opened → CI (Biome auto-repair) → Code Review → Merge
+3. **Dependency Flow**: Dependabot PR → CI → Auto-Merge gate → Merge/Block
 4. **Dashboard**: Schedule/command → schema.ts → collect metrics → render → update issue
 
 ---
@@ -271,22 +284,30 @@ Alert creator using `fn.classifyDebt()` for CI failures (maps job names → debt
 **gate.ts**
 Eligibility gate using `fn.classifyGating()` rules from `B.gating.rules`. Extracts scores from check run summaries via regex, blocks via `mutate` (comment + label), optionally creates migration issues. The gating logic is rule-driven and extensible.
 
-**pr-meta.ts**
-Title parser using `B.pr.pattern` regex and `B.types` commit-to-label mapping (`commitToLabel` derived map). Validates type exists in map, validates scope against `B.pr.scopes`, applies labels via `mutate` label handler.
+**ai-meta.ts**
+Universal metadata fixer with AI fallback. Parses PR/issue titles, validates against commit type patterns, applies appropriate labels, and uses AI when pattern matching fails.
+
+**label.ts**
+Label-triggered behavior executor with polymorphic dispatch. Single factory handles labeled/unlabeled events via `B.labels.behaviors` config. Dispatches to pin/unpin/comment handlers based on label name and action type.
 
 ### GitHub Workflows
 
-**pr-review.yml** (Consolidated)
-Unified PR review workflow combining REQUIREMENTS.md compliance review, AI/CI feedback synthesis, and /summarize command. Three jobs: (1) requirements-review waits for CI, checks compliance patterns (no `any`, no `var`/`let`, no `if`/`else`, no loops, no `try`/`catch`, B constant pattern, dispatch tables), uses Claude Opus 4.5; (2) synthesize-summary collects all reviews and CI status, posts structured summary with risk assessment; (3) manual-summarize handles /summarize slash command. Posts comments with marker `<!-- PR-REVIEW-SUMMARY -->`.
+**ci.yml** (Main CI)
+Main CI pipeline with commit normalization, Biome auto-repair, and Nx affected tasks. Handles all build/test/lint operations for PRs and pushes.
+
+**pr-review.yml**
+REQUIREMENTS.md compliance checking, feedback synthesis, and /summarize command. Validates code patterns against standards and provides structured review feedback.
 
 **active-qc.yml** (Event-Driven)
-Event-driven quality control for PR/push events.
+Event-driven quality control for PR/push/issue events.
 
-**Triggers**: `pull_request` (opened, edited, synchronize) or `push` to main (labels.yml only)
+**Triggers**: `pull_request` (opened, edited, synchronize), `issues` (opened, edited, labeled), or `push` to main (labels.yml only)
 
 Jobs:
-1. **pr-title**: Validates PR title format, applies type labels via pr-meta.ts.
-2. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
+1. **pr-meta**: Validates PR title format, applies type labels via ai-meta.ts.
+2. **issue-meta**: Validates issue metadata when opened/edited.
+3. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
+4. **pin-issue**: Pins issues when the `pinned` label is added (uses GraphQL pinIssue mutation).
 
 **passive-qc.yml** (Scheduled)
 Scheduled quality control running every 6 hours.
@@ -298,17 +319,14 @@ Jobs:
 2. **stale-management**: 3 days inactive → stale label, then 7 more days → close (10 days total). Exemptions: pinned, security, critical.
 3. **aging-report**: Generates issue metrics report (critical, stale, >3 days, total).
 
-**dependency-gate.yml**
-Mutation-gated auto-merge for dependency updates. Triggered by Renovate PRs or check_suite completion. Uses gate.ts to classify updates: patch/minor (eligible) vs major/canary (blocked). Gate requirements: all CI checks green + mutation score ≥ 80%. Auto-merges eligible PRs via `gh pr merge --squash --auto`.
+**auto-merge.yml**
+Dependabot auto-merge for patch/minor/security updates. Automatically merges safe dependency updates after CI passes.
 
-**biome-repair.yml**
-Auto-fixes style issues before human review. Runs `pnpm biome check --write --unsafe` on PR changes, executes `pnpm test` to verify no semantic breakage. If tests pass: commits "style: biome auto-repair" and pushes. If tests fail: skips commit, adds comment warning of semantic breakage.
+**ai-maintenance.yml**
+Weekly AI maintenance + manual tasks via Claude. Handles repository maintenance tasks that benefit from AI assistance.
 
 **dashboard.yml**
 Auto-updating repository health dashboard. Triggered by 6-hour schedule, workflow_dispatch, or checkbox toggle on dashboard issue (Renovate-style `<!-- dashboard-refresh -->` marker). Uses dashboard.ts script to collect metrics and render clickable badges. Excludes skipped/cancelled workflow runs from success rate calculation.
-
-**bundle-analysis.yml**
-Tracks bundle size changes in PRs. Builds all packages, analyzes sizes (raw, gzip, brotli), compares with main branch. Posts/updates PR comment with size report, warns if significant increase (>10KB gzip).
 
 **security.yml**
 Multi-layer security scanning. Jobs: dependency-audit (`pnpm audit`), CodeQL (JavaScript/TypeScript analysis), secrets-scan (Gitleaks), license-check (copyleft detection). Creates security issue if critical vulnerabilities found.
@@ -316,13 +334,19 @@ Multi-layer security scanning. Jobs: dependency-audit (`pnpm audit`), CodeQL (Ja
 ### Composite Actions
 
 **.github/actions/node-env/action.yml**
-Node.js + pnpm setup with caching. Eliminates duplication across all workflows. Inputs: `node-version` (default: 25.2.1), `node-version-file` (optional), `pnpm-version` (default: 10.23.0), `install` (default: true), `frozen-lockfile` (default: true). Steps: (1) pnpm/action-setup for package manager, (2) actions/setup-node with pnpm cache, (3) conditional `pnpm install --frozen-lockfile`. All workflows reference via `uses: ./.github/actions/node-env`.
+Node.js + pnpm + Nx setup with caching and distributed execution. Eliminates duplication across all workflows. Inputs: `node-version` (default: 25.2.1), `node-version-file` (optional), `pnpm-version` (default: 10.23.0), `install` (default: true), `frozen-lockfile` (default: true). Steps: (1) pnpm/action-setup for package manager, (2) actions/setup-node with pnpm cache, (3) conditional `pnpm install --frozen-lockfile`. All workflows reference via `uses: ./.github/actions/node-env`.
 
 **.github/actions/git-identity/action.yml**
-Configure git user for commits. Inputs: `name` (default: github-actions[bot]), `email` (default: github-actions[bot]@users.noreply.github.com). Used by release, biome-repair, and other workflows that commit changes.
+Configure git user for commits. Inputs: `name` (default: github-actions[bot]), `email` (default: github-actions[bot]@users.noreply.github.com). Used by ci, auto-merge, and other workflows that commit changes.
 
-**.github/actions/nx-cache/action.yml**
-Universal Nx monorepo caching and affected command setup. Provides: (1) local cache via GitHub Actions cache for `.nx/cache`, (2) optional Nx Cloud remote caching via `cloud-access-token`, (3) automatic base/head SHA detection via `nrwl/nx-set-shas`. Outputs: `cache-hit`, `base`, `head`. Sets `NX_BASE` and `NX_HEAD` environment variables so `nx affected` commands work without explicit flags.
+**.github/actions/meta-fixer/action.yml**
+Universal metadata fixer action using ai-meta.ts. Validates and fixes PR/issue metadata including titles, labels, and descriptions.
+
+**.github/actions/normalize-commit/action.yml**
+Transform [TYPE!]: to type!: format. Normalizes commit message formats from different sources to conventional commit style.
+
+**.github/actions/label/action.yml**
+Label-triggered behavior executor using label.ts. Handles labeled/unlabeled events and dispatches to appropriate behaviors (pin, unpin, comment) based on `B.labels.behaviors` config. Inputs: `action` (labeled/unlabeled), `label` (name), `node_id` (GraphQL ID), `number` (issue/PR number).
 
 ### GitHub Templates
 
@@ -348,6 +372,12 @@ Fields: doc_type (dropdown), target, current_state, proposed_changes, priority (
 
 **chore.yml** (label: chore)
 Fields: chore_type (dropdown), description, target, acceptance_criteria, priority (dropdown).
+
+**build.yml** (label: build)
+Fields: build_type (dropdown), target, description, acceptance_criteria, priority (dropdown).
+
+**ci.yml** (label: ci)
+Fields: ci_type (dropdown), target, description, acceptance_criteria, priority (dropdown).
 
 **style.yml** (label: style)
 Fields: style_type (dropdown), target, description, priority (dropdown).
@@ -394,21 +424,22 @@ Pre-commit hooks. Two commands: biome (runs `pnpm biome check --write`, auto-sta
 
 ## Interactive Triggers
 
-On-demand workflow triggers via comments and checkboxes:
+On-demand workflow triggers via comments, checkboxes, and labels:
 
 - **`/summarize`** — PR Review workflow, synthesizes all feedback (PR comments)
 - **Dashboard checkbox** — Check the refresh checkbox on dashboard issue footer to trigger update
+- **`pinned` label** — Adding this label to any issue pins it to the repository (up to 3 pinned issues)
 
 ---
 
 ## Quality Gates
 
 1. **Pre-commit**: Lefthook runs Biome + Effect pattern validation
-2. **PR opened**: Biome Repair auto-fixes style, pr-meta.yml validates title + applies labels
+2. **PR opened**: CI auto-fixes style, ai-meta.ts validates title + applies labels
 3. **CI**: Build, test, typecheck via Nx affected
-4. **Post-CI**: claude-pr-review.yml checks REQUIREMENTS.md compliance
+4. **Post-CI**: pr-review.yml checks REQUIREMENTS.md compliance
 5. **Merge gate**: All checks green, reviews approved, semantic title validated
-6. **Renovate gate**: Mutation score ≥ 80% for auto-merge
+6. **Dependabot gate**: Auto-merge for patch/minor/security updates
 
 ---
 
@@ -424,4 +455,4 @@ On-demand workflow triggers via comments and checkboxes:
 
 ---
 
-**Last Updated**: 2025-11-28
+**Last Updated**: 2025-11-30
