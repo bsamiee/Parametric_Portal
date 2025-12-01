@@ -94,11 +94,11 @@
                 "build": { "changelog": false },
                 "chore": { "changelog": false },
                 "ci": { "changelog": false },
-                "docs": { "changelog": { "title": "Documentation" }, "semverBump": "none" },
-                "feat": { "changelog": { "title": "Features" }, "semverBump": "minor" },
-                "fix": { "changelog": { "title": "Bug Fixes" }, "semverBump": "patch" },
-                "perf": { "changelog": { "title": "Performance" }, "semverBump": "patch" },
-                "refactor": { "changelog": { "title": "Refactoring" }, "semverBump": "patch" },
+                "docs": { "changelog": { "title": "[DOCUMENTATION]" }, "semverBump": "none" },
+                "feat": { "changelog": { "title": "[FEATURES]]" }, "semverBump": "minor" },
+                "fix": { "changelog": { "title": "[BUG_FIXES]" }, "semverBump": "patch" },
+                "perf": { "changelog": { "title": "[PERFORMANCE]" }, "semverBump": "patch" },
+                "refactor": { "changelog": { "title": "[REFACTORING]" }, "semverBump": "patch" },
                 "style": { "changelog": false },
                 "test": { "changelog": false }
             }
