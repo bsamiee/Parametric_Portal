@@ -2,6 +2,16 @@
 
 Comprehensive reference for all automation systems, agents, and tooling in Parametric Portal. This documentation reflects the production implementation as of December 2025.
 
+**Quick Navigation**:
+- [Overview](#overview) — Three-paradigm system (Active, Passive, AI)
+- [File Inventory](#file-inventory) — 10 workflows, 13 scripts, 6 actions, 10 agents, 12 templates
+- [Schema Infrastructure](#schema-infrastructure) — Single B constant, SpecRegistry types, Ops factory
+- [GitHub Workflows](#github-workflows) — Detailed workflow descriptions
+- [GitHub Scripts](#github-scripts) — Script implementations and patterns
+- [Agentic Architecture](#agentic-architecture-principles-2025) — Modern patterns for AI-driven CI/CD
+- [Cost Optimization](#cost-optimization-and-monitoring) — Resource management and monitoring
+- [Security](#security-and-compliance) — Security practices and compliance
+
 ---
 
 ## Overview
