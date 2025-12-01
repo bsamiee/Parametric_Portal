@@ -168,7 +168,8 @@ const B = Object.freeze({
             displayTitle: 'Repository Overview',
             label: 'dashboard',
             labels: ['dashboard', 'pinned'] as const,
-            pattern: '[DASHBOARD]',
+            // Pattern uses full title to avoid collision with Renovate's "[DASHBOARD] Dependency Dashboard"
+            pattern: '[DASHBOARD] Repository Overview',
             pin: true,
             title: '[DASHBOARD] Repository Overview',
         },
@@ -184,6 +185,8 @@ const B = Object.freeze({
         botAliases: ['github-actions[bot]', 'gemini-code-assist[bot]', 'chatgpt-codex-connector[bot]'] as const,
         // Display configuration for hygiene messages
         display: { maxFiles: 3 } as const,
+        // Slash commands for AI agents (algorithmically derived in pr-hygiene.ts)
+        slashCommands: ['review', 'fix', 'explain', 'summarize', 'help', 'ask'] as const,
         // Patterns indicating valuable feedback that should NOT be auto-resolved
         valuablePatterns: [
             /security|vulnerab|exploit|inject|xss|csrf|auth/i,

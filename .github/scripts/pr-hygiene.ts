@@ -46,6 +46,12 @@ const H = Object.freeze({
     agentBots: [...B.labels.categories.agent.map((a) => `${a}[bot]`), ...B.dashboard.bots, ...B.hygiene.botAliases],
     // Agent mentions for prompt detection (derived from schema)
     agentMentions: B.labels.categories.agent.map((a) => `@${a}`),
+    // Slash commands: Derive /{agent} {command} patterns algorithmically from schema
+    // Output format: lowercase patterns like '/gemini review', '/copilot fix', '/claude explain'
+    // Used for case-insensitive detection of AI agent prompts in PR comments
+    agentSlashCommands: B.labels.categories.agent.flatMap((a) =>
+        B.hygiene.slashCommands.map((cmd) => `/${a} ${cmd}`.toLowerCase()),
+    ),
     // Display configuration (parametric)
     display: B.hygiene.display,
     gql: {
@@ -79,7 +85,15 @@ const isBot = (login: string | undefined): boolean =>
 const isOwner = (login: string | undefined, owners: ReadonlyArray<string>): boolean =>
     owners.some((o) => o.toLowerCase() === login?.toLowerCase());
 
-const isPrompt = (body: string): boolean => H.agentMentions.some((m) => body.includes(m));
+// Detect @agent mentions OR /agent command slash commands (per schema requirement)
+// Both checks use case-insensitive matching for consistency; lowercase once for O(1) performance
+const isPrompt = (body: string): boolean => {
+    const lower = body.toLowerCase();
+    return (
+        H.agentMentions.some((m) => lower.includes(m.toLowerCase())) ||
+        H.agentSlashCommands.some((cmd) => lower.includes(cmd))
+    );
+};
 
 const isValuable = (body: string): boolean => H.valuablePatterns.some((p) => p.test(body));
 
