@@ -189,8 +189,8 @@ const threadActions: Record<
             : false;
         // Resolve the thread
         const resolved = await resolveThread(ctx, t.id);
-        // Minimize (hide) the original comment
-        first?.id ? await minimizeComment(ctx, first.id) : undefined;
+        // Minimize (hide) the original comment (best-effort, non-blocking)
+        await (first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false));
         return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
     skip: async () => ({ replied: 0, resolved: 0 }),
