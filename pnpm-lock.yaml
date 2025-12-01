@@ -10,11 +10,11 @@ catalogs:
       specifier: 2.3.7
       version: 2.3.7
     '@effect/experimental':
-      specifier: 0.57.4
-      version: 0.57.4
+      specifier: 0.57.9
+      version: 0.57.9
     '@effect/platform':
-      specifier: 0.93.3
-      version: 0.93.3
+      specifier: 0.93.6
+      version: 0.93.6
     '@effect/platform-browser':
       specifier: 0.73.0
       version: 0.73.0
@@ -22,8 +22,8 @@ catalogs:
       specifier: 0.75.5
       version: 0.75.5
     '@effect/vitest':
-      specifier: 0.25.1
-      version: 0.25.1
+      specifier: 0.27.0
+      version: 0.27.0
     '@fast-check/vitest':
       specifier: 0.2.3
       version: 0.2.3
@@ -118,8 +118,8 @@ catalogs:
       specifier: 4.1.0
       version: 4.1.0
     effect:
-      specifier: 3.19.6
-      version: 3.19.6
+      specifier: 3.19.8
+      version: 3.19.8
     fast-check:
       specifier: 4.3.0
       version: 4.3.0
@@ -229,19 +229,19 @@ importers:
         version: 2.3.7
       '@effect/experimental':
         specifier: 'catalog:'
-        version: 0.57.4(@effect/platform@0.93.3(effect@3.19.6))(effect@3.19.6)
+        version: 0.57.9(@effect/platform@0.93.6(effect@3.19.8))(effect@3.19.8)
       '@effect/platform':
         specifier: 'catalog:'
-        version: 0.93.3(effect@3.19.6)
+        version: 0.93.6(effect@3.19.8)
       '@effect/platform-browser':
         specifier: 'catalog:'
-        version: 0.73.0(@effect/platform@0.93.3(effect@3.19.6))(effect@3.19.6)
+        version: 0.73.0(@effect/platform@0.93.6(effect@3.19.8))(effect@3.19.8)
       '@effect/schema':
         specifier: 'catalog:'
-        version: 0.75.5(effect@3.19.6)
+        version: 0.75.5(effect@3.19.8)
       '@effect/vitest':
         specifier: 'catalog:'
-        version: 0.25.1(effect@3.19.6)(vitest@4.0.14)
+        version: 0.27.0(effect@3.19.8)(vitest@4.0.14)
       '@fast-check/vitest':
         specifier: 'catalog:'
         version: 0.2.3(vitest@4.0.14)
@@ -334,7 +334,7 @@ importers:
         version: 4.1.0
       effect:
         specifier: 'catalog:'
-        version: 3.19.6
+        version: 3.19.8
       fast-check:
         specifier: 'catalog:'
         version: 4.3.0
@@ -433,7 +433,7 @@ importers:
     dependencies:
       '@effect/schema':
         specifier: 'catalog:'
-        version: 0.75.5(effect@3.19.6)
+        version: 0.75.5(effect@3.19.8)
       '@radix-ui/react-slot':
         specifier: 'catalog:'
         version: 1.2.4(@types/react@19.2.7)(react@19.3.0-canary-40b4a5bf-20251120)
@@ -448,7 +448,7 @@ importers:
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.0(react@19.3.0-canary-40b4a5bf-20251120))(react@19.3.0-canary-40b4a5bf-20251120)
       effect:
         specifier: 'catalog:'
-        version: 3.19.6
+        version: 3.19.8
       lucide-react:
         specifier: 'catalog:'
         version: 0.554.0(react@19.3.0-canary-40b4a5bf-20251120)
@@ -491,10 +491,10 @@ importers:
     dependencies:
       '@effect/schema':
         specifier: 'catalog:'
-        version: 0.75.5(effect@3.19.6)
+        version: 0.75.5(effect@3.19.8)
       effect:
         specifier: 'catalog:'
-        version: 3.19.6
+        version: 3.19.8
     devDependencies:
       '@fast-check/vitest':
         specifier: 'catalog:'
@@ -516,16 +516,16 @@ importers:
     dependencies:
       '@effect/experimental':
         specifier: 'catalog:'
-        version: 0.57.4(@effect/platform@0.93.3(effect@3.19.6))(effect@3.19.6)
+        version: 0.57.9(@effect/platform@0.93.6(effect@3.19.8))(effect@3.19.8)
       '@effect/schema':
         specifier: 'catalog:'
-        version: 0.75.5(effect@3.19.6)
+        version: 0.75.5(effect@3.19.8)
       date-fns:
         specifier: 'catalog:'
         version: 4.1.0
       effect:
         specifier: 'catalog:'
-        version: 3.19.6
+        version: 3.19.8
       immer:
         specifier: 'catalog:'
         version: 11.0.0
@@ -1214,11 +1214,11 @@ packages:
   '@cacheable/utils@2.3.2':
     resolution: {integrity: sha512-8kGE2P+HjfY8FglaOiW+y8qxcaQAfAhVML+i66XJR3YX5FtyDqn6Txctr3K2FrbxLKixRRYYBWMbuGciOhYNDg==}
 
-  '@effect/experimental@0.57.4':
-    resolution: {integrity: sha512-1qbOGSugeDoCoXGdIsTBk53pKwk4aImmPIghhya1MBUSSExHi9YRn6u0PNQecungNyeKDz6A8k1+rZIbsMQy4g==}
+  '@effect/experimental@0.57.9':
+    resolution: {integrity: sha512-+cR+G1FR1yciFlZULBlQ/PSFerWQCSx1Fz5bbT/PIlPmF+GRk2+qC2IZM4bMdUqqzrrTPocX8LBgHwA5vxZqAw==}
     peerDependencies:
-      '@effect/platform': ^0.93.3
-      effect: ^3.19.5
+      '@effect/platform': ^0.93.6
+      effect: ^3.19.8
       ioredis: ^5
       lmdb: ^3
     peerDependenciesMeta:
@@ -1233,10 +1233,10 @@ packages:
       '@effect/platform': ^0.93.0
       effect: ^3.19.0
 
-  '@effect/platform@0.93.3':
-    resolution: {integrity: sha512-s88zctkeXba24Mjy7MEFMuam1p5sXmsG7uQjPIDE6EiC+2IFUQd8976TtangiU0e8qu0SALpjIH1P1QyC7/1og==}
+  '@effect/platform@0.93.6':
+    resolution: {integrity: sha512-I5lBGQWzWXP4zlIdPs7z7WHmEFVBQhn+74emr/h16GZX96EEJ6I1rjGaKyZF7mtukbMuo9wEckDPssM8vskZ/w==}
     peerDependencies:
-      effect: ^3.19.4
+      effect: ^3.19.8
 
   '@effect/schema@0.75.5':
     resolution: {integrity: sha512-TQInulTVCuF+9EIbJpyLP6dvxbQJMphrnRqgexm/Ze39rSjfhJuufF7XvU3SxTgg3HnL7B/kpORTJbHhlE6thw==}
@@ -1244,10 +1244,10 @@ packages:
     peerDependencies:
       effect: ^3.9.2
 
-  '@effect/vitest@0.25.1':
-    resolution: {integrity: sha512-OMYvOU8iGed8GZXxgVBXlYtjG+jwWj5cJxFk0hOHOfTbCHXtdCMEWlXNba5zxbE7dBnW4srbnSYrP/NGGTC3qQ==}
+  '@effect/vitest@0.27.0':
+    resolution: {integrity: sha512-8bM7n9xlMUYw9GqPIVgXFwFm2jf27m/R7psI64PGpwU5+26iwyxp9eAXEsfT5S6lqztYfpQQ1Ubp5o6HfNYzJQ==}
     peerDependencies:
-      effect: ^3.17.7
+      effect: ^3.19.0
       vitest: ^3.2.0
 
   '@emnapi/core@1.7.1':
@@ -4352,8 +4352,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@3.19.6:
-    resolution: {integrity: sha512-Eh1E/CI+xCAcMSDC5DtyE29yWJINC0zwBbwHappQPorjKyS69rCA8qzpsHpfhKnPDYgxdg8zkknii8mZ+6YMQA==}
+  effect@3.19.8:
+    resolution: {integrity: sha512-OmLw8EfH02vdmyU2fO4uY9He/wepwKI5E/JNpE2pseaWWUbaYOK9UlxIiKP20ZEqQr+S/jSqRDGmpiqD/2DeCQ==}
 
   ejs@3.1.10:
     resolution: {integrity: sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA==}
@@ -8286,33 +8286,33 @@ snapshots:
       hashery: 1.3.0
       keyv: 5.5.4
 
-  '@effect/experimental@0.57.4(@effect/platform@0.93.3(effect@3.19.6))(effect@3.19.6)':
+  '@effect/experimental@0.57.9(@effect/platform@0.93.6(effect@3.19.8))(effect@3.19.8)':
     dependencies:
-      '@effect/platform': 0.93.3(effect@3.19.6)
-      effect: 3.19.6
+      '@effect/platform': 0.93.6(effect@3.19.8)
+      effect: 3.19.8
       uuid: 11.1.0
 
-  '@effect/platform-browser@0.73.0(@effect/platform@0.93.3(effect@3.19.6))(effect@3.19.6)':
+  '@effect/platform-browser@0.73.0(@effect/platform@0.93.6(effect@3.19.8))(effect@3.19.8)':
     dependencies:
-      '@effect/platform': 0.93.3(effect@3.19.6)
-      effect: 3.19.6
+      '@effect/platform': 0.93.6(effect@3.19.8)
+      effect: 3.19.8
       multipasta: 0.2.7
 
-  '@effect/platform@0.93.3(effect@3.19.6)':
+  '@effect/platform@0.93.6(effect@3.19.8)':
     dependencies:
-      effect: 3.19.6
+      effect: 3.19.8
       find-my-way-ts: 0.1.6
       msgpackr: 1.11.5
       multipasta: 0.2.7
 
-  '@effect/schema@0.75.5(effect@3.19.6)':
+  '@effect/schema@0.75.5(effect@3.19.8)':
     dependencies:
-      effect: 3.19.6
+      effect: 3.19.8
       fast-check: 3.23.2
 
-  '@effect/vitest@0.25.1(effect@3.19.6)(vitest@4.0.14)':
+  '@effect/vitest@0.27.0(effect@3.19.8)(vitest@4.0.14)':
     dependencies:
-      effect: 3.19.6
+      effect: 3.19.8
       vitest: 4.0.14(@types/node@24.10.1)(@vitest/ui@4.0.14)(happy-dom@20.0.10)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.6)(yaml@2.8.1)
 
   '@emnapi/core@1.7.1':
@@ -12234,7 +12234,7 @@ snapshots:
 
   '@types/minimatch@6.0.0':
     dependencies:
-      minimatch: 9.0.3
+      minimatch: 10.1.1
 
   '@types/node@20.19.25':
     dependencies:
@@ -13192,7 +13192,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@3.19.6:
+  effect@3.19.8:
     dependencies:
       '@standard-schema/spec': 1.0.0
       fast-check: 3.23.2
