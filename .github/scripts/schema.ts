@@ -197,9 +197,6 @@ const B = Object.freeze({
                 `This issue has been automatically marked as stale due to inactivity.\n` +
                 `It will be closed in 7 days if there is no further activity.\n` +
                 `Comment to keep it open.`,
-            welcome: (login: string): string =>
-                `Thanks for opening your first issue, @${login}! 🎉\n\n` +
-                `We appreciate your contribution and will review it soon.`,
         } as const,
     } as const,
     hygiene: {
