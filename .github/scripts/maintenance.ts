@@ -152,7 +152,7 @@ const handlers = {
             : await Promise.all(toDelete.map((a) => deleteBranch(ctx, a.branch)));
 
         // Execute warnings (unless dry run)
-        dryRun ? Promise.resolve() : await Promise.all(draftPRs.map((pr) => warnDraftPR(ctx, pr)));
+        await Promise.all(dryRun ? [] : draftPRs.map((pr) => warnDraftPR(ctx, pr)));
 
         return {
             deleted: deleteResults.filter((r) => r.success).length,
@@ -201,9 +201,8 @@ const run = async (params: RunParams & { readonly spec: MaintenanceSpec }): Prom
 
     const result = await kindHandlers[params.spec.kind]();
 
-    result.branchErrors > 0
-        ? params.core.info(`[WARN] ${result.branchErrors} branch deletion(s) failed`)
-        : undefined;
+    // Log warnings for failed deletions
+    void (result.branchErrors > 0 && params.core.info(`[WARN] ${result.branchErrors} branch deletion(s) failed`));
     params.core.info(
         `${prefix}[MAINTENANCE] ${M.messages.deleted(result.branchesDeleted)}, ${M.messages.flagged(result.branchesFlagged)}`,
     );
