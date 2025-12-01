@@ -3,6 +3,8 @@ name: Auto-Merge
 on:
     pull_request:
         types: [opened, synchronize, reopened]
+    pull_request_target:
+        types: [opened, synchronize, reopened]
 
 permissions:
     contents: write
@@ -13,7 +15,8 @@ concurrency:
     cancel-in-progress: false
 
 jobs:
-    merge:
+    # --- Dependabot Auto-Merge ------------------------------------------------
+    dependabot:
         name: Dependabot Auto-Merge
         runs-on: ubuntu-latest
         if: github.actor == 'dependabot[bot]'
@@ -27,13 +30,6 @@ jobs:
               with:
                   ref: ${{ github.event.pull_request.head.sha }}
                   check-name: 'Code Quality'
-                  wait-interval: 30
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-            - uses: lewagon/wait-on-check-action@v1.4.1
-              with:
-                  ref: ${{ github.event.pull_request.head.sha }}
-                  check-name: 'Dependency Audit'
                   wait-interval: 30
                   repo-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -72,6 +68,65 @@ jobs:
 
                   **Package**: ${{ steps.metadata.outputs.dependency-names }}
                   **Update**: ${{ steps.metadata.outputs.previous-version }} → ${{ steps.metadata.outputs.new-version }}
+
+                  If this fixes a security vulnerability, add the \`security\` label to enable auto-merge."
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # --- Renovate Auto-Merge --------------------------------------------------
+    renovate:
+        name: Renovate Auto-Merge
+        runs-on: ubuntu-latest
+        if: github.actor == 'renovate[bot]'
+        steps:
+            - uses: lewagon/wait-on-check-action@v1.4.1
+              with:
+                  ref: ${{ github.event.pull_request.head.sha }}
+                  check-name: 'Code Quality'
+                  wait-interval: 30
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Check for automerge label
+              id: check
+              run: |
+                  PR_DATA=$(gh pr view ${{ github.event.pull_request.number }} --json labels,title)
+                  LABELS=$(echo "$PR_DATA" | jq -r '.labels[].name' | tr '\n' ',')
+                  TITLE=$(echo "$PR_DATA" | jq -r '.title')
+                  
+                  # Security: always merge
+                  if [[ "$LABELS" == *"security"* ]]; then
+                    echo "automerge=true" >> $GITHUB_OUTPUT
+                    echo "reason=security" >> $GITHUB_OUTPUT
+                    exit 0
+                  fi
+                  
+                  # Breaking: never auto-merge
+                  if [[ "$LABELS" == *"breaking"* ]]; then
+                    echo "automerge=false" >> $GITHUB_OUTPUT
+                    echo "reason=breaking" >> $GITHUB_OUTPUT
+                    exit 0
+                  fi
+                  
+                  # Default: allow renovate to manage via platformAutomerge
+                  echo "automerge=true" >> $GITHUB_OUTPUT
+                  echo "reason=dependency" >> $GITHUB_OUTPUT
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Enable Auto-Merge
+              if: steps.check.outputs.automerge == 'true'
+              run: |
+                  echo "[OK] Auto-merge enabled (reason: ${{ steps.check.outputs.reason }})"
+                  gh pr merge ${{ github.event.pull_request.number }} --squash --auto --delete-branch
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Block Breaking Changes
+              if: steps.check.outputs.automerge == 'false'
+              run: |
+                  echo "::warning::Breaking change requires manual review"
+                  gh pr comment ${{ github.event.pull_request.number }} \
+                    --body "[WARN] **Auto-merge blocked**: Breaking change requires manual review.
 
                   If this fixes a security vulnerability, add the \`security\` label to enable auto-merge."
               env:
