@@ -3,7 +3,7 @@ packages:
   - packages/*
 
 catalog:
-  '@biomejs/biome': 2.3.7
+  '@biomejs/biome': 2.3.8
   '@effect/experimental': 0.57.4
   '@effect/platform': 0.93.3
   '@effect/platform-browser': 0.73.0
