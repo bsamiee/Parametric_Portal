@@ -1,0 +1,50 @@
+name: PR Hygiene
+description: Automated PR review cleanup - resolve outdated threads, respond to addressed feedback, cleanup owner prompts
+
+inputs:
+    pr_number:
+        description: Pull request number
+        required: true
+    owner_logins:
+        description: Comma-separated owner/admin logins whose prompts should be cleaned
+        required: false
+        default: ''
+
+outputs:
+    resolved:
+        description: Number of review threads resolved
+        value: ${{ steps.run.outputs.resolved }}
+    replied:
+        description: Number of review comments replied to
+        value: ${{ steps.run.outputs.replied }}
+    deleted:
+        description: Number of owner prompts deleted
+        value: ${{ steps.run.outputs.deleted }}
+
+runs:
+    using: composite
+    steps:
+        - uses: ./.github/actions/node-env
+          with:
+              node-version-file: package.json
+
+        - id: run
+          uses: actions/github-script@v7
+          env:
+              NODE_OPTIONS: --import tsx
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/pr-hygiene.ts');
+                  const ownerLogins = '${{ inputs.owner_logins }}'.split(',').map(s => s.trim()).filter(Boolean);
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          prNumber: parseInt('${{ inputs.pr_number }}'),
+                          ownerLogins: ownerLogins.length > 0 ? ownerLogins : [context.repo.owner],
+                      },
+                  });
+                  core.setOutput('resolved', result.resolved);
+                  core.setOutput('replied', result.replied);
+                  core.setOutput('deleted', result.deleted);

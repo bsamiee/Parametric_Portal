@@ -1,0 +1,54 @@
+name: Help Request
+description: Ask a question or request assistance
+title: "[HELP]: "
+labels: ["help"]
+body:
+    - type: dropdown
+      id: help_type
+      attributes:
+          label: Help Category
+          options:
+              - understanding-code
+              - debugging
+              - implementation
+              - architecture
+              - tooling
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Related Files
+          description: Files or packages related to your question
+          placeholder: "src/lib/utils.ts, @parametric/core"
+      validations:
+          required: false
+
+    - type: textarea
+      id: question
+      attributes:
+          label: Question
+          description: What do you need help with?
+          placeholder: "How do I [action] when [context]?"
+      validations:
+          required: true
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Context
+          description: Background information relevant to your question
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true

@@ -1,0 +1,57 @@
+name: Repository Dashboard
+
+on:
+    schedule:
+        # Run at :00 (passive-qc runs at :15 to avoid race conditions)
+        - cron: '0 */6 * * *'
+    workflow_dispatch:
+    issues:
+        types: [edited]
+
+permissions:
+    actions: read
+    contents: read
+    issues: write
+    pull-requests: read
+
+concurrency:
+    group: dashboard
+    cancel-in-progress: false
+
+jobs:
+    update-dashboard:
+        name: Update Repository Dashboard
+        runs-on: ubuntu-latest
+        if: |
+            github.event_name == 'schedule' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'issues' &&
+             contains(github.event.issue.labels.*.name, 'dashboard') &&
+             contains(github.event.issue.body, '[x] <!-- dashboard-refresh -->'))
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      .github/actions
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+                      nx.json
+
+            - uses: ./.github/actions/node-env
+              with:
+                  node-version-file: package.json
+
+            - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              env:
+                  NODE_OPTIONS: --import tsx
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/dashboard.ts');
+                      await run({
+                        context: { repo: context.repo, payload: context.payload },
+                        core,
+                        github,
+                        spec: { kind: 'update', pin: true }
+                      });

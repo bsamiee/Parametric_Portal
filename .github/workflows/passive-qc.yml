@@ -1,0 +1,106 @@
+name: Passive QC
+
+on:
+    schedule:
+        # Run at :15 to avoid race conditions with dashboard.yml (:00)
+        - cron: '15 */6 * * *'
+
+concurrency:
+    group: passive-qc
+    cancel-in-progress: false
+
+permissions:
+    contents: write
+    issues: write
+    pull-requests: write
+    models: read
+
+jobs:
+    # --- Jobs run in sequence via needs chain for deterministic execution -----
+    sync-labels:
+        name: Sync Labels (backup)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: .github/labels.yml
+                  sparse-checkout-cone-mode: false
+
+            - uses: crazy-max/ghaction-github-labeler@de749cf181958193cb7debf1a9c5bb28922a2fd6 # v5.1.0
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  yaml-file: .github/labels.yml
+                  skip-delete: true
+
+    stale-management:
+        name: Stale Management
+        needs: sync-labels
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9.1.0
+              with:
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+                  stale-issue-message: |
+                      This issue has been automatically marked as stale due to inactivity.
+                      It will be closed in 7 days if there is no further activity.
+                      Comment to keep it open.
+                  stale-pr-message: |
+                      This PR has been automatically marked as stale due to inactivity.
+                      It will be closed in 7 days if there is no further activity.
+                  stale-issue-label: stale
+                  stale-pr-label: stale
+                  days-before-stale: 3
+                  days-before-close: 7
+                  exempt-issue-labels: pinned,security,critical
+                  exempt-pr-labels: pinned,security,critical
+
+    aging-report:
+        name: Aging Report
+        needs: stale-management
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      .github/actions
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/node-env
+              with:
+                  node-version-file: package.json
+
+            - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              env:
+                  NODE_OPTIONS: --import tsx
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/report.ts');
+                      await run({
+                        context: { repo: context.repo, payload: { action: 'scheduled', issue: {} } },
+                        core,
+                        github,
+                        spec: { kind: 'aging' }
+                      });
+
+    meta-consistency:
+        name: Meta Consistency
+        needs: aging-report
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/meta-fixer
+              with:
+                  targets: title,label,body
+                  limit: '10'
+                  anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

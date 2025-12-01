@@ -1,0 +1,58 @@
+sequential {
+    `z.discriminatedUnion($discriminant, $unions)` where {
+        not $discriminant <: `"_tag"`,
+        not $discriminant <: `'_tag'`,
+        register_diagnostic(span=$discriminant, message="Use '_tag' as discriminant for consistency with Effect-TS patterns and Match.tag() compatibility", severity="warn")
+    },
+    `z.union([$schemas])` where {
+        $schemas <: some `z.object({ $props })` where { $props <: contains `_tag: z.literal($val)` as $tag_prop },
+        register_diagnostic(span=$schemas, message="Use z.discriminatedUnion('_tag', [...]) instead of z.union() for tagged objects - better performance and type inference", severity="warn")
+    },
+    `z.object({ $props })` where {
+        $props <: contains `type: z.literal($val)`,
+        not $props <: contains `_tag`,
+        register_diagnostic(span=$props, message="Consider using '_tag' instead of 'type' for discriminator field to align with Effect-TS conventions", severity="info")
+    },
+    `z.any()` where {
+        register_diagnostic(span=$_, message="z.any() bypasses all type safety - use z.unknown() and validate, or create a specific schema", severity="error")
+    },
+    `z.object({ $props }).passthrough()` where {
+        register_diagnostic(span=$_, message=".passthrough() allows unvalidated properties - prefer .strict() for type safety or explicitly allow with .catchall()", severity="warn")
+    },
+    `z.object({ $props })` where {
+        not $props <: contains `.describe(`,
+        register_diagnostic(span=$props, message="Add .describe() to schema properties for better error messages and documentation", severity="info")
+    },
+    `z.string().min($n)` where {
+        register_diagnostic(span=$_, message="Consider using z.string().brand<'BrandName'>() after validation for nominal typing and domain modeling", severity="info")
+    },
+    `z.number().positive()` where {
+        register_diagnostic(span=$_, message="Consider using z.number().positive().brand<'Positive'>() for nominal typing", severity="info")
+    },
+    `const $schema = z.object({ $props })` where {
+        register_diagnostic(span=$schema, message="Mark schema definition with 'as const' for literal type inference: const schema = z.object({...}) as const", severity="info")
+    },
+    `$schema.parse($data)` where {
+        register_diagnostic(span=$_, message="Prefer .safeParse() over .parse() for explicit error handling - .parse() throws and defeats type-safe error channels", severity="warn")
+    },
+    `z.enum([$values])` where {
+        $values <: contains `"`,
+        register_diagnostic(span=$values, message="Define enum values as const array first, then use z.enum(VALUES) for both runtime and type-level access", severity="info")
+    },
+    `z.literal($value).or(z.literal($value2))` where {
+        register_diagnostic(span=$_, message="Use z.enum([...]) or z.union([z.literal(...), z.literal(...)]) for multiple literal values", severity="info")
+    },
+    `z.optional($schema)` where {
+        register_diagnostic(span=$_, message="Prefer $schema.optional() over z.optional($schema) for better method chaining", severity="info")
+    },
+    `z.nullable($schema)` where {
+        register_diagnostic(span=$_, message="Prefer $schema.nullable() over z.nullable($schema) for method chaining, or use .nullish() for both null and undefined", severity="info")
+    },
+    `z.lazy(() => $schema)` where {
+        not $schema <: contains `z.`,
+        register_diagnostic(span=$schema, message="z.lazy() callback must return a Zod schema - ensure the returned value is a valid schema", severity="error")
+    },
+    `z.coerce.$type($args)` where {
+        register_diagnostic(span=$_, message="z.coerce.* performs implicit type coercion which hides bugs - prefer explicit validation and transformation", severity="warn")
+    }
+}

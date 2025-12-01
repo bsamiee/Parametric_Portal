@@ -1,0 +1,64 @@
+name: Build System
+description: Modify build tooling, bundling, or configuration
+title: "[BUILD]: "
+labels: ["build"]
+body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will this affect build output format or compatibility?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
+    - type: dropdown
+      id: build_type
+      attributes:
+          label: Build Change Type
+          options:
+              - vite-config
+              - nx-config
+              - typescript-config
+              - bundling
+              - tooling
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Config files to modify
+          placeholder: "vite.config.ts, nx.json, tsconfig.base.json"
+      validations:
+          required: true
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Description
+          description: What build changes are needed?
+      validations:
+          required: true
+
+    - type: textarea
+      id: rationale
+      attributes:
+          label: Rationale
+          description: Why is this build change needed?
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+      validations:
+          required: true
