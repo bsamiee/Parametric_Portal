@@ -49,6 +49,7 @@ const H = Object.freeze({
     // Display configuration (parametric)
     display: B.hygiene.display,
     gql: {
+        minimize: `mutation($id:ID!,$c:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$c}){minimizedComment{isMinimized}}}`,
         resolve: `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`,
         threads: `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path comments(first:20){nodes{id databaseId author{login}body createdAt}}}}}}}`,
     },
@@ -61,6 +62,10 @@ const H = Object.freeze({
             const overflow = f.length > maxFiles ? ` +${f.length - maxFiles}` : '';
             return `[X] **Addressed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})\n\n_Files: ${fileList}${overflow}_`;
         },
+        outdated: (sha: string | null, path: string | null): string =>
+            sha
+                ? `[X] **Code changed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})${path ? ` (${path})` : ''}`
+                : `[X] **Outdated** — code has changed since this comment`,
     },
     // Safety: patterns indicating valuable feedback that should NOT be auto-resolved
     valuablePatterns: B.hygiene.valuablePatterns,
@@ -133,6 +138,12 @@ const resolveThread = (ctx: Ctx, id: string): Promise<boolean> =>
         () => false,
     );
 
+const minimizeComment = (ctx: Ctx, nodeId: string): Promise<boolean> =>
+    ctx.github.graphql(H.gql.minimize, { c: 'OUTDATED', id: nodeId }).then(
+        () => true,
+        () => false,
+    );
+
 const replyToThread = (ctx: Ctx, n: number, commentId: number, body: string): Promise<boolean> =>
     ctx.github.rest.pulls
         .createReplyForReviewComment({ body, comment_id: commentId, owner: ctx.owner, pull_number: n, repo: ctx.repo })
@@ -168,7 +179,20 @@ const threadActions: Record<
         const resolved = replied ? await resolveThread(ctx, t.id) : false;
         return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
-    resolve: async (ctx, t) => ({ replied: 0, resolved: (await resolveThread(ctx, t.id)) ? 1 : 0 }),
+    // For outdated threads: reply → resolve → minimize (hide)
+    resolve: async (ctx, t, commits, n) => {
+        const match = commits.find((c) => pathMatch(t.path, c.files));
+        const first = t.comments.nodes[0];
+        // Reply with explanation of what changed
+        const replied = first?.databaseId
+            ? await replyToThread(ctx, n, first.databaseId, H.msg.outdated(match?.sha ?? null, t.path))
+            : false;
+        // Resolve the thread
+        const resolved = await resolveThread(ctx, t.id);
+        // Minimize (hide) the original comment
+        first?.id ? await minimizeComment(ctx, first.id) : undefined;
+        return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
+    },
     skip: async () => ({ replied: 0, resolved: 0 }),
 };
 
