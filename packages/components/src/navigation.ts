@@ -1,12 +1,16 @@
+/**
+ * Navigation components: render breadcrumb, pagination, tabs with keyboard support.
+ * Uses B, utilities, animStyle, stateCls from schema.ts with React Aria tab management.
+ */
 import type { CSSProperties, FC, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
 import { useFocusRing, useTab, useTabList, useTabPanel } from 'react-aria';
 import type { Key, Node, TabListState } from 'react-stately';
 import { Item, useTabListState } from 'react-stately';
 import type { Inputs, Resolved, TuningFor } from './schema.ts';
-import { animStyle, B, fn, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef } from './schema.ts';
+import { animStyle, B, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type NavType = 'breadcrumb' | 'pagination' | 'tabs';
 type TabOrientation = 'horizontal' | 'vertical';
@@ -43,12 +47,12 @@ type NavInput<T extends NavType = 'tabs'> = {
     readonly type?: T;
 };
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const range = (start: number, end: number): ReadonlyArray<number> =>
     Array.from({ length: end - start + 1 }, (_, idx) => start + idx);
 
-// --- Pagination Dispatch Table (Replaces if/else) ---------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 type PaginationParams = {
     readonly left: number;
@@ -82,16 +86,14 @@ const computePages = (current: number, total: number, siblingCount: number): Rea
             : paginationStrategy.both(params);
 };
 
-// --- Tab Sub-Components (react-aria) ----------------------------------------
-
-type TabCompProps<T> = {
+type TabComponentProps<T> = {
     readonly item: Node<T>;
     readonly orientation: TabOrientation;
     readonly state: TabListState<T>;
     readonly vars: Record<string, string>;
 };
 
-const TabComp = <T>({ item, orientation, state, vars }: TabCompProps<T>) => {
+const TabComponent = <T>({ item, orientation, state, vars }: TabComponentProps<T>) => {
     const ref = useRef<HTMLDivElement>(null);
     const { isDisabled, isSelected, tabProps } = useTab({ key: item.key }, state, ref);
     const { focusProps, isFocusVisible } = useFocusRing();
@@ -101,13 +103,13 @@ const TabComp = <T>({ item, orientation, state, vars }: TabCompProps<T>) => {
         {
             ...tabProps,
             ...focusProps,
-            className: fn.cls(
+            className: utilities.cls(
                 orient.tab,
                 B.nav.tabs.tab.base,
                 B.nav.var.px,
                 B.nav.var.py,
                 B.nav.var.fs,
-                isSelected && fn.cls(orient.tabSelected, B.nav.tabs.tab.selected),
+                isSelected && utilities.cls(orient.tabSelected, B.nav.tabs.tab.selected),
                 isDisabled && B.nav.tabs.tab.disabled,
                 isFocusVisible && B.nav.tabs.tab.focus,
             ),
@@ -121,21 +123,24 @@ const TabComp = <T>({ item, orientation, state, vars }: TabCompProps<T>) => {
     );
 };
 
-type TabPanelCompProps<T> = { readonly state: TabListState<T>; readonly vars: Record<string, string> };
+type TabPanelComponentProps<T> = { readonly state: TabListState<T>; readonly vars: Record<string, string> };
 
-const TabPanelComp = <T>({ state, vars }: TabPanelCompProps<T>) => {
+const TabPanelComponent = <T>({ state, vars }: TabPanelComponentProps<T>) => {
     const ref = useRef<HTMLDivElement>(null);
     const { tabPanelProps } = useTabPanel({}, state, ref);
     return createElement(
         'div',
-        { ...tabPanelProps, className: fn.cls(B.nav.var.px, B.nav.var.py), ref, style: vars as CSSProperties },
+        { ...tabPanelProps, className: utilities.cls(B.nav.var.px, B.nav.var.py), ref, style: vars as CSSProperties },
         state.selectedItem?.props.children,
     );
 };
 
-// --- Component Builders -----------------------------------------------------
-
-const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Resolved['behavior'], a: Resolved['animation']) =>
+const createTabsComponent = (
+    input: NavInput<'tabs'>,
+    vars: Record<string, string>,
+    behavior: Resolved['behavior'],
+    animation: Resolved['animation'],
+) =>
     forwardRef((props: TabsProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             className,
@@ -150,7 +155,7 @@ const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Resolved['beh
         } = props;
         const ref = useForwardedRef(fRef);
         const tabListRef = useRef<HTMLDivElement>(null);
-        const disabledKeys = items.filter((it) => it.disabled || b.disabled).map((it) => it.key);
+        const disabledKeys = items.filter((it) => it.disabled || behavior.disabled).map((it) => it.key);
         // Build react-stately collection - children prop required for exactOptionalPropertyTypes
         const tabChildren = items.map((it) =>
             createElement(Item as FC<{ children: ReactNode; key: Key; textValue: string }>, {
@@ -177,22 +182,33 @@ const mkTabs = (i: NavInput<'tabs'>, v: Record<string, string>, b: Resolved['beh
             'div',
             {
                 ...rest,
-                className: fn.cls('flex', orient.container, B.nav.var.g, stateCls.nav(b), i.className, className),
+                className: utilities.cls(
+                    'flex',
+                    orient.container,
+                    B.nav.var.g,
+                    stateCls.nav(behavior),
+                    input.className,
+                    className,
+                ),
                 ref,
-                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
+                style: { ...vars, ...animStyle(animation), ...style } as CSSProperties,
             },
             createElement(
                 'div',
-                { ...tabListProps, className: fn.cls(orient.list, B.nav.var.g), ref: tabListRef },
+                { ...tabListProps, className: utilities.cls(orient.list, B.nav.var.g), ref: tabListRef },
                 [...state.collection].map((item) =>
-                    createElement(TabComp, { item, key: item.key, orientation, state, vars: v }),
+                    createElement(TabComponent, { item, key: item.key, orientation, state, vars }),
                 ),
             ),
-            createElement(TabPanelComp, { key: state.selectedItem?.key, state, vars: v }),
+            createElement(TabPanelComponent, { key: state.selectedItem?.key, state, vars }),
         );
     });
 
-const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: Resolved['behavior']) =>
+const createBreadcrumbComponent = (
+    input: NavInput<'breadcrumb'>,
+    vars: Record<string, string>,
+    behavior: Resolved['behavior'],
+) =>
     forwardRef((props: BreadcrumbProps, fRef: ForwardedRef<HTMLElement>) => {
         const { className, items, separator = '/', style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -201,25 +217,25 @@ const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: R
             {
                 ...rest,
                 'aria-label': 'Breadcrumb',
-                className: fn.cls(
+                className: utilities.cls(
                     'flex items-center',
                     B.nav.var.g,
                     B.nav.var.fs,
-                    stateCls.nav(b),
-                    i.className,
+                    stateCls.nav(behavior),
+                    input.className,
                     className,
                 ),
                 ref,
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...vars, ...style } as CSSProperties,
             },
             createElement(
                 'ol',
-                { className: fn.cls('flex items-center', B.nav.var.g) },
+                { className: utilities.cls('flex items-center', B.nav.var.g) },
                 items.map((item, idx) => {
                     const isLast = idx === items.length - 1;
                     return createElement(
                         'li',
-                        { className: fn.cls('flex items-center', B.nav.var.g), key: item.key },
+                        { className: utilities.cls('flex items-center', B.nav.var.g), key: item.key },
                         createElement(
                             item.href && !isLast ? 'a' : 'span',
                             {
@@ -236,29 +252,33 @@ const mkBreadcrumb = (i: NavInput<'breadcrumb'>, v: Record<string, string>, b: R
         );
     });
 
-const mkPagination = (i: NavInput<'pagination'>, v: Record<string, string>, b: Resolved['behavior']) =>
+const createPaginationComponent = (
+    input: NavInput<'pagination'>,
+    vars: Record<string, string>,
+    behavior: Resolved['behavior'],
+) =>
     forwardRef((props: PaginationProps, fRef: ForwardedRef<HTMLElement>) => {
         const { className, current, onChange, siblingCount = 1, style, total, ...rest } = props;
         const ref = useForwardedRef(fRef);
         const pages = computePages(current, total, siblingCount);
-        const btn = (p: number, label: ReactNode, disabled: boolean) =>
+        const renderButton = (page: number, label: ReactNode, disabled: boolean) =>
             createElement(
                 'button',
                 {
-                    'aria-current': p === current ? 'page' : undefined,
+                    'aria-current': page === current ? 'page' : undefined,
                     'aria-disabled': disabled || undefined,
-                    className: fn.cls(
+                    className: utilities.cls(
                         'flex items-center justify-center border',
                         B.nav.var.minW,
                         B.nav.var.h,
                         B.nav.var.px,
                         B.nav.var.r,
-                        p === current ? 'font-semibold' : '',
+                        page === current ? 'font-semibold' : '',
                         disabled ? B.nav.state.disabled : '',
                     ),
                     disabled,
-                    key: p,
-                    onClick: () => !disabled && onChange(p),
+                    key: page,
+                    onClick: () => !disabled && onChange(page),
                     type: 'button',
                 },
                 label,
@@ -268,59 +288,66 @@ const mkPagination = (i: NavInput<'pagination'>, v: Record<string, string>, b: R
             {
                 ...rest,
                 'aria-label': 'Pagination',
-                className: fn.cls(
+                className: utilities.cls(
                     'flex items-center',
                     B.nav.var.g,
                     B.nav.var.fs,
-                    stateCls.nav(b),
-                    i.className,
+                    stateCls.nav(behavior),
+                    input.className,
                     className,
                 ),
                 ref,
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...vars, ...style } as CSSProperties,
             },
-            btn(current - 1, '\u2039', current <= 1),
-            pages.map((p) =>
-                p < 0 ? createElement('span', { className: B.nav.var.ellipsisPx, key: p }, '\u2026') : btn(p, p, false),
+            renderButton(current - 1, '\u2039', current <= 1),
+            pages.map((page) =>
+                page < 0
+                    ? createElement('span', { className: B.nav.var.ellipsisPx, key: page }, '\u2026')
+                    : renderButton(page, page, false),
             ),
-            btn(current + 1, '\u203a', current >= total),
+            renderButton(current + 1, '\u203a', current >= total),
         );
     });
 
-// --- Dispatch Table ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const builders = { breadcrumb: mkBreadcrumb, pagination: mkPagination, tabs: mkTabs } as const;
+const builderHandlers = {
+    breadcrumb: createBreadcrumbComponent,
+    pagination: createPaginationComponent,
+    tabs: createTabsComponent,
+} as const;
 
-const createNav = <T extends NavType>(i: NavInput<T>) => {
-    const s = resolve('scale', i.scale);
-    const b = resolve('behavior', i.behavior);
-    const a = resolve('animation', i.animation);
-    const c = fn.computeScale(s);
-    const v = fn.cssVars(c, 'nav');
-    const builder = builders[i.type ?? 'tabs'];
-    const comp = (
+const createNavigationComponent = <T extends NavType>(input: NavInput<T>) => {
+    const scale = resolve('scale', input.scale);
+    const behavior = resolve('behavior', input.behavior);
+    const animation = resolve('animation', input.animation);
+    const computed = utilities.computeScale(scale);
+    const vars = utilities.cssVars(computed, 'nav');
+    const builder = builderHandlers[input.type ?? 'tabs'];
+    const component = (
         builder as unknown as (
-            i: NavInput<T>,
-            v: Record<string, string>,
-            b: Resolved['behavior'],
-            a: Resolved['animation'],
+            input: NavInput<T>,
+            vars: Record<string, string>,
+            behavior: Resolved['behavior'],
+            animation: Resolved['animation'],
         ) => ReturnType<typeof forwardRef>
-    )(i, v, b, a);
-    comp.displayName = `Nav(${i.type ?? 'tabs'})`;
-    return comp;
+    )(input, vars, behavior, animation);
+    component.displayName = `Nav(${input.type ?? 'tabs'})`;
+    return component;
 };
 
-// --- Factory ----------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createNavigation = (tuning?: TuningFor<'nav'>) =>
     Object.freeze({
-        Breadcrumb: createNav({ type: 'breadcrumb', ...pick(tuning, ['behavior', 'scale']) }),
-        create: <T extends NavType>(i: NavInput<T>) => createNav({ ...i, ...merged(tuning, i, TUNING_KEYS.nav) }),
-        Pagination: createNav({ type: 'pagination', ...pick(tuning, ['behavior', 'scale']) }),
-        Tabs: createNav({ type: 'tabs', ...pick(tuning, TUNING_KEYS.nav) }),
+        Breadcrumb: createNavigationComponent({ type: 'breadcrumb', ...pick(tuning, ['behavior', 'scale']) }),
+        create: <T extends NavType>(input: NavInput<T>) =>
+            createNavigationComponent({ ...input, ...merged(tuning, input, TUNING_KEYS.nav) }),
+        Pagination: createNavigationComponent({ type: 'pagination', ...pick(tuning, ['behavior', 'scale']) }),
+        Tabs: createNavigationComponent({ type: 'tabs', ...pick(tuning, TUNING_KEYS.nav) }),
     });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createNavigation };
 export type { BreadcrumbItem, BreadcrumbProps, NavInput, NavType, PaginationProps, TabItem, TabOrientation, TabsProps };

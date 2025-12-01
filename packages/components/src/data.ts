@@ -1,3 +1,7 @@
+/**
+ * Data display components: render avatar, badge, card, list, table with sorting.
+ * Uses B, utilities, stateCls, useCollectionEl from schema.ts with React Stately state.
+ */
 import type { CSSProperties, FC, ForwardedRef, HTMLAttributes, ImgHTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef } from 'react';
 import {
@@ -11,9 +15,19 @@ import {
 import type { Key, Node, SortDescriptor, TableState, TableStateProps } from 'react-stately';
 import { Cell, Column, Row, TableBody, TableHeader, useTableState } from 'react-stately';
 import type { Computed, Inputs, Resolved, TuningFor } from './schema.ts';
-import { B, fn, merged, pick, resolve, stateCls, TUNING_KEYS, useCollectionEl, useForwardedRef } from './schema.ts';
+import {
+    B,
+    merged,
+    pick,
+    resolve,
+    stateCls,
+    TUNING_KEYS,
+    useCollectionEl,
+    useForwardedRef,
+    utilities,
+} from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type DataType = 'avatar' | 'badge' | 'card' | 'list' | 'table';
 type Variant = string;
@@ -62,13 +76,11 @@ type DataInput<T extends DataType = 'card'> = {
     readonly type?: T;
 };
 
-// --- Shared Constants (Destructured) ----------------------------------------
+// --- Constants ---------------------------------------------------------------
 
-const { px, py, r: dRadius } = B.data.var;
+const { px, py, r: dataRadius } = B.data.var;
 
-// --- Component Builders -----------------------------------------------------
-
-const mkAvatar = (i: DataInput<'avatar'>, c: Computed) =>
+const createAvatarComponent = (input: DataInput<'avatar'>, computed: Computed) =>
     forwardRef((props: AvatarProps, fRef: ForwardedRef<HTMLSpanElement>) => {
         const { alt, className, fallback, src, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -76,13 +88,13 @@ const mkAvatar = (i: DataInput<'avatar'>, c: Computed) =>
             'span',
             {
                 ...rest,
-                className: fn.cls(
+                className: utilities.cls(
                     'inline-flex items-center justify-center overflow-hidden rounded-full',
-                    i.className,
+                    input.className,
                     className,
                 ),
                 ref,
-                style: { height: c.height, width: c.height, ...style } as CSSProperties,
+                style: { height: computed.height, width: computed.height, ...style } as CSSProperties,
             },
             src
                 ? createElement('img', { alt, className: 'h-full w-full object-cover', src })
@@ -94,7 +106,7 @@ const mkAvatar = (i: DataInput<'avatar'>, c: Computed) =>
         );
     });
 
-const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
+const createBadgeComponent = (input: DataInput<'badge'>, vars: Record<string, string>) =>
     forwardRef((props: BadgeProps, fRef: ForwardedRef<HTMLSpanElement>) => {
         const { children, className, style, variant, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -102,20 +114,20 @@ const mkBadge = (i: DataInput<'badge'>, v: Record<string, string>) =>
             'span',
             {
                 ...rest,
-                className: fn.cls(
+                className: utilities.cls(
                     'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                    i.className,
+                    input.className,
                     className,
                 ),
                 'data-variant': variant,
                 ref,
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...vars, ...style } as CSSProperties,
             },
             children,
         );
     });
 
-const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Resolved['behavior']) =>
+const createCardComponent = (input: DataInput<'card'>, vars: Record<string, string>, behavior: Resolved['behavior']) =>
     forwardRef((props: CardProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, footer, header, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -123,25 +135,31 @@ const mkCard = (i: DataInput<'card'>, v: Record<string, string>, b: Resolved['be
             'div',
             {
                 ...rest,
-                'aria-busy': b.loading || undefined,
-                'aria-disabled': b.disabled || undefined,
-                className: fn.cls(
-                    dRadius,
+                'aria-busy': behavior.loading || undefined,
+                'aria-disabled': behavior.disabled || undefined,
+                className: utilities.cls(
+                    dataRadius,
                     'border shadow-sm overflow-hidden',
-                    stateCls.data(b),
-                    i.className,
+                    stateCls.data(behavior),
+                    input.className,
                     className,
                 ),
                 ref,
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...vars, ...style } as CSSProperties,
             },
-            header ? createElement('div', { className: fn.cls('border-b font-semibold', px, py) }, header) : null,
-            createElement('div', { className: fn.cls(px, py) }, children),
-            footer ? createElement('div', { className: fn.cls('border-t', px, py) }, footer) : null,
+            header
+                ? createElement('div', { className: utilities.cls('border-b font-semibold', px, py) }, header)
+                : null,
+            createElement('div', { className: utilities.cls(px, py) }, children),
+            footer ? createElement('div', { className: utilities.cls('border-t', px, py) }, footer) : null,
         );
     });
 
-const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Resolved['behavior']) =>
+const createListComponent = <T>(
+    input: DataInput<'list'>,
+    vars: Record<string, string>,
+    behavior: Resolved['behavior'],
+) =>
     forwardRef((props: ListProps<T>, fRef: ForwardedRef<HTMLUListElement>) => {
         const { className, items, keyExtractor, renderItem, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -149,18 +167,18 @@ const mkList = <T>(i: DataInput<'list'>, v: Record<string, string>, b: Resolved[
             'ul',
             {
                 ...rest,
-                'aria-busy': b.loading || undefined,
-                'aria-disabled': b.disabled || undefined,
-                className: fn.cls('space-y-1', stateCls.data(b), i.className, className),
+                'aria-busy': behavior.loading || undefined,
+                'aria-disabled': behavior.disabled || undefined,
+                className: utilities.cls('space-y-1', stateCls.data(behavior), input.className, className),
                 ref,
                 role: 'list',
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...vars, ...style } as CSSProperties,
             },
             items.map((item, idx) => createElement('li', { key: keyExtractor(item, idx) }, renderItem(item, idx))),
         );
     });
 
-// --- Table Sub-Components (react-aria) --------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 type TColHeaderProps<T> = { readonly column: Node<T>; readonly state: TableState<T> };
 const sortDirMap = { ascending: 'asc', descending: 'desc' } as const;
@@ -214,12 +232,10 @@ const TCell = <T>({ cell, state }: TCellProps<T>) => {
     return createElement('td', merge(gridCellProps, px, py), cell.rendered);
 };
 
-// --- Table Builder ----------------------------------------------------------
-
-const mkTable = <T extends Record<string, unknown>>(
-    i: DataInput<'table'>,
-    v: Record<string, string>,
-    b: Resolved['behavior'],
+const createTableComponent = <T extends Record<string, unknown>>(
+    input: DataInput<'table'>,
+    vars: Record<string, string>,
+    behavior: Resolved['behavior'],
 ) =>
     forwardRef((props: TableProps<T>, fRef: ForwardedRef<HTMLTableElement>) => {
         const {
@@ -310,11 +326,16 @@ const mkTable = <T extends Record<string, unknown>>(
             {
                 ...rest,
                 ...gridProps,
-                'aria-busy': b.loading || undefined,
-                'aria-disabled': b.disabled || undefined,
-                className: fn.cls('w-full border-collapse text-sm', stateCls.data(b), i.className, className),
+                'aria-busy': behavior.loading || undefined,
+                'aria-disabled': behavior.disabled || undefined,
+                className: utilities.cls(
+                    'w-full border-collapse text-sm',
+                    stateCls.data(behavior),
+                    input.className,
+                    className,
+                ),
                 ref,
-                style: { ...v, ...style } as CSSProperties,
+                style: { ...vars, ...style } as CSSProperties,
             },
             createElement(
                 'thead',
@@ -333,40 +354,47 @@ const mkTable = <T extends Record<string, unknown>>(
         );
     });
 
-// --- Dispatch Table ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const builders = { avatar: mkAvatar, badge: mkBadge, card: mkCard, list: mkList, table: mkTable } as const;
+const builderHandlers = {
+    avatar: createAvatarComponent,
+    badge: createBadgeComponent,
+    card: createCardComponent,
+    list: createListComponent,
+    table: createTableComponent,
+} as const;
 
-const createDT = <T extends DataType>(i: DataInput<T>) => {
-    const s = resolve('scale', i.scale);
-    const b = resolve('behavior', i.behavior);
-    const c = fn.computeScale(s);
-    const v = fn.cssVars(c, 'data');
-    const builder = builders[i.type ?? 'card'];
-    const comp = (
+const createDataComponent = <T extends DataType>(input: DataInput<T>) => {
+    const scale = resolve('scale', input.scale);
+    const behavior = resolve('behavior', input.behavior);
+    const computed = utilities.computeScale(scale);
+    const vars = utilities.cssVars(computed, 'data');
+    const builder = builderHandlers[input.type ?? 'card'];
+    const component = (
         builder as (
-            i: DataInput<T>,
-            v: Record<string, string>,
-            b: Resolved['behavior'],
+            input: DataInput<T>,
+            vars: Record<string, string>,
+            behavior: Resolved['behavior'],
         ) => ReturnType<typeof forwardRef>
-    )(i, v, b);
-    comp.displayName = `Data(${i.type ?? 'card'})`;
-    return comp;
+    )(input, vars, behavior);
+    component.displayName = `Data(${input.type ?? 'card'})`;
+    return component;
 };
 
-// --- Factory ----------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createData = (tuning?: TuningFor<'data'>) =>
     Object.freeze({
-        Avatar: createDT({ type: 'avatar', ...pick(tuning, ['scale']) }),
-        Badge: createDT({ type: 'badge', ...pick(tuning, ['scale']) }),
-        Card: createDT({ type: 'card', ...pick(tuning, TUNING_KEYS.data) }),
-        create: <T extends DataType>(i: DataInput<T>) => createDT({ ...i, ...merged(tuning, i, TUNING_KEYS.data) }),
-        List: createDT({ type: 'list', ...pick(tuning, TUNING_KEYS.data) }),
-        Table: createDT({ type: 'table', ...pick(tuning, TUNING_KEYS.data) }),
+        Avatar: createDataComponent({ type: 'avatar', ...pick(tuning, ['scale']) }),
+        Badge: createDataComponent({ type: 'badge', ...pick(tuning, ['scale']) }),
+        Card: createDataComponent({ type: 'card', ...pick(tuning, TUNING_KEYS.data) }),
+        create: <T extends DataType>(input: DataInput<T>) =>
+            createDataComponent({ ...input, ...merged(tuning, input, TUNING_KEYS.data) }),
+        List: createDataComponent({ type: 'list', ...pick(tuning, TUNING_KEYS.data) }),
+        Table: createDataComponent({ type: 'table', ...pick(tuning, TUNING_KEYS.data) }),
     });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createData };
 export type { AvatarProps, BadgeProps, CardProps, DataInput, DataType, ListProps, TableProps, Variant };

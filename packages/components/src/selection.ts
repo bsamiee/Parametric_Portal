@@ -1,3 +1,7 @@
+/**
+ * Selection components: render combobox, menu, select with filtering and sections.
+ * Uses B, utilities, animStyle, createBuilderContext from schema.ts with React Stately state.
+ */
 import type { CSSProperties, FC, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef, useRef } from 'react';
 import {
@@ -18,15 +22,15 @@ import {
     animStyle,
     B,
     createBuilderContext,
-    fn,
     merged,
     pick,
     stateCls,
     useCollectionEl,
     useForwardedRef,
+    utilities,
 } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type SelectionType = 'combobox' | 'menu' | 'select';
 type ItemData = { readonly disabled?: boolean; readonly key: Key; readonly label: ReactNode };
@@ -73,7 +77,7 @@ type SelectionInput<T extends SelectionType = 'menu'> = {
 } & Partial<TuningFor<'menu'>>;
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
-// --- Shared Sub-Components --------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 type OptionProps<T> = { readonly item: Node<T>; readonly state: ListState<T> };
 const Option = <T>({ item, state }: OptionProps<T>) => {
@@ -136,7 +140,7 @@ const SectionComp = <T>({ onAction, onClose, section, state }: SectionCompProps<
         section.rendered &&
             createElement(
                 'div',
-                { className: fn.cls(B.menu.section.header, B.menu.var.itemPx, B.menu.var.itemPy) },
+                { className: utilities.cls(B.menu.section.header, B.menu.var.itemPx, B.menu.var.itemPy) },
                 section.rendered,
             ),
         createElement(
@@ -146,38 +150,36 @@ const SectionComp = <T>({ onAction, onClose, section, state }: SectionCompProps<
                 createElement(MenuItemComp, { item, key: item.key, onClose, state, ...(onAction && { onAction }) }),
             ),
         ),
-        createElement('div', { className: fn.cls(B.menu.section.separator, B.menu.var.separatorSp) }),
+        createElement('div', { className: utilities.cls(B.menu.section.separator, B.menu.var.separatorSp) }),
     );
-
-// --- Pure Utility Functions -------------------------------------------------
 
 const isSection = (item: ItemData | SectionData): item is SectionData => 'items' in item;
 const buildItems = (items: ReadonlyArray<ItemData>) =>
-    items.map((it) =>
+    items.map((itemData) =>
         createElement(Item as FC<{ children: ReactNode; key: Key; textValue: string }>, {
             // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-            children: it.label,
-            key: it.key,
-            textValue: String(it.label),
+            children: itemData.label,
+            key: itemData.key,
+            textValue: String(itemData.label),
         }),
     );
 const buildSections = (items: ReadonlyArray<ItemData | SectionData>) =>
-    items.flatMap((it) =>
-        isSection(it)
+    items.flatMap((itemData) =>
+        isSection(itemData)
             ? createElement(Section as FC<{ children: ReactNode; key: Key; title: ReactNode }>, {
                   // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-                  children: buildItems(it.items),
-                  key: it.key,
-                  title: it.title,
+                  children: buildItems(itemData.items),
+                  key: itemData.key,
+                  title: itemData.title,
               })
             : createElement(Item as FC<{ children: ReactNode; key: Key; textValue: string }>, {
                   // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-                  children: it.label,
-                  key: it.key,
-                  textValue: String(it.label),
+                  children: itemData.label,
+                  key: itemData.key,
+                  textValue: String(itemData.label),
               }),
     );
-const dropdownCls = fn.cls(
+const dropdownCls = utilities.cls(
     'absolute left-0 w-full shadow-lg border rounded-md overflow-hidden',
     B.menu.var.dropdownMaxH,
     'overflow-y-auto',
@@ -188,9 +190,7 @@ const baseStyle = (ctx: Ctx, style?: CSSProperties): CSSProperties => ({
     ...style,
 });
 
-// --- Component Builders -----------------------------------------------------
-
-const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
+const createMenuComponent = (input: SelectionInput<'menu'>, ctx: Ctx) =>
     forwardRef((props: MenuProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             className,
@@ -228,7 +228,12 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
             'div',
             {
                 ...rest,
-                className: fn.cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
+                className: utilities.cls(
+                    'relative inline-block',
+                    stateCls.menu(ctx.behavior),
+                    input.className,
+                    className,
+                ),
                 ref,
                 style: baseStyle(ctx, style),
             },
@@ -236,7 +241,7 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
                 'button',
                 {
                     ...buttonProps,
-                    className: fn.cls(B.menu.trigger.base, B.menu.var.triggerMinW, 'cursor-pointer'),
+                    className: utilities.cls(B.menu.trigger.base, B.menu.var.triggerMinW, 'cursor-pointer'),
                     'data-state': menuState.isOpen ? 'open' : 'closed',
                     disabled: ctx.behavior.disabled,
                     ref: triggerRef,
@@ -253,7 +258,7 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
                         ...triggerMenuProps,
                         className: dropdownCls,
                         ref: menuRef,
-                        style: { ...fn.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...utilities.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
                     },
                     [...treeState.collection].map((item) =>
                         item.type === 'section'
@@ -276,7 +281,7 @@ const mkMenu = (i: SelectionInput<'menu'>, ctx: Ctx) =>
         );
     });
 
-const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
+const createSelectComponent = (input: SelectionInput<'select'>, ctx: Ctx) =>
     forwardRef((props: SelectProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             className,
@@ -326,7 +331,12 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
             'div',
             {
                 ...rest,
-                className: fn.cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
+                className: utilities.cls(
+                    'relative inline-block',
+                    stateCls.menu(ctx.behavior),
+                    input.className,
+                    className,
+                ),
                 ref,
                 style: baseStyle(ctx, style),
             },
@@ -336,7 +346,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
                 'button',
                 {
                     ...buttonProps,
-                    className: fn.cls(
+                    className: utilities.cls(
                         B.menu.trigger.base,
                         B.menu.var.triggerMinW,
                         B.menu.var.itemH,
@@ -351,7 +361,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
                 },
                 createElement(
                     'span',
-                    { ...valueProps, className: fn.cls(!state.selectedItem && 'opacity-50') },
+                    { ...valueProps, className: utilities.cls(!state.selectedItem && 'opacity-50') },
                     state.selectedItem?.rendered ?? placeholder,
                 ),
                 createElement('span', { className: B.menu.trigger.indicator }, '\u25BC'),
@@ -363,7 +373,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
                         ...menuProps,
                         className: dropdownCls,
                         ref: listBoxRef,
-                        style: { ...fn.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...utilities.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
                     },
                     [...state.collection].map((item) => createElement(Option, { item, key: item.key, state })),
                 ),
@@ -371,7 +381,7 @@ const mkSelect = (i: SelectionInput<'select'>, ctx: Ctx) =>
         );
     });
 
-const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
+const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
     forwardRef((props: ComboboxProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             allowsCustomValue,
@@ -422,7 +432,12 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
             'div',
             {
                 ...rest,
-                className: fn.cls('relative inline-block', stateCls.menu(ctx.behavior), i.className, className),
+                className: utilities.cls(
+                    'relative inline-block',
+                    stateCls.menu(ctx.behavior),
+                    input.className,
+                    className,
+                ),
                 ref,
                 style: baseStyle(ctx, style),
             },
@@ -432,7 +447,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
                 { className: 'flex' },
                 createElement('input', {
                     ...inputProps,
-                    className: fn.cls(
+                    className: utilities.cls(
                         'flex-1 border border-r-0 rounded-l-md outline-none',
                         B.menu.var.itemH,
                         B.menu.var.itemPx,
@@ -445,7 +460,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
                     'button',
                     {
                         ...buttonProps,
-                        className: fn.cls('border rounded-r-md cursor-pointer px-2', B.menu.var.itemH),
+                        className: utilities.cls('border rounded-r-md cursor-pointer px-2', B.menu.var.itemH),
                         disabled: ctx.behavior.disabled,
                         ref: buttonRef,
                         type: 'button',
@@ -459,7 +474,7 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
                     {
                         className: dropdownCls,
                         ref: popoverRef,
-                        style: { ...fn.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...utilities.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
                     },
                     createElement(
                         'ul',
@@ -470,32 +485,56 @@ const mkCombobox = (i: SelectionInput<'combobox'>, ctx: Ctx) =>
         );
     });
 
-// --- Dispatch Table ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const K: ReadonlyArray<'animation' | 'behavior' | 'overlay' | 'scale'> = ['animation', 'behavior', 'overlay', 'scale'];
-const builders = { combobox: mkCombobox, menu: mkMenu, select: mkSelect } as const;
+const SELECTION_TUNING_KEYS: ReadonlyArray<'animation' | 'behavior' | 'overlay' | 'scale'> = [
+    'animation',
+    'behavior',
+    'overlay',
+    'scale',
+];
+const builderHandlers = {
+    combobox: createComboboxComponent,
+    menu: createMenuComponent,
+    select: createSelectComponent,
+} as const;
 
-const createSel = <T extends SelectionType>(i: SelectionInput<T>) => {
-    const ctx = createBuilderContext('menu', ['animation', 'behavior', 'overlay'] as const, i);
-    const key = (i.type ?? 'menu') as T;
-    const builder = builders[key];
-    const comp = (builder as unknown as (i: SelectionInput<T>, ctx: Ctx) => ReturnType<typeof forwardRef>)(i, ctx);
-    comp.displayName = `Selection(${key})`;
-    return comp;
+const createSelectionComponent = <T extends SelectionType>(input: SelectionInput<T>) => {
+    const ctx = createBuilderContext('menu', ['animation', 'behavior', 'overlay'] as const, input);
+    const selectionType = (input.type ?? 'menu') as T;
+    const builder = builderHandlers[selectionType];
+    const component = (builder as unknown as (input: SelectionInput<T>, ctx: Ctx) => ReturnType<typeof forwardRef>)(
+        input,
+        ctx,
+    );
+    component.displayName = `Selection(${selectionType})`;
+    return component;
 };
 
-// --- Factory ----------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createSelection = (tuning?: TuningFor<'menu'>) =>
     Object.freeze({
-        Combobox: createSel({ type: 'combobox', ...pick(tuning, K) } as SelectionInput<'combobox'>),
-        create: <T extends SelectionType>(i: SelectionInput<T>) =>
-            createSel({ ...i, ...merged(tuning, i, K) } as SelectionInput<T>),
-        Menu: createSel({ type: 'menu', ...pick(tuning, K) } as SelectionInput<'menu'>),
-        Select: createSel({ type: 'select', ...pick(tuning, K) } as SelectionInput<'select'>),
+        Combobox: createSelectionComponent({
+            type: 'combobox',
+            ...pick(tuning, SELECTION_TUNING_KEYS),
+        } as SelectionInput<'combobox'>),
+        create: <T extends SelectionType>(input: SelectionInput<T>) =>
+            createSelectionComponent({
+                ...input,
+                ...merged(tuning, input, SELECTION_TUNING_KEYS),
+            } as SelectionInput<T>),
+        Menu: createSelectionComponent({
+            type: 'menu',
+            ...pick(tuning, SELECTION_TUNING_KEYS),
+        } as SelectionInput<'menu'>),
+        Select: createSelectionComponent({
+            type: 'select',
+            ...pick(tuning, SELECTION_TUNING_KEYS),
+        } as SelectionInput<'select'>),
     });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createSelection };
 export type { ComboboxProps, ItemData, MenuProps, SectionData, SelectionInput, SelectionType, SelectProps };

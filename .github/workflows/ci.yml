@@ -11,10 +11,7 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
-    # --- Normalize Commit (Independent) -----------------------------------------------
-    # Transforms [TYPE!]: to type!: format for Nx release compatibility.
-    # Runs independently - when it force-pushes, concurrency cancels this workflow
-    # and a new workflow starts with the normalized commit.
+    # --- Normalize Commit (Independent) ---------------------------------------
     normalize-commit:
         name: Normalize Commit
         if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
@@ -29,7 +26,7 @@ jobs:
             - uses: ./.github/actions/node-env
             - uses: ./.github/actions/normalize-commit
 
-    # --- Quality Gate -----------------------------------------------------------------
+    # --- Quality Gate ---------------------------------------------------------
     quality:
         name: Code Quality
         runs-on: ubuntu-latest
@@ -171,7 +168,7 @@ jobs:
                         }
                       });
 
-    # --- Release ----------------------------------------------------------------------
+    # --- Release --------------------------------------------------------------
     release:
         name: Release
         needs: [quality]

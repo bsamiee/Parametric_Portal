@@ -5,11 +5,11 @@ import fc from 'fast-check';
 import { describe, expect } from 'vitest';
 import { createTypes, TYPES_TUNING } from '../src/types.ts';
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const loadApi = () => Effect.runSync(createTypes());
 
-// --- Test Data (Parameterized) ----------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const BRAND_TEST_CASES = [
     ['uuidv7', '019377a8-1234-7abc-89de-0123456789ab', true],
@@ -42,7 +42,7 @@ const BRAND_TEST_CASES = [
     ['percentage', 101, false],
 ] as const;
 
-// --- Tests (Parameterized + Property-Based) ---------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 describe('types package', () => {
     describe('api surface', () => {

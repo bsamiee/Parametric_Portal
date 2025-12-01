@@ -1,12 +1,11 @@
 #!/usr/bin/env tsx
 /**
- * Config-driven report generator with source→format→output pipeline.
- * Dispatches to row builders (count, list) and output targets (summary, comment, issue).
+ * Report generator: fetches data, formats tables, outputs to summary/comment/issue.
+ * Uses fn.report, fn.rowsCount, call, mutate from schema.ts.
  */
-
 import { type Ctx, call, createCtx, fn, type Issue, type LabelCat, mutate, type RunParams } from './schema.ts';
 
-// --- Types ------------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type ContentSpec = { readonly kind: string } & Record<string, unknown>;
 type ContentConfig = {
@@ -23,9 +22,9 @@ type ContentConfig = {
     readonly row?: 'count' | 'list';
 };
 
-// --- Config -----------------------------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
-const CONTENT: Record<string, ContentConfig> = Object.freeze({
+const reportSpecs: Record<string, ContentConfig> = Object.freeze({
     aging: {
         filters: [
             { cat: 'priority', label: 'Critical' },
@@ -38,17 +37,16 @@ const CONTENT: Record<string, ContentConfig> = Object.freeze({
     },
 } as const);
 
-// --- Sources ----------------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 type SourceFn = (ctx: Ctx, cfg: ContentConfig, spec: ContentSpec, p: RunParams) => Promise<unknown>;
-
-const sources: Record<string, SourceFn> = {
+const dataSources: Record<string, SourceFn> = {
     fetch: async (ctx, cfg) => call(ctx, cfg.src.op, ...(cfg.src.args ?? [])),
     params: async (_, __, spec) => Promise.resolve(spec),
     payload: async (_, __, ___, params) => Promise.resolve(params.context.payload),
 };
 
-// --- Builders ---------------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const buildRows = (cfg: ContentConfig, data: unknown): ReadonlyArray<ReadonlyArray<string>> => {
     const builders: Record<string, () => ReadonlyArray<ReadonlyArray<string>>> = {
@@ -58,9 +56,9 @@ const buildRows = (cfg: ContentConfig, data: unknown): ReadonlyArray<ReadonlyArr
     return builders[cfg.row ?? 'list']();
 };
 
-// --- Outputs ----------------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
-const outputs = {
+const outputHandlers = {
     comment: async (ctx: Ctx, _: RunParams, body: string, cfg: ContentConfig, number: number): Promise<void> => {
         await mutate(ctx, {
             body,
@@ -84,9 +82,9 @@ const outputs = {
     },
 } as const;
 
-// --- Formatters -------------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const formatters = {
+const contentFormatters = {
     body: (_cfg: ContentConfig, spec: ContentSpec): string => fn.body([], spec as Record<string, string>),
     table: (cfg: ContentConfig, data: unknown, now: Date): string => {
         const rows = buildRows(cfg, data);
@@ -94,18 +92,19 @@ const formatters = {
     },
 } as const;
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: ContentSpec }): Promise<void> => {
     const ctx = createCtx(params);
-    const cfg = CONTENT[params.spec.kind as keyof typeof CONTENT];
+    const cfg = reportSpecs[params.spec.kind as keyof typeof reportSpecs];
     const now = new Date();
-    const data = await sources[cfg.src.source](ctx, cfg, params.spec, params);
-    const body = cfg.fmt.format === 'table' ? formatters.table(cfg, data, now) : formatters.body(cfg, params.spec);
-    await outputs[cfg.out.output](ctx, params, body, cfg, (params.spec as { number?: number }).number ?? 0);
+    const data = await dataSources[cfg.src.source](ctx, cfg, params.spec, params);
+    const body =
+        cfg.fmt.format === 'table' ? contentFormatters.table(cfg, data, now) : contentFormatters.body(cfg, params.spec);
+    await outputHandlers[cfg.out.output](ctx, params, body, cfg, (params.spec as { number?: number }).number ?? 0);
     params.core.info(`${params.spec.kind} report generated`);
 };
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };

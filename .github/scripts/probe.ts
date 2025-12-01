@@ -1,16 +1,15 @@
 #!/usr/bin/env tsx
 /**
- * GitHub entity data extractor with polymorphic handlers.
- * Fetches issues, PRs, or discussions with normalized output shapes.
+ * Entity data extractor: fetches issues, PRs, discussions with normalized output shapes.
+ * Uses B.probe, fn.trunc, fn.reactions, fn.comment, call, mutate, md from schema.ts.
  */
-
 import { B, type Ctx, call, createCtx, fn, type Label, md, mutate, type RunParams, type User } from './schema.ts';
 
-// --- Types ------------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type ReactionGroups = ReadonlyArray<{ readonly content: string; readonly users: { readonly totalCount: number } }>;
 
-// --- Handlers ---------------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 type DiscussionReply = {
     readonly author: User;
@@ -38,7 +37,7 @@ const mapReply = (reply: DiscussionReply) => ({
     reactions: fn.reactions(reply.reactionGroups),
 });
 
-const handlers = {
+const probeHandlers = {
     discussion: async (ctx: Ctx, number: number) => {
         const discussion = (await call(ctx, 'discussion.get', number)) as Discussion;
         return {
@@ -177,10 +176,10 @@ const handlers = {
     },
 } as const;
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
-const probe = async <K extends keyof typeof handlers>(params: RunParams, kind: K, number: number) =>
-    handlers[kind](createCtx(params), number);
+const probe = async <K extends keyof typeof probeHandlers>(params: RunParams, kind: K, number: number) =>
+    probeHandlers[kind](createCtx(params), number);
 
 const post = async (params: RunParams, number: number, marker: string, title: string, body: string): Promise<void> =>
     ((formattedMarker) =>
@@ -192,13 +191,13 @@ const post = async (params: RunParams, number: number, marker: string, title: st
             t: 'comment',
         }))(md.marker(marker)).then(() => params.core.info(`Posted ${title} to PR #${number}`));
 
-// --- Derived Types ----------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
-type DiscussionProbe = Awaited<ReturnType<typeof handlers.discussion>>;
-type IssueProbe = Awaited<ReturnType<typeof handlers.issue>>;
-type PrProbe = Awaited<ReturnType<typeof handlers.pr>>;
+type DiscussionProbe = Awaited<ReturnType<typeof probeHandlers.discussion>>;
+type IssueProbe = Awaited<ReturnType<typeof probeHandlers.issue>>;
+type PrProbe = Awaited<ReturnType<typeof probeHandlers.pr>>;
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
-export { handlers, post, probe };
+export { probeHandlers, post, probe };
 export type { DiscussionProbe, IssueProbe, PrProbe };

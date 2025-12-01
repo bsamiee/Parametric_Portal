@@ -16,22 +16,25 @@ You are a senior dev with decades of experience in automation systems, and a spe
 - **ALWAYS** THIS IS THE MOST CRITICAL REQUIREMENT: NEVER MOVE FAST, WE ARE OPERATING AY AN EXTREMELY METHODICAL, FOCUSED PACE, WE WORK ON A SINGLE PARAGRPH OR SECTION IN A SESSION, NEVER, NEVER DO LARGE EDITS OR PLANS, THIS IS NOT ALLOWED - ALWAYS HYPER FOCUS EACH SESSION ON FOCUSED BEST IMPLEMENTATIONS FOR THE HYPER-FOCUSED TASK
 
 [CONTEXT]
-- We are finalizing our new agent instruction files: CLAUDE.md + REQUIREMENTS_new.md, we first focusing on [tasl] file
-- **NEVER** use the old agent files as a reference, they are terrible and we want to break from their weight value on our new approach
-- **ALWAYS** conduct focused research, finding extremely deep, hyper-focused details to improve
-- CRITICAL: The Agents/claude files are meant to be instructional “hows”, and the REQUIREMENTS is meant to be more guidelines, standards, and larger information, this is a crucial distinction and we need to break the duplication that exists currently, and the low-quality formatting and content of the README
+- We are establishing a universal source of truth for information regarding syntax, semantics, terminology, wording, voice, tone, and language in context of all relevant documentation in our project. Our goal is to establish a universal, standardized approach to all documentation writing to have a unified, consistent approach that is also agentic friendly.
+- This is a crucial distinction and understanding, we are operating beyond just agent instructions files, we want all docstring headers, comments, and markdown files to be written with words, terms, tone, voice, structure, syntax, and semantics that is optimized for agentic infrastructure. For example, we want to structure all files in a way that makes most sense for agents, in a proven format, again this is for non-agent instruction files, the goal here is universal optimization.
+- Further, we want to ensure we establish a naming scshema for all parameters, constants, configs, factories, functions, operations, etc that not only allows us to have consistent, professional, advanced terminology, but also choose distinct words that are proven to be agentic friendly, not only for remembering/context, but for adherance and distinction
 
 [POINTS_OF_RESEARCH]
-
 **READ**: These are starting points, our research and scope of work are NOT limited to these
-
 - Always write all instructions using the appropriate tone, language, and formatting for optimized agentic behavior
 - Always pay attention to semantics and syntax, including comman, period, and colon usage to ensure we use them where appropriate, and consistently
 - ALWAYS be aware of “keywords”, and how, and when to use them, never spamming, but also not underutilizing them
 - ALWAYS pay attention to the order/structure of an instruction file for optimized ingestion to agents, that the flow and order is optimized
 - ALWAYS confirm the validity of information, nothing fake, or hallucinated - but truthful, documented and proven implementations
+- ENSURE that we are going to use appropriate formatting, terminology, and implementaitons universally, and that this is not for agent instruction files, but a univesal truth/approach
 
-[TASK][TARGET_FILE=CLAUDE.md]
-- Review the new AGENTS.md, CLAUDE.md, and REQUIREMENTS_new.md to understand the current state of them
-- Identify all surgical, syntax, semantics, tone, voice/wording micro improvements we can make to our CLAUDE.md
-- Identify an alternatibe (b) we can make for "protocol" for agent contexts that don't have access to nx/filesystem_mcp, it needs to be powerful, fast, and token optimized and achieve the same results. Further, we need to identify how to structure the "alternative" protocol, should we add it as nested bullets, or create labels and have the list we have, and an "alternative" (find better wording) labeled list for commands/tooling that should work regardless of env, that is still optimized, multi-chained commands that grants the agent fast context to understand the project structure, key files, relations, etc
+[EXTREMELY_IMPORTANT+READ]: WE MUST BE FOCUSED, CONCISE, AGONIZE OVER EVERY LINE AND SENTENCE IN THIS NEW FILE WE MAKE - IT MUST BE FORMATTED PROPERLY, AGENT FRIENDLY (REASONABLE LOC) AND COMPREHENSIVELY COVER EVERYTHING WITHOUT ANY UNNECESSARY VERBOSITY, FLUFF, OR OTHERWISE. THIS BREAKS THE ENTIRE PURPOSE OF AGENT FIRST TONE, VOICE, DOCUMENTAITON, AND STANDARDS
+
+[TASK][CREATE_A_NEW_FILE]
+- Review our CLAUDE.md and REQUIREMENTS.md to identify what we have currently regarding documentaiton/tone/voice instructions, and surgically update/improve them, removing lines (surgically) as needed if it can be optimized, and handled better, to do surgical trimming
+- Create a SINGLE new document docs/standards/ with the appropriate name, and structure (agentic optimized)
+- This document must not only establish all the requirements for documentaiton, from length, formatting, word choice, organization (code and documentaiton files), words to integrate (must/always/never/surgical/etc...) these must all be real, verified agentic keywords.
+- CRITICAL: We want to ensure that we right this document adhering to the same standards it states, regaring words, but also syntax, semantics, ordering, and structure
+- IMPORTANT: We want to ensure we explain/provide clear instructions on how to integrate these words/semantics/terminology properly in universal documentaiton, for example, what does a proper comment, docstring header, etc look like
+- Ensure we establish universal requirements and standards for parameters for consistency, again it must be optimized for agents, adherance, rememberance, and action - we are shaping everything for agents.

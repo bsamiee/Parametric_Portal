@@ -18,13 +18,13 @@
         "vitest": "catalog:"
     },
     "exports": {
+        "./temporal": {
+            "import": "./dist/temporal.js",
+            "types": "./dist/temporal.d.ts"
+        },
         "./types": {
             "import": "./dist/types.js",
             "types": "./dist/types.d.ts"
-        },
-        "./utils": {
-            "import": "./dist/utils.js",
-            "types": "./dist/utils.d.ts"
         }
     },
     "name": "@parametric-portal/types",

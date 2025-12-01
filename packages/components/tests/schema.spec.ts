@@ -1,3 +1,7 @@
+/**
+ * Schema tests: verify resolve polymorphism, B constant structure, utility functions.
+ * Uses fast-check for property-based testing with vitest runner.
+ */
 import { it } from '@fast-check/vitest';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
@@ -6,13 +10,13 @@ import {
     type Computed,
     compute,
     createBuilderContext,
-    fn,
     resolve,
     type SchemaKey,
     stateCls,
+    utilities,
 } from '../src/schema.ts';
 
-// --- Test Data (Parameterized) ----------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const SCHEMA_KEYS: ReadonlyArray<SchemaKey> = ['scale', 'behavior', 'overlay', 'feedback', 'animation'];
 const STATE_KEYS = ['ctrl', 'data', 'el', 'fb', 'menu', 'nav', 'ov'] as const;
@@ -24,7 +28,7 @@ const SCALE_CONFIGS = [
     { baseUnit: 0.5, density: 2, radiusMultiplier: 1, scale: 10 },
 ] as const;
 
-// --- Tests (Parameterized + Property-Based) ---------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 describe('components schema', () => {
     describe('resolve polymorphic function', () => {
@@ -74,7 +78,7 @@ describe('components schema', () => {
         describe.each(SCALE_CONFIGS)('with config %o', (config) => {
             it('computes all 36 values correctly', () => {
                 const scale = resolve('scale', config);
-                const computed = fn.computeScale(scale);
+                const computed = utilities.computeScale(scale);
                 expect(Object.keys(computed).length).toBe(36);
                 for (const v of Object.values(computed)) {
                     expect(v).toMatch(/^\d+(\.\d{3})?(rem|px)$/);
@@ -83,13 +87,13 @@ describe('components schema', () => {
         });
     });
 
-    describe('fn.computeScale', () => {
+    describe('utilities.computeScale', () => {
         it.prop([
             fc.integer({ max: 10, min: 1 }),
             fc.float({ max: Math.fround(2), min: Math.fround(0.5), noNaN: true }),
         ])('produces valid computed object for scale=%i density=%f', (scale, density) => {
             const s = resolve('scale', { density, scale });
-            const c = fn.computeScale(s);
+            const c = utilities.computeScale(s);
             expect(Object.keys(c).length).toBe(36);
             for (const v of Object.values(c)) {
                 expect(parseFloat(v)).toBeGreaterThan(0);
@@ -97,11 +101,11 @@ describe('components schema', () => {
         });
     });
 
-    describe('fn.cssVars', () => {
+    describe('utilities.cssVars', () => {
         it('converts computed to css custom properties', () => {
             const scale = resolve('scale', { scale: 5 });
-            const computed = fn.computeScale(scale);
-            const vars = fn.cssVars(computed, 'ctrl');
+            const computed = utilities.computeScale(scale);
+            const vars = utilities.cssVars(computed, 'ctrl');
             expect(vars['--ctrl-height']).toBe(computed.height);
             expect(vars['--ctrl-gap']).toBe(computed.gap);
             expect(vars['--ctrl-font-size']).toBe(computed.fontSize);
@@ -110,8 +114,8 @@ describe('components schema', () => {
 
         it('converts camelCase to kebab-case', () => {
             const scale = resolve('scale', { scale: 5 });
-            const computed = fn.computeScale(scale);
-            const vars = fn.cssVars(computed, 'test');
+            const computed = utilities.computeScale(scale);
+            const vars = utilities.cssVars(computed, 'test');
             expect(vars['--test-badge-padding-x']).toBeDefined();
             expect(vars['--test-dropdown-max-height']).toBeDefined();
             expect(vars['--test-small-font-size']).toBeDefined();
@@ -162,18 +166,18 @@ describe('components schema', () => {
         });
     });
 
-    describe('fn.strokeWidth', () => {
+    describe('utilities.strokeWidth', () => {
         it.each([
             [0, B.icon.stroke.base],
             [5, B.icon.stroke.base - 5 * B.icon.stroke.factor],
             [20, B.icon.stroke.min],
             [100, B.icon.stroke.min],
-        ])('fn.strokeWidth(%i) = %f', (scale, expected) => {
-            expect(fn.strokeWidth(scale)).toBeCloseTo(expected, 2);
+        ])('utilities.strokeWidth(%i) = %f', (scale, expected) => {
+            expect(utilities.strokeWidth(scale)).toBeCloseTo(expected, 2);
         });
 
         it.prop([fc.integer({ max: 100, min: 0 })])('clamps between min and max for scale=%i', (scale) => {
-            const result = fn.strokeWidth(scale);
+            const result = utilities.strokeWidth(scale);
             expect(result).toBeGreaterThanOrEqual(B.icon.stroke.min);
             expect(result).toBeLessThanOrEqual(B.icon.stroke.max);
         });

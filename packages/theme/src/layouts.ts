@@ -1,13 +1,16 @@
+/**
+ * Generate grid, stack, sticky, and container CSS utilities via schema validation.
+ */
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
 import { Effect, pipe } from 'effect';
 import type { Plugin } from 'vite';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type LayoutInput = S.Schema.Type<typeof LayoutInputSchema>;
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const PixelValue = pipe(S.Number, S.int(), S.positive(), S.brand('PixelValue'));
 const GridColumns = pipe(S.Number, S.int(), S.between(1, 12), S.brand('GridColumns'));
@@ -55,10 +58,9 @@ const LayoutInputSchema = S.Union(GridLayoutSchema, StackLayoutSchema, StickyLay
 
 // --- Constants ---------------------------------------------------------------
 
-const LAYOUT_CONFIG = Object.freeze({
-    gapMultiplier: 4,
-    remBase: 16,
-    stickyZindex: 10,
+const B = Object.freeze({
+    gap: { multiplier: 4, remBase: 16 },
+    sticky: { zindex: 10 },
 } as const);
 
 const VIRTUAL_MODULE_ID = Object.freeze({
@@ -66,13 +68,13 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-layouts' as const,
 } as const);
 
-// --- Unified fn Object (Consolidated Helpers) --------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const fn = {
+    // Fallback pixel value calculated when CSS custom property undefined at runtime.
     gap: (scale: number): string =>
-        scale === 0
-            ? '0'
-            : `var(--spacing-${scale}, ${(scale * LAYOUT_CONFIG.gapMultiplier) / LAYOUT_CONFIG.remBase}rem)`,
+        scale === 0 ? '0' : `var(--spacing-${scale}, ${(scale * B.gap.multiplier) / B.gap.remBase}rem)`,
+    // IIFE defers grid formula construction until CSS generation to isolate minmax string.
     gridFormula: (minWidth: number, maxCols?: number): string =>
         ((minmax) => (maxCols ? `repeat(${maxCols}, ${minmax})` : `repeat(auto-fit, ${minmax})`))(
             `minmax(min(${minWidth}px, 100%), 1fr)`,
@@ -80,7 +82,7 @@ const fn = {
     stickyOffset: (position: 'top' | 'bottom' | 'left' | 'right', gap: string): string => `${position}: ${gap};`,
 } as const;
 
-// --- Effect Pipelines & Builders ---------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
 const generateGridLayout = (input: Extract<LayoutInput, { type: 'grid' }>): Effect.Effect<string, ParseError> =>
     pipe(
@@ -88,7 +90,7 @@ const generateGridLayout = (input: Extract<LayoutInput, { type: 'grid' }>): Effe
         Effect.map((config) => {
             const gridFormula = fn.gridFormula(config.minItemWidth, config.maxColumns);
             const gapValue = fn.gap(config.gap);
-
+            // Emit newline-terminated rules only when property defined to preserve CSS block formatting.
             const alignRule = config.alignItems ? `  align-items: ${config.alignItems};\n` : '';
             const containerRule = config.containerQuery ? `  container-type: inline-size;\n` : '';
             const justifyRule = config.justifyItems ? `  justify-items: ${config.justifyItems};\n` : '';
@@ -142,7 +144,7 @@ const generateStickyLayout = (input: Extract<LayoutInput, { type: 'sticky' }>): 
         Effect.map((config) => {
             const offsetValue = fn.gap(config.offset);
             const offsetRule = fn.stickyOffset(config.position, offsetValue);
-            const zIndex = config.zIndex ?? LAYOUT_CONFIG.stickyZindex;
+            const zIndex = config.zIndex ?? B.sticky.zindex;
 
             return `
 .layout-${config.name} {
@@ -178,16 +180,18 @@ ${containerRule}  max-width: var(--layout-${config.name}-max);
         }),
     );
 
-const LAYOUT_GENERATORS = Object.freeze({
+// --- Dispatch Tables ---------------------------------------------------------
+
+const layoutHandlers = Object.freeze({
     container: generateContainerLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
     grid: generateGridLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
     stack: generateStackLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
     sticky: generateStickyLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
 } as const);
 
-const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> => LAYOUT_GENERATORS[input.type](input);
+const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> => layoutHandlers[input.type](input);
 
-// --- Plugin ------------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const defineLayouts = (input: LayoutInput | ReadonlyArray<LayoutInput>): Plugin => ({
     enforce: 'pre',
@@ -214,5 +218,5 @@ const defineLayouts = (input: LayoutInput | ReadonlyArray<LayoutInput>): Plugin 
 
 // --- Export ------------------------------------------------------------------
 
-export { defineLayouts, LAYOUT_CONFIG };
+export { B, defineLayouts };
 export type { LayoutInput };

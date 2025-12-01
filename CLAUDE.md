@@ -13,6 +13,7 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 
 [IMPORTANT]:
 - **ALWAYS** use new sources when conducting research, sources **MUST** be from 2025, and within the last 6 months, **NEVER** use 2024 or older sources
+- **ALWAYS** follow `docs/standards/AGENTIC-DOCUMENTATION.md` for JSDoc headers, comments, naming
 - **ALWAYS** tools over internal knowledge — read files, search codebase, verify assumptions
 - **AWLAYS** Parallelize aggressively — run multiple searches, read several files, call independent tools concurrently
 - **NEVER** use emojis **ALWAYS** use "[X]" style markers with concise UPPERCASE formatting
@@ -25,9 +26,9 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 ## [PREREQUISITES]
 
 [IMPORTANT]: Read these files before generating code:
-- `REQUIREMENTS.md`, `tsconfig.base.json`, `biome.json`
-- `pnpm-workspace.yaml`, `package.json`, `nx.json`
-- `vite.config.ts`, `.github/scripts/schema.ts`
+- `REQUIREMENTS.md`, `docs/standards/AGENTIC-DOCUMENTATION.md`,
+- `tsconfig.base.json`, `vite.config.ts`, `biome.json`
+- `nx.json`, `pnpm-workspace.yaml`, `package.json`,
 
 ## [PROTOCOL]
 
@@ -71,8 +72,8 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 - **ALWAYS** Handle all modes via single factory function
 - **ALWAYS** Branch via dispatch tables: `handlers[mode](config)`
 - **ALWAYS** Narrow types via discriminated unions
-- Target 25-30 LOC per feature, complexity ≤25
 - **ALWAYS** Produce multiple outputs from one pipeline
+- Target 25-30 LOC per feature, complexity ≤25
 
 ## [CONSTRAINTS]
 
@@ -111,17 +112,23 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 
 ## [FILE_ORGANIZATION]
 
-[RULE]: **Separator format**: `// --- Section Name -------` (77 chars, triple-dash):
+[RULE]: **Section separators**: `// --- Label ` + dashes to column 80. Labels: max 2 words, no parentheticals.
+
 ```typescript
-// --- Imports -----------------------------------------------------------------
-// --- Type Definitions --------------------------------------------------------
-// --- Schema Definitions ------------------------------------------------------
+// --- Types -------------------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 // --- Constants ---------------------------------------------------------------
-// --- Pure Utility Functions --------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 // --- Dispatch Tables ---------------------------------------------------------
 // --- Effect Pipeline ---------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 // --- Export ------------------------------------------------------------------
 ```
+**Canonical order** (omit unused): Types → Schema → Constants → Pure Functions → Dispatch Tables → Effect Pipeline → Entry Point → Export
+
+**FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, any parentheticals
+
+[RULE]: **Documentation standards** in `docs/standards/AGENTIC-DOCUMENTATION.md`.
 
 ## [VALIDATION]
 

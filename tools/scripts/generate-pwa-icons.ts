@@ -1,68 +1,89 @@
+/**
+ * Generate PWA icons by resizing SVG source to multiple PNG sizes with maskable variants.
+ */
 import * as path from 'node:path';
 import { Effect, pipe } from 'effect';
 import sharp from 'sharp';
 
-// --- Configuration -----------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
-const ICON_CONFIG = Object.freeze({
-    outputDir: 'public',
+type IconMode = 'maskable' | 'standard';
+
+class IconGenerationError {
+    readonly _tag = 'IconGenerationError';
+    constructor(
+        readonly size: number,
+        readonly mode: IconMode,
+        readonly reason: string,
+    ) {}
+}
+
+// --- Constants ---------------------------------------------------------------
+
+// 10% safe zone for maskable icons per Web App Manifest spec
+const B = Object.freeze({
+    baseSize: 512,
+    output: 'public',
+    rgbWhite: 255,
+    safeZonePadding: 51,
+    smallRatio: 192 / 512,
     source: 'public/icon-source.svg',
     targets: [
-        { maskable: false, size: 192 },
-        { maskable: false, size: 512 },
-        { maskable: true, size: 512 },
-    ] as const,
+        { mode: 'standard' as const, size: 192 },
+        { mode: 'standard' as const, size: 512 },
+        { mode: 'maskable' as const, size: 512 },
+    ],
 } as const);
 
-// --- Domain Logic ------------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
-const createResizeOptions = (maskable: boolean) => ({
-    background: { alpha: maskable ? 0 : 0, b: maskable ? 255 : 0, g: maskable ? 255 : 0, r: maskable ? 255 : 0 },
-    fit: 'contain' as const,
-});
+const deriveOutputPath = (size: number, mode: IconMode): string =>
+    path.join(B.output, `icon-${size}${mode === 'maskable' ? '-maskable' : ''}.png`);
 
-const createExtendOptions = () => ({
-    background: { alpha: 1, b: 255, g: 255, r: 255 },
-    bottom: 51,
-    left: 51,
-    right: 51,
-    top: 51,
-});
+// --- Dispatch Tables ---------------------------------------------------------
 
-const getOutputPath = (size: number, maskable: boolean): string =>
-    path.join(ICON_CONFIG.outputDir, `icon-${size}${maskable ? '-maskable' : ''}.png`);
+// Route pipeline behavior by icon mode
+const pipelineHandlers = {
+    maskable: (p: sharp.Sharp) =>
+        p.extend({
+            background: { alpha: 1, b: B.rgbWhite, g: B.rgbWhite, r: B.rgbWhite },
+            bottom: B.safeZonePadding,
+            left: B.safeZonePadding,
+            right: B.safeZonePadding,
+            top: B.safeZonePadding,
+        }),
+    standard: (p: sharp.Sharp) => p,
+} as const satisfies Record<IconMode, (p: sharp.Sharp) => sharp.Sharp>;
 
-// --- Effect Pipelines --------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
-const processIcon = ({ maskable, size }: { maskable: boolean; size: number }): Effect.Effect<void, Error> =>
+const processIcon = ({ mode, size }: { mode: IconMode; size: number }): Effect.Effect<void, IconGenerationError> =>
     pipe(
         Effect.tryPromise({
-            catch: (error) =>
-                new Error(`Failed to generate icon (size: ${size}, maskable: ${maskable}): ${String(error)}`),
-            try: () => {
-                const resizeSize = maskable ? 410 : size;
-                const pipeline = sharp(ICON_CONFIG.source).resize(
-                    resizeSize,
-                    resizeSize,
-                    createResizeOptions(maskable),
-                );
-
-                return (maskable ? pipeline.extend(createExtendOptions()) : pipeline)
+            catch: (error) => new IconGenerationError(size, mode, String(error)),
+            // Maskable icons: resize to (baseSize - 2*padding) then extend back to baseSize
+            try: () =>
+                pipelineHandlers[mode](
+                    sharp(B.source).resize(
+                        mode === 'maskable' ? B.baseSize - B.safeZonePadding * 2 : size,
+                        mode === 'maskable' ? B.baseSize - B.safeZonePadding * 2 : size,
+                        { background: { alpha: 0, b: 0, g: 0, r: 0 }, fit: 'contain' as const },
+                    ),
+                )
                     .png()
-                    .toFile(getOutputPath(size, maskable));
-            },
+                    .toFile(deriveOutputPath(size, mode)),
         }),
         Effect.tap(() =>
             Effect.sync(() => {
                 // biome-ignore lint/suspicious/noConsole: script output
-                console.log(`[OK] Generated: ${getOutputPath(size, maskable)}`);
+                console.log(`[OK] Generated: ${deriveOutputPath(size, mode)}`);
             }),
         ),
     );
 
-const main = pipe(
+const generationPipeline = pipe(
     Effect.all(
-        ICON_CONFIG.targets.map((target) => processIcon(target)),
+        B.targets.map((target) => processIcon(target)),
         { concurrency: 'unbounded' },
     ),
     Effect.tap(() =>
@@ -74,12 +95,12 @@ const main = pipe(
     Effect.catchAll((error) =>
         Effect.sync(() => {
             // biome-ignore lint/suspicious/noConsole: script output
-            console.error(`\n[ERROR] ${error.message}`);
+            console.error(`\n[ERROR] ${error.reason}`);
             process.exit(1);
         }),
     ),
 );
 
-// --- Execution ---------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
-void Effect.runPromise(main);
+void Effect.runPromise(generationPipeline);

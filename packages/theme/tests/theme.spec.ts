@@ -1,9 +1,12 @@
+/**
+ * Validate theme plugin virtual module resolution, color generation, and error handling.
+ */
 import { it } from '@fast-check/vitest';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
-import { defineThemes, THEME_CONFIG } from '../src/theme.ts';
+import { B, defineThemes } from '../src/theme.ts';
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const loadVirtualModule = (input: Parameters<typeof defineThemes>[0]) => {
     const plugin = defineThemes(input);
@@ -22,13 +25,13 @@ const loadVirtualModule = (input: Parameters<typeof defineThemes>[0]) => {
     return { css, resolved };
 };
 
-// --- Test Data (Parameterized) ----------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const VALID_SCALES = [2, 5, 10, 15, 20] as const;
 
 const VALID_MODIFIERS = ['hover', 'focus', 'active', 'disabled', 'pressed', 'selected', 'dragged'] as const;
 
-// --- Tests (Parameterized + Property-Based) ---------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 describe('theme plugin', () => {
     describe('virtual module', () => {
@@ -150,19 +153,19 @@ describe('theme plugin', () => {
 
     describe('theme config constants', () => {
         it('exports frozen config', () => {
-            expect(Object.isFrozen(THEME_CONFIG)).toBe(true);
+            expect(Object.isFrozen(B)).toBe(true);
         });
 
         it('has all baseline modifiers', () => {
             for (const mod of VALID_MODIFIERS) {
-                expect(THEME_CONFIG.baselineModifiers[mod]).toBeDefined();
+                expect(B.baseline[mod]).toBeDefined();
             }
         });
 
         it('has multipliers for shifts', () => {
-            expect(THEME_CONFIG.multipliers.alpha).toBeGreaterThan(0);
-            expect(THEME_CONFIG.multipliers.chroma).toBeGreaterThan(0);
-            expect(THEME_CONFIG.multipliers.lightness).toBeGreaterThan(0);
+            expect(B.multipliers.alpha).toBeGreaterThan(0);
+            expect(B.multipliers.chroma).toBeGreaterThan(0);
+            expect(B.multipliers.lightness).toBeGreaterThan(0);
         });
     });
 });

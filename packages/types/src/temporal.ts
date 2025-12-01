@@ -1,3 +1,6 @@
+/**
+ * Define temporal operations via Effect-wrapped date-fns: parse, format, addDays, daysBetween with Immer brand registry.
+ */
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
 import { addDays, differenceInDays, format, parseISO } from 'date-fns';
@@ -6,7 +9,7 @@ import { castDraft, enableMapSet, produce } from 'immer';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 
-// --- Type Definitions --------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type BrandMetadata = S.Schema.Type<typeof BrandMetadataSchema>;
 type RegistryState = { readonly brands: ReadonlyMap<string, BrandMetadata> };
@@ -18,12 +21,10 @@ type RegistryActions = {
     readonly unregister: (name: string) => void;
 };
 type BrandRegistry = RegistryState & RegistryActions;
-
-type UtilsConfig = {
+type TemporalConfig = {
     readonly defaultDateFormat?: string;
 };
-
-type UtilsApi = {
+type TemporalApi = {
     readonly addDays: (numDays: number) => (date: Date) => Effect.Effect<Date, never>;
     readonly createRegistry: () => BrandRegistry;
     readonly daysBetween: (start: Date, end: Date) => Effect.Effect<number, never>;
@@ -32,25 +33,23 @@ type UtilsApi = {
     readonly produce: typeof produce;
 };
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const BrandMetadataSchema = S.Struct({
     brandName: S.String,
     createdAt: S.Number,
 });
 
-// --- Constants (Single B Constant) -------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     defaultFormat: 'yyyy-MM-dd',
     registry: { initial: new Map<string, BrandMetadata>() },
 } as const);
 
-// --- Immer Setup -------------------------------------------------------------
-
 enableMapSet();
 
-// --- Pure Utility Functions --------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError, never> =>
     pipe(
@@ -58,7 +57,36 @@ const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError
         Effect.flatMap(S.decode(BrandMetadataSchema)),
     );
 
-// --- Registry Factory (Immer-powered) ----------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
+
+const temporalHandlers = {
+    addDays:
+        (numDays: number) =>
+        (date: Date): Effect.Effect<Date, never> =>
+            Effect.sync(() => addDays(date, numDays)),
+    daysBetween: (start: Date, end: Date): Effect.Effect<number, never> =>
+        Effect.sync(() => differenceInDays(end, start)),
+    formatDate:
+        (formatStr: string) =>
+        (date: Date): Effect.Effect<string, ParseError> =>
+            Effect.try({
+                catch: (error) => new Error(`Format failed: ${String(error)}`) as ParseError,
+                try: () => format(date, formatStr),
+            }),
+    parse: (input: string): Effect.Effect<Date, ParseError> =>
+        pipe(
+            Effect.try({
+                catch: (error) => new Error(`Parse failed: ${String(error)}`) as ParseError,
+                try: () => parseISO(input),
+            }),
+            Effect.filterOrFail(
+                (parsedDate) => !Number.isNaN(parsedDate.getTime()),
+                () => new Error(`Invalid date: ${input}`) as ParseError,
+            ),
+        ),
+};
+
+// --- Entry Point -------------------------------------------------------------
 
 const createRegistry = (): BrandRegistry => {
     const useStore = create<BrandRegistry>()(
@@ -93,49 +121,18 @@ const createRegistry = (): BrandRegistry => {
     return useStore.getState();
 };
 
-// --- Date Utilities ----------------------------------------------------------
-
-const dateUtils = {
-    addDays:
-        (numDays: number) =>
-        (date: Date): Effect.Effect<Date, never> =>
-            Effect.sync(() => addDays(date, numDays)),
-    daysBetween: (start: Date, end: Date): Effect.Effect<number, never> =>
-        Effect.sync(() => differenceInDays(end, start)),
-    formatDate:
-        (formatStr: string) =>
-        (date: Date): Effect.Effect<string, ParseError> =>
-            Effect.try({
-                catch: (error) => new Error(`Format failed: ${String(error)}`) as ParseError,
-                try: () => format(date, formatStr),
-            }),
-    parse: (input: string): Effect.Effect<Date, ParseError> =>
-        pipe(
-            Effect.try({
-                catch: (error) => new Error(`Parse failed: ${String(error)}`) as ParseError,
-                try: () => parseISO(input),
-            }),
-            Effect.filterOrFail(
-                (parsedDate) => !Number.isNaN(parsedDate.getTime()),
-                () => new Error(`Invalid date: ${input}`) as ParseError,
-            ),
-        ),
-};
-
-// --- Polymorphic Entry Point -------------------------------------------------
-
-const createUtils = (config: UtilsConfig = {}): UtilsApi =>
+const createTemporal = (config: TemporalConfig = {}): TemporalApi =>
     Object.freeze({
-        addDays: dateUtils.addDays,
+        addDays: temporalHandlers.addDays,
         createRegistry,
-        daysBetween: dateUtils.daysBetween,
+        daysBetween: temporalHandlers.daysBetween,
         formatDate: (formatStr?: string) =>
-            dateUtils.formatDate(formatStr ?? config.defaultDateFormat ?? B.defaultFormat),
-        parse: dateUtils.parse,
+            temporalHandlers.formatDate(formatStr ?? config.defaultDateFormat ?? B.defaultFormat),
+        parse: temporalHandlers.parse,
         produce,
     } as const);
 
-// --- Export (2 Exports: Tuning + Factory) ------------------------------------
+// --- Export ------------------------------------------------------------------
 
-export { B as UTILS_TUNING, createUtils };
-export type { BrandMetadata, BrandRegistry, UtilsApi, UtilsConfig };
+export { B as TEMPORAL_TUNING, createTemporal };
+export type { BrandMetadata, BrandRegistry, TemporalApi, TemporalConfig };

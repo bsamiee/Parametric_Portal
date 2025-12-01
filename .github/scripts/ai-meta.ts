@@ -1,9 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * Universal GitHub metadata fixer. Validates titles, labels, bodies, commits.
- * Three-tier: local inference → Claude → GitHub Models.
+ * Metadata fixer: validates/repairs titles, labels, bodies via local inference or AI fallback.
+ * Uses B.meta.infer, B.pr.pattern, fn.classify, call, mutate from schema.ts.
  */
-
 import {
     B,
     type Ctx,
@@ -19,16 +18,16 @@ import {
     type TypeKey,
 } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
-type Config = { readonly key?: string; readonly token: string };
-type Spec = { readonly targets?: ReadonlyArray<Target>; readonly limit?: number };
+type MetaConfig = { readonly key?: string; readonly token: string };
+type MetaSpec = { readonly targets?: ReadonlyArray<Target>; readonly limit?: number };
 type Commit = { readonly message: string; readonly sha: string };
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
-const infer = (text: string): TypeKey => fn.classify(text, B.meta.infer, 'chore') as TypeKey;
-const strip = (text: string): string =>
+const classifyType = (text: string): TypeKey => fn.classify(text, B.meta.infer, 'chore') as TypeKey;
+const stripConventionalPrefix = (text: string): string =>
     text
         .replace(/^\[.*?\]:?\s*/i, '')
         .replace(/^(\w+)(\(.*?\))?:?\s*/i, '')
@@ -39,9 +38,9 @@ const isDashboard = (labels: ReadonlyArray<Label>): boolean => labels.some((labe
 const isBreak = (title: string, body: string | null): boolean =>
     B.pr.pattern.exec(title)?.[2] === '!' || B.breaking.bodyPat.test(body ?? '');
 
-// --- Dispatch Tables --------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const RULES: Record<
+const fixRules: Record<
     Target,
     {
         readonly ok: (issue: Issue, commits?: ReadonlyArray<Commit>) => boolean;
@@ -59,22 +58,22 @@ const RULES: Record<
     commit: {
         fix: (_, commits) =>
             ((bad) =>
-                bad ? `${infer(bad.message)}${isBreak(bad.message, null) ? '!' : ''}: ${strip(bad.message)}` : null)(
-                commits?.find((commit) => !B.patterns.commit.test(commit.message)),
-            ),
+                bad
+                    ? `${classifyType(bad.message)}${isBreak(bad.message, null) ? '!' : ''}: ${stripConventionalPrefix(bad.message)}`
+                    : null)(commits?.find((commit) => !B.patterns.commit.test(commit.message))),
         ok: (_, commits) => commits?.every((commit) => B.patterns.commit.test(commit.message)) ?? true,
         prompt: (issue) => `Fix commit to conventional: type: desc. Current: "${issue.title}". Return ONLY message.`,
         write: () => Promise.resolve(),
     },
     label: {
-        fix: (issue) => infer(issue.title),
+        fix: (issue) => classifyType(issue.title),
         ok: (issue) => hasType(issue.labels),
         prompt: (issue) => `Classify: ${TYPES.join(',')}. Title: "${issue.title}". Return ONE type.`,
         write: (ctx, number, value) => mutate(ctx, { action: 'add', labels: [value], n: number, t: 'label' }),
     },
     title: {
         fix: (issue) =>
-            `${B.meta.fmt.title(infer(issue.title), isBreak(issue.title, issue.body))} ${strip(issue.title)}`,
+            `${B.meta.fmt.title(classifyType(issue.title), isBreak(issue.title, issue.body))} ${stripConventionalPrefix(issue.title)}`,
         ok: (issue) => B.pr.pattern.test(issue.title),
         prompt: (issue) =>
             `Fix to [TYPE]: format. Types: ${TYPES.join(',')}. Current: "${issue.title}". Return ONLY title.`,
@@ -82,9 +81,9 @@ const RULES: Record<
     },
 };
 
-// --- AI Providers -----------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
-const ai = (config: Config, prompt: string): Promise<string | null> =>
+const callAiApi = (config: MetaConfig, prompt: string): Promise<string | null> =>
     fetch(
         config.key ? 'https://api.anthropic.com/v1/messages' : 'https://models.github.ai/inference/chat/completions',
         {
@@ -113,17 +112,17 @@ const ai = (config: Config, prompt: string): Promise<string | null> =>
         )
         .catch(() => null);
 
-// --- Effect Pipeline --------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
-const fix = (ctx: Ctx, config: Config, target: Target, issue: Issue): Promise<number> =>
-    RULES[target].ok(issue)
+const fixTarget = (ctx: Ctx, config: MetaConfig, target: Target, issue: Issue): Promise<number> =>
+    fixRules[target].ok(issue)
         ? Promise.resolve(0)
         : ((local) =>
-              (local ? Promise.resolve(local) : ai(config, RULES[target].prompt(issue))).then((value) =>
-                  value ? RULES[target].write(ctx, issue.number, value.trim().split('\n')[0]).then(() => 1) : 0,
-              ))(RULES[target].fix(issue));
+              (local ? Promise.resolve(local) : callAiApi(config, fixRules[target].prompt(issue))).then((value) =>
+                  value ? fixRules[target].write(ctx, issue.number, value.trim().split('\n')[0]).then(() => 1) : 0,
+              ))(fixRules[target].fix(issue));
 
-const sync = (ctx: Ctx, issue: Issue): Promise<number> =>
+const syncBreakingLabel = (ctx: Ctx, issue: Issue): Promise<number> =>
     ((breaking, hasLabel) =>
         breaking !== hasLabel
             ? mutate(ctx, {
@@ -137,9 +136,11 @@ const sync = (ctx: Ctx, issue: Issue): Promise<number> =>
         issue.labels.some((label) => label.name === B.breaking.label),
     );
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
-const run = async (params: RunParams & { spec: Spec; cfg: Config }): Promise<{ fixed: number; provider: string }> => {
+const run = async (
+    params: RunParams & { spec: MetaSpec; cfg: MetaConfig },
+): Promise<{ fixed: number; provider: string }> => {
     const ctx = createCtx(params);
     const targets = (params.spec.targets ?? ['title', 'label', 'body']).filter(
         (target): target is Exclude<Target, 'commit'> => target !== 'commit',
@@ -154,15 +155,15 @@ const run = async (params: RunParams & { spec: Spec; cfg: Config }): Promise<{ f
         ),
     ).then((results) => results.flat().slice(0, params.spec.limit ?? 10));
     const results = await Promise.all([
-        ...items.flatMap((issue) => targets.map((target) => fix(ctx, params.cfg, target, issue))),
-        ...items.map((issue) => sync(ctx, issue)),
+        ...items.flatMap((issue) => targets.map((target) => fixTarget(ctx, params.cfg, target, issue))),
+        ...items.map((issue) => syncBreakingLabel(ctx, issue)),
     ]);
     const fixed = results.reduce((acc, count) => acc + count, 0);
     params.core.info(`[META] fixed ${fixed} items`);
     return { fixed, provider: fixed > 0 ? 'mixed' : 'none' };
 };
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };
-export type { Commit, Config, Spec };
+export type { Commit, MetaConfig, MetaSpec };

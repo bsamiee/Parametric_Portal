@@ -1,10 +1,10 @@
 #!/usr/bin/env tsx
 /**
- * Central configuration and type definitions for workflow automation.
- * Single B constant (config DSL), polymorphic ops, unified check/classify.
+ * Central schema: define B constant, types, fn utilities, call/mutate dispatch, md formatters.
+ * Uses B.labels, B.hygiene, call (issue/pr), mutate (labels/issues/branches), md formatters.
  */
 
-// --- Base Types -------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type User = { readonly login: string };
 type Label = { readonly name: string };
@@ -53,7 +53,7 @@ type RunParams = {
     readonly github: GitHub;
 };
 
-// --- Markdown Generators ----------------------------------------------------
+// --- Markdown ----------------------------------------------------------------
 
 const shieldUrl = (label: string, message: string, color: string, style?: string, logo?: string): string => {
     const base = `https://img.shields.io/badge/${encodeURIComponent(label)}-${encodeURIComponent(message)}-${color}`;
@@ -106,7 +106,7 @@ const md = Object.freeze({
     },
 } as const);
 
-// --- Section Types ----------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type Section =
     | { readonly kind: 'list'; readonly items: ReadonlyArray<string>; readonly ordered?: boolean }
@@ -126,7 +126,7 @@ type Section =
 
 type BodySpec = ReadonlyArray<Section>;
 
-// --- Validation Types -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type ValidateResult =
     | { readonly valid: true; readonly type: TypeKey; readonly breaking: boolean; readonly subject: string }
@@ -135,12 +135,12 @@ type Target = 'title' | 'commit' | 'label' | 'body';
 type TypeKey = 'feat' | 'fix' | 'docs' | 'style' | 'refactor' | 'test' | 'chore' | 'perf' | 'ci' | 'build';
 type MarkerKey = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 
-// --- Core Arrays (algorithmic source) ---------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const TYPES = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build'] as const;
 const MARKERS = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;
 
-// --- Constants (B) ----------------------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     algo: { closeRatio: 14 / 30, mutationPct: 80, staleDays: 30 },
@@ -183,11 +183,8 @@ const B = Object.freeze({
     hygiene: {
         // Bot aliases not derived from agent labels (actual GitHub bot names)
         botAliases: ['github-actions[bot]', 'gemini-code-assist[bot]', 'chatgpt-codex-connector[bot]'] as const,
-        // Display configuration for hygiene messages
         display: { maxFiles: 3 } as const,
-        // Slash commands for AI agents (algorithmically derived in pr-hygiene.ts)
         slashCommands: ['review', 'fix', 'explain', 'summarize', 'help', 'ask'] as const,
-        // Patterns indicating valuable feedback that should NOT be auto-resolved
         valuablePatterns: [
             /security|vulnerab|exploit|inject|xss|csrf|auth/i,
             /breaking|compat|deprecat|removal/i,
@@ -277,13 +274,13 @@ const B = Object.freeze({
     time: { day: 86400000 },
 } as const);
 
-// --- Derived Types ----------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type LabelCat = keyof typeof B.labels.categories;
 type MetaCat = keyof typeof B.meta.ops;
 type MetaCap = keyof typeof B.meta.caps;
 
-// --- Spec Types -------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type MutateSpec =
     | {
@@ -324,7 +321,7 @@ type MutateSpec =
           readonly prerelease?: boolean;
       };
 
-// --- Pure Functions ---------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const fn = {
     age: (created: string, now: Date): number => Math.floor((now.getTime() - new Date(created).getTime()) / B.time.day),
@@ -436,7 +433,7 @@ const fn = {
     trunc: (text: string | null, limit = B.probe.bodyTruncate): string => (text ?? '').substring(0, limit),
 } as const;
 
-// --- API Operations (Direct Dispatch Table) ---------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 type Op = {
     readonly api?: readonly [string, string];
@@ -591,7 +588,7 @@ const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Pro
     return op.safe ? execute().catch(() => undefined) : execute();
 };
 
-// --- Mutation Handlers ------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const merge = (existing: string | null, content: string, mode: 'replace' | 'append' | 'prepend'): string =>
     ({
@@ -659,7 +656,7 @@ const mutateHandlers: {
 
 const mutate = async (ctx: Ctx, spec: MutateSpec): Promise<void> => mutateHandlers[spec.t](ctx, spec as never);
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createCtx = (params: RunParams): Ctx => ({
     github: params.github,
@@ -667,7 +664,7 @@ const createCtx = (params: RunParams): Ctx => ({
     repo: params.context.repo.repo,
 });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { B, call, createCtx, fn, MARKERS, md, mutate, TYPES };
 export type {

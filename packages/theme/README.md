@@ -47,11 +47,8 @@ defineThemes([{
 ```
 
 **Generates**: `--color-brand-50` through `--color-brand-550`, plus `--color-brand-hover`, `--color-brand-disabled`
-
 **Usage**: `<button className="bg-brand-500 hover:bg-brand-hover">Submit</button>`
-
 **API**: `{ name, lightness, chroma, hue, alpha?, scale, spacing?, modifiers?, customModifiers? }`
-
 **Config**: `THEME_CONFIG.scaleIncrement`, `THEME_CONFIG.multipliers`, `THEME_CONFIG.baselineModifiers`
 
 ---
@@ -75,11 +72,8 @@ defineFonts([{
 ```
 
 **Generates**: `@font-face`, `--font-brand` CSS variable, `.font-brand-regular`, `.font-brand-bold` utilities
-
 **Usage**: `<h1 className="font-brand-bold">Title</h1>`
-
 **API**: `{ name, family, type, src, weights, axes?, features?, display?, fallback? }`
-
 **Config**: `FORMAT_CONFIG.variable`, `FORMAT_CONFIG.static`
 
 ---
@@ -100,20 +94,16 @@ defineLayouts([
 ```
 
 **Generates**: `--layout-*` CSS variables and `.layout-*` utility classes
-
 **Usage**: `<div className="layout-cards"><div>Card 1</div><div>Card 2</div></div>`
-
 **Container Queries**: Set `containerQuery: true` to enable `@container` queries (children respond to parent width, not viewport)
+**Config**: `LAYOUT_CONFIG.gapMultiplier`, `LAYOUT_CONFIG.remBase`, `LAYOUT_CONFIG.stickyZindex`
+**Gap Calculation**: `gap: 4` → `4 × 4px = 16px = 1rem`
 
 **API**:
 - Grid: `{ type: 'grid', name, minItemWidth, maxColumns?, gap?, containerQuery?, alignItems?, justifyItems? }`
 - Stack: `{ type: 'stack', name, direction, gap?, containerQuery?, align?, justify?, wrap? }`
 - Sticky: `{ type: 'sticky', name, position, offset, zIndex? }`
 - Container: `{ type: 'container', name, maxWidth, padding?, containerQuery? }`
-
-**Config**: `LAYOUT_CONFIG.gapMultiplier`, `LAYOUT_CONFIG.remBase`, `LAYOUT_CONFIG.stickyZindex`
-
-**Gap Calculation**: `gap: 4` → `4 × 4px = 16px = 1rem`
 
 ---
 

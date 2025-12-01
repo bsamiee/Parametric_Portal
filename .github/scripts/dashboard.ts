@@ -1,9 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * Metrics collector and section renderer with dispatch table architecture.
- * Composes parallel API calls, formats via fn.report, outputs via mutate.
+ * Repository dashboard: collects metrics, renders sections, publishes pinned issue.
+ * Uses B.dashboard, fn.report, md utilities, call, mutate from schema.ts.
  */
-
 import { ENV } from './env.ts';
 import {
     B,
@@ -20,7 +19,7 @@ import {
     type WorkflowRun,
 } from './schema.ts';
 
-// --- Local Extensions (ENV-dependent) ---------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const externalLinks = [
     {
@@ -32,7 +31,7 @@ const externalLinks = [
 
 const nxCloudEnabled = ENV.nxCloudWorkspaceId !== '';
 
-// --- Types ------------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type DashboardSpec = { readonly kind: 'update'; readonly pin?: boolean };
 type Workflow = { readonly name: string; readonly path: string };
@@ -62,7 +61,7 @@ type Metrics = {
     readonly workflowRate: number;
 };
 
-// --- Helpers ----------------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const { colors, targets } = B.dashboard;
 const since = (days: number): Date => new Date(Date.now() - days * B.time.day);
@@ -70,7 +69,7 @@ const isBot = (pr: PR): boolean => B.dashboard.bots.some((bot) => pr.user.login 
 const url = (repo: string, path: string, query = ''): string =>
     `https://github.com/${repo}/${path}${query ? `?q=${query}` : ''}`;
 
-// --- Data Collection --------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const collect = async (ctx: Ctx): Promise<Metrics> => {
     const sinceDate = since(B.dashboard.window);
@@ -154,7 +153,7 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
     };
 };
 
-// --- Section Renderers ------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
     actions: (_, repo) => {
@@ -307,7 +306,7 @@ const format = (metrics: Metrics, repo: string): string =>
         sections.footer(metrics, repo),
     ].join('\n\n');
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: DashboardSpec }): Promise<void> =>
     ((ctx, repo) =>
@@ -324,7 +323,7 @@ const run = async (params: RunParams & { readonly spec: DashboardSpec }): Promis
             }).then(() => params.core.info(`Dashboard updated: ${B.dashboard.output.title}`)),
         ))(createCtx(params), `${params.context.repo.owner}/${params.context.repo.repo}`);
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };
 export type { DashboardSpec };

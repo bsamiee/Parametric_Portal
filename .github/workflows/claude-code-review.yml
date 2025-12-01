@@ -17,7 +17,7 @@ permissions:
     id-token: write
 
 jobs:
-    # --- On-Demand Code Review (triggered by @claude mention) -------------------
+    # --- On-Demand Code Review (triggered by @claude mention) -----------------
     claude-review:
         if: |
             (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -32,7 +32,7 @@ jobs:
                   fetch-depth: 0
 
             - name: Claude Code Review
-              uses: anthropics/claude-code-action@0ad5ce41d0605080c46b79d7b4fb2f8ab38decc5 # v1
+              uses: anthropics/claude-code-action@v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   additional_permissions: |

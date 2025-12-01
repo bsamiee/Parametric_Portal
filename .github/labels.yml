@@ -1,4 +1,4 @@
-# --- Commit Type Labels ------------------------------------------------------
+# --- Commit Type Labels -------------------------------------------------------
 
 - name: fix
   color: "f05223"
@@ -40,19 +40,19 @@
   color: "93c572"
   description: "Build system or tooling"
 
-# --- Issue-Only Type Labels (no commit prefix) -------------------------------
+# --- Issue-Only Type Labels (no commit prefix) --------------------------------
 
 - name: help
   color: "702963"
   description: "Question or assistance needed"
 
-# --- Priority Labels ---------------------------------------------------------
+# --- Priority Labels ----------------------------------------------------------
 
 - name: critical
   color: "ff473e"
   description: "Must be addressed immediately"
 
-# --- Action Labels -----------------------------------------------------------
+# --- Action Labels ------------------------------------------------------------
 
 - name: implement
   color: "ee3a95"
@@ -66,7 +66,7 @@
   color: "fed700"
   description: "Cannot proceed"
 
-# --- Agent Labels (Mutually Exclusive) ---------------------------------------
+# --- Agent Labels (Mutually Exclusive) ----------------------------------------
 
 - name: copilot
   color: "848482"
@@ -84,7 +84,7 @@
   color: "848482"
   description: "Assign to OpenAI Codex"
 
-# --- Lifecycle Labels --------------------------------------------------------
+# --- Lifecycle Labels ---------------------------------------------------------
 
 - name: stale
   color: "2a3439"
@@ -94,7 +94,7 @@
   color: "123524"
   description: "Exempt from stale"
 
-# --- Special Labels ----------------------------------------------------------
+# --- Special Labels -----------------------------------------------------------
 
 - name: security
   color: "FF2DD1"

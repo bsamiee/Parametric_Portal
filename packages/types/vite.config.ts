@@ -8,8 +8,8 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
+                temporal: './src/temporal.ts',
                 types: './src/types.ts',
-                utils: './src/utils.ts',
             },
             external: ['effect', '@effect/schema', 'date-fns', 'immer', 'ts-pattern', 'uuid', 'zustand'],
             mode: 'library',

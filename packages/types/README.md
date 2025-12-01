@@ -27,7 +27,7 @@ const id = Effect.runSync(types.generateUuidv7);
 
 // Branded schemas (11 types via @effect/schema)
 types.brands.email         // Email
-types.brands.hexColor      // HexColor  
+types.brands.hexColor      // HexColor
 types.brands.isoDate       // IsoDate
 types.brands.nonEmptyString // NonEmptyString
 types.brands.percentage    // Percentage (0-100)
@@ -65,28 +65,28 @@ types.P.number  // Number pattern
 - `TypesApi.P` - ts-pattern predicates
 - `TypesApi.Option` - Effect Option monad
 
-### Utils (`utils`)
+### Temporal (`temporal`)
 
-Effect-based date utilities, immer-powered state, and Zustand registry.
+Effect-based date operations, immer-powered state, and Zustand registry.
 
 ```typescript
-import { createUtils, UTILS_TUNING } from '@parametric-portal/types/utils';
+import { createTemporal, TEMPORAL_TUNING } from '@parametric-portal/types/temporal';
 
-const utils = createUtils({ defaultDateFormat: 'yyyy-MM-dd' });
+const temporal = createTemporal({ defaultDateFormat: 'yyyy-MM-dd' });
 
 // Date operations (Effect-based)
-const tomorrow = Effect.runSync(utils.addDays(1)(new Date()));
-const days = Effect.runSync(utils.daysBetween(start, end));
-const formatted = Effect.runSync(utils.formatDate()(new Date()));
-const parsed = Effect.runSync(utils.parse('2024-01-01'));
+const tomorrow = Effect.runSync(temporal.addDays(1)(new Date()));
+const days = Effect.runSync(temporal.daysBetween(start, end));
+const formatted = Effect.runSync(temporal.formatDate()(new Date()));
+const parsed = Effect.runSync(temporal.parse('2024-01-01'));
 
 // Immer produce for immutable updates
-const nextState = utils.produce(state, (draft) => {
+const nextState = temporal.produce(state, (draft) => {
   draft.items.push({ id: 1, name: 'New' });
 });
 
 // Brand registry (Zustand + Immer)
-const registry = utils.createRegistry();
+const registry = temporal.createRegistry();
 registry.register('MyBrand');
 registry.hasBrand('MyBrand'); // true
 registry.getBrandNames(); // ['MyBrand']
@@ -94,13 +94,13 @@ registry.clear(); // Clear all
 ```
 
 **API**:
-- `createUtils(config?) => UtilsApi`
-- `UtilsApi.addDays(n)(date)` - Add days
-- `UtilsApi.daysBetween(start, end)` - Days difference
-- `UtilsApi.formatDate(fmt?)(date)` - Format date
-- `UtilsApi.parse(str)` - Parse ISO date
-- `UtilsApi.produce` - Immer produce function
-- `UtilsApi.createRegistry()` - Zustand + Immer brand store
+- `createTemporal(config?) => TemporalApi`
+- `TemporalApi.addDays(n)(date)` - Add days
+- `TemporalApi.daysBetween(start, end)` - Days difference
+- `TemporalApi.formatDate(fmt?)(date)` - Format date
+- `TemporalApi.parse(str)` - Parse ISO date
+- `TemporalApi.produce` - Immer produce function
+- `TemporalApi.createRegistry()` - Zustand + Immer brand store
 
 ## Requirements
 

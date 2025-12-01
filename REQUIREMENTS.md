@@ -326,16 +326,62 @@ export default defineConfig({
 ---
 ## [4][FILE_ARCHITECTURE]
 
-### [4.1][LAYER_STRUCTURE]
+### [4.1][SECTION_ORGANIZATION]
 
-[LAYER]: Source
+[IMPORTANT]: Canonical section order and naming. MUST use exact labels, exact order, maximum 2 words per label.
 
-[LAYER]: Engine
+**Separator Format**: `// --- Label ` + dashes to column 80 (total 80 chars)
 
-[LAYER]: Consumer
+```typescript
+// --- Types -------------------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
+// --- Constants ---------------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
+```
 
-[LAYER]: Action (when applicable)
+**Character Breakdown**:
+- `// --- ` = 7 chars (comment prefix + opening dashes + space)
+- `Label` = variable (max 2 words, title case)
+- ` ` = 1 char (space before closing dashes)
+- `---...---` = padding dashes to reach 80 chars total
 
-### [4.2][CHAIN_PATTERNS]
+**Canonical Sections** (order is mandatory, omit unused):
+1. `Types` — type aliases, interfaces, discriminated unions
+2. `Schema` — @effect/schema definitions
+3. `Constants` — B constant, frozen config objects
+4. `Pure Functions` — stateless utilities
+5. `Dispatch Tables` — keyed handler objects
+6. `Effect Pipeline` — Effect.gen, pipe chains
+7. `Entry Point` — run(), main(), createX()
+8. `Export` — named exports
 
-<!-- Skeleton: 3-step and 4-step process documentation -->
+**Domain-Specific Sections** (insert between Constants and Pure Functions when required):
+- `Markdown` — md.* generators (schema.ts only)
+- `Providers` — external API adapters
+- `Renderers` — output formatters
+
+**FORBIDDEN**:
+- Parentheticals in labels: `Constants (B)` → `Constants`
+- Labels >2 words: `Pure Utility Functions` → `Pure Functions`
+- Non-canonical labels: `Helpers`, `Handlers`, `Utils`, `Config`
+- Descriptive suffixes: `Schema (Single Union)` → `Schema`
+
+### [4.2][DOCUMENTATION_STANDARDS]
+
+[RULE]: JSDoc headers, comments, and naming conventions defined in `docs/standards/AGENTIC-DOCUMENTATION.md`.
+
+### [4.3][LAYER_STRUCTURE]
+
+[LAYER]: Source — Raw data, external inputs, API responses
+[LAYER]: Engine — Business logic, transformations, validation
+[LAYER]: Consumer — UI components, output formatters, renderers
+[LAYER]: Action — Side effects, mutations, external calls (when applicable)
+
+### [4.4][CHAIN_PATTERNS]
+
+[PATTERN]: 3-step pipelines for simple transformations (input → transform → output)
+[PATTERN]: 4-step pipelines for failable operations (input → validate → transform → handle)

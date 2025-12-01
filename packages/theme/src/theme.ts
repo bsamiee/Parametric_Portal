@@ -1,14 +1,17 @@
+/**
+ * Transform OKLCH color scales via Effect schema validation and modifier application.
+ */
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
-import { Effect, pipe } from 'effect';
+import { Effect, Option, pipe } from 'effect';
 import type { Plugin } from 'vite';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type OklchColor = S.Schema.Type<typeof OklchColorSchema>;
 type ThemeInput = S.Schema.Type<typeof ThemeInputSchema>;
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const ModifierOverrideSchema = S.Union(
     S.Literal(true),
@@ -23,6 +26,7 @@ const OklchColorSchema = pipe(
     S.Struct({
         a: pipe(S.Number, S.between(0, 1), S.brand('Alpha')),
         c: pipe(S.Number, S.between(0, 0.4), S.brand('Chroma')),
+        // Normalize hue to [0, 360) using double-modulo to handle negative inputs.
         h: pipe(
             S.Number,
             S.transform(S.Number, { decode: (h) => ((h % 360) + 360) % 360, encode: (h) => h }),
@@ -68,8 +72,8 @@ const ThemeInputSchema = S.Struct({
 
 // --- Constants ---------------------------------------------------------------
 
-const THEME_CONFIG = Object.freeze({
-    baselineModifiers: {
+const B = Object.freeze({
+    baseline: {
         active: { alphaShift: 0, chromaShift: 2, lightnessShift: -1 },
         disabled: { alphaShift: -1, chromaShift: -20, lightnessShift: 1.88 },
         dragged: { alphaShift: 0, chromaShift: 0.5, lightnessShift: 0.5 },
@@ -78,17 +82,12 @@ const THEME_CONFIG = Object.freeze({
         pressed: { alphaShift: 0, chromaShift: 2, lightnessShift: -1 },
         selected: { alphaShift: 0, chromaShift: 1, lightnessShift: 0.5 },
     },
-    multipliers: {
-        alpha: 0.5,
-        chroma: 0.03,
-        lightness: 0.08,
+    multipliers: { alpha: 0.5, chroma: 0.03, lightness: 0.08 },
+    scale: {
+        algorithm: { chromaDecay: 0.4, lightnessRange: 0.9 },
+        increment: 50,
     },
-    scaleAlgorithm: {
-        chromaDecay: 0.4,
-        lightnessRange: 0.9,
-    },
-    scaleIncrement: 50,
-    spacingIncrement: 0.25,
+    spacing: { increment: 0.25 },
 } as const);
 
 const VIRTUAL_MODULE_ID = Object.freeze({
@@ -96,12 +95,12 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-theme' as const,
 } as const);
 
-// --- Pure Utility Functions --------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const oklchToCss = (color: OklchColor): string =>
     `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${color.a < 1 ? ` / ${color.a.toFixed(2)}` : ''})`;
 
-// --- Effect Pipelines & Builders ---------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
 const createOklchColor = (l: number, c: number, h: number, a = 1): Effect.Effect<OklchColor, ParseError> =>
     S.decode(OklchColorSchema)({ a, c, h, l } as const);
@@ -111,28 +110,28 @@ const applyShifts = (
     color: OklchColor,
 ): Effect.Effect<OklchColor, ParseError> =>
     createOklchColor(
-        color.l * (1 + shifts.lightnessShift * THEME_CONFIG.multipliers.lightness),
-        color.c * (1 + shifts.chromaShift * THEME_CONFIG.multipliers.chroma),
+        color.l * (1 + shifts.lightnessShift * B.multipliers.lightness),
+        color.c * (1 + shifts.chromaShift * B.multipliers.chroma),
         color.h,
-        color.a * (1 + shifts.alphaShift * THEME_CONFIG.multipliers.alpha),
+        color.a * (1 + shifts.alphaShift * B.multipliers.alpha),
     );
 
 const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> =>
     pipe(
         createOklchColor(input.lightness, input.chroma, input.hue, input.alpha),
         Effect.flatMap((base) => {
-            const steps = Array.from({ length: input.scale }, (_, i) => (i + 1) * THEME_CONFIG.scaleIncrement);
+            const steps = Array.from({ length: input.scale }, (_, i) => (i + 1) * B.scale.increment);
             const mid = steps[Math.floor(input.scale / 2)] ?? steps[0] ?? 0;
-            const enabledBaseline = (
-                Object.keys(THEME_CONFIG.baselineModifiers) as ReadonlyArray<
-                    keyof typeof THEME_CONFIG.baselineModifiers
-                >
-            ).filter((key) => input.modifiers?.[key] !== undefined);
+            // Include only modifiers specified in input to inherit baseline defaults.
+            const enabledBaseline = (Object.keys(B.baseline) as ReadonlyArray<keyof typeof B.baseline>).filter((key) =>
+                pipe(Option.fromNullable(input.modifiers?.[key]), Option.isSome),
+            );
             return pipe(
                 Effect.all({
                     baseline: Effect.forEach(enabledBaseline, (key) => {
-                        const baseline = THEME_CONFIG.baselineModifiers[key];
+                        const baseline = B.baseline[key];
                         const override = input.modifiers?.[key];
+                        // Merge partial modifier overrides with baseline defaults via nullish coalescing.
                         const shifts =
                             override === true
                                 ? baseline
@@ -153,29 +152,40 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
                         ),
                     ),
                     scale: Effect.forEach(steps, (step) => {
+                        // Asymmetric lightness scaling: expand toward white [norm > 0] or black [norm < 0] from midpoint.
                         const norm = (step - mid) / mid;
                         return createOklchColor(
-                            base.l +
-                                norm * (norm > 0 ? 1 - base.l : base.l) * THEME_CONFIG.scaleAlgorithm.lightnessRange,
-                            base.c * (1 - (Math.abs(step - mid) / mid) * THEME_CONFIG.scaleAlgorithm.chromaDecay),
+                            base.l + norm * (norm > 0 ? 1 - base.l : base.l) * B.scale.algorithm.lightnessRange,
+                            base.c * (1 - (Math.abs(step - mid) / mid) * B.scale.algorithm.chromaDecay),
                             base.h,
                             base.a,
                         );
                     }),
-                    spacing: Effect.succeed(
-                        input.spacing !== undefined
-                            ? Array.from(
-                                  { length: input.spacing },
-                                  (_, i) => `  --spacing-${i + 1}: ${(i + 1) * THEME_CONFIG.spacingIncrement}rem;`,
-                              )
-                            : [],
+                    spacing: pipe(
+                        Option.fromNullable(input.spacing),
+                        Option.match({
+                            onNone: () => Effect.succeed([] as ReadonlyArray<string>),
+                            onSome: (sp) =>
+                                Effect.succeed(
+                                    Array.from(
+                                        { length: sp },
+                                        (_, i) => `  --spacing-${i + 1}: ${(i + 1) * B.spacing.increment}rem;`,
+                                    ),
+                                ),
+                        }),
                     ),
                 }),
                 Effect.map(({ scale, baseline, custom, spacing }) =>
                     [
                         '@theme {',
                         ...steps.flatMap((step, i) =>
-                            scale[i] !== undefined ? [`  --color-${input.name}-${step}: ${oklchToCss(scale[i])};`] : [],
+                            pipe(
+                                Option.fromNullable(scale[i]),
+                                Option.match({
+                                    onNone: () => [],
+                                    onSome: (color) => [`  --color-${input.name}-${step}: ${oklchToCss(color)};`],
+                                }),
+                            ),
                         ),
                         ...baseline.map(([name, color]) => `  --color-${input.name}-${name}: ${oklchToCss(color)};`),
                         ...custom.map(([name, color]) => `  --color-${input.name}-${name}: ${oklchToCss(color)};`),
@@ -186,6 +196,8 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
             );
         }),
     );
+
+// --- Entry Point -------------------------------------------------------------
 
 const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin => ({
     enforce: 'pre',
@@ -208,7 +220,7 @@ const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin =>
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
 });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
-export { defineThemes, THEME_CONFIG };
+export { B, defineThemes };
 export type { ThemeInput };

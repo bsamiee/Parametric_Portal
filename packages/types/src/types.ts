@@ -1,10 +1,13 @@
+/**
+ * Define domain primitives via Effect Schema branded types: Uuidv7, Email, HexColor, IsoDate, Slug, Url with cached ID generation.
+ */
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
 import { Cache, Duration, Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 import { v7 as uuidv7 } from 'uuid';
 
-// --- Type Definitions --------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>;
 type Email = S.Schema.Type<typeof EmailSchema>;
@@ -17,12 +20,10 @@ type PositiveInt = S.Schema.Type<typeof PositiveIntSchema>;
 type SafeInteger = S.Schema.Type<typeof SafeIntegerSchema>;
 type Slug = S.Schema.Type<typeof SlugSchema>;
 type Url = S.Schema.Type<typeof UrlSchema>;
-
 type TypesConfig = {
     readonly cacheCapacity?: number;
     readonly cacheTtlMinutes?: number;
 };
-
 type TypesApi = {
     readonly brands: typeof brands;
     readonly createIdGenerator: typeof createIdGenerator;
@@ -36,7 +37,7 @@ type TypesApi = {
     readonly schemas: typeof schemas;
 };
 
-// --- Constants (Single B Constant) -------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     cache: { capacity: 1000, ttlMinutes: 5 },
@@ -54,9 +55,9 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema Definitions (Unbranded Bases) ------------------------------------
+// --- Schema ------------------------------------------------------------------
 
-const base = {
+const baseSchemas = {
     email: pipe(S.String, S.pattern(B.patterns.email)),
     hexColor: pipe(S.String, S.pattern(B.patterns.hexColor)),
     int: pipe(S.Number, S.int()),
@@ -71,26 +72,22 @@ const base = {
     uuidv7: pipe(S.String, S.pattern(B.patterns.uuidv7)),
 } as const;
 
-// --- Branded Schemas (Derived from Bases) ------------------------------------
-
-const EmailSchema = pipe(base.email, S.brand('Email'));
-const HexColorSchema = pipe(base.hexColor, S.brand('HexColor'));
-const IsoDateSchema = pipe(base.isoDate, S.brand('IsoDate'));
-const NonEmptyStringSchema = pipe(base.nonEmptyString, S.brand('NonEmptyString'));
-const NonNegativeIntSchema = pipe(base.nonNegativeInt, S.brand('NonNegativeInt'));
-const PercentageSchema = pipe(base.percentage, S.brand('Percentage'));
-const PositiveIntSchema = pipe(base.positiveInt, S.brand('PositiveInt'));
-const SafeIntegerSchema = pipe(base.safeInteger, S.brand('SafeInteger'));
-const SlugSchema = pipe(base.slug, S.brand('Slug'));
-const UrlSchema = pipe(base.url, S.brand('Url'));
-const Uuidv7Schema = pipe(base.uuidv7, S.brand('Uuidv7'));
-
-// --- Exported Objects --------------------------------------------------------
+const EmailSchema = pipe(baseSchemas.email, S.brand('Email'));
+const HexColorSchema = pipe(baseSchemas.hexColor, S.brand('HexColor'));
+const IsoDateSchema = pipe(baseSchemas.isoDate, S.brand('IsoDate'));
+const NonEmptyStringSchema = pipe(baseSchemas.nonEmptyString, S.brand('NonEmptyString'));
+const NonNegativeIntSchema = pipe(baseSchemas.nonNegativeInt, S.brand('NonNegativeInt'));
+const PercentageSchema = pipe(baseSchemas.percentage, S.brand('Percentage'));
+const PositiveIntSchema = pipe(baseSchemas.positiveInt, S.brand('PositiveInt'));
+const SafeIntegerSchema = pipe(baseSchemas.safeInteger, S.brand('SafeInteger'));
+const SlugSchema = pipe(baseSchemas.slug, S.brand('Slug'));
+const UrlSchema = pipe(baseSchemas.url, S.brand('Url'));
+const Uuidv7Schema = pipe(baseSchemas.uuidv7, S.brand('Uuidv7'));
 
 const patterns = Object.freeze(B.patterns);
 
 const schemas = Object.freeze({
-    ...base,
+    ...baseSchemas,
     number: S.Number,
     string: S.String,
     uuid: S.UUID,
@@ -110,16 +107,16 @@ const brands = Object.freeze({
     uuidv7: Uuidv7Schema,
 } as const);
 
-// --- Pure Utility Functions --------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
 
-// --- Factory Functions -------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createIdCache = (cfg: TypesConfig) =>
     Cache.make({
         capacity: cfg.cacheCapacity ?? B.cache.capacity,
-        lookup: (uuid: string) => Effect.succeed(S.is(base.uuidv7)(uuid)),
+        lookup: (uuid: string) => Effect.succeed(S.is(baseSchemas.uuidv7)(uuid)),
         timeToLive: Duration.minutes(cfg.cacheTtlMinutes ?? B.cache.ttlMinutes),
     });
 
@@ -128,8 +125,6 @@ const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect
         Effect.sync(() => castToUuidv7(uuidv7())),
         Effect.flatMap((uuid) => S.decode(schema)(uuid)),
     );
-
-// --- Polymorphic Entry Point -------------------------------------------------
 
 const createTypes = (config: TypesConfig = {}): Effect.Effect<TypesApi, never, never> =>
     pipe(
@@ -150,7 +145,7 @@ const createTypes = (config: TypesConfig = {}): Effect.Effect<TypesApi, never, n
         ),
     );
 
-// --- Export (2 Exports: Tuning + Factory) ------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { B as TYPES_TUNING, createTypes };
 export type {

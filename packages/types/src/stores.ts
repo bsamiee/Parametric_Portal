@@ -1,8 +1,11 @@
+/**
+ * Define store slice contracts via typed patterns: StoreSlice, StoreActions, CombinedStore with subscription management.
+ */
 import { Schema as S } from '@effect/schema';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Type Definitions --------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type SliceName = S.Schema.Type<typeof SliceNameSchema>;
 
@@ -50,13 +53,13 @@ type StoreApi = {
     readonly schemas: typeof schemas;
 };
 
-// --- Constants (Single B Constant) -------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { enableDevtools: false, name: 'store' },
 } as const);
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const SliceNameSchema = pipe(S.String, S.nonEmptyString(), S.brand('SliceName'));
 
@@ -71,7 +74,7 @@ const schemas = Object.freeze({
     sliceName: SliceNameSchema,
 } as const);
 
-// --- Pure Utility Functions (Internal) ---------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const mkSliceName = (name: string): SliceName => name as SliceName;
 
@@ -157,7 +160,7 @@ const mkCombinedStore = <S extends Record<string, StoreSlice<unknown>>>(slices: 
     };
 };
 
-// --- Polymorphic Entry Point -------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createStore = (config: StoreConfig = {}): Effect.Effect<StoreApi, never, never> =>
     pipe(
@@ -179,7 +182,7 @@ const createStore = (config: StoreConfig = {}): Effect.Effect<StoreApi, never, n
         ),
     );
 
-// --- Export (2 Exports: Tuning + Factory) ------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { B as STORE_TUNING, createStore };
 export type { CombinedStore, SliceConfig, SliceName, StoreActions, StoreApi, StoreConfig, StoreSlice };

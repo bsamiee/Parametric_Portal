@@ -1,12 +1,11 @@
 #!/usr/bin/env tsx
 /**
- * Label-triggered behavior executor with polymorphic dispatch.
- * Single entry point handles labeled/unlabeled events across all behaviors.
+ * Label behavior executor: dispatches pin/unpin/comment actions on label events.
+ * Uses B.labels.behaviors, call (issue.pin/unpin), mutate from schema.ts.
  */
-
 import { B, type Ctx, call, createCtx, mutate, type RunParams } from './schema.ts';
 
-// --- Types ------------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type LabelSpec = {
     readonly action: 'labeled' | 'unlabeled';
@@ -16,11 +15,11 @@ type LabelSpec = {
 };
 type LabelResult = { readonly executed: boolean; readonly behavior: string | null };
 
-// --- Dispatch Table ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 type Behavior = 'pin' | 'unpin' | 'comment';
 
-const handlers: Record<Behavior, (ctx: Ctx, spec: LabelSpec) => Promise<void>> = {
+const labelHandlers: Record<Behavior, (ctx: Ctx, spec: LabelSpec) => Promise<void>> = {
     comment: (ctx, spec) =>
         mutate(ctx, {
             body: `Label \`${spec.label}\` applied`,
@@ -36,24 +35,24 @@ const handlers: Record<Behavior, (ctx: Ctx, spec: LabelSpec) => Promise<void>> =
     },
 };
 
-// --- Pure Functions ---------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
-const resolve = (label: string, action: LabelSpec['action']): Behavior | null =>
+const resolveBehavior = (label: string, action: LabelSpec['action']): Behavior | null =>
     (B.labels.behaviors as Record<string, { readonly onAdd: Behavior | null; readonly onRemove: Behavior | null }>)[
         label
     ]?.[action === 'labeled' ? 'onAdd' : 'onRemove'] ?? null;
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: LabelSpec }): Promise<LabelResult> => {
     const ctx = createCtx(params);
-    const behavior = resolve(params.spec.label, params.spec.action);
-    behavior && (await handlers[behavior](ctx, params.spec));
+    const behavior = resolveBehavior(params.spec.label, params.spec.action);
+    behavior && (await labelHandlers[behavior](ctx, params.spec));
     params.core.info(`[LABEL] ${params.spec.label} ${params.spec.action}: ${behavior ?? 'no-op'}`);
     return { behavior, executed: behavior !== null };
 };
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };
 export type { LabelResult, LabelSpec };

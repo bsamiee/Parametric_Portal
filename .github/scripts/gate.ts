@@ -1,12 +1,11 @@
 #!/usr/bin/env tsx
 /**
- * PR merge eligibility checker with mutation score verification.
- * Classifies PRs by version type, blocks ineligible merges, creates migration issues.
+ * Merge gating: blocks canary/major versions, enforces mutation thresholds, creates migration issues.
+ * Uses B.breaking, BodySpec, fn.classify, fn.body, call, mutate, md from schema.ts.
  */
-
 import { B, type BodySpec, call, createCtx, fn, md, mutate, type RunParams } from './schema.ts';
 
-// --- Domain Config (GATING) -------------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 type ReasonKey = 'canary' | 'major' | 'mutation';
 type GateClass = { readonly eligible: boolean; readonly reason?: ReasonKey };
@@ -56,7 +55,7 @@ const GATING = Object.freeze({
     ] as ReadonlyArray<Rule<GateClass>>,
 } as const);
 
-// --- Types ------------------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type CheckRun = { readonly name: string; readonly output?: { readonly summary?: string } };
 type GateSpec = {
@@ -70,7 +69,7 @@ type GateSpec = {
 };
 type GateResult = { readonly eligible: boolean };
 
-// --- Helpers ----------------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const parsePackage = (title: string): { readonly pkg: string; readonly version: string } | null =>
     ((match) => match && { pkg: match[1], version: match[2] })(title.match(GATING.patterns.package)) ?? null;
@@ -78,7 +77,7 @@ const parsePackage = (title: string): { readonly pkg: string; readonly version: 
 const extractScore = (runs: ReadonlyArray<CheckRun>, checkName: string): number =>
     parseInt(runs.find((run) => run.name === checkName)?.output?.summary?.match(GATING.patterns.score)?.[1] ?? '0', 10);
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: GateSpec }): Promise<GateResult> => {
     const ctx = createCtx(params);
@@ -135,7 +134,7 @@ const run = async (params: RunParams & { readonly spec: GateSpec }): Promise<Gat
     return { eligible };
 };
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };
 export type { GateResult, GateSpec };

@@ -1,3 +1,7 @@
+/**
+ * Command palette components: render dialog, inline, and palette command interfaces.
+ * Uses B, utilities, animStyle, stateCls, createBuilderContext from schema.ts.
+ */
 import { Command as Cmdk, useCommandState } from 'cmdk';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef, useCallback, useMemo, useState } from 'react';
@@ -6,15 +10,15 @@ import {
     animStyle,
     B,
     createBuilderContext,
-    fn,
     merged,
     pick,
     stateCls,
     TUNING_KEYS,
     useForwardedRef,
+    utilities,
 } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type CommandType = 'dialog' | 'inline' | 'palette';
 type SeparatorData = { readonly key: string; readonly type: 'separator' };
@@ -71,51 +75,66 @@ type CommandInput<T extends CommandType = 'palette'> = Partial<TuningFor<'cmd'>>
 };
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
-// --- Unified cmd Namespace (All Pure Functions) -----------------------------
+// --- Pure Functions ----------------------------------------------------------
 
-const cmd = {
-    baseStyle: (ctx: Ctx, s?: CSSProperties): CSSProperties => ({ ...ctx.vars, ...animStyle(ctx.animation), ...s }),
-    dispatchKey: (k: string) => document.dispatchEvent(new KeyboardEvent('keydown', { key: k })),
+const commandHelpers = {
+    baseStyle: (ctx: Ctx, style?: CSSProperties): CSSProperties => ({
+        ...ctx.vars,
+        ...animStyle(ctx.animation),
+        ...style,
+    }),
+    dispatchKey: (key: string) => document.dispatchEvent(new KeyboardEvent('keydown', { key })),
     enhance:
-        (pages: ReadonlyArray<PageData> | undefined, push: ((k: string) => void) | undefined) =>
-        (x: ItemData | SeparatorData): ItemData | SeparatorData =>
-            cmd.isSep(x) || !push
-                ? x
-                : { ...x, onSelect: x.onSelect ?? (() => pages?.some((p) => p.key === x.key) && push(x.key)) },
-    isSep: (x: ItemData | SeparatorData): x is SeparatorData => 'type' in x && x.type === 'separator',
-    itemCls: (d?: boolean) =>
-        fn.cls(
+        (pages: ReadonlyArray<PageData> | undefined, push: ((key: string) => void) | undefined) =>
+        (item: ItemData | SeparatorData): ItemData | SeparatorData =>
+            commandHelpers.isSeparator(item) || !push
+                ? item
+                : {
+                      ...item,
+                      onSelect: item.onSelect ?? (() => pages?.some((page) => page.key === item.key) && push(item.key)),
+                  },
+    isSeparator: (item: ItemData | SeparatorData): item is SeparatorData => 'type' in item && item.type === 'separator',
+    itemCls: (disabled?: boolean) =>
+        utilities.cls(
             B.cmd.item.base,
             B.cmd.var.itemH,
             B.cmd.var.px,
             B.cmd.var.py,
-            d && B.cmd.item.disabled,
+            disabled && B.cmd.item.disabled,
             B.cmd.item.selected,
         ),
-    listStyle: (a: Resolved['animation']): CSSProperties => ({
+    listStyle: (animation: Resolved['animation']): CSSProperties => ({
         height: `var(${B.cmd.list.heightVar})`,
-        transition: a.enabled ? `height ${a.duration}ms ${a.easing}` : undefined,
+        transition: animation.enabled ? `height ${animation.duration}ms ${animation.easing}` : undefined,
     }),
-    prevent: (e: React.KeyboardEvent, a: () => void) => {
-        e.preventDefault();
-        a();
+    prevent: (event: React.KeyboardEvent, action: () => void) => {
+        event.preventDefault();
+        action();
     },
 } as const;
 
-// --- Dispatch Tables --------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const wrappers = { dialog: Cmdk.Dialog, inline: Cmdk, palette: Cmdk } as const;
 
 const rootStyles = {
-    dialog: (ctx: Ctx, s?: CSSProperties) => ({ ...cmd.baseStyle(ctx, s), ...fn.zStyle(ctx.overlay) }),
-    inline: cmd.baseStyle,
-    palette: cmd.baseStyle,
-} as { readonly [K in CommandType]: (ctx: Ctx, s?: CSSProperties) => CSSProperties };
+    dialog: (ctx: Ctx, style?: CSSProperties) => ({
+        ...commandHelpers.baseStyle(ctx, style),
+        ...utilities.zStyle(ctx.overlay),
+    }),
+    inline: commandHelpers.baseStyle,
+    palette: commandHelpers.baseStyle,
+} as { readonly [K in CommandType]: (ctx: Ctx, style?: CSSProperties) => CSSProperties };
 
 const dialogPropsFor = {
-    dialog: (oCls?: string, container?: HTMLElement | null, onOpenChange?: (o: boolean) => void, open?: boolean) => ({
-        contentClassName: fn.cls(B.cmd.dialog.content, B.cmd.root),
-        overlayClassName: fn.cls(B.ov.pos.fixed, B.ov.backdrop, oCls),
+    dialog: (
+        overlayCls?: string,
+        container?: HTMLElement | null,
+        onOpenChange?: (isOpen: boolean) => void,
+        open?: boolean,
+    ) => ({
+        contentClassName: utilities.cls(B.cmd.dialog.content, B.cmd.root),
+        overlayClassName: utilities.cls(B.ov.pos.fixed, B.ov.backdrop, overlayCls),
         ...(container && { container }),
         ...(onOpenChange && { onOpenChange }),
         ...(open !== undefined && { open }),
@@ -124,96 +143,99 @@ const dialogPropsFor = {
     palette: () => ({}),
 } as const;
 
-// --- Render Dispatch --------------------------------------------------------
-
-const render = {
-    group: (g: GroupData) =>
+const renderHandlers = {
+    group: (group: GroupData) =>
         createElement(
             Cmdk.Group,
             {
                 className: B.cmd.group.base,
-                key: g.key,
-                ...fn.optProps({
-                    forceMount: g.forceMount,
-                    heading: g.heading
+                key: group.key,
+                ...utilities.optProps({
+                    forceMount: group.forceMount,
+                    heading: group.heading
                         ? createElement(
                               'div',
                               {
-                                  className: fn.cls(
+                                  className: utilities.cls(
                                       B.cmd.group.heading.base,
                                       B.cmd.var.headingPx,
                                       B.cmd.var.headingPy,
                                       B.cmd.var.xsFs,
                                   ),
                               },
-                              g.heading,
+                              group.heading,
                           )
                         : undefined,
                 }),
             },
-            g.items.map(render.item),
+            group.items.map(renderHandlers.item),
         ),
-    item: (x: ItemData | SeparatorData) =>
-        cmd.isSep(x)
-            ? createElement(Cmdk.Separator, { className: B.cmd.separator, key: x.key })
+    item: (item: ItemData | SeparatorData) =>
+        commandHelpers.isSeparator(item)
+            ? createElement(Cmdk.Separator, { className: B.cmd.separator, key: item.key })
             : createElement(
                   Cmdk.Item,
                   {
-                      className: cmd.itemCls(x.disabled),
-                      key: x.key,
-                      value: x.value ?? String(x.label),
-                      ...(x.disabled !== undefined && { disabled: x.disabled }),
-                      ...(x.forceMount !== undefined && { forceMount: x.forceMount }),
-                      ...(x.keywords && { keywords: [...x.keywords] }),
-                      ...(x.onSelect && { onSelect: x.onSelect }),
+                      className: commandHelpers.itemCls(item.disabled),
+                      key: item.key,
+                      value: item.value ?? String(item.label),
+                      ...(item.disabled !== undefined && { disabled: item.disabled }),
+                      ...(item.forceMount !== undefined && { forceMount: item.forceMount }),
+                      ...(item.keywords && { keywords: [...item.keywords] }),
+                      ...(item.onSelect && { onSelect: item.onSelect }),
                   },
-                  x.icon && createElement('span', { className: B.cmd.item.icon }, x.icon),
-                  createElement('span', null, x.label),
-                  x.shortcut &&
+                  item.icon && createElement('span', { className: B.cmd.item.icon }, item.icon),
+                  createElement('span', null, item.label),
+                  item.shortcut &&
                       createElement(
                           'kbd',
-                          { className: fn.cls(B.cmd.item.shortcut.base, B.cmd.var.xsFs) },
-                          x.shortcut.split(' ').map((k, i) =>
+                          { className: utilities.cls(B.cmd.item.shortcut.base, B.cmd.var.xsFs) },
+                          item.shortcut.split(' ').map((key, index) =>
                               createElement(
                                   'span',
                                   {
-                                      className: fn.cls(
+                                      className: utilities.cls(
                                           B.cmd.item.shortcut.key,
                                           B.cmd.var.shortcutPx,
                                           B.cmd.var.shortcutPy,
                                       ),
-                                      key: i,
+                                      key: index,
                                   },
-                                  k,
+                                  key,
                               ),
                           ),
                       ),
               ),
 } as const;
 
-// --- Hooks ------------------------------------------------------------------
-
-const usePageNav = (vim?: boolean) => {
+const usePageNavigation = (vimBindingsEnabled?: boolean) => {
     const [search, setSearch] = useState('');
     const [stack, setStack] = useState<ReadonlyArray<string>>([B.cmd.initialPage]);
-    const pop = useCallback(() => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s)), []);
-    const push = useCallback((p: string) => {
-        setStack((s) => [...s, p]);
+    const pop = useCallback(
+        () => setStack((currentStack) => (currentStack.length > 1 ? currentStack.slice(0, -1) : currentStack)),
+        [],
+    );
+    const push = useCallback((page: string) => {
+        setStack((currentStack) => [...currentStack, page]);
         setSearch('');
     }, []);
     const handleKeyDown = useCallback(
-        (e: React.KeyboardEvent) => {
-            const back = stack.length > 1 && (e.key === 'Escape' || (e.key === 'Backspace' && !search));
-            back && cmd.prevent(e, pop);
-            vim && e.ctrlKey && e.key === 'j' && cmd.prevent(e, () => cmd.dispatchKey('ArrowDown'));
-            vim && e.ctrlKey && e.key === 'k' && cmd.prevent(e, () => cmd.dispatchKey('ArrowUp'));
+        (event: React.KeyboardEvent) => {
+            const shouldGoBack = stack.length > 1 && (event.key === 'Escape' || (event.key === 'Backspace' && !search));
+            shouldGoBack && commandHelpers.prevent(event, pop);
+            vimBindingsEnabled &&
+                event.ctrlKey &&
+                event.key === 'j' &&
+                commandHelpers.prevent(event, () => commandHelpers.dispatchKey('ArrowDown'));
+            vimBindingsEnabled &&
+                event.ctrlKey &&
+                event.key === 'k' &&
+                commandHelpers.prevent(event, () => commandHelpers.dispatchKey('ArrowUp'));
         },
-        [stack.length, search, pop, vim],
+        [stack.length, search, pop, vimBindingsEnabled],
     );
     return { activePage: stack[stack.length - 1] ?? B.cmd.initialPage, handleKeyDown, push, search, setSearch };
 };
-
-// --- List Content -----------------------------------------------------------
 
 const ListContent = ({
     ctx,
@@ -232,20 +254,20 @@ const ListContent = ({
     readonly loadingLabel?: string | undefined;
     readonly progress?: number | undefined;
     readonly pages?: ReadonlyArray<PageData> | undefined;
-    readonly push?: ((k: string) => void) | undefined;
+    readonly push?: ((key: string) => void) | undefined;
 }) => {
-    const enhance = useMemo(() => cmd.enhance(pages, push), [pages, push]);
+    const enhance = useMemo(() => commandHelpers.enhance(pages, push), [pages, push]);
     return createElement(
         Cmdk.List,
         {
-            className: fn.cls(B.cmd.list.base, B.cmd.var.listMinH, B.cmd.var.listMaxH),
-            style: cmd.listStyle(ctx.animation),
+            className: utilities.cls(B.cmd.list.base, B.cmd.var.listMinH, B.cmd.var.listMaxH),
+            style: commandHelpers.listStyle(ctx.animation),
         },
         loading &&
             createElement(
                 Cmdk.Loading,
                 {
-                    className: fn.cls(B.cmd.loading.base, B.cmd.var.emptyPy),
+                    className: utilities.cls(B.cmd.loading.base, B.cmd.var.emptyPy),
                     ...(loadingLabel && { label: loadingLabel }),
                     ...(progress !== undefined && { progress }),
                 },
@@ -253,19 +275,17 @@ const ListContent = ({
             ),
         createElement(
             Cmdk.Empty,
-            { className: fn.cls(B.cmd.empty.base, B.cmd.var.emptyPy, B.cmd.var.smFs) },
+            { className: utilities.cls(B.cmd.empty.base, B.cmd.var.emptyPy, B.cmd.var.smFs) },
             'No results found.',
         ),
-        page?.groups?.map(render.group),
-        page?.items?.map((x) => render.item(enhance(x))),
+        page?.groups?.map(renderHandlers.group),
+        page?.items?.map((item) => renderHandlers.item(enhance(item))),
     );
 };
 
-// --- Builder ----------------------------------------------------------------
-
-const mkCmd = <T extends CommandType>(t: T, i: CommandInput<T>, ctx: Ctx) => {
-    const cfg = B.cmd.defaults[t];
-    const Wrapper = wrappers[t];
+const createCommandFactory = <T extends CommandType>(commandType: T, input: CommandInput<T>, ctx: Ctx) => {
+    const config = B.cmd.defaults[commandType];
+    const Wrapper = wrappers[commandType];
     const Component = (props: DialogProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
             className,
@@ -279,7 +299,7 @@ const mkCmd = <T extends CommandType>(t: T, i: CommandInput<T>, ctx: Ctx) => {
             open,
             overlayClassName,
             pages,
-            placeholder = cfg.placeholder,
+            placeholder = config.placeholder,
             progress,
             shouldFilter = B.algo.cmdShouldFilter,
             style,
@@ -287,35 +307,37 @@ const mkCmd = <T extends CommandType>(t: T, i: CommandInput<T>, ctx: Ctx) => {
             ...rest
         } = props;
         const ref = useForwardedRef(fRef);
-        const nav = usePageNav(vimBindings);
+        const navigation = usePageNavigation(vimBindings);
         const [simpleSearch, setSimpleSearch] = useState('');
-        const [search, setSearch] = cfg.useNav ? [nav.search, nav.setSearch] : [simpleSearch, setSimpleSearch];
+        const [search, setSearch] = config.useNav
+            ? [navigation.search, navigation.setSearch]
+            : [simpleSearch, setSimpleSearch];
         const page = useMemo(
-            () => (cfg.useNav ? pages?.find((p) => p.key === nav.activePage) : pages?.[0]),
-            [pages, nav.activePage],
+            () => (config.useNav ? pages?.find((pageData) => pageData.key === navigation.activePage) : pages?.[0]),
+            [pages, navigation.activePage],
         );
         return createElement(
             Wrapper,
             {
                 ...rest,
-                className: fn.cls(B.cmd.root, stateCls.cmd(ctx.behavior), i.className, className),
+                className: utilities.cls(B.cmd.root, stateCls.cmd(ctx.behavior), input.className, className),
                 label,
                 loop,
                 ref,
                 shouldFilter,
-                style: rootStyles[t](ctx, style),
-                ...fn.optProps({
+                style: rootStyles[commandType](ctx, style),
+                ...utilities.optProps({
                     defaultValue: props.defaultValue,
                     disablePointerSelection: props.disablePointerSelection,
                     filter: props.filter,
                     onValueChange: props.onValueChange,
                     value: props.value,
                 }),
-                ...(cfg.useNav && { onKeyDown: nav.handleKeyDown }),
-                ...dialogPropsFor[t](overlayClassName, container, onOpenChange, open),
+                ...(config.useNav && { onKeyDown: navigation.handleKeyDown }),
+                ...dialogPropsFor[commandType](overlayClassName, container, onOpenChange, open),
             },
             createElement(Cmdk.Input, {
-                className: fn.cls(B.cmd.input.base, B.cmd.var.inputH, B.cmd.var.px),
+                className: utilities.cls(B.cmd.input.base, B.cmd.var.inputH, B.cmd.var.px),
                 onValueChange: setSearch,
                 placeholder: page?.placeholder ?? placeholder,
                 value: search,
@@ -328,7 +350,7 @@ const mkCmd = <T extends CommandType>(t: T, i: CommandInput<T>, ctx: Ctx) => {
                 page,
                 pages,
                 progress,
-                push: cfg.useNav ? nav.push : undefined,
+                push: config.useNav ? navigation.push : undefined,
             }),
         );
     };
@@ -337,26 +359,29 @@ const mkCmd = <T extends CommandType>(t: T, i: CommandInput<T>, ctx: Ctx) => {
         : ReturnType<typeof forwardRef<HTMLDivElement, BaseProps>>;
 };
 
-const createCmd = <T extends CommandType>(i: CommandInput<T>) => {
-    const ctx = createBuilderContext('cmd', ['animation', 'behavior', 'overlay'] as const, i);
-    const t = (i.type ?? 'palette') as T;
-    const comp = mkCmd(t, i, ctx);
-    comp.displayName = `Command(${t})`;
-    return comp;
+const createCommandComponent = <T extends CommandType>(input: CommandInput<T>) => {
+    const ctx = createBuilderContext('cmd', ['animation', 'behavior', 'overlay'] as const, input);
+    const commandType = (input.type ?? 'palette') as T;
+    const component = createCommandFactory(commandType, input, ctx);
+    component.displayName = `Command(${commandType})`;
+    return component;
 };
 
-// --- Factory ----------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createCommand = (tuning?: TuningFor<'cmd'>) =>
     Object.freeze({
-        create: <T extends CommandType>(i: CommandInput<T>) =>
-            createCmd({ ...i, ...merged(tuning, i, TUNING_KEYS.cmd) } as CommandInput<T>),
-        Dialog: createCmd({ type: 'dialog', ...pick(tuning, TUNING_KEYS.cmd) } as CommandInput<'dialog'>),
-        Inline: createCmd({ type: 'inline', ...pick(tuning, TUNING_KEYS.cmd) } as CommandInput<'inline'>),
-        Palette: createCmd({ type: 'palette', ...pick(tuning, TUNING_KEYS.cmd) } as CommandInput<'palette'>),
+        create: <T extends CommandType>(input: CommandInput<T>) =>
+            createCommandComponent({ ...input, ...merged(tuning, input, TUNING_KEYS.cmd) } as CommandInput<T>),
+        Dialog: createCommandComponent({ type: 'dialog', ...pick(tuning, TUNING_KEYS.cmd) } as CommandInput<'dialog'>),
+        Inline: createCommandComponent({ type: 'inline', ...pick(tuning, TUNING_KEYS.cmd) } as CommandInput<'inline'>),
+        Palette: createCommandComponent({
+            type: 'palette',
+            ...pick(tuning, TUNING_KEYS.cmd),
+        } as CommandInput<'palette'>),
     });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createCommand, useCommandState };
 export type {

@@ -1,16 +1,11 @@
 #!/usr/bin/env tsx
 /**
- * PR review hygiene automation for active-qc workflow.
- * Algorithmically analyzes review threads, responds based on commit diff coverage,
- * resolves GitHub-outdated threads, and cleans owner AI agent prompts.
- *
- * Leverages schema.ts: B constant, call (API), fn (formatTime), md (marker)
- * Pattern: Single H constant → Dispatch tables → Polymorphic pipeline → Entry point
+ * PR review hygiene: resolves outdated threads, replies to addressed comments, cleans AI prompts.
+ * Uses B.hygiene, B.labels.categories.agent, fn.formatTime, call, md.marker from schema.ts.
  */
-
 import { B, type Core, type Ctx, call, createCtx, fn, md, type RunParams, type User } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type HygieneSpec = { readonly prNumber: number; readonly ownerLogins: ReadonlyArray<string> };
 type HygieneResult = { readonly resolved: number; readonly replied: number; readonly deleted: number };
@@ -38,21 +33,14 @@ type IssueComment = {
 type CommitFile = { readonly sha: string; readonly files: ReadonlyArray<string> };
 type Action = 'resolve' | 'reply' | 'skip';
 
-// --- H Constant (Hygiene Configuration) -------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const H = Object.freeze({
-    // Algorithmic: Derive bot logins from B.labels.categories.agent + B.dashboard.bots
-    // Maps schema agent labels to actual GitHub bot login patterns
     agentBots: [...B.labels.categories.agent.map((a) => `${a}[bot]`), ...B.dashboard.bots, ...B.hygiene.botAliases],
-    // Agent mentions for prompt detection (derived from schema)
     agentMentions: B.labels.categories.agent.map((a) => `@${a}`),
-    // Slash commands: Derive /{agent} {command} patterns algorithmically from schema
-    // Output format: lowercase patterns like '/gemini review', '/copilot fix', '/claude explain'
-    // Used for case-insensitive detection of AI agent prompts in PR comments
     agentSlashCommands: B.labels.categories.agent.flatMap((a) =>
         B.hygiene.slashCommands.map((cmd) => `/${a} ${cmd}`.toLowerCase()),
     ),
-    // Display configuration (parametric)
     display: B.hygiene.display,
     gql: {
         minimize: `mutation($id:ID!,$c:ReportedContentClassifiers!){minimizeComment(input:{subjectId:$id,classifier:$c}){minimizedComment{isMinimized}}}`,
@@ -60,7 +48,6 @@ const H = Object.freeze({
         threads: `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path comments(first:20){nodes{id databaseId author{login}body createdAt}}}}}}}`,
     },
     marker: 'PR-HYGIENE',
-    // Parametric message templates (sha truncation uses B.probe.shaLength)
     msg: {
         addressed: (sha: string, f: ReadonlyArray<string>): string => {
             const maxFiles = B.hygiene.display.maxFiles;
@@ -73,11 +60,10 @@ const H = Object.freeze({
                 ? `[X] **Code changed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})${path ? ` (${path})` : ''}`
                 : `[X] **Outdated** — code has changed since this comment`,
     },
-    // Safety: patterns indicating valuable feedback that should NOT be auto-resolved
     valuablePatterns: B.hygiene.valuablePatterns,
 } as const);
 
-// --- Pure Functions ---------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const isBot = (login: string | undefined): boolean =>
     login ? H.agentBots.some((b) => login.toLowerCase() === b.toLowerCase()) : false;
@@ -85,8 +71,6 @@ const isBot = (login: string | undefined): boolean =>
 const isOwner = (login: string | undefined, owners: ReadonlyArray<string>): boolean =>
     owners.some((o) => o.toLowerCase() === login?.toLowerCase());
 
-// Detect @agent mentions OR /agent command slash commands (per schema requirement)
-// Both checks use case-insensitive matching for consistency; lowercase once for O(1) performance
 const isPrompt = (body: string): boolean => {
     const lower = body.toLowerCase();
     return (
@@ -100,7 +84,6 @@ const isValuable = (body: string): boolean => H.valuablePatterns.some((p) => p.t
 const pathMatch = (path: string | null, files: ReadonlyArray<string>): boolean =>
     path !== null && files.some((f) => f === path);
 
-// Polymorphic action classifier: Thread × Commits → Action
 const classify = (t: Thread, commits: ReadonlyArray<CommitFile>): Action =>
     t.isResolved
         ? 'skip'
@@ -112,7 +95,7 @@ const classify = (t: Thread, commits: ReadonlyArray<CommitFile>): Action =>
               ? 'reply'
               : 'skip';
 
-// --- API Operations ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const fetchThreads = async (ctx: Ctx, n: number): Promise<ReadonlyArray<Thread>> =>
     ((r) => r?.repository?.pullRequest?.reviewThreads?.nodes ?? [])(
@@ -172,7 +155,7 @@ const deleteComment = (ctx: Ctx, id: number): Promise<boolean> =>
         () => false,
     );
 
-// --- Dispatch Tables --------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const threadActions: Record<
     Action,
@@ -193,24 +176,20 @@ const threadActions: Record<
         const resolved = replied ? await resolveThread(ctx, t.id) : false;
         return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
-    // For outdated threads: reply → resolve → minimize (hide)
     resolve: async (ctx, t, commits, n) => {
         const match = commits.find((c) => pathMatch(t.path, c.files));
         const first = t.comments.nodes[0];
-        // Reply with explanation of what changed
         const replied = first?.databaseId
             ? await replyToThread(ctx, n, first.databaseId, H.msg.outdated(match?.sha ?? null, t.path))
             : false;
-        // Resolve the thread
         const resolved = await resolveThread(ctx, t.id);
-        // Minimize (hide) the original comment (best-effort, non-blocking)
         await (first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false));
         return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
     skip: async () => ({ replied: 0, resolved: 0 }),
 };
 
-// --- Effect Pipeline --------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
 const processThreads = async (
     ctx: Ctx,
@@ -236,7 +215,7 @@ const cleanupPrompts = async (
         )
     ).filter(Boolean).length;
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const noWorkResult = (core: Core, prNumber: number): HygieneResult => {
     core.info(`[PR-HYGIENE] #${prNumber}: no work`);
@@ -246,11 +225,7 @@ const noWorkResult = (core: Core, prNumber: number): HygieneResult => {
 const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<HygieneResult> => {
     const ctx = createCtx(params);
     const { prNumber, ownerLogins } = params.spec;
-
-    // Parallel fetch: threads + comments
     const [threads, comments] = await Promise.all([fetchThreads(ctx, prNumber), fetchComments(ctx, prNumber)]);
-
-    // Early return if no work
     const unresolved = threads.filter((t) => !t.isResolved);
     const hasPrompts = comments.some((c) => isOwner(c.user?.login, ownerLogins) && isPrompt(c.body));
     const noWork = unresolved.length === 0 && !hasPrompts;
@@ -278,27 +253,24 @@ const processHygiene = async (
     prNumber: number,
     ownerLogins: ReadonlyArray<string>,
 ): Promise<HygieneResult> => {
-    // Calculate since timestamp from earliest unresolved comment (or 24h ago if empty)
     const allDates = unresolved.flatMap((t) => t.comments.nodes.map((c) => new Date(c.createdAt).getTime()));
     const since =
         allDates.length > 0
             ? new Date(Math.min(...allDates)).toISOString()
             : new Date(Date.now() - B.time.day).toISOString();
 
-    // Fetch commit files and process
     const commits = await fetchCommitFiles(ctx, prNumber, since);
     const [{ resolved, replied }, deleted] = await Promise.all([
         processThreads(ctx, unresolved, commits, prNumber),
         cleanupPrompts(ctx, comments, ownerLogins),
     ]);
 
-    // Log and post summary if actions taken
     const result = { deleted, replied, resolved };
     params.core.info(`[PR-HYGIENE] #${prNumber}: resolved=${resolved} replied=${replied} deleted=${deleted}`);
     return resolved + replied + deleted > 0 ? postSummary(ctx, prNumber, result) : result;
 };
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };
 export type { HygieneResult, HygieneSpec };

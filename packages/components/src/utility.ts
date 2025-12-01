@@ -1,9 +1,13 @@
+/**
+ * Utility components: render scroll area with directional control and hiding.
+ * Uses B, utilities, resolve from schema.ts with CSS overflow customization.
+ */
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef } from 'react';
 import type { Inputs, TuningFor } from './schema.ts';
-import { B, fn, merged, pick, resolve, TUNING_KEYS, useForwardedRef } from './schema.ts';
+import { B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type ScrollDirection = 'both' | 'horizontal' | 'vertical';
 type ScrollAreaProps = HTMLAttributes<HTMLDivElement> & {
@@ -18,25 +22,30 @@ type UtilityInput = {
     readonly scale?: Inputs['scale'] | undefined;
 };
 
-// --- Component Factory ------------------------------------------------------
-
-const createScrollArea = (i: UtilityInput) => {
-    const scl = resolve('scale', i.scale);
-    const vars = fn.cssVars(fn.computeScale(scl), 'util');
-    const dir = i.direction ?? 'vertical';
-    const Comp = forwardRef((props: ScrollAreaProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { children, className, direction = dir, hideScrollbar = i.hideScrollbar, style, ...rest } = props;
+const createScrollAreaComponent = (input: UtilityInput) => {
+    const scale = resolve('scale', input.scale);
+    const vars = utilities.cssVars(utilities.computeScale(scale), 'util');
+    const defaultDirection = input.direction ?? 'vertical';
+    const Component = forwardRef((props: ScrollAreaProps, fRef: ForwardedRef<HTMLDivElement>) => {
+        const {
+            children,
+            className,
+            direction = defaultDirection,
+            hideScrollbar = input.hideScrollbar,
+            style,
+            ...rest
+        } = props;
         const ref = useForwardedRef(fRef);
         return createElement(
             'div',
             {
                 ...rest,
-                className: fn.cls(
+                className: utilities.cls(
                     'relative',
                     B.util.dir[direction],
                     hideScrollbar ? B.util.scrollbar.hidden : B.util.scrollbar.visible,
                     B.util.var.r,
-                    i.className,
+                    input.className,
                     className,
                 ),
                 ref,
@@ -46,19 +55,20 @@ const createScrollArea = (i: UtilityInput) => {
             children,
         );
     });
-    Comp.displayName = 'Util(scrollArea)';
-    return Comp;
+    Component.displayName = 'Util(scrollArea)';
+    return Component;
 };
 
-// --- Factory ----------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createUtility = (tuning?: TuningFor<'util'>) =>
     Object.freeze({
-        create: (i: UtilityInput) => createScrollArea({ ...i, ...merged(tuning, i, TUNING_KEYS.util) }),
-        ScrollArea: createScrollArea({ ...pick(tuning, TUNING_KEYS.util) }),
+        create: (input: UtilityInput) =>
+            createScrollAreaComponent({ ...input, ...merged(tuning, input, TUNING_KEYS.util) }),
+        ScrollArea: createScrollAreaComponent({ ...pick(tuning, TUNING_KEYS.util) }),
     });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createUtility };
 export type { ScrollAreaProps, ScrollDirection, UtilityInput };

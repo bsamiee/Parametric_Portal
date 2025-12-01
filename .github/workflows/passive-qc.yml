@@ -27,7 +27,6 @@ permissions:
 
 jobs:
     # --- Jobs run in sequence via needs chain for deterministic execution -----
-    # QC jobs run every 6 hours; maintenance jobs run daily at 03:00
     sync-labels:
         name: Sync Labels (backup)
         if: github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
@@ -123,7 +122,6 @@ jobs:
     # --- Daily Maintenance Jobs (03:00 UTC or manual trigger) -----------------
     branch-cleanup:
         name: Branch Cleanup
-        # Run on daily schedule (03:00) or manual maintenance trigger
         if: github.event.schedule == '0 3 * * *' || github.event.inputs.maintenance == 'true'
         runs-on: ubuntu-latest
         timeout-minutes: 10
@@ -161,9 +159,8 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
-            # Workflow run cleanup (logs, artifacts older than 7 days)
             - name: Cleanup Workflow Runs
-              uses: viascom/github-maintenance-action@aa3a556c67f6582ee9b7b75dd26fda08e66f3b82 # v0.0.3
+              uses: viascom/github-maintenance-action@v0.1.0
               with:
                   github_token: ${{ secrets.GITHUB_TOKEN }}
                   repository: ${{ github.repository }}
@@ -173,7 +170,6 @@ jobs:
                   delete_artifacts: true
                   dry_run: false
 
-            # Cache cleanup using gh CLI
             - name: Cleanup Stale Caches
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

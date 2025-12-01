@@ -1,14 +1,17 @@
+/**
+ * Generate @font-face rules and semantic weight utilities via schema validation.
+ */
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
-import { Effect, pipe } from 'effect';
+import { Effect, Option, pipe } from 'effect';
 import type { Plugin } from 'vite';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type FontWeight = S.Schema.Type<typeof FontWeightSchema>;
 type FontInput = S.Schema.Type<typeof FontInputSchema>;
 
-// --- Schema Definitions -----------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const FontWeightSchema = pipe(S.Number, S.int(), S.between(100, 900), S.brand('FontWeight'));
 
@@ -42,9 +45,11 @@ const FontInputSchema = S.Struct({
 
 // --- Constants ---------------------------------------------------------------
 
-const FORMAT_CONFIG = Object.freeze({
-    static: { format: 'woff2', tech: undefined },
-    variable: { format: 'woff2', tech: 'variations' },
+const B = Object.freeze({
+    format: {
+        static: { format: 'woff2', tech: undefined },
+        variable: { format: 'woff2', tech: 'variations' },
+    },
 } as const);
 
 const VIRTUAL_MODULE_ID = Object.freeze({
@@ -52,11 +57,18 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-fonts' as const,
 } as const);
 
-// --- Unified fn Object (Consolidated Helpers) --------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const fn = {
+    // Invert undefined check: output quoted family-only when no fallback provided.
     fallbackStack: (family: string, fallback: ReadonlyArray<string> | undefined): string =>
-        fallback === undefined ? `"${family}"` : `"${family}", ${fallback.join(', ')}`,
+        pipe(
+            Option.fromNullable(fallback),
+            Option.match({
+                onNone: () => `"${family}"`,
+                onSome: (fb) => `"${family}", ${fb.join(', ')}`,
+            }),
+        ),
     weightRange: (weights: Record<string, FontWeight>): string =>
         pipe(
             Object.values(weights),
@@ -65,21 +77,35 @@ const fn = {
         ),
 } as const;
 
-// --- Effect Pipelines & Builders --------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
 const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[], ParseError> =>
     pipe(
-        Effect.succeed(FORMAT_CONFIG[input.type]),
+        Effect.succeed(B.format[input.type]),
         Effect.map(({ format, tech }) =>
             [
                 '@font-face {',
                 `  font-family: "${input.family}";`,
-                `  src: url('${input.src}') 			format(${tech !== undefined ? `'${format} ${tech}'` : `'${format}'`});`,
+                // Include tech as space-delimited string for @supports() compatibility in variable fonts.
+                `  src: url('${input.src}') \t\t\tformat(${pipe(
+                    Option.fromNullable(tech),
+                    Option.match({
+                        onNone: () => `'${format}'`,
+                        onSome: (t) => `'${format} ${t}'`,
+                    }),
+                )});`,
                 `  font-weight: ${fn.weightRange(input.weights)};`,
-                input.display !== undefined ? `  font-display: ${input.display};` : '',
-                input.features !== undefined
-                    ? `  font-feature-settings: ${input.features.map((f) => `"${f}"`).join(', ')};`
-                    : '',
+                pipe(
+                    Option.fromNullable(input.display),
+                    Option.match({ onNone: () => '', onSome: (d) => `  font-display: ${d};` }),
+                ),
+                pipe(
+                    Option.fromNullable(input.features),
+                    Option.match({
+                        onNone: () => '',
+                        onSome: (fs) => `  font-feature-settings: ${fs.map((f) => `"${f}"`).join(', ')};`,
+                    }),
+                ),
                 '}',
             ].filter((line) => line !== ''),
         ),
@@ -102,18 +128,26 @@ const createThemeVariables = (input: FontInput): Effect.Effect<readonly string[]
     pipe(
         Effect.all({
             family: Effect.succeed(`--font-${input.name}: ${fn.fallbackStack(input.family, input.fallback)};`),
-            variations:
-                input.axes !== undefined
-                    ? Effect.succeed(
-                          `--font-${input.name}--font-variation-settings: ${Object.entries(input.axes)
-                              .map(([axis, { default: defaultVal }]) => `"${axis}" ${defaultVal}`)
-                              .join(', ')};`,
-                      )
-                    : Effect.succeed(undefined),
+            variations: pipe(
+                Option.fromNullable(input.axes),
+                Option.match({
+                    onNone: () => Effect.succeed(undefined),
+                    onSome: (axes) =>
+                        Effect.succeed(
+                            `--font-${input.name}--font-variation-settings: ${Object.entries(axes)
+                                .map(([axis, { default: defaultVal }]) => `"${axis}" ${defaultVal}`)
+                                .join(', ')};`,
+                        ),
+                }),
+            ),
         }),
         Effect.map(({ family, variations }) =>
-            ['@theme {', `  ${family}`, variations !== undefined ? `  ${variations}` : '', '}'].filter(
-                (line) => line !== '',
+            pipe(
+                Option.fromNullable(variations),
+                Option.match({
+                    onNone: () => ['@theme {', `  ${family}`, '}'],
+                    onSome: (v) => ['@theme {', `  ${family}`, `  ${v}`, '}'],
+                }),
             ),
         ),
     );
@@ -136,6 +170,8 @@ const createFontBlocks = (input: FontInput): Effect.Effect<readonly string[], Pa
         Effect.catchAll((error) => Effect.succeed([`/* Font parsing failed: ${input.name} - ${error._tag} */`])),
     );
 
+// --- Entry Point -------------------------------------------------------------
+
 const defineFonts = (inputs: FontInput | ReadonlyArray<FontInput>): Plugin => ({
     enforce: 'pre',
     load: (id) =>
@@ -151,7 +187,7 @@ const defineFonts = (inputs: FontInput | ReadonlyArray<FontInput>): Plugin => ({
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
 });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
-export { defineFonts, FORMAT_CONFIG };
+export { B, defineFonts };
 export type { FontInput };

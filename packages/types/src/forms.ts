@@ -1,9 +1,12 @@
+/**
+ * Define form validation types via Effect Schema: FieldState, ValidationError, FormField, FormState with declarative rule composition.
+ */
 import { Schema as S } from '@effect/schema';
 import type { ParseError } from '@effect/schema/ParseResult';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Type Definitions --------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type FieldName = S.Schema.Type<typeof FieldNameSchema>;
 
@@ -71,7 +74,7 @@ type FoldHandlers<R> = {
     readonly onSuccess: (field: FieldName) => R;
 };
 
-// --- Constants (Single B Constant) -------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { validateOnBlur: true, validateOnChange: false },
@@ -87,7 +90,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const FieldNameSchema = pipe(S.String, S.nonEmptyString(), S.brand('FieldName'));
 
@@ -125,7 +128,7 @@ const schemas = Object.freeze({
     validationSuccess: ValidationSuccessSchema,
 } as const);
 
-// --- Pure Utility Functions (Internal) ---------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const mkFieldName = (name: string): FieldName => name as FieldName;
 
@@ -161,22 +164,22 @@ const updateField = <T extends Record<string, unknown>, K extends keyof T>(
 const computeIsValid = <T extends Record<string, unknown>>(fields: FormState<T>['fields']): boolean =>
     Object.values(fields).every((f) => (f as FormField<unknown>).errors.length === 0);
 
-// --- Dispatch Table (Fold Handlers) ------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const foldDispatch = <R>(result: ValidationResult, h: FoldHandlers<R>): R =>
+const foldHandlers = <R>(result: ValidationResult, h: FoldHandlers<R>): R =>
     match(result)
         .with({ _tag: B.tags.success }, (r) => h.onSuccess(r.field))
         .with({ _tag: B.tags.error }, (r) => h.onError(r))
         .exhaustive();
 
-const validateDispatch = <V>(field: FormField<V>, schema: S.Schema<V>): Effect.Effect<ValidationResult, never, never> =>
+const validateHandlers = <V>(field: FormField<V>, schema: S.Schema<V>): Effect.Effect<ValidationResult, never, never> =>
     pipe(
         S.decode(schema)(field.value),
         Effect.map(() => mkSuccess(field.name)),
         Effect.catchAll((error: ParseError) => Effect.succeed(mkError(field.name, 'schema', error.message))),
     );
 
-// --- Polymorphic Entry Point -------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createForm = <T extends Record<string, unknown>>(
     config: FormConfig = {},
@@ -190,7 +193,7 @@ const createForm = <T extends Record<string, unknown>>(
             Object.freeze({
                 createField: <V>(name: string, initialValue: V) => mkField(name, initialValue),
                 error: mkError,
-                fold: <R>(result: ValidationResult, handlers: FoldHandlers<R>) => foldDispatch(result, handlers),
+                fold: <R>(result: ValidationResult, handlers: FoldHandlers<R>) => foldHandlers(result, handlers),
                 getFieldErrors: (state: FormState<T>, name: keyof T) => state.fields[name].errors,
                 isError: (result: ValidationResult): result is ValidationError => result._tag === B.tags.error,
                 isFormValid: (state: FormState<T>) => computeIsValid(state.fields),
@@ -208,12 +211,12 @@ const createForm = <T extends Record<string, unknown>>(
                         ...f,
                         state: f.state === B.states.pristine ? B.states.touched : f.state,
                     })),
-                validateField: <V>(field: FormField<V>, schema: S.Schema<V>) => validateDispatch(field, schema),
+                validateField: <V>(field: FormField<V>, schema: S.Schema<V>) => validateHandlers(field, schema),
             } as FormApi<T>),
         ),
     );
 
-// --- Export (2 Exports: Tuning + Factory) ------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { B as FORM_TUNING, createForm };
 export type {

@@ -1,15 +1,12 @@
 #!/usr/bin/env tsx
 /**
- * Unified auto-merge decision engine for dependency bot PRs.
- * Polymorphic dispatch handles Dependabot, Renovate, and future bots.
- *
- * Leverages schema.ts: B constant (dashboard.bots, labels.categories), fn (classify), call, mutate
- * Pattern: Single M constant → Dispatch tables → Polymorphic pipeline → Entry point
+ * Auto-merge decision engine: classifies bot PRs by version type, merges/blocks accordingly.
+ * Uses B.dashboard.bots, B.labels, fn.classify, mutate from schema.ts.
  */
 
 import { B, type Ctx, createCtx, fn, mutate, type RunParams } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type MergeSpec = {
     readonly prNumber: number;
@@ -28,17 +25,14 @@ type BotKey = 'dependabot' | 'renovate' | 'unknown';
 type Decision = { readonly eligible: boolean; readonly reason: ReasonKey };
 type Rule<V> = { readonly pattern: RegExp; readonly value: V };
 
-// --- M Constant (Merge Configuration) ---------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const M = Object.freeze({
-    // Algorithmic: Derive bot identifiers from B.dashboard.bots
     bots: {
         dependabot: 'dependabot[bot]',
         renovate: 'renovate[bot]',
     } as const,
-    // Decision rules for PR classification (ordered by priority)
     decisions: {
-        // Breaking changes never auto-merge
         breaking: { eligible: false, reason: 'breaking' } as Decision,
         // Canary/unstable versions need review
         canary: { eligible: false, reason: 'canary' } as Decision,
@@ -46,24 +40,21 @@ const M = Object.freeze({
         default: { eligible: false, reason: 'no-decision' } as Decision,
         // Major versions need review
         major: { eligible: false, reason: 'major' } as Decision,
-        // Minor/patch versions auto-merge
         minor: { eligible: true, reason: 'minor' } as Decision,
+        'no-decision': { eligible: false, reason: 'no-decision' } as Decision,
+        'not-bot': { eligible: false, reason: 'not-bot' } as Decision,
         patch: { eligible: true, reason: 'patch' } as Decision,
-        // Security always merges (highest priority)
         security: { eligible: true, reason: 'security' } as Decision,
     } as const,
-    // Label-based classification rules (uses B.labels from schema.ts)
     labels: {
-        breaking: B.breaking.label, // 'breaking'
-        security: B.labels.categories.special[1], // 'security'
+        breaking: B.breaking.label,
+        security: B.labels.categories.special[1],
     } as const,
-    // Messages for block comments
     messages: {
         breaking: '[WARN] **Auto-merge blocked**: Breaking change requires manual review.',
         canary: '[WARN] **Auto-merge blocked**: Canary/unstable version requires manual review.',
         major: '[WARN] **Auto-merge blocked**: Major version update requires manual review.',
     } as const,
-    // Title pattern rules for version classification
     titleRules: [
         { pattern: /canary|beta|rc|alpha|preview|nightly/i, value: 'canary' },
         { pattern: /major/i, value: 'major' },
@@ -72,7 +63,7 @@ const M = Object.freeze({
     ] as ReadonlyArray<Rule<ReasonKey>>,
 } as const);
 
-// --- Pure Functions ---------------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const identifyBot = (actor: string): BotKey =>
     actor === M.bots.dependabot ? 'dependabot' : actor === M.bots.renovate ? 'renovate' : 'unknown';
@@ -92,7 +83,7 @@ const classifyByTitle = (title: string): Decision =>
         fn.classify(title, M.titleRules, 'no-decision' as ReasonKey),
     );
 
-// --- Dispatch Table ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const botHandlers: Record<BotKey, (spec: MergeSpec) => Decision> = {
     dependabot: (spec) => classifyByLabels(spec.labels) ?? classifyByTitle(spec.title),
@@ -100,10 +91,9 @@ const botHandlers: Record<BotKey, (spec: MergeSpec) => Decision> = {
     unknown: () => ({ eligible: false, reason: 'not-bot' }),
 };
 
-// --- Effect Pipeline --------------------------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
 const decide = (spec: MergeSpec): Decision => botHandlers[identifyBot(spec.actor)](spec);
-
 const execute = async (ctx: Ctx, spec: MergeSpec, decision: Decision): Promise<MergeResult> => {
     const actions = {
         block: async (): Promise<MergeResult> => {
@@ -132,7 +122,7 @@ const execute = async (ctx: Ctx, spec: MergeSpec, decision: Decision): Promise<M
     return actions[action]();
 };
 
-// --- Entry Point ------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const run = async (params: RunParams & { readonly spec: MergeSpec }): Promise<MergeResult> => {
     const ctx = createCtx(params);
@@ -142,7 +132,7 @@ const run = async (params: RunParams & { readonly spec: MergeSpec }): Promise<Me
     return result;
 };
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { run };
 export type { MergeResult, MergeSpec };

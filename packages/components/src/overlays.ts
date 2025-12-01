@@ -1,10 +1,14 @@
+/**
+ * Overlay components: render dialog, drawer, modal, popover, sheet, tooltip.
+ * Uses B.ov, utilities, animStyle from schema.ts with React Aria focus management.
+ */
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef, useEffect, useState } from 'react';
 import { FocusScope, useDialog, useModal, useOverlay, usePreventScroll } from 'react-aria';
 import type { Inputs, Resolved, TuningFor } from './schema.ts';
-import { animStyle, B, fn, merged, pick, resolve, TUNING_KEYS, useForwardedRef } from './schema.ts';
+import { animStyle, B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Type Definitions -------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type OverlayType = 'dialog' | 'drawer' | 'modal' | 'popover' | 'sheet' | 'tooltip';
 type Position = 'bottom' | 'left' | 'right' | 'top';
@@ -31,25 +35,23 @@ type OverlayInput<T extends OverlayType = 'modal'> = {
     readonly type?: T;
 };
 
-// --- Pure Utility Functions -------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
-const focus = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
+const createFocusScope = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
     createElement(FocusScope, { ...opts, ...({ children: child } as const) });
 
-// --- Component Builders -----------------------------------------------------
-
-const mkModal = (
-    i: OverlayInput<'modal'>,
-    v: Record<string, string>,
-    o: Resolved['overlay'],
-    a: Resolved['animation'],
-    _s: Resolved['scale'],
+const createModalComponent = (
+    input: OverlayInput<'modal'>,
+    vars: Record<string, string>,
+    overlay: Resolved['overlay'],
+    animation: Resolved['animation'],
+    _scale: Resolved['scale'],
 ) =>
     forwardRef((props: ModalProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, onClose, size = 'lg', style, title, ...rest } = props;
         const ref = useForwardedRef(fRef);
         const { overlayProps, underlayProps } = useOverlay(
-            { isDismissable: o.closeOnOutsideClick, isOpen, onClose },
+            { isDismissable: overlay.closeOnOutsideClick, isOpen, onClose },
             ref,
         );
         const { modalProps } = useModal();
@@ -62,44 +64,47 @@ const mkModal = (
                 ...overlayProps,
                 ...modalProps,
                 ...dialogProps,
-                className: fn.cls(
+                className: utilities.cls(
                     'w-full shadow-xl max-h-[90vh] overflow-y-auto',
                     B.ov.size[size],
                     B.ov.var.r,
-                    i.className,
+                    input.className,
                     className,
                 ),
                 ref,
-                style: { ...v, ...animStyle(a), ...style } as CSSProperties,
+                style: { ...vars, ...animStyle(animation), ...style } as CSSProperties,
             },
             title
                 ? createElement(
                       'div',
-                      { ...titleProps, className: fn.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py) },
+                      {
+                          ...titleProps,
+                          className: utilities.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py),
+                      },
                       title,
                   )
                 : null,
-            createElement('div', { className: fn.cls(B.ov.var.px, B.ov.var.py) }, children),
+            createElement('div', { className: utilities.cls(B.ov.var.px, B.ov.var.py) }, children),
         );
         return isOpen
             ? createElement(
                   'div',
                   {
                       ...underlayProps,
-                      className: fn.cls('fixed inset-0 flex items-center justify-center', B.ov.backdrop),
-                      style: fn.zStyle(o, true),
+                      className: utilities.cls('fixed inset-0 flex items-center justify-center', B.ov.backdrop),
+                      style: utilities.zStyle(overlay, true),
                   },
-                  focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
+                  createFocusScope({ autoFocus: true, contain: overlay.trapFocus, restoreFocus: true }, content),
               )
             : null;
     });
 
-const mkDialog = (
-    i: OverlayInput<'dialog'>,
-    v: Record<string, string>,
-    o: Resolved['overlay'],
-    a: Resolved['animation'],
-    _s: Resolved['scale'],
+const createDialogComponent = (
+    input: OverlayInput<'dialog'>,
+    vars: Record<string, string>,
+    overlay: Resolved['overlay'],
+    animation: Resolved['animation'],
+    _scale: Resolved['scale'],
 ) =>
     forwardRef((props: DialogProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const {
@@ -117,7 +122,7 @@ const mkDialog = (
         } = props;
         const ref = useForwardedRef(fRef);
         const { overlayProps, underlayProps } = useOverlay(
-            { isDismissable: o.closeOnOutsideClick, isOpen, onClose },
+            { isDismissable: overlay.closeOnOutsideClick, isOpen, onClose },
             ref,
         );
         const { modalProps } = useModal();
@@ -130,28 +135,31 @@ const mkDialog = (
                 ...overlayProps,
                 ...modalProps,
                 ...dialogProps,
-                className: fn.cls(
+                className: utilities.cls(
                     'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-xl w-full overflow-hidden',
                     B.ov.size[size],
                     B.ov.var.r,
-                    i.className,
+                    input.className,
                     className,
                 ),
                 ref,
                 role: 'alertdialog',
-                style: { ...v, ...animStyle(a), ...fn.zStyle(o), ...style } as CSSProperties,
+                style: { ...vars, ...animStyle(animation), ...utilities.zStyle(overlay), ...style } as CSSProperties,
             },
             title
                 ? createElement(
                       'div',
-                      { ...titleProps, className: fn.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py) },
+                      {
+                          ...titleProps,
+                          className: utilities.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py),
+                      },
                       title,
                   )
                 : null,
-            createElement('div', { className: fn.cls(B.ov.var.px, B.ov.var.py) }, children),
+            createElement('div', { className: utilities.cls(B.ov.var.px, B.ov.var.py) }, children),
             createElement(
                 'div',
-                { className: fn.cls('border-t flex justify-end gap-3', B.ov.var.px, B.ov.var.py) },
+                { className: utilities.cls('border-t flex justify-end gap-3', B.ov.var.px, B.ov.var.py) },
                 createElement(
                     'button',
                     { className: 'px-4 py-2 rounded border', onClick: onClose, type: 'button' },
@@ -171,79 +179,87 @@ const mkDialog = (
                   'div',
                   {
                       ...underlayProps,
-                      className: fn.cls('fixed inset-0', B.ov.backdrop),
-                      style: fn.zStyle(o, true),
+                      className: utilities.cls('fixed inset-0', B.ov.backdrop),
+                      style: utilities.zStyle(overlay, true),
                   },
-                  focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
+                  createFocusScope({ autoFocus: true, contain: overlay.trapFocus, restoreFocus: true }, content),
               )
             : null;
     });
 
-const mkDrawer = (
-    i: OverlayInput<'drawer'>,
-    v: Record<string, string>,
-    o: Resolved['overlay'],
-    a: Resolved['animation'],
-    _s: Resolved['scale'],
+const createDrawerComponent = (
+    input: OverlayInput<'drawer'>,
+    vars: Record<string, string>,
+    overlay: Resolved['overlay'],
+    animation: Resolved['animation'],
+    _scale: Resolved['scale'],
 ) =>
     forwardRef((props: DrawerProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { children, className, isOpen, onClose, position = o.position, style, ...rest } = props;
+        const { children, className, isOpen, onClose, position = overlay.position, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
         const { overlayProps, underlayProps } = useOverlay(
-            { isDismissable: o.closeOnOutsideClick, isOpen, onClose },
+            { isDismissable: overlay.closeOnOutsideClick, isOpen, onClose },
             ref,
         );
         const { modalProps } = useModal();
         usePreventScroll({ isDisabled: !isOpen });
-        const isHoriz = position === 'left' || position === 'right';
+        const isHorizontal = position === 'left' || position === 'right';
         const content = createElement(
             'div',
             {
                 ...rest,
                 ...overlayProps,
                 ...modalProps,
-                className: fn.cls(
+                className: utilities.cls(
                     'fixed shadow-xl overflow-hidden',
                     B.ov.pos[position],
-                    isHoriz ? 'h-full' : 'w-full',
+                    isHorizontal ? 'h-full' : 'w-full',
                     B.ov.var.r,
-                    i.className,
+                    input.className,
                     className,
                 ),
                 ref,
-                style: { ...v, ...animStyle(a), ...fn.zStyle(o), ...style } as CSSProperties,
+                style: { ...vars, ...animStyle(animation), ...utilities.zStyle(overlay), ...style } as CSSProperties,
             },
-            createElement('div', { className: fn.cls('h-full overflow-y-auto', B.ov.var.px, B.ov.var.py) }, children),
+            createElement(
+                'div',
+                { className: utilities.cls('h-full overflow-y-auto', B.ov.var.px, B.ov.var.py) },
+                children,
+            ),
         );
         return isOpen
             ? createElement(
                   'div',
                   {
                       ...underlayProps,
-                      className: fn.cls('fixed inset-0', B.ov.backdrop),
-                      style: fn.zStyle(o, true),
+                      className: utilities.cls('fixed inset-0', B.ov.backdrop),
+                      style: utilities.zStyle(overlay, true),
                   },
-                  focus({ autoFocus: true, contain: o.trapFocus, restoreFocus: true }, content),
+                  createFocusScope({ autoFocus: true, contain: overlay.trapFocus, restoreFocus: true }, content),
               )
             : null;
     });
 
-const mkPopover = (
-    i: OverlayInput<'popover'>,
-    v: Record<string, string>,
-    o: Resolved['overlay'],
-    _a: Resolved['animation'],
-    s: Resolved['scale'],
+const createPopoverComponent = (
+    input: OverlayInput<'popover'>,
+    vars: Record<string, string>,
+    overlay: Resolved['overlay'],
+    _animation: Resolved['animation'],
+    scale: Resolved['scale'],
 ) =>
     forwardRef((props: PopoverProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, onClose, style, triggerRef, ...rest } = props;
         const ref = useForwardedRef(fRef);
-        const { overlayProps } = useOverlay({ isDismissable: o.closeOnOutsideClick, isOpen, onClose }, ref);
-        const [pos, setPos] = useState({ left: 0, top: 0 });
-        const offsetPx = Math.round(s.scale * B.algo.popoverOffMul * s.density * s.baseUnit * 4 * 16);
+        const { overlayProps } = useOverlay({ isDismissable: overlay.closeOnOutsideClick, isOpen, onClose }, ref);
+        const [position, setPosition] = useState({ left: 0, top: 0 });
+        const offsetPx = Math.round(scale.scale * B.algo.popoverOffMul * scale.density * scale.baseUnit * 4 * 16);
         useEffect(() => {
-            const t = triggerRef.current;
-            setPos(t ? { left: t.offsetLeft, top: t.offsetTop + t.offsetHeight + offsetPx } : { left: 0, top: 0 });
+            const trigger = triggerRef.current;
+            setPosition(
+                trigger
+                    ? { left: trigger.offsetLeft, top: trigger.offsetTop + trigger.offsetHeight + offsetPx }
+                    : { left: 0, top: 0 },
+            );
         }, [triggerRef, offsetPx]);
         return isOpen
             ? createElement(
@@ -251,104 +267,110 @@ const mkPopover = (
                   {
                       ...rest,
                       ...overlayProps,
-                      className: fn.cls(
+                      className: utilities.cls(
                           'absolute shadow-lg border overflow-hidden',
                           B.ov.var.r,
-                          i.className,
+                          input.className,
                           className,
                       ),
                       ref,
-                      style: { ...v, ...fn.zStyle(o), ...pos, ...style } as CSSProperties,
+                      style: { ...vars, ...utilities.zStyle(overlay), ...position, ...style } as CSSProperties,
                   },
-                  createElement('div', { className: fn.cls(B.ov.var.px, B.ov.var.py) }, children),
+                  createElement('div', { className: utilities.cls(B.ov.var.px, B.ov.var.py) }, children),
               )
             : null;
     });
 
-const mkTooltip = (
-    i: OverlayInput<'tooltip'>,
-    _v: Record<string, string>,
-    o: Resolved['overlay'],
-    _a: Resolved['animation'],
-    s: Resolved['scale'],
+const createTooltipComponent = (
+    input: OverlayInput<'tooltip'>,
+    _vars: Record<string, string>,
+    overlay: Resolved['overlay'],
+    _animation: Resolved['animation'],
+    scale: Resolved['scale'],
 ) =>
     forwardRef((props: TooltipProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, isOpen, style, triggerRef, ...rest } = props;
         const ref = useForwardedRef(fRef);
-        const [pos, setPos] = useState({ left: 0, top: 0 });
-        const offsetPx = Math.round(s.scale * B.algo.tooltipOffMul * s.density * s.baseUnit * 4 * 16);
+        const [position, setPosition] = useState({ left: 0, top: 0 });
+        const offsetPx = Math.round(scale.scale * B.algo.tooltipOffMul * scale.density * scale.baseUnit * 4 * 16);
         useEffect(() => {
-            const t = triggerRef.current;
-            setPos(t ? { left: t.offsetLeft, top: t.offsetTop - offsetPx } : { left: 0, top: 0 });
+            const trigger = triggerRef.current;
+            setPosition(
+                trigger ? { left: trigger.offsetLeft, top: trigger.offsetTop - offsetPx } : { left: 0, top: 0 },
+            );
         }, [triggerRef, offsetPx]);
         return isOpen
             ? createElement(
                   'div',
                   {
                       ...rest,
-                      className: fn.cls(
+                      className: utilities.cls(
                           'absolute text-xs px-2 py-1 rounded shadow-lg pointer-events-none',
-                          i.className,
+                          input.className,
                           className,
                       ),
                       ref,
                       role: 'tooltip',
-                      style: { ...fn.zStyle(o), ...pos, ...style } as CSSProperties,
+                      style: { ...utilities.zStyle(overlay), ...position, ...style } as CSSProperties,
                   },
                   children,
               )
             : null;
     });
 
-// --- Dispatch Table ---------------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const builders = {
-    dialog: mkDialog,
-    drawer: mkDrawer,
-    modal: mkModal,
-    popover: mkPopover,
-    sheet: mkDrawer,
-    tooltip: mkTooltip,
+const builderHandlers = {
+    dialog: createDialogComponent,
+    drawer: createDrawerComponent,
+    modal: createModalComponent,
+    popover: createPopoverComponent,
+    sheet: createDrawerComponent,
+    tooltip: createTooltipComponent,
 } as const;
 
-const createOV = <T extends OverlayType>(i: OverlayInput<T>) => {
-    const s = resolve('scale', i.scale);
-    const o = resolve('overlay', (i.type ?? 'modal') === 'sheet' ? { ...i.overlay, position: 'bottom' } : i.overlay);
-    const a = resolve('animation', i.animation);
-    const c = fn.computeScale(s);
-    const v = fn.cssVars(c, 'ov');
-    const builder = builders[i.type ?? 'modal'];
-    const comp = (
+const createOverlayComponent = <T extends OverlayType>(input: OverlayInput<T>) => {
+    const scale = resolve('scale', input.scale);
+    const overlay = resolve(
+        'overlay',
+        (input.type ?? 'modal') === 'sheet' ? { ...input.overlay, position: 'bottom' } : input.overlay,
+    );
+    const animation = resolve('animation', input.animation);
+    const computed = utilities.computeScale(scale);
+    const vars = utilities.cssVars(computed, 'ov');
+    const builder = builderHandlers[input.type ?? 'modal'];
+    const component = (
         builder as unknown as (
-            i: OverlayInput<T>,
-            v: Record<string, string>,
-            o: Resolved['overlay'],
-            a: Resolved['animation'],
-            s: Resolved['scale'],
+            input: OverlayInput<T>,
+            vars: Record<string, string>,
+            overlay: Resolved['overlay'],
+            animation: Resolved['animation'],
+            scale: Resolved['scale'],
         ) => ReturnType<typeof forwardRef>
-    )(i, v, o, a, s);
-    comp.displayName = `Overlay(${i.type ?? 'modal'})`;
-    return comp;
+    )(input, vars, overlay, animation, scale);
+    component.displayName = `Overlay(${input.type ?? 'modal'})`;
+    return component;
 };
 
-// --- Factory ----------------------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createOverlays = (tuning?: TuningFor<'ov'>) =>
     Object.freeze({
-        create: <T extends OverlayType>(i: OverlayInput<T>) => createOV({ ...i, ...merged(tuning, i, TUNING_KEYS.ov) }),
-        Dialog: createOV({ type: 'dialog', ...pick(tuning, TUNING_KEYS.ov) }),
-        Drawer: createOV({ type: 'drawer', ...pick(tuning, TUNING_KEYS.ov) }),
-        Modal: createOV({ type: 'modal', ...pick(tuning, TUNING_KEYS.ov) }),
-        Popover: createOV({ type: 'popover', ...pick(tuning, TUNING_KEYS.ov) }),
-        Sheet: createOV({
+        create: <T extends OverlayType>(input: OverlayInput<T>) =>
+            createOverlayComponent({ ...input, ...merged(tuning, input, TUNING_KEYS.ov) }),
+        Dialog: createOverlayComponent({ type: 'dialog', ...pick(tuning, TUNING_KEYS.ov) }),
+        Drawer: createOverlayComponent({ type: 'drawer', ...pick(tuning, TUNING_KEYS.ov) }),
+        Modal: createOverlayComponent({ type: 'modal', ...pick(tuning, TUNING_KEYS.ov) }),
+        Popover: createOverlayComponent({ type: 'popover', ...pick(tuning, TUNING_KEYS.ov) }),
+        Sheet: createOverlayComponent({
             type: 'sheet',
             ...pick(tuning, ['animation', 'scale']),
             overlay: { ...tuning?.overlay, position: 'bottom' },
         }),
-        Tooltip: createOV({ type: 'tooltip', ...pick(tuning, ['scale']) }),
+        Tooltip: createOverlayComponent({ type: 'tooltip', ...pick(tuning, ['scale']) }),
     });
 
-// --- Export -----------------------------------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createOverlays };
 export type {

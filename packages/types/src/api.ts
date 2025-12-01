@@ -1,8 +1,11 @@
+/**
+ * Define API response discriminated unions via Effect Schema: ApiSuccess, ApiError, PaginatedResponse with status code validation.
+ */
 import { Schema as S } from '@effect/schema';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Type Definitions --------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type HttpStatus = S.Schema.Type<typeof HttpStatusSchema>;
 type HttpStatusSuccess = S.Schema.Type<typeof HttpStatusSuccessSchema>;
@@ -62,7 +65,7 @@ type FoldHandlers<T, R> = {
     readonly onSuccess: (data: T, status: HttpStatusSuccess) => R;
 };
 
-// --- Constants (Single B Constant) -------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { pageSize: 20, status: 200 },
@@ -76,7 +79,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema Definitions ------------------------------------------------------
+// --- Schema ------------------------------------------------------------------
 
 const HttpStatusSuccessSchema = pipe(
     S.Number,
@@ -137,7 +140,7 @@ const schemas = Object.freeze({
     paginationMeta: PaginationMetaSchema,
 } as const);
 
-// --- Pure Utility Functions (Internal) ---------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const mkSuccess = <T>(data: T, status: HttpStatusSuccess): ApiSuccess<T> => ({
     _tag: B.tags.success,
@@ -165,20 +168,20 @@ const mkPaginated = <T>(
 
 const defaultStatus = (): HttpStatusSuccess => B.defaults.status as HttpStatusSuccess;
 
-// --- Dispatch Table (Fold Handlers) ------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
-const foldDispatch = <T, R>(response: ApiResponse<T>, h: FoldHandlers<T, R>): R =>
+const foldHandlers = <T, R>(response: ApiResponse<T>, h: FoldHandlers<T, R>): R =>
     match(response)
         .with({ _tag: B.tags.success }, (r) => h.onSuccess(r.data, r.status))
         .with({ _tag: B.tags.error }, (r) => h.onError(r))
         .exhaustive();
 
-const mapDispatch = <T, U>(response: ApiResponse<T>, f: (data: T) => U): ApiResponse<U> =>
+const mapHandlers = <T, U>(response: ApiResponse<T>, f: (data: T) => U): ApiResponse<U> =>
     match(response)
         .with({ _tag: B.tags.success }, (r) => mkSuccess(f(r.data), r.status))
         .otherwise(() => response as ApiResponse<U>);
 
-// --- Polymorphic Entry Point -------------------------------------------------
+// --- Entry Point -------------------------------------------------------------
 
 const createApi = <T>(config: ApiConfig = {}): Effect.Effect<ApiApi<T>, never, never> =>
     pipe(
@@ -186,10 +189,10 @@ const createApi = <T>(config: ApiConfig = {}): Effect.Effect<ApiApi<T>, never, n
         Effect.map((_pageSize) =>
             Object.freeze({
                 error: mkError,
-                fold: <R>(response: ApiResponse<T>, handlers: FoldHandlers<T, R>) => foldDispatch(response, handlers),
+                fold: <R>(response: ApiResponse<T>, handlers: FoldHandlers<T, R>) => foldHandlers(response, handlers),
                 isError: (response: ApiResponse<T>): response is ApiError => response._tag === B.tags.error,
                 isSuccess: (response: ApiResponse<T>): response is ApiSuccess<T> => response._tag === B.tags.success,
-                map: <U>(response: ApiResponse<T>, f: (data: T) => U) => mapDispatch(response, f),
+                map: <U>(response: ApiResponse<T>, f: (data: T) => U) => mapHandlers(response, f),
                 match,
                 Option,
                 P,
@@ -202,7 +205,7 @@ const createApi = <T>(config: ApiConfig = {}): Effect.Effect<ApiApi<T>, never, n
         ),
     );
 
-// --- Export (2 Exports: Tuning + Factory) ------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { B as API_TUNING, createApi };
 export type {

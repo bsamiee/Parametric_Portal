@@ -1,4 +1,8 @@
 /// <reference types="vite/client" />
+/**
+ * Root Vite configuration: orchestrate plugins, compression, PWA, CSP via Effect pipeline.
+ * Uses B constant, CfgSchema, createConfig factory for app/library mode dispatch.
+ */
 import { Schema as S } from '@effect/schema';
 import typescript from '@rollup/plugin-typescript';
 import tailwindcss from '@tailwindcss/vite';
@@ -17,13 +21,13 @@ import svgr from 'vite-plugin-svgr';
 import webfontDownload from 'vite-plugin-webfont-dl';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-// --- Type Definitions --------------------------------------------------------
+// --- Types -------------------------------------------------------------------
 
 type Cfg = S.Schema.Type<typeof CfgSchema>;
 type Mode = Cfg['mode'];
 type Browsers = { readonly [K in 'chrome' | 'edge' | 'firefox' | 'safari']: number };
 
-// --- Schema Definitions (Single Discriminated Union) -------------------------
+// --- Schema ------------------------------------------------------------------
 
 const CfgSchema = S.Union(
     S.Struct({
@@ -46,7 +50,7 @@ const CfgSchema = S.Union(
     }),
 );
 
-// --- Constants (Unified Base) ------------------------------------------------
+// --- Constants ---------------------------------------------------------------
 
 const B = Object.freeze({
     assets: ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'],
@@ -98,7 +102,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Pure Utility Functions --------------------------------------------------
+// --- Pure Functions ----------------------------------------------------------
 
 const browsers = (): Browsers =>
     pipe(
@@ -199,7 +203,7 @@ const resolve = (browser = false) => ({
     ...(browser ? { dedupe: ['react', 'react-dom'], extensions: [...B.exts] } : {}),
 });
 
-// --- Plugin Dispatch Table ---------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const plugins = {
     app: (c: Extract<Cfg, { mode: 'app' }>, prod: boolean) => [
@@ -265,7 +269,7 @@ const plugins = {
     ],
 } as const;
 
-// --- Config Dispatch Table ---------------------------------------------------
+// --- Dispatch Tables ---------------------------------------------------------
 
 const config: {
     readonly [M in Mode]: (
@@ -358,7 +362,7 @@ const config: {
     }),
 };
 
-// --- Effect Pipeline (Single Entry Point) ------------------------------------
+// --- Effect Pipeline ---------------------------------------------------------
 
 const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =>
     pipe(
@@ -377,7 +381,7 @@ const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =
         ),
     );
 
-// --- Export (Single Polymorphic API) -----------------------------------------
+// --- Export ------------------------------------------------------------------
 
 export { createConfig };
 export default defineConfig(
