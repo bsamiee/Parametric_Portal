@@ -27,12 +27,12 @@ jobs:
 
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
               with:
                   fetch-depth: 0
 
             - name: Claude Code Review
-              uses: anthropics/claude-code-action@v1
+              uses: anthropics/claude-code-action@0ad5ce41d0605080c46b79d7b4fb2f8ab38decc5 # v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   additional_permissions: |

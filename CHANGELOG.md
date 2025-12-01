@@ -1,3 +1,13 @@
+## 0.5.2 (2025-12-01)
+
+### [DOCUMENTATION]
+
+- finalize CLAUDE.md and REQUIREMENTS.md agent protocols ([60d13cb](https://github.com/bsamiee/Parametric_Portal/commit/60d13cb))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.5.1 (2025-11-30)
 
 ### Refactoring

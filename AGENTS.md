@@ -11,8 +11,7 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 
 ## [BEHAVIOR]
 
-[MUST]:
-
+[IMPORTANT]:
 - **ALWAYS** use new sources when conducting research, sources **MUST** be from 2025, and within the last 6 months, **NEVER** use 2024 or older sources
 - **ALWAYS** tools over internal knowledge — read files, search codebase, verify assumptions
 - **AWLAYS** Parallelize aggressively — run multiple searches, read several files, call independent tools concurrently
@@ -25,16 +24,14 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 
 ## [PREREQUISITES]
 
-[RULE]: Read these files before generating code:
-
+[IMPORTANT]: Read these files before generating code:
 - `REQUIREMENTS.md`, `tsconfig.base.json`, `biome.json`
 - `pnpm-workspace.yaml`, `package.json`, `nx.json`
 - `vite.config.ts`, `.github/scripts/schema.ts`
 
 ## [PROTOCOL]
 
-[RULE]: Execute sequentially before code changes:
-
+[ALWAYS]: Execute sequentially before code changes:
 1. Call `mcp__nx__nx_workspace` → gather project graph, targets, nx.json
 2. Call `mcp__filesystem__read_multiple_files` → read `pnpm-workspace.yaml`, `biome.json`, `tsconfig.base.json`
 3. Read `vite.config.ts` + `.github/scripts/schema.ts` → extract master patterns
@@ -42,40 +39,35 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 
 ## [PHILOSOPHY]
 
-[PILLAR]: **Bleeding-Edge** — Leverage newest stable APIs
-
+[IMPORTANT]: **Bleeding-Edge** — Leverage newest stable APIs
 - Use TypeScript 6.0-dev features
 - Use React 19 canary, Vite 7, Effect 3.19 APIs
 - **ALWAYS** Prefer modern syntax: `using`, `satisfies`, const type parameters
 - **ALWAYS** Research docs ≤6 months old before implementation
 - **ALWAYS** Reject legacy patterns and deprecated methods
 
-[PILLAR]: **Functional-Monadic** — Write pure functions with monadic composition
-
+[IMPORTANT]: **Functional-Monadic** — Write pure functions with monadic composition
 - Use `Effect` for async/failable operations
 - Use `Option.fromNullable` for nullable values
 - **MUST** Compose via `pipe()`, not nested calls
 - **MUST** Route errors through Effect channel, not `try/catch`
 - **MUST** Enforce immutability via `Object.freeze`, `ReadonlyArray`
 
-[PILLAR]: **Expression-Centric** — Write code as expressions, not statements
-
+[IMPORTANT]: **Expression-Centric** — Write code as expressions, not statements
 - Use ternaries over `if/else`
 - **ALWAYS** Use `Option.match` over null checks
 - **ALWAYS** Use arrow functions with implicit returns
 - **ALWAYS** Replace switch/case with dispatch tables
 - **NEVER** use blocks `{}` when expression suffices
 
-[PILLAR]: **Algorithmic-Parametric** — Derive values algorithmically
-
+[IMPORTANT]: **Algorithmic-Parametric** — Derive values algorithmically
 - **ALWAYS** Generate constants from base values, **NEVER** hardcode
 - Expose tuning parameters at call-sites
 - Consolidate config into single `B` constant per file
 - Validate inputs via `@effect/schema`
 - Define domain primitives as branded types
 
-[PILLAR]: **Polymorphic-Dense** — Maximize functionality per LOC
-
+[IMPORTANT]: **Polymorphic-Dense** — Maximize functionality per LOC
 - **ALWAYS** Handle all modes via single factory function
 - **ALWAYS** Branch via dispatch tables: `handlers[mode](config)`
 - **ALWAYS** Narrow types via discriminated unions
@@ -85,7 +77,6 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 ## [CONSTRAINTS]
 
 [FORBIDDEN]:
-
 - `any` → use branded types via @effect/schema
 - `let`/`var` → use `const` only
 - `if/else` → use dispatch tables
@@ -94,7 +85,6 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 - Default exports → use named exports (except `*.config.ts`)
 
 [REQUIRED]:
-
 - Consolidate config into single frozen B constant per file
 - Branch via dispatch tables
 - Sequence async/failable via Effect pipelines
@@ -104,7 +94,6 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 ## [OUTPUT]
 
 [FORMAT]:
-
 - Use `backticks` for file paths, symbols, and CLI commands
 - Avoid large code blocks — reference file/symbol names instead
 - No before/after pairs or full method bodies unless explicitly requested
@@ -114,7 +103,6 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 ### [DEPENDENCIES]
 
 [PROCESS]:
-
 1. **Check catalog**: `cat pnpm-workspace.yaml | grep my-dep`
 2. **Add to catalog** (if missing): `my-dep: 1.2.3` (exact version)
 3. **Reference**: `"dependencies": { "my-dep": "catalog:" }`
@@ -124,7 +112,6 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 ## [FILE_ORGANIZATION]
 
 [RULE]: **Separator format**: `// --- Section Name -------` (77 chars, triple-dash):
-
 ```typescript
 // --- Imports -----------------------------------------------------------------
 // --- Type Definitions --------------------------------------------------------
@@ -139,7 +126,6 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 ## [VALIDATION]
 
 [RULE]: Execute before any commit:
-
 1. Run `pnpm typecheck` → must pass with zero errors, zero suppressions
 2. Run `pnpm check` → must pass with zero Biome violations
 3. Verify pattern compliance → B constant, dispatch tables, Effect pipelines
@@ -163,3 +149,42 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 | Performance     | `performance-analyst`      |
 
 [DETAIL]: Consult `.github/agents/*.agent.md` for full capabilities.
+
+## [COMMANDS]
+
+[IMPORTANT]: Execute via Nx — direct tool invocation bypasses cache, dependencies, and task graph.
+
+| Category | Command | Description | Cache |
+|----------|---------|-------------|-------|
+| Development | `nx dev <project>` | Vite dev server | false |
+| Development | `nx build <project>` | Production build | true |
+| Quality | `nx run-many -t check` | Biome lint (CI mode) | true |
+| Quality | `nx run-many -t lint` | Biome lint | true |
+| Quality | `nx run-many -t fix` | Biome lint --write | false |
+| Quality | `nx run-many -t typecheck` | tsc --noEmit | true |
+| Testing | `nx test <project>` | Vitest unit tests | true |
+| Testing | `nx run-many -t mutate` | Stryker mutation testing | false |
+| Analysis | `nx run-many -t analyze` | Bundle analyzer | true |
+| Analysis | `nx inspect:dev <project>` | Vite inspect (dev) | false |
+| Analysis | `nx inspect:build <project>` | Vite inspect (build) | false |
+| CI | `nx affected -t build test lint typecheck` | Changed projects only | true |
+| CI | `nx run-many -t validate:compression` | Verify .br/.gz artifacts | false |
+| Release | `nx release` | Semantic versioning + changelog | false |
+| Utility | `nx graph` | Visualize project graph | false |
+| Utility | `nx reset` | Clear Nx cache | false |
+| PWA | `nx pwa:icons <project>` | Generate PWA icons | false |
+
+[AVOID]: Direct tool invocation breaks Nx orchestration:
+```bash
+# [AVOID] Bypasses cache, dependencies, task graph
+vite build
+vitest run
+biome check
+
+# [USE] Nx-mediated
+nx build <project>
+nx test <project>
+nx run-many -t check
+```
+
+[REFERENCE]: Root `package.json` contains pnpm aliases that delegate to `nx run-many`. Configuration in `nx.json` → `targetDefaults`.
