@@ -32,7 +32,7 @@ jobs:
             actions: read
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
               with:
                   fetch-depth: 0
 
@@ -40,7 +40,7 @@ jobs:
               with:
                   install: 'false'
 
-            - uses: anthropics/claude-code-action@v1
+            - uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   prompt: |
@@ -85,7 +85,7 @@ jobs:
             id-token: write
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
               with:
                   fetch-depth: 0
 
@@ -93,7 +93,7 @@ jobs:
               with:
                   install: 'false'
 
-            - uses: anthropics/claude-code-action@v1
+            - uses: anthropics/claude-code-action@a7e4c51380c42dd89b127f5e5f9be7b54020bc6b # v1
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   prompt: |

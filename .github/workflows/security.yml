@@ -24,7 +24,7 @@ jobs:
         name: Dependency Audit
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github/actions
@@ -49,7 +49,7 @@ jobs:
                   cat audit-results.json
 
             - name: Check for Critical Vulnerabilities
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
               with:
                   script: |
                       const fs = require('fs');
@@ -73,9 +73,9 @@ jobs:
         runs-on: ubuntu-latest
         if: github.event_name == 'pull_request'
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-            - uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4.7.1
+            - uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
               with:
                   fail-on-severity: high
                   allow-licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause
@@ -85,16 +85,16 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             # Full checkout required - CodeQL needs to analyze all source files
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-            - uses: github/codeql-action/init@4f3212b61783c3c68e8309a0f18a699764811cda # v3.27.1
+            - uses: github/codeql-action/init@d3ced5c96c16c4332e2a61eb6f3649d6f1b20bb8 # v3.31.5
               with:
                   languages: javascript-typescript
                   queries: security-and-quality
 
-            - uses: github/codeql-action/autobuild@4f3212b61783c3c68e8309a0f18a699764811cda # v3.27.1
+            - uses: github/codeql-action/autobuild@d3ced5c96c16c4332e2a61eb6f3649d6f1b20bb8 # v3.31.5
 
-            - uses: github/codeql-action/analyze@4f3212b61783c3c68e8309a0f18a699764811cda # v3.27.1
+            - uses: github/codeql-action/analyze@d3ced5c96c16c4332e2a61eb6f3649d6f1b20bb8 # v3.31.5
               with:
                   category: '/language:javascript-typescript'
 
@@ -103,7 +103,7 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             # Full checkout with history required - Gitleaks scans entire git history
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   fetch-depth: 0
 
@@ -116,7 +116,7 @@ jobs:
         name: License Compliance
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github/actions
@@ -150,7 +150,7 @@ jobs:
         needs: [dependency-audit, codeql, secrets-scan, license-check]
         if: failure() && github.event_name != 'pull_request'
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github/scripts
@@ -161,7 +161,7 @@ jobs:
 
             - uses: ./.github/actions/node-env
 
-            - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+            - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
               env:
                   NODE_OPTIONS: --import tsx
               with:
