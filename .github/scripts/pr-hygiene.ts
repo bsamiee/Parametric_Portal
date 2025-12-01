@@ -8,7 +8,7 @@
  * Pattern: Single H constant → Dispatch tables → Polymorphic pipeline → Entry point
  */
 
-import { B, type Ctx, call, createCtx, fn, md, type RunParams, type User } from './schema.ts';
+import { B, type Core, type Ctx, call, createCtx, fn, md, type RunParams, type User } from './schema.ts';
 
 // --- Type Definitions -------------------------------------------------------
 
@@ -41,16 +41,13 @@ type Action = 'resolve' | 'reply' | 'skip';
 // --- H Constant (Hygiene Configuration) -------------------------------------
 
 const H = Object.freeze({
-    // Algorithmic: Map schema agent labels to actual bot login patterns
-    // Schema: ['claude', 'codex', 'copilot', 'gemini'] → bot logins
-    agentBots: [
-        ...B.labels.categories.agent.map((a) => `${a}[bot]`), // claude[bot], copilot[bot], etc.
-        'github-actions[bot]', // Copilot uses this
-        'gemini-code-assist[bot]', // Gemini actual bot name
-        'chatgpt-codex-connector[bot]', // Codex actual bot name
-    ],
-    // Agent mentions for prompt detection
+    // Algorithmic: Derive bot logins from B.labels.categories.agent + B.dashboard.bots
+    // Maps schema agent labels to actual GitHub bot login patterns
+    agentBots: [...B.labels.categories.agent.map((a) => `${a}[bot]`), ...B.dashboard.bots, ...B.hygiene.botAliases],
+    // Agent mentions for prompt detection (derived from schema)
     agentMentions: B.labels.categories.agent.map((a) => `@${a}`),
+    // Display configuration (parametric)
+    display: B.hygiene.display,
     gql: {
         resolve: `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`,
         threads: `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{id isResolved isOutdated path comments(first:20){nodes{id databaseId author{login}body createdAt}}}}}}}`,
@@ -58,17 +55,15 @@ const H = Object.freeze({
     marker: 'PR-HYGIENE',
     // Parametric message templates (sha truncation uses B.probe.shaLength)
     msg: {
-        addressed: (sha: string, f: ReadonlyArray<string>): string =>
-            `✅ **Addressed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})\n\n_Files: ${f.slice(0, 3).join(', ')}${f.length > 3 ? ` +${f.length - 3}` : ''}_`,
+        addressed: (sha: string, f: ReadonlyArray<string>): string => {
+            const maxFiles = B.hygiene.display.maxFiles;
+            const fileList = f.slice(0, maxFiles).join(', ');
+            const overflow = f.length > maxFiles ? ` +${f.length - maxFiles}` : '';
+            return `[X] **Addressed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})\n\n_Files: ${fileList}${overflow}_`;
+        },
     },
     // Safety: patterns indicating valuable feedback that should NOT be auto-resolved
-    valuablePatterns: [
-        /security|vulnerab|exploit|inject|xss|csrf|auth/i,
-        /breaking|compat|deprecat|removal/i,
-        /design|architect|pattern|approach/i,
-        /performance|optim|memory|leak/i,
-        /\bP0\b|\bP1\b|critical|urgent|blocker/i,
-    ],
+    valuablePatterns: B.hygiene.valuablePatterns,
 } as const);
 
 // --- Pure Functions ---------------------------------------------------------
@@ -205,6 +200,11 @@ const cleanupPrompts = async (
 
 // --- Entry Point ------------------------------------------------------------
 
+const noWorkResult = (core: Core, prNumber: number): HygieneResult => {
+    core.info(`[PR-HYGIENE] #${prNumber}: no work`);
+    return { deleted: 0, replied: 0, resolved: 0 };
+};
+
 const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<HygieneResult> => {
     const ctx = createCtx(params);
     const { prNumber, ownerLogins } = params.spec;
@@ -216,10 +216,20 @@ const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<
     const unresolved = threads.filter((t) => !t.isResolved);
     const hasPrompts = comments.some((c) => isOwner(c.user?.login, ownerLogins) && isPrompt(c.body));
     const noWork = unresolved.length === 0 && !hasPrompts;
-    noWork && params.core.info(`[PR-HYGIENE] #${prNumber}: no work`);
     return noWork
-        ? { deleted: 0, replied: 0, resolved: 0 }
+        ? noWorkResult(params.core, prNumber)
         : processHygiene(ctx, params, unresolved, comments, prNumber, ownerLogins);
+};
+
+const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult): Promise<HygieneResult> => {
+    const { resolved, replied, deleted } = result;
+    await call(
+        ctx,
+        'comment.create',
+        prNumber,
+        `${md.marker(H.marker)}\n### PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`,
+    );
+    return result;
 };
 
 const processHygiene = async (
@@ -235,7 +245,7 @@ const processHygiene = async (
     const since =
         allDates.length > 0
             ? new Date(Math.min(...allDates)).toISOString()
-            : new Date(Date.now() - 86400000).toISOString();
+            : new Date(Date.now() - B.time.day).toISOString();
 
     // Fetch commit files and process
     const commits = await fetchCommitFiles(ctx, prNumber, since);
@@ -245,16 +255,9 @@ const processHygiene = async (
     ]);
 
     // Log and post summary if actions taken
+    const result = { deleted, replied, resolved };
     params.core.info(`[PR-HYGIENE] #${prNumber}: resolved=${resolved} replied=${replied} deleted=${deleted}`);
-    resolved + replied + deleted > 0 &&
-        (await call(
-            ctx,
-            'comment.create',
-            prNumber,
-            `${md.marker(H.marker)}\n### PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`,
-        ));
-
-    return { deleted, replied, resolved };
+    return resolved + replied + deleted > 0 ? postSummary(ctx, prNumber, result) : result;
 };
 
 // --- Export -----------------------------------------------------------------
