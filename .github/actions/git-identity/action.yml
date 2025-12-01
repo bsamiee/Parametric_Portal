@@ -1,0 +1,16 @@
+name: Git Identity
+description: Configure git user for commits
+inputs:
+    name:
+        description: Git user name
+        default: github-actions[bot]
+    email:
+        description: Git user email
+        default: github-actions[bot]@users.noreply.github.com
+runs:
+    using: composite
+    steps:
+        - shell: bash
+          run: |
+              git config user.name "${{ inputs.name }}"
+              git config user.email "${{ inputs.email }}"

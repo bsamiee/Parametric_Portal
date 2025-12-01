@@ -1,0 +1,66 @@
+name: Refactor
+description: Restructure code without changing behavior
+title: "[REFACTOR]: "
+labels: ["refactor"]
+body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will this refactor change public APIs?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Files or packages to refactor
+          placeholder: "src/lib/utils.ts, @parametric/core"
+      validations:
+          required: true
+
+    - type: textarea
+      id: current_pattern
+      attributes:
+          label: Current Pattern
+          description: What's wrong with the current code?
+          placeholder: |
+              - Uses try/catch for error handling
+              - Has if/else chains
+      validations:
+          required: true
+
+    - type: textarea
+      id: target_pattern
+      attributes:
+          label: Target Pattern
+          description: What should the refactored code look like?
+          placeholder: |
+              - Effect pipeline for async/failable operations
+              - Dispatch table for type-safe lookups
+      validations:
+          required: true
+
+    - type: textarea
+      id: rationale
+      attributes:
+          label: Rationale
+          description: Why is this refactor necessary?
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+              - critical
+      validations:
+          required: true

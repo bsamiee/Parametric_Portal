@@ -1,0 +1,53 @@
+name: Meta Fixer
+description: Universal GitHub metadata fixer (titles, labels, bodies) with AI fallback
+
+inputs:
+    targets:
+        description: 'Targets: title,label,body (comma-separated, default: all)'
+        required: false
+        default: 'title,label,body'
+    limit:
+        description: 'Max items to process (default: 10)'
+        required: false
+        default: '10'
+    anthropic_api_key:
+        description: 'Anthropic API key for Claude'
+        required: false
+
+outputs:
+    fixed:
+        description: 'Number of items fixed'
+        value: ${{ steps.run.outputs.fixed }}
+    provider:
+        description: 'Provider used (mixed|none)'
+        value: ${{ steps.run.outputs.provider }}
+
+runs:
+    using: composite
+    steps:
+        # Note: Caller must checkout .github before using this action
+        - uses: ./.github/actions/node-env
+          with:
+              node-version-file: package.json
+
+        - name: Run Meta Fixer
+          id: run
+          uses: actions/github-script@v7
+          env:
+              ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+              NODE_OPTIONS: --import tsx
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/ai-meta.ts');
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          targets: '${{ inputs.targets }}'.split(',').map(s => s.trim()),
+                          limit: parseInt('${{ inputs.limit }}'),
+                      },
+                      cfg: { key: process.env.ANTHROPIC_API_KEY ?? '', token: process.env.GITHUB_TOKEN ?? '' },
+                  });
+                  core.setOutput('fixed', result.fixed);
+                  core.setOutput('provider', result.provider);

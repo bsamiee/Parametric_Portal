@@ -1,0 +1,54 @@
+name: Label Handler
+description: Executes label-triggered behaviors (pin, unpin, comment) via schema-driven dispatch
+
+inputs:
+    action:
+        description: 'Label event: labeled or unlabeled'
+        required: true
+    label:
+        description: 'Label name that triggered the event'
+        required: true
+    node_id:
+        description: 'Issue/PR node_id for GraphQL mutations'
+        required: true
+    number:
+        description: 'Issue/PR number'
+        required: true
+
+outputs:
+    executed:
+        description: 'Whether a behavior was executed'
+        value: ${{ steps.run.outputs.executed }}
+    behavior:
+        description: 'Behavior that was executed (pin, unpin, comment, or null)'
+        value: ${{ steps.run.outputs.behavior }}
+
+runs:
+    using: composite
+    steps:
+        # Note: Caller must checkout .github before using this action
+        - uses: ./.github/actions/node-env
+          with:
+              node-version-file: package.json
+
+        - name: Execute Label Behavior
+          id: run
+          uses: actions/github-script@v7
+          env:
+              NODE_OPTIONS: --import tsx
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/label.ts');
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          action: '${{ inputs.action }}',
+                          label: '${{ inputs.label }}',
+                          nodeId: '${{ inputs.node_id }}',
+                          number: parseInt('${{ inputs.number }}'),
+                      },
+                  });
+                  core.setOutput('executed', result.executed);
+                  core.setOutput('behavior', result.behavior ?? 'null');

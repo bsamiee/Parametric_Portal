@@ -1,0 +1,204 @@
+name: Security Scanning
+
+on:
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
+    schedule:
+        - cron: '0 0 * * 1'
+
+permissions:
+    contents: read
+    security-events: write
+    issues: write
+    pull-requests: write
+
+concurrency:
+    group: security-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    # --- Parallel Security Scans (run concurrently for speed) -----------------
+    dependency-audit:
+        name: Dependency Audit
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/actions
+                      package.json
+                      pnpm-lock.yaml
+                      .npmrc
+
+            - uses: ./.github/actions/node-env
+              with:
+                  install: 'false'
+
+            - name: Run pnpm audit
+              id: audit
+              run: |
+                  pnpm audit --audit-level=moderate --json > audit-results.json
+                  exit_code=$?
+                  if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 1 ]; then
+                    echo "[ERROR] Audit command failed"
+                    cat audit-results.json
+                    exit "$exit_code"
+                  fi
+                  cat audit-results.json
+
+            - name: Check for Critical Vulnerabilities
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              with:
+                  script: |
+                      const fs = require('fs');
+                      const auditResults = JSON.parse(fs.readFileSync('audit-results.json', 'utf8'));
+                      const vulns = auditResults.metadata?.vulnerabilities || {};
+                      const critical = vulns.critical || 0;
+                      const high = vulns.high || 0;
+                      core.info(`Vulnerability summary: ${critical} critical, ${high} high`);
+                      if (critical > 0 || high > 0) {
+                        const advisories = auditResults.advisories || {};
+                        for (const [id, advisory] of Object.entries(advisories)) {
+                          if (advisory.severity === 'critical' || advisory.severity === 'high') {
+                            core.error(`[${advisory.severity.toUpperCase()}] ${advisory.module_name}: ${advisory.title}`);
+                          }
+                        }
+                        core.setFailed(`Found ${critical} critical and ${high} high severity vulnerabilities`);
+                      }
+
+    dependency-review:
+        name: Dependency Review
+        runs-on: ubuntu-latest
+        if: github.event_name == 'pull_request'
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+            - uses: actions/dependency-review-action@da24556b548a50705dd671f47852072ea4c105d9 # v4.7.1
+              with:
+                  fail-on-severity: high
+                  allow-licenses: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause
+
+    codeql:
+        name: CodeQL Analysis
+        runs-on: ubuntu-latest
+        steps:
+            # Full checkout required - CodeQL needs to analyze all source files
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+            - uses: github/codeql-action/init@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
+              with:
+                  languages: javascript-typescript
+                  queries: security-and-quality
+
+            - uses: github/codeql-action/autobuild@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
+
+            - uses: github/codeql-action/analyze@fdbfb4d2750291e159f0156def62b853c2798ca2 # v4.31.5
+              with:
+                  category: '/language:javascript-typescript'
+
+    secrets-scan:
+        name: Secrets Scanning
+        runs-on: ubuntu-latest
+        steps:
+            # Full checkout with history required - Gitleaks scans entire git history
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  fetch-depth: 0
+
+            - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GITLEAKS_ENABLE_SUMMARY: true
+
+    license-check:
+        name: License Compliance
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/actions
+                      package.json
+                      pnpm-lock.yaml
+                      pnpm-workspace.yaml
+
+            - uses: ./.github/actions/node-env
+
+            - name: Check for MIT License Compliance
+              run: |
+                  echo "Checking that all dependencies use MIT license..."
+                  pnpm licenses list --json > licenses.json
+                  NON_MIT=$(cat licenses.json | jq -r '
+                    .[] |
+                    select(.license | test("^MIT$"; "i") | not) |
+                    "\(.name): \(.license)"
+                  ' 2>/dev/null || echo "")
+                  if [[ -n "$NON_MIT" ]]; then
+                    echo "[ERROR] Non-MIT licenses detected:"
+                    echo "$NON_MIT"
+                    exit 1
+                  else
+                    echo "[OK] All dependencies use MIT license"
+                  fi
+
+    # --- Post-Scan Jobs (depend on parallel scans) ----------------------------
+    create-security-issue:
+        name: Create Security Issue
+        runs-on: ubuntu-latest
+        needs: [dependency-audit, codeql, secrets-scan, license-check]
+        if: failure() && github.event_name != 'pull_request'
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      .github/actions
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/node-env
+
+            - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              env:
+                  NODE_OPTIONS: --import tsx
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
+                      await run({
+                        context: { repo: context.repo, payload: { action: 'created', issue: {} } },
+                        core,
+                        github,
+                        spec: { kind: 'security', runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` }
+                      });
+
+    security-summary:
+        name: Security Summary
+        runs-on: ubuntu-latest
+        needs: [dependency-audit, dependency-review, codeql, secrets-scan, license-check]
+        if: always()
+        steps:
+            - name: Check Results
+              run: |
+                  echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+                  echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+                  echo "| Dependency Audit | ${{ needs.dependency-audit.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| Dependency Review | ${{ needs.dependency-review.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| CodeQL Analysis | ${{ needs.codeql.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| Secrets Scan | ${{ needs.secrets-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+                  echo "| License Compliance | ${{ needs.license-check.result }} |" >> $GITHUB_STEP_SUMMARY
+
+                  if [[ "${{ needs.dependency-audit.result }}" == "failure" ]] || \
+                     [[ "${{ needs.codeql.result }}" == "failure" ]] || \
+                     [[ "${{ needs.secrets-scan.result }}" == "failure" ]] || \
+                     [[ "${{ needs.license-check.result }}" == "failure" ]]; then
+                    echo ""
+                    echo "[ERROR] Security checks failed - see above for details"
+                    exit 1
+                  fi
+                  echo ""
+                  echo "[OK] All security checks passed"

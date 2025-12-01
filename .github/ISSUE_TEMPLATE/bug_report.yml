@@ -1,0 +1,73 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[FIX]: "
+labels: ["fix"]
+body:
+    - type: dropdown
+      id: breaking
+      attributes:
+          label: Breaking Change
+          description: Will fixing this bug change existing behavior?
+          options:
+              - "no"
+              - "yes"
+      validations:
+          required: true
+
+    - type: textarea
+      id: description
+      attributes:
+          label: Bug Description
+          description: What went wrong?
+          placeholder: "When [action], [unexpected result] occurs instead of [expected result]"
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: File, function, or package affected
+          placeholder: "src/lib/utils.ts, calculateTotal(), @parametric/core"
+      validations:
+          required: true
+
+    - type: textarea
+      id: repro_steps
+      attributes:
+          label: Steps to Reproduce
+          description: Minimal steps to trigger the bug
+          placeholder: |
+              1. Call function with X
+              2. Observe error Y
+      validations:
+          required: true
+
+    - type: textarea
+      id: expected_behavior
+      attributes:
+          label: Expected Behavior
+          description: What should happen?
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - low
+              - medium
+              - high
+              - critical
+      validations:
+          required: true
+
+    - type: textarea
+      id: logs
+      attributes:
+          label: Error Logs
+          description: Relevant error messages or stack traces
+          render: shell
+      validations:
+          required: false
