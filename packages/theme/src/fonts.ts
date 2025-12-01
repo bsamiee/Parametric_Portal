@@ -56,7 +56,7 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 
 const fn = {
     fallbackStack: (family: string, fallback: ReadonlyArray<string> | undefined): string =>
-        fallback !== undefined ? `"${family}", ${fallback.join(', ')}` : `"${family}"`,
+        fallback === undefined ? `"${family}"` : `"${family}", ${fallback.join(', ')}`,
     weightRange: (weights: Record<string, FontWeight>): string =>
         pipe(
             Object.values(weights),
