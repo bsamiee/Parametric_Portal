@@ -184,6 +184,8 @@ const B = Object.freeze({
         botAliases: ['github-actions[bot]', 'gemini-code-assist[bot]', 'chatgpt-codex-connector[bot]'] as const,
         // Display configuration for hygiene messages
         display: { maxFiles: 3 } as const,
+        // Slash commands for AI agents (algorithmically derived in pr-hygiene.ts)
+        slashCommands: ['review', 'fix', 'explain', 'summarize', 'help', 'ask'] as const,
         // Patterns indicating valuable feedback that should NOT be auto-resolved
         valuablePatterns: [
             /security|vulnerab|exploit|inject|xss|csrf|auth/i,
