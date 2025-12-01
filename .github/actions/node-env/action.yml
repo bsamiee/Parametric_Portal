@@ -107,6 +107,6 @@ runs:
         - name: Set affected SHAs
           id: shas
           if: inputs.nx == 'true'
-          uses: nrwl/nx-set-shas@e2e91f46f9a28f7c2ad1e8ff850e76a80bf7d3ea # v4.4.1
+          uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
           with:
               main-branch-name: ${{ inputs.nx-main-branch }}
