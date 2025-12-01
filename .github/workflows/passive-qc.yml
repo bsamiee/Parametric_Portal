@@ -179,14 +179,11 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   echo "[INFO] Fetching cache entries older than 7 days..."
-                  CUTOFF_DATE=$(date -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+                  CUTOFF_DATE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
                   
-                  # List and delete caches older than retention period
-                  gh cache list --limit 100 --json id,createdAt --jq ".[] | select(.createdAt < \"$CUTOFF_DATE\") | .id" | while read -r cache_id; do
-                    if [ -n "$cache_id" ]; then
-                      echo "[INFO] Deleting cache: $cache_id"
-                      gh cache delete "$cache_id" || true
-                    fi
+                  # List and delete caches older than retention period (no limit)
+                  gh cache list --json id,createdAt --jq ".[] | select(.createdAt < \"$CUTOFF_DATE\") | .id" | while read -r cache_id; do
+                    [ -n "$cache_id" ] && echo "[INFO] Deleting cache: $cache_id" && gh cache delete "$cache_id" || true
                   done
                   
                   echo "[OK] Cache cleanup complete"

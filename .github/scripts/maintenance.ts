@@ -117,7 +117,7 @@ const deleteBranch = async (ctx: Ctx, branch: string): Promise<{ success: boolea
     ctx.github.rest.git
         .deleteRef({ owner: ctx.owner, ref: `heads/${branch}`, repo: ctx.repo })
         .then(() => ({ success: true }))
-        .catch((err: Error) => ({ error: err.message ?? 'Unknown error', success: false }));
+        .catch((err: Error) => ({ error: err.message || 'Unknown error', success: false }));
 
 const warnDraftPR = async (ctx: Ctx, pr: PR): Promise<void> => {
     const age = branchAge(pr.updated_at);
@@ -152,7 +152,7 @@ const handlers = {
             : await Promise.all(toDelete.map((a) => deleteBranch(ctx, a.branch)));
 
         // Execute warnings (unless dry run)
-        dryRun || (await Promise.all(draftPRs.map((pr) => warnDraftPR(ctx, pr))));
+        dryRun ? Promise.resolve() : await Promise.all(draftPRs.map((pr) => warnDraftPR(ctx, pr)));
 
         return {
             deleted: deleteResults.filter((r) => r.success).length,
@@ -181,31 +181,33 @@ const run = async (params: RunParams & { readonly spec: MaintenanceSpec }): Prom
     const dryRun = params.spec.dryRun ?? false;
     const prefix = dryRun ? '[DRY-RUN] ' : '';
 
-    const result =
-        params.spec.kind === 'full'
-            ? await handlers.full(ctx, dryRun)
-            : params.spec.kind === 'branches'
-              ? { ...(await handlers.branches(ctx, dryRun)), cacheCleared: false }
-              : {
-                    branchErrors: 0,
-                    branchesDeleted: 0,
-                    branchesFlagged: 0,
-                    cacheCleared: await handlers.cache(ctx, dryRun),
-                };
+    // Dispatch table for kind-based routing
+    const kindHandlers = {
+        branches: async (): Promise<MaintenanceResult> => {
+            const r = await handlers.branches(ctx, dryRun);
+            return { branchErrors: r.errors, branchesDeleted: r.deleted, branchesFlagged: r.flagged, cacheCleared: false };
+        },
+        cache: async (): Promise<MaintenanceResult> => ({
+            branchErrors: 0,
+            branchesDeleted: 0,
+            branchesFlagged: 0,
+            cacheCleared: await handlers.cache(ctx, dryRun),
+        }),
+        full: async (): Promise<MaintenanceResult> => {
+            const r = await handlers.full(ctx, dryRun);
+            return { branchErrors: r.errors, branchesDeleted: r.deleted, branchesFlagged: r.flagged, cacheCleared: r.cacheCleared };
+        },
+    } as const;
 
-    const normalizedResult: MaintenanceResult = {
-        branchErrors: 'errors' in result ? result.errors : result.branchErrors,
-        branchesDeleted: 'deleted' in result ? result.deleted : result.branchesDeleted,
-        branchesFlagged: 'flagged' in result ? result.flagged : result.branchesFlagged,
-        cacheCleared: result.cacheCleared,
-    };
+    const result = await kindHandlers[params.spec.kind]();
 
-    normalizedResult.branchErrors > 0 &&
-        params.core.info(`[WARN] ${normalizedResult.branchErrors} branch deletion(s) failed`);
+    result.branchErrors > 0
+        ? params.core.info(`[WARN] ${result.branchErrors} branch deletion(s) failed`)
+        : undefined;
     params.core.info(
-        `${prefix}[MAINTENANCE] ${M.messages.deleted(normalizedResult.branchesDeleted)}, ${M.messages.flagged(normalizedResult.branchesFlagged)}`,
+        `${prefix}[MAINTENANCE] ${M.messages.deleted(result.branchesDeleted)}, ${M.messages.flagged(result.branchesFlagged)}`,
     );
-    return normalizedResult;
+    return result;
 };
 
 // --- Export -----------------------------------------------------------------
