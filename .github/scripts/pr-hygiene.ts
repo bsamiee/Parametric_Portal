@@ -86,9 +86,14 @@ const isOwner = (login: string | undefined, owners: ReadonlyArray<string>): bool
     owners.some((o) => o.toLowerCase() === login?.toLowerCase());
 
 // Detect @agent mentions OR /agent command slash commands (per schema requirement)
-const isPrompt = (body: string): boolean =>
-    H.agentMentions.some((m) => body.includes(m)) ||
-    H.agentSlashCommands.some((cmd) => body.toLowerCase().includes(cmd));
+// Both checks use case-insensitive matching for consistency; lowercase once for O(1) performance
+const isPrompt = (body: string): boolean => {
+    const lower = body.toLowerCase();
+    return (
+        H.agentMentions.some((m) => lower.includes(m.toLowerCase())) ||
+        H.agentSlashCommands.some((cmd) => lower.includes(cmd))
+    );
+};
 
 const isValuable = (body: string): boolean => H.valuablePatterns.some((p) => p.test(body));
 
