@@ -179,6 +179,20 @@ const B = Object.freeze({
         window: 7,
         workflow: 'dashboard.yml',
     } as const,
+    hygiene: {
+        // Bot aliases not derived from agent labels (actual GitHub bot names)
+        botAliases: ['github-actions[bot]', 'gemini-code-assist[bot]', 'chatgpt-codex-connector[bot]'] as const,
+        // Display configuration for hygiene messages
+        display: { maxFiles: 3 } as const,
+        // Patterns indicating valuable feedback that should NOT be auto-resolved
+        valuablePatterns: [
+            /security|vulnerab|exploit|inject|xss|csrf|auth/i,
+            /breaking|compat|deprecat|removal/i,
+            /design|architect|pattern|approach/i,
+            /performance|optim|memory|leak/i,
+            /\bP0\b|\bP1\b|critical|urgent|blocker/i,
+        ] as const,
+    } as const,
     labels: {
         behaviors: {
             pinned: { onAdd: 'pin', onRemove: 'unpin' },
