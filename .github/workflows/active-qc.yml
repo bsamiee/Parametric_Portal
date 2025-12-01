@@ -56,6 +56,26 @@ jobs:
                         }
                       });
 
+    pr-hygiene:
+        name: PR Review Hygiene
+        if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      .github/actions
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/pr-hygiene
+              with:
+                  pr_number: ${{ github.event.pull_request.number }}
+                  owner_logins: ${{ github.repository_owner }}
+
     pr-meta:
         name: PR Meta
         if: github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'edited')
