@@ -481,7 +481,7 @@ Label-triggered behavior executor using label.ts. Handles labeled/unlabeled even
 Automated PR review cleanup using pr-hygiene.ts. Resolves outdated review threads after code changes, replies to addressed feedback, and deletes owner prompts/slash commands. Outputs: `resolved` (thread count), `replied` (comment count), `deleted` (prompt count). Inputs: `pr_number` (required), `owner_logins` (optional, comma-separated).
 
 **.github/actions/issue-ops/action.yml**
-Unified issue/PR operations via Issue Helper (actions-cool/issues-helper@v3.7.2) with parametric dispatch. Supports 15 operations: check-inactive, close-issues, find-issues, find-comments, mark-duplicate, add-labels, remove-labels, toggle-labels, create-comment, update-comment, create-issue, update-issue, close-issue, open-issue. All inputs are optional except `operation`. Configuration-driven via B.helper for inactivity thresholds, command triggers, and message templates.
+Unified issue/PR operations via Issue Helper (actions-cool/issues-helper@v3.7.2) with parametric dispatch. Supports 14 operations: check-inactive, close-issues, find-issues, find-comments, mark-duplicate, add-labels, remove-labels, toggle-labels, create-comment, update-comment, create-issue, update-issue, close-issue, open-issue. All inputs are optional except `operation`. Configuration values defined in B.helper (schema.ts) provide defaults but workflows specify actual values for GitHub Actions compatibility.
 
 ### GitHub Templates
 
@@ -548,8 +548,8 @@ The repository integrates [Issue Helper](https://github.com/marketplace/actions/
 - Handles COMPLEX query operations beyond Issue Helper's capabilities
 - `find-stale`: Custom filtering with label exclusions and age calculation
 - `report-inactive`: Sorted aging reports for analytics
-- Used when workflow needs structured data or custom business logic
-- Returns typed results for downstream processing
+- **Note**: Currently implemented but not invoked in workflows - reserved for future aging report features
+- Returns typed results for downstream processing when integrated
 
 ### Operations Leveraged
 

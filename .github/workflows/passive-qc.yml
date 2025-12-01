@@ -64,7 +64,7 @@ jobs:
                   inactive-day: '3'
                   inactive-mode: 'comment,issue'
                   inactive-label: 'stale'
-                  exclude-labels: 'pinned,security,critical,$exclude-empty'
+                  exclude-labels: 'pinned,security,critical'
                   issue-state: 'open'
 
             # Close issues/PRs marked stale for 7+ days

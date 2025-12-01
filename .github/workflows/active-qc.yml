@@ -156,9 +156,9 @@ jobs:
               with:
                   operation: mark-duplicate
                   duplicate-command: '/duplicate'
-                  labels: duplicate
-                  close-issue: true
-                  require-permission: write
+                  labels: 'duplicate'
+                  close-issue: 'true'
+                  require-permission: 'write'
                   emoji: 'eyes'
 
     # --- Label Sync (push event only) -----------------------------------------

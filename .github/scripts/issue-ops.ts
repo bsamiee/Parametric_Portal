@@ -1,7 +1,8 @@
 #!/usr/bin/env tsx
 /**
  * Issue Helper orchestration: compose Issue Helper operations with schema-driven dispatch.
- * Uses B.helper (config), fn (utilities), call (GitHub API) from schema.ts.
+ * Uses B (API constants), fn (utilities), call (GitHub API) from schema.ts.
+ * Note: B.helper config values should be passed as spec parameters from calling workflows.
  */
 import { B, type Ctx, call, createCtx, fn, type RunParams } from './schema.ts';
 
