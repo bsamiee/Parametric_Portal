@@ -180,11 +180,33 @@ const B = Object.freeze({
         window: 7,
         workflow: 'dashboard.yml',
     } as const,
+    helper: {
+        commands: {
+            duplicate: { label: 'duplicate', requirePermission: 'write', trigger: '/duplicate' } as const,
+        } as const,
+        inactivity: {
+            checkDays: 3,
+            closeDays: 7,
+            label: 'stale',
+            modes: ['comment', 'issue'] as const,
+        } as const,
+        messages: {
+            duplicate: (original: number): string =>
+                `Marked as duplicate of #${original}. This issue will be closed automatically.`,
+            stale: (): string =>
+                `This issue has been automatically marked as stale due to inactivity.\n` +
+                `It will be closed in 7 days if there is no further activity.\n` +
+                `Comment to keep it open.`,
+            welcome: (login: string): string =>
+                `Thanks for opening your first issue, @${login}! 🎉\n\n` +
+                `We appreciate your contribution and will review it soon.`,
+        } as const,
+    } as const,
     hygiene: {
         // Bot aliases not derived from agent labels (actual GitHub bot names)
         botAliases: ['github-actions[bot]', 'gemini-code-assist[bot]', 'chatgpt-codex-connector[bot]'] as const,
         display: { maxFiles: 3 } as const,
-        slashCommands: ['review', 'fix', 'explain', 'summarize', 'help', 'ask'] as const,
+        slashCommands: ['review', 'fix', 'explain', 'summarize', 'help', 'ask', 'duplicate'] as const,
         valuablePatterns: [
             /security|vulnerab|exploit|inject|xss|csrf|auth/i,
             /breaking|compat|deprecat|removal/i,
