@@ -47,8 +47,11 @@ const H = Object.freeze({
     // Agent mentions for prompt detection (derived from schema)
     agentMentions: B.labels.categories.agent.map((a) => `@${a}`),
     // Slash commands: Derive /{agent} {command} patterns algorithmically from schema
-    // e.g., /gemini review, /copilot fix, /claude explain
-    agentSlashCommands: B.labels.categories.agent.flatMap((a) => B.hygiene.slashCommands.map((cmd) => `/${a} ${cmd}`)),
+    // Output format: lowercase patterns like '/gemini review', '/copilot fix', '/claude explain'
+    // Used for case-insensitive detection of AI agent prompts in PR comments
+    agentSlashCommands: B.labels.categories.agent.flatMap((a) =>
+        B.hygiene.slashCommands.map((cmd) => `/${a} ${cmd}`.toLowerCase()),
+    ),
     // Display configuration (parametric)
     display: B.hygiene.display,
     gql: {
