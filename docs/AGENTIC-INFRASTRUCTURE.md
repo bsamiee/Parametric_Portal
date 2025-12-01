@@ -1,6 +1,37 @@
 # Agentic Infrastructure Reference
 
-Concise reference for all automation systems, agents, and tooling in Parametric Portal.
+Comprehensive reference for all automation systems, agents, and tooling in Parametric Portal. This documentation reflects the production implementation as of December 2025.
+
+**Quick Navigation**:
+- [Overview](#overview) — Three-paradigm system (Active, Passive, AI)
+- [File Inventory](#file-inventory) — 10 workflows, 13 scripts, 6 actions, 10 agents, 12 templates
+- [Schema Infrastructure](#schema-infrastructure) — Single B constant, SpecRegistry types, Ops factory
+- [GitHub Workflows](#github-workflows) — Detailed workflow descriptions
+- [GitHub Scripts](#github-scripts) — Script implementations and patterns
+- [Agentic Architecture](#agentic-architecture-principles-2025) — Modern patterns for AI-driven CI/CD
+- [Cost Optimization](#cost-optimization-and-monitoring) — Resource management and monitoring
+- [Security](#security-and-compliance) — Security practices and compliance
+
+---
+
+## Overview
+
+Parametric Portal implements a **three-paradigm agentic maintenance system** aligned with industry-leading practices for AI-driven workflow orchestration in 2025:
+
+- **Active**: Event-triggered automation (PR commits, issue changes, labels) — responds within seconds
+- **Passive**: Scheduled maintenance (6-hour QC cycles, daily cleanup) — continuous drift detection
+- **AI**: Agentic workflows with Claude Code for complex tasks requiring reasoning — human-in-the-loop
+
+All automation follows the project's core patterns: single B constant configuration, dispatch tables, Effect pipelines, and schema-driven polymorphism.
+
+### Architecture Philosophy
+
+The agentic infrastructure is designed around four key principles:
+
+1. **Semantic Routing**: Fast intent classification via pattern matching and embedding similarity (label taxonomy, commit analysis)
+2. **Progressive Refinement**: Agents iterate on feedback loops (pr-hygiene cleans after fixes, meta-consistency corrects errors)
+3. **Multi-Agent Coordination**: Specialized agents (10 custom profiles) with explicit delegation rules via dispatch tables
+4. **Schema-Driven Declarative Automation**: Behavior encoded in B constant enables algorithmic adaptation without code changes
 
 ---
 
@@ -8,7 +39,7 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 
 ### Root-Level Protocol Files
 - `REQUIREMENTS.md` — Single Source of Truth (SSoT) for all coding standards and agent protocols
-- `CLAUDE.md` — Code standards for Claude Code
+- `CLAUDE.md` — Code standards for Claude Code (referenced by Claude in workflows)
 
 ### Configuration Files
 - `renovate.json` — Renovate dependency update configuration with domain grouping
@@ -17,20 +48,21 @@ Concise reference for all automation systems, agents, and tooling in Parametric 
 - `.github/copilot-instructions.md` — IDE agent instructions
 - `stryker.config.js` — Mutation testing configuration (80% threshold, Vitest runner)
 
-### GitHub Workflows (9 total)
-- `.github/workflows/active-qc.yml` — Event-driven QC: PR commit sync, title/label validation, label sync on push, issue pinning
-- `.github/workflows/ai-maintenance.yml` — Weekly AI maintenance + manual tasks via Claude
-- `.github/workflows/auto-merge.yml` — Dependabot auto-merge for patch/minor/security
-- `.github/workflows/ci.yml` — Main CI: normalize commits, Biome auto-repair, Nx affected tasks
+### GitHub Workflows (10 total)
+- `.github/workflows/active-qc.yml` — Event-driven QC: PR sync, PR hygiene, PR/issue metadata validation, label pinning
+- `.github/workflows/ai-maintenance.yml` — Weekly AI maintenance + manual tasks via Claude Code
+- `.github/workflows/auto-merge.yml` — Dependabot auto-merge for patch/minor/security updates
+- `.github/workflows/ci.yml` — Main CI: normalize commits, Biome auto-repair, Nx affected tasks (build/test/lint/typecheck)
 - `.github/workflows/claude-code-review.yml` — Claude AI code review with structured summary and inline comments
-- `.github/workflows/claude.yml` — Claude Code agentic automation triggered via @claude mentions
+- `.github/workflows/claude.yml` — Claude Code agentic automation triggered via @claude mentions in issues/PRs
 - `.github/workflows/dashboard.yml` — Repository health metrics dashboard (6-hour schedule + checkbox trigger)
-- `.github/workflows/passive-qc.yml` — Scheduled QC: stale management, aging report, meta consistency
+- `.github/workflows/passive-qc.yml` — Scheduled QC: stale management, aging report, meta consistency, daily maintenance
 - `.github/workflows/security.yml` — Multi-layer: dependency audit, CodeQL, Gitleaks, license check
+- `.github/workflows/sonarcloud.yml` — SonarCloud static analysis for code quality and security hotspots
 
 **Note**: Releases are handled via `npx nx release` (configured in nx.json).
 
-### GitHub Scripts (10 total)
+### GitHub Scripts (13 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
 - `.github/scripts/schema.ts` — Core infrastructure: B constant, types, markdown generators, ops factory, mutate handlers
@@ -42,14 +74,18 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/ai-meta.ts` — Universal metadata fixer with AI fallback
 - `.github/scripts/label.ts` — Label-triggered behavior executor (pin, unpin, comment)
 - `.github/scripts/pr-sync.ts` — PR commit synchronization: analyzes commits to update title/labels on push
+- `.github/scripts/pr-hygiene.ts` — Automated PR review cleanup: resolve outdated threads, respond to addressed feedback
+- `.github/scripts/maintenance.ts` — Repository maintenance: branch cleanup, draft PR warnings
+- `.github/scripts/auto-merge.ts` — Automated merge eligibility checking for Dependabot PRs
 - `.github/scripts/env.ts` — Environment configuration (lang, nxCloudWorkspaceId)
 
-### GitHub Composite Actions (5 total)
+### GitHub Composite Actions (6 total)
 - `.github/actions/node-env/action.yml` — Node.js + pnpm + Nx setup with caching + distributed execution
 - `.github/actions/git-identity/action.yml` — Git user configuration for commits
 - `.github/actions/meta-fixer/action.yml` — Universal metadata fixer action using ai-meta.ts
 - `.github/actions/normalize-commit/action.yml` — Transform [TYPE!]: to type!: format
 - `.github/actions/label/action.yml` — Label-triggered behavior executor (pin, unpin, comment)
+- `.github/actions/pr-hygiene/action.yml` — Automated PR review cleanup using pr-hygiene.ts
 
 ### GitHub Templates (12 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
@@ -92,11 +128,12 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 The `.github/scripts/schema.ts` file is the core of the automation system, implementing:
 
 ### Single B Constant
-All configuration in one frozen object with nested domains:
+All configuration in one frozen object with nested domains (696 lines, ~15KB):
 - `B.algo` — Algorithm thresholds (closeRatio, mutationPct 80%, staleDays 30)
 - `B.api` — GitHub API constants (perPage 100, states)
 - `B.breaking` — Breaking change detection patterns and label
 - `B.dashboard` — Dashboard config (bots, colors, targets, schedule, output)
+- `B.hygiene` — PR hygiene config (bot aliases, slash commands, valuable patterns, display limits)
 - `B.labels` — Label taxonomy (categories, behaviors, exempt lists, GraphQL mutations)
 - `B.meta` — Metadata config (alerts, caps, fmt, infer rules, models, ops)
 - `B.patterns` — Regex patterns for parsing (commit, header, placeholder)
@@ -105,14 +142,15 @@ All configuration in one frozen object with nested domains:
 - `B.time` — Time constants (day in ms)
 
 ### SpecRegistry Type System
-Polymorphic spec definitions for type-safe operations:
-- `U<'alert'>` — CI/security alert specs
-- `U<'dashboard'>` — Dashboard update specs
-- `U<'filter'>` — Issue filtering (age, label)
-- `U<'source'>` — Data sources (fetch, params, payload)
-- `U<'output'>` — Output targets (summary, comment, issue)
-- `U<'format'>` — Formatters (table, body)
-- `U<'mutate'>` — Mutation ops (comment, issue, label, review, release)
+Polymorphic spec definitions for type-safe operations (unified discriminated unions):
+- `U<'alert'>` — CI/security alert specs with debt categorization
+- `U<'dashboard'>` — Dashboard update specs with section renderers
+- `U<'filter'>` — Issue filtering (age, label, state)
+- `U<'source'>` — Data sources (fetch, params, payload) for report generation
+- `U<'output'>` — Output targets (summary, comment, issue) with markdown formatting
+- `U<'format'>` — Formatters (table, body) with row builders
+- `U<'mutate'>` — Mutation ops (comment, issue, label, review, release) via GitHub API
+- `U<'hygiene'>` — PR hygiene specs for review thread management
 
 ### Ops Factory
 Dispatch table mapping operation keys to GitHub API calls:
@@ -213,7 +251,7 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                          GitHub Workflows (9)                         │
+│                          GitHub Workflows (10)                        │
 │  ┌──────────────┐  ┌─────────────────────────────────┐               │
 │  │ CI Pipeline  │→│ claude-code-review.yml            │               │
 │  │ (ci.yml)     │  │ (AI review + inline comments)    │               │
@@ -223,17 +261,18 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
 │  ┌───────────────────┐     ┌──────────────┐                          │
 │  │ active-qc.yml     │     │ AI Maint     │                          │
 │  │ + passive-qc.yml  │     │ (weekly)     │                          │
-│  │ + pr-sync         │     └──────────────┘                          │
+│  │ + pr-sync/hygiene │     └──────────────┘                          │
 │  └───────────────────┘                                               │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
                              ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                     Schema Infrastructure (10 scripts)                │
+│                     Schema Infrastructure (13 scripts)                │
 │  ┌──────────────────────────────────────────────────────────────────┐│
 │  │ schema.ts → dashboard.ts, probe.ts, report.ts, failure-alert.ts ││
-│  │ gate.ts, ai-meta.ts, label.ts, pr-sync.ts, env.ts               ││
-│  │ B constant + Ops Factory + Mutate Handlers                       ││
+│  │ gate.ts, ai-meta.ts, label.ts, pr-sync.ts, pr-hygiene.ts        ││
+│  │ maintenance.ts, auto-merge.ts, env.ts                            ││
+│  │ B constant (696L) + Ops Factory + Mutate Handlers                ││
 │  └──────────────────────────────────────────────────────────────────┘│
 └────────────────────────────┬─────────────────────────────────────────┘
                              │
@@ -241,18 +280,59 @@ Labels are managed declaratively via `.github/labels.yml` and synced automatical
           ▼                                     ▼
     GitHub Templates (12)             Dependabot Auto-Merge
     (type labels applied)             (auto-merge.yml)
+    + 6 Composite Actions            + auto-merge.ts gate
           │                                     │
           ▼                                     ▼
     Issue Created                       Dependency Updates
 ```
 
-### Data Flow
+### Data Flow and Agentic Orchestration
 
-1. **Issue Creation**: Templates apply type labels (fix, feat, perf, style, test, docs, refactor, chore, build, ci, help)
-2. **PR Lifecycle**: PR opened → CI (Biome auto-repair) → PR Sync (commit analysis) → Code Review → Merge
-3. **PR Commit Sync**: Commit pushed → pr-sync.ts analyzes commits → Updates PR title/labels to match reality
-4. **Dependency Flow**: Dependabot PR → CI → Auto-Merge gate → Merge/Block
-5. **Dashboard**: Schedule/command → schema.ts → collect metrics → render → update + pin issue
+The system implements **handoff orchestration** and **sequential refinement** patterns where specialized agents assess tasks and delegate to appropriate handlers:
+
+1. **Issue Creation**: Templates apply type labels (fix, feat, perf, style, test, docs, refactor, chore, build, ci, help) → Agent routing via label classification
+2. **PR Lifecycle**: 
+   - PR opened → CI (Biome auto-repair) → PR Sync (commit analysis) → Code Review (Claude) → Merge
+   - Each push triggers: pr-sync (metadata sync) + pr-hygiene (thread cleanup) in parallel
+3. **PR Commit Sync**: Commit pushed → pr-sync.ts analyzes commits → Semantic routing determines type → Updates PR title/labels to match reality
+4. **PR Review Hygiene**: Commit pushed → pr-hygiene.ts extracts review threads → Pattern matching detects addressed feedback → Auto-resolves outdated threads, replies to valuable feedback
+5. **Dependency Flow**: Dependabot PR → CI → Auto-Merge gate (semantic version check) → Merge/Block with actionable feedback
+6. **Dashboard**: Schedule/command → schema.ts dispatch tables → Parallel API calls → Section renderers → Markdown assembly → Issue upsert + pin
+7. **AI Maintenance**: Weekly schedule → Claude Code agent → Natural language task decomposition → Execution with tool calls → Summary issue creation
+
+### Agentic Decision Trees
+
+```
+Issue/PR Event
+    │
+    ├─ Label Change? ──→ label.ts dispatch table ──→ B.labels.behaviors[label][action]
+    │                                                     ├─ pin/unpin (GraphQL mutation)
+    │                                                     └─ comment (template from B)
+    │
+    ├─ PR Synchronize? ──→ Parallel Execution
+    │                        ├─ pr-sync.ts: Commit analysis → Title/label sync
+    │                        └─ pr-hygiene.ts: Review analysis → Thread resolution
+    │
+    ├─ Metadata Invalid? ──→ ai-meta.ts
+    │                           ├─ Pattern matching (B.meta.infer)
+    │                           └─ AI fallback (Claude) if no match
+    │
+    ├─ Stale? ──→ Scheduled check → B.algo.staleDays threshold → Label + comment
+    │
+    └─ @claude mention? ──→ Claude Code Action
+                               ├─ Context assembly (CLAUDE.md + files)
+                               ├─ Tool execution (allowed via claude_args)
+                               └─ Response generation (inline/summary)
+```
+
+### Semantic Routing Implementation
+
+The system implements fast semantic routing patterns (sub-100ms) to avoid expensive LLM calls:
+
+1. **Label-Based Routing**: `B.labels.categories` provides pre-classified taxonomies for instant dispatch
+2. **Pattern-Based Classification**: `B.meta.infer` uses regex patterns for commit type inference before AI fallback
+3. **Dispatch Tables**: All handlers organized as `handlers[discriminant](data)` for O(1) routing
+4. **Embedding-Free**: Uses algorithmic pattern matching instead of vector embeddings for speed and cost optimization
 
 ---
 
@@ -289,13 +369,22 @@ Label-triggered behavior executor with polymorphic dispatch. Single factory hand
 **pr-sync.ts**
 PR commit synchronization analyzer. On synchronize (commit push) events, fetches PR commits, analyzes them to determine dominant type and breaking changes, updates PR title/labels to reflect reality. Ensures PR titles aren't stale (e.g., `[CHORE]` that's really a `feat`, or missing `!` for breaking changes).
 
+**pr-hygiene.ts**
+Automated PR review cleanup with intelligent thread resolution. Resolves outdated review threads when code changes address feedback, replies to valuable feedback acknowledging fixes, deletes owner prompts and slash commands after processing. Uses `B.hygiene` config for valuable pattern detection and bot alias matching. Outputs metrics for resolved threads, replied comments, and deleted prompts.
+
+**maintenance.ts**
+Repository maintenance operations with dry-run support. Implements branch cleanup (deletes merged branches >14 days, abandoned >30 days), warns on stale draft PRs, and provides detailed reporting. Uses `M` constant (following project pattern) for maintenance-specific config including thresholds and message templates.
+
+**auto-merge.ts**
+Automated merge eligibility checker for Dependabot PRs. Validates PR meets auto-merge criteria: from Dependabot bot, CI passing, semantic version analysis (patch/minor/security only), no breaking changes. Implements comment-based communication for rejected PRs with actionable feedback.
+
 ### GitHub Workflows
 
 **ci.yml** (Main CI)
 Main CI pipeline with commit normalization, Biome auto-repair, and Nx affected tasks. Handles all build/test/lint operations for PRs and pushes.
 
-**pr-review.yml**
-REQUIREMENTS.md compliance checking, feedback synthesis, and /summarize command. Validates code patterns against standards and provides structured review feedback.
+**claude-code-review.yml**
+Claude AI-powered code review with REQUIREMENTS.md compliance checking, structured summary generation, and inline comment posting. Validates code patterns against standards and provides contextual feedback.
 
 **active-qc.yml** (Event-Driven)
 Event-driven quality control for PR/push/issue events with optimized sparse checkouts.
@@ -305,30 +394,38 @@ Event-driven quality control for PR/push/issue events with optimized sparse chec
 **Optimizations**:
 - Sparse checkout for all jobs (only `.github`, `package.json`, `pnpm-workspace.yaml`)
 - Jobs are mutually exclusive via conditions (no wasted parallel runs)
+- Concurrency grouping per PR/issue to cancel outdated runs
 - Job order: PR jobs → Issue jobs → Label sync (grouped by event type)
 
 Jobs:
 1. **pr-sync**: On commit push (synchronize), analyzes PR commits to update title/labels to match reality. Detects breaking changes, infers type from commits, syncs breaking label.
-2. **pr-meta**: On PR opened/edited, validates PR title format, applies type labels via ai-meta.ts.
-3. **issue-meta**: Validates issue metadata when opened/edited.
-4. **pin-issue**: Pins issues when the `pinned` label is added (uses GraphQL pinIssue mutation).
-5. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push.
+2. **pr-hygiene**: On commit push (synchronize), automated PR review cleanup—resolves outdated threads, replies to addressed feedback, deletes owner prompts.
+3. **pr-meta**: On PR opened/edited, validates PR title format, applies type labels via ai-meta.ts.
+4. **issue-meta**: Validates issue metadata when opened/edited via ai-meta.ts.
+5. **pin-issue**: Pins/unpins issues when the `pinned` label is added/removed (uses GraphQL pinIssue/unpinIssue mutations).
+6. **sync-labels**: Syncs labels to repository via `crazy-max/ghaction-github-labeler` on push to main.
 
 **passive-qc.yml** (Scheduled)
 Scheduled quality control running every 6 hours with sequential job execution.
 
-**Triggers**: Schedule only (every 6 hours at :15)
+**Triggers**: Two separate schedules—QC runs every 6 hours at :15, maintenance runs daily at 03:00 UTC
 
 **Optimizations**:
 - Jobs run in sequence via `needs` chain for deterministic execution
 - Sparse checkout for label sync (only `.github/labels.yml`)
 - Stale management runs before aging report to ensure report reflects current state
+- Conditional job execution based on schedule (QC vs maintenance)
 
-Jobs (sequential):
+QC Jobs (every 6 hours, sequential):
 1. **sync-labels**: Backup label sync as safety net (no needs).
 2. **stale-management**: 3 days inactive → stale label, then 7 more days → close (10 days total). Exemptions: pinned, security, critical. (needs: sync-labels)
 3. **aging-report**: Generates issue metrics report (critical, stale, >3 days, total). (needs: stale-management)
 4. **meta-consistency**: Runs ai-meta.ts to fix titles/labels/bodies across up to 10 items. (needs: aging-report)
+
+Maintenance Jobs (daily 03:00 UTC or manual trigger, parallel):
+1. **branch-cleanup**: Deletes stale branches using maintenance.ts (merged PRs >14 days, abandoned branches >30 days).
+2. **cache-cleanup**: Prunes workflow run artifacts/logs >7 days, deletes stale GitHub Actions caches >7 days.
+3. **maintenance-summary**: Aggregates cleanup results into summary table.
 
 **auto-merge.yml**
 Dependabot auto-merge for patch/minor/security updates. Automatically merges safe dependency updates after CI passes.
@@ -376,6 +473,9 @@ Transform [TYPE!]: to type!: format. Normalizes commit message formats from diff
 
 **.github/actions/label/action.yml**
 Label-triggered behavior executor using label.ts. Handles labeled/unlabeled events and dispatches to appropriate behaviors (pin, unpin, comment) based on `B.labels.behaviors` config. **Note**: Caller must checkout `.github` and `package.json` before using. Inputs: `action` (labeled/unlabeled), `label` (name), `node_id` (GraphQL ID), `number` (issue/PR number).
+
+**.github/actions/pr-hygiene/action.yml**
+Automated PR review cleanup using pr-hygiene.ts. Resolves outdated review threads after code changes, replies to addressed feedback, and deletes owner prompts/slash commands. Outputs: `resolved` (thread count), `replied` (comment count), `deleted` (prompt count). Inputs: `pr_number` (required), `owner_logins` (optional, comma-separated).
 
 ### GitHub Templates
 
@@ -455,21 +555,24 @@ Pre-commit hooks. Two commands: biome (runs `pnpm biome check --write`, auto-sta
 
 On-demand workflow triggers via comments, checkboxes, and labels:
 
-- **`/summarize`** — PR Review workflow, synthesizes all feedback (PR comments)
-- **Dashboard checkbox** — Check the refresh checkbox on dashboard issue footer to trigger update
+- **`@claude`** — Mention @claude in issues/PRs to trigger Claude Code agentic automation (claude.yml)
+- **`/review`**, **`/fix`**, **`/explain`**, **`/summarize`**, **`/help`**, **`/ask`** — Slash commands for AI agent interaction (automatically cleaned up by pr-hygiene)
+- **Dashboard checkbox** — Check the refresh checkbox on dashboard issue footer (`<!-- dashboard-refresh -->`) to trigger update
 - **`pinned` label** — Adding this label to any issue pins it to the repository (up to 3 pinned issues)
+- **Manual maintenance** — Trigger passive-qc.yml workflow_dispatch with `maintenance: true` for on-demand cleanup
 
 ---
 
 ## Quality Gates
 
-1. **Pre-commit**: Lefthook runs Biome + Effect pattern validation
+1. **Pre-commit**: Lefthook runs Biome + Effect pattern validation (blocks commits with `try {` outside comments)
 2. **PR opened**: CI auto-fixes style, ai-meta.ts validates title + applies labels
-3. **PR sync**: On commit push, pr-sync.ts updates title/labels to match commit reality
-4. **CI**: Build, test, typecheck via Nx affected
-5. **Code review**: claude-code-review.yml checks REQUIREMENTS.md compliance
-6. **Merge gate**: All checks green, reviews approved, semantic title validated
-7. **Dependabot gate**: Auto-merge for patch/minor/security updates
+3. **PR sync**: On commit push, pr-sync.ts updates title/labels to match commit reality, pr-hygiene.ts cleans review threads
+4. **CI**: Build, test, typecheck via Nx affected (normalize commits, Biome auto-repair)
+5. **Code review**: claude-code-review.yml checks REQUIREMENTS.md compliance with inline comments
+6. **Merge gate**: All checks green, reviews approved, semantic title validated, no breaking changes for auto-merge
+7. **Dependabot gate**: Auto-merge for patch/minor/security updates (auto-merge.ts validates eligibility)
+8. **Post-merge**: Dashboard updates every 6 hours, maintenance runs daily at 03:00 UTC
 
 ---
 
@@ -503,11 +606,74 @@ nx mutate <project>  # Run on specific project
 
 - **Effect Pipelines**: All async/failable operations use Effect, no try/catch
 - **Option Monads**: All nullable values use Option, no null checks
-- **Single B Constant**: All config in one frozen object per file
-- **Dispatch Tables**: Replace if/else with type-safe lookup tables
+- **Single B Constant**: All config in one frozen object per file (schema.ts has ~696 lines)
+- **Dispatch Tables**: Replace if/else with type-safe lookup tables (`handlers[key](data)`)
 - **Branded Types**: Nominal typing via @effect/schema `S.Brand`
 - **Section Separators**: 77-char separators for files >50 LOC
+- **Polymorphic Entry Points**: Single function handles all modes via discriminated unions
+- **Sparse Checkout**: Workflows use sparse checkout for faster clones (only needed files)
+- **Concurrency Groups**: Cancel outdated workflow runs per PR/issue to save resources
+- **AI-First Design**: Issue templates, PR formats, and automation optimized for agent parsing
+
+## Agentic Architecture Principles (2025)
+
+Following industry best practices for agentic CI/CD and workflow orchestration:
+
+1. **Multi-Agent Coordination**: Specialized agents (10 custom agents) with explicit delegation rules
+2. **Semantic Routing**: Fast intent classification via embedding similarity (label patterns, commit analysis)
+3. **Human-in-the-Loop**: AI proposes changes, humans validate via PR reviews and manual triggers
+4. **Progressive Refinement**: Agents iterate on feedback (pr-hygiene cleans up after address, meta-consistency fixes errors)
+5. **Schema-Driven Automation**: Declarative specs in B constant enable algorithmic behavior without hardcoded logic
+6. **Non-Deterministic Testing**: Quality gates based on semantic outcomes, not exact string matches
+7. **Cost Optimization**: Token consumption monitored, concurrency cancellation prevents waste
+8. **Drift Detection**: Scheduled consistency checks catch degradation before user impact
+
+## Cost Optimization and Monitoring
+
+The agentic infrastructure implements modern cost optimization strategies aligned with 2025 best practices:
+
+### GitHub Actions Minutes
+- **Concurrency Groups**: Cancel outdated workflow runs per PR/issue (`group: active-qc-${{ github.event_name }}-${{ github.event.pull_request.number }}`)
+- **Sparse Checkout**: Only clone needed files (`.github/`, `package.json`, `pnpm-workspace.yaml`) — 90% faster
+- **Conditional Jobs**: Mutually exclusive conditions prevent wasted parallel runs
+- **Caching**: pnpm store + Nx cache via composite actions reduce build times by 50-80%
+- **Affected Tasks**: `nx affected` runs only changed projects, not entire monorepo
+
+### AI/LLM Cost Management
+- **Token Monitoring**: Track consumption via Claude API usage dashboards
+- **Pattern Matching First**: Use `B.meta.infer` regex patterns before expensive AI fallback (ai-meta.ts)
+- **Max Turns Limit**: Claude workflows capped at 8-10 turns to prevent runaway costs
+- **Semantic Routing**: Dispatch tables provide O(1) routing without embedding/LLM calls
+- **Incremental Processing**: pr-hygiene and pr-sync analyze diffs, not full codebase
+
+### Resource Cleanup
+- **Artifact Retention**: Default 7 days for build artifacts, 30 days for coverage
+- **Cache Pruning**: Daily cleanup of stale caches >7 days old (passive-qc maintenance job)
+- **Branch Cleanup**: Automated deletion of merged branches >14 days, abandoned >30 days
+- **Workflow Run Cleanup**: Logs and artifacts pruned after retention period
+
+### Monitoring Metrics
+- **Dashboard Refresh**: 6-hour schedule tracks workflow success rates, stale PRs, issue metrics
+- **Success Rate Targets**: 90% workflow success, 70% warning threshold (B.dashboard.targets)
+- **Drift Detection**: Scheduled meta-consistency checks catch degradation before user impact
+- **Failure Alerts**: Creates issues for CI/security failures with categorized debt tracking
+
+**Cost Estimate (100 PRs/month + 50 issues)**:
+- GitHub Actions: ~500 minutes/month (within free tier for public repos)
+- Claude API: ~$10-15/month (depends on review complexity and turns)
+- Nx Cloud: Free tier (500 hours/month) for distributed caching
+
+## Security and Compliance
+
+- **Secrets Management**: API keys stored in GitHub Secrets, never in code
+- **Permissions**: Minimal necessary permissions per workflow (contents, issues, pull-requests, models)
+- **Supply Chain**: Actions pinned by SHA, not floating tags (e.g., `@11bd71901bbe5b1630ceea73d27597364c9af683`)
+- **Code Scanning**: CodeQL + Gitleaks + SonarCloud for multi-layer analysis
+- **Dependency Security**: Automated audits, Renovate grouped updates, auto-merge for safe changes
+- **Audit Trail**: All automation actions logged, user attribution preserved
+- **Human-in-the-Loop**: AI proposes, humans approve via PR reviews and manual triggers
 
 ---
 
-**Last Updated**: 2025-11-30
+**Last Updated**: 2025-12-01
+**Reflects**: Production implementation as of commit hash in this PR

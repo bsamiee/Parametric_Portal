@@ -69,7 +69,9 @@ Third-party services, GitHub Apps, and configuration recommendations for Paramet
 - Required checks:
   - `quality` (from ci.yml)
   - `mutation-score` (if using Stryker)
-  - `PR Metadata` (from pr-meta.yml)
+  - `PR Meta` (from active-qc.yml)
+  - `PR Commit Sync` (from active-qc.yml)
+  - `SonarCloud analysis` (from sonarcloud.yml)
 
 **Pull Request Reviews**:
 - ✅ Require pull request reviews before merging
@@ -147,9 +149,9 @@ Add to your `README.md`:
 ### Optional Secrets
 
 **CLAUDE_CODE_OAUTH_TOKEN** (if using Claude Code for extended features)
-- **Purpose**: Extended Claude API access for code review
-- **Acquisition**: Contact Anthropic for enterprise API access
-- **Usage**: claude-pr-review.yml, claude.yml, claude-maintenance.yml
+- **Purpose**: Extended Claude API access for code review and agentic automation
+- **Acquisition**: Contact Anthropic for enterprise API access or use `/install-github-app` in Claude CLI
+- **Usage**: claude-code-review.yml, claude.yml, ai-maintenance.yml, active-qc.yml (meta-fixer), passive-qc.yml (meta-consistency)
 
 **NX_CLOUD_ACCESS_TOKEN** (if using Nx Cloud)
 - **Purpose**: Remote caching and distributed task execution
@@ -228,9 +230,12 @@ Add to CI workflow:
 
 ### Bundle Size Monitoring
 
-Already integrated via `bundle-analysis.yml` workflow.
+Bundle analysis available via Nx targets:
+```bash
+nx run-many -t analyze  # Run Vite rollup-plugin-visualizer on all projects
+```
 
-**Enhancement**: Add bundlephobia badge to README:
+**Enhancement**: Add bundlephobia badge to README for published packages:
 ```markdown
 [![bundlephobia](https://img.shields.io/bundlephobia/minzip/@your-scope/package)](https://bundlephobia.com/package/@your-scope/package)
 ```
@@ -393,7 +398,48 @@ strategy:
 **GitHub Wiki**: For extended documentation
 **GitHub Pages**: Host generated docs (Storybook, TypeDoc)
 
+## GitHub Copilot Integration
+
+**GitHub Copilot Workspace** (Available with GitHub Copilot subscription)
+- Integrated via `.github/copilot-instructions.md`
+- Custom instructions loaded automatically for IDE assistance
+- Works with custom agent profiles in `.github/agents/*.agent.md`
+
+**Setup**:
+1. Install GitHub Copilot extension in your IDE
+2. Repository instructions automatically loaded from `.github/copilot-instructions.md`
+3. Custom agents available via tool invocations
+
+**Usage**:
+- Copilot reads `REQUIREMENTS.md` for coding standards
+- Follows single B constant pattern, dispatch tables, Effect pipelines
+- Delegates to custom agents when domain-specific expertise needed
+
+## Claude Code Integration
+
+**Claude Code GitHub Action** (Requires `CLAUDE_CODE_OAUTH_TOKEN`)
+- Integrated via `claude.yml` and `ai-maintenance.yml` workflows
+- Triggered by `@claude` mentions in issues/PRs
+- Weekly maintenance automation with natural language tasks
+
+**Setup**:
+1. Install Claude GitHub App: Run `/install-github-app` in Claude CLI
+2. Add `CLAUDE_CODE_OAUTH_TOKEN` to repository secrets
+3. Configure allowed tools in workflow `claude_args`
+
+**Features**:
+- Interactive code review and fixes
+- Automated issue triage and labeling
+- Weekly maintenance reports
+- Natural language workflow automation
+
+**Best Practices**:
+- Use `CLAUDE.md` for repository-specific instructions
+- Pin Claude action by SHA for security
+- Monitor token consumption via costs
+- Set `max-turns` limit to prevent runaway costs
+
 ---
 
-**Last Updated**: 2025-11-28
+**Last Updated**: 2025-12-01
 **Maintained By**: Parametric Portal Team
