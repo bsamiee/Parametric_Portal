@@ -168,7 +168,8 @@ const B = Object.freeze({
             displayTitle: 'Repository Overview',
             label: 'dashboard',
             labels: ['dashboard', 'pinned'] as const,
-            pattern: '[DASHBOARD]',
+            // Pattern uses full title to avoid collision with Renovate's "[DASHBOARD] Dependency Dashboard"
+            pattern: '[DASHBOARD] Repository Overview',
             pin: true,
             title: '[DASHBOARD] Repository Overview',
         },
