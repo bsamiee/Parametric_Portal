@@ -47,7 +47,7 @@ jobs:
     stale-management:
         name: Stale Management
         needs: sync-labels
-        if: github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
+        if: always() && (needs.sync-labels.result == 'success' || needs.sync-labels.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9.1.0
@@ -70,7 +70,7 @@ jobs:
     aging-report:
         name: Aging Report
         needs: stale-management
-        if: github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
+        if: always() && (needs.stale-management.result == 'success' || needs.stale-management.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -102,7 +102,7 @@ jobs:
     meta-consistency:
         name: Meta Consistency
         needs: aging-report
-        if: github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
+        if: always() && (needs.aging-report.result == 'success' || needs.aging-report.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
@@ -163,7 +163,7 @@ jobs:
         steps:
             # Workflow run cleanup (logs, artifacts older than 7 days)
             - name: Cleanup Workflow Runs
-              uses: viascom/github-maintenance-action@v0.0.3
+              uses: viascom/github-maintenance-action@aa3a556c67f6582ee9b7b75dd26fda08e66f3b82 # v0.0.3
               with:
                   github_token: ${{ secrets.GITHUB_TOKEN }}
                   repository: ${{ github.repository }}
