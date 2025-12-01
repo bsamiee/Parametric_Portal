@@ -30,6 +30,7 @@ type MaintenanceSpec = {
 type MaintenanceResult = {
     readonly branchesDeleted: number;
     readonly branchesFlagged: number;
+    readonly branchErrors: number;
     readonly cacheCleared: boolean;
 };
 type BranchAnalysis = {
@@ -47,8 +48,8 @@ const M = Object.freeze({
         draftWarn: (days: number): string =>
             `[WARN] **Draft PR Cleanup Notice**\n\n` +
             `This draft PR has been inactive for ${days} days.\n` +
-            `Draft PRs are automatically deleted after ${M.thresholds.draftWarn + 3} days of inactivity.\n\n` +
-            `**To prevent deletion:**\n` +
+            `Draft PRs will be flagged for manual review after extended inactivity.\n\n` +
+            `**To prevent flagging:**\n` +
             `- Mark the PR as ready for review, or\n` +
             `- Add activity (push commits or comments)\n\n` +
             `_This is an automated maintenance message._`,
@@ -112,11 +113,11 @@ const fetchOpenPRs = async (ctx: Ctx): Promise<ReadonlyArray<PR>> =>
 const fetchBranchCommit = async (ctx: Ctx, branch: string): Promise<BranchCommit> =>
     (await call(ctx, 'branch.get', branch)) as BranchCommit;
 
-const deleteBranch = async (ctx: Ctx, branch: string): Promise<boolean> =>
+const deleteBranch = async (ctx: Ctx, branch: string): Promise<{ success: boolean; error?: string }> =>
     ctx.github.rest.git
         .deleteRef({ owner: ctx.owner, ref: `heads/${branch}`, repo: ctx.repo })
-        .then(() => true)
-        .catch(() => false);
+        .then(() => ({ success: true }))
+        .catch((err: Error) => ({ error: err.message ?? 'Unknown error', success: false }));
 
 const warnDraftPR = async (ctx: Ctx, pr: PR): Promise<void> => {
     const age = branchAge(pr.updated_at);
@@ -132,7 +133,7 @@ const warnDraftPR = async (ctx: Ctx, pr: PR): Promise<void> => {
 // --- Dispatch Table ---------------------------------------------------------
 
 const handlers = {
-    branches: async (ctx: Ctx, dryRun: boolean): Promise<{ deleted: number; flagged: number }> => {
+    branches: async (ctx: Ctx, dryRun: boolean): Promise<{ deleted: number; errors: number; flagged: number }> => {
         const [branches, prs] = await Promise.all([fetchBranches(ctx), fetchOpenPRs(ctx)]);
         const analyses = await Promise.all(
             branches.map(async (branch): Promise<BranchAnalysis> => {
@@ -147,14 +148,15 @@ const handlers = {
 
         // Execute deletions (unless dry run)
         const deleteResults = dryRun
-            ? toDelete.map(() => true)
+            ? toDelete.map(() => ({ success: true }))
             : await Promise.all(toDelete.map((a) => deleteBranch(ctx, a.branch)));
 
         // Execute warnings (unless dry run)
         dryRun || (await Promise.all(draftPRs.map((pr) => warnDraftPR(ctx, pr))));
 
         return {
-            deleted: deleteResults.filter(Boolean).length,
+            deleted: deleteResults.filter((r) => r.success).length,
+            errors: deleteResults.filter((r) => !r.success).length,
             flagged: toWarn.length + draftPRs.length,
         };
     },
@@ -162,7 +164,10 @@ const handlers = {
         // Cache cleanup handled by external action (viascom/github-maintenance-action)
         // This handler is a no-op placeholder for the polymorphic dispatch
         true,
-    full: async (ctx: Ctx, dryRun: boolean): Promise<{ deleted: number; flagged: number; cacheCleared: boolean }> => {
+    full: async (
+        ctx: Ctx,
+        dryRun: boolean,
+    ): Promise<{ cacheCleared: boolean; deleted: number; errors: number; flagged: number }> => {
         const branchResult = await handlers.branches(ctx, dryRun);
         const cacheCleared = await handlers.cache(ctx, dryRun);
         return { ...branchResult, cacheCleared };
@@ -181,14 +186,22 @@ const run = async (params: RunParams & { readonly spec: MaintenanceSpec }): Prom
             ? await handlers.full(ctx, dryRun)
             : params.spec.kind === 'branches'
               ? { ...(await handlers.branches(ctx, dryRun)), cacheCleared: false }
-              : { branchesDeleted: 0, branchesFlagged: 0, cacheCleared: await handlers.cache(ctx, dryRun) };
+              : {
+                    branchErrors: 0,
+                    branchesDeleted: 0,
+                    branchesFlagged: 0,
+                    cacheCleared: await handlers.cache(ctx, dryRun),
+                };
 
     const normalizedResult: MaintenanceResult = {
+        branchErrors: 'errors' in result ? result.errors : result.branchErrors,
         branchesDeleted: 'deleted' in result ? result.deleted : result.branchesDeleted,
         branchesFlagged: 'flagged' in result ? result.flagged : result.branchesFlagged,
         cacheCleared: result.cacheCleared,
     };
 
+    normalizedResult.branchErrors > 0 &&
+        params.core.info(`[WARN] ${normalizedResult.branchErrors} branch deletion(s) failed`);
     params.core.info(
         `${prefix}[MAINTENANCE] ${M.messages.deleted(normalizedResult.branchesDeleted)}, ${M.messages.flagged(normalizedResult.branchesFlagged)}`,
     );
