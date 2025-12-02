@@ -86,12 +86,19 @@ const getNxAffectedProjects = (baseSha: string): ReadonlyArray<string> => {
 };
 
 const computeStats = (files: ReadonlyArray<string>): ChangeStats => {
+    // PERFORMANCE: Single git command for all files (O(1) instead of O(n))
+    // SECURITY: Use argument array (no shell, no injection via filename)
+    const allStatus = execGit(['diff', '--name-status', 'HEAD^', 'HEAD'])
+        .split('\n')
+        .filter((line) => line.trim());
+
     const statusMap = Object.fromEntries(
-        files.map((f) => {
-            // SECURITY: Use argument array (no shell, no injection via filename)
-            const status = execGit(['diff', '--name-status', 'HEAD^', 'HEAD', '--', f]).split('\t')[0];
-            return [f, status];
-        }),
+        allStatus
+            .map((line) => {
+                const [status, ...pathParts] = line.split('\t');
+                return [pathParts.join('\t'), status]; // Handle tabs in filenames
+            })
+            .filter(([path]) => files.includes(path as string)),
     );
 
     return {
@@ -123,21 +130,11 @@ const detectionHandlers: {
             return deps ? parseJson<{ implicitDependencies?: ReadonlyArray<string> }>(deps, {}) : {};
         });
 
-        // Flatten implicit dependencies (avoid spread in reduce)
-        const implicitDeps: Array<string> = [];
-        for (const d of depAnalysis) {
-            const deps = d.implicitDependencies ?? [];
-            for (const dep of deps) {
-                implicitDeps.push(dep);
-            }
-        }
+        // Flatten implicit dependencies (functional, no mutations)
+        const implicitDeps = depAnalysis.flatMap((d) => d.implicitDependencies ?? []);
 
-        // Deduplicate using object keys (avoid forEach)
-        const allAffectedMap: Record<string, true> = {};
-        for (const proj of [...affected, ...implicitDeps]) {
-            allAffectedMap[proj] = true;
-        }
-        const allAffected = Object.keys(allAffectedMap);
+        // Deduplicate using Set (functional, no mutations)
+        const allAffected = [...new Set([...affected, ...implicitDeps])];
 
         return {
             affectedProjects: allAffected,
@@ -169,12 +166,8 @@ const detectionHandlers: {
 
         // Matrix mode: generate matrix config for parallel execution
         const targets = ['build', 'test', 'lint', 'typecheck'] as const;
-        const include: Array<{ project: string; target: string }> = [];
-        for (const project of affected) {
-            for (const target of targets) {
-                include.push({ project, target });
-            }
-        }
+        // Generate matrix using flatMap (functional, no mutations)
+        const include = affected.flatMap((project) => targets.map((target) => ({ project, target })));
 
         const matrix: MatrixConfig = { include };
 

@@ -820,6 +820,10 @@ type DetectionStrategy = {
     readonly filter: (files: ReadonlyArray<FileChange>, globs: ReadonlyArray<string>) => ReadonlyArray<FileChange>;
 };
 
+// Shared filter function (DRY principle - eliminates duplication across all detection strategies)
+const defaultFilter = (files: ReadonlyArray<FileChange>, globs: ReadonlyArray<string>): ReadonlyArray<FileChange> =>
+    files.filter((f) => fn.globMatch(f.path, globs));
+
 const detectionStrategies: {
     readonly [K in DetectionMode]: DetectionStrategy;
 } = {
@@ -846,13 +850,15 @@ const detectionStrategies: {
                 status: f.status as ChangeType,
             }));
         },
-        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+        filter: defaultFilter,
     },
     fast: {
         fetch: async (ctx, config) => {
             const cfg = config as Extract<ChangeDetectionConfig, { mode: 'fast' }>;
             const sinceSha = cfg.sinceSha ?? B.changes.detection.fallback.sinceSha;
-            const files = (await call(ctx, 'changes.compareCommits', sinceSha, 'HEAD')) as ReadonlyArray<{
+            // SECURITY: Runtime validation prevents type assertion issues (consistent with comprehensive mode)
+            const rawFiles = await call(ctx, 'changes.compareCommits', sinceSha, 'HEAD');
+            const files = (Array.isArray(rawFiles) ? rawFiles : []) as ReadonlyArray<{
                 filename: string;
                 status: string;
                 additions: number;
@@ -865,12 +871,14 @@ const detectionStrategies: {
                 status: f.status as ChangeType,
             }));
         },
-        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+        filter: defaultFilter,
     },
     matrix: {
-        fetch: async (ctx, config) => {
-            const _cfg = config as Extract<ChangeDetectionConfig, { mode: 'matrix' }>;
-            const files = (await call(ctx, 'changes.compareCommits', 'HEAD^', 'HEAD')) as ReadonlyArray<{
+        fetch: async (ctx, _config) => {
+            // Remove unused variable (cfg not needed for matrix mode)
+            // SECURITY: Runtime validation prevents type assertion issues (consistent with other modes)
+            const rawFiles = await call(ctx, 'changes.compareCommits', 'HEAD^', 'HEAD');
+            const files = (Array.isArray(rawFiles) ? rawFiles : []) as ReadonlyArray<{
                 filename: string;
                 status: string;
                 additions: number;
@@ -883,7 +891,7 @@ const detectionStrategies: {
                 status: f.status as ChangeType,
             }));
         },
-        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+        filter: defaultFilter,
     },
 } as const;
 

@@ -112,17 +112,23 @@ const buildComment = (data: SectionData): string => {
 // --- GitHub API Operations ---------------------------------------------------
 
 const findComment = async (ctx: Ctx, prNumber: number): Promise<number | undefined> => {
-    const comments = await ctx.github.rest.issues.listComments({
-        issue_number: prNumber,
-        owner: ctx.owner,
-        per_page: 100,
-        repo: ctx.repo,
-    });
+    // PAGINATION: Recursive fetch to handle PRs with >100 comments
     // SECURITY: Regex-based HTML comment detection (robust against whitespace/formatting variations)
-    // Replaces fragile includes() that could match marker text in non-comment context
     const markerPattern = new RegExp(`<!--\\s*${B.prComment.marker.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-->`);
-    const found = comments.data.find((c) => c.body && markerPattern.test(c.body));
-    return found?.id;
+
+    const fetchPage = async (page: number): Promise<number | undefined> => {
+        const comments = await ctx.github.rest.issues.listComments({
+            issue_number: prNumber,
+            owner: ctx.owner,
+            page,
+            per_page: 100,
+            repo: ctx.repo,
+        });
+        const found = comments.data.find((c) => c.body && markerPattern.test(c.body));
+        return found?.id ?? (comments.data.length === 100 ? await fetchPage(page + 1) : undefined);
+    };
+
+    return await fetchPage(1);
 };
 
 const createComment = async (ctx: Ctx, prNumber: number, body: string): Promise<CommentResult> => {
@@ -159,12 +165,14 @@ const run = async (
     const ctx = createCtx(params);
     const body = buildComment(params.spec.data);
     const existingId = await findComment(ctx, params.spec.prNumber);
-    const actions = {
-        create: () => createComment(ctx, params.spec.prNumber, body),
-        update: () => updateComment(ctx, existingId as number, body),
-    };
-    const result = await actions[existingId ? 'update' : 'create']();
-    params.core.info(`[OK] PR comment ${existingId ? 'updated' : 'created'}: ${result.url}`);
+
+    // TYPE NARROWING: Use conditional expression instead of dispatch table with type assertion
+    const result =
+        existingId !== undefined
+            ? await updateComment(ctx, existingId, body)
+            : await createComment(ctx, params.spec.prNumber, body);
+
+    params.core.info(`[OK] PR comment ${existingId !== undefined ? 'updated' : 'created'}: ${result.url}`);
     return result;
 };
 

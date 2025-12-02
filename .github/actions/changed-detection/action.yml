@@ -18,10 +18,6 @@ inputs:
         description: Base SHA for comparison (overrides nx-set-shas base)
         required: false
         default: ''
-    head_sha:
-        description: Head SHA for comparison (overrides nx-set-shas head)
-        required: false
-        default: ''
 
 outputs:
     changed_files:
@@ -65,7 +61,6 @@ runs:
               MODE: ${{ inputs.mode }}
               GLOBS_PATTERN: ${{ inputs.globs_pattern }}
               BASE_SHA: ${{ inputs.base_sha }}
-              HEAD_SHA: ${{ inputs.head_sha }}
           with:
               script: |
                   const { run } = await import('${{ github.workspace }}/.github/scripts/changed-detection.ts');

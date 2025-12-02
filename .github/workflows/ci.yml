@@ -119,21 +119,21 @@ jobs:
               uses: ./.github/actions/pr-comment
               with:
                   pr_number: ${{ github.event.pull_request.number }}
-                  # SECURITY: Safe JSON parsing with default values (prevents fromJson on undefined/null)
+                  # SECURITY: Explicit null checks prevent fromJson parse errors on undefined/empty values
                   sections_data: |
                       {
                         "changes": {
-                          "added": ${{ steps.changes.outputs.stats_json && fromJson(steps.changes.outputs.stats_json).added || 0 }},
-                          "modified": ${{ steps.changes.outputs.stats_json && fromJson(steps.changes.outputs.stats_json).modified || 0 }},
-                          "deleted": ${{ steps.changes.outputs.stats_json && fromJson(steps.changes.outputs.stats_json).deleted || 0 }},
+                          "added": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).added) || 0 }},
+                          "modified": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).modified) || 0 }},
+                          "deleted": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).deleted) || 0 }},
                           "files": ${{ steps.changes.outputs.changed_files || '[]' }}
                         },
                         "affected": ${{ steps.changes.outputs.affected_projects || '[]' }},
                         "quality": {
-                          "lint": "${{ steps.lint.outcome == 'success' && 'pass' || steps.lint.outcome == 'skipped' && 'skip' || 'fail' }}",
-                          "typecheck": "${{ steps.typecheck.outcome == 'success' && 'pass' || steps.typecheck.outcome == 'skipped' && 'skip' || 'fail' }}",
-                          "build": "${{ steps.build.outcome == 'success' && 'pass' || steps.build.outcome == 'skipped' && 'skip' || 'fail' }}",
-                          "test": "${{ steps.test.outcome == 'success' && 'pass' || steps.test.outcome == 'skipped' && 'skip' || 'fail' }}"
+                          "lint": "${{ steps.lint.outcome }}",
+                          "typecheck": "${{ steps.typecheck.outcome }}",
+                          "build": "${{ steps.build.outcome }}",
+                          "test": "${{ steps.test.outcome }}"
                         },
                         "biome": {
                           "repaired": ${{ steps.commit-fixes.outputs.committed == 'true' }}
@@ -172,7 +172,7 @@ jobs:
                   echo "- **Changed Files**: $(echo '${{ steps.changes.outputs.changed_files }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
                   echo "- **Affected Projects**: $(echo '${{ steps.changes.outputs.affected_projects }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
                   STATS='${{ steps.changes.outputs.stats_json }}'
-                  echo "- **Stats**: +$(echo $STATS | jq -r '.added // 0') ~$(echo $STATS | jq -r '.modified // 0') -$(echo $STATS | jq -r '.deleted // 0')" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Stats**: +$(echo "$STATS" | jq -r '.added // 0') ~$(echo "$STATS" | jq -r '.modified // 0') -$(echo "$STATS" | jq -r '.deleted // 0')" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
