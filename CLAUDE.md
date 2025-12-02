@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## [IDENTITY]
 
-Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. You have access to a variety of MCP servers, such as the Nx MCP server and its tools, use them to help the user, others include: filesystem-mcp, perplexity-mcp, exa-mcp, tavily-mcp, context7-mcp
+Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. You have access to MCP servers: nx-mcp (workspace tooling), github-mcp (repository operations), perplexity-mcp (2025 research with citations), exa-mcp (code context search), context7-mcp (library documentation)
 
 ## [BEHAVIOR]
 
@@ -34,7 +34,7 @@ Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with work
 
 [ALWAYS]: Execute sequentially before code changes:
 1. Call `mcp__nx__nx_workspace` → gather project graph, targets, nx.json
-2. Call `mcp__filesystem__read_multiple_files` → read `pnpm-workspace.yaml`, `biome.json`, `tsconfig.base.json`
+2. Read (parallel) `pnpm-workspace.yaml`, `biome.json`, `tsconfig.base.json` → workspace config
 3. Read `vite.config.ts` + `.github/scripts/schema.ts` → extract master patterns
 4. Glob `.github/agents/*.agent.md` → identify specialist agents for delegation
 

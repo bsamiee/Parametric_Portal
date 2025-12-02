@@ -64,12 +64,6 @@
             }
         ]
     },
-    "mcpServers": {
-        "nx": {
-            "args": ["nx", "mcp"],
-            "command": "npx"
-        }
-    },
     "model": "claude-opus-4-5-20251101",
     "permissions": {
         "allow": [
@@ -92,9 +86,9 @@
             "WebFetch(domain:react.dev)",
             "mcp__context7__*",
             "mcp__github__*",
-            "mcp__tavily__*",
             "mcp__perplexity__*",
-            "mcp__exa__*"
+            "mcp__exa__*",
+            "mcp__nx__*"
         ],
         "ask": [],
         "deny": []
