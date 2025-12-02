@@ -1,3 +1,22 @@
+## 0.5.3 (2025-12-02)
+
+### [BUG_FIXES]
+
+- update ghaction-github-labeler to v5.3.0 (resolve 100% workflow failure) ([#89](https://github.com/bsamiee/Parametric_Portal/pull/89))
+- invert negated condition in fallbackStack ternary + fix SonarCloud workflow ([#91](https://github.com/bsamiee/Parametric_Portal/pull/91))
+- Issue Helper action for declarative issue automation ([#92](https://github.com/bsamiee/Parametric_Portal/pull/92))
+- **renovate:** add collision safeguard and trigger dashboard recreation    2 │    3 │ - Add exclusion filter in schema.ts mutate function to never touch    4 │   Renovate's Dependency Dashboard issue (both share 'dashboard' label)    5 │ - Enable dependencyDashboardApproval to force Renovate to recreate    6 │   the dashboard on next run    7 │    8 │ 🤖 Generated with [Claude Code](https://claude.com/claude-code)    9 │   10 │ Co-Authored-By: Claude <noreply@anthropic.com> ─────┴────────────────────────────────────────────────────────────────────────── ([179393f](https://github.com/bsamiee/Parametric_Portal/commit/179393f))
+
+### [DOCUMENTATION]
+
+- update agentic infrastructure documentation to reflect production implementation ([#88](https://github.com/bsamiee/Parametric_Portal/pull/88))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude
+- Copilot @Copilot
+
 ## 0.5.2 (2025-12-01)
 
 ### [DOCUMENTATION]
