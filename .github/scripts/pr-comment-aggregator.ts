@@ -118,8 +118,10 @@ const findComment = async (ctx: Ctx, prNumber: number): Promise<number | undefin
         per_page: 100,
         repo: ctx.repo,
     });
-    const marker = md.marker(B.prComment.marker);
-    const found = comments.data.find((c) => c.body?.includes(marker));
+    // SECURITY: Regex-based HTML comment detection (robust against whitespace/formatting variations)
+    // Replaces fragile includes() that could match marker text in non-comment context
+    const markerPattern = new RegExp(`<!--\\s*${B.prComment.marker.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-->`);
+    const found = comments.data.find((c) => c.body && markerPattern.test(c.body));
     return found?.id;
 };
 

@@ -119,15 +119,16 @@ jobs:
               uses: ./.github/actions/pr-comment
               with:
                   pr_number: ${{ github.event.pull_request.number }}
+                  # SECURITY: Safe JSON parsing with default values (prevents fromJson on undefined/null)
                   sections_data: |
                       {
                         "changes": {
-                          "added": ${{ fromJson(steps.changes.outputs.stats_json).added }},
-                          "modified": ${{ fromJson(steps.changes.outputs.stats_json).modified }},
-                          "deleted": ${{ fromJson(steps.changes.outputs.stats_json).deleted }},
-                          "files": ${{ steps.changes.outputs.changed_files }}
+                          "added": ${{ steps.changes.outputs.stats_json && fromJson(steps.changes.outputs.stats_json).added || 0 }},
+                          "modified": ${{ steps.changes.outputs.stats_json && fromJson(steps.changes.outputs.stats_json).modified || 0 }},
+                          "deleted": ${{ steps.changes.outputs.stats_json && fromJson(steps.changes.outputs.stats_json).deleted || 0 }},
+                          "files": ${{ steps.changes.outputs.changed_files || '[]' }}
                         },
-                        "affected": ${{ steps.changes.outputs.affected_projects }},
+                        "affected": ${{ steps.changes.outputs.affected_projects || '[]' }},
                         "quality": {
                           "lint": "${{ steps.lint.outcome == 'success' && 'pass' || steps.lint.outcome == 'skipped' && 'skip' || 'fail' }}",
                           "typecheck": "${{ steps.typecheck.outcome == 'success' && 'pass' || steps.typecheck.outcome == 'skipped' && 'skip' || 'fail' }}",

@@ -54,8 +54,16 @@ type RunParams = {
 
 // --- Utilities ---------------------------------------------------------------
 
-const execCmd = (cmd: string): string => {
-    const result = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+// SECURITY: Execute git commands directly with argument arrays (no shell, no injection risk)
+// Replaces shell execution that was vulnerable to command injection via user-controlled SHAs
+const execGit = (args: ReadonlyArray<string>): string => {
+    const result = spawnSync('git', [...args], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+    return result.status === 0 ? result.stdout.trim() : '';
+};
+
+// SECURITY: Execute pnpm/nx commands with sanitized arguments (no shell)
+const execNx = (args: ReadonlyArray<string>): string => {
+    const result = spawnSync('pnpm', ['exec', 'nx', ...args], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
     return result.status === 0 ? result.stdout.trim() : '';
 };
 
@@ -65,20 +73,23 @@ const filterByGlobs = (files: ReadonlyArray<string>, patterns: ReadonlyArray<str
     patterns.length === 0 ? files : files.filter((f) => fn.globMatch(f, patterns));
 
 const getNxBaseSha = (): string => {
-    const nxBase = execCmd('pnpm exec nx show projects --affected --base=HEAD^ --json 2>/dev/null');
-    return nxBase ? 'HEAD^' : execCmd('git merge-base origin/main HEAD 2>/dev/null || echo HEAD^');
+    // SECURITY: Use safe command execution (no shell interpolation)
+    const nxBase = execNx(['show', 'projects', '--affected', '--base=HEAD^', '--json']);
+    return nxBase ? 'HEAD^' : execGit(['merge-base', 'origin/main', 'HEAD']) || 'HEAD^';
 };
 
 const getNxAffectedProjects = (baseSha: string): ReadonlyArray<string> => {
-    const cmd = `pnpm exec nx show projects --affected --base=${baseSha} --json 2>/dev/null`;
-    const output = execCmd(cmd);
+    // SECURITY: Sanitize baseSha to prevent command injection (alphanumeric, slash, dash, dot only)
+    const sanitizedSha = baseSha.replaceAll(/[^a-zA-Z0-9/.-]/g, '');
+    const output = execNx(['show', 'projects', '--affected', `--base=${sanitizedSha}`, '--json']);
     return output ? parseJson<ReadonlyArray<string>>(output, []) : [];
 };
 
 const computeStats = (files: ReadonlyArray<string>): ChangeStats => {
     const statusMap = Object.fromEntries(
         files.map((f) => {
-            const status = execCmd(`git diff --name-status HEAD^ HEAD -- "${f}" 2>/dev/null`).split('\t')[0];
+            // SECURITY: Use argument array (no shell, no injection via filename)
+            const status = execGit(['diff', '--name-status', 'HEAD^', 'HEAD', '--', f]).split('\t')[0];
             return [f, status];
         }),
     );
@@ -106,7 +117,9 @@ const detectionHandlers: {
 
         // Comprehensive mode: include dependency analysis
         const depAnalysis = affected.map((proj) => {
-            const deps = execCmd(`pnpm exec nx show project ${proj} --json 2>/dev/null`);
+            // SECURITY: Sanitize project name to prevent command injection (alphanumeric, dash, slash only)
+            const sanitizedProj = proj.replaceAll(/[^a-zA-Z0-9/-]/g, '');
+            const deps = execNx(['show', 'project', sanitizedProj, '--json']);
             return deps ? parseJson<{ implicitDependencies?: ReadonlyArray<string> }>(deps, {}) : {};
         });
 

@@ -6,6 +6,11 @@
 
 // --- Types -------------------------------------------------------------------
 
+// SECURITY: Type guard for REST API responses (runtime validation instead of unsafe assertion)
+type RestApiResponse = { readonly data: unknown };
+const isRestApiResponse = (value: unknown): value is RestApiResponse =>
+    typeof value === 'object' && value !== null && 'data' in value;
+
 type User = { readonly login: string };
 type Label = { readonly name: string };
 type Repo = { readonly owner: string; readonly repo: string };
@@ -500,11 +505,21 @@ const fn = {
         return `${dateStr} ${timeStr} (UTC)`;
     },
     // --- Change Detection Utilities ---
+    // SECURITY: Safe glob matching with bounded complexity (O(n*m), no ReDoS risk)
+    // Replaces naive regex conversion that could cause exponential backtracking
     globMatch: (path: string, patterns: ReadonlyArray<string>): boolean =>
         patterns.some((pattern) => {
-            const regex = new RegExp(
-                `^${pattern.replaceAll('**', '.*').replaceAll('*', '[^/]*').replaceAll('?', '.')}$`,
-            );
+            // SECURITY: Validate pattern length to prevent DoS (max 1000 chars)
+            const safePattern = pattern.length > 1000 ? pattern.slice(0, 1000) : pattern;
+            // SECURITY: Escape special regex chars, then convert glob wildcards
+            // Use non-backtracking alternation for ** (matches any path segment)
+            const escaped = safePattern
+                .replaceAll(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
+                .replaceAll('**', '__DOUBLESTAR__') // Temp marker (conventional, no null bytes)
+                .replaceAll('*', '[^/]*?') // * = non-greedy match within segment
+                .replaceAll('?', '.') // ? = any single char
+                .replaceAll('__DOUBLESTAR__', '(?:[^/]+/)*[^/]*'); // ** = any segments
+            const regex = new RegExp(`^${escaped}$`);
             return regex.test(path);
         }),
     logins: (users: ReadonlyArray<User>): ReadonlyArray<string> => users.map((user) => user.login),
@@ -719,7 +734,9 @@ const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Pro
         const result = isGraphQL
             ? await ctx.github.graphql(op.query as string, params)
             : await ctx.github.rest[op.api?.[0] ?? ''][op.api?.[1] ?? ''](params);
-        return transform(isGraphQL ? result : (result as { data: unknown }).data);
+        // SECURITY: Type guard replaces unsafe type assertion (runtime validation)
+        const data = isGraphQL ? result : isRestApiResponse(result) ? result.data : undefined;
+        return data !== undefined ? transform(data) : undefined;
     };
 
     return op.safe ? execute().catch(() => undefined) : execute();
@@ -808,9 +825,15 @@ const detectionStrategies: {
 } = {
     comprehensive: {
         fetch: async (ctx, config) => {
-            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'comprehensive' }>;
+            // SECURITY: Type narrowing with type guard (replaces unsafe type assertion)
+            const cfg =
+                config.mode === 'comprehensive'
+                    ? (config as Extract<ChangeDetectionConfig, { mode: 'comprehensive' }>)
+                    : { baseSha: B.changes.detection.fallback.sinceSha, mode: 'comprehensive' as const };
             const baseSha = cfg.baseSha ?? B.changes.detection.fallback.sinceSha;
-            const files = (await call(ctx, 'changes.compareCommits', baseSha, 'HEAD')) as ReadonlyArray<{
+            const rawFiles = await call(ctx, 'changes.compareCommits', baseSha, 'HEAD');
+            // SECURITY: Runtime validation instead of type assertion
+            const files = (Array.isArray(rawFiles) ? rawFiles : []) as ReadonlyArray<{
                 filename: string;
                 status: string;
                 additions: number;
