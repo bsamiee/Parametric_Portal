@@ -49,23 +49,23 @@ The agentic infrastructure is designed around four key principles:
 - `stryker.config.js` — Mutation testing configuration (80% threshold, Vitest runner)
 
 ### GitHub Workflows (10 total)
-- `.github/workflows/active-qc.yml` — Event-driven QC: PR sync, PR hygiene, PR/issue metadata validation, label pinning
+- `.github/workflows/active-qc.yml` — Event-driven QC: PR sync, PR hygiene, PR/issue metadata validation, label pinning, duplicate detection
 - `.github/workflows/ai-maintenance.yml` — Weekly AI maintenance + manual tasks via Claude Code
 - `.github/workflows/auto-merge.yml` — Dependabot auto-merge for patch/minor/security updates
 - `.github/workflows/ci.yml` — Main CI: normalize commits, Biome auto-repair, Nx affected tasks (build/test/lint/typecheck)
 - `.github/workflows/claude-code-review.yml` — Claude AI code review with structured summary and inline comments
 - `.github/workflows/claude.yml` — Claude Code agentic automation triggered via @claude mentions in issues/PRs
 - `.github/workflows/dashboard.yml` — Repository health metrics dashboard (6-hour schedule + checkbox trigger)
-- `.github/workflows/passive-qc.yml` — Scheduled QC: stale management, aging report, meta consistency, daily maintenance
+- `.github/workflows/passive-qc.yml` — Scheduled QC: stale management via Issue Helper, aging report, meta consistency, daily maintenance
 - `.github/workflows/security.yml` — Multi-layer: dependency audit, CodeQL, Gitleaks, license check
 - `.github/workflows/sonarcloud.yml` — SonarCloud static analysis for code quality and security hotspots
 
 **Note**: Releases are handled via `npx nx release` (configured in nx.json).
 
-### GitHub Scripts (13 total)
+### GitHub Scripts (14 total)
 Composable infrastructure scripts using schema.ts polymorphic toolkit:
 
-- `.github/scripts/schema.ts` — Core infrastructure: B constant, types, markdown generators, ops factory, mutate handlers
+- `.github/scripts/schema.ts` — Core infrastructure: B constant (includes B.helper config), types, markdown generators, ops factory, mutate handlers
 - `.github/scripts/dashboard.ts` — Metrics collector + section renderers for dashboard
 - `.github/scripts/probe.ts` — Data extraction layer for issues/PRs/discussions
 - `.github/scripts/report.ts` — Config-driven report generator
@@ -77,15 +77,17 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 - `.github/scripts/pr-hygiene.ts` — Automated PR review cleanup: resolve outdated threads, respond to addressed feedback
 - `.github/scripts/maintenance.ts` — Repository maintenance: branch cleanup, draft PR warnings
 - `.github/scripts/auto-merge.ts` — Automated merge eligibility checking for Dependabot PRs
+- `.github/scripts/issue-ops.ts` — Complex Issue Helper queries (find-stale, report-inactive) for aging reports and analytics
 - `.github/scripts/env.ts` — Environment configuration (lang, nxCloudWorkspaceId)
 
-### GitHub Composite Actions (6 total)
+### GitHub Composite Actions (7 total)
 - `.github/actions/node-env/action.yml` — Node.js + pnpm + Nx setup with caching + distributed execution
 - `.github/actions/git-identity/action.yml` — Git user configuration for commits
 - `.github/actions/meta-fixer/action.yml` — Universal metadata fixer action using ai-meta.ts
 - `.github/actions/normalize-commit/action.yml` — Transform [TYPE!]: to type!: format
 - `.github/actions/label/action.yml` — Label-triggered behavior executor (pin, unpin, comment)
 - `.github/actions/pr-hygiene/action.yml` — Automated PR review cleanup using pr-hygiene.ts
+- `.github/actions/issue-ops/action.yml` — Unified issue operations via Issue Helper with parametric dispatch
 
 ### GitHub Templates (12 total)
 - `.github/ISSUE_TEMPLATE/config.yml` — Template configuration (blank issues disabled)
@@ -128,12 +130,13 @@ Composable infrastructure scripts using schema.ts polymorphic toolkit:
 The `.github/scripts/schema.ts` file is the core of the automation system, implementing:
 
 ### Single B Constant
-All configuration in one frozen object with nested domains (696 lines, ~15KB):
+All configuration in one frozen object with nested domains (713 lines, ~16KB):
 - `B.algo` — Algorithm thresholds (closeRatio, mutationPct 80%, staleDays 30)
 - `B.api` — GitHub API constants (perPage 100, states)
 - `B.breaking` — Breaking change detection patterns and label
 - `B.dashboard` — Dashboard config (bots, colors, targets, schedule, output)
-- `B.hygiene` — PR hygiene config (bot aliases, slash commands, valuable patterns, display limits)
+- `B.helper` — Issue Helper config (commands, inactivity thresholds, messages for duplicate/stale)
+- `B.hygiene` — PR hygiene config (bot aliases, slash commands including /duplicate, valuable patterns, display limits)
 - `B.labels` — Label taxonomy (categories, behaviors, exempt lists, GraphQL mutations)
 - `B.meta` — Metadata config (alerts, caps, fmt, infer rules, models, ops)
 - `B.patterns` — Regex patterns for parsing (commit, header, placeholder)
@@ -477,6 +480,9 @@ Label-triggered behavior executor using label.ts. Handles labeled/unlabeled even
 **.github/actions/pr-hygiene/action.yml**
 Automated PR review cleanup using pr-hygiene.ts. Resolves outdated review threads after code changes, replies to addressed feedback, and deletes owner prompts/slash commands. Outputs: `resolved` (thread count), `replied` (comment count), `deleted` (prompt count). Inputs: `pr_number` (required), `owner_logins` (optional, comma-separated).
 
+**.github/actions/issue-ops/action.yml**
+Unified issue/PR operations via Issue Helper (actions-cool/issues-helper@v3.7.2) with parametric dispatch. Supports 14 operations: check-inactive, close-issues, find-issues, find-comments, mark-duplicate, add-labels, remove-labels, toggle-labels, create-comment, update-comment, create-issue, update-issue, close-issue, open-issue. All inputs are optional except `operation`. Configuration values defined in B.helper (schema.ts) provide defaults but workflows specify actual values for GitHub Actions compatibility.
+
 ### GitHub Templates
 
 All issue templates are agent-friendly with JSON-parseable structure. Each field has an `id` attribute that becomes the JSON key when parsed by [github/issue-parser](https://github.com/github/issue-parser) or [issue-ops/parser](https://github.com/issue-ops/parser).
@@ -516,6 +522,115 @@ Fields: help_type (dropdown), question, context, attempted_solutions, relevant_f
 
 **PULL_REQUEST_TEMPLATE.md**
 PR template with Summary, Related Issues, Changes, and Human Review Checklist sections. Includes expandable "Automated Checks" section listing CI status checks. Human checklist covers: tests for new behavior, documentation updates, complexity concerns.
+
+---
+
+## Issue Helper Integration Strategy
+
+The repository integrates [Issue Helper](https://github.com/marketplace/actions/issues-helper) v3.7.2 to leverage battle-tested GitHub issue automation while maintaining our schema-driven architecture. Integration follows the project's core patterns: parametric configuration, dispatch tables, and algorithmic operations.
+
+### Architecture (Three-Layer Pattern)
+
+**Layer 1: Configuration** (`B.helper` in schema.ts)
+- Centralized constants for commands, thresholds, messages
+- Single source of truth following project patterns
+- `B.helper.commands` — Command triggers (e.g., `/duplicate`)
+- `B.helper.inactivity` — Thresholds for stale detection (3 days check, 7 days close)
+- `B.helper.messages` — Message templates (stale, duplicate)
+
+**Layer 2: Composite Action** (`.github/actions/issue-ops/action.yml`)
+- Wraps Issue Helper v3.7.2 with parametric dispatch
+- Handles SIMPLE atomic operations: check-inactive, close-issues, mark-duplicate, add-labels
+- 15 operations via single `operation` parameter
+- Direct workflow usage for basic automation
+
+**Layer 3: TSX Script** (`.github/scripts/issue-ops.ts`)
+- Handles COMPLEX query operations beyond Issue Helper's capabilities
+- `find-stale`: Custom filtering with label exclusions and age calculation
+- `report-inactive`: Sorted aging reports for analytics
+- **Note**: Currently implemented but not invoked in workflows - reserved for future aging report features
+- Returns typed results for downstream processing when integrated
+
+### Operations Leveraged
+
+**Stale Management** (replaces actions/stale):
+- `check-inactive`: Marks issues/PRs inactive for 3+ days with stale label
+- `close-issues`: Closes items with stale label inactive for 7+ more days (10 days total)
+- More granular control via `inactive-mode`: 'comment', 'issue', 'issue-created', 'comment-created'
+- Respects exempt labels: pinned, security, critical (via `exclude-labels`)
+
+**Duplicate Detection**:
+- `mark-duplicate`: `/duplicate` command support with automatic labeling and closing
+
+**Label Management**:
+- `toggle-labels`: State-based toggling (add if absent, remove if present)
+- `add-labels`, `remove-labels`: Explicit label operations
+
+**Query Operations** (future use):
+- `find-issues`, `find-comments`: Structured JSON responses for downstream processing
+- Enable complex batch operations and reporting
+
+### What NOT Replaced
+
+**GraphQL Operations** (Issue Helper uses REST only):
+- Pin/unpin issues: Custom label.ts uses GraphQL mutations
+- Issue transfers, repository queries
+
+**AI-Powered Operations**:
+- Meta-fixer (ai-meta.ts): Pattern inference with Claude fallback
+- Code review (claude-code-review.yml): Context-aware analysis
+
+**Complex Multi-Step Workflows**:
+- PR hygiene (pr-hygiene.ts): Review thread analysis with valuable pattern detection
+- Branch maintenance (maintenance.ts): Git operations, draft PR warnings
+- Dashboard (dashboard.ts): Multi-source metrics aggregation with parallel API calls
+
+### Workflow Integration
+
+**passive-qc.yml** — Stale management refactored to use Issue Helper:
+```yaml
+- Check Inactive Items: check-inactive (3 days, comment/issue mode)
+- Close Stale Items: close-issues (7 days, stale label, not_planned reason)
+```
+
+**active-qc.yml** — Duplicate detection added to event-driven workflow:
+```yaml
+- Duplicate Detection: mark-duplicate on /duplicate command (write permission required)
+```
+
+### Layer Selection Guide
+
+**Use Composite Action** (`.github/actions/issue-ops`) when:
+- Simple atomic operation (mark duplicate, add label, check inactive)
+- No custom filtering or business logic required
+- Standard Issue Helper operation suffices
+- Example: Marking duplicates, applying stale labels
+
+**Use TSX Script** (`issue-ops.ts`) when:
+- Need structured data for downstream processing
+- Custom filtering logic (age calculations, label exclusions)
+- Sorted/aggregated results required
+- Example: Aging reports with metrics, custom stale analysis
+
+**Configuration in both** via `B.helper` - thresholds, messages, command triggers all centralized
+
+### Benefits
+
+**Reduced Maintenance**: Battle-tested action (3.7.2, actively maintained) vs custom code for common operations.
+
+**Consistency**: Standard GitHub Actions marketplace action familiar to contributors.
+
+**Flexibility**: Parametric action design allows extending operations without new action files.
+
+**Schema-Driven**: All configuration in B.helper enables algorithmic adaptation without code changes.
+
+**Delegation**: Frees custom scripts for complex logic requiring reasoning, multi-step workflows, or AI integration.
+
+### Cost Optimization
+
+- **Public Repos**: Unlimited Issue Helper usage (zero cost)
+- **Private Repos**: 2,000 executions/month (typically sufficient for <500 PRs/month)
+- **API Efficiency**: Issue Helper batches operations, respects rate limits, includes retry logic
 
 ### Custom Agent Profiles
 
@@ -557,6 +672,7 @@ On-demand workflow triggers via comments, checkboxes, and labels:
 
 - **`@claude`** — Mention @claude in issues/PRs to trigger Claude Code agentic automation (claude.yml)
 - **`/review`**, **`/fix`**, **`/explain`**, **`/summarize`**, **`/help`**, **`/ask`** — Slash commands for AI agent interaction (automatically cleaned up by pr-hygiene)
+- **`/duplicate`** — Mark issue as duplicate (requires write permission, handled by Issue Helper via active-qc.yml)
 - **Dashboard checkbox** — Check the refresh checkbox on dashboard issue footer (`<!-- dashboard-refresh -->`) to trigger update
 - **`pinned` label** — Adding this label to any issue pins it to the repository (up to 3 pinned issues)
 - **Manual maintenance** — Trigger passive-qc.yml workflow_dispatch with `maintenance: true` for on-demand cleanup

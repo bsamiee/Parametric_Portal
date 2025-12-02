@@ -5,6 +5,8 @@ on:
         types: [opened, edited, synchronize]
     issues:
         types: [opened, edited, labeled, unlabeled]
+    issue_comment:
+        types: [created, edited]
     push:
         branches: [main]
         paths: [".github/labels.yml"]
@@ -137,6 +139,27 @@ jobs:
                   label: ${{ github.event.label.name }}
                   node_id: ${{ github.event.issue.node_id }}
                   number: ${{ github.event.issue.number }}
+
+    # --- Issue Commands (comment-triggered) -----------------------------------
+    mark-duplicate:
+        name: Mark Duplicate
+        if: github.event_name == 'issue_comment' && (github.event.action == 'created' || github.event.action == 'edited')
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: .github/actions/issue-ops
+                  sparse-checkout-cone-mode: false
+
+            - uses: ./.github/actions/issue-ops
+              with:
+                  operation: mark-duplicate
+                  duplicate-command: '/duplicate'
+                  labels: 'duplicate'
+                  close-issue: 'true'
+                  require-permission: 'write'
+                  emoji: 'eyes'
 
     # --- Label Sync (push event only) -----------------------------------------
     sync-labels:

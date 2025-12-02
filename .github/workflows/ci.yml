@@ -151,22 +151,18 @@ jobs:
 
             - name: Create Quality Debt Issue
               if: failure()
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-              env:
-                  NODE_OPTIONS: --import tsx
+              uses: ./.github/actions/issue-ops
               with:
-                  script: |
-                      const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
-                      await run({
-                        context: { repo: context.repo, payload: { action: 'created', issue: {} } },
-                        core,
-                        github,
-                        spec: {
-                          kind: 'ci',
-                          job: '${{ github.job }}',
-                          runUrl: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
-                        }
-                      });
+                  operation: create-issue
+                  title: '[CI] Quality gate failure on ${{ github.ref_name }}'
+                  body: |
+                      ## CI Failure
+                      **Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                      **Job**: ${{ github.job }}
+
+                      ### Action Required
+                      Review the failed CI run and address the issues before merging.
+                  labels: tech-debt,refactor
 
     # --- Release --------------------------------------------------------------
     release:

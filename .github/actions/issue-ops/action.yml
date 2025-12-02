@@ -1,0 +1,83 @@
+name: Issue Operations
+description: Unified issue/PR operations via Issue Helper with schema-driven dispatch
+
+inputs:
+    operation:
+        description: 'Operation: check-inactive, close-issues, find-issues, find-comments, mark-duplicate, add-labels, remove-labels, toggle-labels, create-comment, update-comment, create-issue, update-issue, close-issue, open-issue'
+        required: true
+    issue-number:
+        description: 'Target issue number (when applicable)'
+        required: false
+    body:
+        description: 'Comment or issue body text'
+        required: false
+    labels:
+        description: 'Comma-separated label names'
+        required: false
+    inactive-day:
+        description: 'Days before marking inactive (check-inactive, close-issues)'
+        required: false
+        default: '3'
+    inactive-mode:
+        description: 'Inactivity detection mode: issue, comment, issue-created, comment-created'
+        required: false
+        default: 'comment,issue'
+    inactive-label:
+        description: 'Label to apply for inactive items'
+        required: false
+        default: 'stale'
+    exclude-labels:
+        description: 'Labels to exclude from operations'
+        required: false
+    close-reason:
+        description: 'Close reason: not_planned or completed'
+        required: false
+        default: 'not_planned'
+    duplicate-command:
+        description: 'Command trigger for duplicate marking'
+        required: false
+        default: '/duplicate'
+    close-issue:
+        description: 'Whether to close issue for mark-duplicate operation'
+        required: false
+    require-permission:
+        description: 'Required permission level: admin, write, read, none'
+        required: false
+        default: 'write'
+    title-includes:
+        description: 'Filter by title content'
+        required: false
+    body-includes:
+        description: 'Filter by body content'
+        required: false
+    issue-state:
+        description: 'Filter by state: open, closed, all'
+        required: false
+        default: 'open'
+    emoji:
+        description: 'Reaction emoji to add'
+        required: false
+
+runs:
+    using: composite
+    steps:
+        - name: Execute Issue Helper Operation
+          uses: actions-cool/issues-helper@v3.7.2
+          with:
+              actions: ${{ inputs.operation }}
+              token: ${{ github.token }}
+              issue-number: ${{ inputs.issue-number }}
+              body: ${{ inputs.body }}
+              labels: ${{ inputs.labels }}
+              inactive-day: ${{ inputs.inactive-day }}
+              inactive-mode: ${{ inputs.inactive-mode }}
+              inactive-label: ${{ inputs.inactive-label }}
+              exclude-labels: ${{ inputs.exclude-labels }}
+              close-reason: ${{ inputs.close-reason }}
+              duplicate-command: ${{ inputs.duplicate-command }}
+              close-issue: ${{ inputs.close-issue }}
+              require-permission: ${{ inputs.require-permission }}
+              title-includes: ${{ inputs.title-includes }}
+              body-includes: ${{ inputs.body-includes }}
+              issue-state: ${{ inputs.issue-state }}
+              emoji: ${{ inputs.emoji }}
