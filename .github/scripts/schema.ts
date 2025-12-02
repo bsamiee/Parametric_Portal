@@ -636,7 +636,10 @@ const mutateHandlers: {
     },
     issue: async (ctx, spec) => {
         const issues = (await call(ctx, 'issue.list', B.api.state.open, spec.label)) as ReadonlyArray<Issue>;
-        const existing = issues.find((issue) => issue.title.includes(spec.pattern));
+        // Exclude Renovate's Dependency Dashboard to prevent collision (both share 'dashboard' label)
+        const existing = issues.find(
+            (issue) => issue.title.includes(spec.pattern) && !issue.title.includes('Dependency Dashboard'),
+        );
         const body = merge(existing?.body ?? null, spec.body, spec.mode ?? 'append');
         const actions = {
             create: async () => {

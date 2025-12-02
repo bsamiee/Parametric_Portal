@@ -4,6 +4,7 @@
     "automergeType": "pr",
     "commitMessagePrefix": "[BUILD]:",
     "dependencyDashboard": true,
+    "dependencyDashboardApproval": true,
     "dependencyDashboardLabels": ["dashboard", "pinned", "dependencies"],
     "dependencyDashboardTitle": "[DASHBOARD] Dependency Dashboard",
     "extends": [
