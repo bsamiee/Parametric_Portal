@@ -173,6 +173,61 @@ const B = Object.freeze({
         commitPat: [/^\w+!:/, /^BREAKING[\s-]CHANGE:/im] as const,
         label: 'breaking' as const,
     } as const,
+    changes: {
+        action: {
+            name: 'step-security/changed-files',
+            ref: 'f9b3bb1f9126ed32d88ef4aacec02bde4b70daa2',
+            version: '4.3.0',
+        } as const,
+        api: {
+            endpoints: {
+                compare: 'repos/compareCommits',
+                files: 'pulls/listFiles',
+                ref: 'git/getRef',
+            } as const,
+            maxFiles: 3000,
+            perPage: 100,
+        } as const,
+        detection: {
+            fallback: { files: '*', sinceSha: 'HEAD^' } as const,
+            modes: ['fast', 'comprehensive', 'matrix'] as const,
+            strategies: {
+                comprehensive: { api: 'rest', depth: 0, useCache: false } as const,
+                fast: { api: 'git', depth: 1, useCache: true } as const,
+                matrix: { api: 'git', depth: 1, useCache: true } as const,
+            } as const,
+        } as const,
+        globs: {
+            actions: '.github/{actions,workflows}/**',
+            apps: 'apps/**',
+            configs: '{*.config.*,*.json,*.yml,*.yaml}',
+            docs: '{*.md,docs/**}',
+            packages: 'packages/**',
+            scripts: '.github/scripts/**',
+            tests: '**/*.{test,spec}.{ts,tsx,js,jsx}',
+        } as const,
+        matchers: {
+            monorepo: {
+                affected: ['apps/**', 'packages/**'],
+                infra: ['.github/**', '*.config.*', 'nx.json', 'pnpm-workspace.yaml'],
+                root: ['*.{ts,tsx,js,jsx,json,yml,yaml,md}', '!node_modules/**'],
+            } as const,
+        } as const,
+        outputs: {
+            formats: ['csv', 'json', 'shell'] as const,
+            keys: {
+                added: 'added_files',
+                all: 'all_changed_files',
+                deleted: 'deleted_files',
+                modified: 'modified_files',
+                renamed: 'renamed_files',
+            } as const,
+        } as const,
+        paths: {
+            exclude: ['**/node_modules/**', '**/.nx/cache/**', '**/dist/**', '**/coverage/**'] as const,
+            workspace: { apps: 'apps/*', packages: 'packages/*' } as const,
+        } as const,
+    } as const,
     dashboard: {
         actions: [
             { label: '[Actions]', path: 'actions' },
@@ -304,6 +359,14 @@ const B = Object.freeze({
         bash: String.raw`^\[([A-Za-z]+)(!?)\]:[[:space:]]*(.+)$`, // POSIX regex for bash
         pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i, // JS regex (keep in sync with bash)
     } as const,
+    prComment: {
+        marker: 'UNIFIED-CI-REPORT',
+        sections: ['changes', 'affected', 'quality', 'biome'] as const,
+        templates: {
+            footer: '_Updated: {{timestamp}}_',
+            header: '## 🤖 CI Report',
+        } as const,
+    } as const,
     probe: {
         bodyTruncate: 500,
         gql: {
@@ -314,61 +377,6 @@ const B = Object.freeze({
         titles: { prReview: 'PR Review Summary' } as const,
     } as const,
     time: { day: 86400000 },
-    changes: {
-        action: {
-            name: 'step-security/changed-files',
-            version: '4.3.0',
-            ref: 'f9b3bb1f9126ed32d88ef4aacec02bde4b70daa2',
-        } as const,
-        api: {
-            endpoints: {
-                compare: 'repos/compareCommits',
-                files: 'pulls/listFiles',
-                ref: 'git/getRef',
-            } as const,
-            maxFiles: 3000,
-            perPage: 100,
-        } as const,
-        detection: {
-            fallback: { files: '*', sinceSha: 'HEAD^' } as const,
-            modes: ['fast', 'comprehensive', 'matrix'] as const,
-            strategies: {
-                fast: { api: 'git', depth: 1, useCache: true } as const,
-                comprehensive: { api: 'rest', depth: 0, useCache: false } as const,
-                matrix: { api: 'git', depth: 1, useCache: true } as const,
-            } as const,
-        } as const,
-        globs: {
-            actions: '.github/{actions,workflows}/**',
-            apps: 'apps/**',
-            configs: '{*.config.*,*.json,*.yml,*.yaml}',
-            docs: '{*.md,docs/**}',
-            packages: 'packages/**',
-            scripts: '.github/scripts/**',
-            tests: '**/*.{test,spec}.{ts,tsx,js,jsx}',
-        } as const,
-        matchers: {
-            monorepo: {
-                affected: ['apps/**', 'packages/**'],
-                infra: ['.github/**', '*.config.*', 'nx.json', 'pnpm-workspace.yaml'],
-                root: ['*.{ts,tsx,js,jsx,json,yml,yaml,md}', '!node_modules/**'],
-            } as const,
-        } as const,
-        outputs: {
-            formats: ['csv', 'json', 'shell'] as const,
-            keys: {
-                added: 'added_files',
-                all: 'all_changed_files',
-                deleted: 'deleted_files',
-                modified: 'modified_files',
-                renamed: 'renamed_files',
-            } as const,
-        } as const,
-        paths: {
-            exclude: ['**/node_modules/**', '**/.nx/cache/**', '**/dist/**', '**/coverage/**'] as const,
-            workspace: { apps: 'apps/*', packages: 'packages/*' } as const,
-        } as const,
-    } as const,
 } as const);
 
 // --- Types -------------------------------------------------------------------
@@ -421,6 +429,14 @@ type MutateSpec =
 // --- Pure Functions ----------------------------------------------------------
 
 const fn = {
+    affectedPackages: (
+        files: ReadonlyArray<string>,
+        workspace: { readonly apps: string; readonly packages: string },
+    ): ReadonlyArray<string> => {
+        const patterns = [workspace.apps, workspace.packages];
+        const matches = files.filter((f) => fn.globMatch(f, patterns));
+        return [...new Set(matches.map((f) => f.split('/').slice(0, 2).join('/')))];
+    },
     age: (created: string, now: Date): number => Math.floor((now.getTime() - new Date(created).getTime()) / B.time.day),
     body: (spec: BodySpec, vars: Record<string, string> = {}): string => {
         const interpolate = (text: string): string =>
@@ -460,6 +476,11 @@ const fn = {
         };
         return spec.map((section) => render[section.kind](section)).join('\n\n');
     },
+    changeStats: (files: ReadonlyArray<FileChange>) => ({
+        added: files.filter((f) => f.status === 'added').length,
+        deleted: files.filter((f) => f.status === 'deleted').length,
+        modified: files.filter((f) => f.status === 'modified').length,
+    }),
     classify: <R>(
         input: string,
         rules: ReadonlyArray<{ readonly pattern: RegExp; readonly value: R }>,
@@ -470,12 +491,22 @@ const fn = {
         body: (comment.body ?? '').substring(0, B.probe.bodyTruncate),
         createdAt: comment.created_at,
     }),
+    filesByType: (files: ReadonlyArray<FileChange>, type: ChangeType): ReadonlyArray<string> =>
+        files.filter((f) => type === 'all' || f.status === type).map((f) => f.path),
     formatTime: (date: Date): string => {
         const pad = (num: number): string => String(num).padStart(2, '0');
         const dateStr = `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()}`;
         const timeStr = `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
         return `${dateStr} ${timeStr} (UTC)`;
     },
+    // --- Change Detection Utilities ---
+    globMatch: (path: string, patterns: ReadonlyArray<string>): boolean =>
+        patterns.some((pattern) => {
+            const regex = new RegExp(
+                `^${pattern.replaceAll('**', '.*').replaceAll('*', '[^/]*').replaceAll('?', '.')}$`,
+            );
+            return regex.test(path);
+        }),
     logins: (users: ReadonlyArray<User>): ReadonlyArray<string> => users.map((user) => user.login),
     names: (labels: ReadonlyArray<Label>): ReadonlyArray<string> => labels.map((label) => label.name),
     reactions: (
@@ -528,34 +559,6 @@ const fn = {
         return trends[direction];
     },
     trunc: (text: string | null, limit = B.probe.bodyTruncate): string => (text ?? '').substring(0, limit),
-    // --- Change Detection Utilities ---
-    globMatch: (path: string, patterns: ReadonlyArray<string>): boolean =>
-        patterns.some((pattern) => {
-            const regex = new RegExp(
-                `^${pattern.replaceAll('**', '.*').replaceAll('*', '[^/]*').replaceAll('?', '.')}$`,
-            );
-            return regex.test(path);
-        }),
-    filesByType: (
-        files: ReadonlyArray<FileChange>,
-        type: ChangeType,
-    ): ReadonlyArray<string> =>
-        files
-            .filter((f) => type === 'all' || f.status === type)
-            .map((f) => f.path),
-    affectedPackages: (
-        files: ReadonlyArray<string>,
-        workspace: { readonly apps: string; readonly packages: string },
-    ): ReadonlyArray<string> => {
-        const patterns = [workspace.apps, workspace.packages];
-        const matches = files.filter((f) => fn.globMatch(f, patterns));
-        return [...new Set(matches.map((f) => f.split('/').slice(0, 2).join('/')))];
-    },
-    changeStats: (files: ReadonlyArray<FileChange>) => ({
-        added: files.filter((f) => f.status === 'added').length,
-        deleted: files.filter((f) => f.status === 'deleted').length,
-        modified: files.filter((f) => f.status === 'modified').length,
-    }),
 } as const;
 
 // --- Dispatch Tables ---------------------------------------------------------
@@ -590,6 +593,15 @@ const ops: Record<string, Op> = {
     'branch.updateProtection': {
         api: ['repos', 'updateBranchProtection'],
         map: ([branch, data]) => ({ branch, ...(data as object) }),
+    },
+    'changes.compareCommits': {
+        api: ['repos', 'compareCommits'],
+        map: ([base, head]) => ({ base, head, per_page: B.changes.api.perPage }),
+        out: prop('files'),
+    },
+    'changes.listFiles': {
+        api: ['pulls', 'listFiles'],
+        map: ([number]) => ({ per_page: B.changes.api.maxFiles, pull_number: number }),
     },
     'check.create': {
         api: ['checks', 'create'],
@@ -696,15 +708,6 @@ const ops: Record<string, Op> = {
     },
     'team.list': { api: ['teams', 'list'], map: () => ({ per_page: B.api.perPage }) },
     'team.listMembers': { api: ['teams', 'listMembersInOrg'], map: ([teamSlug]) => ({ team_slug: teamSlug }) },
-    'changes.compareCommits': {
-        api: ['repos', 'compareCommits'],
-        map: ([base, head]) => ({ base, head, per_page: B.changes.api.perPage }),
-        out: prop('files'),
-    },
-    'changes.listFiles': {
-        api: ['pulls', 'listFiles'],
-        map: ([number]) => ({ per_page: B.changes.api.maxFiles, pull_number: number }),
-    },
 } as const;
 
 const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Promise<unknown> => {
@@ -803,25 +806,6 @@ type DetectionStrategy = {
 const detectionStrategies: {
     readonly [K in DetectionMode]: DetectionStrategy;
 } = {
-    fast: {
-        fetch: async (ctx, config) => {
-            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'fast' }>;
-            const sinceSha = cfg.sinceSha ?? B.changes.detection.fallback.sinceSha;
-            const files = (await call(ctx, 'changes.compareCommits', sinceSha, 'HEAD')) as ReadonlyArray<{
-                filename: string;
-                status: string;
-                additions: number;
-                deletions: number;
-            }>;
-            return files.map((f) => ({
-                additions: f.additions,
-                deletions: f.deletions,
-                path: f.filename,
-                status: f.status as ChangeType,
-            }));
-        },
-        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
-    },
     comprehensive: {
         fetch: async (ctx, config) => {
             const cfg = config as Extract<ChangeDetectionConfig, { mode: 'comprehensive' }>;
@@ -841,9 +825,28 @@ const detectionStrategies: {
         },
         filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
     },
+    fast: {
+        fetch: async (ctx, config) => {
+            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'fast' }>;
+            const sinceSha = cfg.sinceSha ?? B.changes.detection.fallback.sinceSha;
+            const files = (await call(ctx, 'changes.compareCommits', sinceSha, 'HEAD')) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+    },
     matrix: {
         fetch: async (ctx, config) => {
-            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'matrix' }>;
+            const _cfg = config as Extract<ChangeDetectionConfig, { mode: 'matrix' }>;
             const files = (await call(ctx, 'changes.compareCommits', 'HEAD^', 'HEAD')) as ReadonlyArray<{
                 filename: string;
                 status: string;
@@ -864,7 +867,7 @@ const detectionStrategies: {
 const createChangeDetection = async (ctx: Ctx, config: ChangeDetectionConfig): Promise<ChangeDetectionResult> => {
     const strategy = detectionStrategies[config.mode];
     const allFiles = await strategy.fetch(ctx, config);
-    const globs = 'globs' in config ? config.globs ?? [] : [];
+    const globs = 'globs' in config ? (config.globs ?? []) : [];
     const filtered = globs.length > 0 ? strategy.filter(allFiles, globs) : allFiles;
     const paths = filtered.map((f) => f.path);
     const affected = fn.affectedPackages(paths, B.changes.paths.workspace);

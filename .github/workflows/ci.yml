@@ -94,29 +94,56 @@ jobs:
                   fi
                   echo "committed=true" >> $GITHUB_OUTPUT
 
-            - name: Comment on Biome Repair
-              if: github.event_name == 'pull_request' && steps.commit-fixes.outputs.committed == 'true'
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-              with:
-                  script: |
-                      await github.rest.issues.createComment({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: context.payload.pull_request.number,
-                        body: '[OK] **Biome Auto-Repair Applied**\n\nStyle issues have been automatically fixed and committed. CI will re-run with the fixed code.'
-                      });
-
             - name: Lint (Biome)
+              id: lint
               run: pnpm exec nx affected -t lint
+              continue-on-error: true
 
             - name: Type Check
+              id: typecheck
               run: pnpm exec nx affected -t typecheck
+              continue-on-error: true
 
             - name: Build
+              id: build
               run: pnpm exec nx affected -t build
+              continue-on-error: true
 
             - name: Test
+              id: test
               run: pnpm exec nx affected -t test
+              continue-on-error: true
+
+            - name: Post Unified PR Comment
+              if: github.event_name == 'pull_request' && always()
+              uses: ./.github/actions/pr-comment
+              with:
+                  pr_number: ${{ github.event.pull_request.number }}
+                  sections_data: |
+                      {
+                        "changes": {
+                          "added": ${{ fromJson(steps.changes.outputs.stats_json).added }},
+                          "modified": ${{ fromJson(steps.changes.outputs.stats_json).modified }},
+                          "deleted": ${{ fromJson(steps.changes.outputs.stats_json).deleted }},
+                          "files": ${{ steps.changes.outputs.changed_files }}
+                        },
+                        "affected": ${{ steps.changes.outputs.affected_projects }},
+                        "quality": {
+                          "lint": "${{ steps.lint.outcome == 'success' && 'pass' || steps.lint.outcome == 'skipped' && 'skip' || 'fail' }}",
+                          "typecheck": "${{ steps.typecheck.outcome == 'success' && 'pass' || steps.typecheck.outcome == 'skipped' && 'skip' || 'fail' }}",
+                          "build": "${{ steps.build.outcome == 'success' && 'pass' || steps.build.outcome == 'skipped' && 'skip' || 'fail' }}",
+                          "test": "${{ steps.test.outcome == 'success' && 'pass' || steps.test.outcome == 'skipped' && 'skip' || 'fail' }}"
+                        },
+                        "biome": {
+                          "repaired": ${{ steps.commit-fixes.outputs.committed == 'true' }}
+                        }
+                      }
+
+            - name: Check Quality Gates
+              if: steps.lint.outcome == 'failure' || steps.typecheck.outcome == 'failure' || steps.build.outcome == 'failure' || steps.test.outcome == 'failure'
+              run: |
+                  echo "::error::One or more quality gates failed"
+                  exit 1
 
             - name: Generate Project Graph
               if: always()
