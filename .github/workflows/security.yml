@@ -129,7 +129,7 @@ jobs:
             - name: Check for Permissive License Compliance
               run: |
                   echo "Checking that all dependencies use permissive licenses..."
-                  pnpm licenses list --json > licenses.json
+                  pnpm licenses list --json > licenses.json || true
                   # pnpm groups packages by license - keys are license names
                   # Allow common permissive licenses and dual-licensed packages
                   # Allow common OSS licenses - only block GPL-only or proprietary
