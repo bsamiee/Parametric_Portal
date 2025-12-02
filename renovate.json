@@ -5,11 +5,7 @@
     "commitMessagePrefix": "[BUILD]:",
     "dependencyDashboard": true,
     "dependencyDashboardApproval": true,
-    "dependencyDashboardLabels": [
-        "dashboard",
-        "pinned",
-        "dependencies"
-    ],
+    "dependencyDashboardLabels": ["dashboard", "pinned", "dependencies"],
     "dependencyDashboardTitle": "[DASHBOARD] Dependency Dashboard",
     "extends": [
         "config:recommended",
@@ -17,222 +13,123 @@
         ":pinAllExceptPeerDependencies",
         "helpers:pinGitHubActionDigests"
     ],
-    "labels": [
-        "dependencies"
-    ],
+    "labels": ["dependencies"],
     "lockFileMaintenance": {
         "enabled": true,
-        "schedule": [
-            "before 4am on monday"
-        ]
+        "schedule": ["before 4am on monday"]
     },
     "osvVulnerabilityAlerts": true,
     "packageRules": [
         {
             "automerge": true,
             "description": "Automerge patch updates",
-            "matchUpdateTypes": [
-                "patch"
-            ]
+            "matchUpdateTypes": ["patch"]
         },
         {
             "automerge": true,
             "description": "Automerge minor updates for stable deps",
             "matchCurrentVersion": "!/^0/",
-            "matchUpdateTypes": [
-                "minor"
-            ]
+            "matchUpdateTypes": ["minor"]
         },
         {
             "automerge": true,
             "description": "Group type definitions",
             "groupName": "types",
-            "matchPackageNames": [
-                "@types/**",
-                "!/^@types/react/",
-                "!/^@types/react-dom/"
-            ]
+            "matchPackageNames": ["@types/**", "!/^@types/react/", "!/^@types/react-dom/"]
         },
         {
             "automerge": true,
             "description": "Group GitHub Actions",
             "groupName": "github-actions",
-            "labels": [
-                "dependencies",
-                "ci"
-            ],
-            "matchManagers": [
-                "github-actions"
-            ]
+            "labels": ["dependencies", "ci"],
+            "matchManagers": ["github-actions"]
         },
         {
             "automerge": false,
             "description": "Major updates require manual review",
-            "labels": [
-                "dependencies",
-                "breaking"
-            ],
-            "matchUpdateTypes": [
-                "major"
-            ]
+            "labels": ["dependencies", "breaking"],
+            "matchUpdateTypes": ["major"]
         },
         {
             "automerge": false,
             "description": "TypeScript nightly - manual review",
-            "labels": [
-                "dependencies",
-                "typescript",
-                "breaking"
-            ],
+            "labels": ["dependencies", "typescript", "breaking"],
             "matchCurrentVersion": "/dev/",
-            "matchPackageNames": [
-                "typescript"
-            ]
+            "matchPackageNames": ["typescript"]
         },
         {
             "automerge": true,
             "description": "Group React ecosystem (stable releases)",
             "groupName": "react-ecosystem",
             "matchCurrentVersion": "!/canary|beta|rc/",
-            "matchPackageNames": [
-                "react",
-                "react-dom"
-            ],
-            "matchUpdateTypes": [
-                "minor",
-                "patch"
-            ]
+            "matchPackageNames": ["react", "react-dom"],
+            "matchUpdateTypes": ["minor", "patch"]
         },
         {
             "automerge": false,
             "description": "React canary - manual review",
             "groupName": "react-canary",
-            "labels": [
-                "dependencies",
-                "react",
-                "breaking"
-            ],
+            "labels": ["dependencies", "react", "breaking"],
             "matchCurrentVersion": "/canary|beta|rc/",
-            "matchPackageNames": [
-                "react",
-                "react-dom",
-                "@types/react",
-                "@types/react-dom"
-            ]
+            "matchPackageNames": ["react", "react-dom", "@types/react", "@types/react-dom"]
         },
         {
             "automerge": false,
             "description": "Nx canary - manual review",
             "groupName": "nx-canary",
-            "labels": [
-                "dependencies",
-                "nx",
-                "breaking"
-            ],
+            "labels": ["dependencies", "nx", "breaking"],
             "matchCurrentVersion": "/canary/",
-            "matchPackageNames": [
-                "nx",
-                "@nx/**"
-            ]
+            "matchPackageNames": ["nx", "@nx/**"]
         },
         {
             "automerge": false,
             "description": "Biome - manual review for linting changes",
-            "labels": [
-                "dependencies",
-                "tooling"
-            ],
-            "matchPackageNames": [
-                "@biomejs/biome"
-            ]
+            "labels": ["dependencies", "tooling"],
+            "matchPackageNames": ["@biomejs/biome"]
         },
         {
             "automerge": true,
             "description": "Group Effect ecosystem",
             "groupName": "effect-ecosystem",
-            "labels": [
-                "dependencies",
-                "effect"
-            ],
-            "matchPackageNames": [
-                "effect",
-                "@effect/**"
-            ],
-            "matchUpdateTypes": [
-                "minor",
-                "patch"
-            ],
-            "schedule": [
-                "before 6am on Monday"
-            ]
+            "labels": ["dependencies", "effect"],
+            "matchPackageNames": ["effect", "@effect/**"],
+            "matchUpdateTypes": ["minor", "patch"],
+            "schedule": ["before 6am on Monday"]
         },
         {
             "automerge": true,
             "description": "Group Vite ecosystem",
             "groupName": "vite-ecosystem",
-            "labels": [
-                "dependencies",
-                "vite"
-            ],
-            "matchPackageNames": [
-                "vite",
-                "vitest",
-                "@vitejs/**",
-                "@vitest/**"
-            ],
-            "matchUpdateTypes": [
-                "minor",
-                "patch"
-            ]
+            "labels": ["dependencies", "vite"],
+            "matchPackageNames": ["vite", "vitest", "@vitejs/**", "@vitest/**"],
+            "matchUpdateTypes": ["minor", "patch"]
         },
         {
             "description": "Group TanStack",
             "groupName": "tanstack",
-            "labels": [
-                "dependencies",
-                "tanstack"
-            ],
-            "matchPackageNames": [
-                "@tanstack/**"
-            ]
+            "labels": ["dependencies", "tanstack"],
+            "matchPackageNames": ["@tanstack/**"]
         },
         {
             "description": "Group Radix UI",
             "groupName": "radix-ui",
-            "labels": [
-                "dependencies",
-                "ui"
-            ],
-            "matchPackageNames": [
-                "@radix-ui/**"
-            ]
+            "labels": ["dependencies", "ui"],
+            "matchPackageNames": ["@radix-ui/**"]
         },
         {
             "description": "Group Tailwind + styling",
             "groupName": "styling",
-            "labels": [
-                "dependencies",
-                "styling"
-            ],
-            "matchPackageNames": [
-                "tailwindcss",
-                "@tailwindcss/**",
-                "lightningcss"
-            ]
+            "labels": ["dependencies", "styling"],
+            "matchPackageNames": ["tailwindcss", "@tailwindcss/**", "lightningcss"]
         }
     ],
     "platformAutomerge": true,
-    "postUpdateOptions": [
-        "pnpmDedupe"
-    ],
+    "postUpdateOptions": ["pnpmDedupe"],
     "prConcurrentLimit": 10,
     "prHourlyLimit": 5,
     "timezone": "America/Los_Angeles",
     "vulnerabilityAlerts": {
         "enabled": true,
-        "labels": [
-            "security",
-            "dependencies"
-        ]
+        "labels": ["security", "dependencies"]
     }
 }
