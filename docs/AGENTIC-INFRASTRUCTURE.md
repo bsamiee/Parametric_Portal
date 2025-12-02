@@ -791,5 +791,78 @@ The agentic infrastructure implements modern cost optimization strategies aligne
 
 ---
 
-**Last Updated**: 2025-12-01
-**Reflects**: Production implementation as of commit hash in this PR
+## Workflow: Change Detection
+
+### Change Detection in CI
+
+The `changed-detection` action provides intelligent file change detection with Nx integration:
+
+```yaml
+- name: Detect Changes
+  id: changes
+  uses: ./.github/actions/changed-detection
+  with:
+    mode: fast
+    globs_pattern: 'apps/**,packages/**,.github/**'
+    
+- name: Conditional Build
+  if: steps.changes.outputs.affected_projects != '[]'
+  run: pnpm exec nx affected -t build
+```
+
+**Modes**:
+- `fast` — Git API, cached, 0-5s (PR validation)
+- `comprehensive` — REST API with dependencies, 5-15s (releases)
+- `matrix` — Parallel job generation, up to 256 jobs (monorepo)
+
+**Outputs**: `changed_files`, `affected_projects`, `stats_json`, `matrix_json`, `has_changes`
+
+### Unified PR Comments
+
+The `pr-comment` action consolidates multiple workflow outputs:
+
+```yaml
+- name: Unified PR Comment
+  if: github.event_name == 'pull_request' && always()
+  uses: ./.github/actions/pr-comment
+  with:
+    pr_number: ${{ github.event.pull_request.number }}
+    sections_data: |
+      {
+        "changes": ${{ toJSON(steps.changes.outputs) }},
+        "quality": { "lint": "${{ steps.lint.outcome }}" }
+      }
+```
+
+**Features**:
+- Marker-based update-or-create (`<!-- UNIFIED-CI-REPORT -->`)
+- Conditional sections (changes, affected, quality, biome)
+- Single comment, not per-job spam
+
+### Matrix Job Generation
+
+Generate parallel jobs based on affected projects:
+
+```yaml
+detect:
+  outputs:
+    matrix: ${{ steps.changes.outputs.matrix_json }}
+  steps:
+    - uses: ./.github/actions/changed-detection
+      with:
+        mode: matrix
+
+build-matrix:
+  needs: detect
+  strategy:
+    matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+  steps:
+    - run: pnpm exec nx build ${{ matrix.project }}
+```
+
+**Integration**: Uses `nx show projects --affected --json` + `nrwl/nx-set-shas` for base/head SHA detection. Security: step-security/changed-files v4.3.0 (SHA-pinned, OpenSSF 10/10).
+
+---
+
+**Last Updated**: 2025-12-02
+**Reflects**: Production implementation with changed-files integration

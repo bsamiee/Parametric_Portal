@@ -385,3 +385,32 @@ export default defineConfig({
 
 [PATTERN]: 3-step pipelines for simple transformations (input → transform → output)
 [PATTERN]: 4-step pipelines for failable operations (input → validate → transform → handle)
+
+---
+## [5][CHANGE_DETECTION]
+
+### [5.1][ARCHITECTURE]
+
+**B Constants**: `B.changes` (detection config), `B.prComment` (comment templates)
+**Dispatch Tables**: `detectionHandlers[mode]`, `sectionRenderers[section]`
+**Pure Utilities**: `globMatch`, `affectedPackages`, `filesByType`, `changeStats`
+**Actions**: `.github/actions/changed-detection`, `.github/actions/pr-comment`
+
+### [5.2][DETECTION_MODES]
+
+**fast** (Git API, cached) — PR validation, 0-5s
+**comprehensive** (REST API, w/ deps) — Release builds, 5-15s
+**matrix** (parallel jobs) — Monorepo optimization, up to 256 jobs
+
+### [5.3][INTEGRATION]
+
+**Nx 22 Crystal**: `nx show projects --affected --json`
+**nrwl/nx-set-shas**: Base/head SHA detection
+**step-security/changed-files v4.3.0**: SHA-pinned `f9b3bb1f9126ed32d88ef4aacec02bde4b70daa2`, OpenSSF 10/10
+
+### [5.4][PR_COMMENT_CONSOLIDATION]
+
+**Single Unified Comment**: Conditional sections via marker-based update-or-create
+**Marker**: `<!-- UNIFIED-CI-REPORT -->`
+**Sections**: changes, affected, quality, biome
+**Standalone**: pr-hygiene (per design)
