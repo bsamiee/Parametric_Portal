@@ -56,6 +56,15 @@ jobs:
                   nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
                   nx-fix-tasks: '*lint*,*check*,*format*'
 
+            - name: Detect Changes
+              id: changes
+              uses: ./.github/actions/changed-detection
+              with:
+                  mode: fast
+                  globs_pattern: 'apps/**,packages/**,.github/**'
+                  base_sha: ${{ steps.env.outputs.nx-base }}
+                  head_sha: ${{ steps.env.outputs.nx-head }}
+
             - name: Setup Git Identity
               if: github.event_name == 'pull_request'
               uses: ./.github/actions/git-identity
@@ -129,6 +138,13 @@ jobs:
               if: always()
               run: |
                   echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Change Detection" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Mode**: ${{ steps.changes.outputs.has_changes && 'fast' || 'no changes' }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Changed Files**: $(echo '${{ steps.changes.outputs.changed_files }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Affected Projects**: $(echo '${{ steps.changes.outputs.affected_projects }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
+                  STATS='${{ steps.changes.outputs.stats_json }}'
+                  echo "- **Stats**: +$(echo $STATS | jq -r '.added // 0') ~$(echo $STATS | jq -r '.modified // 0') -$(echo $STATS | jq -r '.deleted // 0')" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
