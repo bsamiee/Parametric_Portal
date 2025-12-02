@@ -56,6 +56,15 @@ jobs:
                   nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
                   nx-fix-tasks: '*lint*,*check*,*format*'
 
+            - name: Detect Changes
+              id: changes
+              uses: ./.github/actions/changed-detection
+              with:
+                  mode: fast
+                  globs_pattern: 'apps/**,packages/**,.github/**'
+                  base_sha: ${{ steps.env.outputs.nx-base }}
+                  head_sha: ${{ steps.env.outputs.nx-head }}
+
             - name: Setup Git Identity
               if: github.event_name == 'pull_request'
               uses: ./.github/actions/git-identity
@@ -85,29 +94,57 @@ jobs:
                   fi
                   echo "committed=true" >> $GITHUB_OUTPUT
 
-            - name: Comment on Biome Repair
-              if: github.event_name == 'pull_request' && steps.commit-fixes.outputs.committed == 'true'
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-              with:
-                  script: |
-                      await github.rest.issues.createComment({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: context.payload.pull_request.number,
-                        body: '[OK] **Biome Auto-Repair Applied**\n\nStyle issues have been automatically fixed and committed. CI will re-run with the fixed code.'
-                      });
-
             - name: Lint (Biome)
+              id: lint
               run: pnpm exec nx affected -t lint
+              continue-on-error: true
 
             - name: Type Check
+              id: typecheck
               run: pnpm exec nx affected -t typecheck
+              continue-on-error: true
 
             - name: Build
+              id: build
               run: pnpm exec nx affected -t build
+              continue-on-error: true
 
             - name: Test
+              id: test
               run: pnpm exec nx affected -t test
+              continue-on-error: true
+
+            - name: Post Unified PR Comment
+              if: github.event_name == 'pull_request' && always()
+              uses: ./.github/actions/pr-comment
+              with:
+                  pr_number: ${{ github.event.pull_request.number }}
+                  # SECURITY: Explicit null checks prevent fromJson parse errors on undefined/empty values
+                  sections_data: |
+                      {
+                        "changes": {
+                          "added": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).added) || 0 }},
+                          "modified": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).modified) || 0 }},
+                          "deleted": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).deleted) || 0 }},
+                          "files": ${{ steps.changes.outputs.changed_files || '[]' }}
+                        },
+                        "affected": ${{ steps.changes.outputs.affected_projects || '[]' }},
+                        "quality": {
+                          "lint": "${{ steps.lint.outcome }}",
+                          "typecheck": "${{ steps.typecheck.outcome }}",
+                          "build": "${{ steps.build.outcome }}",
+                          "test": "${{ steps.test.outcome }}"
+                        },
+                        "biome": {
+                          "repaired": ${{ steps.commit-fixes.outputs.committed == 'true' }}
+                        }
+                      }
+
+            - name: Check Quality Gates
+              if: steps.lint.outcome == 'failure' || steps.typecheck.outcome == 'failure' || steps.build.outcome == 'failure' || steps.test.outcome == 'failure'
+              run: |
+                  echo "::error::One or more quality gates failed"
+                  exit 1
 
             - name: Generate Project Graph
               if: always()
@@ -129,6 +166,13 @@ jobs:
               if: always()
               run: |
                   echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Change Detection" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Mode**: ${{ steps.changes.outputs.has_changes && 'fast' || 'no changes' }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Changed Files**: $(echo '${{ steps.changes.outputs.changed_files }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Affected Projects**: $(echo '${{ steps.changes.outputs.affected_projects }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
+                  STATS='${{ steps.changes.outputs.stats_json }}'
+                  echo "- **Stats**: +$(echo "$STATS" | jq -r '.added // 0') ~$(echo "$STATS" | jq -r '.modified // 0') -$(echo "$STATS" | jq -r '.deleted // 0')" >> $GITHUB_STEP_SUMMARY
                   echo "" >> $GITHUB_STEP_SUMMARY
                   echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
                   pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY

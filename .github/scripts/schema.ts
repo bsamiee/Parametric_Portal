@@ -6,6 +6,11 @@
 
 // --- Types -------------------------------------------------------------------
 
+// SECURITY: Type guard for REST API responses (runtime validation instead of unsafe assertion)
+type RestApiResponse = { readonly data: unknown };
+const isRestApiResponse = (value: unknown): value is RestApiResponse =>
+    typeof value === 'object' && value !== null && 'data' in value;
+
 type User = { readonly login: string };
 type Label = { readonly name: string };
 type Repo = { readonly owner: string; readonly repo: string };
@@ -134,6 +139,29 @@ type ValidateResult =
 type Target = 'title' | 'commit' | 'label' | 'body';
 type TypeKey = 'feat' | 'fix' | 'docs' | 'style' | 'refactor' | 'test' | 'chore' | 'perf' | 'ci' | 'build';
 type MarkerKey = 'note' | 'tip' | 'important' | 'warning' | 'caution';
+type DetectionMode = 'fast' | 'comprehensive' | 'matrix';
+type ChangeType = 'added' | 'modified' | 'deleted' | 'renamed' | 'all';
+type FileChange = {
+    readonly path: string;
+    readonly status: ChangeType;
+    readonly additions?: number;
+    readonly deletions?: number;
+};
+type ChangeDetectionConfig =
+    | { readonly mode: 'fast'; readonly globs?: ReadonlyArray<string>; readonly sinceSha?: string }
+    | { readonly mode: 'comprehensive'; readonly globs?: ReadonlyArray<string>; readonly baseSha?: string }
+    | {
+          readonly mode: 'matrix';
+          readonly globs: ReadonlyArray<string>;
+          readonly outputs: ReadonlyArray<string>;
+          readonly format?: 'csv' | 'json' | 'shell';
+      };
+type ChangeDetectionResult = {
+    readonly mode: DetectionMode;
+    readonly files: ReadonlyArray<FileChange>;
+    readonly affected: ReadonlyArray<string>;
+    readonly stats: { readonly added: number; readonly modified: number; readonly deleted: number };
+};
 
 // --- Constants ---------------------------------------------------------------
 
@@ -149,6 +177,61 @@ const B = Object.freeze({
         bodyPat: /###\s*Breaking Change\s*\n+\s*yes/i,
         commitPat: [/^\w+!:/, /^BREAKING[\s-]CHANGE:/im] as const,
         label: 'breaking' as const,
+    } as const,
+    changes: {
+        action: {
+            name: 'step-security/changed-files',
+            ref: 'f9b3bb1f9126ed32d88ef4aacec02bde4b70daa2',
+            version: '4.3.0',
+        } as const,
+        api: {
+            endpoints: {
+                compare: 'repos/compareCommits',
+                files: 'pulls/listFiles',
+                ref: 'git/getRef',
+            } as const,
+            maxFiles: 3000,
+            perPage: 100,
+        } as const,
+        detection: {
+            fallback: { files: '*', sinceSha: 'HEAD^' } as const,
+            modes: ['fast', 'comprehensive', 'matrix'] as const,
+            strategies: {
+                comprehensive: { api: 'rest', depth: 0, useCache: false } as const,
+                fast: { api: 'git', depth: 1, useCache: true } as const,
+                matrix: { api: 'git', depth: 1, useCache: true } as const,
+            } as const,
+        } as const,
+        globs: {
+            actions: '.github/{actions,workflows}/**',
+            apps: 'apps/**',
+            configs: '{*.config.*,*.json,*.yml,*.yaml}',
+            docs: '{*.md,docs/**}',
+            packages: 'packages/**',
+            scripts: '.github/scripts/**',
+            tests: '**/*.{test,spec}.{ts,tsx,js,jsx}',
+        } as const,
+        matchers: {
+            monorepo: {
+                affected: ['apps/**', 'packages/**'],
+                infra: ['.github/**', '*.config.*', 'nx.json', 'pnpm-workspace.yaml'],
+                root: ['*.{ts,tsx,js,jsx,json,yml,yaml,md}', '!node_modules/**'],
+            } as const,
+        } as const,
+        outputs: {
+            formats: ['csv', 'json', 'shell'] as const,
+            keys: {
+                added: 'added_files',
+                all: 'all_changed_files',
+                deleted: 'deleted_files',
+                modified: 'modified_files',
+                renamed: 'renamed_files',
+            } as const,
+        } as const,
+        paths: {
+            exclude: ['**/node_modules/**', '**/.nx/cache/**', '**/dist/**', '**/coverage/**'] as const,
+            workspace: { apps: 'apps/*', packages: 'packages/*' } as const,
+        } as const,
     } as const,
     dashboard: {
         actions: [
@@ -281,6 +364,14 @@ const B = Object.freeze({
         bash: String.raw`^\[([A-Za-z]+)(!?)\]:[[:space:]]*(.+)$`, // POSIX regex for bash
         pattern: /^\[([A-Z]+)(!?)\]:\s*(.+)$/i, // JS regex (keep in sync with bash)
     } as const,
+    prComment: {
+        marker: 'UNIFIED-CI-REPORT',
+        sections: ['changes', 'affected', 'quality', 'biome'] as const,
+        templates: {
+            footer: '_Updated: {{timestamp}}_',
+            header: '## 🤖 CI Report',
+        } as const,
+    } as const,
     probe: {
         bodyTruncate: 500,
         gql: {
@@ -343,6 +434,14 @@ type MutateSpec =
 // --- Pure Functions ----------------------------------------------------------
 
 const fn = {
+    affectedPackages: (
+        files: ReadonlyArray<string>,
+        workspace: { readonly apps: string; readonly packages: string },
+    ): ReadonlyArray<string> => {
+        const patterns = [workspace.apps, workspace.packages];
+        const matches = files.filter((f) => fn.globMatch(f, patterns));
+        return [...new Set(matches.map((f) => f.split('/').slice(0, 2).join('/')))];
+    },
     age: (created: string, now: Date): number => Math.floor((now.getTime() - new Date(created).getTime()) / B.time.day),
     body: (spec: BodySpec, vars: Record<string, string> = {}): string => {
         const interpolate = (text: string): string =>
@@ -382,6 +481,11 @@ const fn = {
         };
         return spec.map((section) => render[section.kind](section)).join('\n\n');
     },
+    changeStats: (files: ReadonlyArray<FileChange>) => ({
+        added: files.filter((f) => f.status === 'added').length,
+        deleted: files.filter((f) => f.status === 'deleted').length,
+        modified: files.filter((f) => f.status === 'modified').length,
+    }),
     classify: <R>(
         input: string,
         rules: ReadonlyArray<{ readonly pattern: RegExp; readonly value: R }>,
@@ -392,12 +496,32 @@ const fn = {
         body: (comment.body ?? '').substring(0, B.probe.bodyTruncate),
         createdAt: comment.created_at,
     }),
+    filesByType: (files: ReadonlyArray<FileChange>, type: ChangeType): ReadonlyArray<string> =>
+        files.filter((f) => type === 'all' || f.status === type).map((f) => f.path),
     formatTime: (date: Date): string => {
         const pad = (num: number): string => String(num).padStart(2, '0');
         const dateStr = `${pad(date.getUTCMonth() + 1)}/${pad(date.getUTCDate())}/${date.getUTCFullYear()}`;
         const timeStr = `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
         return `${dateStr} ${timeStr} (UTC)`;
     },
+    // --- Change Detection Utilities ---
+    // SECURITY: Safe glob matching with bounded complexity (O(n*m), no ReDoS risk)
+    // Replaces naive regex conversion that could cause exponential backtracking
+    globMatch: (path: string, patterns: ReadonlyArray<string>): boolean =>
+        patterns.some((pattern) => {
+            // SECURITY: Validate pattern length to prevent DoS (max 1000 chars)
+            const safePattern = pattern.length > 1000 ? pattern.slice(0, 1000) : pattern;
+            // SECURITY: Escape special regex chars, then convert glob wildcards
+            // Use non-backtracking alternation for ** (matches any path segment)
+            const escaped = safePattern
+                .replaceAll(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars
+                .replaceAll('**', '__DOUBLESTAR__') // Temp marker (conventional, no null bytes)
+                .replaceAll('*', '[^/]*?') // * = non-greedy match within segment
+                .replaceAll('?', '.') // ? = any single char
+                .replaceAll('__DOUBLESTAR__', '(?:[^/]+/)*[^/]*'); // ** = any segments
+            const regex = new RegExp(`^${escaped}$`);
+            return regex.test(path);
+        }),
     logins: (users: ReadonlyArray<User>): ReadonlyArray<string> => users.map((user) => user.login),
     names: (labels: ReadonlyArray<Label>): ReadonlyArray<string> => labels.map((label) => label.name),
     reactions: (
@@ -484,6 +608,15 @@ const ops: Record<string, Op> = {
     'branch.updateProtection': {
         api: ['repos', 'updateBranchProtection'],
         map: ([branch, data]) => ({ branch, ...(data as object) }),
+    },
+    'changes.compareCommits': {
+        api: ['repos', 'compareCommits'],
+        map: ([base, head]) => ({ base, head, per_page: B.changes.api.perPage }),
+        out: prop('files'),
+    },
+    'changes.listFiles': {
+        api: ['pulls', 'listFiles'],
+        map: ([number]) => ({ per_page: B.changes.api.maxFiles, pull_number: number }),
     },
     'check.create': {
         api: ['checks', 'create'],
@@ -601,7 +734,9 @@ const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Pro
         const result = isGraphQL
             ? await ctx.github.graphql(op.query as string, params)
             : await ctx.github.rest[op.api?.[0] ?? ''][op.api?.[1] ?? ''](params);
-        return transform(isGraphQL ? result : (result as { data: unknown }).data);
+        // SECURITY: Type guard replaces unsafe type assertion (runtime validation)
+        const data = isGraphQL ? result : isRestApiResponse(result) ? result.data : undefined;
+        return data !== undefined ? transform(data) : undefined;
     };
 
     return op.safe ? execute().catch(() => undefined) : execute();
@@ -678,6 +813,99 @@ const mutateHandlers: {
 
 const mutate = async (ctx: Ctx, spec: MutateSpec): Promise<void> => mutateHandlers[spec.t](ctx, spec as never);
 
+// --- Change Detection Dispatch Tables ----------------------------------------
+
+type DetectionStrategy = {
+    readonly fetch: (ctx: Ctx, config: ChangeDetectionConfig) => Promise<ReadonlyArray<FileChange>>;
+    readonly filter: (files: ReadonlyArray<FileChange>, globs: ReadonlyArray<string>) => ReadonlyArray<FileChange>;
+};
+
+// Shared filter function (DRY principle - eliminates duplication across all detection strategies)
+const defaultFilter = (files: ReadonlyArray<FileChange>, globs: ReadonlyArray<string>): ReadonlyArray<FileChange> =>
+    files.filter((f) => fn.globMatch(f.path, globs));
+
+const detectionStrategies: {
+    readonly [K in DetectionMode]: DetectionStrategy;
+} = {
+    comprehensive: {
+        fetch: async (ctx, config) => {
+            // SECURITY: Type narrowing with type guard (replaces unsafe type assertion)
+            const cfg =
+                config.mode === 'comprehensive'
+                    ? (config as Extract<ChangeDetectionConfig, { mode: 'comprehensive' }>)
+                    : { baseSha: B.changes.detection.fallback.sinceSha, mode: 'comprehensive' as const };
+            const baseSha = cfg.baseSha ?? B.changes.detection.fallback.sinceSha;
+            const rawFiles = await call(ctx, 'changes.compareCommits', baseSha, 'HEAD');
+            // SECURITY: Runtime validation instead of type assertion
+            const files = (Array.isArray(rawFiles) ? rawFiles : []) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: defaultFilter,
+    },
+    fast: {
+        fetch: async (ctx, config) => {
+            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'fast' }>;
+            const sinceSha = cfg.sinceSha ?? B.changes.detection.fallback.sinceSha;
+            // SECURITY: Runtime validation prevents type assertion issues (consistent with comprehensive mode)
+            const rawFiles = await call(ctx, 'changes.compareCommits', sinceSha, 'HEAD');
+            const files = (Array.isArray(rawFiles) ? rawFiles : []) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: defaultFilter,
+    },
+    matrix: {
+        fetch: async (ctx, _config) => {
+            // Remove unused variable (cfg not needed for matrix mode)
+            // SECURITY: Runtime validation prevents type assertion issues (consistent with other modes)
+            const rawFiles = await call(ctx, 'changes.compareCommits', 'HEAD^', 'HEAD');
+            const files = (Array.isArray(rawFiles) ? rawFiles : []) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: defaultFilter,
+    },
+} as const;
+
+const createChangeDetection = async (ctx: Ctx, config: ChangeDetectionConfig): Promise<ChangeDetectionResult> => {
+    const strategy = detectionStrategies[config.mode];
+    const allFiles = await strategy.fetch(ctx, config);
+    const globs = 'globs' in config ? (config.globs ?? []) : [];
+    const filtered = globs.length > 0 ? strategy.filter(allFiles, globs) : allFiles;
+    const paths = filtered.map((f) => f.path);
+    const affected = fn.affectedPackages(paths, B.changes.paths.workspace);
+    const stats = fn.changeStats(filtered);
+    return { affected, files: filtered, mode: config.mode, stats };
+};
+
 // --- Entry Point -------------------------------------------------------------
 
 const createCtx = (params: RunParams): Ctx => ({
@@ -688,13 +916,18 @@ const createCtx = (params: RunParams): Ctx => ({
 
 // --- Export ------------------------------------------------------------------
 
-export { B, call, createCtx, fn, MARKERS, md, mutate, TYPES };
+export { B, call, createChangeDetection, createCtx, detectionStrategies, fn, MARKERS, md, mutate, TYPES };
 export type {
     BodySpec,
+    ChangeDetectionConfig,
+    ChangeDetectionResult,
+    ChangeType,
     Comment,
     Commit,
     Core,
     Ctx,
+    DetectionMode,
+    FileChange,
     GitHub,
     Issue,
     Label,

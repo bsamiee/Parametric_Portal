@@ -1,0 +1,43 @@
+name: PR Comment Aggregator
+description: Consolidate workflow outputs into single unified PR comment with marker-based update-or-create strategy
+
+inputs:
+    pr_number:
+        description: Pull request number to comment on
+        required: true
+    sections_data:
+        description: JSON string with section data (changes, affected, quality, biome)
+        required: true
+
+outputs:
+    comment_id:
+        description: ID of the created or updated comment
+        value: ${{ steps.comment.outputs.comment_id }}
+    comment_url:
+        description: URL of the created or updated comment
+        value: ${{ steps.comment.outputs.comment_url }}
+
+runs:
+    using: composite
+    steps:
+        - name: Post Unified Comment
+          id: comment
+          uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+          env:
+              NODE_OPTIONS: --import tsx
+              SECTIONS_DATA: ${{ inputs.sections_data }}
+          with:
+              script: |
+                  const { run } = await import('${{ github.workspace }}/.github/scripts/pr-comment-aggregator.ts');
+                  const data = JSON.parse(process.env.SECTIONS_DATA || '{}');
+                  const result = await run({
+                      context: { repo: context.repo, payload: context.payload },
+                      core,
+                      github,
+                      spec: {
+                          prNumber: parseInt('${{ inputs.pr_number }}', 10),
+                          data,
+                      },
+                  });
+                  core.setOutput('comment_id', String(result.id));
+                  core.setOutput('comment_url', result.url);
