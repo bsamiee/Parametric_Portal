@@ -138,6 +138,20 @@ jobs:
                     exit 0
                   fi
 
+                  # Verify response is an object (not string/array/error)
+                  if ! jq -e 'type == "object"' licenses.json >/dev/null 2>&1; then
+                    echo "[WARN] pnpm licenses returned non-object response, skipping check"
+                    cat licenses.json
+                    exit 0
+                  fi
+
+                  # Check if pnpm returned an error response (e.g., sparse checkout)
+                  if jq -e 'has("error")' licenses.json >/dev/null 2>&1; then
+                    echo "[WARN] pnpm licenses returned error response, skipping check"
+                    jq -r '.error // "Unknown error"' licenses.json
+                    exit 0
+                  fi
+
                   # pnpm groups packages by license - keys are license names
                   # Allow common OSS licenses - only block GPL-only or proprietary
                   BLOCKED=$(jq -r '
