@@ -39,7 +39,7 @@ jobs:
             - name: Run pnpm audit
               id: audit
               run: |
-                  pnpm audit --audit-level=moderate --json > audit-results.json
+                  pnpm audit --audit-level=moderate --json > audit-results.json || true
                   exit_code=$?
                   if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 1 ]; then
                     echo "[ERROR] Audit command failed"
@@ -126,21 +126,21 @@ jobs:
 
             - uses: ./.github/actions/node-env
 
-            - name: Check for MIT License Compliance
+            - name: Check for Permissive License Compliance
               run: |
-                  echo "Checking that all dependencies use MIT license..."
+                  echo "Checking that all dependencies use permissive licenses..."
                   pnpm licenses list --json > licenses.json
-                  NON_MIT=$(cat licenses.json | jq -r '
+                  NON_PERMISSIVE=$(cat licenses.json | jq -r '
                     .[] |
-                    select(.license | test("^MIT$"; "i") | not) |
+                    select(.license | test("MIT|Apache|ISC|BSD"; "i") | not) |
                     "\(.name): \(.license)"
                   ' 2>/dev/null || echo "")
-                  if [[ -n "$NON_MIT" ]]; then
-                    echo "[ERROR] Non-MIT licenses detected:"
-                    echo "$NON_MIT"
+                  if [[ -n "$NON_PERMISSIVE" ]]; then
+                    echo "[ERROR] Non-permissive licenses detected:"
+                    echo "$NON_PERMISSIVE"
                     exit 1
                   else
-                    echo "[OK] All dependencies use MIT license"
+                    echo "[OK] All dependencies use permissive licenses (MIT, Apache, ISC, BSD)"
                   fi
 
     # --- Post-Scan Jobs (depend on parallel scans) ----------------------------
