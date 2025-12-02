@@ -62,7 +62,8 @@ runs:
           with:
               node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
               node-version-file: ${{ inputs.node-version-file }}
-              cache: pnpm
+              # Only enable pnpm cache when install is true (avoids post-run failures on sparse checkout)
+              cache: ${{ inputs.install == 'true' && 'pnpm' || '' }}
 
         # Nx Cloud remote cache - set token early for nx-cloud CLI
         - name: Configure Nx Cloud
