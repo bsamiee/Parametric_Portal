@@ -134,6 +134,29 @@ type ValidateResult =
 type Target = 'title' | 'commit' | 'label' | 'body';
 type TypeKey = 'feat' | 'fix' | 'docs' | 'style' | 'refactor' | 'test' | 'chore' | 'perf' | 'ci' | 'build';
 type MarkerKey = 'note' | 'tip' | 'important' | 'warning' | 'caution';
+type DetectionMode = 'fast' | 'comprehensive' | 'matrix';
+type ChangeType = 'added' | 'modified' | 'deleted' | 'renamed' | 'all';
+type FileChange = {
+    readonly path: string;
+    readonly status: ChangeType;
+    readonly additions?: number;
+    readonly deletions?: number;
+};
+type ChangeDetectionConfig =
+    | { readonly mode: 'fast'; readonly globs?: ReadonlyArray<string>; readonly sinceSha?: string }
+    | { readonly mode: 'comprehensive'; readonly globs?: ReadonlyArray<string>; readonly baseSha?: string }
+    | {
+          readonly mode: 'matrix';
+          readonly globs: ReadonlyArray<string>;
+          readonly outputs: ReadonlyArray<string>;
+          readonly format?: 'csv' | 'json' | 'shell';
+      };
+type ChangeDetectionResult = {
+    readonly mode: DetectionMode;
+    readonly files: ReadonlyArray<FileChange>;
+    readonly affected: ReadonlyArray<string>;
+    readonly stats: { readonly added: number; readonly modified: number; readonly deleted: number };
+};
 
 // --- Constants ---------------------------------------------------------------
 
@@ -291,6 +314,61 @@ const B = Object.freeze({
         titles: { prReview: 'PR Review Summary' } as const,
     } as const,
     time: { day: 86400000 },
+    changes: {
+        action: {
+            name: 'step-security/changed-files',
+            version: '4.3.0',
+            ref: 'f9b3bb1f9126ed32d88ef4aacec02bde4b70daa2',
+        } as const,
+        api: {
+            endpoints: {
+                compare: 'repos/compareCommits',
+                files: 'pulls/listFiles',
+                ref: 'git/getRef',
+            } as const,
+            maxFiles: 3000,
+            perPage: 100,
+        } as const,
+        detection: {
+            fallback: { files: '*', sinceSha: 'HEAD^' } as const,
+            modes: ['fast', 'comprehensive', 'matrix'] as const,
+            strategies: {
+                fast: { api: 'git', depth: 1, useCache: true } as const,
+                comprehensive: { api: 'rest', depth: 0, useCache: false } as const,
+                matrix: { api: 'git', depth: 1, useCache: true } as const,
+            } as const,
+        } as const,
+        globs: {
+            actions: '.github/{actions,workflows}/**',
+            apps: 'apps/**',
+            configs: '{*.config.*,*.json,*.yml,*.yaml}',
+            docs: '{*.md,docs/**}',
+            packages: 'packages/**',
+            scripts: '.github/scripts/**',
+            tests: '**/*.{test,spec}.{ts,tsx,js,jsx}',
+        } as const,
+        matchers: {
+            monorepo: {
+                affected: ['apps/**', 'packages/**'],
+                infra: ['.github/**', '*.config.*', 'nx.json', 'pnpm-workspace.yaml'],
+                root: ['*.{ts,tsx,js,jsx,json,yml,yaml,md}', '!node_modules/**'],
+            } as const,
+        } as const,
+        outputs: {
+            formats: ['csv', 'json', 'shell'] as const,
+            keys: {
+                added: 'added_files',
+                all: 'all_changed_files',
+                deleted: 'deleted_files',
+                modified: 'modified_files',
+                renamed: 'renamed_files',
+            } as const,
+        } as const,
+        paths: {
+            exclude: ['**/node_modules/**', '**/.nx/cache/**', '**/dist/**', '**/coverage/**'] as const,
+            workspace: { apps: 'apps/*', packages: 'packages/*' } as const,
+        } as const,
+    } as const,
 } as const);
 
 // --- Types -------------------------------------------------------------------
@@ -450,6 +528,34 @@ const fn = {
         return trends[direction];
     },
     trunc: (text: string | null, limit = B.probe.bodyTruncate): string => (text ?? '').substring(0, limit),
+    // --- Change Detection Utilities ---
+    globMatch: (path: string, patterns: ReadonlyArray<string>): boolean =>
+        patterns.some((pattern) => {
+            const regex = new RegExp(
+                `^${pattern.replaceAll('**', '.*').replaceAll('*', '[^/]*').replaceAll('?', '.')}$`,
+            );
+            return regex.test(path);
+        }),
+    filesByType: (
+        files: ReadonlyArray<FileChange>,
+        type: ChangeType,
+    ): ReadonlyArray<string> =>
+        files
+            .filter((f) => type === 'all' || f.status === type)
+            .map((f) => f.path),
+    affectedPackages: (
+        files: ReadonlyArray<string>,
+        workspace: { readonly apps: string; readonly packages: string },
+    ): ReadonlyArray<string> => {
+        const patterns = [workspace.apps, workspace.packages];
+        const matches = files.filter((f) => fn.globMatch(f, patterns));
+        return [...new Set(matches.map((f) => f.split('/').slice(0, 2).join('/')))];
+    },
+    changeStats: (files: ReadonlyArray<FileChange>) => ({
+        added: files.filter((f) => f.status === 'added').length,
+        deleted: files.filter((f) => f.status === 'deleted').length,
+        modified: files.filter((f) => f.status === 'modified').length,
+    }),
 } as const;
 
 // --- Dispatch Tables ---------------------------------------------------------
@@ -590,6 +696,15 @@ const ops: Record<string, Op> = {
     },
     'team.list': { api: ['teams', 'list'], map: () => ({ per_page: B.api.perPage }) },
     'team.listMembers': { api: ['teams', 'listMembersInOrg'], map: ([teamSlug]) => ({ team_slug: teamSlug }) },
+    'changes.compareCommits': {
+        api: ['repos', 'compareCommits'],
+        map: ([base, head]) => ({ base, head, per_page: B.changes.api.perPage }),
+        out: prop('files'),
+    },
+    'changes.listFiles': {
+        api: ['pulls', 'listFiles'],
+        map: ([number]) => ({ per_page: B.changes.api.maxFiles, pull_number: number }),
+    },
 } as const;
 
 const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Promise<unknown> => {
@@ -678,6 +793,85 @@ const mutateHandlers: {
 
 const mutate = async (ctx: Ctx, spec: MutateSpec): Promise<void> => mutateHandlers[spec.t](ctx, spec as never);
 
+// --- Change Detection Dispatch Tables ----------------------------------------
+
+type DetectionStrategy = {
+    readonly fetch: (ctx: Ctx, config: ChangeDetectionConfig) => Promise<ReadonlyArray<FileChange>>;
+    readonly filter: (files: ReadonlyArray<FileChange>, globs: ReadonlyArray<string>) => ReadonlyArray<FileChange>;
+};
+
+const detectionStrategies: {
+    readonly [K in DetectionMode]: DetectionStrategy;
+} = {
+    fast: {
+        fetch: async (ctx, config) => {
+            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'fast' }>;
+            const sinceSha = cfg.sinceSha ?? B.changes.detection.fallback.sinceSha;
+            const files = (await call(ctx, 'changes.compareCommits', sinceSha, 'HEAD')) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+    },
+    comprehensive: {
+        fetch: async (ctx, config) => {
+            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'comprehensive' }>;
+            const baseSha = cfg.baseSha ?? B.changes.detection.fallback.sinceSha;
+            const files = (await call(ctx, 'changes.compareCommits', baseSha, 'HEAD')) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+    },
+    matrix: {
+        fetch: async (ctx, config) => {
+            const cfg = config as Extract<ChangeDetectionConfig, { mode: 'matrix' }>;
+            const files = (await call(ctx, 'changes.compareCommits', 'HEAD^', 'HEAD')) as ReadonlyArray<{
+                filename: string;
+                status: string;
+                additions: number;
+                deletions: number;
+            }>;
+            return files.map((f) => ({
+                additions: f.additions,
+                deletions: f.deletions,
+                path: f.filename,
+                status: f.status as ChangeType,
+            }));
+        },
+        filter: (files, globs) => files.filter((f) => fn.globMatch(f.path, globs)),
+    },
+} as const;
+
+const createChangeDetection = async (ctx: Ctx, config: ChangeDetectionConfig): Promise<ChangeDetectionResult> => {
+    const strategy = detectionStrategies[config.mode];
+    const allFiles = await strategy.fetch(ctx, config);
+    const globs = 'globs' in config ? config.globs ?? [] : [];
+    const filtered = globs.length > 0 ? strategy.filter(allFiles, globs) : allFiles;
+    const paths = filtered.map((f) => f.path);
+    const affected = fn.affectedPackages(paths, B.changes.paths.workspace);
+    const stats = fn.changeStats(filtered);
+    return { affected, files: filtered, mode: config.mode, stats };
+};
+
 // --- Entry Point -------------------------------------------------------------
 
 const createCtx = (params: RunParams): Ctx => ({
@@ -688,13 +882,18 @@ const createCtx = (params: RunParams): Ctx => ({
 
 // --- Export ------------------------------------------------------------------
 
-export { B, call, createCtx, fn, MARKERS, md, mutate, TYPES };
+export { B, call, createChangeDetection, createCtx, detectionStrategies, fn, MARKERS, md, mutate, TYPES };
 export type {
     BodySpec,
+    ChangeDetectionConfig,
+    ChangeDetectionResult,
+    ChangeType,
     Comment,
     Commit,
     Core,
     Ctx,
+    DetectionMode,
+    FileChange,
     GitHub,
     Issue,
     Label,
