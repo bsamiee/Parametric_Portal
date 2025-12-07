@@ -82,7 +82,7 @@ jobs:
               marker: 'PR-MONITOR',
               mode: 'section',
               sectionId: 'biome-repair',
-              body: '✅ **Biome Auto-Repair Applied**: Style issues fixed and committed.'
+              body: '[OK] **Biome Auto-Repair Applied**: Style issues fixed and committed.'
             });
 
       - name: Lint (Biome)
