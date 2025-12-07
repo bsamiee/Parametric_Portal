@@ -1,7 +1,7 @@
 ---
 name: ${kebab-case-name}
 type: complex
-depth: ${depth}
+depth: ${extended|full}
 description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, or ${scenario-3}.
 ---
 
@@ -12,84 +12,81 @@ description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, o
 
 ${one-sentence-purpose}
 
-**Scope:**<br>
-- *${Mode-1}:* ${workflow-description}.
-- *${Mode-N}:* ${workflow-description}.
+**Tasks:**
+1. Collect parameters — ${param-1}: `${options}`, ${param-n}: `${options}`
+2. Read [index.md](./index.md) — Reference file listing for navigation
+3. Read [${domain-1}.md](./references/${domain-1}.md) — ${domain-1-description}
+4. Read [${domain-n}.md](./references/${domain-n}.md) — ${domain-n-description}
+5. (scripting) Read [scripting.md](./references/scripting.md) — Automation standards
+6. (prose) Load `style-standards` skill — Voice, formatting, constraints
+7. Execute per ${workflow}:
+   - (${param-value-1}) ${action} — see [${workflow-1}.md](./references/workflows/${workflow-1}.md)
+   - (${param-value-n}) ${action} — see [${workflow-n}.md](./references/workflows/${workflow-n}.md)
+8. Validate — Quality gate; see §VALIDATION
 
-**Domain Navigation:**<br>
-- *[${DOMAIN}]* — ${domain-summary}. Load for: ${when-to-load}.
-- *[${DOMAIN}]* — ${domain-summary}. Load for: ${when-to-load}.
-- *[SCRIPTING]* — Automation scripts. Load for: ${automation-trigger}.
+**Dependencies:**
+- `${skill-name}` — ${purpose}
+- `${output-style}` — Sub-agent output format
 
-[REFERENCE]: [→index.md](./index.md) — Reference file listing.
-
----
-## [2][INSTRUCTIONS]
->**Dictum:** *Progressive disclosure optimizes context loading.*
-
-<br>
-
-**Instruction Structure:**<br>
-- *Required Task* — Mandatory read before domain work.
-- *Conditional Task* — Applies when parameter matches.
-- *Guidance* — Core concepts with rationale.
-- *Best-Practices* — Constraints and patterns.
-
-**Universal Tasks:**<br>
-1. Read [→index.md](./index.md): Reference file listing for navigation.
+[REFERENCE]: [index.md](./index.md) — Complete file listing
 
 ---
-## [3][DECISION]
->**Dictum:** *${decision-principle}.*
-
-<br>
-
-[IMPORTANT] ${parameter-collection-context}.
-
-```mermaid
-flowchart LR
-    ${diagram-content}
-```
-
-**Conditional Task:**<br>
-1. (Requires: ${scope-1}) Read [→${workflow-1}.md](./references/workflows/${workflow-1}.md): ${workflow-details}.
-2. (Requires: ${scope-N}) Read [→${workflow-N}.md](./references/workflows/${workflow-N}.md): ${workflow-details}.
-
-[VERIFY] Parameters collected:
-- [ ] ${parameter-1}: ${options}.
-- [ ] ${parameter-N}: ${options}.
-
----
-## [N][${DOMAIN}]
+## [1][${DOMAIN_1}]
 >**Dictum:** *${domain-truth}.*
 
 <br>
 
-${domain-context-sentence}
+${domain-context-sentence-explaining-why}
 
-**Required Task:**<br>
-1. Read [→${domain}.md](./references/${domain}.md): ${what-file-contains}.
+${tables, key concepts, decision gates as needed}
 
-**Conditional Task:**<br>
-1. (Requires: ${condition}) Read [→${file}.md](./references/${file}.md): ${context}.
-
-**Guidance:**<br>
+**Guidance:**
+- `${Concept}` — ${why-it-matters}.
 - `${Concept}` — ${why-it-matters}.
 
-**Best-Practices:**<br>
+**Best-Practices:**
 - **${Pattern}** — ${constraint-or-rule}.
 
 ---
-## [N+1][SCRIPTING]
->**Dictum:** *Scripts extend capabilities beyond LLM generation.*
+## [2][${DOMAIN_N}]
+>**Dictum:** *${domain-truth}.*
 
 <br>
 
-**Conditional Task:**<br>
-1. (Requires: automation needed) Read [→scripting.md](./references/scripting.md): Standards and patterns.
+${domain-context-sentence-explaining-why}
 
-**Guidance:**<br>
+**Guidance:**
 - `${Concept}` — ${why-it-matters}.
 
-**Best-Practices:**<br>
+**Best-Practices:**
 - **${Pattern}** — ${constraint-or-rule}.
+
+---
+## [N][SCRIPTING]
+>**Dictum:** *Deterministic automation extends LLM capabilities.*
+
+<br>
+
+scripts/ folder for external tool orchestration, artifact generation, validation.
+
+**Guidance:**
+- `Justification` — Script overhead demands explicit need: tool wrapping, reproducibility, schema enforcement.
+- `Standards` — Python 3.14+/TypeScript 6.0+, frozen config, dispatch tables, JSON output.
+
+**Best-Practices:**
+- **Augmentation** — Scripts support workflows; core logic remains in SKILL.md and references.
+
+---
+## [N+1][VALIDATION]
+>**Dictum:** *Gates prevent incomplete execution.*
+
+<br>
+
+[VERIFY] Completion:
+- [ ] Parameters: ${param-list} collected and applied.
+- [ ] References: All required domain files loaded per Tasks.
+- [ ] Workflow: ${workflow} executed per parameter fork.
+- [ ] Style: `style-standards` constraints applied.
+- [ ] Quality: LOC within limits, content separation enforced.
+
+[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

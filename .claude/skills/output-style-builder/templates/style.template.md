@@ -16,7 +16,7 @@ ${one-sentence-purpose}
 
 ---
 ## [1][VOICE]
->**Dictum:** *Voice parameters govern tone and formality.*
+>**Dictum:** *Parameterized voice ensures consistent tone across contexts.*
 
 <br>
 
@@ -37,11 +37,11 @@ ${one-sentence-purpose}
 - [ALWAYS] **Tense:** ${tense-requirement}.
 
 [CRITICAL]:
-- [NEVER] **Self-Reference:** No "I", "we", "you" unless ${exception-condition}.
-- [NEVER] **Hedging:** No "might", "could", "probably", "should".
-- [NEVER] **Meta-Commentary:** No "Sourced from", "Confirmed with".
+- [NEVER] **Self-Reference:** Prohibit "I", "we", "you" unless ${exception-condition}.
+- [NEVER] **Hedging:** Prohibit "might", "could", "probably", "should".
+- [NEVER] **Meta-Commentary:** Prohibit "Sourced from", "Confirmed with".
 
-[REFERENCE] Grammar rules → `style-standards/references/voice/grammar.md`.
+[REFERENCE] Grammar → `style-standards/references/voice/grammar.md`.
 
 <br>
 
@@ -53,7 +53,7 @@ ${one-sentence-purpose}
 
 ---
 ## [2][STRUCTURE]
->**Dictum:** *Structure rules govern readability.*
+>**Dictum:** *Structured formatting reduces cognitive load.*
 
 <br>
 
@@ -64,11 +64,11 @@ ${one-sentence-purpose}
 |   [3]   | Header Usage     | ${threshold}  | ${header-usage-rule}             |
 |   [4]   | List Conversion  | ${threshold}  | ${list-threshold-description}    |
 
-[REFERENCE] Structure rules → `style-standards/references/formatting/structure.md`.
+[REFERENCE] Structure → `style-standards/references/formatting/structure.md`.
 
 ---
 ## [3][CONSTRAINTS]
->**Dictum:** *Constraints enforce quality.*
+>**Dictum:** *Explicit boundaries enforce output quality.*
 
 <br>
 
@@ -87,11 +87,11 @@ ${one-sentence-purpose}
 - [NEVER] **${prohibited-pattern-2}:** ${rationale-2}.
 - [NEVER] **${prohibited-pattern-3}:** ${rationale-3}.
 
-[REFERENCE] Constraint rules → `style-standards/references/voice/constraints.md`.
+[REFERENCE] Constraints → `style-standards/references/voice/constraints.md`.
 
 ---
 ## [4][VALIDATION]
->**Dictum:** *Checklist enforces compliance.*
+>**Dictum:** *Pre-flight verification prevents deployment errors.*
 
 <br>
 

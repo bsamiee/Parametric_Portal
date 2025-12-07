@@ -1,5 +1,5 @@
 # [H1][LIFECYCLE]
->**Dictum:** *Event selection determines automation scope.*
+>**Dictum:** *Hook effectiveness requires matching event to intervention goal.*
 
 <br>
 
@@ -7,7 +7,7 @@ Ten lifecycle events span agent execution. Each fires at distinct point with eve
 
 ---
 ## [1][EVENTS]
->**Dictum:** *Blocking capability determines intervention power.*
+>**Dictum:** *Blocking events enforce; non-blocking events observe.*
 
 <br>
 
@@ -26,50 +26,58 @@ Ten lifecycle events span agent execution. Each fires at distinct point with eve
 
 ---
 ## [2][INPUT_SCHEMAS]
->**Dictum:** *Input structure varies by event type.*
+>**Dictum:** *Event-specific fields enable targeted automation.*
 
 <br>
 
 ### [2.1][BASE_FIELDS]
-All events receive:
+Events receive:
 
-| [INDEX] | [FIELD]           | [TYPE] | [DESCRIPTION]                   |
-| :-----: | ----------------- | ------ | ------------------------------- |
-|   [1]   | `session_id`      | string | Current session identifier      |
-|   [2]   | `transcript_path` | string | Path to session.jsonl           |
-|   [3]   | `hook_event_name` | string | Event name (e.g., "PreToolUse") |
-|   [4]   | `cwd`             | string | Current working directory       |
+| [INDEX] | [FIELD]           | [TYPE] | [DESCRIPTION]                                   |
+| :-----: | ----------------- | ------ | ----------------------------------------------- |
+|   [1]   | `session_id`      | string | Current session identifier                      |
+|   [2]   | `transcript_path` | string | Path to session.jsonl                           |
+|   [3]   | `hook_event_name` | string | Event name (e.g., "PreToolUse")                 |
+|   [4]   | `cwd`             | string | Current working directory                       |
+|   [5]   | `permission_mode` | string | `default\|plan\|acceptEdits\|bypassPermissions` |
 
 ### [2.2][TOOL_EVENTS]
 PreToolUse, PermissionRequest, PostToolUse add:
 
-| [INDEX] | [FIELD]           | [TYPE] | [DESCRIPTION]             |
-| :-----: | ----------------- | ------ | ------------------------- |
-|   [1]   | `tool_name`       | string | Tool being invoked        |
-|   [2]   | `tool_input`      | object | Tool parameters           |
-|   [3]   | `tool_use_id`     | string | Unique tool invocation ID |
-|   [4]   | `permission_mode` | string | Permission context        |
+| [INDEX] | [FIELD]       | [TYPE] | [DESCRIPTION]             |
+| :-----: | ------------- | ------ | ------------------------- |
+|   [1]   | `tool_name`   | string | Tool being invoked        |
+|   [2]   | `tool_input`  | object | Tool parameters           |
+|   [3]   | `tool_use_id` | string | Unique tool invocation ID |
 
 PostToolUse adds `tool_response` with tool output.
 
-### [2.3][SESSION_EVENTS]
+### [2.3][STOP_EVENTS]
+Stop, SubagentStop add:
+
+| [INDEX] | [FIELD]            | [TYPE]  | [DESCRIPTION]                                  |
+| :-----: | ------------------ | ------- | ---------------------------------------------- |
+|   [1]   | `stop_hook_active` | boolean | True if previous Stop hook kept Claude running |
+
+### [2.4][SESSION_EVENTS]
 
 | [INDEX] | [EVENT]      | [FIELD]  | [VALUES]                                        |
 | :-----: | ------------ | -------- | ----------------------------------------------- |
 |   [1]   | SessionStart | `source` | `startup`, `resume`, `clear`, `compact`         |
 |   [2]   | SessionEnd   | `reason` | `clear`, `logout`, `prompt_input_exit`, `other` |
 
-### [2.4][OTHER_EVENTS]
+### [2.5][OTHER_EVENTS]
 
-| [INDEX] | [EVENT]          | [ADDITIONAL_FIELD]    | [DESCRIPTION]           |
+| [INDEX] | [EVENT]          | [FIELD]               | [DESCRIPTION]           |
 | :-----: | ---------------- | --------------------- | ----------------------- |
 |   [1]   | UserPromptSubmit | `prompt`              | User's input text       |
 |   [2]   | PreCompact       | `trigger`             | `manual` or `auto`      |
 |   [3]   | PreCompact       | `custom_instructions` | Compaction instructions |
+|   [4]   | Notification     | `message`             | Notification content    |
 
 ---
 ## [3][EXECUTION]
->**Dictum:** *Execution constraints bound hook behavior.*
+>**Dictum:** *Timeouts and deduplication prevent runaway execution.*
 
 <br>
 
@@ -83,15 +91,18 @@ PostToolUse adds `tool_response` with tool output.
 
 ---
 ## [4][EXIT_CODES]
->**Dictum:** *Exit code 2 blocks; other codes log.*
+>**Dictum:** *Blocking requires exit code 2; exit code 1 blocks erroneously.*
 
 <br>
 
-| [INDEX] | [CODE] | [MEANING]          | [BEHAVIOR]                           |
+| [INDEX] | [CODE] | [DOCUMENTED]       | [ACTUAL_BEHAVIOR]                    |
 | :-----: | :----: | ------------------ | ------------------------------------ |
 |   [1]   |   0    | Success            | Continue normally                    |
-|   [2]   |   2    | Block              | Block action, stderr shown to Claude |
-|   [3]   | Other  | Non-blocking error | Log error, continue execution        |
+|   [2]   |   1    | Non-blocking error | Blocks execution                     |
+|   [3]   |   2    | Block              | Block action, stderr shown to Claude |
+|   [4]   | Other  | Non-blocking error | Log error, continue execution        |
+
+[CRITICAL] Exit 0 signals warnings. Exit 2 blocks intentionally.
 
 ### [4.1][EXIT_2_BEHAVIOR]
 
@@ -107,25 +118,16 @@ PostToolUse adds `tool_response` with tool output.
 
 ---
 ## [5][KNOWN_ISSUES]
->**Dictum:** *Known bugs inform defensive implementation.*
+>**Dictum:** *Bug awareness prevents deployment failures.*
 
 <br>
 
-| [INDEX] | [ISSUE]          | [DESCRIPTION]                                    |
-| :-----: | ---------------- | ------------------------------------------------ |
-|   [1]   | Race condition   | PermissionRequest hooks >1-2s may show dialog    |
-|   [2]   | Env substitution | `$CLAUDE_TOOL_NAME` may fail in some contexts    |
-|   [3]   | Context bridging | SubagentStop cannot pass context to parent agent |
+| [INDEX] | [ISSUE]            | [DESCRIPTION]                                    |
+| :-----: | ------------------ | ------------------------------------------------ |
+|   [1]   | Exit code 1 blocks | Despite docs, exit 1 blocks execution (#4809)    |
+|   [2]   | Race condition     | PermissionRequest hooks >1.5s may show dialog    |
+|   [3]   | Env substitution   | `$CLAUDE_TOOL_NAME` may fail in some contexts    |
+|   [4]   | Context bridging   | SubagentStop cannot pass context to parent agent |
+|   [5]   | SessionEnd/clear   | `/clear` doesn't fire SessionEnd hook (#6428)    |
 
----
-## [6][VALIDATION]
->**Dictum:** *Gate checklist ensures correct event selection.*
-
-<br>
-
-[VERIFY] Pre-implementation:
-- [ ] Event matches automation goal (blocking vs observing).
-- [ ] Input schema fields accessed correctly.
-- [ ] Exit code 2 used only for intentional blocking.
-- [ ] Timeout appropriate for script complexity.
-- [ ] Race conditions considered for permission hooks.
+[REFERENCE] Validation checklist: [→validation.md§2](./validation.md#2lifecycle_gate)

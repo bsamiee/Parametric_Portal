@@ -1,15 +1,15 @@
 # [H1][CONFIGURATION]
->**Dictum:** *Scope hierarchy determines response style precedence.*
+>**Dictum:** *Hierarchical scope governance ensures response style consistency.*
 
 <br>
 
 [IMPORTANT] Configuration hierarchy: global (1) → project (2) → skill (3) → agent (4) → command (5). Higher precedence overrides lower.
 
-[CRITICAL] **DELEGATE** Voice, formatting, and constraint rules → `style-standards` skill. This file covers scope hierarchy and embedding patterns only.
+[CRITICAL] **DELEGATE** Voice, formatting, constraint rules → `style-standards` skill. Scope hierarchy and embedding patterns covered here.
 
 ---
 ## [1][HIERARCHY]
->**Dictum:** *Five scope levels enable granular control.*
+>**Dictum:** *Five-level scope hierarchy enables granular control.*
 
 <br>
 
@@ -25,7 +25,7 @@
 
 ---
 ## [2][GLOBAL]
->**Dictum:** *CLAUDE.md governs all responses.*
+>**Dictum:** *Global defaults require single source configuration.*
 
 <br>
 
@@ -57,7 +57,7 @@
 
 ---
 ## [3][PROJECT]
->**Dictum:** *Project scope overrides global.*
+>**Dictum:** *Specialized contexts require project-level overrides.*
 
 <br>
 
@@ -81,7 +81,7 @@
 
 ---
 ## [4][SKILL_AGENT]
->**Dictum:** *Skill/agent scope enables task-specific output.*
+>**Dictum:** *Skill/agent scope isolation enables task-specific output.*
 
 <br>
 
@@ -112,7 +112,7 @@ tools: Read, ...
 
 ---
 ## [5][COMMAND]
->**Dictum:** *Command scope is narrowest override.*
+>**Dictum:** *Narrowest scope enables single invocation specialization.*
 
 <br>
 
@@ -131,7 +131,7 @@ tools: Read, ...
 
 ---
 ## [6][STORAGE]
->**Dictum:** *Two directories serve distinct purposes.*
+>**Dictum:** *Distinct storage directories enable format-style separation.*
 
 <br>
 
@@ -140,21 +140,7 @@ tools: Read, ...
 |   [1]   | `.claude/styles/`        | Agent-level | Data format definitions    |
 |   [2]   | `.claude/output-styles/` | Global      | Response style definitions |
 
-**`.claude/styles/`** — Structured data formats (JSON schema, Markdown-KV, YAML). Embedded via `@` in agent/command body.
-
+**`.claude/styles/`** — Structured data formats (JSON schema, Markdown-KV, YAML). Embedded via `@` in agent/command body.<br>
 **`.claude/output-styles/`** — Prose response styles (voice, tone, structure). Referenced from CLAUDE.md or standalone.
 
----
-## [7][VALIDATION]
->**Dictum:** *Gate checklist enforces configuration compliance.*
-
-<br>
-
-[VERIFY]:
-- [ ] Scope level matches use case (global vs specialized).
-- [ ] CLAUDE.md output section <= 100 LOC.
-- [ ] Override sections document divergence reason.
-- [ ] Reference pattern uses `@` syntax with valid path.
-- [ ] Reference files exist in `.claude/styles/` or `.claude/output-styles/`.
-- [ ] Voice/formatting rules delegate to `style-standards`—no duplication.
-- [ ] Inheritance hierarchy respected (higher precedence wins).
+[REFERENCE] Validation checklist: [→validation.md§2](./validation.md#2configuration_gate)

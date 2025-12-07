@@ -7,7 +7,7 @@
 
 ---
 ## [1][ARGUMENT_CAPTURE]
->**Dictum:** *Pattern choice determines parameter resolution behavior.*
+>**Dictum:** *Pattern choice determines resolution behavior.*
 
 <br>
 
@@ -35,7 +35,7 @@ Target: ${1:-src}  Format: ${2:-json}
 
 ---
 ## [2][FILE_REFERENCES]
->**Dictum:** *File references inject context at interpolation time.*
+>**Dictum:** *File references inject context at interpolation.*
 
 <br>
 
@@ -67,7 +67,7 @@ Compare @src/v1/api.ts with @src/v2/api.ts. Summarize breaking changes.
 
 ---
 ## [3][SHELL_EXECUTION]
->**Dictum:** *Shell injection captures runtime state unavailable at command definition.*
+>**Dictum:** *Shell execution captures runtime state.*
 
 <br>
 
@@ -101,7 +101,7 @@ Analyze changes since last release.
 
 ---
 ## [4][SKILL_LOADING]
->**Dictum:** *Orchestrators require skill context for validation authority.*
+>**Dictum:** *Skill context grants orchestrators validation authority.*
 
 <br>
 
@@ -141,7 +141,7 @@ allowed-tools: Read, Task, TodoWrite
 
 ---
 ## [5][PATTERN_SELECTION]
->**Dictum:** *Structure determines interpolation behavior.*
+>**Dictum:** *Scenario determines pattern selection.*
 
 <br>
 
@@ -160,7 +160,7 @@ allowed-tools: Read, Task, TodoWrite
 
 ---
 ## [6][ANTI_PATTERNS]
->**Dictum:** *Pattern mixing violates substitution ordering assumptions.*
+>**Dictum:** *Pattern mixing causes unpredictable substitution.*
 
 <br>
 

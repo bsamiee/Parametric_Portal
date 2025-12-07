@@ -7,7 +7,7 @@
 
 ---
 ## [1][SYNTAX_PATTERNS]
->**Dictum:** *Type conventions eliminate runtime parameter errors.*
+>**Dictum:** *Type conventions prevent runtime errors.*
 
 <br>
 
@@ -21,7 +21,7 @@
 
 ---
 ## [2][ENUM_HINTS]
->**Dictum:** *Constrained inputs eliminate validation overhead.*
+>**Dictum:** *Constrained inputs reduce validation overhead.*
 
 <br>
 
@@ -38,7 +38,7 @@ argument-hint: [goal: optimize|upgrade|audit] [target-type?]
 
 ---
 ## [3][ORDERING]
->**Dictum:** *Predictable sequences maximize recall accuracy.*
+>**Dictum:** *Predictable ordering maximizes recall.*
 
 <br>
 
@@ -50,7 +50,7 @@ argument-hint: [goal: optimize|upgrade|audit] [target-type?]
 
 ---
 ## [4][EXAMPLES]
->**Dictum:** *Concrete patterns encode abstract rules.*
+>**Dictum:** *Examples encode abstract rules.*
 
 <br>
 
@@ -80,7 +80,7 @@ argument-hint: [option: a|b|c|d|e|f|g|h|i]
 
 ---
 ## [5][ANTI_PATTERNS]
->**Dictum:** *Negative examples establish boundary constraints.*
+>**Dictum:** *Negative examples establish boundaries.*
 
 <br>
 

@@ -1,7 +1,7 @@
 ---
 name: hooks-builder
 type: standard
-depth: base
+depth: extended
 description: >-
   Creates and configures Claude Code hooks for lifecycle automation. Use when
   implementing PreToolUse validation, PostToolUse formatting, PermissionRequest
@@ -9,110 +9,98 @@ description: >-
 ---
 
 # [H1][HOOKS-BUILDER]
->**Dictum:** *Hooks encode deterministic behavior; prompts cannot guarantee execution.*
+>**Dictum:** *Deterministic behavior requires hooks; prompts fail execution guarantees.*
 
 <br>
 
-Build Claude Code hooks—shell commands executing at agent lifecycle events.
+Build Claude Code hooks—shell commands execute at agent lifecycle events.
 
-**Scope:**<br>
+**Tasks:**
+1. Read [index.md](./index.md) — Reference file listing for navigation
+2. Read [lifecycle.md](./references/lifecycle.md) — Event table, input schemas, exit codes
+3. Read [schema.md](./references/schema.md) — Configuration structure, matchers, JSON responses
+4. (integration) Read [integration.md](./references/integration.md) — Environment variables, context injection
+5. (scripting) Read [scripting.md](./references/scripting.md) — Python standards, security patterns
+6. (recipes) Read [recipes.md](./references/recipes.md) — Proven implementation patterns
+7. (troubleshooting) Read [troubleshooting.md](./references/troubleshooting.md) — Known issues, platform workarounds
+8. (prose) Load `style-standards` skill — Voice, formatting, constraints
+9. Validate — Quality gate; see §VALIDATION
+
+**Scope:**
 - *Event Selection:* Choose hook type by automation goal (blocking vs observing).
 - *Configuration:* Author settings.json entries with matchers and timeouts.
 - *Response Handling:* Control agent via exit codes, JSON responses, or prompt evaluation.
 
-**Domain Navigation:**<br>
-- *[SCHEMA]* — Configuration structure, matchers, JSON response formats. Load for authoring hooks.
-- *[LIFECYCLE]* — Event flow, input schemas, exit codes. Load for understanding behavior.
-- *[INTEGRATION]* — Environment variables, context injection, precedence. Load for advanced automation.
-- *[SCRIPTING]* — Python 3.14 standards, security patterns, functional style. Load for writing scripts.
-
-[REFERENCE]: [→index.md](./index.md) — Complete reference file listing.
+[REFERENCE]: [index.md](./index.md) — Complete reference file listing
 
 ---
-## [2][INSTRUCTIONS]
->**Dictum:** *Progressive disclosure optimizes context loading.*
+## [1][EVENT_SELECTION]
+>**Dictum:** *Automation goal determines hook type; blocking capability varies by event.*
 
 <br>
 
-**Universal Tasks:**<br>
-1. Read [→index.md](./index.md): Reference file listing for navigation.
+**Decision Gate:**<br>
+- *Intercept before execution?* → PreToolUse (validate/block/modify parameters)
+- *Control permission dialogs?* → PermissionRequest (auto-approve/deny)
+- *React after completion?* → PostToolUse (format, lint, add context)
+- *Inject at session boundaries?* → SessionStart (context), UserPromptSubmit (per-message)
+- *Evaluate task completion?* → Stop/SubagentStop (prompt type for LLM judgment)
+
+**Blocking vs Observing:**
+- *Blocking (exit 2):* PreToolUse, PermissionRequest, PostToolUse, UserPromptSubmit, Stop, SubagentStop
+- *Observing only:* Notification, PreCompact, SessionStart, SessionEnd
 
 ---
-## [3][EVENTS]
->**Dictum:** *Ten events span agent lifecycle; six can block.*
+## [2][CONFIGURATION]
+>**Dictum:** *Centralized configuration enables scope-aware hook precedence.*
 
 <br>
 
-| [INDEX] | [EVENT]           | [TRIGGER]                  | [BLOCKS] | [PRIMARY_USE]              |
-| :-----: | ----------------- | -------------------------- | :------: | -------------------------- |
-|   [1]   | PreToolUse        | Before tool execution      |   Yes    | Validate, block, modify    |
-|   [2]   | PermissionRequest | Permission dialog shown    |   Yes    | Auto-approve/deny, modify  |
-|   [3]   | PostToolUse       | After tool completion      |   Yes    | Format code, add context   |
-|   [4]   | UserPromptSubmit  | User submits prompt        |   Yes    | Inject context, validate   |
-|   [5]   | Stop              | Agent finishes responding  |   Yes    | Force continuation         |
-|   [6]   | SubagentStop      | Subagent task completes    |   Yes    | Evaluate completion        |
-|   [7]   | Notification      | Agent sends notification   |    No    | Custom desktop alerts      |
-|   [8]   | PreCompact        | Before context compaction  |    No    | Backup transcripts         |
-|   [9]   | SessionStart      | Session init or resume     |    No    | Load context, set env vars |
-|  [10]   | SessionEnd        | Session terminates         |    No    | Cleanup, persist state     |
-
-**Required Task:**<br>
-1. Read [→lifecycle.md](./references/lifecycle.md): Input schemas, exit codes, execution model.
-
----
-## [4][CONFIGURATION]
->**Dictum:** *Settings.json is the sole registration mechanism.*
-
-<br>
-
-| [INDEX] | [SCOPE] | [PATH]                        | [USE]               | [GIT]  |
-| :-----: | ------- | ----------------------------- | ------------------- | :----: |
-|   [1]   | User    | `~/.claude/settings.json`     | Global, all projects|  N/A   |
-|   [2]   | Project | `.claude/settings.json`       | Shared, committed   | Commit |
-|   [3]   | Local   | `.claude/settings.local.json` | Personal, testing   | Ignore |
+| [INDEX] | [SCOPE] | [PATH]                        | [USE]                | [GIT]  |
+| :-----: | ------- | ----------------------------- | -------------------- | :----: |
+|   [1]   | User    | `~/.claude/settings.json`     | Global, all projects |  N/A   |
+|   [2]   | Project | `.claude/settings.json`       | Shared, committed    | Commit |
+|   [3]   | Local   | `.claude/settings.local.json` | Personal, testing    | Ignore |
 
 **Precedence:** Local > Project > User.
 
-**Required Task:**<br>
-1. Read [→schema.md](./references/schema.md): Configuration schema, matchers, JSON responses.
-
 ---
-## [5][IMPLEMENTATION]
->**Dictum:** *Two hook types serve different complexity levels.*
+## [3][IMPLEMENTATION]
+>**Dictum:** *Deterministic and evaluative patterns require distinct execution modes.*
 
 <br>
 
-| [INDEX] | [TYPE]   | [USE_CASE]                       | [TIMEOUT] | [CHARACTERISTICS]       |
-| :-----: | -------- | -------------------------------- | :-------: | ----------------------- |
-|   [1]   | command  | Validation, formatting, rules    |    60s    | Deterministic, fast     |
-|   [2]   | prompt   | Complex evaluation, LLM judgment |    30s    | Context-aware, flexible |
+| [INDEX] | [TYPE]  | [USE_CASE]                       | [TIMEOUT] | [CHARACTERISTICS]       |
+| :-----: | ------- | -------------------------------- | :-------: | ----------------------- |
+|   [1]   | command | Validation, formatting, rules    |    60s    | Deterministic, fast     |
+|   [2]   | prompt  | Complex evaluation, LLM judgment |    30s    | Context-aware, flexible |
 
-**Eligible for prompt type:** Stop, SubagentStop, UserPromptSubmit, PreToolUse, PermissionRequest.
+**Prompt Type Scope:** Stop and SubagentStop events only; Haiku provides fast LLM evaluation.
 
-**Required Task:**<br>
-1. Read [→integration.md](./references/integration.md): Environment variables, context injection.
+**Guidance:**<br>
+- `Command hooks` — Deterministic scripts receive JSON stdin; return exit codes + optional JSON stdout.
+- `Prompt hooks` — LLM evaluates decisions; response schema: `{"decision": "approve"|"block", "reason": "..."}`.
+- `Blocking` — Exit code 2 blocks action; stderr routes to Claude. Exit 1 also blocks (known bug #4809).
 
 ---
-## [6][SCRIPTING]
->**Dictum:** *Functional pipelines produce reliable hook scripts.*
+## [4][SCRIPTING]
+>**Dictum:** *Hook reliability requires functional pipeline patterns.*
 
 <br>
 
 Python 3.14+ with strict typing. Zero imperative patterns.
 
-**Required Task:**<br>
-1. Read [→scripting.md](./references/scripting.md): Tooling gates, philosophy pillars, security patterns.
-
 ---
-## [7][VALIDATION]
->**Dictum:** *Gate checklist prevents registration failures.*
+## [5][VALIDATION]
+>**Dictum:** *Gates prevent incomplete artifacts.*
 
 <br>
 
-[VERIFY] Pre-deployment:
-- [ ] JSON syntax valid—no trailing commas.
-- [ ] `type` field is `"command"` or `"prompt"`.
-- [ ] `command` path exists and is executable.
-- [ ] Matcher regex valid—test with `/hooks` command.
-- [ ] Timeout appropriate: ≤60s for command, ≤30s for prompt.
-- [ ] Security patterns applied per scripting.md.
+[VERIFY] Completion:
+- [ ] Event: Selected correct hook type for automation goal.
+- [ ] Schema: Configuration structure validated per schema.md.
+- [ ] Integration: Environment variables and context injection applied.
+- [ ] Scripting: Security patterns and tooling gates passed.
+- [ ] Quality: JSON syntax valid, timeouts appropriate.
+
+[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

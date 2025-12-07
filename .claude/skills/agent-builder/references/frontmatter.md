@@ -40,15 +40,15 @@
 
 <br>
 
-Semantic matching via reasoning—no embeddings, no keyword matching.
+Semantic matching via reasoning. No embeddings. No keyword matching.
 
-**Voice Constraints:**<br>
-- Third person: "Analyzes..." never "I analyze".
-- Active voice: "Creates data" never "Data is created".
-- Present tense: "Validates..." never "Will validate".
-- No hedging: reject `might`, `could`, `should`.
+Voice constraints:<br>
+- Third person: "Analyzes..." not "I analyze".
+- Active voice: "Creates data" not "Data is created".
+- Present tense: "Validates..." not "Will validate".
+- No hedging: Reject `might`, `could`, `should`.
 
-**Structure Pattern:**<br>
+Structure pattern:<br>
 `[Capability statement]. Use when [trigger-1], [trigger-2], or [trigger-3].`
 
 ---
@@ -94,7 +94,7 @@ Semantic matching via reasoning—no embeddings, no keyword matching.
 |   [4]   | Quote special chars      | Unquoted `: # [ ] { }`   | Field value corrupted |
 |   [5]   | Use `>-` for multi-line  | Literal scalar `\|`      | Indexing error        |
 
-**Multi-line Pattern:**<br>
+Multi-line pattern:<br>
 
 ```yaml
 description: >-
@@ -134,17 +134,4 @@ skills: style-standards
 ---
 ```
 
----
-## [5][VALIDATION]
->**Dictum:** *Gate checklist prevents discovery failures.*
-
-<br>
-
-[VERIFY] Pre-deployment:
-- [ ] Delimiters: `---` on line 1; closing `---` on own line.
-- [ ] Syntax: spaces only—no tabs; quote special characters.
-- [ ] `name`: lowercase + hyphens; max 64 chars; matches file.
-- [ ] `description`: third person, active voice, present tense.
-- [ ] `description`: includes "Use when" + 3+ trigger scenarios.
-- [ ] `description`: catch-all phrase for broader applicability.
-- [ ] Multi-line: folded scalar `>-` only—never `|`.
+[REFERENCE] Validation checklist: [→validation.md§3](./validation.md#3frontmatter_gate)

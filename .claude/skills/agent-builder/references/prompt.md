@@ -3,7 +3,7 @@
 
 <br>
 
-Content after frontmatter defines agent system prompt. Structure determines effectiveness.
+Body after frontmatter forms system prompt; structure determines effectiveness.
 
 ---
 ## [1][STRUCTURE]
@@ -22,7 +22,7 @@ Content after frontmatter defines agent system prompt. Structure determines effe
 
 ### [1.1][ROLE_LINE]
 
-Open with concise role definition. Set behavioral framing.
+Open with concise role definition; set behavioral framing.
 
 ```markdown
 Extract and consolidate style guidance from documentation. Return severity-ranked summaries.
@@ -30,7 +30,7 @@ Extract and consolidate style guidance from documentation. Return severity-ranke
 
 [IMPORTANT]:
 - [NEVER] Verbose introductions or explanations.
-- [ALWAYS] Imperative voice, single sentence.
+- [ALWAYS] Imperative voice and single sentence.
 - [ALWAYS] State concrete deliverable.
 
 ---
@@ -69,7 +69,7 @@ Return structured summary with severity ranking.
 |   [4]   | `[NEVER]`     | Absolute prohibition  | No exceptions |
 |   [5]   | `[VERIFY]`    | Gate checklist        | Pre-condition |
 
-**Placement Pattern:**
+Placement pattern:
 
 ```markdown
 [CRITICAL]:
@@ -117,16 +117,4 @@ Return structured summary:
 
 [REFERENCE] Template scaffold: [→agent.template.md](../templates/agent.template.md)
 
----
-## [5][VALIDATION]
->**Dictum:** *Gate checklist ensures prompt quality.*
-
-<br>
-
-[VERIFY] Pre-deployment:
-- [ ] Role line: concise, imperative, states deliverable.
-- [ ] Sections: H2 with numbered sigils.
-- [ ] Constraints: `[CRITICAL]`/`[IMPORTANT]` markers.
-- [ ] Output spec: explicit format defined.
-- [ ] No verbose introductions or explanations.
-- [ ] Stateless operation—no prior context assumptions.
+[REFERENCE] Validation checklist: [→validation.md§4](./validation.md#4prompt_gate)

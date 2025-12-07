@@ -10,87 +10,59 @@ description: Enforces style consistency for documentation and code with support 
 
 <br>
 
-Style standards governing all file creation and modification in this monorepo.
+Govern file creation and modification in monorepo.
 
-**Scope:**<br>
+**Tasks:**
+1. Read [index.md](./index.md) — Reference file listing for navigation
+2. Read [keywords.md](./references/keywords.md) — Canonical keyword list; all Markers use official terms
+3. (taxonomy) Read [taxonomy.md](./references/taxonomy.md) — Lexicon, references, stati definitions
+4. (voice) Read [voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density
+5. (formatting) Read [formatting.md](./references/formatting.md) — Structure, typeset, spacing, examples
+6. Apply standards — Implement per domain Guidance and Best-Practices
+7. Validate — Quality gate; see §VALIDATION
+
+**Scope:**
 - *Documentation:* Markdown structure, headers, lists, tables, Dictums, separators.
 - *Code:* Comments, headers, section dividers, naming conventions, file organization.
 
-**Domain Navigation:**<br>
+**Domain Navigation:**
 - *[TAXONOMY]* — Terms, markers, cross-references. Load for: sigils, stati, lexicon definitions.
 - *[VOICE]* — Tone, grammar, comments, naming. Load for: imperative phrasing, headers, code naming.
 - *[FORMATTING]* — Layout, separators, spacing. Load for: header structure, dividers, whitespace rules.
 
-[REFERENCE]: [→index.md](./index.md) — Complete reference file listing.
-
-# [H2][INSTRUCTIONS]
->**Dictum:** *Progressive disclosure optimizes context loading.*
-
-<br>
-
-[CRITICAL] Consistency over all else. Refactor inconsistent formatting to project standards.
-
-**Instruction Structure:**<br>
-- *Required Task* — Mandatory read before domain work. Numbered, sequential.
-- *References* — Supplemental files for deeper context. Load as needed.
-- *Guidance* — Core implementation rules. Imperative tone.
-- *Best-Practices* — Usage patterns and limits. Declarative tone.
-
-**Task Adherence:**<br>
-1. Complete **Universal Tasks** first—applies to all domains.
-2. Complete **Required Task** for target domain before implementation.
-
-**Universal Tasks:**<br>
-1. Read [→index.md](./index.md): Reference file listing for navigation.
-2. Read [→keywords.md](references/keywords.md): Canonical keyword list; all `Markers` use official terms.
+[REFERENCE]: [index.md](./index.md) — Reference file listing
 
 ---
-## [2.1][TAXONOMY]
+## [1][TAXONOMY]
 >**Dictum:** *Vocabulary anchors structure; Markers encode state.*
 
 <br>
 
-Taxonomy signals intent for agent execution. Leverage terms for document traversal and desired behavior. Create all files with project taxonomy.
-
-**Required Task:**<br>
-1. Read [→lexicon.md](references/taxonomy/lexicon.md): Definitions for all monorepo-specific terms.
-
-**References:**<br>
-- [→references.md](references/taxonomy/references.md): Cross-reference notation and linking syntax.
-- [→stati.md](references/taxonomy/stati.md): Canonical `Stati` glyphs and stasis markers.
+Signals intent for agent execution. Leverage terms for document traversal.
 
 **Guidance:**<br>
-- `Dictum` - Read all `Dictum` + headers first for rapid file mapping.
+- `Dictum` - Read `Dictum` + headers first—rapid file mapping.
 - `Qualifier` - [ALWAYS] respect inline directives when encountered.
 - `Preamble` - Signals **section-wide** imperative.
 - `Terminus` - Signals **task-specific** imperative; **isolated** effect.
 - `Corpus` - Read after `Preamble`/`Terminus` orientation.
-- `Gate` - [CRITICAL] finalize all checklist items before proceeding; use `[VERIFY]` to denote `Gate` checklists.
+- `Gate` - [CRITICAL] Finalize checklist items prior to proceeding; use `[VERIFY]` for `Gate` checklists.
 - `Directive` - Lists require strict adherence; polarity set by `Modifier`.
 - `Stati` - Replace emoji.
 
 **Best-Practices:**<br>
-- **Markers:** Hard limit of **10 per file**. Strategic placement maximizes compliance.
+- **Markers:** Hard limit: **10 per file**. Strategic placement maximizes compliance.
   - *Preamble/Terminus* - 0–4 markers per file maximum.
 
+[REFERENCE]: [→taxonomy.md](./references/taxonomy.md) — Lexicon, references, stati
+
 ---
-## [2.2][VOICE]
+## [2][VOICE]
 >**Dictum:** *Universal standards for LLM-optimized context, documentation, and agentic instructions.*
 
 <br>
 
-`Voice` applies to all documentation and comments. Scope: tone, list semantics, ordering primacy, grammar, syntax, modals, visuals, comment standards, keywords.
-
-**Required Task:**<br>
-1. Read [→grammar.md](references/voice/grammar.md): Tone, stopwords, punctuation, modals, syntax rules.
-
-**References:**<br>
-- [→ordering.md](references/voice/ordering.md): Primacy effects, attention weight distribution.
-- [→comments.md](references/voice/comments.md): Comment rules, code header formats, accuracy tradeoffs.
-- [→constraints.md](references/voice/constraints.md): Density limits, few-shot guidance.
-- [→naming.md](references/voice/naming.md): Code and file naming patterns.
-- [→density.md](references/voice/density.md): Tables, diagrams, format efficiency.
-- [→validation.md](references/voice/validation.md): Voice compliance checklist.
+Applies to documentation and comments. Scope: tone, list semantics, ordering primacy, grammar, syntax, modals, visuals, comment standards, keywords.
 
 **Guidance:**<br>
 - `Voice` - Active voice: 56% token reduction.
@@ -111,20 +83,15 @@ Taxonomy signals intent for agent execution. Leverage terms for document travers
 - **Tone** - Actions: imperative. Context/facts: declarative.
 - **Naming** - Prohibited: `utils`, `helpers`, `misc`, `config`, `cfg`, `opts`, `params`, `Data`, `Info`, `Manager`, `Service`.
 
+[REFERENCE]: [→voice.md](./references/voice.md) — Grammar, ordering, comments, constraints, naming, density
+
 ---
-## [2.3][FORMATTING]
+## [3][FORMATTING]
 >**Dictum:** *Whitespace and separator rules for document structure.*
 
 <br>
 
-Separators encode hierarchy. Whitespace is semantic, not cosmetic. Patterns enable rapid reference.
-
-**Required Task:**<br>
-1. Read [→structure.md](references/formatting/structure.md): Depth, lists, separators, headers, spacing rules.
-
-**References:**<br>
-- [→typeset.md](references/formatting/typeset.md): Case conventions, punctuation, table formatting.
-- [→example.md](references/formatting/example.md): Canonical formatting implementation.
+Separators encode hierarchy. Whitespace: semantic, not cosmetic. Patterns enable rapid reference.
 
 **Guidance:**<br>
 - `Dictum` - Place first after H1/H2. State WHY, not WHAT. Format: `>**Dictum:** *statement*`
@@ -147,3 +114,18 @@ Separators encode hierarchy. Whitespace is semantic, not cosmetic. Patterns enab
 - **Directive Ordering** - `[IMPORTANT]:` precedes `[CRITICAL]:`. Within list: `[ALWAYS]` precedes `[NEVER]`.
 - **Table Styling** - First column bold for category anchoring.
 
+[REFERENCE]: [→formatting.md](./references/formatting.md) — Structure, typeset, spacing, example
+
+---
+## [4][VALIDATION]
+>**Dictum:** *Gates prevent non-compliant output.*
+
+<br>
+
+[VERIFY] Completion:
+- [ ] Structure: Nesting ≤H3, critical constraints at sequence start.
+- [ ] Voice: Active voice, no stopwords, no hedging, no self-reference.
+- [ ] Formatting: Separators correct, spacing rules applied.
+- [ ] Consistency: All markers use canonical keywords.
+
+[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

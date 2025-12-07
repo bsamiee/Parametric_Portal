@@ -1,5 +1,5 @@
 # [H1][FORMATS]
->**Dictum:** *Format selection governs output reliability and token efficiency.*
+>**Dictum:** *Empirical format selection requires accuracy-token tradeoff analysis.*
 
 <br>
 
@@ -7,7 +7,7 @@
 
 ---
 ## [1][SELECTION]
->**Dictum:** *Empirical metrics inform format selection.*
+>**Dictum:** *Data-driven format choice requires 16pp accuracy awareness.*
 
 <br>
 
@@ -46,7 +46,7 @@
 
 ---
 ## [2][WEIGHTING]
->**Dictum:** *Attention distribution determines section ordering.*
+>**Dictum:** *5.79x attention differential requires priority-first placement.*
 
 <br>
 
@@ -61,7 +61,7 @@
 
 ---
 ## [3][EMBEDDING]
->**Dictum:** *Reference patterns enable format reuse.*
+>**Dictum:** *Duplication prevention across 3+ consumers requires reference pattern.*
 
 <br>
 
@@ -95,7 +95,7 @@ tools: Read, ...
 - Include `Read` in agent `tools:` frontmatter for reference pattern.
 - Embed format reference in body preamble. Exclude from H2 sections.
 
-[CRITICAL] Each `@` embeds entire file. Use inline embedding for single-use formats.
+[CRITICAL] Reference pattern embeds entire file at `@` marker. Use inline embedding for single-use formats.
 
 ---
 ### [3.2][VARIABLES]
@@ -105,47 +105,6 @@ tools: Read, ...
 - Optional: `${variable-name:-default}`
 - Conditional: `${variable-name?}`
 
-**Resolution:** Resolve frontmatter variables at compile-time. Resolve context values at runtime.
+**Resolution:** Compiler resolves frontmatter variables. Runtime resolves context values.
 
----
-## [4][VALIDATION]
->**Dictum:** *Compliance scoring enforces quality.*
-
-<br>
-
-| [INDEX] | [DIMENSION]       | [POINTS] | [VALIDATOR]                          |
-| :-----: | ----------------- | :------: | ------------------------------------ |
-|   [1]   | Format valid      |    30    | Parser accepts (JSON/YAML/XML/MD-KV) |
-|   [2]   | Required sections |    25    | All `required: true` present         |
-|   [3]   | Delimiters        |    20    | Fence + separator consistency        |
-|   [4]   | Variables         |    15    | All required vars resolved           |
-|   [5]   | Anti-bloat        |    10    | No prohibited patterns               |
-|         | **TOTAL**         | **100**  | Score >= 80 = pass                   |
-
-<br>
-
-### [4.1][ANTI_BLOAT]
-
-**Prohibited Patterns:**
-```regex
-/Sourced from|Confirmed with|Based on/i  → meta-commentary
-/This file|We do|You should/i            → self-reference
-/might|could|probably|perhaps/i          → hedging
-/\b(please|kindly|just|really)\b/i       → filler stopwords
-```
-
-[IMPORTANT] Prohibited patterns deduct 2 points per violation (maximum deduction: 10 points).
-
----
-## [5][GATE]
->**Dictum:** *Checklist enforces deployment readiness.*
-
-<br>
-
-[VERIFY]:
-- [ ] Format selected matches use case strength.
-- [ ] Sections weighted and ordered by severity.
-- [ ] Embedding pattern matches reuse requirements.
-- [ ] All required variables resolved.
-- [ ] No anti-bloat violations detected.
-- [ ] Validation score >= 80.
+[REFERENCE] Validation checklist: [→validation.md§1](./validation.md#1formats_gate)

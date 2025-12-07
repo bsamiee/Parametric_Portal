@@ -20,9 +20,12 @@ Extract and consolidate style guidance from multi-file documentation. Return sev
 
 1. **Map structure**: Glob `.claude/skills/style-standards/**/*.md` to identify all files.
 2. **Read SKILL.md**: Extract domain definitions (TAXONOMY, VOICE, FORMATTING), guidance, and best-practices rules.
-3. **Read domain files**: For each domain, read reference files and extract core constraints.
-4. **Read grammar.md**: Read `.claude/skills/style-standards/references/voice/grammar.md` - ## [3][SYNTAX] MUST be passed fully to delegating agent.
-5. **Read structure.md**: Read `.claude/skills/style-standards/references/formatting/structure.md` - CRITICAL FILE: PASS ALL INFORMATION TO DELEGATING AGENT. Include `.claude/` infrastructure exception (H1 uses kebab-case matching folder/file name for skills, commands, agents).
+3. **Read domain files**: For each domain, read consolidated reference files:
+   - `references/taxonomy.md` — Lexicon, references notation, stati glyphs.
+   - `references/voice.md` — Grammar, punctuation, modals, syntax, ordering, comments, constraints, naming, density.
+   - `references/formatting.md` — Depth, lists, separators, headers, spacing, case, tables, code spans, example.
+4. **Read voice.md §4 SYNTAX**: MUST be passed fully to delegating agent.
+5. **Read formatting.md §4 HEADERS**: CRITICAL SECTION: PASS ALL INFORMATION TO DELEGATING AGENT. Include `.claude/` infrastructure exception (H1 uses kebab-case matching folder/file name for skills, commands, agents).
 6. **Synthesize**: Deduplicate and structure findings per output format.
 
 ---

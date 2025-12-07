@@ -1,5 +1,5 @@
 # [H1][WORKFLOW_CREATE]
->**Dictum:** *Sequential phases with parallel dispatch ensure research-informed agent creation.*
+>**Dictum:** *Sequential phases ensure research-informed agent creation.*
 
 <br>
 
@@ -7,26 +7,22 @@
 
 ---
 ## [1][UNDERSTAND]
->**Dictum:** *Requirements clarity prevents rework.*
+>**Dictum:** *Clear requirements prevent rework.*
 
 <br>
 
 Confirm before proceeding:
-- `Name` — Kebab-case, descriptive, role/action-based. Reject: helper, processor, agent.
-- `Type` — readonly|write|orchestrator|full. Gates tools + model.
+- `Name` — Kebab-case, descriptive, and role/action-based. Reject helper, processor, agent.
+- `Type` — readonly|write|orchestrator|full. Type gates tools and model.
 - `Triggers` — What user intent activates? Capture 3+ scenarios.
 - `Deliverable` — What concrete output does this agent produce?
 - `Constraints` — What boundaries govern behavior?
 
-[VERIFY] Requirements captured:
-- [ ] Name follows naming conventions.
-- [ ] Type explicitly stated.
-- [ ] 3+ trigger scenarios identified.
-- [ ] Deliverable articulated.
+[REFERENCE] Requirements gate: [→validation.md§1](./validation.md#1requirements_gate)
 
 ---
 ## [2][ACQUIRE]
->**Dictum:** *Context loading precedes research.*
+>**Dictum:** *Context loading enables informed research.*
 
 <br>
 
@@ -44,9 +40,9 @@ Load agent-builder sections per Type:
 ---
 ### [2.2][LOAD_STANDARDS]
 
-Invoke `style-summarizer`. Extract:
-- Voice constraints (imperative prompt body, third person description).
-- Formatting rules (H2 with sigils, constraint markers).
+Invoke `style-summarizer`. Extract voice constraints and formatting rules:
+- Voice: imperative prompt body, third person description.
+- Formatting: H2 with sigils, constraint markers.
 
 [CRITICAL] Include style constraints in sub-agent prompts.
 
@@ -64,7 +60,7 @@ Deliverable: ${output_description}
 
 ---
 ## [3][RESEARCH]
->**Dictum:** *Delegated research maximizes coverage via specialized agents.*
+>**Dictum:** *Specialized agents maximize research coverage.*
 
 <br>
 
@@ -77,37 +73,26 @@ Invoke `deep-research`:
 
 [REFERENCE]: [→deep-research](../../deep-research/SKILL.md)
 
-**Post-dispatch:** Receive validated findings. Proceed to §3.2.
+Post-dispatch: Receive validated findings, then proceed to §3.2.
 
 ---
 ### [3.1][PLAN_SYNTHESIS]
 
 Invoke `parallel-dispatch` with 3 planning agents.
 
-**Input:** Research findings, constraint manifest, agent-builder SKILL.md + references, template.<br>
-**Deliverable:** Frontmatter fields, prompt sections, constraint list.<br>
-**Golden-path synthesis:** Combine strongest elements. Resolve conflicts via Type hierarchy.
+Input: Research findings, constraint manifest, agent-builder SKILL.md + references, and template.<br>
+Deliverable: Frontmatter fields, prompt sections, and constraint list.<br>
+Synthesis: Combine strongest elements, and resolve conflicts via Type hierarchy.
 
-[VERIFY] Plan synthesis complete:
-- [ ] Frontmatter fields defined.
-- [ ] Prompt sections outlined.
-- [ ] Trigger coverage confirmed.
+[REFERENCE] Plan gate: [→validation.md§2](./validation.md#2plan_gate)
 
 ---
 ## [4][AUTHOR]
->**Dictum:** *Type-gated creation prevents scope violations.*
+>**Dictum:** *Type gates prevent scope violations.*
 
 <br>
 
-### [4.1][VALIDATE_PLAN]
-
-[VERIFY]: Confirm plan compliance before creation:
-- [ ] Tools match Type gate.
-- [ ] Model matches Type gate.
-- [ ] Description includes "Use when" + 3+ triggers.
-
----
-### [4.2][CREATE_ARTIFACT]
+### [4.1][CREATE_ARTIFACT]
 
 Create `.claude/agents/${name}.md`:
 
@@ -120,7 +105,7 @@ Create `.claude/agents/${name}.md`:
 |   5    | §OUTPUT      | Explicit format specification                     |
 |   6    | §CONSTRAINTS | [CRITICAL]/[IMPORTANT] markers                    |
 
-**Type Gates:**
+Type gates:
 
 | [TYPE]       | [TOOLS]                       | [MODEL] |
 | ------------ | ----------------------------- | :-----: |
@@ -136,23 +121,14 @@ Create `.claude/agents/${name}.md`:
 
 ---
 ## [5][VALIDATE]
->**Dictum:** *Parallel review agents ensure comprehensive quality.*
+>**Dictum:** *Parallel review ensures comprehensive quality.*
 
 <br>
 
 Invoke `parallel-dispatch` with 3 review agents.
 
-**Input:** Agent file, plan + manifest, agent-builder SKILL.md + references.<br>
-**Review scope:** Frontmatter validity, trigger coverage, tool/model alignment, voice compliance.<br>
-**Post-dispatch:** Compile findings, reject false positives, apply fixes.
+Input: Agent file, plan + manifest, agent-builder SKILL.md + references.<br>
+Review scope: Frontmatter validity, trigger coverage, tool/model alignment, and voice compliance.<br>
+Post-dispatch: Compile findings, reject false positives, and apply fixes.
 
-[VERIFY] Quality gate:
-- [ ] Filename: kebab-case, `.md` extension.
-- [ ] `name`: matches filename (without extension).
-- [ ] `description`: third person, active, "Use when" clause, catch-all.
-- [ ] `tools`: matches Type gate (or omitted for full).
-- [ ] YAML: `---` delimiters, spaces only, `>-` for multi-line.
-- [ ] Role line: imperative, single sentence.
-- [ ] Sections: H2 with numbered sigils.
-- [ ] Constraints: [CRITICAL]/[IMPORTANT] markers present.
-- [ ] Output spec: explicit format defined.
+[REFERENCE] Artifact gate: [→validation.md§5](./validation.md#5artifact_gate)

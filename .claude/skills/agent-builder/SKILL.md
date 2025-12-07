@@ -6,19 +6,30 @@ description: Creates and configures Claude Code agent files (.claude/agents/*.md
 ---
 
 # [H1][AGENT-BUILDER]
->**Dictum:** *Discoverable agents extend capabilities via structured frontmatter, scoped tools, and behavioral prompts.*
+>**Dictum:** *Structured frontmatter and scoped tools enable discoverable agents.*
 
 <br>
 
-Agent files encode specialized execution contexts for main Claude agent invocation. Frontmatter controls discovery; markdown body encodes behavior.
+Specialized execution contexts for main Claude agent invocation. Frontmatter controls discovery; markdown body encodes behavior.
 
 **Location:** `.claude/agents/` (project) or `~/.claude/agents/` (user). Project agents override user agents on name collision.
 
-**Navigation:** [→index.md](./index.md) | [→frontmatter.md](./references/frontmatter.md) | [→prompt.md](./references/prompt.md) | [→workflow.md](./references/workflow.md)
+**Tasks:**
+1. Read [index.md](./index.md) — Reference file listing for navigation
+2. Read [frontmatter.md](./references/frontmatter.md) — Schema, triggers, syntax validation
+3. Read [prompt.md](./references/prompt.md) — Structure patterns, constraint markers
+4. Read [workflow.md](./references/workflow.md) — 5-phase creation process
+5. (prose) Load `style-standards` skill — Voice, formatting, constraints
+6. Execute per workflow — UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE
+7. Validate — Quality gate; see §VALIDATION
+
+**Templates:** [→agent.template.md](./templates/agent.template.md) — Standard agent scaffold.
+
+[REFERENCE]: [index.md](./index.md) — Complete reference file listing
 
 ---
 ## [1][FRONTMATTER]
->**Dictum:** *Metadata enables discovery before loading.*
+>**Dictum:** *Metadata enables discovery before load.*
 
 <br>
 
@@ -33,15 +44,13 @@ skills: style-standards
 ---
 ```
 
-| [INDEX] | [FIELD]       | [TYPE] | [REQ] | [CONSTRAINT]                              |
-| :-----: | ------------- | ------ | :---: | ----------------------------------------- |
-|   [1]   | `name`        | string |  Yes  | Kebab-case, max 64 chars, match filename  |
-|   [2]   | `description` | string |  Yes  | Third person, active voice, "Use when"    |
-|   [3]   | `tools`       | list   |  No   | Comma-separated; omit = inherit all tools |
-|   [4]   | `model`       | enum   |  No   | `haiku`, `sonnet`, `opus`, `inherit`      |
-|   [5]   | `skills`      | list   |  No   | Skill names agent can invoke              |
-
-**Required Task:** Consult [→frontmatter.md](./references/frontmatter.md)—schema details, trigger patterns, validation.
+| [INDEX] | [FIELD]       | [TYPE] | [REQ] | [CONSTRAINT]                               |
+| :-----: | ------------- | ------ | :---: | ------------------------------------------ |
+|   [1]   | `name`        | string |  Yes  | Kebab-case, max 64 chars, match filename   |
+|   [2]   | `description` | string |  Yes  | Third person, active voice, trigger clause |
+|   [3]   | `tools`       | list   |  No   | Comma-separated; omit = inherit all tools  |
+|   [4]   | `model`       | enum   |  No   | `haiku`, `sonnet`, `opus`, `inherit`       |
+|   [5]   | `skills`      | list   |  No   | Skill names agent can invoke               |
 
 ---
 ## [2][DISCOVERY]
@@ -49,7 +58,7 @@ skills: style-standards
 
 <br>
 
-LLM reasoning matches description—no embeddings, no keyword matching.
+Reasoning matches description directly—no embeddings, no keyword matching.
 
 | [INDEX] | [PATTERN]           | [EXAMPLE]                            | [MECHANISM]                |
 | :-----: | ------------------- | ------------------------------------ | -------------------------- |
@@ -68,7 +77,7 @@ LLM reasoning matches description—no embeddings, no keyword matching.
 
 ---
 ## [3][TOOLS]
->**Dictum:** *Tool declarations scope agent permissions.*
+>**Dictum:** *Tool declarations scope permissions.*
 
 <br>
 
@@ -86,7 +95,7 @@ LLM reasoning matches description—no embeddings, no keyword matching.
 
 ---
 ## [4][MODELS]
->**Dictum:** *Model selection balances capability, latency, and cost.*
+>**Dictum:** *Model selection balances capability against latency and cost.*
 
 <br>
 
@@ -108,17 +117,15 @@ LLM reasoning matches description—no embeddings, no keyword matching.
 
 ---
 ## [5][SYSTEM_PROMPT]
->**Dictum:** *Structured prompts constrain agent execution.*
+>**Dictum:** *Structured prompts constrain execution.*
 
 <br>
 
-Markdown body after frontmatter encodes agent behavior. Structure determines effectiveness.
-
-**Required Task:** Consult [→prompt.md](./references/prompt.md)—structure patterns, section ordering, constraint markers.
+Markdown body follows frontmatter. Body encodes agent behavior; structure determines effectiveness.
 
 ---
 ## [6][NAMING]
->**Dictum:** *Naming conventions enable rapid discovery.*
+>**Dictum:** *Naming conventions enable discovery.*
 
 <br>
 
@@ -135,38 +142,16 @@ Markdown body after frontmatter encodes agent behavior. Structure determines eff
 - [ALWAYS] Filename matches `name` field exactly.
 
 ---
-## [7][TEMPLATES]
->**Dictum:** *Templates accelerate creation via proven patterns.*
+## [7][VALIDATION]
+>**Dictum:** *Validation gates prevent incomplete artifacts.*
 
 <br>
 
-**Reference:** [→agent.template.md](./templates/agent.template.md) — Standard agent scaffold.
+[VERIFY] Completion:
+- [ ] Workflow: All 5 phases executed (UNDERSTAND → VALIDATE).
+- [ ] Frontmatter: Valid YAML, description with "Use when" clause.
+- [ ] Tools: Matches type gate (readonly|write|orchestrator|full).
+- [ ] Prompt: Role line + H2 sections + constraint markers.
+- [ ] Quality: Kebab-case naming, filename matches `name` field.
 
----
-## [8][WORKFLOW]
->**Dictum:** *Workflow governs phase execution for agent creation.*
-
-<br>
-
-**Required Task:** Consult [→workflow.md](./references/workflow.md)—5-phase creation process (UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE).
-
----
-## [9][VALIDATION]
->**Dictum:** *Gate checklist prevents registration failures.*
-
-<br>
-
-[VERIFY] Pre-deployment:
-- [ ] YAML: `---` delimiters, spaces only—no tabs.
-- [ ] `name`: matches filename, without extension.
-- [ ] `description`: third person, active, includes "Use when" clause.
-- [ ] `tools`: includes `Read` for every `@path` reference.
-- [ ] Multi-line descriptions: folded scalar `>-` only.
-- [ ] Filename: kebab-case, `.md` extension.
-
-| [INDEX] | [ERROR]           | [SYMPTOM]           | [FIX]                      |
-| :-----: | ----------------- | ------------------- | -------------------------- |
-|   [1]   | Tab character     | YAML parse failure  | Replace with spaces        |
-|   [2]   | Missing delimiter | Frontmatter ignored | Add `---` before and after |
-|   [3]   | Name mismatch     | Registration fails  | Match filename exactly     |
-|   [4]   | Vague description | Discovery fails     | Add "Use when" + triggers  |
+[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

@@ -1,5 +1,5 @@
 # [H1][WORKFLOW_CREATE]
->**Dictum:** *Sequential phases with parallel dispatch ensure research-informed command creation.*
+>**Dictum:** *Sequential phases ensure research-informed command creation.*
 
 <br>
 
@@ -7,7 +7,7 @@
 
 ---
 ## [1][UNDERSTAND]
->**Dictum:** *Requirements clarity prevents rework.*
+>**Dictum:** *Clear requirements prevent rework.*
 
 <br>
 
@@ -18,15 +18,11 @@ Confirm before proceeding:
 - `Tools` — What permissions? Match @path→Read, !cmd→Bash.
 - `Triggers` — What user intent activates this command?
 
-[VERIFY] Requirements captured:
-- [ ] Name follows verb-first convention.
-- [ ] Pattern explicitly stated.
-- [ ] Argument style determined.
-- [ ] Tool list scoped to pattern.
+[REFERENCE] Requirements gate: [→validation.md§1](./validation.md#1requirements_gate)
 
 ---
 ## [2][ACQUIRE]
->**Dictum:** *Context loading precedes research.*
+>**Dictum:** *Context loading enables informed research.*
 
 <br>
 
@@ -65,7 +61,7 @@ Tools: ${tool_list} | Arguments: ${arg_structure}
 
 ---
 ## [3][RESEARCH]
->**Dictum:** *Delegated research maximizes coverage via specialized agents.*
+>**Dictum:** *Specialized agents maximize research coverage.*
 
 <br>
 
@@ -89,26 +85,15 @@ Invoke `parallel-dispatch` with 3 planning agents.
 **Deliverable:** Frontmatter fields, section structure, tool list.<br>
 **Golden-path synthesis:** Combine strongest elements. Resolve conflicts via Pattern hierarchy.
 
-[VERIFY] Plan synthesis complete:
-- [ ] Frontmatter fields defined.
-- [ ] Section structure outlined.
-- [ ] LOC estimate <125.
+[REFERENCE] Plan gate: [→validation.md§2](./validation.md#2plan_gate)
 
 ---
 ## [4][AUTHOR]
->**Dictum:** *Pattern-gated creation prevents scope violations.*
+>**Dictum:** *Pattern gates prevent scope violations.*
 
 <br>
 
-### [4.1][VALIDATE_PLAN]
-
-[VERIFY]: Confirm plan compliance before creation:
-- [ ] Tools match Pattern gate.
-- [ ] LOC estimate <125.
-- [ ] No $ARGUMENTS + $1-$N mixing.
-
----
-### [4.2][CREATE_ARTIFACT]
+### [4.1][CREATE_ARTIFACT]
 
 Create `.claude/commands/${name}.md`:
 
@@ -138,7 +123,7 @@ Create `.claude/commands/${name}.md`:
 
 ---
 ## [5][VALIDATE]
->**Dictum:** *Parallel review agents ensure comprehensive quality.*
+>**Dictum:** *Parallel review ensures comprehensive quality.*
 
 <br>
 
@@ -148,11 +133,4 @@ Invoke `parallel-dispatch` with 3 review agents.
 **Review scope:** Frontmatter validity, tool declarations, variable consistency, LOC compliance.<br>
 **Post-dispatch:** Compile findings, reject false positives, apply fixes.
 
-[VERIFY] Quality gate:
-- [ ] LOC < 125.
-- [ ] Valid YAML (---delimiters, no tabs).
-- [ ] All @path have Read declared.
-- [ ] All !cmd have Bash declared.
-- [ ] No $ARGUMENTS + $1-$N mixing.
-- [ ] Name: lowercase, hyphens, verb-first.
-- [ ] Description: verb-first, <80 chars, outcome-focused.
+[REFERENCE] Artifact gate: [→validation.md§3](./validation.md#3artifact_gate)

@@ -24,16 +24,16 @@ Scripts extend skill capabilities with executable automation. Required for: CLI 
 
 <br>
 
-**Purpose:**<br>
+**Purpose:**
 - *Orchestration:* Wrap external tools (protoc, pandoc, prisma) for downstream skill workflows.
 - *Generation:* Scaffold artifacts requiring exact structure (OpenAPI specs, database migrations).
 - *Validation:* Enforce constraints beyond LLM generation (schema compliance, AST transforms).
 
-**Tooling:**<br>
+**Tooling:**
 - *Python:* 3.14+ with `slots=True`, `Final`, type hints. Standard library first.
 - *TypeScript:* 6.0+ with Effect 3.19+, ESM imports, `satisfies` for exhaustiveness.
 
-**Philosophy:**<br>
+**Philosophy:**
 - *Algorithmic:* Derive values from frozen `B` constant.
 - *Polymorphic:* Route variants through dispatch tables.
 - *Functional:* Compose via `pipe`, Effect pipelines, Option monads.
@@ -42,14 +42,7 @@ Scripts extend skill capabilities with executable automation. Required for: CLI 
 **Density:**<br>
 Maximum functionality in minimum LOC. Single script addresses single concern. No wrapper abstractions.
 
-[VERIFY] Script quality gate:
-- [ ] Frozen `B` constant consolidates tunables.
-- [ ] Dispatch table routes all variants.
-- [ ] JSON output for agent parsing.
-- [ ] `--help` supported for discoverability.
-- [ ] Zero hardcoded paths—arguments or environment.
-- [ ] External dependencies documented in header.
-- [ ] Executes without errors.
+[REFERENCE] Script validation checklist: [→validation.md§5](./validation.md#5scripting)
 
 ---
 ## [3][PYTHON]

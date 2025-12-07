@@ -13,151 +13,135 @@ description: >-
 
 <br>
 
-Two-round research: breadth (Round 1) → critique → depth (Round 2) → synthesize.
+Conduct comprehensive topic research via parallel agent dispatch.
 
-**Input:**<br>
-- `Topic`: Domain to research.
-- `Constraints`: Context, scaffold, style. Optional `AgentCount` overrides defaults.
+**Workflow:**
+1. §ORIENT — Execute 3 EXA queries, map landscape, extract facets
+2. §ROUND_1 — Dispatch 6-10 agents for breadth coverage via `parallel-dispatch` skill
+3. §CRITIQUE_1 — Filter findings, retain quality, build skeleton with gaps
+4. §ROUND_2 — Dispatch 6-10 agents to flesh out skeleton
+5. §CRITIQUE_2 — Synthesize holistically, deduplicate, produce final output
 
-[REFERENCE]: [→parallel-dispatch](../parallel-dispatch/SKILL.md) — Dispatch mechanics, agent prompt structure, synthesis.
+**Dependencies:**
+- `parallel-dispatch` — Agent orchestration mechanics
+- `report.md` — Sub-agent output format (CRITICAL → FINDINGS → SOURCES)
 
-**Agents:**<br>
-- [→research-explorer](../../agents/research-explorer.md) — Discovery (scope parameter).
-- [→research-validator](../../agents/research-validator.md) — Verification (claims parameter).
-- [→research-critic](../../agents/research-critic.md) — Adversarial (mode parameter).
+**Input:**
+- `Topic`: Domain to research
+- `Constraints`: Context, scaffold, style from invoking skill
 
 ---
-## [1][WORKFLOW]
->**Dictum:** *Two-round execution ensures breadth then depth.*
+## [1][ORIENT]
+>**Dictum:** *Initial queries map landscape before dispatch.*
 
 <br>
 
-```mermaid
-%%{ init: { 'flowchart': { 'curve': 'stepBefore' } } }%%
-flowchart LR
-    T((Topic)) --> O[ORIENT]
-    O --> R1[ROUND_1]:::ref
-    R1 --> C1[CRITIQUE]
-    C1 --> R2[ROUND_2]:::ref
-    R2 --> C2[CRITIQUE]
-    C2 --> S[SYNTHESIZE]:::state
-    classDef input fill:#50fa7b,stroke:#44475a,stroke-width:2px,color:#282a36
-    classDef action fill:#8be9fd,stroke:#44475a,stroke-width:1px,color:#282a36
-    classDef ref fill:#ffb86c,stroke:#44475a,stroke-width:1px,color:#282a36
-    classDef state fill:#bd93f9,stroke:#44475a,stroke-width:1px,color:#282a36
-    class T input
-    class O,C1,C2 action
-```
+Main agent executes exactly 3 EXA MCP queries; these map topic structure.
 
----
-## [2][ORIENT]
->**Dictum:** *Initial queries establish decomposition boundaries.*
-
-<br>
-
-Main agent executes 2-3 MCP queries to map landscape before dispatch.
-
-**Deliverable:** Facet list for agent assignment per `parallel-dispatch` §3.
+Map domain landscape; identify facets for agent assignment.<br>
+Produce facet list (6-10 independent research areas) for Round 1.
 
 [IMPORTANT]:
+- [ALWAYS] Execute 3 EXA queries before dispatch.
 - [ALWAYS] Extract facet boundaries from results.
-- [NEVER] Dispatch before orient phase.
+- [NEVER] Dispatch before orient completes.
 
 ---
-## [3][ROUND_1]
->**Dictum:** *Breadth via parallel explorer dispatch.*
+## [2][ROUND_1]
+>**Dictum:** *Breadth via parallel dispatch—6-10 agents exploring independent facets.*
 
 <br>
 
-Dispatch agents per `parallel-dispatch` §5. Each agent receives unique scope.
+Dispatch 6-10 sub-agents via `parallel-dispatch`. Assign each agent unique scope from orient facets.
 
-| [AGENT]  | [PARAM]                                                          | [DEFAULT] |
-| -------- | ---------------------------------------------------------------- | :-------: |
-| explorer | scope: core/adjacent/emerging/tooling/academic/practical/[facet] |     8     |
-| critic   | mode: anti-pattern/contrarian                                    |     2     |
+**Agent Count:** Scale by task complexity (default: 8).
 
-[IMPORTANT] `Constraints.AgentCount` overrides defaults when provided by invoker.
+**Agent Prompt:**
+```
+Scope: [Specific facet from orient]
+Objective: Research this facet comprehensively
+Output: Use report.md format (CRITICAL → FINDINGS → SOURCES)
+Context: [Topic background, constraints]
+```
 
-[CRITICAL] Round 1 = BREADTH. Agents select MCP tools internally per scope.
+[CRITICAL]:
+- [ALWAYS] Dispatch ALL agents in ONE message block.
+- [ALWAYS] Specify report.md output format.
+- [NEVER] Create overlapping scopes.
 
 ---
-## [4][CRITIQUE]
->**Dictum:** *Critique filters breadth into focused depth targets.*
+## [3][CRITIQUE_1]
+>**Dictum:** *Main agent builds skeleton—retains quality, identifies gaps.*
 
 <br>
 
-### [4.1][FILTER]
+Main agent (NOT sub-agent) processes Round 1 outputs.
 
-| [REMOVE]     | [CRITERIA]                 |
-| ------------ | -------------------------- |
-| Tangential   | Off-topic, scope drift     |
-| Redundant    | Duplicates across agents   |
-| Unverifiable | No source attribution      |
-| Outdated     | Pre-2024 when newer exists |
+| [ACTION] | [CRITERIA]                                                                  |
+| -------- | --------------------------------------------------------------------------- |
+| Remove   | Lacks focus, duplicates content, missing sources, pre-2024, fails quality   |
+| Retain   | Addresses topic, includes sources, dates 2024-2025, converges across agents |
 
-### [4.2][MANIFEST]
+**Skeleton:** Build from retained → `[Domain N]: [findings]` + `Gaps:` + `Depth-Targets:`
 
-```
-Retained: [count] / [total] (filtered [removed])
-Gaps: [missing facets]
-Validation: [claims needing verification]
-Deep-Dive: [themes for round 2]
-High-Confidence: [convergent—skip round 2]
-Conflicts: [divergences to resolve]
-```
-
-[CRITICAL] Manifest scopes round 2 dispatch.
+[CRITICAL] Skeleton is first corpus—Round 2 fleshes it out.
 
 ---
-## [5][ROUND_2]
->**Dictum:** *Surgical dispatch addresses first-round gaps.*
+## [4][ROUND_2]
+>**Dictum:** *Depth via parallel dispatch—same agent count, focused on skeleton gaps.*
 
 <br>
 
-Dispatch agents per manifest priorities (default 4-6, override via `Constraints.AgentCount`):
+Dispatch 6-10 sub-agents (same count as Round 1) via `parallel-dispatch`.
 
-| [SIGNAL]   | [AGENT]   | [PARAM]            |
-| ---------- | --------- | ------------------ |
-| Gap        | explorer  | scope: [facet]     |
-| Quality    | validator | claims: [list]     |
-| Branch     | explorer  | scope: [theme]     |
-| Divergence | validator | claims: [conflict] |
-| Weakness   | critic    | mode: edge-case    |
+**Agent Assignment:**
 
-Extend agent prompt with Prior field per `parallel-dispatch` §4:
+| [TYPE]  | [PURPOSE]                   | [COUNT] |
+| ------- | --------------------------- | ------- |
+| Focused | Specific gaps from skeleton | 4-6     |
+| Wide    | Broader context for areas   | 2-4     |
 
+**Agent Prompt:**
 ```
-Prior: [Round 1 findings—build on, don't repeat]
+Scope: [Gap or depth-target from skeleton]
+Objective: [Focused: fill gap | Wide: broaden context]
+Output: Use report.md format (CRITICAL → FINDINGS → SOURCES)
+Context: [Skeleton content—build on, don't repeat]
+Prior: [Relevant Round 1 findings]
 ```
 
-[CRITICAL] Round 2 = DEPTH. Agents select MCP tools internally per type.
+[CRITICAL]:
+- [ALWAYS] Same agent count as Round 1.
+- [ALWAYS] Include skeleton context.
+- [ALWAYS] Specify report.md output format.
 
 ---
-## [6][SYNTHESIZE]
->**Dictum:** *Structure enables downstream integration.*
+## [5][CRITIQUE_2]
+>**Dictum:** *Main agent synthesizes holistically—final corpus for downstream use.*
 
 <br>
 
-Apply `parallel-dispatch` §6 convergent/divergent handling.
+Main agent (NOT sub-agent) compiles final research output.
 
-**Output Format:** @.claude/styles/report.md
+**Integrate:** Merge Round 2 → skeleton. Cross-reference rounds. Resolve conflicts (prioritize sourced, current, convergent).
 
-**Domain Variables:**<br>
-- `domain-1`: CORE_FINDINGS
-- `domain-2`: VALIDATED
-- `domain-3`: EMERGING
-- `domain-4`: LIMITATIONS
+**Filter:** Remove duplicates, out-of-scope content, superseded items, unresolved conflicts.
+
+**Output Format:**
+- `## [1][FINDINGS]` — Synthesized research by domain
+- `## [2][CONFIDENCE]` — High (convergent) | Medium (single-source) | Low (gaps)
+- `## [3][SOURCES]` — All sources with attribution
 
 ---
-## [7][VALIDATION]
+## [6][VALIDATION]
 >**Dictum:** *Gates prevent incomplete synthesis.*
 
 <br>
 
 [VERIFY]:
-- [ ] Orient executed before dispatch.
-- [ ] Round 1 dispatched agents per constraints.
-- [ ] First critique produced manifest.
-- [ ] Round 2 addressed manifest priorities.
-- [ ] Second critique completed.
-- [ ] Synthesis follows report.md format.
+- [ ] Orient: 3 EXA queries executed
+- [ ] Round 1: 6-10 agents in ONE message
+- [ ] Critique 1: Skeleton built, gaps identified
+- [ ] Round 2: Same count, focused on skeleton
+- [ ] Critique 2: Final synthesis, duplicates removed
+- [ ] All sub-agents used report.md format

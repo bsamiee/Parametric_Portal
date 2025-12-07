@@ -1,5 +1,5 @@
 # [H1][SCHEMA]
->**Dictum:** *Delimiter syntax and examples anchor format implementation.*
+>**Dictum:** *Parsing reliability requires consistent delimiter syntax.*
 
 <br>
 
@@ -7,11 +7,11 @@
 
 ---
 ## [1][DELIMITERS]
->**Dictum:** *Delimiter consistency prevents parsing failures.*
+>**Dictum:** *Delimiter consistency prevents 18-29% performance variance.*
 
 <br>
 
-[IMPORTANT] Delimiter consistency prevents 18-29% performance variance.
+[IMPORTANT] Inconsistent delimiters cause 18-29% performance variance.
 
 | [INDEX] | [DELIMITER]  | [SYNTAX]          | [PURPOSE]                          |
 | :-----: | ------------ | ----------------- | ---------------------------------- |
@@ -21,11 +21,11 @@
 |   [4]   | Inline code  | `` ` ``           | Symbol/path boundary               |
 |   [5]   | Boundary tag | `[START]`/`[END]` | Explicit parse anchors             |
 
-[CRITICAL] Single output prohibits mixed delimiter styles.
+[CRITICAL] Prohibit mixed delimiter styles within single output.
 
 ---
 ## [2][EXAMPLES]
->**Dictum:** *Canonical examples demonstrate format application.*
+>**Dictum:** *Canonical reference patterns standardize format implementation.*
 
 <br>
 

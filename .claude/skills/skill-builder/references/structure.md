@@ -17,8 +17,8 @@
 |   [2]   | Standard |    Yes     |    Yes     |      Yes      |     Yes      |     —      |
 |   [3]   | Complex  |    Yes     |    Yes     |      Yes      |     Yes      |    Yes     |
 
-**Simple:** Single file. All content in SKILL.md. No supporting folders. Sections map to workflow steps.
-**Standard:** Distributed content. references/ for deep knowledge, templates/ for output scaffolds. Domains map to reference files.
+**Simple:** Single file. All content in SKILL.md. No supporting folders. Sections map to workflow steps.<br>
+**Standard:** Distributed content. references/ for deep knowledge, templates/ for output scaffolds. Domains map to reference files.<br>
 **Complex:** Standard + scripts/ for deterministic automation.
 
 [CRITICAL] Create only folders appropriate to type. Empty folders prohibited.
@@ -36,9 +36,9 @@
 |   [3]   | `templates/`  | Output scaffolds         | `${placeholder}` syntax, structure  |
 |   [4]   | `scripts/`    | Deterministic automation | Python/TypeScript executables       |
 
-**references/** — Content too detailed for SKILL.md. On-demand loading via Required/Conditional Tasks.
-**templates/** — Source of truth for generated artifacts. Follow template exactly.
-**scripts/** — Operations requiring exact reproducibility. External tool wrapping, validation.
+**references/** — Content too detailed for SKILL.md. On-demand loading via Required/Conditional Tasks. Must include validation.md.<br>
+**templates/** — Source of truth for generated artifacts. Follow template exactly.<br>
+**scripts/** — Operations requiring exact reproducibility. External tool wrapping, automation.
 
 [CRITICAL] Max 7 files in references/ (Standard/Complex).
 
@@ -74,7 +74,7 @@
 
 Standard/Complex types require index.md at skill root.
 
-**Requirements:**<br>
+**Requirements:**
 - Located at skill root, not in subfolders.
 - Lists ALL reference files with path, domain, and dictum.
 - Single navigation source—no per-folder indexes.
@@ -89,18 +89,24 @@ Standard/Complex types require index.md at skill root.
 [REFERENCE] Nesting rights by depth: [→depth.md§2](./depth.md#2unlocks)
 
 ---
-## [5][VALIDATION]
->**Dictum:** *Gate checklist enforces structural compliance.*
+## [5][VALIDATION_FILE]
+>**Dictum:** *validation.md centralizes operational checklists.*
 
 <br>
 
-[VERIFY] Pre-commit:
-- [ ] Type selected: Simple | Standard | Complex.
-- [ ] Folders match type (Simple: none; Standard: refs+templates; Complex: +scripts).
-- [ ] No empty folders—every folder contains at least one file.
-- [ ] Skill folder name matches frontmatter `name` exactly.
-- [ ] `references/` ≤7 files total (including nested).
-- [ ] `index.md` exists at root (Standard/Complex only).
-- [ ] All names kebab-case, domain-specific.
+Standard/Complex types require validation.md in references/.
 
-[REFERENCE] Frontmatter name matching: [→frontmatter.md§1.1](./frontmatter.md#11name)
+**Purpose:**
+- Consolidates operational verification checklists from all domains.
+- SKILL.md §VALIDATION contains high-level gates (3-5 items).
+- validation.md contains detailed checklists, error symptoms, commands.
+
+**Requirements:**
+- Located at `references/validation.md`.
+- Sections map to domain concerns (frontmatter, structure, depth, scripting).
+- Includes error symptoms table for diagnosis.
+- Operational commands for verification (`wc -l`, `grep`, etc.).
+
+**Simple type exception:** Validation remains in SKILL.md §VALIDATION (no references/ folder).
+
+[REFERENCE] Validation content guidelines: [→validation.md](./validation.md)

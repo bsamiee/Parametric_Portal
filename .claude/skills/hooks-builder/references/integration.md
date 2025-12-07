@@ -12,30 +12,25 @@ Hooks integrate via settings files, environment variables, and context injection
 <br>
 
 ### [1.1][HOOK_VARIABLES]
-Variables injected by Claude Code into hook execution context:
 
-| [INDEX] | [VARIABLE]            | [SCOPE]        | [VALUE]                            |
-| :-----: | --------------------- | -------------- | ---------------------------------- |
-|   [1]   | `CLAUDE_PROJECT_DIR`  | All hooks      | Absolute path to project root      |
-|   [2]   | `CLAUDE_WORKING_DIR`  | All hooks      | Current working directory          |
-|   [3]   | `CLAUDE_SESSION_ID`   | All hooks      | Current session identifier         |
-|   [4]   | `CLAUDE_EVENT_TYPE`   | All hooks      | Event name (e.g., `PreToolUse`)    |
-|   [5]   | `CLAUDE_TOOL_NAME`    | Tool hooks     | Tool being invoked (e.g., `Write`) |
-|   [6]   | `CLAUDE_TOOL_INPUT`   | Tool hooks     | Raw tool parameters as JSON        |
-|   [7]   | `CLAUDE_TOOL_OUTPUT`  | PostToolUse    | Tool execution output              |
-|   [8]   | `CLAUDE_FILE_PATHS`   | Tool hooks     | Space-separated file paths         |
-|   [9]   | `CLAUDE_NOTIFICATION` | Notification   | Message content                    |
-|  [10]   | `CLAUDE_ENV_FILE`     | SessionStart   | Path to append `export` statements |
-|  [11]   | `CLAUDE_PLUGIN_ROOT`  | Plugin hooks   | Absolute path to plugin directory  |
-|  [12]   | `CLAUDE_CODE_REMOTE`  | Remote context | `"true"` when running remotely     |
+| [INDEX] | [VARIABLE]            | [SCOPE]      | [VALUE]                            |
+| :-----: | --------------------- | ------------ | ---------------------------------- |
+|   [1]   | `CLAUDE_PROJECT_DIR`  | All hooks    | Absolute path to project root      |
+|   [2]   | `CLAUDE_WORKING_DIR`  | All hooks    | Current working directory          |
+|   [3]   | `CLAUDE_SESSION_ID`   | All hooks    | Current session identifier         |
+|   [4]   | `CLAUDE_EVENT_TYPE`   | All hooks    | Event name (e.g., `PreToolUse`)    |
+|   [5]   | `CLAUDE_CODE_REMOTE`  | All hooks    | `"true"` for web, empty for CLI    |
+|   [6]   | `CLAUDE_TOOL_NAME`    | Tool hooks   | Tool being invoked (e.g., `Write`) |
+|   [7]   | `CLAUDE_TOOL_INPUT`   | Tool hooks   | Raw tool parameters as JSON        |
+|   [8]   | `CLAUDE_TOOL_OUTPUT`  | PostToolUse  | Tool execution output              |
+|   [9]   | `CLAUDE_FILE_PATHS`   | Tool hooks   | Space-separated file paths         |
+|  [10]   | `CLAUDE_NOTIFICATION` | Notification | Message content                    |
+|  [11]   | `CLAUDE_ENV_FILE`     | SessionStart | Path to append `export` statements |
+|  [12]   | `CLAUDE_PLUGIN_ROOT`  | Plugin hooks | Absolute path to plugin directory  |
 
 ### [1.2][CUSTOM_VARIABLES]
 
-Define debug flags via environment for hook development:
-
 ```python
-from typing import Final
-import os
 DEBUG: Final[bool] = os.environ.get("CLAUDE_HOOK_DEBUG", "").lower() in ("1", "true")
 _debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 ```
@@ -46,22 +41,19 @@ _debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 { "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate.py" }
 ```
 
-[CRITICAL] Quote `$CLAUDE_PROJECT_DIR` to handle paths with spaces.
+[CRITICAL] Quote `$CLAUDE_PROJECT_DIR` for paths with spaces.
 
-### [1.4][FOLDER_STRUCTURE]
+### [1.4][PLATFORM_WARNINGS]
 
-```
-.claude/
-├── hooks/                    # Hook scripts
-│   ├── validate-bash.py      # PreToolUse validator
-│   └── load-context.py       # SessionStart context loader
-├── settings.json             # Project hooks (committed)
-└── settings.local.json       # Local hooks (gitignored)
-```
+| [INDEX] | [PLATFORM] | [ISSUE]                              | [WORKAROUND]              |
+| :-----: | ---------- | ------------------------------------ | ------------------------- |
+|   [1]   | Windows    | `$CLAUDE_PROJECT_DIR` literal string | Use absolute paths        |
+|   [2]   | Windows    | PATH wiped on env append             | Use full executable paths |
+|   [3]   | Remote     | SSH key access required              | Configure SSH agent       |
 
 ---
 ## [2][CONTEXT_INJECTION]
->**Dictum:** *Stdout from specific events injects context for Claude.*
+>**Dictum:** *Stdout from specific events injects context to Claude.*
 
 <br>
 
@@ -80,7 +72,6 @@ _debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 ```python
 import json
 from typing import Final
-
 WRAPPER: Final = "context"
 def build_response(content: str) -> dict[str, object]:
     return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": f"<{WRAPPER}>\n{content}\n</{WRAPPER}>"}}
@@ -89,24 +80,19 @@ print(json.dumps(build_response("Project uses Effect. Follow REQUIREMENTS.md."))
 
 ### [2.3][ENV_FILE_PERSISTENCE]
 
-SessionStart hooks can persist variables for entire session via `CLAUDE_ENV_FILE`:
-
 ```python
 from pathlib import Path
 import os
-from typing import Final
-
 def cache_to_env(key: str, value: str) -> None:
     env_file = os.environ.get("CLAUDE_ENV_FILE")
     _ = env_file and Path(env_file).open("a").write(f"export {key}={value}\n")
-
 # Usage: cache computed values for session duration
 cache_to_env("SKILL_COUNT", str(len(skills)))
 ```
 
 ---
 ## [3][ATTENTION_WEIGHTING]
->**Dictum:** *XML-like tags increase agent attention.*
+>**Dictum:** *XML-like tags weight agent attention.*
 
 <br>
 
@@ -116,13 +102,9 @@ cache_to_env("SKILL_COUNT", str(len(skills)))
 |   [2]   | `<IMPORTANT>` |   High   | Key guidance              |
 |   [3]   | `<context>`   | Standard | General context injection |
 
-```python
-context = "<IMPORTANT>All files must pass basedpyright.</IMPORTANT>"
-```
-
 ---
 ## [4][MERGE_BEHAVIOR]
->**Dictum:** *Hooks from all scopes merge at session start.*
+>**Dictum:** *Scope merging at session start composes hooks.*
 
 <br>
 
@@ -137,14 +119,27 @@ context = "<IMPORTANT>All files must pass basedpyright.</IMPORTANT>"
 - Identical hook commands auto-deduplicated
 
 ---
-## [5][VALIDATION]
->**Dictum:** *Gate checklist ensures correct integration.*
+## [5][TIMING]
+>**Dictum:** *Fast hook execution preserves user experience.*
 
 <br>
 
-[VERIFY] Pre-deployment:
-- [ ] `$CLAUDE_PROJECT_DIR` quoted in command strings.
-- [ ] Context injection uses SessionStart or UserPromptSubmit.
-- [ ] `CLAUDE_ENV_FILE` used only in SessionStart hooks.
-- [ ] Plugin hooks use `${CLAUDE_PLUGIN_ROOT}` for portability.
-- [ ] Attention tags applied to critical context.
+| [INDEX] | [EVENT]           | [THRESHOLD] | [CONSEQUENCE]                |
+| :-----: | ----------------- | :---------: | ---------------------------- |
+|   [1]   | PermissionRequest |    <1.5s    | Race condition; dialog shown |
+|   [2]   | SessionStart      |     <5s     | Delayed session start        |
+|   [3]   | All hooks         |   <100ms    | Imperceptible latency        |
+
+---
+## [6][FOLDER_STRUCTURE]
+
+```
+.claude/
+├── hooks/                    # Hook scripts
+│   ├── validate-bash.py      # PreToolUse validator
+│   └── load-context.py       # SessionStart context loader
+├── settings.json             # Project hooks (committed)
+└── settings.local.json       # Local hooks (gitignored)
+```
+
+[REFERENCE] Validation checklist: [→validation.md§3](./validation.md#3integration_gate)

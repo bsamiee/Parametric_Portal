@@ -6,18 +6,26 @@ description: Creates and configures Claude Code slash commands with YAML frontma
 ---
 
 # [H1][COMMAND-BUILDER]
->**Dictum:** *Discoverable prompt templates reduce repetitive instruction and enforce consistency.*
+>**Dictum:** *Reusable prompt templates reduce repetition and enforce consistency.*
 
 <br>
 
-[CRITICAL] Load commands from `.claude/commands/` (project) or `~/.claude/commands/` (user). Filename becomes command name.
+Load commands from `.claude/commands/` (project) or `~/.claude/commands/` (user). Filename becomes command name.
 
-[REFERENCE]: [→index.md](./index.md) — Complete reference file listing.<br>
-[REFERENCE]: [→workflow.md](./references/workflow.md) — 5-phase creation workflow.
+**Tasks:**
+1. Read [index.md](./index.md) — Reference file listing for navigation
+2. Read [workflow.md](./references/workflow.md) — 5-phase creation process
+3. Read [variables.md](./references/variables.md) — Argument capture, file references, skill loading
+4. Read [hints.md](./references/hints.md) — Argument-hint syntax, enum patterns
+5. (prose) Load `style-standards` skill — Voice, formatting, constraints
+6. Execute per workflow — UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE
+7. Validate — Quality gate; see §VALIDATION
+
+[REFERENCE]: [index.md](./index.md) — Complete reference file listing
 
 ---
 ## [1][FRONTMATTER]
->**Dictum:** *Frontmatter gates command execution through declarative constraints.*
+>**Dictum:** *Declarative constraints gate command execution.*
 
 <br>
 
@@ -47,12 +55,9 @@ model: opus
 - [ALWAYS] Declare `Bash` for every `!command` reference.
 - [NEVER] Omit required tools—command fails without output.
 
-**Task:**<br>
-1. Read [→hints.md](./references/hints.md): Argument-hint syntax, enum patterns, ordering rules.
-
 ---
 ## [2][MODELS]
->**Dictum:** *Model selection controls complexity ceiling and resource allocation.*
+>**Dictum:** *Model selection balances capability against cost and latency.*
 
 <br>
 
@@ -74,7 +79,7 @@ model: opus
 
 ---
 ## [3][VARIABLES]
->**Dictum:** *Dynamic substitution eliminates hardcoding and enables reusable commands.*
+>**Dictum:** *Dynamic substitution enables reusable commands.*
 
 <br>
 
@@ -94,7 +99,7 @@ model: opus
 
 ---
 ## [4][PATTERNS]
->**Dictum:** *Canonical patterns accelerate development and prevent structural errors.*
+>**Dictum:** *Canonical patterns accelerate development.*
 
 <br>
 
@@ -160,7 +165,7 @@ Load context above. Spawn Task agents. Verify findings against loaded context. A
 
 ---
 ## [5][ORGANIZATION]
->**Dictum:** *Namespaces partition command scope and prevent collision.*
+>**Dictum:** *Namespaces prevent command collision.*
 
 <br>
 
@@ -186,37 +191,16 @@ Load context above. Spawn Task agents. Verify findings against loaded context. A
 ```
 
 ---
-## [6][WORKFLOW]
->**Dictum:** *Workflow governs phase execution for command creation.*
+## [6][VALIDATION]
+>**Dictum:** *Validation gates prevent incomplete artifacts.*
 
 <br>
 
-**Required Task:** Consult [→workflow.md](./references/workflow.md)—5-phase creation process (UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE).
+[VERIFY] Completion:
+- [ ] Workflow: All 5 phases executed (UNDERSTAND → VALIDATE).
+- [ ] Frontmatter: Valid YAML, description present, tools declared.
+- [ ] Variables: No `$ARGUMENTS` + `$1-$N` mixing.
+- [ ] Tools: All `@path` have `Read`, all `!command` have `Bash`.
+- [ ] Quality: LOC < 125, verb-first naming.
 
----
-## [7][VALIDATION]
->**Dictum:** *Validation prevents broken command deployment.*
-
-<br>
-
-[IMPORTANT]:
-- [ALWAYS] Keep commands under 125 LOC.
-- [ALWAYS] Use `Glob` for file discovery, `Read` for content, `Grep` for search.
-
-[CRITICAL]:
-- [NEVER] Hardcode paths; use arguments.
-- [NEVER] Use generic names: `run`, `do`, `execute`, `go`.
-- [NEVER] Use abbreviations without context: `gc`, `rp`, `dt`.
-
-[VERIFY]:
-- [ ] *Filename:* Lowercase, hyphens, `.md` extension.
-- [ ] *Frontmatter:* Valid YAML, `---` delimiters, description present.
-- [ ] *Tools:* All `@path` have `Read`, all `!command` have `Bash`.
-- [ ] *Variables:* No `$ARGUMENTS` + `$1-$N` mixing.
-
-| [INDEX] | [ERROR]               | [SYMPTOM]           | [FIX]                       |
-| :-----: | --------------------- | ------------------- | --------------------------- |
-|   [1]   | **Tab character**     | YAML parse failure  | Replace with spaces.        |
-|   [2]   | **Missing delimiter** | Frontmatter ignored | Add `---` before and after. |
-|   [3]   | **Unquoted special**  | Field truncated     | Quote the value.            |
-|   [4]   | **Missing tool**      | Silent failure      | Add to `allowed-tools`.     |
+[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

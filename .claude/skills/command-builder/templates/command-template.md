@@ -11,7 +11,7 @@ argument-hint: [target] [focus: domain1|domain2|domain3?]
 
 ---
 ## [1][TARGET]
->**Dictum:** *Explicit target prevents ambiguity and enables file-level operations.*
+>**Dictum:** *Explicit targets prevent ambiguity.*
 
 <br>
 
@@ -19,7 +19,7 @@ argument-hint: [target] [focus: domain1|domain2|domain3?]
 
 ---
 ## [2][ARGUMENTS]
->**Dictum:** *Defaults prevent empty substitution and enable optional parameters.*
+>**Dictum:** *Defaults prevent empty substitution.*
 
 <br>
 
@@ -28,7 +28,7 @@ argument-hint: [target] [focus: domain1|domain2|domain3?]
 
 ---
 ## [3][CONTEXT]
->**Dictum:** *Runtime context captures state unavailable at command definition.*
+>**Dictum:** *Runtime context captures dynamic state.*
 
 <br>
 
@@ -38,7 +38,7 @@ argument-hint: [target] [focus: domain1|domain2|domain3?]
 
 ---
 ## [4][TASK]
->**Dictum:** *Clear instructions ensure consistent execution across invocations.*
+>**Dictum:** *Clear instructions ensure consistent execution.*
 
 <br>
 

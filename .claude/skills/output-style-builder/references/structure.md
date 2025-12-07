@@ -1,5 +1,5 @@
 # [H1][STRUCTURE]
->**Dictum:** *Section ordering and composition enable format reuse.*
+>**Dictum:** *Compositional structure enables format reuse across contexts.*
 
 <br>
 
@@ -7,7 +7,7 @@
 
 ---
 ## [1][ORDERING]
->**Dictum:** *Order by cognitive impact, not logical sequence.*
+>**Dictum:** *Impact-weighted ordering minimizes cognitive load.*
 
 <br>
 
@@ -19,11 +19,11 @@
 
 ---
 ## [2][HIERARCHY]
->**Dictum:** *Depth limits prevent cognitive overload.*
+>**Dictum:** *Depth constraints prevent cognitive overload.*
 
 <br>
 
-[IMPORTANT] Maximum 3-level hierarchy. H4+ prohibited.
+[IMPORTANT] Limit hierarchy to 3 levels. Prohibit H4+.
 
 | [INDEX] | [LEVEL] | [PURPOSE]           | [CONSTRAINT]           |
 | :-----: | :-----: | ------------------- | ---------------------- |
@@ -32,13 +32,13 @@
 |   [3]   |   L3    | Reference/optional  | Hidden by default      |
 
 **Section Limits:**<br>
-- 2-7 items per container.
-- 3-5 constraints per level.
-- Maximum 10 markers per file.
+- Limit containers to 2-7 items.
+- Limit levels to 3-5 constraints.
+- Limit files to 10 markers maximum.
 
 ---
 ## [3][COMPOSITION]
->**Dictum:** *Inheritance enables format reuse.*
+>**Dictum:** *Inheritance patterns enable format reuse across outputs.*
 
 <br>
 
@@ -64,7 +64,7 @@ override:
 
 ---
 ## [4][CHAINING]
->**Dictum:** *Output of one stage feeds input of another.*
+>**Dictum:** *Explicit stage coupling ensures pipeline reliability.*
 
 <br>
 
@@ -75,4 +75,4 @@ override:
 |   [3]   | Validate  | Reformatted     | Validated       | Schema compliance    |
 |   [4]   | Emit      | Validated       | Final response  | Apply template       |
 
-[CRITICAL] Each stage produces complete, valid output.
+[CRITICAL] Design each stage to produce complete, valid output.

@@ -1,7 +1,7 @@
 ---
 name: ${kebab-case-name}
 type: standard
-depth: ${depth}
+depth: ${base|extended|full}
 description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, or ${scenario-3}.
 ---
 
@@ -12,60 +12,70 @@ description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, o
 
 ${one-sentence-purpose}
 
-**Scope:**<br>
-- *${Scope-1}:* ${what-this-mode-covers}.
-- *${Scope-N}:* ${what-this-mode-covers}.
+**Tasks:**
+1. Read [index.md](./index.md) — Reference file listing for navigation
+2. Read [${domain-1}.md](./references/${domain-1}.md) — ${domain-1-description}
+3. Read [${domain-n}.md](./references/${domain-n}.md) — ${domain-n-description}
+4. (${condition}) Read [${conditional}.md](./references/${conditional}.md) — ${conditional-description}
+5. (prose) Load `style-standards` skill — Voice, formatting, constraints
+6. Execute per ${workflow} — ${workflow-phases}
+7. Validate — Quality gate; see §VALIDATION
 
-**Domain Navigation:**<br>
-- *[${DOMAIN}]* — ${domain-summary}. Load for: ${when-to-load}.
-- *[${DOMAIN}]* — ${domain-summary}. Load for: ${when-to-load}.
+**Scope:** ${remove-if-not-needed}
+- *${Scope-1}:* ${what-this-covers}.
+- *${Scope-N}:* ${what-this-covers}.
 
-[REFERENCE]: [→index.md](./index.md) — Reference file listing.
+**Domain Navigation:** ${remove-if-not-needed}
+- *[${DOMAIN_1}]* — ${domain-summary}. Load when ${trigger}.
+- *[${DOMAIN_N}]* — ${domain-summary}. Load when ${trigger}.
+
+**Templates:** ${remove-if-not-needed} [→${template}.md](./templates/${template}.md) — ${template-purpose}.
+
+**Dependencies:** ${remove-if-none}
+- `${skill-name}` — ${purpose}
+
+[REFERENCE]: [index.md](./index.md) — Complete reference file listing
 
 ---
-## [2][INSTRUCTIONS]
->**Dictum:** *Progressive disclosure optimizes context loading.*
-
-<br>
-
-**Universal Tasks:**<br>
-1. Read [→index.md](./index.md): Reference file listing for navigation.
-
----
-## [3][${DOMAIN}]
+## [1][${DOMAIN_1}]
 >**Dictum:** *${domain-truth}.*
 
 <br>
 
-${domain-context-sentence}
+${domain-context-sentence-explaining-why}
 
-**Required Task:**<br>
-1. Read [→${domain}.md](./references/${domain}.md): ${what-file-contains}.
+${optional: decision gate, tables, or key concepts}
 
-**References:**<br>
-- [→${related}.md](./references/${related}.md): ${supplemental-content}.
-
-**Guidance:**<br>
-- `${Concept}` — ${why-it-matters}.
+**Guidance:**
 - `${Concept}` — ${why-it-matters}.
 
-**Best-Practices:**<br>
-- **${Pattern}** — ${constraint-or-rule}.
+**Best-Practices:** ${remove-if-not-needed}
 - **${Pattern}** — ${constraint-or-rule}.
 
 ---
-## [N][${DOMAIN}]
+## [N][${DOMAIN_N}]
 >**Dictum:** *${domain-truth}.*
 
 <br>
 
-${domain-context-sentence}
+${domain-context-sentence-explaining-why}
 
-**Required Task:**<br>
-1. Read [→${domain}.md](./references/${domain}.md): ${what-file-contains}.
-
-**Guidance:**<br>
+**Guidance:**
 - `${Concept}` — ${why-it-matters}.
 
-**Best-Practices:**<br>
+**Best-Practices:** ${remove-if-not-needed}
 - **${Pattern}** — ${constraint-or-rule}.
+
+---
+## [N+1][VALIDATION]
+>**Dictum:** *Gates prevent incomplete execution.*
+
+<br>
+
+[VERIFY] Completion:
+- [ ] References: All required domain files loaded per Tasks.
+- [ ] Workflow: ${workflow} phases executed.
+- [ ] Style: `style-standards` constraints applied.
+- [ ] Quality: LOC within limits, content separation enforced.
+
+[REFERENCE] Operational checklist: [→validation.md](./references/validation.md)

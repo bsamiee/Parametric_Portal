@@ -14,7 +14,7 @@ ${one-sentence-purpose}
 
 ---
 ## [1][FORMAT]
->**Dictum:** *Delimiter syntax anchors format implementation.*
+>**Dictum:** *Consistent delimiter boundaries enable structured parsing.*
 
 <br>
 
@@ -29,7 +29,7 @@ ${format-template}
 
 ---
 ## [2][SECTIONS]
->**Dictum:** *Section ordering determines attention distribution.*
+>**Dictum:** *5.79x attention differential requires priority-first ordering.*
 
 <br>
 
@@ -46,11 +46,11 @@ ${format-template}
 
 ---
 ## [3][VARIABLES]
->**Dictum:** *Variables enable runtime customization.*
+>**Dictum:** *Dynamic value resolution enables runtime context.*
 
 <br>
 
-[IMPORTANT] Resolve frontmatter variables at compile-time. Resolve context values at runtime.
+[IMPORTANT] Compiler resolves frontmatter variables. Runtime resolves context values.
 
 | [INDEX] | [VARIABLE]    | [REQUIRED] | [DEFAULT]    | [DESCRIPTION]        |
 | :-----: | ------------- | :--------: | ------------ | -------------------- |
@@ -64,7 +64,7 @@ ${format-template}
 
 ---
 ## [4][VALIDATION]
->**Dictum:** *Compliance scoring enforces quality.*
+>**Dictum:** *Malformed output prevention requires quality gates.*
 
 <br>
 
@@ -89,7 +89,7 @@ ${format-template}
 /\b(please|kindly|just|really)\b/i       → filler stopwords
 ```
 
-[IMPORTANT] Prohibited patterns deduct 2 points per violation (maximum deduction: 10 points).
+[IMPORTANT] Prohibited patterns deduct 2 points per violation (max deduction: 10 points).
 
 ---
 ### [4.2][GATE]

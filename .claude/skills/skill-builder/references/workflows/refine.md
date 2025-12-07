@@ -1,142 +1,72 @@
 # [H1][WORKFLOW_REFINE]
->**Dictum:** *Surgical transformation preserves semantic content while improving density.*
+>**Dictum:** *Research-driven transformation without semantic loss.*
 
 <br>
 
-[IMPORTANT] Classification from frontmatter `type` and `depth` fields. Command extracts before workflow invocation.
+Refine scope: compare `deep-research` findings to existing skill, apply changes based on input vs frontmatter.
+
+[CRITICAL] `deep-research` MUST complete fully before comparison. Sub-agents use `report.md` output format per SKILL.md Task 7.
 
 ---
-## [1][UNDERSTAND]
->**Dictum:** *Command provides classification; workflow derives mode.*
+## [1][COMPARISON_MODES]
+>**Dictum:** *Input/frontmatter delta determines action.*
 
 <br>
 
-Classification extracted by command (§DETECT_CLASSIFICATION). Derive mode:
-
-| [INDEX] | [GOAL]   | [MODE]   | [TARGET]        | [OPERATIONS]                      |
-| :-----: | -------- | -------- | --------------- | --------------------------------- |
-|   [1]   | optimize | Optimize | Same type/depth | Density, voice, frontmatter fixes |
-|   [2]   | upgrade  | Upgrade  | Higher type     | Add folders, redistribute content |
-|   [3]   | upgrade  | Expand   | Higher depth    | Add nesting, sections, LOC budget |
-|   [4]   | audit    | Audit    | —               | Report findings only, no changes  |
-
-[CRITICAL] Missing classification → Legacy skill. Add `type`/`depth` as Priority 0 intervention.
-
-[VERIFY] State captured:
-- [ ] Current type/depth from command extraction.
-- [ ] Mode derived from goal.
-- [ ] Target type/depth set (upgrade only).
+| [CONDITION]      | [MODE]   | [ACTION]                                     |
+| ---------------- | -------- | -------------------------------------------- |
+| Input = existing | Optimize | Improve density, fix issues, enhance quality |
+| Input > existing | Upgrade  | Expand structure (type) or depth             |
+| Input < existing | Downsize | Combine content, refactor, remove low-value  |
 
 ---
-## [2][ACQUIRE]
->**Dictum:** *Conditional loading minimizes context overhead.*
+## [2][GAP_CATEGORIES]
+>**Dictum:** *Gap analysis drives surgical planning.*
 
 <br>
 
-### [2.1][LOAD_CONTEXT]
-
-Command loads base context. Workflow loads per mode:
-
-| [MODE]   | [LOAD]                       |
-| -------- | ---------------------------- |
-| Optimize | §DEPTH (LOC limits)          |
-| Upgrade  | §STRUCTURE + target template |
-| Expand   | §DEPTH (nesting rights)      |
-| Audit    | None additional              |
-
-| [TARGET_TYPE] | [ADDITIONAL] |
-| ------------- | ------------ |
-| complex       | §SCRIPTING   |
-
-Invoke `style-summarizer`—extract voice/formatting constraints for sub-agent prompts.
+| [CATEGORY] | [SIGNALS]                                |
+| ---------- | ---------------------------------------- |
+| Missing    | Research reveals undocumented capability |
+| Incorrect  | Existing content contradicts research    |
+| Outdated   | Deprecated patterns, superseded APIs     |
+| Redundant  | SKILL.md duplicates reference content    |
+| Tiered     | Basic/advanced/expert language present   |
 
 ---
-### [2.2][COMPILE_INVENTORY]
-
-Read skill folder. Compile inventory:
-
-```
-Current: ${type}/${depth} | Target: ${target_type}/${target_depth} | Mode: ${mode}
-Files: [list with LOC] | Headroom: SKILL.md ${current}/${limit} | Refs ${current}/${limit}
-```
-
-[IMPORTANT] Positive headroom → enrichment possible. Negative → density surgery required.
-
----
-## [3][AUDIT]
->**Dictum:** *Diagnosis informs surgical planning.*
+## [3][PRIORITY_RANKING]
+>**Dictum:** *Fix order maximizes impact.*
 
 <br>
 
-### [3.1][SCAN]
-
-| [INDEX] | [CATEGORY]     | [SIGNALS]                                     |
-| :-----: | -------------- | --------------------------------------------- |
-|   [1]   | Classification | Missing/mismatched `type`/`depth` frontmatter |
-|   [2]   | Density        | Prose→table, list→table, diagram-worthy       |
-|   [3]   | Violations     | Voice, structure, depth, naming               |
-|   [4]   | Duplication    | SKILL.md↔references overlap                   |
-|   [5]   | Upgrade gaps   | Missing folders/sections for target tier      |
+| [PRIORITY] | [CLASS]         | [ACTION]                         |
+| :--------: | --------------- | -------------------------------- |
+|     0      | Incorrect       | Fix immediately—misinformation   |
+|     1      | Tiered language | Remove—violates singular quality |
+|     2      | Redundant       | Consolidate—no duplication       |
+|     3      | Outdated        | Update with research findings    |
+|     4      | Missing         | Add if within LOC headroom       |
 
 ---
-### [3.2][PLAN]
-
-Invoke `parallel-dispatch` with 3 planning agents.
-
-**Input:** Scan findings, inventory, skill-builder sections, target template.<br>
-**Deliverable:** Ordered intervention list with LOC projections.<br>
-**Golden-path synthesis:** Priority: Classification → Correctness → Density → Enrichment.
-
-[VERIFY] Plan complete:
-- [ ] Interventions ordered by priority.
-- [ ] LOC projections within limits.
-- [ ] No semantic content loss.
-
----
-## [4][REFACTOR]
->**Dictum:** *Atomic transformations enable validation between changes.*
+## [4][EXECUTION_ORDER]
+>**Dictum:** *Surgical first, rewrites second, quality last.*
 
 <br>
 
-Execute interventions by priority:
+**Phase 1 (Surgical):** Small, targeted changes
+- Add missing fields, matchers, values
+- Correct inaccuracies with authoritative sources
+- Remove deprecated patterns
 
-| [PRIORITY] | [CLASS]               | [GATE]                 |
-| :--------: | --------------------- | ---------------------- |
-|     0      | Classification fix    | `type`/`depth` present |
-|     1      | Constraint violations | All resolved           |
-|     2      | Format transforms     | LOC delta validated    |
-|     3      | Content consolidation | No duplication         |
-|     4      | Structural additions  | Upgrade folders exist  |
-|     5      | Content enrichment    | Headroom utilized      |
+**Phase 2 (Rewrite):** Research-driven restructuring
+- Apply when surgical insufficient
+- Maintain semantic content
+
+**Phase 3 (Quality):** Final pass
+- Remove all tiered language
+- Verify LOC within limits
+- Ensure SKILL.md builds FROM references
 
 [IMPORTANT]:
-- [ALWAYS] Fix classification FIRST—enables future refine.
-- [ALWAYS] Compress representation, not meaning.
-- [NEVER] Delete content—refactor for density.
-
----
-## [5][VALIDATE]
->**Dictum:** *Parallel review ensures no regression.*
-
-<br>
-
-Invoke `parallel-dispatch` with 3 review agents.
-
-**Input:** Refined skill, original, plan, constraint manifest.<br>
-**Review scope:** Classification, LOC, structure, voice, semantic preservation.
-
-**Regression Gate:**
-
-| [INDEX] | [DIMENSION]    | [REQUIREMENT]                       |
-| :-----: | -------------- | ----------------------------------- |
-|   [1]   | Classification | `type`/`depth` present and accurate |
-|   [2]   | Triggers       | 100% preserved                      |
-|   [3]   | Domains        | 100% addressed                      |
-|   [4]   | Semantics      | 100% retained                       |
-|   [5]   | LOC            | Within target limits                |
-
-[VERIFY] Quality gate:
-- [ ] Classification present and accurate.
-- [ ] LOC limits satisfied.
-- [ ] Structure matches target.
-- [ ] Semantic preservation verified.
+- [ALWAYS] Compress representation, not meaning
+- [NEVER] Delete semantic content—refactor for density
