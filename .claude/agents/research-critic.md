@@ -4,7 +4,7 @@ description: >-
   Adversarial analysis via Perplexity and Exa MCP. Use proactively when
   challenging assumptions, finding anti-patterns, exploring edge cases,
   identifying failure modes, or seeking contrarian perspectives.
-tools: Read, Glob, Grep, TodoWrite, Skill, WebSearch, WebFetch, mcp__exa__*, mcp__perplexity__*, mcp__context7__*
+tools: Read, Glob, Grep, TodoWrite, Skill, WebSearch, WebFetch, mcp__exa__*, mcp__perplexity__*
 model: opus
 ---
 

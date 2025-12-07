@@ -14,7 +14,7 @@ Agent files encode specialized execution contexts for main Claude agent invocati
 
 **Location:** `.claude/agents/` (project) or `~/.claude/agents/` (user). Project agents override user agents on name collision.
 
-**Navigation:** [→index.md](./index.md) | [→frontmatter.md](./references/frontmatter.md) | [→prompt.md](./references/prompt.md)
+**Navigation:** [→index.md](./index.md) | [→frontmatter.md](./references/frontmatter.md) | [→prompt.md](./references/prompt.md) | [→workflow.md](./references/workflow.md)
 
 ---
 ## [1][FRONTMATTER]
@@ -143,7 +143,15 @@ Markdown body after frontmatter encodes agent behavior. Structure determines eff
 **Reference:** [→agent.template.md](./templates/agent.template.md) — Standard agent scaffold.
 
 ---
-## [8][VALIDATION]
+## [8][WORKFLOW]
+>**Dictum:** *Workflow governs phase execution for agent creation.*
+
+<br>
+
+**Required Task:** Consult [→workflow.md](./references/workflow.md)—5-phase creation process (UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE).
+
+---
+## [9][VALIDATION]
 >**Dictum:** *Gate checklist prevents registration failures.*
 
 <br>

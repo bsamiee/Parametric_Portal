@@ -1,6 +1,6 @@
 ---
 description: Refine existing command via command-builder workflow (project)
-argument-hint: [command-path] [goal: optimize|upgrade|audit] [target-pattern?]
+argument-hint: [command-path] [goal: optimize|upgrade|audit] [target-pattern: file|multi|agent|skill|free?]
 ---
 
 # [H1][REFINE-COMMAND]

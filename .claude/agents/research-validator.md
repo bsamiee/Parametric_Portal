@@ -4,7 +4,7 @@ description: >-
   Source-grounded verification via Exa and Perplexity MCP. MUST BE USED when
   confirming research accuracy, cross-checking facts, validating sources,
   verifying claims from prior rounds, or establishing confidence levels.
-tools: Read, Glob, Grep, TodoWrite, Skill, WebSearch, WebFetch, mcp__exa__*, mcp__perplexity__*, mcp__context7__*
+tools: Read, Glob, Grep, TodoWrite, Skill, WebSearch, WebFetch, mcp__exa__*, mcp__perplexity__*
 model: opus
 ---
 

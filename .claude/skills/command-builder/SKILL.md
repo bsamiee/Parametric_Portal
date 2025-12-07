@@ -12,7 +12,8 @@ description: Creates and configures Claude Code slash commands with YAML frontma
 
 [CRITICAL] Load commands from `.claude/commands/` (project) or `~/.claude/commands/` (user). Filename becomes command name.
 
-[REFERENCE]: [→index.md](./index.md) — Complete reference file listing.
+[REFERENCE]: [→index.md](./index.md) — Complete reference file listing.<br>
+[REFERENCE]: [→workflow.md](./references/workflow.md) — 5-phase creation workflow.
 
 ---
 ## [1][FRONTMATTER]
@@ -185,7 +186,15 @@ Load context above. Spawn Task agents. Verify findings against loaded context. A
 ```
 
 ---
-## [6][VALIDATION]
+## [6][WORKFLOW]
+>**Dictum:** *Workflow governs phase execution for command creation.*
+
+<br>
+
+**Required Task:** Consult [→workflow.md](./references/workflow.md)—5-phase creation process (UNDERSTAND, ACQUIRE, RESEARCH, AUTHOR, VALIDATE).
+
+---
+## [7][VALIDATION]
 >**Dictum:** *Validation prevents broken command deployment.*
 
 <br>

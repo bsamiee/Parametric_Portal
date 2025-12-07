@@ -4,7 +4,7 @@ description: >-
   Breadth-first domain discovery via Perplexity and Exa MCP. Use proactively
   when mapping topic territory, finding core concepts, discovering adjacent
   fields, exploring emerging developments, or locating existing implementations.
-tools: Read, Glob, Grep, TodoWrite, Skill, WebSearch, WebFetch, mcp__exa__*, mcp__perplexity__*, mcp__context7__*
+tools: Read, Glob, Grep, TodoWrite, Skill, WebSearch, WebFetch, mcp__exa__*, mcp__perplexity__*
 model: opus
 ---
 
