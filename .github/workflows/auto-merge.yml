@@ -1,70 +1,70 @@
 name: Auto-Merge
 
 on:
-    pull_request:
-        types: [opened, synchronize, reopened]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
-    contents: write
-    pull-requests: write
+  contents: write
+  pull-requests: write
 
 concurrency:
-    group: auto-merge-${{ github.event.pull_request.number }}
-    cancel-in-progress: false
+  group: auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
-    # --- Bot Auto-Merge (Unified) ---------------------------------------------
-    bot-merge:
-        name: Bot Auto-Merge
-        runs-on: ubuntu-latest
-        if: github.actor == 'dependabot[bot]' || github.actor == 'renovate[bot]'
-        steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-              with:
-                  sparse-checkout: |
-                      .github/scripts
-                      .github/actions
-                      package.json
-                      pnpm-workspace.yaml
-                      pnpm-lock.yaml
+  # --- Bot Auto-Merge (Unified) ---------------------------------------------
+  bot-merge:
+    name: Bot Auto-Merge
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]' || github.actor == 'renovate[bot]'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
+            package.json
+            pnpm-workspace.yaml
+            pnpm-lock.yaml
 
-            - uses: ./.github/actions/node-env
-              with:
-                  node-version-file: package.json
+      - uses: ./.github/actions/node-env
+        with:
+          node-version-file: package.json
 
-            - uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc # v1.4.1
-              with:
-                  ref: ${{ github.event.pull_request.head.sha }}
-                  check-name: 'Code Quality'
-                  wait-interval: 30
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc # v1.4.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'Code Quality'
+          wait-interval: 30
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-            - uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc # v1.4.1
-              with:
-                  ref: ${{ github.event.pull_request.head.sha }}
-                  check-name: 'Security Summary'
-                  wait-interval: 30
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-                  allowed-conclusions: success,skipped
+      - uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc # v1.4.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'Security Summary'
+          wait-interval: 30
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          allowed-conclusions: success,skipped
 
-            - name: Auto-Merge Decision
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-              env:
-                  NODE_OPTIONS: --import tsx
-              with:
-                  script: |
-                      const { run } = await import('${{ github.workspace }}/.github/scripts/auto-merge.ts');
-                      const labels = context.payload.pull_request.labels.map(l => l.name);
-                      await run({
-                        context: { repo: context.repo, payload: { action: context.payload.action, issue: {} } },
-                        core,
-                        github,
-                        spec: {
-                          prNumber: context.payload.pull_request.number,
-                          actor: '${{ github.actor }}',
-                          sha: context.payload.pull_request.head.sha,
-                          labels,
-                          title: context.payload.pull_request.title
-                        }
-                      });
+      - name: Auto-Merge Decision
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          NODE_OPTIONS: --import tsx
+        with:
+          script: |
+            const { run } = await import('${{ github.workspace }}/.github/scripts/auto-merge.ts');
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            await run({
+              context: { repo: context.repo, payload: { action: context.payload.action, issue: {} } },
+              core,
+              github,
+              spec: {
+                prNumber: context.payload.pull_request.number,
+                actor: '${{ github.actor }}',
+                sha: context.payload.pull_request.head.sha,
+                labels,
+                title: context.payload.pull_request.title
+              }
+            });
 

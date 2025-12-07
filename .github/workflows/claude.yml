@@ -21,36 +21,103 @@ jobs:
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       issues: write
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          trigger_phrase: "@claude"
+          track_progress: "true"
+          claude_args: |
+            --model claude-opus-4-5-20251101
+            --max-turns 15
+            --append-system-prompt "CRITICAL: Read and strictly follow CLAUDE.md for all C# code.
 
-          # This is an optional setting that allows Claude to read CI results on PRs
-          additional_permissions: |
-            actions: read
+            KEY RULES (build will fail if violated):
+            - NO var - explicit types always
+            - NO if/else - use ternary, switch expressions, pattern matching
+            - Named parameters for non-obvious args
+            - Trailing commas on multi-line collections
+            - K&R brace style (opening brace on same line)
+            - One type per file
+            - Result<T> for all failable operations
+            - UnifiedOperation for polymorphic dispatch
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          claude_args: >-
-            --model claude-sonnet-4-5-20250929
-            --max-turns 8
-            --allowed-tools Read,Write,Edit,Grep,Glob,Bash(gh pr *),Bash(gh issue *),Bash(gh api *),Bash(pnpm *),Bash(git *)
+            Run 'dotnet build' to verify changes compile.
+            Run 'dotnet test' for test verification."
+          settings: |
+            {
+              "permissions": {
+                "allow": [
+                  "Read",
+                  "Write",
+                  "Edit",
+                  "Bash",
+                  "Glob",
+                  "Grep",
+                  "Task",
+                  "WebSearch",
+                  "WebFetch",
+                  "mcp__tavily__*",
+                  "mcp__context7__*",
+                  "mcp__perplexity__*",
+                  "mcp__exa__*",
+                  "mcp__github__*"
+                ]
+              },
+              "mcpServers": {
+                "github": {
+                  "command": "npx",
+                  "args": ["-y", "@modelcontextprotocol/server-github"],
+                  "env": {
+                    "GITHUB_TOKEN": "${{ github.token }}"
+                  }
+                }
+              },
+              "agents": [
+                {
+                  "name": "csharp-advanced",
+                  "description": "Advanced C# specialist for dense, algorithmic code",
+                  "prompt": "You are an advanced C# specialist. Read .github/agents/csharp-advanced.agent.md. NO var, NO if/else, NO helpers. Use expression trees, FrozenDictionary dispatch."
+                },
+                {
+                  "name": "testing-specialist",
+                  "description": "C# testing with CsCheck and Rhino.Testing",
+                  "prompt": "You are a testing specialist. Read .github/agents/testing-specialist.agent.md. CsCheck for core/, NUnit+Rhino.Testing for rhino/."
+                },
+                {
+                  "name": "refactoring-architect",
+                  "description": "Architecture refactoring for density",
+                  "prompt": "You are a refactoring architect. Read .github/agents/refactoring-architect.agent.md. Consolidate, reduce file counts."
+                },
+                {
+                  "name": "rhino-implementation",
+                  "description": "RhinoCommon geometry operations",
+                  "prompt": "You are a RhinoCommon specialist. Read .github/agents/rhino-implementation.agent.md. UnifiedOperation, V.* validation, E.* errors."
+                },
+                {
+                  "name": "cleanup-specialist",
+                  "description": "Code cleanup and standards enforcement",
+                  "prompt": "You are a cleanup specialist. Read .github/agents/cleanup-specialist.agent.md. Fix var, if/else, missing commas."
+                }
+              ]
+            }
 

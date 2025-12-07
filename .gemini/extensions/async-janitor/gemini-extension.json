@@ -1,0 +1,12 @@
+{
+    "description": "Automated code hygiene and standard enforcement. Handles formatting, linting, and pattern migration.",
+    "name": "async-janitor",
+    "subAgents": [
+        {
+            "description": "The Cleaner. Fixes lint errors, migrates if/else to dispatch tables, and standardizes file structure.",
+            "instructions": "./INSTRUCTIONS.md",
+            "name": "janitor"
+        }
+    ],
+    "version": "1.0.0"
+}

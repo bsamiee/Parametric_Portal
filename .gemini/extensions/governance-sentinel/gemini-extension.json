@@ -1,0 +1,12 @@
+{
+    "description": "Strictly enforces project Constitution and Domain Standards. Use for code review and pre-commit validation.",
+    "name": "governance-sentinel",
+    "subAgents": [
+        {
+            "description": "The Compliance Officer. Validates diffs against constitution.md and domain-*.md. Rejects non-compliant code.",
+            "instructions": "./INSTRUCTIONS.md",
+            "name": "sentinel"
+        }
+    ],
+    "version": "1.0.0"
+}

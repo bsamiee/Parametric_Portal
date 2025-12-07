@@ -1,0 +1,12 @@
+{
+    "description": "Deep context mapper. Analyzes workspace graph and file structures to ground planning in reality.",
+    "name": "architect-investigator",
+    "subAgents": [
+        {
+            "description": "The Map Maker. Reads entire folders and graphs to produce high-fidelity context reports.",
+            "instructions": "./INSTRUCTIONS.md",
+            "name": "architect"
+        }
+    ],
+    "version": "1.0.0"
+}

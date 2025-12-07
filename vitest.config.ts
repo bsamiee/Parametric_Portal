@@ -7,7 +7,7 @@ import { Effect, pipe } from 'effect';
 import { defineConfig, mergeConfig } from 'vitest/config';
 import viteConfig from './vite.config.ts';
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     patterns: {
@@ -31,7 +31,7 @@ const B = Object.freeze({
     thresholds: { branches: 80, functions: 80, lines: 80, statements: 80 },
 } as const);
 
-// --- Effect Pipeline ---------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const createVitestConfig = () =>
     pipe(
@@ -108,6 +108,6 @@ const createVitestConfig = () =>
         }),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export default mergeConfig(viteConfig, defineConfig(Effect.runSync(createVitestConfig())));

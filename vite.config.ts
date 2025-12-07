@@ -21,13 +21,13 @@ import svgr from 'vite-plugin-svgr';
 import webfontDownload from 'vite-plugin-webfont-dl';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type Cfg = S.Schema.Type<typeof CfgSchema>;
 type Mode = Cfg['mode'];
 type Browsers = { readonly [K in 'chrome' | 'edge' | 'firefox' | 'safari']: number };
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const CfgSchema = S.Union(
     S.Struct({
@@ -50,7 +50,7 @@ const CfgSchema = S.Union(
     }),
 );
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     assets: ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'],
@@ -102,7 +102,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const browsers = (): Browsers =>
     pipe(
@@ -203,7 +203,7 @@ const resolve = (browser = false) => ({
     ...(browser ? { dedupe: ['react', 'react-dom'], extensions: [...B.exts] } : {}),
 });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const plugins = {
     app: (c: Extract<Cfg, { mode: 'app' }>, prod: boolean) => [
@@ -269,7 +269,7 @@ const plugins = {
     ],
 } as const;
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const config: {
     readonly [M in Mode]: (
@@ -362,7 +362,7 @@ const config: {
     }),
 };
 
-// --- Effect Pipeline ---------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =>
     pipe(
@@ -381,7 +381,7 @@ const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =
         ),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createConfig };
 export default defineConfig(

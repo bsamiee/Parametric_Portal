@@ -6,7 +6,7 @@ import type { ParseError } from '@effect/schema/ParseResult';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type FieldName = S.Schema.Type<typeof FieldNameSchema>;
 
@@ -74,7 +74,7 @@ type FoldHandlers<R> = {
     readonly onSuccess: (field: FieldName) => R;
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { validateOnBlur: true, validateOnChange: false },
@@ -90,7 +90,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const FieldNameSchema = pipe(S.String, S.nonEmptyString(), S.brand('FieldName'));
 
@@ -128,7 +128,7 @@ const schemas = Object.freeze({
     validationSuccess: ValidationSuccessSchema,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const mkFieldName = (name: string): FieldName => name as FieldName;
 
@@ -164,7 +164,7 @@ const updateField = <T extends Record<string, unknown>, K extends keyof T>(
 const computeIsValid = <T extends Record<string, unknown>>(fields: FormState<T>['fields']): boolean =>
     Object.values(fields).every((f) => (f as FormField<unknown>).errors.length === 0);
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const foldHandlers = <R>(result: ValidationResult, h: FoldHandlers<R>): R =>
     match(result)
@@ -179,7 +179,7 @@ const validateHandlers = <V>(field: FormField<V>, schema: S.Schema<V>): Effect.E
         Effect.catchAll((error: ParseError) => Effect.succeed(mkError(field.name, 'schema', error.message))),
     );
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createForm = <T extends Record<string, unknown>>(
     config: FormConfig = {},
@@ -216,7 +216,7 @@ const createForm = <T extends Record<string, unknown>>(
         ),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B as FORM_TUNING, createForm };
 export type {

@@ -3,195 +3,185 @@ description: Senior developer protocol for Parametric Portal monorepo
 alwaysApply: true
 ---
 
-# Parametric Portal — Agent Protocol
+# [H1][CLAUDE_MANIFEST]
+>**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-## [IDENTITY]
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. MCP servers available: nx-mcp (workspace tooling), github-mcp (repository operations), perplexity-mcp (2025 research with citations), exa-mcp (code context search), context7-mcp (library documentation).
 
-Operate as senior developer in a bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. You have access to MCP servers: nx-mcp (workspace tooling), github-mcp (repository operations), perplexity-mcp (2025 research with citations), exa-mcp (code context search), context7-mcp (library documentation)
+---
+## [1][BEHAVIOR]
+>**Dictum:** *Constraints govern agent actions.*
 
-## [BEHAVIOR]
+<br>
 
 [IMPORTANT]:
-- **ALWAYS** use new sources when conducting research, sources **MUST** be from 2025, and within the last 6 months, **NEVER** use 2024 or older sources
-- **ALWAYS** follow `docs/standards/AGENTIC-DOCUMENTATION.md` for JSDoc headers, comments, naming
-- **ALWAYS** tools over internal knowledge — read files, search codebase, verify assumptions
-- **AWLAYS** Parallelize aggressively — run multiple searches, read several files, call independent tools concurrently
-- **NEVER** use emojis **ALWAYS** use "[X]" style markers with concise UPPERCASE formatting
-- **NEVER** bypass Nx (breaks caching): [AVOID]; `vite build`, [AVOID]; `vitest run`
-- Reference symbols by name — avoid inline code blocks for context already shown
-- When running tasks (such as: build, lint, test, e2e, etc.), ALWAYS prefer running the task through `nx` (i.e. `nx run`, `nx run-many`, `nx affected`) instead of using the underlying tooling directly
-- When answering questions about the repository, **ALWAYS** use the `nx_workspace` tool first to gain an understanding of the workspace architecture where applicable
-- When working in individual projects, use the `nx_project_details` mcp tool to analyze and understand the specific project structure and dependencies
+- [ALWAYS] Use new sources when conducting research; sources [MUST] be from 2025 and within last 6 months.
+- [ALWAYS] Follow `docs/styleguide/voice.md` for code headers, comments, naming.
+- [ALWAYS] Tools over internal knowledge—read files, search codebase, verify assumptions.
+- [ALWAYS] Parallelize aggressively—run multiple searches, read several files, call independent tools concurrently.
+- [ALWAYS] Reference symbols by name—avoid inline code blocks for context already shown.
+- [ALWAYS] Prefer running tasks through `nx` (`nx run`, `nx run-many`, `nx affected`) instead of underlying tooling directly.
+- [ALWAYS] Use `mcp__nx__nx_workspace` tool first when answering repository questions to gain workspace architecture understanding.
+- [ALWAYS] Use `mcp__nx__nx_project_details` tool to analyze specific project structure and dependencies.
 
-## [PREREQUISITES]
+[CRITICAL]:
+- [NEVER] Use emojis; use `[X]` style markers with concise UPPERCASE formatting.
+- [NEVER] Bypass Nx (breaks caching).
 
-[IMPORTANT]: Read these files before generating code:
-- `REQUIREMENTS.md`, `docs/standards/AGENTIC-DOCUMENTATION.md`,
-- `tsconfig.base.json`, `vite.config.ts`, `biome.json`
-- `nx.json`, `pnpm-workspace.yaml`, `package.json`,
+---
+## [2][PHILOSOPHY]
+>**Dictum:** *Philosophy principles guide implementation.*
 
-## [PROTOCOL]
+<br>
 
-[ALWAYS]: Execute sequentially before code changes:
-1. Call `mcp__nx__nx_workspace` → gather project graph, targets, nx.json
-2. Read (parallel) `pnpm-workspace.yaml`, `biome.json`, `tsconfig.base.json` → workspace config
-3. Read `vite.config.ts` + `.github/scripts/schema.ts` → extract master patterns
-4. Glob `.github/agents/*.agent.md` → identify specialist agents for delegation
+[IMPORTANT]: **Bleeding-Edge** — Leverage newest stable APIs.
+- [ALWAYS] Use TypeScript 6.0-dev features.
+- [ALWAYS] Use React 19 canary, Vite 7, Effect 3.19 APIs.
+- [ALWAYS] Prefer modern syntax: `using`, `satisfies`, const type parameters.
+- [ALWAYS] Research docs ≤6 months old before implementation.
+- [ALWAYS] Reject legacy patterns and deprecated methods.
 
-## [PHILOSOPHY]
+[IMPORTANT]: **Functional-Monadic** — Write pure functions with monadic composition.
+- [ALWAYS] Use `Effect` for async/failable operations.
+- [ALWAYS] Use `Option.fromNullable` for nullable values.
+- [MUST] Compose via `pipe()`, not nested calls.
+- [MUST] Route errors through Effect channel, not `try/catch`.
+- [MUST] Enforce immutability via `Object.freeze`, `ReadonlyArray`.
 
-[IMPORTANT]: **Bleeding-Edge** — Leverage newest stable APIs
-- Use TypeScript 6.0-dev features
-- Use React 19 canary, Vite 7, Effect 3.19 APIs
-- **ALWAYS** Prefer modern syntax: `using`, `satisfies`, const type parameters
-- **ALWAYS** Research docs ≤6 months old before implementation
-- **ALWAYS** Reject legacy patterns and deprecated methods
+[IMPORTANT]: **Expression-Centric** — Write code as expressions, not statements.
+- [ALWAYS] Use ternaries over `if/else`.
+- [ALWAYS] Use `Option.match` over null checks.
+- [ALWAYS] Use arrow functions with implicit returns.
+- [ALWAYS] Replace switch/case with dispatch tables.
 
-[IMPORTANT]: **Functional-Monadic** — Write pure functions with monadic composition
-- Use `Effect` for async/failable operations
-- Use `Option.fromNullable` for nullable values
-- **MUST** Compose via `pipe()`, not nested calls
-- **MUST** Route errors through Effect channel, not `try/catch`
-- **MUST** Enforce immutability via `Object.freeze`, `ReadonlyArray`
+[CRITICAL]: **Expression-Centric** — Prohibited patterns.
+- [NEVER] Use blocks `{}` when expression suffices.
 
-[IMPORTANT]: **Expression-Centric** — Write code as expressions, not statements
-- Use ternaries over `if/else`
-- **ALWAYS** Use `Option.match` over null checks
-- **ALWAYS** Use arrow functions with implicit returns
-- **ALWAYS** Replace switch/case with dispatch tables
-- **NEVER** use blocks `{}` when expression suffices
+[IMPORTANT]: **Algorithmic-Parametric** — Derive values algorithmically.
+- [ALWAYS] Generate constants from base values.
+- [ALWAYS] Expose tuning parameters at call-sites.
+- [ALWAYS] Consolidate config into single `B` constant per file.
+- [ALWAYS] Validate inputs via `@effect/schema`.
+- [ALWAYS] Define domain primitives as branded types.
 
-[IMPORTANT]: **Algorithmic-Parametric** — Derive values algorithmically
-- **ALWAYS** Generate constants from base values, **NEVER** hardcode
-- Expose tuning parameters at call-sites
-- Consolidate config into single `B` constant per file
-- Validate inputs via `@effect/schema`
-- Define domain primitives as branded types
+[CRITICAL]: **Algorithmic-Parametric** — Prohibited patterns.
+- [NEVER] Hardcode values.
 
-[IMPORTANT]: **Polymorphic-Dense** — Maximize functionality per LOC
-- **ALWAYS** Handle all modes via single factory function
-- **ALWAYS** Branch via dispatch tables: `handlers[mode](config)`
-- **ALWAYS** Narrow types via discriminated unions
-- **ALWAYS** Produce multiple outputs from one pipeline
-- Target 25-30 LOC per feature, complexity ≤25
+[IMPORTANT]: **Polymorphic-Dense** — Maximize functionality per LOC.
+- [ALWAYS] Handle all modes via single factory function.
+- [ALWAYS] Branch via dispatch tables: `handlers[mode](config)`.
+- [ALWAYS] Narrow types via discriminated unions.
+- [ALWAYS] Produce multiple outputs from one pipeline.
+- [ALWAYS] Target 25-30 LOC per feature, complexity ≤25.
 
-## [CONSTRAINTS]
+---
+## [3][CONSTRAINTS]
+>**Dictum:** *Constraints enforce code standards.*
 
-[FORBIDDEN]:
-- `any` → use branded types via @effect/schema
-- `let`/`var` → use `const` only
-- `if/else` → use dispatch tables
-- `for/while` → use `.map`, `.filter`, Effect
-- `try/catch` → use Effect error channel
-- Default exports → use named exports (except `*.config.ts`)
+<br>
 
-[REQUIRED]:
-- Consolidate config into single frozen B constant per file
-- Branch via dispatch tables
-- Sequence async/failable via Effect pipelines
-- Handle nullable via Option monads
-- Define domain primitives as branded types
+[IMPORTANT]:
+- [ALWAYS] Consolidate config into single frozen B constant per file.
+- [ALWAYS] Branch via dispatch tables.
+- [ALWAYS] Sequence async/failable via Effect pipelines.
+- [ALWAYS] Handle nullable via Option monads.
+- [ALWAYS] Define domain primitives as branded types.
 
-## [OUTPUT]
+[CRITICAL]:
+- [NEVER] `any` → use branded types via @effect/schema.
+- [NEVER] `let`/`var` → use `const` only.
+- [NEVER] `if/else` → use dispatch tables.
+- [NEVER] `for/while` → use `.map`, `.filter`, Effect.
+- [NEVER] `try/catch` → use Effect error channel.
+- [NEVER] Default exports → use named exports (except `*.config.ts`).
+- [NEVER] Meta-commentary ("Sourced from...", "Confirmed with...") in output files.
 
-[FORMAT]:
-- Use `backticks` for file paths, symbols, and CLI commands
-- Avoid large code blocks — reference file/symbol names instead
-- No before/after pairs or full method bodies unless explicitly requested
-- Markdown: headings for structure, bullets for lists, tables for comparisons
-- Keep responses actionable — lead with what changed, not what you will do
+---
+## [4][OUTPUT]
+>**Dictum:** *Output format optimizes readability.*
 
-### [DEPENDENCIES]
+<br>
 
-[PROCESS]:
-1. **Check catalog**: `cat pnpm-workspace.yaml | grep my-dep`
-2. **Add to catalog** (if missing): `my-dep: 1.2.3` (exact version)
-3. **Reference**: `"dependencies": { "my-dep": "catalog:" }`
-4. **Install**: `pnpm install`
-5. **Validate**: `pnpm typecheck && pnpm check`
+[IMPORTANT]:
+- [ALWAYS] Use `backticks` for file paths, symbols, and CLI commands.
+- [ALWAYS] Avoid large code blocks—reference file/symbol names instead.
+- [ALWAYS] Use Markdown: headings for structure, bullets for lists, tables for comparisons.
+- [ALWAYS] Keep responses actionable—lead with what changed, not what you will do.
 
-## [FILE_ORGANIZATION]
+<br>
 
-[RULE]: **Section separators**: `// --- Label ` + dashes to column 80. Labels: max 2 words, no parentheticals.
+### [4.1][DEPENDENCIES]
+
+[IMPORTANT]:
+1. [ALWAYS] **Check catalog**: `cat pnpm-workspace.yaml | grep my-dep`.
+2. [ALWAYS] **Add to catalog** (if missing): `my-dep: 1.2.3` (exact version).
+3. [ALWAYS] **Reference**: `"dependencies": { "my-dep": "catalog:" }`.
+4. [ALWAYS] **Install**: `pnpm install`.
+5. [ALWAYS] **Validate**: `pnpm typecheck && pnpm check`.
+
+---
+## [5][FILE_ORGANIZATION]
+>**Dictum:** *Organization patterns enable navigation.*
+
+<br>
+
+[IMPORTANT] **Section separators**: `// --- [LABEL] ` + dashes to column 80. Labels: UPPERCASE, max 2 words, underscores for spaces, no parentheticals.
 
 ```typescript
-// --- Types -------------------------------------------------------------------
-// --- Schema ------------------------------------------------------------------
-// --- Constants ---------------------------------------------------------------
-// --- Pure Functions ----------------------------------------------------------
-// --- Dispatch Tables ---------------------------------------------------------
-// --- Effect Pipeline ---------------------------------------------------------
-// --- Entry Point -------------------------------------------------------------
-// --- Export ------------------------------------------------------------------
-```
-**Canonical order** (omit unused): Types → Schema → Constants → Pure Functions → Dispatch Tables → Effect Pipeline → Entry Point → Export
-
-**FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, any parentheticals
-
-[RULE]: **Documentation standards** in `docs/standards/AGENTIC-DOCUMENTATION.md`.
-
-## [VALIDATION]
-
-[RULE]: Execute before any commit:
-1. Run `pnpm typecheck` → must pass with zero errors, zero suppressions
-2. Run `pnpm check` → must pass with zero Biome violations
-3. Verify pattern compliance → B constant, dispatch tables, Effect pipelines
-4. Extend existing `createX` factories → never bypass
-
-## [DELEGATION]
-
-[RULE]: Check domain match before implementing:
-
-| Domain          | Agent                      |
-|-----------------|----------------------------|
-| React 19, hooks | `react-specialist`         |
-| Vite/Nx config  | `vite-nx-specialist`       |
-| Effect/types    | `typescript-advanced`      |
-| Tests           | `testing-specialist`       |
-| New packages    | `library-planner`          |
-| Refactoring     | `refactoring-architect`    |
-| Docs            | `documentation-specialist` |
-| Density         | `cleanup-specialist`       |
-| Cross-package   | `integration-specialist`   |
-| Performance     | `performance-analyst`      |
-
-[DETAIL]: Consult `.github/agents/*.agent.md` for full capabilities.
-
-## [COMMANDS]
-
-[IMPORTANT]: Execute via Nx — direct tool invocation bypasses cache, dependencies, and task graph.
-
-| Category | Command | Description | Cache |
-|----------|---------|-------------|-------|
-| Development | `nx dev <project>` | Vite dev server | false |
-| Development | `nx build <project>` | Production build | true |
-| Quality | `nx run-many -t check` | Biome lint (CI mode) | true |
-| Quality | `nx run-many -t lint` | Biome lint | true |
-| Quality | `nx run-many -t fix` | Biome lint --write | false |
-| Quality | `nx run-many -t typecheck` | tsc --noEmit | true |
-| Testing | `nx test <project>` | Vitest unit tests | true |
-| Testing | `nx run-many -t mutate` | Stryker mutation testing | false |
-| Analysis | `nx run-many -t analyze` | Bundle analyzer | true |
-| Analysis | `nx inspect:dev <project>` | Vite inspect (dev) | false |
-| Analysis | `nx inspect:build <project>` | Vite inspect (build) | false |
-| CI | `nx affected -t build test lint typecheck` | Changed projects only | true |
-| CI | `nx run-many -t validate:compression` | Verify .br/.gz artifacts | false |
-| Release | `nx release` | Semantic versioning + changelog | false |
-| Utility | `nx graph` | Visualize project graph | false |
-| Utility | `nx reset` | Clear Nx cache | false |
-| PWA | `nx pwa:icons <project>` | Generate PWA icons | false |
-
-[AVOID]: Direct tool invocation breaks Nx orchestration:
-```bash
-# [AVOID] Bypasses cache, dependencies, task graph
-vite build
-vitest run
-biome check
-
-# [USE] Nx-mediated
-nx build <project>
-nx test <project>
-nx run-many -t check
+// --- [TYPES] -----------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 ```
 
-[REFERENCE]: Root `package.json` contains pnpm aliases that delegate to `nx run-many`. Configuration in `nx.json` → `targetDefaults`.
+**Canonical order** (omit unused): Types → Schema → Constants → Pure Functions → Dispatch Tables → Effect Pipeline → Entry Point → Export.<br>
+**FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, any parentheticals.
+
+---
+## [6][VALIDATION]
+>**Dictum:** *Validation gates enforce quality.*
+
+<br>
+
+[VERIFY] Execute before any commit:
+- [ ] Run `pnpm typecheck` → zero errors, zero suppressions.
+- [ ] Run `pnpm check` → zero Biome violations.
+- [ ] Pattern compliance → B constant, dispatch tables, Effect pipelines.
+- [ ] Extend existing `createX` factories → never bypass.
+
+---
+## [7][COMMANDS]
+>**Dictum:** *Commands execute via Nx orchestration.*
+
+<br>
+
+[IMPORTANT] Execute via Nx—direct tool invocation bypasses cache, dependencies, and task graph.
+
+| [INDEX] | [CATEGORY]  | [COMMAND]                                  | [DESCRIPTION]                   | [CACHE] |
+| :-----: | ----------- | ------------------------------------------ | ------------------------------- | :-----: |
+|   [1]   | Development | `nx dev <project>`                         | Vite dev server                 |  false  |
+|   [2]   | Development | `nx build <project>`                       | Production build                |  true   |
+|   [3]   | Quality     | `nx run-many -t check`                     | Biome lint (CI mode)            |  true   |
+|   [4]   | Quality     | `nx run-many -t lint`                      | Biome lint                      |  true   |
+|   [5]   | Quality     | `nx run-many -t fix`                       | Biome lint --write              |  false  |
+|   [6]   | Quality     | `nx run-many -t typecheck`                 | tsc --noEmit                    |  true   |
+|   [7]   | Testing     | `nx test <project>`                        | Vitest unit tests               |  true   |
+|   [8]   | Testing     | `nx run-many -t mutate`                    | Stryker mutation testing        |  false  |
+|   [9]   | Analysis    | `nx run-many -t analyze`                   | Bundle analyzer                 |  true   |
+|  [10]   | Analysis    | `nx inspect:dev <project>`                 | Vite inspect (dev)              |  false  |
+|  [11]   | Analysis    | `nx inspect:build <project>`               | Vite inspect (build)            |  false  |
+|  [12]   | CI          | `nx affected -t build test lint typecheck` | Changed projects only           |  true   |
+|  [13]   | CI          | `nx run-many -t validate:compression`      | Verify .br/.gz artifacts        |  false  |
+|  [14]   | Release     | `nx release`                               | Semantic versioning + changelog |  false  |
+|  [15]   | Utility     | `nx graph`                                 | Visualize project graph         |  false  |
+|  [16]   | Utility     | `nx reset`                                 | Clear Nx cache                  |  false  |
+|  [17]   | PWA         | `nx pwa:icons <project>`                   | Generate PWA icons              |  false  |
+
+[REFERENCE] Pnpm aliases: [→package.json](package.json).<br>
+[REFERENCE] Task configuration: [→nx.json](nx.json) → `targetDefaults`.
+
+[CRITICAL] Direct tool invocation—breaks Nx orchestration.

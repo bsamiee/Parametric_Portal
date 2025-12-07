@@ -9,7 +9,7 @@ import { castDraft, enableMapSet, produce } from 'immer';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type BrandMetadata = S.Schema.Type<typeof BrandMetadataSchema>;
 type RegistryState = { readonly brands: ReadonlyMap<string, BrandMetadata> };
@@ -33,14 +33,14 @@ type TemporalApi = {
     readonly produce: typeof produce;
 };
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const BrandMetadataSchema = S.Struct({
     brandName: S.String,
     createdAt: S.Number,
 });
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     defaultFormat: 'yyyy-MM-dd',
@@ -49,7 +49,7 @@ const B = Object.freeze({
 
 enableMapSet();
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError, never> =>
     pipe(
@@ -57,7 +57,7 @@ const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError
         Effect.flatMap(S.decode(BrandMetadataSchema)),
     );
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const temporalHandlers = {
     addDays:
@@ -86,7 +86,7 @@ const temporalHandlers = {
         ),
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createRegistry = (): BrandRegistry => {
     const useStore = create<BrandRegistry>()(
@@ -132,7 +132,7 @@ const createTemporal = (config: TemporalConfig = {}): TemporalApi =>
         produce,
     } as const);
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B as TEMPORAL_TUNING, createTemporal };
 export type { BrandMetadata, BrandRegistry, TemporalApi, TemporalConfig };

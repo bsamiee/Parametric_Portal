@@ -7,7 +7,7 @@ import { Cache, Duration, Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 import { v7 as uuidv7 } from 'uuid';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>;
 type Email = S.Schema.Type<typeof EmailSchema>;
@@ -37,7 +37,7 @@ type TypesApi = {
     readonly schemas: typeof schemas;
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     cache: { capacity: 1000, ttlMinutes: 5 },
@@ -55,7 +55,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const baseSchemas = {
     email: pipe(S.String, S.pattern(B.patterns.email)),
@@ -107,11 +107,11 @@ const brands = Object.freeze({
     uuidv7: Uuidv7Schema,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createIdCache = (cfg: TypesConfig) =>
     Cache.make({
@@ -145,7 +145,7 @@ const createTypes = (config: TypesConfig = {}): Effect.Effect<TypesApi, never, n
         ),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B as TYPES_TUNING, createTypes };
 export type {

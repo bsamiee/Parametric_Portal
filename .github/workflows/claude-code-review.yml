@@ -1,44 +1,137 @@
 name: Claude Code Review
 
 on:
-    issue_comment:
-        types: [created]
-    pull_request_review_comment:
-        types: [created]
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'libs/**/*.cs'
+      - 'test/**/*.cs'
+      - '*.csproj'
+      - 'Directory.Build.props'
 
 concurrency:
-    group: claude-review-${{ github.event.issue.number || github.event.pull_request.number }}
-    cancel-in-progress: true
-
-permissions:
-    contents: read
-    pull-requests: write
-    issues: read
-    id-token: write
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-    # --- On-Demand Code Review (triggered by @claude mention) -----------------
-    claude-review:
-        if: |
-            (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-            (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
+  claude-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
 
-        steps:
-            - name: Checkout
-              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-              with:
-                  fetch-depth: 0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-            - name: Claude Code Review
-              uses: anthropics/claude-code-action@v1
-              with:
-                  claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-                  additional_permissions: |
-                      actions: read
-                  # No prompt - let Claude respond to the @claude mention interactively
-                  claude_args: >-
-                      --model claude-sonnet-4-5-20250929
-                      --max-turns 10
-                      --allowed-tools Read,Grep,Glob,Bash(gh pr diff *),Bash(gh pr view *),Bash(gh pr review *),Bash(gh api *),Bash(cat *),Bash(rm *)
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Create review output directory
+        run: mkdir -p .github/review-output
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Review PR #${{ github.event.pull_request.number }} against CLAUDE.md standards.
+
+            ## OUTPUT REQUIREMENT
+
+            You MUST generate structured JSON output to `.github/review-output/pr-${{ github.event.pull_request.number }}.json`.
+
+            The JSON must follow this schema:
+            ```json
+            {
+              "pr_number": ${{ github.event.pull_request.number }},
+              "verdict": "approve" | "request_changes",
+              "violations": [
+                {
+                  "rule": "RULE_ID",
+                  "file": "relative/path.cs",
+                  "start_line": 1,
+                  "end_line": 1,
+                  "current": "code that violates",
+                  "suggested": "code that fixes",
+                  "severity": "error",
+                  "context": "optional explanation"
+                }
+              ],
+              "passed_checks": ["RULE_ID", ...],
+              "metadata": {
+                "review_timestamp": "ISO 8601 timestamp",
+                "build_status": "success" | "failure"
+              }
+            }
+            ```
+
+            Valid RULE_IDs: NO_VAR, NO_IF_ELSE, TRAILING_COMMA, NAMED_PARAMETERS,
+            TARGET_TYPED_NEW, COLLECTION_EXPRESSIONS, FILE_SCOPED_NAMESPACE,
+            ONE_TYPE_PER_FILE, KR_BRACE_STYLE, PATTERN_MATCHING, RESULT_MONAD,
+            UNIFIED_OPERATION, ERROR_REGISTRY, FILES_PER_FOLDER, TYPES_PER_FOLDER,
+            LOC_PER_MEMBER, PRIMARY_CONSTRUCTORS
+
+            ## MANDATORY CHECKS (build failures)
+
+            **Syntax violations** (search for these patterns):
+            - `var ` declarations → must use explicit types (NO_VAR)
+            - `if (` with `} else {` → must use ternary/switch expressions (NO_IF_ELSE)
+            - `new List<` or `new Dictionary<` → must use collection expressions `[]` (COLLECTION_EXPRESSIONS)
+            - Missing trailing commas in multi-line arrays/collections (TRAILING_COMMA)
+            - `namespace X {` → must use file-scoped `namespace X;` (FILE_SCOPED_NAMESPACE)
+
+            **Architecture violations**:
+            - Direct `throw new` → must return `Result<T>` with `E.*` errors (RESULT_MONAD)
+            - Missing named parameters for non-obvious args (NAMED_PARAMETERS)
+            - Multiple types in single file (ONE_TYPE_PER_FILE)
+            - Helper method extraction instead of inline logic
+
+            **Organization violations**:
+            - Method >300 LOC (LOC_PER_MEMBER)
+            - >4 files per folder (FILES_PER_FOLDER)
+            - >10 types per folder (TYPES_PER_FOLDER)
+
+            ## EXECUTION STEPS
+
+            1. Run `dotnet build` to check analyzer compliance
+            2. Search changed files for pattern violations
+            3. For each violation found, record with exact line numbers and suggested fix
+            4. Write JSON to `.github/review-output/pr-${{ github.event.pull_request.number }}.json`
+            5. Use `gh pr review` with `--approve` or `--request-changes` based on verdict
+
+            ## IMPORTANT
+
+            - The JSON file MUST be created even if verdict is "approve" (with empty violations array)
+            - Include ALL passed checks in passed_checks array
+            - Violations must have actionable suggested fixes
+            - Apply fixes in reverse line order (highest line first) within each file to prevent shifts
+
+          claude_args: |
+            --model claude-opus-4-5-20251101
+            --max-turns 8
+            --allowedTools Read,Write,Grep,Glob,Bash(dotnet:*),Bash(git diff:*),Bash(gh pr:*)
+
+      - name: Save PR metadata for downstream workflows
+        if: always()
+        run: |
+          echo '${{ github.event.pull_request.number }}' > .github/review-output/pr-number.txt
+          echo '${{ github.event.pull_request.head.ref }}' > .github/review-output/head-branch.txt
+
+      - name: Upload review output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-output
+          path: .github/review-output/
+          if-no-files-found: warn
+          retention-days: 30

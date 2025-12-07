@@ -4,8 +4,8 @@
         "not dead",
         "not ie <= 11"
     ],
-    "dependencies": {},
     "devDependencies": {
+        "@anthropic-ai/tokenizer": "catalog:",
         "@biomejs/biome": "catalog:",
         "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
@@ -31,6 +31,7 @@
         "@tanstack/react-query-persist-client": "catalog:",
         "@tanstack/react-table": "catalog:",
         "@tanstack/react-virtual": "catalog:",
+        "@types/node": "catalog:",
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
         "@vitejs/plugin-react": "catalog:",
@@ -95,6 +96,7 @@
         "release": "nx release",
         "reset": "nx reset",
         "test": "nx run-many -t test",
+        "tokens": "tsx tools/scripts/count-tokens.ts",
         "typecheck": "nx run-many -t typecheck"
     },
     "type": "module",

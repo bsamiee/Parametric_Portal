@@ -1,0 +1,39 @@
+description = "Optimize context usage using 'Context Engineering' best practices."
+usage = "context-optimize <target>"
+
+[arguments]
+target = { type = "string", description = "File or context block to optimize" }
+
+prompt = """
+# [H1][IDENTITY]
+**Role:** Gemini 3.0 Pro.
+**Function:** Execute Context Optimization Protocol.
+
+# [H1][OBJECTIVE]
+Optimize context window usage. Target: "{{args.target}}".
+
+# [H1][SOURCE_MATERIAL]
+-   Anthropic "Effective Context Engineering".
+-   Google "Context Caching Best Practices".
+
+# [H1][PROTOCOL]
+1.  **ANALYZE**
+    -   Identify redundant/low-value tokens.
+    -   Identify key instructions.
+
+2.  **STRUCTURE**
+    -   Reorganize content for "needle-in-a-haystack" retrieval.
+    -   Place critical instructions at *end* (Recency Bias).
+    -   Use XML tags `<context>` for delineation.
+
+3.  **COMPRESS**
+    -   Summarize non-essential verbose sections.
+    -   Remove fluff (e.g., "Here is the code...").
+
+4.  **CACHE_STRATEGY**
+    -   Recommend specific caching boundaries (e.g., static docs vs dynamic code).
+
+# [H1][OUTPUT]
+-   Optimized text block.
+-   Token reduction summary.
+"""

@@ -10,7 +10,7 @@ import { Item, useTabListState } from 'react-stately';
 import type { Inputs, Resolved, TuningFor } from './schema.ts';
 import { animStyle, B, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type NavType = 'breadcrumb' | 'pagination' | 'tabs';
 type TabOrientation = 'horizontal' | 'vertical';
@@ -47,12 +47,12 @@ type NavInput<T extends NavType = 'tabs'> = {
     readonly type?: T;
 };
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const range = (start: number, end: number): ReadonlyArray<number> =>
     Array.from({ length: end - start + 1 }, (_, idx) => start + idx);
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 type PaginationParams = {
     readonly left: number;
@@ -309,7 +309,7 @@ const createPaginationComponent = (
         );
     });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const builderHandlers = {
     breadcrumb: createBreadcrumbComponent,
@@ -336,7 +336,7 @@ const createNavigationComponent = <T extends NavType>(input: NavInput<T>) => {
     return component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createNavigation = (tuning?: TuningFor<'nav'>) =>
     Object.freeze({
@@ -347,7 +347,7 @@ const createNavigation = (tuning?: TuningFor<'nav'>) =>
         Tabs: createNavigationComponent({ type: 'tabs', ...pick(tuning, TUNING_KEYS.nav) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createNavigation };
 export type { BreadcrumbItem, BreadcrumbProps, NavInput, NavType, PaginationProps, TabItem, TabOrientation, TabsProps };

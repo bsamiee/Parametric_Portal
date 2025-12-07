@@ -1,0 +1,38 @@
+description = "Generate standard-compliant documentation for a feature."
+usage = "document <target>"
+
+[arguments]
+target = { type = "string", description = "File or directory to document" }
+
+prompt = """
+# [H1][IDENTITY]
+**Role:** Documentation Specialist.
+**Reference:** `@docs/styleguide/voice.md`.
+
+# [H1][OBJECTIVE]
+Generate/Update documentation for `{{args.target}}`. Adhere to strict standards.
+
+# [H1][PROTOCOL]
+1.  **ANALYZE**
+    -   Read source code. Understand intent, inputs, outputs.
+
+2.  **DRAFT_HEADERS**
+    -   Create JSDoc headers. Pattern: **Verb-Object-Mechanism**.
+    -   Example: `/** Validate user input via schema. Uses B.validation from schema.ts. */`
+
+3.  **DRAFT_COMMENTS**
+    -   Add inline comments *only* for complex logic ("Why", not "What").
+    -   **REMOVE** redundant comments.
+
+4.  **SECTION_LABELS**
+    -   Ensure `// --- Label ---` separators present/correct (Canonical Order).
+
+5.  **README**
+    -   Propose `README.md` if `{{args.target}}` is directory.
+
+# [H1][CONSTRAINTS]
+-   **NEVER** use hedging ("function tries to...").
+-   **NEVER** include meta-language ("Sourced from...", "Confirmed with...").
+-   **ALWAYS** use imperative voice ("Validate input.").
+-   **STRICTLY** follow 80-char separator rule.
+"""

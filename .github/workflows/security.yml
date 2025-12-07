@@ -57,7 +57,7 @@ jobs:
                       const vulns = auditResults.metadata?.vulnerabilities || {};
                       const critical = vulns.critical || 0;
                       const high = vulns.high || 0;
-                      core.info(`Vulnerability summary: ${critical} critical, ${high} high`);
+                      core.info(`[PASS] Vulnerability summary: ${critical} critical, ${high} high`);
                       if (critical > 0 || high > 0) {
                         const advisories = auditResults.advisories || {};
                         for (const [id, advisory] of Object.entries(advisories)) {

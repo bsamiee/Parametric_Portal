@@ -31,7 +31,7 @@ type IssueComment = {
     readonly created_at: string;
 };
 type CommitFile = { readonly sha: string; readonly files: ReadonlyArray<string> };
-type Action = 'resolve' | 'reply' | 'skip';
+type Action = 'resolve' | 'reply' | 'valuable' | 'skip';
 
 // --- Constants ---------------------------------------------------------------
 
@@ -75,7 +75,8 @@ const isPrompt = (body: string): boolean => {
     const lower = body.toLowerCase();
     return (
         H.agentMentions.some((m) => lower.includes(m.toLowerCase())) ||
-        H.agentSlashCommands.some((cmd) => lower.includes(cmd))
+        H.agentSlashCommands.some((cmd) => lower.includes(cmd)) ||
+        B.hygiene.slashCommands.some((cmd) => lower.includes(`/${cmd}`))
     );
 };
 
@@ -90,7 +91,7 @@ const classify = (t: Thread, commits: ReadonlyArray<CommitFile>): Action =>
         : t.isOutdated
           ? 'resolve'
           : isValuable(t.comments.nodes.map((c) => c.body).join(' '))
-            ? 'skip' // Never auto-resolve valuable feedback
+            ? 'valuable' // Thumbs up valuable feedback, no resolve
             : commits.some((c) => pathMatch(t.path, c.files))
               ? 'reply'
               : 'skip';
@@ -155,6 +156,12 @@ const deleteComment = (ctx: Ctx, id: number): Promise<boolean> =>
         () => false,
     );
 
+const reactToComment = (ctx: Ctx, id: number, content: string): Promise<boolean> =>
+    call(ctx, 'reaction.createForReviewComment', id, content).then(
+        () => true,
+        () => false,
+    );
+
 // --- Dispatch Tables ---------------------------------------------------------
 
 const threadActions: Record<
@@ -174,6 +181,10 @@ const threadActions: Record<
                 ? await replyToThread(ctx, n, first.databaseId, H.msg.addressed(match.sha, match.files))
                 : false;
         const resolved = replied ? await resolveThread(ctx, t.id) : false;
+        await Promise.all([
+            replied && first?.databaseId ? reactToComment(ctx, first.databaseId, '+1') : Promise.resolve(false),
+            resolved && first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false),
+        ]);
         return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
     resolve: async (ctx, t, commits, n) => {
@@ -183,10 +194,18 @@ const threadActions: Record<
             ? await replyToThread(ctx, n, first.databaseId, H.msg.outdated(match?.sha ?? null, t.path))
             : false;
         const resolved = await resolveThread(ctx, t.id);
-        await (first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false));
+        await Promise.all([
+            resolved && first?.databaseId ? reactToComment(ctx, first.databaseId, '-1') : Promise.resolve(false),
+            first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false),
+        ]);
         return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
     skip: async () => ({ replied: 0, resolved: 0 }),
+    valuable: async (ctx, t) => {
+        const first = t.comments.nodes[0];
+        await (first?.databaseId ? reactToComment(ctx, first.databaseId, '+1') : Promise.resolve(false));
+        return { replied: 0, resolved: 0 };
+    },
 };
 
 // --- Effect Pipeline ---------------------------------------------------------
@@ -210,7 +229,7 @@ const cleanupPrompts = async (
     (
         await Promise.all(
             comments
-                .filter((c) => isOwner(c.user?.login, owners) && isPrompt(c.body) && !isBot(c.user?.login))
+                .filter((c) => isPrompt(c.body) && !isBot(c.user?.login) && isOwner(c.user?.login, owners))
                 .map((c) => deleteComment(ctx, c.id)),
         )
     ).filter(Boolean).length;
@@ -227,7 +246,7 @@ const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<
     const { prNumber, ownerLogins } = params.spec;
     const [threads, comments] = await Promise.all([fetchThreads(ctx, prNumber), fetchComments(ctx, prNumber)]);
     const unresolved = threads.filter((t) => !t.isResolved);
-    const hasPrompts = comments.some((c) => isOwner(c.user?.login, ownerLogins) && isPrompt(c.body));
+    const hasPrompts = comments.some((c) => isPrompt(c.body) && !isBot(c.user?.login));
     const noWork = unresolved.length === 0 && !hasPrompts;
     return noWork
         ? noWorkResult(params.core, prNumber)

@@ -16,7 +16,7 @@ import {
     utilities,
 } from '../src/schema.ts';
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const SCHEMA_KEYS: ReadonlyArray<SchemaKey> = ['scale', 'behavior', 'overlay', 'feedback', 'animation'];
 const STATE_KEYS = ['ctrl', 'data', 'el', 'fb', 'menu', 'nav', 'ov'] as const;
@@ -28,7 +28,7 @@ const SCALE_CONFIGS = [
     { baseUnit: 0.5, density: 2, radiusMultiplier: 1, scale: 10 },
 ] as const;
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 describe('components schema', () => {
     describe('resolve polymorphic function', () => {

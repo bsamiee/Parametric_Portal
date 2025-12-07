@@ -10,8 +10,14 @@ import { type BodySpec, createCtx, fn, mutate, type RunParams } from './schema.t
 type DebtClassification = { readonly labels: ReadonlyArray<string>; readonly type: string };
 type Rule<V> = { readonly pattern: RegExp; readonly value: V };
 type AlertSpec =
-    | { readonly kind: 'ci'; readonly job: string; readonly runUrl: string }
-    | { readonly kind: 'security'; readonly runUrl: string };
+    | {
+          readonly kind: 'ci';
+          readonly job: string;
+          readonly runUrl: string;
+          readonly prNumber?: number;
+          readonly sectionId?: string;
+      }
+    | { readonly kind: 'security'; readonly runUrl: string; readonly prNumber?: number; readonly sectionId?: string };
 
 // --- Constants ---------------------------------------------------------------
 
@@ -59,29 +65,60 @@ const alertSpecs = Object.freeze({
 const run = async (params: RunParams & { readonly spec: AlertSpec }): Promise<void> => {
     const ctx = createCtx(params);
     const spec = params.spec;
-    const cfg =
-        spec.kind === 'ci'
-            ? ((classification) => ({
-                  body: fn.body(alertSpecs.ci.body, { job: spec.job, runUrl: spec.runUrl }),
-                  labels: classification.labels,
-                  pattern: alertSpecs.ci.pattern,
-                  title: `${classification.type} Debt: CI Failure`,
-              }))(fn.classify(spec.job, alertSpecs.ci.rules, alertSpecs.ci.default))
-            : {
-                  body: fn.body(alertSpecs.security.body, { runUrl: spec.runUrl }),
-                  labels: [...alertSpecs.security.labels],
-                  pattern: alertSpecs.security.pattern,
-                  title: alertSpecs.security.title,
-              };
-    await mutate(ctx, {
-        body: cfg.body,
-        label: cfg.labels[0],
-        labels: [...cfg.labels],
-        pattern: cfg.pattern,
-        t: 'issue',
-        title: cfg.title,
-    });
-    params.core.info(`${spec.kind} alert created/updated`);
+
+    // CI Failure Logic
+    if (spec.kind === 'ci') {
+        const classification = fn.classify(spec.job, alertSpecs.ci.rules, alertSpecs.ci.default);
+        const body = fn.body(alertSpecs.ci.body, { job: spec.job, runUrl: spec.runUrl });
+
+        // If PR number provided, update PR comment section
+        if (spec.prNumber) {
+            await mutate(ctx, {
+                body,
+                marker: 'PR-MONITOR', // Uses the master marker from PR template
+                mode: 'section',
+                n: spec.prNumber,
+                sectionId: 'ci-failure',
+                t: 'comment',
+            });
+        }
+        // Fallback: Create/Update Issue
+        else {
+            await mutate(ctx, {
+                body,
+                label: classification.labels[0],
+                labels: [...classification.labels],
+                pattern: alertSpecs.ci.pattern,
+                t: 'issue',
+                title: `${classification.type} Debt: CI Failure`,
+            });
+        }
+    }
+
+    // Security Alert Logic
+    else {
+        const body = fn.body(alertSpecs.security.body, { runUrl: spec.runUrl });
+        if (spec.prNumber) {
+            await mutate(ctx, {
+                body,
+                marker: 'PR-MONITOR',
+                mode: 'section',
+                n: spec.prNumber,
+                sectionId: 'security-alert',
+                t: 'comment',
+            });
+        } else {
+            await mutate(ctx, {
+                body,
+                label: alertSpecs.security.labels[0],
+                labels: [...alertSpecs.security.labels],
+                pattern: alertSpecs.security.pattern,
+                t: 'issue',
+                title: alertSpecs.security.title,
+            });
+        }
+    }
+    params.core.info(`${spec.kind} alert processed`);
 };
 
 // --- Export ------------------------------------------------------------------

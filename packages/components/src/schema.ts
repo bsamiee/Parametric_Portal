@@ -10,11 +10,11 @@ import { useRef } from 'react';
 import { useFocusRing } from 'react-aria';
 import { twMerge } from 'tailwind-merge';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type ScaleComputed = { readonly scale: number; readonly density: number; readonly baseUnit: number };
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const DISABLED_CLASS = 'pointer-events-none opacity-50';
 const LOADING_CLASS = 'animate-pulse';
@@ -34,7 +34,7 @@ const multiplyScale = (computed: ScaleComputed, factor: number, multiplier = 1):
 const addScaleOffset = (computed: ScaleComputed, base: number, step: number, multiplier = 1): number =>
     (base + computed.scale * step) * computed.density * computed.baseUnit * multiplier;
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const PositiveSchema = pipe(S.Number, S.positive());
 const NonNegativeIntSchema = pipe(S.Number, S.int(), S.nonNegative());
@@ -92,7 +92,7 @@ const AnimationSchema = S.Struct({
     enabled: optionalBoolean(true),
 });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const Schemas = {
     animation: AnimationSchema,
@@ -114,8 +114,8 @@ const compute = {
     cmdHeadingPaddingY: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdHeadingPyMul)),
     cmdInputHeight: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdInputHMul)),
     cmdItemHeight: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdItemHMul)),
-    cmdListMaxHeight: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdListMaxMul)),
-    cmdListMinHeight: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdListMinMul)),
+    cmdListMaxHeight: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdListMaxMul, 4)),
+    cmdListMinHeight: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdListMinMul, 4)),
     cmdShortcutPaddingX: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdShortcutPxMul)),
     cmdShortcutPaddingY: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.cmdShortcutPyMul)),
     dialogMaxWidth: (computed: Resolved['scale']) =>
@@ -154,7 +154,7 @@ const compute = {
 
 type Computed = { readonly [K in keyof typeof compute]: string };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     algo: {
@@ -538,7 +538,7 @@ const useCollectionEl = <T extends HTMLElement>(focusClass?: string): Collection
     };
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const resolve = <K extends SchemaKey>(key: K, input?: Inputs[K]): Resolved[K] =>
     S.decodeUnknownSync(Schemas[key] as unknown as S.Schema<Resolved[K], Inputs[K]>)(input ?? {});
@@ -605,7 +605,7 @@ const createBuilderContext = <K extends string, R extends SchemaKey>(
     return { ...resolved, computed, scale, vars: utilities.cssVars(computed, cssPrefix) };
 };
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export {
     animStyle,

@@ -30,7 +30,7 @@ import {
     utilities,
 } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type SelectionType = 'combobox' | 'menu' | 'select';
 type ItemData = { readonly disabled?: boolean; readonly key: Key; readonly label: ReactNode };
@@ -77,7 +77,7 @@ type SelectionInput<T extends SelectionType = 'menu'> = {
 } & Partial<TuningFor<'menu'>>;
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 type OptionProps<T> = { readonly item: Node<T>; readonly state: ListState<T> };
 const Option = <T>({ item, state }: OptionProps<T>) => {
@@ -485,7 +485,7 @@ const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
         );
     });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const SELECTION_TUNING_KEYS: ReadonlyArray<'animation' | 'behavior' | 'overlay' | 'scale'> = [
     'animation',
@@ -511,7 +511,7 @@ const createSelectionComponent = <T extends SelectionType>(input: SelectionInput
     return component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createSelection = (tuning?: TuningFor<'menu'>) =>
     Object.freeze({
@@ -534,7 +534,7 @@ const createSelection = (tuning?: TuningFor<'menu'>) =>
         } as SelectionInput<'select'>),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createSelection };
 export type { ComboboxProps, ItemData, MenuProps, SectionData, SelectionInput, SelectionType, SelectProps };

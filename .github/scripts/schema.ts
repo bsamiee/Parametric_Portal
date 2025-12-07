@@ -398,7 +398,8 @@ type MutateSpec =
           readonly n: number;
           readonly marker: string;
           readonly body: string;
-          readonly mode?: 'replace' | 'append' | 'prepend';
+          readonly mode?: 'replace' | 'append' | 'prepend' | 'section';
+          readonly sectionId?: string;
       }
     | {
           readonly t: 'issue';
@@ -701,6 +702,14 @@ const ops: Record<string, Op> = {
         api: ['pulls', 'update'],
         map: ([number, meta]) => ({ pull_number: number, ...(meta as object) }),
     },
+    'reaction.create': {
+        api: ['reactions', 'createForIssueComment'],
+        map: ([commentId, content]) => ({ comment_id: commentId, content }),
+    },
+    'reaction.createForReviewComment': {
+        api: ['reactions', 'createForPullRequestReviewComment'],
+        map: ([commentId, content]) => ({ comment_id: commentId, content }),
+    },
     'release.create': {
         api: ['repos', 'createRelease'],
         map: ([tag, name, body, draft, prerelease]) => ({ body, draft, name, prerelease, tag_name: tag }),
@@ -744,12 +753,27 @@ const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Pro
 
 // --- Dispatch Tables ---------------------------------------------------------
 
-const merge = (existing: string | null, content: string, mode: 'replace' | 'append' | 'prepend'): string =>
-    ({
-        append: `${existing ?? ''}\n\n---\n\n${content}`,
-        prepend: `${content}\n\n---\n\n${existing ?? ''}`,
+const merge = (
+    existing: string | null,
+    content: string,
+    mode: 'replace' | 'append' | 'prepend' | 'section',
+    sectionId?: string,
+): string => {
+    const prev = existing ?? '';
+    if (mode === 'section' && sectionId) {
+        const start = `<!-- SECTION-START: ${sectionId} -->`;
+        const end = `<!-- SECTION-END: ${sectionId} -->`;
+        const section = `${start}\n${content}\n${end}`;
+        const pattern = new RegExp(`${start}[\\s\\S]*?${end}`);
+        return pattern.test(prev) ? prev.replace(pattern, section) : `${prev}\n\n${section}`;
+    }
+    return {
+        append: `${prev}\n\n---\n\n${content}`,
+        prepend: `${content}\n\n---\n\n${prev}`,
         replace: content,
-    })[mode];
+        section: content, // Fallback if no sectionId
+    }[mode];
+};
 
 const mutateHandlers: {
     readonly [K in MutateSpec['t']]: (ctx: Ctx, spec: Extract<MutateSpec, { t: K }>) => Promise<void>;
@@ -764,7 +788,7 @@ const mutateHandlers: {
                     ctx,
                     'comment.update',
                     existing?.id,
-                    merge(existing?.body ?? null, spec.body, spec.mode ?? 'replace'),
+                    merge(existing?.body ?? null, spec.body, spec.mode ?? 'replace', spec.sectionId),
                 ),
         };
         await actions[existing ? 'update' : 'create']();

@@ -1,235 +1,188 @@
 name: CI
 
 on:
-    pull_request:
-        branches: [main]
-    push:
-        branches: [main]
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
 
 concurrency:
-    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-    cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-    # --- Normalize Commit (Independent) ---------------------------------------
-    normalize-commit:
-        name: Normalize Commit
-        if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-              with:
-                  token: ${{ secrets.GITHUB_TOKEN }}
-                  fetch-depth: 0
-            - uses: ./.github/actions/node-env
-            - uses: ./.github/actions/normalize-commit
+  # --- Normalize Commit (Independent) ---------------------------------------
+  normalize-commit:
+    name: Normalize Commit
+    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      - uses: ./.github/actions/node-env
+      - uses: ./.github/actions/normalize-commit
 
-    # --- Quality Gate ---------------------------------------------------------
-    quality:
-        name: Code Quality
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
-        permissions:
-            contents: write
-            actions: read
-            issues: write
-            pull-requests: write
-        steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-              with:
-                  ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
-                  token: ${{ secrets.GITHUB_TOKEN }}
-                  fetch-depth: 0
-                  filter: tree:0
+  # --- Quality Gate ---------------------------------------------------------
+  quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          filter: tree:0
 
-            - name: Setup Environment
-              id: env
-              uses: ./.github/actions/node-env
-              with:
-                  nx: 'true'
-                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-                  nx-distribute: 'true'
-                  nx-distribute-config: '.nx/workflows/distribution-config.yaml'
-                  nx-stop-on-success: 'true'
-                  nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
-                  nx-fix-tasks: '*lint*,*check*,*format*'
+      - name: Setup Environment
+        id: env
+        uses: ./.github/actions/node-env
+        with:
+          nx: 'true'
+          nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+          nx-distribute: 'true'
+          nx-distribute-config: '.nx/workflows/distribution-config.yaml'
+          nx-stop-on-success: 'true'
+          nx-auto-fix: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+          nx-fix-tasks: '*lint*,*check*,*format*'
 
-            - name: Detect Changes
-              id: changes
-              uses: ./.github/actions/changed-detection
-              with:
-                  mode: fast
-                  globs_pattern: 'apps/**,packages/**,.github/**'
-                  base_sha: ${{ steps.env.outputs.nx-base }}
-                  head_sha: ${{ steps.env.outputs.nx-head }}
+      - name: Setup Git Identity
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/git-identity
 
-            - name: Setup Git Identity
-              if: github.event_name == 'pull_request'
-              uses: ./.github/actions/git-identity
+      - name: Auto Fix (Biome)
+        id: auto-fix
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/auto-fix
+        with:
+          command: pnpm exec biome check --write --unsafe .
+          commit-message: 'style: biome auto-repair'
 
-            - name: Biome Auto-Repair
-              id: biome-repair
-              if: github.event_name == 'pull_request'
-              run: |
-                  pnpm exec biome check --write --unsafe .
-                  if [[ -n $(git status --porcelain) ]]; then
-                    echo "has_changes=true" >> $GITHUB_OUTPUT
-                  else
-                    echo "has_changes=false" >> $GITHUB_OUTPUT
-                  fi
+      - name: Comment on Biome Repair
+        if: github.event_name == 'pull_request' && steps.auto-fix.outputs.has-changes == 'true'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          NODE_OPTIONS: --import tsx
+        with:
+          script: |
+            const { mutate, createCtx } = await import('${{ github.workspace }}/.github/scripts/schema.ts');
+            await mutate(createCtx({ context, core, github }), {
+              t: 'comment',
+              n: context.payload.pull_request.number,
+              marker: 'PR-MONITOR',
+              mode: 'section',
+              sectionId: 'biome-repair',
+              body: '✅ **Biome Auto-Repair Applied**: Style issues fixed and committed.'
+            });
 
-            - name: Commit Biome Fixes
-              id: commit-fixes
-              if: github.event_name == 'pull_request' && steps.biome-repair.outputs.has_changes == 'true'
-              run: |
-                  git add -u
-                  git commit -m "style: biome auto-repair" \
-                      -m "" \
-                      -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-                  if ! git push; then
-                    echo "::error::Failed to push biome fixes. This may occur if the PR is from a fork or if there are concurrent commits."
-                    exit 1
-                  fi
-                  echo "committed=true" >> $GITHUB_OUTPUT
+      - name: Lint (Biome)
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: pnpm exec nx affected -t lint
 
-            - name: Lint (Biome)
-              id: lint
-              run: pnpm exec nx affected -t lint
-              continue-on-error: true
+      - name: Type Check
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: pnpm exec nx affected -t typecheck
 
-            - name: Type Check
-              id: typecheck
-              run: pnpm exec nx affected -t typecheck
-              continue-on-error: true
+      - name: Build
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: pnpm exec nx affected -t build
 
-            - name: Build
-              id: build
-              run: pnpm exec nx affected -t build
-              continue-on-error: true
+      - name: Test
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: pnpm exec nx affected -t test
 
-            - name: Test
-              id: test
-              run: pnpm exec nx affected -t test
-              continue-on-error: true
+      - name: Generate Project Graph
+        if: always()
+        run: pnpm exec nx graph --file=.nx/project-graph.json
+        continue-on-error: true
 
-            - name: Post Unified PR Comment
-              if: github.event_name == 'pull_request' && always()
-              uses: ./.github/actions/pr-comment
-              with:
-                  pr_number: ${{ github.event.pull_request.number }}
-                  # SECURITY: Explicit null checks prevent fromJson parse errors on undefined/empty values
-                  sections_data: |
-                      {
-                        "changes": {
-                          "added": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).added) || 0 }},
-                          "modified": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).modified) || 0 }},
-                          "deleted": ${{ (steps.changes.outputs.stats_json != '' && fromJson(steps.changes.outputs.stats_json).deleted) || 0 }},
-                          "files": ${{ steps.changes.outputs.changed_files || '[]' }}
-                        },
-                        "affected": ${{ steps.changes.outputs.affected_projects || '[]' }},
-                        "quality": {
-                          "lint": "${{ steps.lint.outcome }}",
-                          "typecheck": "${{ steps.typecheck.outcome }}",
-                          "build": "${{ steps.build.outcome }}",
-                          "test": "${{ steps.test.outcome }}"
-                        },
-                        "biome": {
-                          "repaired": ${{ steps.commit-fixes.outputs.committed == 'true' }}
-                        }
-                      }
+      - name: Upload Coverage and Project Graph
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-artifacts
+          path: |
+            **/coverage
+            .nx/project-graph.json
+          if-no-files-found: ignore
+          retention-days: 7
 
-            - name: Check Quality Gates
-              if: steps.lint.outcome == 'failure' || steps.typecheck.outcome == 'failure' || steps.build.outcome == 'failure' || steps.test.outcome == 'failure'
-              run: |
-                  echo "::error::One or more quality gates failed"
-                  exit 1
+      - name: Job Summary
+        if: always()
+        run: |
+          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
+          pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Cache Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | Cache Hit |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+          for target in lint typecheck build test; do
+            HIT_COUNT=$(pnpm exec nx show projects --affected --json 2>/dev/null | jq 'length // 0')
+            echo "| $target | $HIT_COUNT projects affected |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
+          NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
+          if [[ -n "$NX_CLOUD_ID" ]]; then
+            echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
+            echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/analytics) - Time to Green analytics" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
 
-            - name: Generate Project Graph
-              if: always()
-              run: pnpm exec nx graph --file=.nx/project-graph.json
-              continue-on-error: true
+      - name: Create Quality Debt Issue
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          NODE_OPTIONS: --import tsx
+        with:
+          script: |
+            const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
+            await run({
+              context: { repo: context.repo, payload: context.payload },
+              core,
+              github,
+              spec: {
+                kind: 'ci',
+                job: '${{ github.job }}',
+                runUrl: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
+                prNumber: context.payload.pull_request.number
+              }
+            });
 
-            - name: Upload Coverage and Project Graph
-              if: always()
-              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-              with:
-                  name: ci-artifacts
-                  path: |
-                      **/coverage
-                      .nx/project-graph.json
-                  if-no-files-found: ignore
-                  retention-days: 7
+  # --- Release --------------------------------------------------------------
+  release:
+    name: Release
+    needs: [quality]
+    if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'chore(release)')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
-            - name: Job Summary
-              if: always()
-              run: |
-                  echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "### Change Detection" >> $GITHUB_STEP_SUMMARY
-                  echo "- **Mode**: ${{ steps.changes.outputs.has_changes && 'fast' || 'no changes' }}" >> $GITHUB_STEP_SUMMARY
-                  echo "- **Changed Files**: $(echo '${{ steps.changes.outputs.changed_files }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
-                  echo "- **Affected Projects**: $(echo '${{ steps.changes.outputs.affected_projects }}' | jq 'length')" >> $GITHUB_STEP_SUMMARY
-                  STATS='${{ steps.changes.outputs.stats_json }}'
-                  echo "- **Stats**: +$(echo "$STATS" | jq -r '.added // 0') ~$(echo "$STATS" | jq -r '.modified // 0') -$(echo "$STATS" | jq -r '.deleted // 0')" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
-                  pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "### Cache Status" >> $GITHUB_STEP_SUMMARY
-                  echo "| Target | Cache Hit |" >> $GITHUB_STEP_SUMMARY
-                  echo "|--------|-----------|" >> $GITHUB_STEP_SUMMARY
-                  for target in lint typecheck build test; do
-                    HIT_COUNT=$(pnpm exec nx show projects --affected --json 2>/dev/null | jq 'length // 0')
-                    echo "| $target | $HIT_COUNT projects affected |" >> $GITHUB_STEP_SUMMARY
-                  done
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
-                  NX_CLOUD_ID=$(jq -r '.nxCloudId // empty' nx.json)
-                  if [[ -n "$NX_CLOUD_ID" ]]; then
-                    echo "- [Nx Cloud Dashboard](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID) - Task details, cache hits, build insights" >> $GITHUB_STEP_SUMMARY
-                    echo "- [TTG Metrics](https://cloud.nx.app/orgs/workspace/$NX_CLOUD_ID/analytics) - Time to Green analytics" >> $GITHUB_STEP_SUMMARY
-                  fi
-                  echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
+      - uses: ./.github/actions/node-env
+        with:
+          nx: 'true'
+          nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
-            - name: Create Quality Debt Issue
-              if: failure()
-              uses: ./.github/actions/issue-ops
-              with:
-                  operation: create-issue
-                  title: '[CI] Quality gate failure on ${{ github.ref_name }}'
-                  body: |
-                      ## CI Failure
-                      **Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-                      **Job**: ${{ github.job }}
+      - uses: ./.github/actions/git-identity
 
-                      ### Action Required
-                      Review the failed CI run and address the issues before merging.
-                  labels: tech-debt,refactor
-
-    # --- Release --------------------------------------------------------------
-    release:
-        name: Release
-        needs: [quality]
-        if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'chore(release)')
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        permissions:
-            contents: write
-        steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-              with:
-                  fetch-depth: 0
-
-            - uses: ./.github/actions/node-env
-              with:
-                  nx: 'true'
-                  nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-
-            - uses: ./.github/actions/git-identity
-
-            - name: Release
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: pnpm nx release
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm nx release

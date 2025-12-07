@@ -8,7 +8,7 @@ import { createElement, forwardRef } from 'react';
 import type { Inputs, TuningFor } from './schema.ts';
 import { B, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type Tag = 'article' | 'aside' | 'div' | 'footer' | 'header' | 'main' | 'nav' | 'section' | 'span';
 type FlexDir = 'col' | 'col-reverse' | 'row' | 'row-reverse';
@@ -41,13 +41,13 @@ type DividerInput = {
 type ElementProps = HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode };
 type DividerProps = HTMLAttributes<HTMLDivElement>;
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const { dir, align, justify, wrap } = B.el.flex;
 const { autoFlow } = B.el.grid;
 const { gap, px: elPx, py: elPy, r: elR } = B.el.var;
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const flexCls = (d?: FlexDir, a?: FlexAlign, j?: FlexJustify, w?: boolean): string =>
     d
@@ -120,7 +120,7 @@ const createDividerComponent = (input: DividerInput) => {
     return Component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createElements = (tuning?: TuningFor<'el'>) =>
     Object.freeze({
@@ -134,7 +134,7 @@ const createElements = (tuning?: TuningFor<'el'>) =>
         Stack: createElementComponent({ direction: 'col', gap: true, ...pick(tuning, TUNING_KEYS.el) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createElements };
 export type {

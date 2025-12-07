@@ -6,7 +6,7 @@ import fc from 'fast-check';
 import { describe, expect } from 'vitest';
 import { B, defineThemes } from '../src/theme.ts';
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const loadVirtualModule = (input: Parameters<typeof defineThemes>[0]) => {
     const plugin = defineThemes(input);
@@ -25,13 +25,13 @@ const loadVirtualModule = (input: Parameters<typeof defineThemes>[0]) => {
     return { css, resolved };
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const VALID_SCALES = [2, 5, 10, 15, 20] as const;
 
 const VALID_MODIFIERS = ['hover', 'focus', 'active', 'disabled', 'pressed', 'selected', 'dragged'] as const;
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 describe('theme plugin', () => {
     describe('virtual module', () => {

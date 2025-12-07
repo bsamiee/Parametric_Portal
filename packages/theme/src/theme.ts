@@ -6,12 +6,12 @@ import type { ParseError } from '@effect/schema/ParseResult';
 import { Effect, Option, pipe } from 'effect';
 import type { Plugin } from 'vite';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type OklchColor = S.Schema.Type<typeof OklchColorSchema>;
 type ThemeInput = S.Schema.Type<typeof ThemeInputSchema>;
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const ModifierOverrideSchema = S.Union(
     S.Literal(true),
@@ -70,7 +70,7 @@ const ThemeInputSchema = S.Struct({
     spacing: S.optional(pipe(S.Number, S.int(), S.between(1, 100))),
 });
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     baseline: {
@@ -95,12 +95,12 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-theme' as const,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const oklchToCss = (color: OklchColor): string =>
     `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${color.a < 1 ? ` / ${color.a.toFixed(2)}` : ''})`;
 
-// --- Effect Pipeline ---------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const createOklchColor = (l: number, c: number, h: number, a = 1): Effect.Effect<OklchColor, ParseError> =>
     S.decode(OklchColorSchema)({ a, c, h, l } as const);
@@ -197,7 +197,7 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
         }),
     );
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin => ({
     enforce: 'pre',
@@ -220,7 +220,7 @@ const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin =>
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
 });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B, defineThemes };
 export type { ThemeInput };

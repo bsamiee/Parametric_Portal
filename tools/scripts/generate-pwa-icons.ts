@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { Effect, pipe } from 'effect';
 import sharp from 'sharp';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type IconMode = 'maskable' | 'standard';
 
@@ -18,9 +18,8 @@ class IconGenerationError {
     ) {}
 }
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
-// 10% safe zone for maskable icons per Web App Manifest spec
 const B = Object.freeze({
     baseSize: 512,
     output: 'public',
@@ -35,12 +34,12 @@ const B = Object.freeze({
     ],
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const deriveOutputPath = (size: number, mode: IconMode): string =>
     path.join(B.output, `icon-${size}${mode === 'maskable' ? '-maskable' : ''}.png`);
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 // Route pipeline behavior by icon mode
 const pipelineHandlers = {
@@ -55,7 +54,7 @@ const pipelineHandlers = {
     standard: (p: sharp.Sharp) => p,
 } as const satisfies Record<IconMode, (p: sharp.Sharp) => sharp.Sharp>;
 
-// --- Effect Pipeline ---------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const processIcon = ({ mode, size }: { mode: IconMode; size: number }): Effect.Effect<void, IconGenerationError> =>
     pipe(
@@ -101,6 +100,6 @@ const generationPipeline = pipe(
     ),
 );
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 void Effect.runPromise(generationPipeline);

@@ -18,7 +18,7 @@ import {
     utilities,
 } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type CommandType = 'dialog' | 'inline' | 'palette';
 type SeparatorData = { readonly key: string; readonly type: 'separator' };
@@ -75,7 +75,7 @@ type CommandInput<T extends CommandType = 'palette'> = Partial<TuningFor<'cmd'>>
 };
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const commandHelpers = {
     baseStyle: (ctx: Ctx, style?: CSSProperties): CSSProperties => ({
@@ -113,7 +113,7 @@ const commandHelpers = {
     },
 } as const;
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const wrappers = { dialog: Cmdk.Dialog, inline: Cmdk, palette: Cmdk } as const;
 
@@ -367,7 +367,7 @@ const createCommandComponent = <T extends CommandType>(input: CommandInput<T>) =
     return component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createCommand = (tuning?: TuningFor<'cmd'>) =>
     Object.freeze({
@@ -381,7 +381,7 @@ const createCommand = (tuning?: TuningFor<'cmd'>) =>
         } as CommandInput<'palette'>),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createCommand, useCommandState };
 export type {

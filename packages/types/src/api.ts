@@ -5,7 +5,7 @@ import { Schema as S } from '@effect/schema';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type HttpStatus = S.Schema.Type<typeof HttpStatusSchema>;
 type HttpStatusSuccess = S.Schema.Type<typeof HttpStatusSuccessSchema>;
@@ -65,7 +65,7 @@ type FoldHandlers<T, R> = {
     readonly onSuccess: (data: T, status: HttpStatusSuccess) => R;
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { pageSize: 20, status: 200 },
@@ -79,7 +79,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const HttpStatusSuccessSchema = pipe(
     S.Number,
@@ -140,7 +140,7 @@ const schemas = Object.freeze({
     paginationMeta: PaginationMetaSchema,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const mkSuccess = <T>(data: T, status: HttpStatusSuccess): ApiSuccess<T> => ({
     _tag: B.tags.success,
@@ -168,7 +168,7 @@ const mkPaginated = <T>(
 
 const defaultStatus = (): HttpStatusSuccess => B.defaults.status as HttpStatusSuccess;
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const foldHandlers = <T, R>(response: ApiResponse<T>, h: FoldHandlers<T, R>): R =>
     match(response)
@@ -181,7 +181,7 @@ const mapHandlers = <T, U>(response: ApiResponse<T>, f: (data: T) => U): ApiResp
         .with({ _tag: B.tags.success }, (r) => mkSuccess(f(r.data), r.status))
         .otherwise(() => response as ApiResponse<U>);
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createApi = <T>(config: ApiConfig = {}): Effect.Effect<ApiApi<T>, never, never> =>
     pipe(
@@ -205,7 +205,7 @@ const createApi = <T>(config: ApiConfig = {}): Effect.Effect<ApiApi<T>, never, n
         ),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B as API_TUNING, createApi };
 export type {

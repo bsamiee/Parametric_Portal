@@ -5,7 +5,7 @@ import { Schema as S } from '@effect/schema';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type SliceName = S.Schema.Type<typeof SliceNameSchema>;
 
@@ -53,13 +53,13 @@ type StoreApi = {
     readonly schemas: typeof schemas;
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { enableDevtools: false, name: 'store' },
 } as const);
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const SliceNameSchema = pipe(S.String, S.nonEmptyString(), S.brand('SliceName'));
 
@@ -74,7 +74,7 @@ const schemas = Object.freeze({
     sliceName: SliceNameSchema,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const mkSliceName = (name: string): SliceName => name as SliceName;
 
@@ -160,7 +160,7 @@ const mkCombinedStore = <S extends Record<string, StoreSlice<unknown>>>(slices: 
     };
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createStore = (config: StoreConfig = {}): Effect.Effect<StoreApi, never, never> =>
     pipe(
@@ -182,7 +182,7 @@ const createStore = (config: StoreConfig = {}): Effect.Effect<StoreApi, never, n
         ),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B as STORE_TUNING, createStore };
 export type { CombinedStore, SliceConfig, SliceName, StoreActions, StoreApi, StoreConfig, StoreSlice };

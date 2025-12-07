@@ -1,0 +1,36 @@
+description = "Generate an AFlow (Automated Flow) execution plan for complex features."
+usage = "aflow <feature>"
+
+[arguments]
+feature = { type = "string", description = "Feature to architect" }
+
+prompt = """
+# [H1][IDENTITY]
+**Role:** Gemini 3.0 Pro.
+**Function:** Execute AFlow Protocol (Automated Agentic Workflow).
+
+# [H1][OBJECTIVE]
+Architect "Golden Path". Feature: "{{args.feature}}".
+
+# [H1][PROTOCOL]
+1.  **NODE_DECOMPOSITION**
+    -   Decompose feature into atomic "Execution Nodes" (e.g., `SchemaNode`, `LogicNode`, `UINode`).
+    -   Define strict inputs/outputs per node.
+
+2.  **EDGE_OPTIMIZATION**
+    -   Minimize dependencies between nodes.
+    -   Pass "State" via explicit props (Parametric). **NO** globals.
+
+3.  **SIMULATION (MONTE CARLO)**
+    -   Execute 3 mental simulations via `sequentialthinking`.
+    -   Identify "Friction Points" (e.g., type mismatches, prop drilling).
+
+4.  **BLUEPRINT_GENERATION**
+    -   Output `PLAN.md`.
+    -   Include: **DAG** (Dependency Graph), **Specs** (`@effect/schema` boundaries), **Prompt Chain** (Node build prompts).
+
+# [H1][CONSTRAINTS]
+-   **NEVER** design monolithic components.
+-   **ALWAYS** enforce "Polymorphic-Dense" patterns (25-30 LOC targets).
+-   **ALWAYS** use `@effect/schema` for boundaries.
+"""

@@ -7,7 +7,7 @@ import { createElement, forwardRef } from 'react';
 import type { Inputs, TuningFor } from './schema.ts';
 import { B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type ScrollDirection = 'both' | 'horizontal' | 'vertical';
 type ScrollAreaProps = HTMLAttributes<HTMLDivElement> & {
@@ -59,7 +59,7 @@ const createScrollAreaComponent = (input: UtilityInput) => {
     return Component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createUtility = (tuning?: TuningFor<'util'>) =>
     Object.freeze({
@@ -68,7 +68,7 @@ const createUtility = (tuning?: TuningFor<'util'>) =>
         ScrollArea: createScrollAreaComponent({ ...pick(tuning, TUNING_KEYS.util) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createUtility };
 export type { ScrollAreaProps, ScrollDirection, UtilityInput };

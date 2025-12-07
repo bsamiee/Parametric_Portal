@@ -7,7 +7,7 @@ import { createElement, forwardRef } from 'react';
 import type { Computed, Inputs, Resolved, TuningFor } from './schema.ts';
 import { animStyle, B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type FeedbackType = 'alert' | 'progress' | 'skeleton' | 'spinner' | 'toast';
 type Variant = string;
@@ -181,7 +181,7 @@ const createSpinnerComponent = (input: FBInput<'spinner'>, computed: Computed) =
         );
     });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const builderHandlers = {
     alert: createAlertComponent,
@@ -210,7 +210,7 @@ const createFeedbackComponent = <T extends FeedbackType>(input: FBInput<T>) => {
     return component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createFeedback = (tuning?: TuningFor<'fb'>) =>
     Object.freeze({
@@ -223,7 +223,7 @@ const createFeedback = (tuning?: TuningFor<'fb'>) =>
         Toast: createFeedbackComponent({ type: 'toast', ...pick(tuning, TUNING_KEYS.fb) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createFeedback };
 export type {

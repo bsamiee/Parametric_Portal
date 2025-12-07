@@ -27,7 +27,7 @@ import {
     utilities,
 } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type DataType = 'avatar' | 'badge' | 'card' | 'list' | 'table';
 type Variant = string;
@@ -76,7 +76,7 @@ type DataInput<T extends DataType = 'card'> = {
     readonly type?: T;
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const { px, py, r: dataRadius } = B.data.var;
 
@@ -178,7 +178,7 @@ const createListComponent = <T>(
         );
     });
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 type TColHeaderProps<T> = { readonly column: Node<T>; readonly state: TableState<T> };
 const sortDirMap = { ascending: 'asc', descending: 'desc' } as const;
@@ -354,7 +354,7 @@ const createTableComponent = <T extends Record<string, unknown>>(
         );
     });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const builderHandlers = {
     avatar: createAvatarComponent,
@@ -381,7 +381,7 @@ const createDataComponent = <T extends DataType>(input: DataInput<T>) => {
     return component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createData = (tuning?: TuningFor<'data'>) =>
     Object.freeze({
@@ -394,7 +394,7 @@ const createData = (tuning?: TuningFor<'data'>) =>
         Table: createDataComponent({ type: 'table', ...pick(tuning, TUNING_KEYS.data) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createData };
 export type { AvatarProps, BadgeProps, CardProps, DataInput, DataType, ListProps, TableProps, Variant };

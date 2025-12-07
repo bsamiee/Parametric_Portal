@@ -1,0 +1,57 @@
+name: Auto Fix
+description: Run auto-fixers (like Biome), commit changes, and push
+inputs:
+    command:
+        description: 'Fix command to run (e.g., pnpm exec biome check --write --unsafe .)'
+        required: true
+    commit-message:
+        description: 'Commit message for fixes'
+        required: true
+    file-pattern:
+        description: 'File pattern to add (default: -u)'
+        required: false
+        default: '-u'
+
+outputs:
+    has-changes:
+        description: 'Whether changes were committed'
+        value: ${{ steps.check.outputs.has_changes }}
+
+runs:
+    using: composite
+    steps:
+        - name: Run Fix Command
+          shell: bash
+          run: ${{ inputs.command }}
+
+        - name: Check for Changes
+          id: check
+          shell: bash
+          run: |
+              if [[ -n $(git status --porcelain) ]]; then
+                echo "has_changes=true" >> $GITHUB_OUTPUT
+              else
+                echo "has_changes=false" >> $GITHUB_OUTPUT
+              fi
+
+        - uses: ./.github/actions/git-identity
+          if: steps.check.outputs.has_changes == 'true'
+
+        - name: Commit and Push
+          id: commit
+          if: steps.check.outputs.has_changes == 'true'
+          shell: bash
+          run: |
+              git add ${{ inputs.file-pattern }}
+              git commit -m "${{ inputs.commit-message }}" \
+                -m "" \
+                -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+              
+              # Retry logic for push to handle race conditions
+              n=0
+              until [ "$n" -ge 3 ]
+              do
+                git pull --rebase && git push && break
+                n=$((n+1))
+                sleep 2
+              done

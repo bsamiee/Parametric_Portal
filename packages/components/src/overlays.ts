@@ -8,7 +8,7 @@ import { FocusScope, useDialog, useModal, useOverlay, usePreventScroll } from 'r
 import type { Inputs, Resolved, TuningFor } from './schema.ts';
 import { animStyle, B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type OverlayType = 'dialog' | 'drawer' | 'modal' | 'popover' | 'sheet' | 'tooltip';
 type Position = 'bottom' | 'left' | 'right' | 'top';
@@ -35,7 +35,7 @@ type OverlayInput<T extends OverlayType = 'modal'> = {
     readonly type?: T;
 };
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const createFocusScope = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
     createElement(FocusScope, { ...opts, ...({ children: child } as const) });
@@ -318,7 +318,7 @@ const createTooltipComponent = (
             : null;
     });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const builderHandlers = {
     dialog: createDialogComponent,
@@ -352,7 +352,7 @@ const createOverlayComponent = <T extends OverlayType>(input: OverlayInput<T>) =
     return component;
 };
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createOverlays = (tuning?: TuningFor<'ov'>) =>
     Object.freeze({
@@ -370,7 +370,7 @@ const createOverlays = (tuning?: TuningFor<'ov'>) =>
         Tooltip: createOverlayComponent({ type: 'tooltip', ...pick(tuning, ['scale']) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createOverlays };
 export type {

@@ -6,11 +6,11 @@ import type { ParseError } from '@effect/schema/ParseResult';
 import { Effect, pipe } from 'effect';
 import type { Plugin } from 'vite';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type LayoutInput = S.Schema.Type<typeof LayoutInputSchema>;
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const PixelValue = pipe(S.Number, S.int(), S.positive(), S.brand('PixelValue'));
 const GridColumns = pipe(S.Number, S.int(), S.between(1, 12), S.brand('GridColumns'));
@@ -56,7 +56,7 @@ const ContainerLayoutSchema = S.Struct({
 
 const LayoutInputSchema = S.Union(GridLayoutSchema, StackLayoutSchema, StickyLayoutSchema, ContainerLayoutSchema);
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     gap: { multiplier: 4, remBase: 16 },
@@ -68,7 +68,7 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-layouts' as const,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const fn = {
     // Fallback pixel value calculated when CSS custom property undefined at runtime.
@@ -82,7 +82,7 @@ const fn = {
     stickyOffset: (position: 'top' | 'bottom' | 'left' | 'right', gap: string): string => `${position}: ${gap};`,
 } as const;
 
-// --- Effect Pipeline ---------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const generateGridLayout = (input: Extract<LayoutInput, { type: 'grid' }>): Effect.Effect<string, ParseError> =>
     pipe(
@@ -180,7 +180,7 @@ ${containerRule}  max-width: var(--layout-${config.name}-max);
         }),
     );
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const layoutHandlers = Object.freeze({
     container: generateContainerLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
@@ -191,7 +191,7 @@ const layoutHandlers = Object.freeze({
 
 const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> => layoutHandlers[input.type](input);
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const defineLayouts = (input: LayoutInput | ReadonlyArray<LayoutInput>): Plugin => ({
     enforce: 'pre',
@@ -216,7 +216,7 @@ const defineLayouts = (input: LayoutInput | ReadonlyArray<LayoutInput>): Plugin 
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
 });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B, defineLayouts };
 export type { LayoutInput };

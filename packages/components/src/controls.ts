@@ -11,7 +11,7 @@ import { useToggleState } from 'react-stately';
 import type { Inputs, TuningFor } from './schema.ts';
 import { B, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type ControlType = 'button' | 'checkbox' | 'input' | 'radio' | 'switch' | 'textarea';
 type ButtonVariant = keyof typeof B.ctrl.variant;
@@ -42,7 +42,7 @@ type ControlInput<T extends ControlType = 'button'> = {
     readonly type?: T;
 };
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const { base, h, px, py, fs, r, g } = B.ctrl.var;
 const baseCls = (fw?: boolean): string => utilities.cls(base, h, px, py, fs, r, g, fw ? 'w-full' : 'w-auto');
@@ -168,7 +168,7 @@ const createSwitchControl = (input: ControlInput<'switch'>) => {
     return Component;
 };
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const builderHandlers = {
     button: createButtonControl,
@@ -182,7 +182,7 @@ const builderHandlers = {
 const create = <T extends ControlType>(input: ControlInput<T>) =>
     (builderHandlers[input.type ?? 'button'] as (input: ControlInput<T>) => ReturnType<typeof forwardRef>)(input);
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createControls = (tuning?: TuningFor<'ctrl'>) =>
     Object.freeze({
@@ -196,7 +196,7 @@ const createControls = (tuning?: TuningFor<'ctrl'>) =>
         Textarea: create({ type: 'textarea', ...pick(tuning, TUNING_KEYS.ctrl) }),
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createControls };
 export type { ButtonProps, ButtonVariant, ControlInput, ControlType, InputProps, SwitchProps, TextareaProps };

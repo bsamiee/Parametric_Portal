@@ -6,12 +6,12 @@ import type { ParseError } from '@effect/schema/ParseResult';
 import { Effect, Option, pipe } from 'effect';
 import type { Plugin } from 'vite';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type FontWeight = S.Schema.Type<typeof FontWeightSchema>;
 type FontInput = S.Schema.Type<typeof FontInputSchema>;
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const FontWeightSchema = pipe(S.Number, S.int(), S.between(100, 900), S.brand('FontWeight'));
 
@@ -43,7 +43,7 @@ const FontInputSchema = S.Struct({
     weights: WeightSpecSchema,
 });
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     format: {
@@ -57,7 +57,7 @@ const VIRTUAL_MODULE_ID = Object.freeze({
     virtual: 'virtual:parametric-fonts' as const,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const fn = {
     // Invert undefined check: output quoted family-only when no fallback provided.
@@ -77,7 +77,7 @@ const fn = {
         ),
 } as const;
 
-// --- Effect Pipeline ---------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[], ParseError> =>
     pipe(
@@ -87,13 +87,14 @@ const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[],
                 '@font-face {',
                 `  font-family: "${input.family}";`,
                 // Include tech as space-delimited string for @supports() compatibility in variable fonts.
-                `  src: url('${input.src}') \t\t\tformat(${pipe(
+                `  src: url('${input.src}') 			format(${pipe(
                     Option.fromNullable(tech),
                     Option.match({
                         onNone: () => `'${format}'`,
                         onSome: (t) => `'${format} ${t}'`,
                     }),
-                )});`,
+                )});
+                `,
                 `  font-weight: ${fn.weightRange(input.weights)};`,
                 pipe(
                     Option.fromNullable(input.display),
@@ -170,7 +171,7 @@ const createFontBlocks = (input: FontInput): Effect.Effect<readonly string[], Pa
         Effect.catchAll((error) => Effect.succeed([`/* Font parsing failed: ${input.name} - ${error._tag} */`])),
     );
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const defineFonts = (inputs: FontInput | ReadonlyArray<FontInput>): Plugin => ({
     enforce: 'pre',
@@ -187,7 +188,7 @@ const defineFonts = (inputs: FontInput | ReadonlyArray<FontInput>): Plugin => ({
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
 });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B, defineFonts };
 export type { FontInput };

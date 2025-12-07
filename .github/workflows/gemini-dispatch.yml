@@ -1,0 +1,126 @@
+name: 'Gemini Dispatch'
+
+on:
+  pull_request_review_comment:
+    types: ['created']
+  pull_request_review:
+    types: ['submitted']
+  pull_request:
+    types: ['opened']
+  issues:
+    types: ['opened', 'reopened']
+  issue_comment:
+    types: ['created']
+
+defaults:
+  run:
+    shell: 'bash'
+
+jobs:
+  dispatch:
+    if: |-
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.fork == false
+      ) || (
+        github.event_name == 'issues' &&
+        contains(fromJSON('["opened", "reopened"]'), github.event.action)
+      ) || (
+        github.event.sender.type == 'User' &&
+        startsWith(github.event.comment.body || github.event.review.body || github.event.issue.body, '@gemini-cli') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association || github.event.issue.author_association)
+      )
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: 'read'
+      issues: 'write'
+      pull-requests: 'write'
+    outputs:
+      command: '${{ steps.extract_command.outputs.command }}'
+      context: '${{ steps.extract_command.outputs.context }}'
+      issue_number: '${{ github.event.pull_request.number || github.event.issue.number }}'
+    steps:
+      - name: 'Extract command'
+        id: 'extract_command'
+        uses: 'actions/github-script@v7'
+        env:
+          EVENT_TYPE: '${{ github.event_name }}.${{ github.event.action }}'
+          BODY: '${{ github.event.comment.body || github.event.review.body || github.event.issue.body }}'
+        with:
+          script: |
+            const type = process.env.EVENT_TYPE;
+            const body = process.env.BODY || '';
+
+            // Default triggers
+            if (type === 'pull_request.opened') return core.setOutput('command', 'review');
+            if (['issues.opened', 'issues.reopened'].includes(type)) return core.setOutput('command', 'triage');
+
+            // Command parsing
+            const match = body.match(/^@gemini-cli\s+(\/\w+)?\s*(.*)$/s);
+            if (!match) return core.setOutput('command', 'fallthrough');
+
+            const cmd = match[1] || '/invoke'; // Default to invoke
+            const ctx = match[2].trim();
+
+            core.setOutput('context', ctx);
+
+            switch (cmd) {
+              case '/review': core.setOutput('command', 'review'); break;
+              case '/triage': core.setOutput('command', 'triage'); break;
+              case '/architect': core.setOutput('command', 'architect'); break;
+              case '/implement': core.setOutput('command', 'implement'); break;
+              default: core.setOutput('command', 'invoke'); break;
+            }
+
+      - name: 'Acknowledge'
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          NUMBER: '${{ github.event.pull_request.number || github.event.issue.number }}'
+          REPO: '${{ github.repository }}'
+        run: |
+          gh issue comment "$NUMBER" --body "🤖 Working on it..." --repo "$REPO"
+
+  # --- Specialized Workflows ------------------------------------------------
+  review:
+    needs: 'dispatch'
+    if: needs.dispatch.outputs.command == 'review'
+    uses: './.github/workflows/gemini-review.yml'
+    with:
+      additional_context: '${{ needs.dispatch.outputs.context }}'
+    secrets: 'inherit'
+
+  triage:
+    needs: 'dispatch'
+    if: needs.dispatch.outputs.command == 'triage'
+    uses: './.github/workflows/gemini-triage.yml'
+    with:
+      additional_context: '${{ needs.dispatch.outputs.context }}'
+    secrets: 'inherit'
+
+  # --- Generic Workflows ----------------------------------------------------
+  architect:
+    needs: 'dispatch'
+    if: needs.dispatch.outputs.command == 'architect'
+    uses: './.github/workflows/gemini-invoke.yml'
+    with:
+      command: 'gemini-architect'
+      additional_context: '${{ needs.dispatch.outputs.context }}'
+    secrets: 'inherit'
+
+  implement:
+    needs: 'dispatch'
+    if: needs.dispatch.outputs.command == 'implement'
+    uses: './.github/workflows/gemini-invoke.yml'
+    with:
+      command: 'gemini-implement'
+      additional_context: '${{ needs.dispatch.outputs.context }}'
+    secrets: 'inherit'
+
+  invoke:
+    needs: 'dispatch'
+    if: needs.dispatch.outputs.command == 'invoke'
+    uses: './.github/workflows/gemini-invoke.yml'
+    with:
+      command: 'gemini-invoke'
+      additional_context: '${{ needs.dispatch.outputs.context }}'
+    secrets: 'inherit'

@@ -5,7 +5,7 @@ import { Schema as S } from '@effect/schema';
 import { Effect, Option, pipe } from 'effect';
 import { match, P } from 'ts-pattern';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type Idle = S.Schema.Type<typeof IdleSchema>;
 type Loading = S.Schema.Type<typeof LoadingSchema>;
@@ -39,7 +39,7 @@ type FoldHandlers<A, E, R> = {
     readonly onSuccess: (data: A, timestamp: number) => R;
 };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     tags: {
@@ -51,7 +51,7 @@ const B = Object.freeze({
     timestamp: () => Date.now(),
 } as const);
 
-// --- Schema ------------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const IdleSchema = S.Struct({ _tag: S.Literal('Idle') });
 const LoadingSchema = S.Struct({ _tag: S.Literal('Loading'), startedAt: S.Number });
@@ -73,14 +73,14 @@ const schemas = Object.freeze({
     success: SuccessSchema,
 } as const);
 
-// --- Pure Functions ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const mkIdle = (): Idle => ({ _tag: B.tags.idle });
 const mkLoading = (ts: () => number): Loading => ({ _tag: B.tags.loading, startedAt: ts() });
 const mkSuccess = <A>(data: A, ts: () => number): Success<A> => ({ _tag: B.tags.success, data, timestamp: ts() });
 const mkFailure = <E>(error: E, ts: () => number): Failure<E> => ({ _tag: B.tags.failure, error, timestamp: ts() });
 
-// --- Dispatch Tables ---------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const foldHandlers = <A, E, R>(state: AsyncState<A, E>, h: FoldHandlers<A, E, R>): R =>
     match(state)
@@ -95,7 +95,7 @@ const mapHandlers = <A, E, B>(state: AsyncState<A, E>, f: (a: A) => B, ts: () =>
         .with({ _tag: B.tags.success }, (s) => mkSuccess(f(s.data as A), ts))
         .otherwise(() => state as AsyncState<B, E>);
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createAsync = <A, E = Error>(config: AsyncConfig = {}): Effect.Effect<AsyncApi<A, E>, never, never> =>
     pipe(
@@ -121,7 +121,7 @@ const createAsync = <A, E = Error>(config: AsyncConfig = {}): Effect.Effect<Asyn
         ),
     );
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { B as ASYNC_TUNING, createAsync };
 export type { AsyncApi, AsyncConfig, AsyncState, Failure, FoldHandlers, Idle, Loading, Success };

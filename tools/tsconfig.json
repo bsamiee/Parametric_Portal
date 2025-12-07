@@ -1,0 +1,11 @@
+{
+    "compilerOptions": {
+        "lib": ["esnext"],
+        "rootDir": ".",
+        "tsBuildInfoFile": "../.nx/cache/tsbuildinfo/tools.tsbuildinfo"
+    },
+    "exclude": ["node_modules"],
+    "extends": "../tsconfig.base.json",
+    "include": ["**/*.ts"],
+    "references": []
+}

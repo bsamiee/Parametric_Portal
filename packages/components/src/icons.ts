@@ -9,7 +9,7 @@ import { createElement, forwardRef, memo, useMemo } from 'react';
 import type { Inputs } from './schema.ts';
 import { merged, resolve, utilities } from './schema.ts';
 
-// --- Types -------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type IconTuning = { readonly scale?: Inputs['scale'] | undefined; readonly strokeWidth?: number | undefined };
 type IconName = keyof typeof icons;
@@ -25,7 +25,7 @@ type IconInput = {
 };
 type DynamicIconProps = IconProps & { readonly name: IconName };
 
-// --- Constants ---------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const iconNames = Object.freeze(Object.keys(icons) as ReadonlyArray<IconName>);
 const getIcon = (name: IconName): LucideIcon => icons[name];
@@ -84,7 +84,7 @@ const DynamicIcon = memo(
 );
 DynamicIcon.displayName = 'DynamicIcon';
 
-// --- Entry Point -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createIcons = (tuning?: IconTuning) =>
     Object.freeze({
@@ -101,7 +101,7 @@ const createIcons = (tuning?: IconTuning) =>
         names: iconNames,
     });
 
-// --- Export ------------------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export { createIcons, iconNames };
 export type { DynamicIconProps, IconInput, IconName, IconProps };

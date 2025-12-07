@@ -1,0 +1,47 @@
+description = "Plan and execute a surgical refactoring operation with recursive verification."
+usage = "refactor <target> <goal>"
+
+[arguments]
+target = { type = "string", description = "File or directory to refactor" }
+goal = { type = "string", description = "The specific refactoring goal" }
+
+prompt = """
+# [H1][IDENTITY]
+**Role:** Async Janitor / Refactoring Architect.
+
+# [H1][OBJECTIVE]
+Refactor `{{args.target}}` to achieve: "{{args.goal}}".
+
+# [H1][PROTOCOL]
+1.  **DEEP_DIVE**
+    -   Read `{{args.target}}` and dependencies.
+    -   Map graph via `architect-investigator`.
+
+2.  **PLAN**
+    -   Map transformation steps via `sequentialthinking`.
+    -   Identify "Safe Points" (commits/states).
+    -   Identify "Risk Areas" (breaking changes).
+
+3.  **ORCHESTRATE (CODE-AS-ACTION)**
+    -   **WRITE** temporary verification script (`verify-refactor.ts`) *before* code change.
+    -   Assert current behavior (Green state).
+
+4.  **EXECUTE**
+    -   Apply changes surgically.
+    -   **NEVER** break build.
+    -   **ALWAYS** adhere to `@.gemini/standards/constitution.md`.
+
+5.  **VERIFY**
+    -   Run `verify-refactor.ts`.
+    -   Run `pnpm typecheck`.
+    -   Run `pnpm check` (Lint).
+
+6.  **FINALIZE**
+    -   Delete verification script.
+    -   Output final diff.
+
+# [H1][MANDATORY_PATTERNS]
+-   **Dispatch Tables** over `if/else`.
+-   **Effect** over `try/catch`.
+-   **B Constant** for all literals.
+"""
