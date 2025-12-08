@@ -24,7 +24,10 @@ type ParseResult =
 
 const META_PATTERN = /<!--\s*ai-meta\s*\n([\s\S]*?)\n\s*-->/;
 
-const stripPrefix = (label: string): string => label.replace(/^(kind|phase|status|priority):/, '');
+const AXIS_NAMES = Object.keys(B.labels.invariants.maxPerAxis) as ReadonlyArray<string>;
+
+const stripPrefix = (label: string): string =>
+    label.replace(new RegExp(`^(${AXIS_NAMES.join('|')}):`, ''), '');
 
 const VALID_SETS = Object.freeze({
     agent: B.labels.categories.agent,

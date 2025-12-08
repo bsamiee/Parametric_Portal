@@ -303,7 +303,7 @@ const B = Object.freeze({
         categories: {
             action: ['blocked', 'implement', 'review'] as const,
             agent: ['claude', 'codex', 'copilot', 'gemini'] as const,
-            kind: ['kind:project', 'kind:task', 'kind:spike'] as const,
+            kind: ['kind:project', 'kind:task', 'kind:spike', 'kind:refactor'] as const,
             legacy: { action: ['blocked', 'implement', 'review'] as const, priority: ['critical'] as const } as const,
             lifecycle: ['pinned', 'stale'] as const,
             phase: [

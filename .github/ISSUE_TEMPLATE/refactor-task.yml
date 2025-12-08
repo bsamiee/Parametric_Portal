@@ -1,0 +1,115 @@
+name: Refactor
+description: Code restructuring without behavior change
+title: "[REFACTOR]: "
+labels: ["kind:refactor", "status:triage"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              <!-- ai-meta
+              kind: refactor
+              project_id: 
+              phase: 
+              status: triage
+              agent: 
+              effort: 
+              -->
+
+    - type: input
+      id: project_id
+      attributes:
+          label: Parent Project ID
+          description: Link to parent project (if applicable)
+          placeholder: "technical-debt-001"
+      validations:
+          required: false
+
+    - type: textarea
+      id: objective
+      attributes:
+          label: Objective
+          description: What code needs refactoring and why?
+          placeholder: "Refactor X to improve Y..."
+      validations:
+          required: true
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Context
+          description: Current state, technical debt, design issues
+          placeholder: "Currently the code has... This causes..."
+      validations:
+          required: true
+
+    - type: input
+      id: target
+      attributes:
+          label: Target
+          description: Package, file, or module to refactor
+          placeholder: "@parametric/core, src/lib/legacy.ts"
+      validations:
+          required: true
+
+    - type: textarea
+      id: acceptance_criteria
+      attributes:
+          label: Acceptance Criteria
+          description: What defines successful refactoring?
+          placeholder: |
+              - [ ] Code follows B constant pattern
+              - [ ] Dispatch tables replace if/else chains
+              - [ ] All tests pass unchanged
+              - [ ] Performance unchanged or improved
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - "low"
+              - "medium"
+              - "high"
+              - "critical"
+          default: 1
+      validations:
+          required: true
+
+    - type: dropdown
+      id: agent
+      attributes:
+          label: Assigned Agent
+          description: Which agent should perform this refactor?
+          options:
+              - "human"
+              - "claude"
+              - "copilot"
+              - "gemini"
+              - "codex"
+          default: 0
+      validations:
+          required: false
+
+    - type: input
+      id: effort
+      attributes:
+          label: Estimated Effort (story points)
+          description: Rough estimate of complexity (Fibonacci scale)
+          placeholder: "3"
+      validations:
+          required: false
+
+    - type: textarea
+      id: refactoring_goals
+      attributes:
+          label: Refactoring Goals
+          description: What patterns or improvements to apply
+          placeholder: |
+              - Convert to dispatch tables
+              - Replace let/var with const
+              - Extract B constant
+              - Add Effect pipelines
+      validations:
+          required: false

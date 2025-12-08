@@ -60,6 +60,10 @@
   color: "06b6d4"
   description: "Research task with knowledge outputs"
 
+- name: kind:refactor
+  color: "3a140e"
+  description: "Code restructuring without behavior change"
+
 # --- Status Axis (Agentic: Current State) -------------------------------------
 
 - name: status:triage
