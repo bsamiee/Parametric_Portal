@@ -66,7 +66,7 @@ const findViolations = (groups: Record<LabelAxis, ReadonlyArray<string>>): Reado
         .map((axis) => `Too many ${axis} labels (${groups[axis].length}/${B_schema.labels.invariants.maxPerAxis[axis]}): ${groups[axis].join(', ')}`);
 
 const selectPreferred = (labels: ReadonlyArray<string>, axis: LabelAxis): string =>
-    labels.find((label) => B.priorityOrder[axis].includes(label)) ?? labels[0];
+    labels.find((label) => (B.priorityOrder[axis] as ReadonlyArray<string>).includes(label)) ?? labels[0];
 
 const generateFixes = (
     groups: Record<LabelAxis, ReadonlyArray<string>>,

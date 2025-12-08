@@ -22,19 +22,22 @@ type ParseResult =
 
 // --- Constants ---------------------------------------------------------------
 
-const LABEL_AXES = Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>;
-
-const stripPrefix = (label: string): string =>
-    label.replace(new RegExp(`^(${LABEL_AXES.join('|')}):`, ''), '');
-
 const B = Object.freeze({
+    labelAxes: Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>,
     metaPattern: /<!--\s*ai-meta\s*\n([\s\S]*?)\n\s*-->/,
-    validSets: {
-        agent: B_schema.labels.categories.agent,
-        kind: B_schema.labels.categories.kind.map(stripPrefix),
-        phase: B_schema.labels.categories.phase.map(stripPrefix),
-        status: B_schema.labels.categories.status.map(stripPrefix),
-    } as const,
+    validSets: (() => {
+        const stripPrefix = (label: string): string =>
+            label.replace(
+                new RegExp(`^(${(Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>).join('|')}):`, ''),
+                '',
+            );
+        return {
+            agent: B_schema.labels.categories.agent,
+            kind: B_schema.labels.categories.kind.map(stripPrefix),
+            phase: B_schema.labels.categories.phase.map(stripPrefix),
+            status: B_schema.labels.categories.status.map(stripPrefix),
+        } as const;
+    })(),
 } as const);
 
 // --- Pure Functions ----------------------------------------------------------
@@ -75,7 +78,7 @@ type Validator = (obj: Record<string, unknown>) => ValidationError | null;
 const validators: Record<keyof AiMeta, Validator> = {
     agent: (obj) =>
         obj.agent && !validateField('agent', obj.agent)
-            ? `Invalid agent: ${obj.agent}. Must be one of: ${VALID_SETS.agent.join(', ')}`
+            ? `Invalid agent: ${obj.agent}. Must be one of: ${B.validSets.agent.join(', ')}`
             : null,
     effort: (obj) =>
         obj.effort && !validateEffort(obj.effort) ? `Invalid effort: ${obj.effort}. Must be a positive number` : null,
@@ -83,16 +86,16 @@ const validators: Record<keyof AiMeta, Validator> = {
         !obj.kind
             ? 'Missing required field: kind'
             : !validateField('kind', obj.kind)
-              ? `Invalid kind: ${obj.kind}. Must be one of: ${VALID_SETS.kind.join(', ')}`
+              ? `Invalid kind: ${obj.kind}. Must be one of: ${B.validSets.kind.join(', ')}`
               : null,
     phase: (obj) =>
         obj.phase && !validateField('phase', obj.phase)
-            ? `Invalid phase: ${obj.phase}. Must be one of: ${VALID_SETS.phase.join(', ')}`
+            ? `Invalid phase: ${obj.phase}. Must be one of: ${B.validSets.phase.join(', ')}`
             : null,
     project_id: () => null,
     status: (obj) =>
         obj.status && !validateField('status', obj.status)
-            ? `Invalid status: ${obj.status}. Must be one of: ${VALID_SETS.status.join(', ')}`
+            ? `Invalid status: ${obj.status}. Must be one of: ${B.validSets.status.join(', ')}`
             : null,
 };
 

@@ -79,7 +79,7 @@
   description: "Someone (agent or human) is working"
 
 - name: status:review
-  color: "FFF58A"
+  color: "fff58a"
   description: "Needs review"
 
 - name: status:blocked
@@ -149,7 +149,7 @@
   description: "Ready for implementation by AI/human"
 
 - name: review
-  color: "FFF58A"
+  color: "fff58a"
   description: "Needs review"
 
 - name: blocked

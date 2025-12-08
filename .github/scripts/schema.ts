@@ -333,9 +333,6 @@ const B = Object.freeze({
         } as const,
         invariants: {
             maxPerAxis: { kind: 1, phase: 1, priority: 1, status: 1 } as const,
-            mutuallyExclusive: [
-                ['status:implement', 'status:review', 'status:in-progress', 'status:blocked'] as const,
-            ] as const,
         } as const,
     },
     meta: {
