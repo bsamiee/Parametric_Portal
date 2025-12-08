@@ -13,6 +13,7 @@
         "@effect/schema": "catalog:",
         "@effect/vitest": "catalog:",
         "@fast-check/vitest": "catalog:",
+        "@mermaid-js/mermaid-cli": "11.12.0",
         "@nx/js": "catalog:",
         "@nx/react": "catalog:",
         "@nx/vite": "catalog:",

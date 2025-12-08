@@ -15,7 +15,7 @@ Execute sections in sequence. Summarize findings post-execution.
 
 <br>
 
-Run `git ls-files` mapping repository structure.
+Run `eza . --tree --git-ignore` mapping repository structure.
 
 ---
 ## [2][DELEGATE]
