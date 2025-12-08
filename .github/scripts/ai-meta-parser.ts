@@ -1,17 +1,18 @@
 #!/usr/bin/env tsx
 /**
  * AI metadata parser: extracts and validates machine-readable YAML from issue bodies.
- * Uses B.labels.categories, fn utilities from schema.ts.
+ * Uses B.labels.categories from schema.ts, no duplication.
  */
+import { B } from './schema.ts';
 
 // --- Types -------------------------------------------------------------------
 
 type AiMeta = {
-    readonly kind: 'project' | 'task' | 'spike' | 'refactor';
+    readonly kind: string;
     readonly project_id?: string;
     readonly phase?: string;
     readonly status?: string;
-    readonly agent?: 'claude' | 'copilot' | 'gemini' | 'codex' | 'human';
+    readonly agent?: string;
     readonly effort?: number;
 };
 
@@ -21,149 +22,103 @@ type ParseResult =
 
 // --- Constants ---------------------------------------------------------------
 
-const B = Object.freeze({
-    pattern: /<!--\s*ai-meta\s*\n([\s\S]*?)\n\s*-->/,
-    validKinds: ['project', 'task', 'spike', 'refactor'] as const,
-    validPhases: ['0-foundation', '1-planning', '2-impl-core', '3-impl-extensions', '4-hardening', '5-release'] as const,
-    validStatuses: ['triage', 'implement', 'in-progress', 'review', 'blocked', 'done', 'idea', 'planning'] as const,
-    validAgents: ['claude', 'copilot', 'gemini', 'codex', 'human'] as const,
+const META_PATTERN = /<!--\s*ai-meta\s*\n([\s\S]*?)\n\s*-->/;
+
+const stripPrefix = (label: string): string => label.replace(/^(kind|phase|status|priority):/, '');
+
+const VALID_SETS = Object.freeze({
+    agent: B.labels.categories.agent,
+    kind: B.labels.categories.kind.map(stripPrefix),
+    phase: B.labels.categories.phase.map(stripPrefix),
+    status: B.labels.categories.status.map(stripPrefix),
 } as const);
 
 // --- Pure Functions ----------------------------------------------------------
 
-const extractYaml = (body: string): string | null => {
-    const match = B.pattern.exec(body);
-    return match?.[1]?.trim() ?? null;
+const extractYaml = (body: string): string | null => META_PATTERN.exec(body)?.[1]?.trim() ?? null;
+
+const parseValue = (raw: string): string | number | boolean =>
+    /^\d+$/.test(raw) ? parseInt(raw, 10) : raw === 'true' ? true : raw === 'false' ? false : raw;
+
+const parseYaml = (yaml: string): Record<string, unknown> =>
+    Object.fromEntries(
+        yaml
+            .split('\n')
+            .filter((line) => line.trim() && !line.trim().startsWith('#'))
+            .map((line) => line.split(':'))
+            .filter(([_key, val]) => val)
+            .map(([key, val]) => [key.trim(), parseValue(val.trim())]),
+    );
+
+const validateField = <K extends keyof typeof VALID_SETS>(
+    key: K,
+    value: unknown,
+): value is (typeof VALID_SETS)[K][number] =>
+    typeof value === 'string' && (VALID_SETS[key] as ReadonlyArray<string>).includes(value);
+
+const validateEffort = (value: unknown): value is number => typeof value === 'number' && value > 0;
+
+// --- Dispatch Tables ---------------------------------------------------------
+
+type ValidationError = string;
+type Validator = (obj: Record<string, unknown>) => ValidationError | null;
+
+const validators: Record<keyof AiMeta, Validator> = {
+    agent: (obj) =>
+        obj.agent && !validateField('agent', obj.agent)
+            ? `Invalid agent: ${obj.agent}. Must be one of: ${VALID_SETS.agent.join(', ')}`
+            : null,
+    effort: (obj) =>
+        obj.effort && !validateEffort(obj.effort) ? `Invalid effort: ${obj.effort}. Must be a positive number` : null,
+    kind: (obj) =>
+        !obj.kind
+            ? 'Missing required field: kind'
+            : !validateField('kind', obj.kind)
+              ? `Invalid kind: ${obj.kind}. Must be one of: ${VALID_SETS.kind.join(', ')}`
+              : null,
+    phase: (obj) =>
+        obj.phase && !validateField('phase', obj.phase)
+            ? `Invalid phase: ${obj.phase}. Must be one of: ${VALID_SETS.phase.join(', ')}`
+            : null,
+    project_id: () => null,
+    status: (obj) =>
+        obj.status && !validateField('status', obj.status)
+            ? `Invalid status: ${obj.status}. Must be one of: ${VALID_SETS.status.join(', ')}`
+            : null,
 };
 
-const parseYaml = (yaml: string): Record<string, unknown> => {
-    const lines = yaml.split('\n').filter((line) => line.trim() && !line.trim().startsWith('#'));
-    const obj: Record<string, unknown> = {};
-
-    lines.forEach((line) => {
-        const colonIndex = line.indexOf(':');
-        if (colonIndex === -1) return;
-
-        const key = line.slice(0, colonIndex).trim();
-        const value = line.slice(colonIndex + 1).trim();
-
-        if (!value) {
-            obj[key] = undefined;
-            return;
-        }
-
-        // Parse numbers
-        if (/^\d+$/.test(value)) {
-            obj[key] = parseInt(value, 10);
-            return;
-        }
-
-        // Parse booleans
-        if (value === 'true') {
-            obj[key] = true;
-            return;
-        }
-        if (value === 'false') {
-            obj[key] = false;
-            return;
-        }
-
-        // Default: string
-        obj[key] = value;
-    });
-
-    return obj;
-};
-
-const validate = (obj: Record<string, unknown>): ParseResult => {
-    const kind = obj.kind as string | undefined;
-
-    if (!kind) {
-        return { error: 'Missing required field: kind', success: false };
-    }
-
-    if (!(B.validKinds as ReadonlyArray<string>).includes(kind)) {
-        return { error: `Invalid kind: ${kind}. Must be one of: ${B.validKinds.join(', ')}`, success: false };
-    }
-
-    const meta: AiMeta = {
-        kind: kind as AiMeta['kind'],
-    };
-
-    if (obj.project_id && typeof obj.project_id === 'string') {
-        meta.project_id = obj.project_id;
-    }
-
-    if (obj.phase) {
-        const phase = obj.phase as string;
-        if (!(B.validPhases as ReadonlyArray<string>).includes(phase)) {
-            return { error: `Invalid phase: ${phase}. Must be one of: ${B.validPhases.join(', ')}`, success: false };
-        }
-        meta.phase = phase;
-    }
-
-    if (obj.status) {
-        const status = obj.status as string;
-        if (!(B.validStatuses as ReadonlyArray<string>).includes(status)) {
-            return { error: `Invalid status: ${status}. Must be one of: ${B.validStatuses.join(', ')}`, success: false };
-        }
-        meta.status = status;
-    }
-
-    if (obj.agent) {
-        const agent = obj.agent as string;
-        if (!(B.validAgents as ReadonlyArray<string>).includes(agent)) {
-            return { error: `Invalid agent: ${agent}. Must be one of: ${B.validAgents.join(', ')}`, success: false };
-        }
-        meta.agent = agent as AiMeta['agent'];
-    }
-
-    if (obj.effort) {
-        const effort = obj.effort;
-        if (typeof effort !== 'number' || effort < 0) {
-            return { error: `Invalid effort: ${effort}. Must be a positive number`, success: false };
-        }
-        meta.effort = effort;
-    }
-
-    return { meta, success: true };
-};
+const validate = (obj: Record<string, unknown>): ParseResult =>
+    ((errors) =>
+        errors.length > 0
+            ? { error: errors[0], success: false }
+            : {
+                  meta: {
+                      agent: obj.agent as string | undefined,
+                      effort: obj.effort as number | undefined,
+                      kind: obj.kind as string,
+                      phase: obj.phase as string | undefined,
+                      project_id: obj.project_id as string | undefined,
+                      status: obj.status as string | undefined,
+                  },
+                  success: true,
+              })(Object.values(validators).map((validator) => validator(obj)).filter(Boolean) as ReadonlyArray<string>);
 
 // --- Entry Point -------------------------------------------------------------
 
-const parse = (body: string | null): ParseResult => {
-    if (!body) {
-        return { error: 'Empty body', success: false };
-    }
+const parse = (body: string | null): ParseResult =>
+    !body
+        ? { error: 'Empty body', success: false }
+        : ((yaml) => (!yaml ? { error: 'No ai-meta block found', success: false } : validate(parseYaml(yaml))))(
+              extractYaml(body),
+          );
 
-    const yaml = extractYaml(body);
-    if (!yaml) {
-        return { error: 'No ai-meta block found', success: false };
-    }
-
-    const obj = parseYaml(yaml);
-    return validate(obj);
-};
-
-const toLabels = (meta: AiMeta): ReadonlyArray<string> => {
-    const labels: Array<string> = [];
-
-    labels.push(`kind:${meta.kind}`);
-
-    if (meta.phase) {
-        labels.push(`phase:${meta.phase}`);
-    }
-
-    if (meta.status) {
-        labels.push(`status:${meta.status}`);
-    }
-
-    if (meta.agent && meta.agent !== 'human') {
-        labels.push(meta.agent);
-    }
-
-    return labels;
-};
+const toLabels = (meta: AiMeta): ReadonlyArray<string> =>
+    [
+        `kind:${meta.kind}`,
+        meta.phase ? `phase:${meta.phase}` : null,
+        meta.status ? `status:${meta.status}` : null,
+        meta.agent && meta.agent !== 'human' ? meta.agent : null,
+    ].filter((label): label is string => label !== null);
 
 // --- Export ------------------------------------------------------------------
 
