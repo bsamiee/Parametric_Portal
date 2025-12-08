@@ -1,5 +1,5 @@
 name: Changed Detection
-description: Detect changed files and affected Nx projects with three detection modes (fast|comprehensive|matrix)
+description: Detect changed files and affected Nx projects with three detection modes (fast|comprehensive|matrix). Uses tj-actions/changed-files@v47 for optimized file detection.
 
 inputs:
     mode:
