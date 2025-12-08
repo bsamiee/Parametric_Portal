@@ -6,77 +6,95 @@ config:
   theme: base
   elk:
     mergeEdges: false
-    nodePlacementStrategy: NETWORK_SIMPLEX
-    cycleBreakingStrategy: GREEDY
-    layering: NETWORK_SIMPLEX
+    nodePlacementStrategy: BRANDES_KOEPF
+    cycleBreakingStrategy: GREEDY_MODEL_ORDER
+    layering: LONGEST_PATH
+    direction: RIGHT
+    edgeRouting: SPLINES
     spacing:
-      nodeNode: 80
-      edgeNode: 40
-      edgeEdge: 30
-    padding: "[top=50,left=50,bottom=50,right=50]"
+      nodeNode: 100
+      edgeNode: 60
+      edgeEdge: 40
+      componentComponent: 70
+    padding: "[top=80,left=80,bottom=80,right=80]"
     hierarchyHandling: INCLUDE_CHILDREN
+    separateConnectedComponents: false
+    aspectRatio: 1.6
   themeVariables:
     background: "#282a36"
     fontFamily: "JetBrains Mono, monospace"
-    fontSize: "14px"
+    fontSize: "15px"
     primaryColor: "#44475a"
     primaryTextColor: "#f8f8f2"
-    primaryBorderColor: "#6272a4"
+    primaryBorderColor: "#bd93f9"
     lineColor: "#6272a4"
     archEdgeColor: "#8be9fd"
     archEdgeArrowColor: "#50fa7b"
-    archEdgeWidth: "3"
+    archEdgeWidth: "3.5"
     archGroupBorderColor: "#bd93f9"
-    archGroupBorderWidth: "3"
+    archGroupBorderWidth: "3.5"
 ---
 architecture-beta
-    accTitle: E-Commerce Platform Architecture
-    accDescr: Cloud-native microservices platform with clear request flow from edge to services to data, demonstrating proper ELK spacing, hierarchical organization, and logical service grouping.
-    group cdn(logos:cloudflare)[Edge CDN]
-    service cloudfront(logos:cloudflare-workers)[CloudFront] in cdn
-    service waf(mdi:shield-check)[WAF] in cdn
-    group clients(logos:react)[Client Layer]
-    service web(logos:react)[Web App] in clients
-    service mobile(logos:flutter)[Mobile App] in clients
-    group gateway(cloud)[API Gateway]
-    service apigw(logos:kong)[Kong Gateway] in gateway
-    junction gwJunction in gateway
-    group backend(logos:kubernetes)[Backend Services]
-    service auth(mdi:account-key)[Auth Service] in backend
-    service catalog(mdi:storefront)[Catalog Service] in backend
-    service orders(mdi:cart)[Orders Service] in backend
-    service payments(mdi:credit-card)[Payment Service] in backend
-    junction backendHub in backend
-    group messaging(logos:apache-kafka)[Message Queue]
-    service kafka(logos:apache-kafka)[Kafka Broker] in messaging
-    service worker(mdi:cog)[Event Worker] in messaging
-    group persistence(database)[Data Persistence]
-    service postgres(logos:postgresql)[PostgreSQL] in persistence
-    service redis(logos:redis)[Redis Cache] in persistence
-    service elastic(logos:elasticsearch)[Elasticsearch] in persistence
-    group external(internet)[External Services]
-    service stripe(logos:stripe)[Stripe API] in external
-    service email(mdi:email)[Email Service] in external
-    cloudfront:R --> L:waf
-    waf:B --> T:web
-    waf:B --> T:mobile
-    web:B --> T:apigw
-    mobile:B --> T:apigw
-    apigw:R --> L:gwJunction
-    gwJunction:B --> T:backendHub
-    backendHub:R --> L:auth
-    backendHub:R --> L:catalog
-    backendHub:R --> L:orders
-    backendHub:R --> L:payments
-    auth:B --> T:postgres
-    catalog:B --> T:postgres
-    catalog:R --> L:elastic
-    catalog:R --> L:redis
-    orders:B --> T:postgres
-    orders:R --> L:kafka
-    payments:B --> T:stripe
-    payments:R --> L:kafka
-    kafka:B --> T:worker
-    worker:R --> L:email
-    worker:R --> L:postgres
+    accTitle: Cloud-Native E-Commerce Platform
+    accDescr: Production architecture demonstrating clean left-to-right flow with strategic grouping, no crossing arrows, enhanced Dracula styling, and advanced ELK configurations for optimal layout.
+    group ingress(logos:cloudflare)[Ingress Layer]
+    service cdn(logos:cloudflare-workers)[CDN] in ingress
+    service waf(mdi:shield-check)[WAF] in ingress
+    junction ingressHub in ingress
+    group presentation(logos:react)[Presentation Layer]
+    service webapp(logos:react)[Web App] in presentation
+    service mobileapp(logos:flutter)[Mobile App] in presentation
+    junction presentationHub in presentation
+    group routing(cloud)[Routing Layer]
+    service apigateway(logos:kong)[API Gateway] in routing
+    service loadbalancer(mdi:web)[Load Balancer] in routing
+    junction routingHub in routing
+    group application(logos:kubernetes)[Application Layer]
+    group core(server)[Core Services] in application
+    service auth(mdi:account-key)[Auth] in core
+    service catalog(mdi:storefront)[Catalog] in core
+    junction coreHub in core
+    group transactional(server)[Transaction Services] in application
+    service orders(mdi:cart)[Orders] in transactional
+    service payments(mdi:credit-card)[Payments] in transactional
+    junction txHub in transactional
+    group integration(logos:apache-kafka)[Integration Layer]
+    service eventbus(logos:apache-kafka)[Event Bus] in integration
+    service processor(mdi:cog)[Processor] in integration
+    junction integrationHub in integration
+    group datastore(database)[Data Layer]
+    service primarydb(logos:postgresql)[Primary DB] in datastore
+    service cachedb(logos:redis)[Cache] in datastore
+    service searchdb(logos:elasticsearch)[Search] in datastore
+    junction dataHub in datastore
+    group external(internet)[External Layer]
+    service payment_gateway(logos:stripe)[Payment Gateway] in external
+    service notification(mdi:email)[Notifications] in external
+    cdn:R --> L:waf
+    waf:R --> L:ingressHub
+    ingressHub:R --> L:webapp
+    ingressHub:R --> L:mobileapp
+    webapp:R --> L:presentationHub
+    mobileapp:R --> L:presentationHub
+    presentationHub:R --> L:apigateway
+    apigateway:R --> L:loadbalancer
+    loadbalancer:R --> L:routingHub
+    routingHub:R --> L:coreHub
+    routingHub:R --> L:txHub
+    coreHub:R --> L:auth
+    coreHub:R --> L:catalog
+    txHub:R --> L:orders
+    txHub:R --> L:payments
+    auth:R --> L:primarydb
+    catalog:R --> L:cachedb
+    catalog:R --> L:searchdb
+    orders:R --> L:primarydb
+    orders:R --> L:integrationHub
+    payments:R --> L:payment_gateway
+    payments:R --> L:integrationHub
+    integrationHub:R --> L:eventbus
+    eventbus:R --> L:processor
+    processor:R --> L:notification
+    processor:R --> L:dataHub
+    dataHub:R --> L:primarydb
 ```
