@@ -120,23 +120,34 @@ C4Container
     UpdateElementStyle(payment, "#f1fa8c", "#282a36", "#f1fa8c", "true")
     UpdateElementStyle(search, "#f1fa8c", "#282a36", "#f1fa8c", "true")
 
+    %% User interactions (green - entry points)
     UpdateRelStyle(users, web, "#50fa7b", "#50fa7b")
     UpdateRelStyle(users, mobile, "#50fa7b", "#50fa7b")
+    UpdateRelStyle(notifications, users, "#50fa7b", "#50fa7b")
+    
+    %% Client app routing (cyan - presentation layer)
     UpdateRelStyle(web, gateway, "#8be9fd", "#8be9fd")
     UpdateRelStyle(mobile, gateway, "#8be9fd", "#8be9fd")
+    
+    %% Gateway routing (purple - core services)
     UpdateRelStyle(gateway, auth, "#bd93f9", "#bd93f9")
     UpdateRelStyle(gateway, catalog, "#bd93f9", "#bd93f9")
     UpdateRelStyle(gateway, order, "#bd93f9", "#bd93f9")
-    UpdateRelStyle(catalog, search, "#f1fa8c", "#f1fa8c")
-    UpdateRelStyle(search, catalog, "#f1fa8c", "#f1fa8c")
+    
+    %% Data flows (orange - persistence layer)
     UpdateRelStyle(auth, writedb, "#ffb86c", "#ffb86c")
     UpdateRelStyle(catalog, readdb, "#ffb86c", "#ffb86c")
     UpdateRelStyle(catalog, cache, "#ffb86c", "#ffb86c")
-    UpdateRelStyle(order, payment, "#f1fa8c", "#f1fa8c")
     UpdateRelStyle(order, writedb, "#ffb86c", "#ffb86c")
+    
+    %% Event flows (pink - async processing)
     UpdateRelStyle(order, events, "#ff79c6", "#ff79c6")
     UpdateRelStyle(events, workers, "#ff79c6", "#ff79c6")
     UpdateRelStyle(workers, readdb, "#ff79c6", "#ff79c6")
     UpdateRelStyle(workers, notifications, "#ff79c6", "#ff79c6")
-    UpdateRelStyle(notifications, users, "#50fa7b", "#50fa7b")
+    
+    %% External integrations (yellow - third-party APIs)
+    UpdateRelStyle(catalog, search, "#f1fa8c", "#f1fa8c")
+    UpdateRelStyle(search, catalog, "#f1fa8c", "#f1fa8c")
+    UpdateRelStyle(order, payment, "#f1fa8c", "#f1fa8c")
 ```
