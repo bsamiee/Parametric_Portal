@@ -23,6 +23,30 @@ concurrency:
 
 jobs:
     # --- PR Metadata Jobs (mutually exclusive via conditions) -----------------
+    # Note: pr-meta has separate concurrency group to prevent cancellation during title normalization
+    pr-meta:
+        name: PR Meta
+        if: github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'edited')
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        concurrency:
+            group: pr-meta-${{ github.event.pull_request.number }}
+            cancel-in-progress: false
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/meta-fixer
+              with:
+                  targets: title,label,body
+                  limit: '1'
+                  anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
     pr-sync:
         name: PR Commit Sync
         if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
@@ -78,26 +102,6 @@ jobs:
                   pr_number: ${{ github.event.pull_request.number }}
                   owner_logins: ${{ github.repository_owner }}
 
-    pr-meta:
-        name: PR Meta
-        if: github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'edited')
-        runs-on: ubuntu-latest
-        timeout-minutes: 5
-        steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-              with:
-                  sparse-checkout: |
-                      .github
-                      package.json
-                      pnpm-workspace.yaml
-                      pnpm-lock.yaml
-
-            - uses: ./.github/actions/meta-fixer
-              with:
-                  targets: title,label,body
-                  limit: '1'
-                  anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
     # --- Issue Metadata Jobs --------------------------------------------------
     issue-meta:
         name: Issue Meta
@@ -140,6 +144,31 @@ jobs:
                   node_id: ${{ github.event.issue.node_id }}
                   number: ${{ github.event.issue.number }}
 
+    pin-renovate-dashboard:
+        name: Pin Renovate Dashboard
+        if: |
+            github.event_name == 'issues' &&
+            (github.event.action == 'opened' || github.event.action == 'edited') &&
+            github.event.issue.title == '[DASHBOARD] Dependency Dashboard' &&
+            contains(github.event.issue.labels.*.name, 'pinned')
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/label
+              with:
+                  action: 'labeled'
+                  label: 'pinned'
+                  node_id: ${{ github.event.issue.node_id }}
+                  number: ${{ github.event.issue.number }}
+
     # --- Issue Commands (comment-triggered) -----------------------------------
     mark-duplicate:
         name: Mark Duplicate
@@ -152,6 +181,7 @@ jobs:
                   sparse-checkout: .github/actions/issue-ops
                   sparse-checkout-cone-mode: false
 
+            # issue-ops action handles /duplicate command detection internally
             - uses: ./.github/actions/issue-ops
               with:
                   operation: mark-duplicate

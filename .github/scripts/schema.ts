@@ -180,9 +180,9 @@ const B = Object.freeze({
     } as const,
     changes: {
         action: {
-            name: 'step-security/changed-files',
-            ref: 'f9b3bb1f9126ed32d88ef4aacec02bde4b70daa2',
-            version: '4.3.0',
+            name: 'tj-actions/changed-files',
+            ref: '24d32ffd492484c1d75e0c0b894501ddb9d30d62',
+            version: '47',
         } as const,
         api: {
             endpoints: {
@@ -380,6 +380,20 @@ const B = Object.freeze({
         markers: { prReview: 'PR-REVIEW-SUMMARY' } as const,
         shaLength: 7,
         titles: { prReview: 'PR Review Summary' } as const,
+    } as const,
+    slashDispatch: {
+        action: {
+            name: 'peter-evans/slash-command-dispatch',
+            ref: 'a28ee6cd74d5200f99e247ebc7b365c03ae0ef3c',
+            version: '4.0.1',
+        } as const,
+        commands: {
+            gemini: ['review', 'triage', 'architect', 'implement', 'invoke'] as const,
+            maintenance: ['duplicate'] as const,
+        } as const,
+        eventSuffix: '-command' as const,
+        permission: 'write' as const,
+        reactions: { dispatch: '🚀', seen: '👀' } as const,
     } as const,
     time: { day: 86400000 },
 } as const);

@@ -3,11 +3,7 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
-    paths:
-      - 'libs/**/*.cs'
-      - 'test/**/*.cs'
-      - '*.csproj'
-      - 'Directory.Build.props'
+    # Removed path filters - now runs on all PRs like Gemini and Copilot
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -15,6 +11,8 @@ concurrency:
 
 jobs:
   claude-review:
+    # Only run on non-fork PRs (same pattern as Gemini)
+    if: github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

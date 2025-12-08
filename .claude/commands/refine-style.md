@@ -14,7 +14,7 @@ argument-hint: [folder-path] [focus: formatting|voice|taxonomy|dictum|keywords|d
 
 <br>
 
-Target: $1<br>
+Target: $1
 Focus: ${2:-none}
 
 ---

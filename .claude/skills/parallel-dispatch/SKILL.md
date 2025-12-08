@@ -98,13 +98,12 @@ Context: [Relevant background—agents execute statelessly]
 
 [CRITICAL] Dispatch ALL agents in ONE message block:
 
-```
+```text
 Task("Agent A: [scope, objective, output format]")
 Task("Agent B: [scope, objective, output format]")
 Task("Agent C: [scope, objective, output format]")
 Task("Agent D: [scope, objective, output format]")
 Task("Agent E: [scope, objective, output format]")
-...
 ```
 
 [IMPORTANT]:
