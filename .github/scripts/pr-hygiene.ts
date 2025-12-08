@@ -253,14 +253,21 @@ const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<
         : processHygiene(ctx, params, unresolved, comments, prNumber, ownerLogins);
 };
 
-const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult): Promise<HygieneResult> => {
+const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, core: Core): Promise<HygieneResult> => {
     const { resolved, replied, deleted } = result;
-    await call(
-        ctx,
-        'comment.create',
-        prNumber,
-        `${md.marker(H.marker)}\n### PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`,
-    );
+    const body = `### 🧹 PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
+    
+    // INTEGRATION: Use PR-MONITOR marker with section mode to consolidate with other workflow outputs
+    // This replaces the standalone PR-HYGIENE comment with integration into main PR comment
+    const { mutate, createCtx: createMutateCtx } = await import('./schema.ts');
+    await mutate(createMutateCtx({ context: { repo: { owner: ctx.owner, repo: ctx.repo } }, core, github: ctx.github }), {
+        t: 'comment',
+        n: prNumber,
+        marker: 'PR-MONITOR',
+        mode: 'section',
+        sectionId: 'pr-hygiene',
+        body,
+    });
     return result;
 };
 
@@ -286,7 +293,7 @@ const processHygiene = async (
 
     const result = { deleted, replied, resolved };
     params.core.info(`[PR-HYGIENE] #${prNumber}: resolved=${resolved} replied=${replied} deleted=${deleted}`);
-    return resolved + replied + deleted > 0 ? postSummary(ctx, prNumber, result) : result;
+    return resolved + replied + deleted > 0 ? postSummary(ctx, prNumber, result, params.core) : result;
 };
 
 // --- Export ------------------------------------------------------------------

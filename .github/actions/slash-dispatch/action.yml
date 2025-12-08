@@ -1,0 +1,61 @@
+name: Slash Command Dispatch
+description: Unified slash command dispatcher using peter-evans/slash-command-dispatch with schema-driven configuration
+
+inputs:
+    token:
+        description: Repository-scoped Personal Access Token (PAT) required for creating dispatch events that trigger workflows. GITHUB_TOKEN cannot trigger workflow_dispatch/repository_dispatch events due to GitHub security restrictions.
+        required: true
+    reaction-token:
+        description: Token for adding reactions (GITHUB_TOKEN is sufficient; PAT not required)
+        required: false
+        default: ${{ github.token }}
+    commands:
+        description: Comma or newline separated list of slash commands to handle
+        required: true
+    permission:
+        description: Repository permission level required (none, read, write, admin)
+        required: false
+        default: write
+    repository:
+        description: Target repository for dispatch events (defaults to current)
+        required: false
+    event-type-suffix:
+        description: Suffix for repository dispatch event types
+        required: false
+        default: -command
+    static-args:
+        description: Static arguments dispatched with every command
+        required: false
+    reactions:
+        description: Whether to add reactions (true/false)
+        required: false
+        default: 'true'
+    dispatch-type:
+        description: Dispatch type (repository_dispatch or workflow_dispatch)
+        required: false
+        default: repository_dispatch
+
+outputs:
+    command:
+        description: The dispatched command name
+        value: ${{ steps.dispatch.outputs.command }}
+    args:
+        description: JSON payload of command arguments
+        value: ${{ steps.dispatch.outputs.args }}
+
+runs:
+    using: composite
+    steps:
+        - name: Slash Command Dispatch
+          id: dispatch
+          uses: peter-evans/slash-command-dispatch@a28ee6cd74d5200f99e247ebc7b365c03ae0ef3c # v4.0.1
+          with:
+              token: ${{ inputs.token }}
+              reaction-token: ${{ inputs.reaction-token }}
+              reactions: ${{ inputs.reactions }}
+              commands: ${{ inputs.commands }}
+              permission: ${{ inputs.permission }}
+              repository: ${{ inputs.repository }}
+              event-type-suffix: ${{ inputs.event-type-suffix }}
+              static-args: ${{ inputs.static-args }}
+              dispatch-type: ${{ inputs.dispatch-type }}
