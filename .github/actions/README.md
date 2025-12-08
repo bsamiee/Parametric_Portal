@@ -182,5 +182,5 @@ const B = Object.freeze({
 ## References
 
 - [Composite Actions Documentation](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action)
-- [Workflow Optimization Guide](..//WORKFLOW_OPTIMIZATION.md)
+- [Workflow Optimization Guide](../WORKFLOW_OPTIMIZATION.md)
 - [Schema Configuration](../scripts/schema.ts)
