@@ -123,6 +123,35 @@ jobs:
                   limit: '1'
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
+            - uses: ./.github/actions/node-env
+              with:
+                  node-version-file: package.json
+
+            - name: AI Meta Sync
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              env:
+                  NODE_OPTIONS: --import tsx
+              with:
+                  script: |
+                      const { parse, toLabels } = await import('${{ github.workspace }}/.github/scripts/ai-meta-parser.ts');
+                      const issueBody = context.payload.issue.body;
+                      const issueNumber = context.payload.issue.number;
+                      const result = parse(issueBody);
+                      if (result.success) {
+                          const labels = toLabels(result.meta);
+                          if (labels.length > 0) {
+                              await github.rest.issues.addLabels({
+                                  owner: context.repo.owner,
+                                  repo: context.repo.repo,
+                                  issue_number: issueNumber,
+                                  labels: [...labels],
+                              });
+                              core.info(`[AI-META-SYNC] Applied ${labels.length} labels: ${labels.join(', ')}`);
+                          }
+                      } else {
+                          core.info(`[AI-META-SYNC] No ai-meta block found: ${result.error}`);
+                      }
+
     pin-issue:
         name: Pin/Unpin Issue
         if: github.event_name == 'issues' && (github.event.action == 'labeled' || github.event.action == 'unlabeled') && github.event.label.name == 'pinned'
@@ -143,6 +172,43 @@ jobs:
                   label: ${{ github.event.label.name }}
                   node_id: ${{ github.event.issue.node_id }}
                   number: ${{ github.event.issue.number }}
+
+    validate-labels:
+        name: Validate Issue Labels
+        if: github.event_name == 'issues' && (github.event.action == 'labeled' || github.event.action == 'unlabeled' || github.event.action == 'opened')
+        runs-on: ubuntu-latest
+        timeout-minutes: 3
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github/scripts
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
+            - uses: ./.github/actions/node-env
+              with:
+                  node-version-file: package.json
+
+            - name: Validate Label Invariants
+              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              env:
+                  NODE_OPTIONS: --import tsx
+              with:
+                  script: |
+                      const { run } = await import('${{ github.workspace }}/.github/scripts/label-validator.ts');
+                      const result = await run({
+                          context: { repo: context.repo, payload: context.payload },
+                          core,
+                          github,
+                      });
+                      if (result.valid) {
+                          core.info('[LABEL-VALIDATOR] ✓ All label invariants satisfied');
+                      } else {
+                          core.info('[LABEL-VALIDATOR] ✗ Fixed label violations');
+                          result.fixes.forEach((fix) => core.info(`  - ${fix}`));
+                      }
 
     # --- Issue Commands (comment-triggered) -----------------------------------
     mark-duplicate:
