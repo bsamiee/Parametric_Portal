@@ -3,8 +3,11 @@ description: Top-level initiative (e.g., Agentic Framework)
 title: "[PROJECT]: "
 labels: ["kind:project", "status:triage", "phase:1-planning"]
 body:
-    - type: markdown
+    - type: textarea
+      id: ai_meta
       attributes:
+          label: AI Metadata (Do not edit)
+          description: Machine-readable metadata for AI agent coordination
           value: |
               <!-- ai-meta
               kind: project
@@ -14,6 +17,9 @@ body:
               agent: 
               effort: 
               -->
+          render: markdown
+      validations:
+          required: true
 
     - type: input
       id: project_id

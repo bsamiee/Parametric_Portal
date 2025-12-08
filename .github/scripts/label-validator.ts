@@ -3,7 +3,7 @@
  * Label validator: enforces orthogonal label invariants via dispatch tables.
  * Uses B.labels.invariants, B.labels.categories, fn.names, mutate from schema.ts.
  */
-import { B, type Ctx, createCtx, fn, type Issue, mutate, type RunParams } from './schema.ts';
+import { B as B_schema, type Ctx, createCtx, fn, type Issue, mutate, type RunParams } from './schema.ts';
 
 // --- Types -------------------------------------------------------------------
 
@@ -13,37 +13,38 @@ type ValidationResult = {
     readonly fixes: ReadonlyArray<string>;
 };
 
-type LabelAxis = keyof typeof B.labels.invariants.maxPerAxis;
+type LabelAxis = keyof typeof B_schema.labels.invariants.maxPerAxis;
 
 // --- Constants ---------------------------------------------------------------
 
-const AXIS_PREFIX: Record<LabelAxis, string> = Object.freeze({
-    kind: 'kind:',
-    phase: 'phase:',
-    priority: 'priority:',
-    status: 'status:',
-} as const);
-
-const PRIORITY_ORDER: Record<LabelAxis, ReadonlyArray<string>> = Object.freeze({
-    kind: B.labels.categories.kind,
-    phase: [...B.labels.categories.phase].reverse(),
-    priority: B.labels.categories.priority,
-    status: [
-        'status:done',
-        'status:review',
-        'status:in-progress',
-        'status:implement',
-        'status:blocked',
-        'status:planning',
-        'status:triage',
-        'status:idea',
-    ] as const,
+const B = Object.freeze({
+    axisPrefix: {
+        kind: 'kind:',
+        phase: 'phase:',
+        priority: 'priority:',
+        status: 'status:',
+    } as const,
+    priorityOrder: {
+        kind: B_schema.labels.categories.kind,
+        phase: [...B_schema.labels.categories.phase].reverse(),
+        priority: B_schema.labels.categories.priority,
+        status: [
+            'status:done',
+            'status:review',
+            'status:in-progress',
+            'status:implement',
+            'status:blocked',
+            'status:planning',
+            'status:triage',
+            'status:idea',
+        ] as const,
+    } as const,
 } as const);
 
 // --- Pure Functions ----------------------------------------------------------
 
 const extractAxis = (label: string): LabelAxis | null =>
-    (Object.keys(AXIS_PREFIX) as ReadonlyArray<LabelAxis>).find((axis) => label.startsWith(AXIS_PREFIX[axis])) ?? null;
+    (Object.keys(B.axisPrefix) as ReadonlyArray<LabelAxis>).find((axis) => label.startsWith(B.axisPrefix[axis])) ?? null;
 
 const groupByAxis = (
     labels: ReadonlyArray<string>,
@@ -60,23 +61,26 @@ const groupByAxis = (
     ) as Record<LabelAxis, ReadonlyArray<string>> & { readonly other: ReadonlyArray<string> };
 
 const findViolations = (groups: Record<LabelAxis, ReadonlyArray<string>>): ReadonlyArray<string> =>
-    (Object.keys(B.labels.invariants.maxPerAxis) as ReadonlyArray<LabelAxis>)
-        .filter((axis) => groups[axis].length > B.labels.invariants.maxPerAxis[axis])
-        .map((axis) => `Too many ${axis} labels (${groups[axis].length}/${B.labels.invariants.maxPerAxis[axis]}): ${groups[axis].join(', ')}`);
+    (Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<LabelAxis>)
+        .filter((axis) => groups[axis].length > B_schema.labels.invariants.maxPerAxis[axis])
+        .map((axis) => `Too many ${axis} labels (${groups[axis].length}/${B_schema.labels.invariants.maxPerAxis[axis]}): ${groups[axis].join(', ')}`);
 
 const selectPreferred = (labels: ReadonlyArray<string>, axis: LabelAxis): string =>
-    labels.find((label) => PRIORITY_ORDER[axis].includes(label)) ?? labels[0];
+    labels.find((label) => B.priorityOrder[axis].includes(label)) ?? labels[0];
 
 const generateFixes = (
     groups: Record<LabelAxis, ReadonlyArray<string>>,
 ): ReadonlyArray<{ readonly axis: LabelAxis; readonly keep: string; readonly remove: ReadonlyArray<string> }> =>
-    (Object.keys(B.labels.invariants.maxPerAxis) as ReadonlyArray<LabelAxis>)
-        .filter((axis) => groups[axis].length > B.labels.invariants.maxPerAxis[axis])
-        .map((axis) => ({
-            axis,
-            keep: selectPreferred(groups[axis], axis),
-            remove: groups[axis].filter((label) => label !== selectPreferred(groups[axis], axis)),
-        }));
+    (Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<LabelAxis>)
+        .filter((axis) => groups[axis].length > B_schema.labels.invariants.maxPerAxis[axis])
+        .map((axis) => {
+            const preferred = selectPreferred(groups[axis], axis);
+            return {
+                axis,
+                keep: preferred,
+                remove: groups[axis].filter((label) => label !== preferred),
+            };
+        });
 
 // --- Effect Pipeline ---------------------------------------------------------
 
@@ -104,10 +108,11 @@ const run = async (params: RunParams): Promise<ValidationResult> => {
     const violations = findViolations(groups);
     const fixes = generateFixes(groups);
 
-    violations.length > 0 &&
-        (params.core.info(`[LABEL-VALIDATOR] Found ${violations.length} violations`),
-        violations.forEach((v) => params.core.info(`  - ${v}`)),
-        await applyFixes(ctx, issue, fixes, params.core));
+    if (violations.length > 0) {
+        params.core.info(`[LABEL-VALIDATOR] Found ${violations.length} violations`);
+        violations.forEach((v) => params.core.info(`  - ${v}`));
+        await applyFixes(ctx, issue, fixes, params.core);
+    }
 
     return {
         fixes: fixes.map((f) => `${f.axis}: kept ${f.keep}, removed ${f.remove.join(', ')}`),

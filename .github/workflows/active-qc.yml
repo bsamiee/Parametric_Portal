@@ -139,14 +139,18 @@ jobs:
                       const result = parse(issueBody);
                       if (result.success) {
                           const labels = toLabels(result.meta);
-                          if (labels.length > 0) {
+                          const currentLabels = context.payload.issue.labels.map(l => l.name);
+                          const newLabels = labels.filter(l => !currentLabels.includes(l));
+                          if (newLabels.length > 0) {
                               await github.rest.issues.addLabels({
                                   owner: context.repo.owner,
                                   repo: context.repo.repo,
                                   issue_number: issueNumber,
-                                  labels: [...labels],
+                                  labels: [...newLabels],
                               });
-                              core.info(`[AI-META-SYNC] Applied ${labels.length} labels: ${labels.join(', ')}`);
+                              core.info(`[AI-META-SYNC] Applied ${newLabels.length} labels: ${newLabels.join(', ')}`);
+                          } else {
+                              core.info(`[AI-META-SYNC] All labels already present`);
                           }
                       } else {
                           core.info(`[AI-META-SYNC] No ai-meta block found: ${result.error}`);
@@ -178,21 +182,11 @@ jobs:
         if: github.event_name == 'issues' && (github.event.action == 'labeled' || github.event.action == 'unlabeled' || github.event.action == 'opened')
         runs-on: ubuntu-latest
         timeout-minutes: 3
-    pin-renovate-dashboard:
-        name: Pin Renovate Dashboard
-        if: |
-            github.event_name == 'issues' &&
-            (github.event.action == 'opened' || github.event.action == 'edited') &&
-            github.event.issue.title == '[DASHBOARD] Dependency Dashboard' &&
-            contains(github.event.issue.labels.*.name, 'pinned')
-        runs-on: ubuntu-latest
-        timeout-minutes: 2
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
               with:
                   sparse-checkout: |
                       .github/scripts
-                      .github
                       package.json
                       pnpm-workspace.yaml
                       pnpm-lock.yaml
@@ -219,6 +213,25 @@ jobs:
                           core.info('[LABEL-VALIDATOR] ✗ Fixed label violations');
                           result.fixes.forEach((fix) => core.info(`  - ${fix}`));
                       }
+
+    pin-renovate-dashboard:
+        name: Pin Renovate Dashboard
+        if: |
+            github.event_name == 'issues' &&
+            (github.event.action == 'opened' || github.event.action == 'edited') &&
+            github.event.issue.title == '[DASHBOARD] Dependency Dashboard' &&
+            contains(github.event.issue.labels.*.name, 'pinned')
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+              with:
+                  sparse-checkout: |
+                      .github
+                      package.json
+                      pnpm-workspace.yaml
+                      pnpm-lock.yaml
+
             - uses: ./.github/actions/label
               with:
                   action: 'labeled'

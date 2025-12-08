@@ -3,8 +3,11 @@ description: Work unit that leads to code changes
 title: "[TASK]: "
 labels: ["kind:task", "status:triage"]
 body:
-    - type: markdown
+    - type: textarea
+      id: ai_meta
       attributes:
+          label: AI Metadata (Do not edit)
+          description: Machine-readable metadata for AI agent coordination
           value: |
               <!-- ai-meta
               kind: task
@@ -14,6 +17,9 @@ body:
               agent: 
               effort: 
               -->
+          render: markdown
+      validations:
+          required: true
 
     - type: input
       id: project_id
