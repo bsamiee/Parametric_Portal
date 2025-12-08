@@ -64,7 +64,7 @@ jobs:
       # Fallback: extract command from event body for auto-triggers
       - name: 'Extract command (auto-trigger)'
         id: 'extract_command'
-        if: ${{ !steps.slash-dispatch.outputs.command }}
+        if: !steps.slash-dispatch.outputs.command
         uses: 'actions/github-script@v7'
         env:
           EVENT_TYPE: '${{ github.event_name }}.${{ github.event.action }}'
@@ -96,7 +96,7 @@ jobs:
             }
 
       - name: 'Acknowledge'
-        if: ${{ !steps.slash-dispatch.outputs.command }}
+        if: !steps.slash-dispatch.outputs.command
         env:
           GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
           NUMBER: '${{ github.event.pull_request.number || github.event.issue.number }}'

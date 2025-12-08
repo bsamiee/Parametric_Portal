@@ -41,7 +41,8 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ```yaml
 - uses: ./.github/actions/slash-dispatch
   with:
-    token: ${{ secrets.PAT }} # Required: repo-scoped PAT
+    token: ${{ secrets.GITHUB_TOKEN }} # For reactions only
+    # token: ${{ secrets.PAT }} # Use PAT if dispatching to trigger workflows
     commands: |
       review
       triage

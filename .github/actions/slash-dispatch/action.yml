@@ -3,10 +3,10 @@ description: Unified slash command dispatcher using peter-evans/slash-command-di
 
 inputs:
     token:
-        description: Repository-scoped PAT for creating dispatch events (GITHUB_TOKEN insufficient)
+        description: Repository-scoped Personal Access Token (PAT) required for creating dispatch events that trigger workflows. GITHUB_TOKEN cannot trigger workflow_dispatch/repository_dispatch events due to GitHub security restrictions.
         required: true
     reaction-token:
-        description: Token for adding reactions (can use GITHUB_TOKEN)
+        description: Token for adding reactions (GITHUB_TOKEN is sufficient; PAT not required)
         required: false
         default: ${{ github.token }}
     commands:
