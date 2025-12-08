@@ -449,3 +449,36 @@ mermaid.initialize({
 [IMPORTANT] URL sanitization and callback validation operate independently.
 
 [REFERENCE] Security levels: [→global-config.md§2.4](./global-config.md#24security), URL validation: [→validation.md§2.2](./validation.md#22verify).
+
+---
+### [4.5][SECURITY_INTERACTIVITY]
+
+| [LEVEL] | [CLICK] | [TOOLTIP] | [USE_CASE] |
+| ------- | :-----: | :-------: | ---------- |
+| `strict` | — | — | Untrusted content |
+| `loose` | [X] | [X] | Trusted content |
+| `antiscript` | [X] | [X] | Semi-trusted |
+
+[CRITICAL] ALL interactive features require `securityLevel: 'loose'` or `'antiscript'` via `initialize()`.
+
+---
+### [4.6][PROGRAMMATIC_BINDING]
+
+**`mermaid.render()` API requires explicit binding:**
+
+```javascript
+const { svg, bindFunctions } = await mermaid.render('id', def);
+container.innerHTML = svg;
+bindFunctions?.(container);
+```
+
+[CRITICAL] Omitting `bindFunctions()` produces non-functional click handlers.
+
+---
+### [4.7][TOOLTIP_CSS]
+
+**Class:** `.mermaidTooltip`
+
+**Properties:** `position`, `max-width`, `padding`, `background`, `border-radius`, `z-index`.
+
+[IMPORTANT] Default positioning unreliable—use `position: fixed !important` for consistency.

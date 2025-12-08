@@ -30,7 +30,7 @@ catalog:
   '@tanstack/react-query-persist-client': 5.90.13
   '@tanstack/react-table': 8.21.3
   '@tanstack/react-virtual': 3.13.12
-  '@types/node': 25.0.13
+  '@types/node': 24.10.1
   '@types/react': 19.2.7
   '@types/react-dom': 19.2.3
   '@types/uuid': 10.0.0
@@ -50,6 +50,8 @@ catalog:
   jspdf: 3.0.4
   jszip: 3.10.1
   lefthook: 2.0.4
+  mermaid: 11.12.2
+  '@mermaid-js/layout-elk': 0.2.0
   lightningcss: 1.30.2
   lucide-react: 0.554.0
   nx: 22.2.0-canary.20251125-7e00ec4

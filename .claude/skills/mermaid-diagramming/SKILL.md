@@ -37,8 +37,8 @@ Mermaid v11+ diagram creation with frontmatter YAML, ELK layout, Dracula palette
 <br>
 
 **Required Tasks:**
-1. Read [→global-config.md](./references/diagrams/global-config.md): Frontmatter YAML, ELK layout (required for ALL diagrams).
-2. Read [→styling.md](./references/diagrams/styling.md): Theme, classDef, palette.
+1. Read [→global-config.md](./references/global-config.md): Frontmatter YAML, ELK layout (required for ALL diagrams).
+2. Read [→styling.md](./references/styling.md): Theme, classDef, palette.
 3. Select diagram category per §2 table, load corresponding syntax reference.
 
 [REFERENCE]: [→index.md](./references/index.md) — Complete file listing.
@@ -59,11 +59,11 @@ Mermaid v11+ diagram creation with frontmatter YAML, ELK layout, Dracula palette
 
 | [CATEGORY]   | [TYPES]                                              | [REFERENCE]                                               |
 | :----------- | ---------------------------------------------------- | --------------------------------------------------------- |
-| Graph        | flowchart, mindmap, block                            | [→graph.md](./references/diagrams/graph.md)               |
-| Interaction  | sequence, journey                                    | [→interaction.md](./references/diagrams/interaction.md)   |
-| Modeling     | state, ER, class, requirement                        | [→modeling.md](./references/diagrams/modeling.md)         |
-| Charts       | pie, quadrant, sankey, xy, radar, gantt, treemap     | [→charts.md](./references/diagrams/charts.md)             |
-| Architecture | C4, architecture, packet, timeline, gitgraph, kanban | [→architecture.md](./references/diagrams/architecture.md) |
+| Graph        | flowchart, mindmap, block                            | [→graph.md](./references/graph.md)               |
+| Interaction  | sequence, journey                                    | [→interaction.md](./references/interaction.md)   |
+| Modeling     | state, ER, class, requirement                        | [→modeling.md](./references/modeling.md)         |
+| Charts       | pie, quadrant, sankey, xy, radar, gantt, treemap     | [→charts.md](./references/charts.md)             |
+| Architecture | C4, architecture, packet, timeline, gitgraph, kanban | [→architecture.md](./references/architecture.md) |
 
 **Type Headers:**
 
@@ -112,4 +112,4 @@ Mermaid v11+ diagram creation with frontmatter YAML, ELK layout, Dracula palette
 - [ ] classDef: placed at diagram end, after node definitions.
 - [ ] Accessibility: accTitle/accDescr present after diagram type.
 
-[REFERENCE]: [→validation.md](./references/diagrams/validation.md) — Full validation checklists and anti-patterns.
+[REFERENCE]: [→validation.md](./references/validation.md) — Full validation checklists and anti-patterns.

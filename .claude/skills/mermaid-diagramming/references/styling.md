@@ -22,18 +22,17 @@ Visual styling includes `themes`, `looks`, `themeVariables`, `classDef`, `linkSt
 |   [4]   | `forest`  |       No       | Nature/organic themes   |
 |   [5]   | `neutral` |       No       | Print-friendly, minimal |
 
-| [INDEX] | [LOOK]      | [ENGINE] | [VERSION] | [DESCRIPTION]           |
-| :-----: | ----------- | -------- | --------- | ----------------------- |
-|   [1]   | `neo`       | Standard | v11.0+    | Default modern style    |
-|   [2]   | `classic`   | Standard | v11.0+    | Traditional appearance  |
-|   [3]   | `handDrawn` | RoughJS  | v11.0+    | Sketch-like via RoughJS |
+| [INDEX] | [LOOK]    | [ENGINE] | [VERSION] | [DESCRIPTION]          |
+| :-----: | --------- | -------- | --------- | ---------------------- |
+|   [1]   | `neo`     | Standard | v11.0+    | Default modern style   |
+|   [2]   | `classic` | Standard | v11.0+    | Traditional appearance |
 
 [IMPORTANT] ONLY `theme: base` accepts `themeVariables`; looks apply to `flowchart`, `state`, `packet` diagrams—expanding coverage.
 
 ```yaml
 ---
 config:
-  look: handDrawn
+  look: neo
   theme: base
   themeVariables:
     primaryColor: "#ff0000"
@@ -123,6 +122,35 @@ config:
 **Properties:** `e1@{ animate: true }` or `e1@{ animation: fast|slow }`.
 
 [CRITICAL] Edge ID cannot style `color` or `stroke` directly—Issue #6784; use `linkStyle` for stroke styling.
+
+### [4.3][ANIMATION_CSS]
+
+| [PROPERTY] | [VALUES] | [PURPOSE] |
+| ---------- | -------- | --------- |
+| `stroke-dasharray` | `{dash},{gap}` (e.g., `9,5`) | Dash pattern |
+| `stroke-dashoffset` | Numeric (e.g., `900`) | Animation start position |
+| `animation` | `{name} {dur} {timing} {iter}` | CSS animation declaration |
+
+**Timing Functions:** `linear`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(x1,y1,x2,y2)`.
+
+[IMPORTANT] Escape commas in `stroke-dasharray` as `\,` (comma is style delimiter in classDef).
+
+---
+### [4.4][EDGE_CURVE_ANIMATION]
+
+**Combined syntax (v11.10.0+):** `e1@{ curve: linear, animation: fast }`.
+
+**Curve Values:** `linear`, `basis`, `cardinal`, `catmullRom`, `natural`, `step`, `stepBefore`, `stepAfter`.
+
+---
+### [4.5][ANIMATION_SUPPORT]
+
+| [DIAGRAM] | [EDGE] | [NODE] |
+| --------- | :----: | :----: |
+| Flowchart | [X] | — |
+| State | — | — |
+| Class | — | — |
+| ER | — | — |
 
 ---
 ## [5][CSS_INJECTION]

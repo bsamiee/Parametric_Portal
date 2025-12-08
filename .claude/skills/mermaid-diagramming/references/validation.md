@@ -32,7 +32,7 @@ Consolidated validation for all Mermaid diagram types; SKILL.md §3 contains hig
 - [ ] Markdown escaping with `\*`, `\_`, `\[`, `\]` (v11 default).
 - [ ] Increase edge count via `maxEdges` in `initialize()` if >500.
 - [ ] Set security level via `initialize()` only.
-- [ ] Set look to `classic` or `handDrawn`.
+- [ ] Set look to `neo` or `classic`.
 - [ ] Theme uses `base` for `themeVariables`.
 
 ---

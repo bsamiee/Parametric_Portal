@@ -3,7 +3,8 @@
 
 <br>
 
-Mermaid v11+ configuration via YAML frontmatter; ELK layout engine for advanced graph positioning; hand-drawn and classic looks for visual variety.
+Mermaid v11+ configuration via YAML frontmatter; ELK layout engine for advanced graph positioning.
+
 [CRITICAL] v10.5.0 deprecates `%%{init:...}%%`; use YAML frontmatter with `config:` key exclusively.
 
 ---
@@ -16,7 +17,7 @@ Mermaid v11+ configuration via YAML frontmatter; ELK layout engine for advanced 
 ---
 config:
   layout: elk
-  look: handDrawn
+  look: neo
   theme: base
   elk:
     mergeEdges: true
@@ -41,14 +42,13 @@ flowchart LR
 
 | [INDEX] | [KEY]            | [TYPE]  | [DEFAULT] | [DESCRIPTION]                                                        |
 | :-----: | ---------------- | ------- | :-------: | -------------------------------------------------------------------- |
-|   [1]   | `look`           | string  | `classic` | Visual style: `classic`, `handDrawn`                                 |
-|   [2]   | `handDrawnSeed`  | number  |    `0`    | RNG seed for `handDrawn` (`0` = random)                              |
-|   [3]   | `theme`          | string  | `default` | Color scheme: `default`, `base`, `dark`, `forest`, `neutral`, `null` |
-|   [4]   | `themeVariables` | object  |   `{}`    | Custom theme overrides (`base` theme only)                           |
-|   [5]   | `themeCSS`       | string  |  `null`   | Direct CSS injection                                                 |
-|   [6]   | `darkMode`       | boolean |  `false`  | Enable dark mode                                                     |
+|   [1]   | `look`           | string  |   `neo`   | Visual style: `neo`, `classic`                                       |
+|   [2]   | `theme`          | string  | `default` | Color scheme: `default`, `base`, `dark`, `forest`, `neutral`, `null` |
+|   [3]   | `themeVariables` | object  |   `{}`    | Custom theme overrides (`base` theme only)                           |
+|   [4]   | `themeCSS`       | string  |  `null`   | Direct CSS injection                                                 |
+|   [5]   | `darkMode`       | boolean |  `false`  | Enable dark mode                                                     |
 
-[IMPORTANT] `handDrawn` uses rough.js for sketch-like rendering; `themeVariables` modifies `base` theme exclusively; look configuration supports flowcharts and state diagrams only.
+[IMPORTANT] `themeVariables` modifies `base` theme exclusively; look configuration supports flowcharts and state diagrams only.
 
 ---
 ## [3][TYPOGRAPHY]
@@ -121,18 +121,37 @@ flowchart LR
 |   [5]   |    5    | Edge Routing          | Calculates edge paths and bend points. |
 
 ---
-### [6.2][ELK_STRATEGIES]
+### [6.2][ELK_OPTIONS]
 
-**Node Placement** (`nodePlacementStrategy`): `BRANDES_KOEPF` (default, balanced compact), `LINEAR_SEGMENTS` (minimizes edge bends), `NETWORK_SIMPLEX` (optimizes edge length, slower), `SIMPLE` (fast basic positioning).<br>
-**Cycle Breaking** (`cycleBreakingStrategy`): `GREEDY_MODEL_ORDER` (default, greedy with model order tiebreaker), `GREEDY` (fast heuristic), `DEPTH_FIRST` (DFS-based ordering), `INTERACTIVE` (user-driven cycle resolution), `MODEL_ORDER` (respects input order).<br>
-**Model Order** (`considerModelOrder`): `NODES_AND_EDGES` (default, consider both), `NONE` (ignore model order), `PREFER_NODES` (prioritize node order), `PREFER_EDGES` (prioritize edge order).
+| [KEY]                   | [TYPE] | [VALUES]                                                                    |      [DEFAULT]       |
+| ----------------------- | ------ | --------------------------------------------------------------------------- | :------------------: |
+| `mergeEdges`            | bool   | `true`, `false`                                                             |       `false`        |
+| `nodePlacementStrategy` | str    | `SIMPLE`, `NETWORK_SIMPLEX`, `LINEAR_SEGMENTS`, `BRANDES_KOEPF`             |   `BRANDES_KOEPF`    |
+| `cycleBreakingStrategy` | str    | `GREEDY`, `DEPTH_FIRST`, `INTERACTIVE`, `MODEL_ORDER`, `GREEDY_MODEL_ORDER` | `GREEDY_MODEL_ORDER` |
+| `forceNodeModelOrder`   | bool   | `true`, `false`                                                             |       `false`        |
+| `considerModelOrder`    | str    | `NONE`, `NODES_AND_EDGES`, `PREFER_EDGES`, `PREFER_NODES`                   |  `NODES_AND_EDGES`   |
 
 ---
-### [6.3][ELK_OPTIONS]
+### [6.3][STRATEGY_COMPARISON]
 
-**Configuration:** `mergeEdges` (`false`, edges share paths when possible), `forceNodeModelOrder` (`false`, strict node ordering without reordering).
+**Node Placement:**
 
-[IMPORTANT] `mergeEdges` creates compact diagrams but reduces readability.
+| [STRATEGY]        | [QUALITY] | [USE_CASE]               |
+| ----------------- | :-------: | ------------------------ |
+| `BRANDES_KOEPF`   |   High    | Default balanced         |
+| `NETWORK_SIMPLEX` |   High    | Edge length optimization |
+| `LINEAR_SEGMENTS` |  Medium   | Minimize bends           |
+| `SIMPLE`          |    Low    | Fast positioning         |
+
+**Cycle Breaking:**
+
+| [STRATEGY]           | [QUALITY] | [USE_CASE]        |
+| -------------------- | :-------: | ----------------- |
+| `GREEDY_MODEL_ORDER` |   High    | Default balanced  |
+| `MODEL_ORDER`        |   High    | Semantic ordering |
+| `GREEDY`             |  Medium   | Fast heuristic    |
+| `DEPTH_FIRST`        |  Medium   | DFS-based         |
+| `INTERACTIVE`        |    Low    | User-driven       |
 
 ---
 ## [7][DIRECTION]

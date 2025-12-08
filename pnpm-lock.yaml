@@ -84,6 +84,9 @@ catalogs:
     '@tanstack/react-virtual':
       specifier: 3.13.12
       version: 3.13.12
+    '@types/node':
+      specifier: 24.10.1
+      version: 24.10.1
     '@types/react':
       specifier: 19.2.7
       version: 19.2.7
@@ -305,6 +308,9 @@ importers:
       '@tanstack/react-virtual':
         specifier: 'catalog:'
         version: 3.13.12(react-dom@19.2.0(react@19.3.0-canary-fd524fe0-20251121))(react@19.3.0-canary-fd524fe0-20251121)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.1
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.7
