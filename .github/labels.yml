@@ -142,26 +142,6 @@
   color: "d4d4d8"
   description: "Low priority"
 
-# --- Legacy Action Labels (Deprecated, use status:* instead) ------------------
-
-- name: implement
-  color: "ee3a95"
-  description: "[DEPRECATED] Use status:implement"
-
-- name: review
-  color: "FFF58A"
-  description: "[DEPRECATED] Use status:review"
-
-- name: blocked
-  color: "fed700"
-  description: "[DEPRECATED] Use status:blocked"
-
-# --- Legacy Priority Label (Deprecated, use priority:* instead) ---------------
-
-- name: critical
-  color: "ff473e"
-  description: "[DEPRECATED] Use priority:critical"
-
 # --- Agent Labels (Mutually Exclusive) ----------------------------------------
 
 - name: copilot
