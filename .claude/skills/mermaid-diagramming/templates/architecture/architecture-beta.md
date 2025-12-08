@@ -45,7 +45,7 @@ architecture-beta
     service webapp(logos:react)[Web App] in presentation
     service mobileapp(logos:flutter)[Mobile App] in presentation
     junction presentationHub in presentation
-    group routing(cloud)[Routing Layer]
+    group routing(mdi:router-network)[Routing Layer]
     service apigateway(logos:kong)[API Gateway] in routing
     service loadbalancer(mdi:web)[Load Balancer] in routing
     junction routingHub in routing
@@ -68,7 +68,7 @@ architecture-beta
     service searchdb(logos:elasticsearch)[Search] in datastore
     junction dataHub in datastore
     group external(internet)[External Layer]
-    service payment_gateway(logos:stripe)[Payment Gateway] in external
+    service paymentgateway(logos:stripe)[Payment Gateway] in external
     service notification(mdi:email)[Notifications] in external
     cdn:R --> L:waf
     waf:R --> L:ingressHub
@@ -90,7 +90,7 @@ architecture-beta
     catalog:R --> L:searchdb
     orders:R --> L:primarydb
     orders:R --> L:integrationHub
-    payments:R --> L:payment_gateway
+    payments:R --> L:paymentgateway
     payments:R --> L:integrationHub
     integrationHub:R --> L:eventbus
     eventbus:R --> L:processor

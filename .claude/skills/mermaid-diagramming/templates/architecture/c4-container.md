@@ -50,13 +50,13 @@ C4Container
     Container(mobile, "Mobile App", "React Native", "iOS/Android", $sprite="mobile", $link="https://github.com/org/mobile")
     
     System_Ext(search, "Search Engine", "Elasticsearch", $sprite="magnifying-glass", $link="https://elastic.co/docs")
+    System_Ext(payment, "Payment Gateway", "Stripe", $sprite="credit-card", $link="https://stripe.com/docs")
 
     System_Boundary(platform, "E-Commerce Platform", $link="https://github.com/org/ecommerce") {
         Container_Boundary(core, "Application Layer", $link="https://docs.example.com/core") {
             Container(gateway, "API Gateway", "Kong", "Routing", $sprite="server", $link="https://konghq.com")
             Container(auth, "Auth Service", "Node.js", "Identity", $sprite="key", $link="https://github.com/org/auth")
             Container(catalog, "Catalog Service", "Go", "Products", $sprite="book", $link="https://github.com/org/catalog")
-            System_Ext(payment, "Payment Gateway", "Stripe", $sprite="credit-card", $link="https://stripe.com/docs")
             Container(order, "Order Service", "Rust", "Orders", $sprite="shopping-cart", $link="https://github.com/org/orders")
         }
         
