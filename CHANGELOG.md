@@ -1,3 +1,15 @@
+## 0.6.0 (2025-12-08)
+
+### [FEATURES]]
+
+- Add repo-agnostic changed-files workflow with Nx integration and unified PR comments ([#96](https://github.com/bsamiee/Parametric_Portal/pull/96))
+- agentic infrastructure overhaul with skill system and style standards ([ad59dc6](https://github.com/bsamiee/Parametric_Portal/commit/ad59dc6))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Copilot @Copilot
+
 ## 0.5.3 (2025-12-02)
 
 ### [BUG_FIXES]
