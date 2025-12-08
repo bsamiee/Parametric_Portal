@@ -301,6 +301,7 @@ const B = Object.freeze({
             stale: { onAdd: 'comment', onRemove: null },
         } as const,
         categories: {
+            action: ['blocked', 'implement', 'review'] as const,
             agent: ['claude', 'codex', 'copilot', 'gemini'] as const,
             kind: ['kind:project', 'kind:task', 'kind:spike', 'kind:refactor'] as const,
             lifecycle: ['pinned', 'stale'] as const,

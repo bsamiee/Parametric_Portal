@@ -142,6 +142,24 @@
   color: "d4d4d8"
   description: "Low priority"
 
+# --- Original Action Labels (Pre-existing, kept for backward compatibility) ---
+
+- name: implement
+  color: "ee3a95"
+  description: "Ready for implementation by AI/human"
+
+- name: review
+  color: "FFF58A"
+  description: "Needs review"
+
+- name: blocked
+  color: "fed700"
+  description: "Cannot proceed"
+
+- name: critical
+  color: "ff473e"
+  description: "Critical priority"
+
 # --- Agent Labels (Mutually Exclusive) ----------------------------------------
 
 - name: copilot
