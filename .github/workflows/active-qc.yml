@@ -149,10 +149,25 @@ jobs:
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
               with:
-                  sparse-checkout: .github/actions/issue-ops
+                  sparse-checkout: |
+                      .github/actions/issue-ops
+                      .github/actions/slash-dispatch
                   sparse-checkout-cone-mode: false
 
+            # Use slash-command-dispatch for /duplicate command detection
+            - name: Check for duplicate command
+              id: slash-cmd
+              uses: ./.github/actions/slash-dispatch
+              with:
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  commands: duplicate
+                  permission: write
+                  reactions: 'true'
+                  dispatch-type: repository_dispatch
+
+            # Execute mark-duplicate operation if command detected
             - uses: ./.github/actions/issue-ops
+              if: steps.slash-cmd.outputs.command == 'duplicate'
               with:
                   operation: mark-duplicate
                   duplicate-command: '/duplicate'

@@ -36,12 +36,35 @@ jobs:
       issues: 'write'
       pull-requests: 'write'
     outputs:
-      command: '${{ steps.extract_command.outputs.command }}'
+      command: '${{ steps.slash-dispatch.outputs.command || steps.extract_command.outputs.command }}'
       context: '${{ steps.extract_command.outputs.context }}'
       issue_number: '${{ github.event.pull_request.number || github.event.issue.number }}'
     steps:
-      - name: 'Extract command'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: .github/actions/slash-dispatch
+          sparse-checkout-cone-mode: false
+
+      # Use slash-command-dispatch for comment-based commands
+      - name: 'Slash Command Dispatch'
+        id: 'slash-dispatch'
+        if: github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment'
+        uses: ./.github/actions/slash-dispatch
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commands: |
+            review
+            triage
+            architect
+            implement
+            invoke
+          permission: write
+          reactions: 'true'
+
+      # Fallback: extract command from event body for auto-triggers
+      - name: 'Extract command (auto-trigger)'
         id: 'extract_command'
+        if: steps.slash-dispatch.outputs.command == ''
         uses: 'actions/github-script@v7'
         env:
           EVENT_TYPE: '${{ github.event_name }}.${{ github.event.action }}'
@@ -55,11 +78,11 @@ jobs:
             if (type === 'pull_request.opened') return core.setOutput('command', 'review');
             if (['issues.opened', 'issues.reopened'].includes(type)) return core.setOutput('command', 'triage');
 
-            // Command parsing
+            // Command parsing for @gemini-cli mentions
             const match = body.match(/^@gemini-cli\s+(\/\w+)?\s*(.*)$/s);
             if (!match) return core.setOutput('command', 'fallthrough');
 
-            const cmd = match[1] || '/invoke'; // Default to invoke
+            const cmd = match[1] || '/invoke';
             const ctx = match[2].trim();
 
             core.setOutput('context', ctx);
@@ -73,6 +96,7 @@ jobs:
             }
 
       - name: 'Acknowledge'
+        if: steps.slash-dispatch.outputs.command == ''
         env:
           GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
           NUMBER: '${{ github.event.pull_request.number || github.event.issue.number }}'
