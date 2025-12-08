@@ -1,148 +1,196 @@
 # [H1][SCRIPTING]
->**Dictum:** *Reliable hook scripts require functional pipelines.*
+>**Dictum:** *Python 3.14 functional pipelines produce reliable hooks.*
 
 <br>
 
-Python 3.14+ with strict typing. Zero imperative patterns. Security-first design.
-
 ---
-## [1][TOOLING_GATE]
->**Dictum:** *Sequential tool execution enforces quality gates.*
+## [1][SHEBANG]
+>**Dictum:** *PEP 723 inline metadata enables zero-setup execution.*
 
 <br>
 
-| [INDEX] | [TOOL]       | [COMMAND]            | [PURPOSE]          |
-| :-----: | ------------ | -------------------- | ------------------ |
-|   [1]   | basedpyright | `basedpyright .`     | Type checking      |
-|   [2]   | ruff check   | `ruff check --fix .` | Linting + auto-fix |
-|   [3]   | ruff format  | `ruff format .`      | Formatting         |
-
-[CRITICAL] All three must pass. No suppressions.
+```python
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["httpx"]
+# ///
+```
 
 ---
-## [2][PHILOSOPHY]
->**Dictum:** *Four governance pillars ensure hook implementation quality.*
+## [2][TYPES]
+>**Dictum:** *PEP 695 type aliases replace TypeAlias annotations.*
 
 <br>
 
-| [INDEX] | [PILLAR]           | [RULE]                                        |
-| :-----: | ------------------ | --------------------------------------------- |
-|   [1]   | Algorithmic        | Zero literals; trace all values to `B: Final` |
-|   [2]   | Polymorphic        | Zero `if/else`; use `handlers[key](data)`     |
-|   [3]   | Functional         | Zero mutation; `Final`, frozen `@dataclass`   |
-|   [4]   | Expression-Centric | Ternary over blocks; lambda over single-def   |
+```python
+from collections.abc import Callable
+from typing import Any, Final, NamedTuple
+
+type Frontmatter = dict[str, str]
+type ParseState = tuple[Frontmatter, str | None, list[str]]
+type Handler = tuple[Callable[[dict], tuple[str, ...]], Callable[[str, dict], dict]]
+
+class SkillEntry(NamedTuple):
+    name: str
+    trigger: str
+```
 
 ---
-## [3][SECURITY]
+## [3][CONSTANTS]
+>**Dictum:** *Frozen dataclass with field factories enables immutable config.*
+
+<br>
+
+```python
+from dataclasses import dataclass, field
+import re
+
+@dataclass(frozen=True, slots=True)
+class _B:
+    timeout: int = 60
+    blocked: frozenset[str] = frozenset(("rm -rf", "sudo"))
+    field_re: re.Pattern[str] = field(default_factory=lambda: re.compile(r"^([^:]+):(.*)$"))
+    groups: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("quality", ("check", "lint", "typecheck")),
+        ("build", ("build", "dev")),
+    )
+
+B: Final[_B] = _B()
+DEBUG: Final[bool] = os.environ.get("CLAUDE_HOOK_DEBUG", "").lower() in ("1", "true")
+_debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
+```
+
+---
+## [4][DISPATCH]
+>**Dictum:** *Handler tables route all behavior—zero conditionals.*
+
+<br>
+
+```python
+handlers: dict[str, Handler] = {
+    "workspace": (lambda _: ("npx", "nx", "show", "projects", "--json"), lambda o, _: {"projects": json.loads(o)}),
+    "project": (lambda a: ("npx", "nx", "show", "project", a["name"], "--json"), lambda o, a: {"name": a["name"], "project": json.loads(o)}),
+}
+
+# Decorator registration — auto-registers function by name
+_tools: dict[str, tuple[Callable, dict]] = {}
+def tool(**cfg: Any) -> Callable[[Callable], Callable]:
+    return lambda fn: (_tools.__setitem__(fn.__name__, (fn, {"method": "POST", **cfg})), fn)[1]
+```
+
+---
+## [5][PATTERN_MATCHING]
+>**Dictum:** *Structural pattern matching replaces if/else chains.*
+
+<br>
+
+```python
+def _fold_line(state: ParseState, line: str) -> ParseState:
+    result, field, parts = state
+    match_ = B.field_re.match(line)
+    match (match_, line.startswith(" "), field):
+        case (m, False, _) if m and m.group(2).strip() in (">-", ">"):
+            return ({**result, field: " ".join(parts)} if field else result, m.group(1).strip(), [])
+        case (m, False, _) if m:
+            return ({**result, m.group(1).strip(): m.group(2).strip().strip("'\"")}, None, [])
+        case (_, True, f) if f:
+            return (result, field, [*parts, line.strip()])
+        case _:
+            return state
+
+# Walrus in match guard
+match cmd:
+    case tuple() if (r := subprocess.run(cmd, capture_output=True, text=True)).returncode == 0:
+        output = r.stdout
+    case _:
+        output = None
+
+# Exhaustive matching with assert_never
+type Action = Literal["allow", "block", "ask"]
+def handle(action: Action) -> int:
+    match action:
+        case "allow" | "ask": return 0
+        case "block": return 2
+        case _ as unreachable: assert_never(unreachable)
+```
+
+---
+## [6][EXPRESSIONS]
+>**Dictum:** *Walrus operator and comprehensions eliminate statements.*
+
+<br>
+
+```python
+# Walrus in comprehension — assignment within filter
+lines = [line for n, g in B.groups if (line := f'<group name="{n}">{" ".join(g)}</group>')]
+
+# Expression-based argparse — list comprehension for side effects
+[p.add_argument(a, **o) for a, o in [("command", {"choices": handlers.keys()}), ("--name", {})]]
+
+# Ternary chain — single expression, no if/else block
+result = {"status": "success", **fmt(o, a)} if o else {"status": "error", "msg": f"{cmd} failed"}
+```
+
+---
+## [7][OUTPUT]
+>**Dictum:** *XML tags optimize Claude context injection per Anthropic guidance.*
+
+<br>
+
+```python
+def _format_xml(skills: list[SkillEntry], targets: frozenset[str]) -> str:
+    return "\n".join([
+        "<session_context>",
+        f'  <skills count="{len(skills)}">',
+        *[f'    <skill name="{s.name}">{s.trigger}</skill>' for s in skills],
+        "  </skills>",
+        '  <nx_targets command="nx run-many -t {target}">',
+        *[f'    <group name="{n}">{" ".join(t for t in g if t in targets)}</group>' for n, g in B.groups],
+        "  </nx_targets>",
+        "</session_context>",
+    ])
+
+def main() -> None:
+    match (skills, targets):
+        case ([], ts) if not ts: pass
+        case _: print(_format_xml(skills, targets))
+    sys.exit(0)
+```
+
+---
+## [8][SECURITY]
 >**Dictum:** *Defense patterns prevent exploitation.*
 
 <br>
 
-| [INDEX] | [FORBIDDEN]                       | [REQUIRED]                            |
-| :-----: | --------------------------------- | ------------------------------------- |
-|   [1]   | `os.system(f"...{input}...")`     | `json.load(sys.stdin)`                |
-|   [2]   | `eval()` / `exec()`               | `os.path.realpath()` comparison       |
-|   [3]   | `subprocess.run(..., shell=True)` | `subprocess.run([...], shell=False)`  |
-|   [4]   | `path.startswith(prefix)`         | `@dataclass(frozen=True, slots=True)` |
-|   [5]   | `print(tool_input)` (credentials) | `handlers[key](data)` dispatch        |
-
----
-## [4][STRUCTURE]
->**Dictum:** *Section dividers enable navigation.*
-
-<br>
-
-| [INDEX] | [SECTION]               | [CONTENT]                               |
-| :-----: | ----------------------- | --------------------------------------- |
-|   [1]   | `# --- TYPES`           | `TypedDict`, `@dataclass`, type aliases |
-|   [2]   | `# --- CONSTANTS`       | `B: Final`, `frozenset` collections     |
-|   [3]   | `# --- PURE_FUNCTIONS`  | Lambdas, validators, transformers       |
-|   [4]   | `# --- DISPATCH_TABLES` | `handlers: dict[str, Callable]`         |
-|   [5]   | `# --- ENTRY_POINT`     | `def main() -> int:`                    |
-|   [6]   | `# --- EXPORT`          | `if __name__ == "__main__":`            |
-
----
-## [5][PATTERNS]
->**Dictum:** *Reusable patterns accelerate development.*
-
-<br>
-
-### [5.1][UV_SHEBANG]
-PEP 723 inline dependencies—zero environment setup.
+| [FORBIDDEN] | [REQUIRED] |
+|-------------|------------|
+| `os.system(f"...{input}")` | `subprocess.run([...], shell=False)` |
+| `eval()` / `exec()` | `json.load(sys.stdin)` |
+| `path.startswith(prefix)` | `Path(p).resolve().is_relative_to(root)` |
 
 ```python
-#!/usr/bin/env -S uv run
-# /// script
-# requires-python = ">=3.12"
-# dependencies = ["python-dotenv"]
-# ///
-from typing import Callable, Final
-import json, sys
-type Handler = Callable[[dict], tuple[str, str]]
-B: Final = {"blocked": frozenset(("rm -rf", "sudo"))}
-handlers: dict[str, Handler] = {
-    "Bash": lambda d: ("block", "Dangerous") if any(c in str(d) for c in B["blocked"]) else ("allow", ""),
-}
-def main() -> int:
-    data = json.load(sys.stdin)
-    action, reason = handlers.get(data.get("tool_name", ""), lambda _: ("allow", ""))(data.get("tool_input", {}))
-    reason and print(reason, file=sys.stderr)
-    return 0 if action == "allow" else 2
-if __name__ == "__main__": sys.exit(main())
-```
-
-### [5.2][IDIOMS]
-```python
-# Type aliases (Python 3.12+)
-type Frontmatter = dict[str, str]
-type ParseState = tuple[Frontmatter, str | None, list[str]]
-
-# Immutable collections
-BLOCKED: Final[frozenset[str]] = frozenset(("rm -rf", "sudo", "chmod 777"))
-
-# Exhaustive dispatch
-from typing import Literal, assert_never
-Action = Literal["allow", "block", "ask"]
-def handle(action: Action) -> int:
-    match action:
-        case "allow": return 0
-        case "block": return 2
-        case "ask": return 0
-        case _ as unreachable: assert_never(unreachable)
-
-# Path validation
-from pathlib import Path
-import os
-project = os.environ.get("CLAUDE_PROJECT_DIR", "")
-safe = lambda p: Path(p).resolve().is_relative_to(Path(project).resolve())
-
-# Debug pattern
-DEBUG: Final[bool] = os.environ.get("CLAUDE_HOOK_DEBUG", "").lower() in ("1", "true")
-_debug = lambda msg: DEBUG and print(f"[hook] {msg}", file=sys.stderr)
-
-# Pipe composition
-from functools import reduce
-pipe = lambda x, *fns: reduce(lambda acc, f: f(acc), fns, x)
+safe = lambda p: Path(p).resolve().is_relative_to(Path(os.environ.get("CLAUDE_PROJECT_DIR", ".")).resolve())
 ```
 
 ---
-## [6][CONFIG]
->**Dictum:** *Tooling configuration enforces standards.*
+## [9][TOOLING]
+>**Dictum:** *Quality gates enforce standards.*
 
 <br>
 
 ```toml
-# pyproject.toml
 [tool.basedpyright]
 typeCheckingMode = "all"
 pythonVersion = "3.14"
 
 [tool.ruff]
 target-version = "py314"
-line-length = 120
-
-[tool.ruff.lint]
 select = ["E", "F", "W", "B", "I", "UP", "ANN", "S", "C90"]
 ```
 
-[REFERENCE] Validation checklist: [→validation.md§4](./validation.md#4scripting_gate)
+| [GATE] | [COMMAND] |
+|--------|-----------|
+| Type | `basedpyright .` |
+| Lint | `ruff check --fix . && ruff format .` |

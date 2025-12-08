@@ -51,38 +51,52 @@ Maximum functionality in minimum LOC. Single script addresses single concern. No
 <br>
 
 ```python
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# ///
 """Transform input through format-specific handlers."""
+
+# --- [IMPORTS] ----------------------------------------------------------------
+import argparse
+import json
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Callable
-import argparse, json, sys
+from typing import Final
 
+# --- [TYPES] ------------------------------------------------------------------
+type Data = dict[str, object]
+type Handler = Callable[[Data], Data]
+
+# --- [CONSTANTS] --------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
-class B:
+class _B:
     indent: int = 2
     encoding: str = "utf-8"
-    exit_ok: int = 0
-    exit_err: int = 1
 
-C: Final = B()
+B: Final[_B] = _B()
 
-handlers: dict[str, Callable[[dict], dict]] = {
+# --- [DISPATCH_TABLES] --------------------------------------------------------
+handlers: dict[str, Handler] = {
     "upper": lambda d: {k: (v.upper() if isinstance(v, str) else v) for k, v in d.items()},
     "lower": lambda d: {k: (v.lower() if isinstance(v, str) else v) for k, v in d.items()},
     "keys": lambda d: {"keys": list(d.keys())},
 }
 
+# --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("-i", "--input", type=Path, required=True)
-    p.add_argument("-o", "--output", type=Path)
-    p.add_argument("-m", "--mode", choices=handlers.keys(), default="upper")
+    [p.add_argument(a, **o) for a, o in [
+        ("-i", {"dest": "input", "type": Path, "required": True}),
+        ("-o", {"dest": "output", "type": Path}),
+        ("-m", {"dest": "mode", "choices": handlers.keys(), "default": "upper"}),
+    ]]
     a = p.parse_args()
-
-    result = json.dumps({"status": "success", "data": handlers[a.mode](json.loads(a.input.read_text(C.encoding)))}, indent=C.indent)
-    (a.output.write_text(result, encoding=C.encoding) if a.output else print(result))
-    return C.exit_ok
+    data = json.loads(a.input.read_text(B.encoding))
+    result = json.dumps({"status": "success", "data": handlers[a.mode](data)}, indent=B.indent)
+    _ = a.output.write_text(result, encoding=B.encoding) if a.output else print(result)
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

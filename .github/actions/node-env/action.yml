@@ -51,6 +51,9 @@ outputs:
     nx-head:
         description: Head SHA for Nx affected commands
         value: ${{ steps.shas.outputs.head }}
+    nx-distributed:
+        description: Whether Nx Agents distributed execution is active
+        value: ${{ steps.nx-agents.outputs.distributed || 'false' }}
 
 runs:
     using: composite
@@ -71,27 +74,36 @@ runs:
           shell: bash
           run: echo "NX_CLOUD_ACCESS_TOKEN=${{ inputs.nx-cloud-token }}" >> $GITHUB_ENV
 
-        # Start distributed CI run BEFORE dependencies (TTG optimization)
+        # Install dependencies BEFORE Nx Agents (required for project graph)
+        - if: inputs.install == 'true'
+          shell: bash
+          run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}
+
+        # Start distributed CI run after dependencies
         # See: https://nx.dev/docs/guides/nx-cloud/optimize-your-ttg
+        # Graceful fallback: if Nx Cloud quota exhausted, continues with local execution
         - name: Start Nx Agents
+          id: nx-agents
           if: inputs.nx == 'true' && inputs.nx-distribute == 'true' && inputs.nx-cloud-token != ''
           shell: bash
           run: |
               # Use dynamic config file if provided, otherwise use fixed agent count and machine type
               DISTRIBUTE_ON="${{ inputs.nx-distribute-config != '' && inputs.nx-distribute-config || format('{0} linux-medium-js', env.AGENTS) }}"
-              npx nx-cloud start-ci-run \
+
+              if npx nx-cloud start-ci-run \
                 --distribute-on="$DISTRIBUTE_ON" \
                 --stop-agents-after=typecheck,build,test \
                 ${{ inputs.nx-stop-on-success == 'true' && '--stop-agents-on-failure' || '' }} \
                 ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes={0}', inputs.nx-fix-tasks) || '' }} \
-                ${{ inputs.nx-auto-fix == 'true' && format('--fix-tasks={0}', inputs.nx-fix-tasks) || '' }}
+                ${{ inputs.nx-auto-fix == 'true' && format('--fix-tasks={0}', inputs.nx-fix-tasks) || '' }}; then
+                echo "distributed=true" >> "$GITHUB_OUTPUT"
+                echo "::notice title=Nx Agents::Distributed execution enabled"
+              else
+                echo "distributed=false" >> "$GITHUB_OUTPUT"
+                echo "::warning title=Nx Agents::Distributed execution unavailable (quota/auth issue). Falling back to local execution with remote cache."
+              fi
           env:
               AGENTS: ${{ inputs.nx-agents }}
-
-        # Install dependencies after Nx Agents start
-        - if: inputs.install == 'true'
-          shell: bash
-          run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}
 
         # Nx local cache
         - name: Restore Nx cache

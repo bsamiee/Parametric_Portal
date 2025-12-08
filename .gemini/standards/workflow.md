@@ -46,4 +46,4 @@
 
 3.  **Implementation:**
     -   WRITE final code adhering to `@.gemini/standards/constitution.md`.
-    -   VALIDATE via `pnpm typecheck` and `pnpm check`.
+    -   VALIDATE via `nx run-many -t typecheck` and `nx run-many -t check`.

@@ -6,7 +6,7 @@ alwaysApply: true
 # [H1][CLAUDE_MANIFEST]
 >**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. MCP servers available: nx-mcp (workspace tooling), github-mcp (repository operations), perplexity-mcp (2025 research with citations), exa-mcp (code context search), context7-mcp (library documentation).
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools` (nx workspace), `github-tools` (gh CLI), `perplexity-tools` (web research), `exa-tools` (code search), `context7-tools` (library docs).
 
 ---
 ## [1][BEHAVIOR]
@@ -21,8 +21,7 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [ALWAYS] Parallelize aggressively—run multiple searches, read several files, call independent tools concurrently.
 - [ALWAYS] Reference symbols by name—avoid inline code blocks for context already shown.
 - [ALWAYS] Prefer running tasks through `nx` (`nx run`, `nx run-many`, `nx affected`) instead of underlying tooling directly.
-- [ALWAYS] Use `mcp__nx__nx_workspace` tool first when answering repository questions to gain workspace architecture understanding.
-- [ALWAYS] Use `mcp__nx__nx_project_details` tool to analyze specific project structure and dependencies.
+- [ALWAYS] Use `nx-tools` skill scripts for workspace queries (zero MCP overhead).
 
 [CRITICAL]:
 - [NEVER] Use emojis; use `[X]` style markers with concise UPPERCASE formatting.
@@ -117,7 +116,7 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 2. [ALWAYS] **Add to catalog** (if missing): `my-dep: 1.2.3` (exact version).
 3. [ALWAYS] **Reference**: `"dependencies": { "my-dep": "catalog:" }`.
 4. [ALWAYS] **Install**: `pnpm install`.
-5. [ALWAYS] **Validate**: `pnpm typecheck && pnpm check`.
+5. [ALWAYS] **Validate**: `nx run-many -t typecheck && nx run-many -t check`.
 
 ---
 ## [5][FILE_ORGANIZATION]
@@ -148,40 +147,11 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 <br>
 
 [VERIFY] Execute before any commit:
-- [ ] Run `pnpm typecheck` → zero errors, zero suppressions.
-- [ ] Run `pnpm check` → zero Biome violations.
+- [ ] Run `nx run-many -t typecheck` → zero errors, zero suppressions.
+- [ ] Run `nx run-many -t check` → zero Biome violations.
 - [ ] Pattern compliance → B constant, dispatch tables, Effect pipelines.
 - [ ] Extend existing `createX` factories → never bypass.
 
----
-## [7][COMMANDS]
->**Dictum:** *Commands execute via Nx orchestration.*
-
-<br>
-
-[IMPORTANT] Execute via Nx—direct tool invocation bypasses cache, dependencies, and task graph.
-
-| [INDEX] | [CATEGORY]  | [COMMAND]                                  | [DESCRIPTION]                   | [CACHE] |
-| :-----: | ----------- | ------------------------------------------ | ------------------------------- | :-----: |
-|   [1]   | Development | `nx dev <project>`                         | Vite dev server                 |  false  |
-|   [2]   | Development | `nx build <project>`                       | Production build                |  true   |
-|   [3]   | Quality     | `nx run-many -t check`                     | Biome lint (CI mode)            |  true   |
-|   [4]   | Quality     | `nx run-many -t lint`                      | Biome lint                      |  true   |
-|   [5]   | Quality     | `nx run-many -t fix`                       | Biome lint --write              |  false  |
-|   [6]   | Quality     | `nx run-many -t typecheck`                 | tsc --noEmit                    |  true   |
-|   [7]   | Testing     | `nx test <project>`                        | Vitest unit tests               |  true   |
-|   [8]   | Testing     | `nx run-many -t mutate`                    | Stryker mutation testing        |  false  |
-|   [9]   | Analysis    | `nx run-many -t analyze`                   | Bundle analyzer                 |  true   |
-|  [10]   | Analysis    | `nx inspect:dev <project>`                 | Vite inspect (dev)              |  false  |
-|  [11]   | Analysis    | `nx inspect:build <project>`               | Vite inspect (build)            |  false  |
-|  [12]   | CI          | `nx affected -t build test lint typecheck` | Changed projects only           |  true   |
-|  [13]   | CI          | `nx run-many -t validate:compression`      | Verify .br/.gz artifacts        |  false  |
-|  [14]   | Release     | `nx release`                               | Semantic versioning + changelog |  false  |
-|  [15]   | Utility     | `nx graph`                                 | Visualize project graph         |  false  |
-|  [16]   | Utility     | `nx reset`                                 | Clear Nx cache                  |  false  |
-|  [17]   | PWA         | `nx pwa:icons <project>`                   | Generate PWA icons              |  false  |
-
-[REFERENCE] Pnpm aliases: [→package.json](package.json).<br>
-[REFERENCE] Task configuration: [→nx.json](nx.json) → `targetDefaults`.
-
 [CRITICAL] Direct tool invocation—breaks Nx orchestration.
+
+[REFERENCE] Task configuration: [→nx.json](nx.json) → `targetDefaults`.

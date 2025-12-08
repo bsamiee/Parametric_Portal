@@ -334,6 +334,10 @@ const B = Object.freeze({
         invariants: {
             maxPerAxis: { kind: 1, phase: 1, priority: 1, status: 1 } as const,
         } as const,
+        special: {
+            dependencies: 'dependencies',
+            security: 'security',
+        } as const,
     },
     meta: {
         alerts: Object.freeze(
@@ -815,6 +819,14 @@ const mutateHandlers: {
     readonly [K in MutateSpec['t']]: (ctx: Ctx, spec: Extract<MutateSpec, { t: K }>) => Promise<void>;
 } = {
     comment: async (ctx, spec) => {
+        // First check PR body for marker (preferred location for consolidated reports)
+        const pr = (await call(ctx, 'pull.get', spec.n)) as { body: string | null };
+        if (pr.body?.includes(spec.marker)) {
+            const updatedBody = merge(pr.body, spec.body, spec.mode ?? 'replace', spec.sectionId);
+            await call(ctx, 'pull.update', spec.n, { body: updatedBody });
+            return;
+        }
+        // Fallback: check comments for marker
         const comments = (await call(ctx, 'comment.list', spec.n)) as ReadonlyArray<Comment>;
         const existing = comments.find((comment) => comment.body?.includes(spec.marker));
         const actions = {

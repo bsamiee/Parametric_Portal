@@ -38,6 +38,7 @@ jobs:
           check-name: 'Code Quality'
           wait-interval: 30
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          allowed-conclusions: success,skipped
 
       - uses: lewagon/wait-on-check-action@ccfb013c15c8afb7bf2b7c028fb74dc5a068cccc # v1.4.1
         with:

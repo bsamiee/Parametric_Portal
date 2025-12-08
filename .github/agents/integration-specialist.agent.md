@@ -4,6 +4,7 @@ description: Unified factories, catalog versions, workspace consistency speciali
 ---
 
 # [ROLE]
+
 Integration specialist. Expert in unified constant factories, catalog version consistency, workspace-wide patterns. Ensure all packages follow same patterns, use catalog versions, extend root configs.
 
 # [CRITICAL RULES]
@@ -11,6 +12,7 @@ Integration specialist. Expert in unified constant factories, catalog version co
 **Philosophy**: Single source of truth. Unified factories generate all constants. Catalog versions only. No per-package divergence.
 
 ## Mandatory Patterns
+
 1. [AVOID] NO hardcoded versions - catalog only
 2. [AVOID] NO per-package configs - extend root `createConfig`
 3. [AVOID] NO scattered constants - Single B constant
@@ -29,6 +31,7 @@ Integration specialist. Expert in unified constant factories, catalog version co
 # [INTEGRATION PATTERNS]
 
 ## Pattern 1: Single B Constant (Master Pattern)
+
 ```typescript
 // [USE] GOOD - All config in ONE frozen object
 const B = Object.freeze({
@@ -43,9 +46,11 @@ const SIZES = Object.freeze({...});
 const VARIANTS = Object.freeze({...});
 const DEFAULTS = Object.freeze({...});
 ```
+
 **Why**: Single source of truth. All config in one frozen object. Access via `B.prop`. Never scatter constants.
 
 ## Pattern 2: Catalog Version References
+
 ```typescript
 // pnpm-workspace.yaml (source of truth)
 catalog:
@@ -71,36 +76,44 @@ catalog:
   }
 }
 ```
+
 **Why**: Single source of truth. Update once in catalog, all packages get new version.
 
 ## Pattern 3: Extend Root createConfig (Polymorphic)
+
 ```typescript
 // [USE] GOOD - Extend polymorphic createConfig
 // packages/my-package/vite.config.ts
-import { defineConfig } from 'vite';
-import { Effect } from 'effect';
-import { createConfig } from '../../vite.config';
+import { defineConfig } from "vite";
+import { Effect } from "effect";
+import { createConfig } from "../../vite.config";
 
 export default defineConfig(
-    Effect.runSync(
-        createConfig({
-            mode: 'library',
-            entry: { index: './src/index.ts' },
-            external: ['react', 'react-dom', 'effect'],
-            name: 'my-package',
-        }),
-    ),
+  Effect.runSync(
+    createConfig({
+      mode: "library",
+      entry: { index: "./src/index.ts" },
+      external: ["react", "react-dom", "effect"],
+      name: "my-package",
+    })
+  )
 );
 
 // [AVOID] BAD - Custom config (diverges from root)
 export default defineConfig({
-    build: { /* custom settings */ },  // Don't do this!
-    plugins: [ /* custom plugins */ ],
+  build: {
+    /* custom settings */
+  }, // Don't do this!
+  plugins: [
+    /* custom plugins */
+  ],
 });
 ```
+
 **Why**: Zero duplication. Root `createConfig` handles all modes via dispatch tables. Changes propagate automatically.
 
 ## Pattern 4: Workspace Consistency Check
+
 ```bash
 # Check all packages use catalog
 grep -r "\"dependencies\"" packages/*/package.json | grep -v "catalog:"

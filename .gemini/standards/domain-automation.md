@@ -17,7 +17,7 @@
 ## [3][WORKFLOW_PROTOCOL]
 1.  **Analysis:** `read_file .github/scripts/schema.ts`.
 2.  **Parametrization:** Parameterize logic in script.
-3.  **Validation:** Run `pnpm typecheck` on script **BEFORE** committing YAML.
+3.  **Validation:** Run `nx run-many -t typecheck` on script **BEFORE** committing YAML.
 
 ## [4][PATH_MAPPING]
 -   **Schema:** `.github/scripts/schema.ts`

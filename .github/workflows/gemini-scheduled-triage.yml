@@ -36,7 +36,7 @@ jobs:
       pull-requests: 'read'
     outputs:
       available_labels: '${{ steps.get_labels.outputs.available_labels }}'
-      triaged_issues: '${{ env.TRIAGED_ISSUES }}'
+      triaged_issues: '${{ steps.capture_triage.outputs.triaged_issues }}'
     steps:
       - name: 'Get repository labels'
         id: 'get_labels'
@@ -50,7 +50,7 @@ jobs:
             for await (const response of github.paginate.iterator(github.rest.issues.listLabelsForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              per_page: 100, # Maximum per page to reduce API calls
+              per_page: 100, // Maximum per page to reduce API calls
             })) {
               labels.push(...response.data);
             }
@@ -96,17 +96,10 @@ jobs:
           REPOSITORY: '${{ github.repository }}'
           AVAILABLE_LABELS: '${{ steps.get_labels.outputs.available_labels }}'
         with:
-          gcp_location: '${{ vars.GOOGLE_CLOUD_LOCATION }}'
-          gcp_project_id: '${{ vars.GOOGLE_CLOUD_PROJECT }}'
-          gcp_service_account: '${{ vars.SERVICE_ACCOUNT_EMAIL }}'
-          gcp_workload_identity_provider: '${{ vars.GCP_WIF_PROVIDER }}'
           gemini_api_key: '${{ secrets.GEMINI_API_KEY }}'
           gemini_cli_version: '${{ vars.GEMINI_CLI_VERSION }}'
           gemini_debug: '${{ fromJSON(vars.DEBUG || vars.ACTIONS_STEP_DEBUG || false) }}'
           gemini_model: '${{ vars.GEMINI_MODEL }}'
-          google_api_key: '${{ secrets.GOOGLE_API_KEY }}'
-          use_gemini_code_assist: '${{ vars.GOOGLE_GENAI_USE_GCA }}'
-          use_vertex_ai: '${{ vars.GOOGLE_GENAI_USE_VERTEXAI }}'
           upload_artifacts: '${{ vars.UPLOAD_ARTIFACTS }}'
           workflow_name: 'gemini-scheduled-triage'
           settings: |-
@@ -128,6 +121,20 @@ jobs:
               }
             }
           prompt: '/gemini-scheduled-triage'
+
+      - name: 'Capture Triage Output'
+        id: 'capture_triage'
+        if: always() && steps.gemini_issue_analysis.outcome == 'success'
+        shell: bash
+        run: |-
+          # Read TRIAGED_ISSUES from GITHUB_ENV file if set by Gemini action
+          if [[ -n "${TRIAGED_ISSUES:-}" ]]; then
+            echo "triaged_issues=${TRIAGED_ISSUES}" >> "${GITHUB_OUTPUT}"
+            echo "[PASS] Captured ${#TRIAGED_ISSUES} bytes of triage output"
+          else
+            echo "triaged_issues=[]" >> "${GITHUB_OUTPUT}"
+            echo "[WARN] No triage output found in TRIAGED_ISSUES"
+          fi
 
   label:
     runs-on: 'ubuntu-latest'

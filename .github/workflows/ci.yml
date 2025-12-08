@@ -122,6 +122,18 @@ jobs:
         run: |
           echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Nx Cloud Status
+          echo "### Execution Mode" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.env.outputs.nx-distributed }}" == "true" ]]; then
+            echo "> [!NOTE]" >> $GITHUB_STEP_SUMMARY
+            echo "> Nx Agents: **Distributed** (tasks running on cloud agents)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "> [!WARNING]" >> $GITHUB_STEP_SUMMARY
+            echo "> Nx Agents: **Local** (distributed execution unavailable, using remote cache only)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
           echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
           pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

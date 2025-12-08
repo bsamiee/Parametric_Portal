@@ -21,7 +21,7 @@ const ENV = Object.freeze({
 
 const CMD = Object.freeze({
     cs: { build: 'dotnet build', lint: 'dotnet format --verify-no-changes', test: 'dotnet test' },
-    ts: { build: 'pnpm typecheck', lint: 'pnpm check', test: 'pnpm test' },
+    ts: { build: 'nx run-many -t typecheck', lint: 'nx run-many -t check', test: 'nx run-many -t test' },
 } as const)[ENV.lang];
 
 // --- Export ------------------------------------------------------------------

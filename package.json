@@ -84,21 +84,8 @@
     "packageManager": "pnpm@10.24.0",
     "private": true,
     "scripts": {
-        "affected": "nx affected",
-        "build": "nx run-many -t build",
-        "check": "nx run-many -t check",
-        "fix": "biome check --write .",
-        "fix-ci": "nx fix-ci --merge --verbose",
-        "fix:unsafe": "biome check --write --unsafe .",
-        "graph": "nx graph",
-        "lint": "biome ci .",
         "prepare": "lefthook install",
-        "pwa:icons": "nx run-many -t pwa:icons",
-        "release": "nx release",
-        "reset": "nx reset",
-        "test": "nx run-many -t test",
-        "tokens": "tsx tools/scripts/count-tokens.ts",
-        "typecheck": "nx run-many -t typecheck"
+        "tokens": "tsx tools/scripts/count-tokens.ts"
     },
     "type": "module",
     "version": "0.4.0",

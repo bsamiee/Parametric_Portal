@@ -56,7 +56,7 @@ No `any` • No `var`/`let` (`const` only) • No `if/else` (ternaries/`Option.m
 
 **Code**: Single `B` constant → Pure Utils → Dispatch Tables (if polymorphic) → Effect Pipeline → Factory Function → Export (`*_TUNING`, `create*`)
 
-**Validate**: `pnpm typecheck` • `pnpm check` • `nx build my-package` • `nx test my-package`
+**Validate**: `nx run-many -t typecheck` • `nx run-many -t check` • `nx build my-package` • `nx test my-package`
 
 ## Project Structure
 
@@ -92,35 +92,39 @@ No `any` • No `var`/`let` (`const` only) • No `if/else` (ternaries/`Option.m
 ## Canonical Patterns
 
 **Single B Constant** (replace scattered constants):
+
 ```typescript
 const B = Object.freeze({
-    defaults: { size: 'md', variant: 'primary' },
-    sizes: { sm: 8, md: 12, lg: 16 },
-    variants: { primary: 'bg-blue', secondary: 'bg-gray' },
+  defaults: { size: "md", variant: "primary" },
+  sizes: { sm: 8, md: 12, lg: 16 },
+  variants: { primary: "bg-blue", secondary: "bg-gray" },
 } as const);
 // Access: B.defaults.size, B.sizes.md, B.variants.primary
 ```
 
 **Dispatch Tables** (replace if/else):
+
 ```typescript
 const handlers = {
-    button: (props) => <Button {...props} />,
-    input: (props) => <Input {...props} />,
-    icon: (props) => <Icon {...props} />,
+  button: (props) => <Button {...props} />,
+  input: (props) => <Input {...props} />,
+  icon: (props) => <Icon {...props} />,
 } as const;
 // Usage: handlers[type](props) — type-safe, extensible
 ```
 
 **Discriminated Union Schema** (polymorphic validation):
+
 ```typescript
 const ConfigSchema = S.Union(
-    S.Struct({ mode: S.Literal('app'), port: S.Number }),
-    S.Struct({ mode: S.Literal('library'), entry: S.String }),
+  S.Struct({ mode: S.Literal("app"), port: S.Number }),
+  S.Struct({ mode: S.Literal("library"), entry: S.String })
 );
 // One schema validates all modes, TypeScript narrows automatically
 ```
 
 **Factory Export Pattern** (packages/components style):
+
 ```typescript
 export { B as COMPONENT_TUNING, createComponents };
 // Consumers: import { COMPONENT_TUNING, createComponents } from '@/components';
@@ -129,33 +133,42 @@ export { B as COMPONENT_TUNING, createComponents };
 ## Anti-Patterns to Avoid
 
 [AVOID] **Scattered Constants**:
+
 ```typescript
 const SIZES = Object.freeze({...});
 const VARIANTS = Object.freeze({...});
 const DEFAULTS = Object.freeze({...});
 ```
+
 [USE] **Single B Constant**:
+
 ```typescript
 const B = Object.freeze({ sizes, variants, defaults } as const);
 ```
 
 [AVOID] **If/Else Chains**:
+
 ```typescript
-if (mode === 'app') return appConfig();
-else if (mode === 'library') return libConfig();
+if (mode === "app") return appConfig();
+else if (mode === "library") return libConfig();
 ```
+
 [USE] **Dispatch Table**:
+
 ```typescript
 const config = { app: appConfig, library: libConfig } as const;
 return config[mode]();
 ```
 
 [AVOID] **Separate Builder Functions**:
+
 ```typescript
 export const createAppConfig = () => {...};
 export const createLibraryConfig = () => {...};
 ```
+
 [USE] **Polymorphic Entry Point**:
+
 ```typescript
 export const createConfig = (input) => pipe(decode, dispatch);
 ```
@@ -166,11 +179,11 @@ export const createConfig = (input) => pipe(decode, dispatch);
 
 **Questions**: Cite REQUIREMENTS.md/AGENTS.MD • Link official docs • Show concrete examples • Explain why (density, type safety) • Reference vite.config.ts patterns
 
-**Debugging**: Check catalog versions → `pnpm typecheck` + `pnpm check` → `nx reset` if stale → Verify B constant structure → Ensure dispatch tables type-check
+**Debugging**: Check catalog versions → `nx run-many -t typecheck` + `nx run-many -t check` → `nx reset` if stale → Verify B constant structure → Ensure dispatch tables type-check
 
 ## Resources & Conventions
 
-**Available Scripts**: `pnpm build` • `pnpm test` • `pnpm typecheck` • `pnpm check`
+**Available Commands**: `nx run-many -t build` • `nx run-many -t test` • `nx run-many -t typecheck` • `nx run-many -t check`
 
 **File Naming**: `*.config.ts` • `*.{test,spec}.{ts,tsx}` • `*.bench.{ts,tsx}`
 

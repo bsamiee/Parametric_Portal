@@ -33,8 +33,8 @@ Refactor `{{args.target}}` to achieve: "{{args.goal}}".
 
 5.  **VERIFY**
     -   Run `verify-refactor.ts`.
-    -   Run `pnpm typecheck`.
-    -   Run `pnpm check` (Lint).
+    -   Run `nx run-many -t typecheck`.
+    -   Run `nx run-many -t check` (Lint).
 
 6.  **FINALIZE**
     -   Delete verification script.

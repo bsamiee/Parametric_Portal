@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook: Inject skill index into context."""
+"""SessionStart hook: Inject skill index and nx targets via XML tags."""
 
 # --- [IMPORTS] ----------------------------------------------------------------
 from __future__ import annotations
@@ -8,39 +8,51 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import reduce
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 # --- [TYPES] ------------------------------------------------------------------
 type Frontmatter = dict[str, str]
 type ParseState = tuple[Frontmatter, str | None, list[str]]
 
-# --- [CONSTANTS] --------------------------------------------------------------
-MAX_DESC: Final[int] = 75
-WRAPPER: Final[str] = "skills"
-SUFFIX: Final[str] = "..."
-DEBUG: Final[bool] = os.environ.get("CLAUDE_HOOK_DEBUG", "").lower() in ("1", "true")
-MULTILINE: Final[frozenset[str]] = frozenset((">-", ">", "|-", "|"))
-FIELD_RE: Final[re.Pattern[str]] = re.compile(r"^([^:]+):(.*)$")
 
-
-@dataclass(frozen=True, slots=True)
-class SkillEntry:
-    """Skill with name and description."""
+class SkillEntry(NamedTuple):
+    """Skill with name and trigger phrase."""
 
     name: str
-    description: str
+    trigger: str
+
+
+# --- [CONSTANTS] --------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class _B:
+    """Immutable configuration constants."""
+
+    multiline: frozenset[str] = frozenset((">-", ">", "|-", "|"))
+    field_re: re.Pattern[str] = field(
+        default_factory=lambda: re.compile(r"^([^:]+):(.*)$")
+    )
+    trigger_re: re.Pattern[str] = field(
+        default_factory=lambda: re.compile(r"Use (?:when|this|for)[^.]*\.", re.I)
+    )
+    target_groups: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("quality", ("check", "lint", "fix", "typecheck")),
+        ("build", ("build", "dev", "analyze")),
+        ("test", ("test", "mutate")),
+        ("inspect", ("inspect:build", "inspect:dev")),
+        ("util", ("pwa:icons", "pwa:icons:watch", "validate:compression")),
+    )
+
+
+B: Final[_B] = _B()
+DEBUG: Final[bool] = os.environ.get("CLAUDE_HOOK_DEBUG", "").lower() in ("1", "true")
 
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
 def _debug(msg: str) -> None:
-    _ = DEBUG and print(f"[load-skill-index] {msg}", file=sys.stderr)
-
-
-def _truncate(text: str) -> str:
-    return text[:MAX_DESC] + SUFFIX if len(text) > MAX_DESC else text
+    _ = DEBUG and print(f"[hook] {msg}", file=sys.stderr)
 
 
 def _find_end(lines: list[str]) -> int | None:
@@ -48,131 +60,124 @@ def _find_end(lines: list[str]) -> int | None:
 
 
 def _fold_line(state: ParseState, line: str) -> ParseState:
-    """Fold single line into parse state (result, current_field, parts)."""
-    result, field, parts = state
-    match_ = FIELD_RE.match(line)
+    """Fold single line into parse state via pattern matching."""
+    result, current_field, parts = state
+    match_ = B.field_re.match(line)
 
-    return (
-        # Case 1: New field line
-        (
-            {**result, field: " ".join(parts)} if field and parts else result,
-            match_.group(1).strip(),
-            [],
-        )
-        if match_ and not line.startswith(" ") and match_.group(2).strip() in MULTILINE
-        # Case 2: New field with inline value
-        else (
-            {
-                **({**result, field: " ".join(parts)} if field and parts else result),
-                match_.group(1).strip(): match_.group(2).strip().strip("'\""),
-            },
-            None,
-            [],
-        )
-        if match_ and not line.startswith(" ")
-        # Case 3: Continuation line
-        else (result, field, [*parts, line.strip()])
-        if field and line.startswith("  ")
-        # Case 4: Skip
-        else state
-    )
+    match (match_, line.startswith(" "), current_field):
+        case (m, False, _) if m and m.group(2).strip() in B.multiline:
+            finalized = {**result, current_field: " ".join(parts)} if current_field and parts else result
+            return (finalized, m.group(1).strip(), [])
+        case (m, False, _) if m:
+            finalized = {**result, current_field: " ".join(parts)} if current_field and parts else result
+            return ({**finalized, m.group(1).strip(): m.group(2).strip().strip("'\"")}, None, [])
+        case (_, True, f) if f:
+            return (result, current_field, [*parts, line.strip()])
+        case _:
+            return state
 
 
 def _finalize(state: ParseState) -> Frontmatter:
-    """Finalize parse state into frontmatter dict."""
-    result, field, parts = state
-    return {**result, field: " ".join(parts)} if field and parts else result
+    result, current_field, parts = state
+    return {**result, current_field: " ".join(parts)} if current_field and parts else result
 
 
 def _parse_frontmatter(content: str) -> Frontmatter:
-    """Parse YAML frontmatter via fold."""
     lines = content.split("\n")
     end = _find_end(lines) if lines and lines[0].strip() == "---" else None
+    return _finalize(reduce(_fold_line, lines[1:end], ({}, None, []))) if end else {}
+
+
+def _extract_trigger(desc: str) -> str:
+    """Extract 'Use when...' phrase or fallback to first sentence."""
+    match = B.trigger_re.search(desc)
+    return match.group(0) if match else (desc.split(".")[0] + "." if "." in desc else desc)
+
+
+def _parse_json_file(path: Path) -> dict | None:
     return (
-        _finalize(reduce(_fold_line, lines[1:end], ({}, None, [])))
-        if end is not None
-        else {}
-    )
+        json.loads(path.read_text())
+        if path.exists() and path.is_file()
+        else None
+    ) if path.suffix == ".json" else None
 
 
 def _skill_to_entry(path: Path) -> SkillEntry | None:
-    """Transform skill directory to SkillEntry."""
     skill_file = path / "SKILL.md"
-    return (
-        None
-        if not path.is_dir() or not skill_file.exists()
-        else _extract_entry(_parse_frontmatter(skill_file.read_text()))
-    )
+    match (path.is_dir(), skill_file.exists()):
+        case (True, True):
+            fm = _parse_frontmatter(skill_file.read_text())
+            name, desc = fm.get("name", ""), fm.get("description", "")
+            return SkillEntry(name, _extract_trigger(desc)) if name and desc else None
+        case _:
+            return None
 
 
-def _extract_entry(fm: Frontmatter) -> SkillEntry | None:
-    """Extract SkillEntry from frontmatter."""
-    name, desc = fm.get("name", ""), fm.get("description", "")
-    return SkillEntry(name, desc) if name and desc else None
-
-
-def _format_entry(entry: SkillEntry) -> str:
-    """Format SkillEntry as index line."""
-    return f"{entry.name}: {_truncate(entry.description)}"
-
-
-# --- [PIPELINE] ---------------------------------------------------------------
+# --- [COLLECTORS] -------------------------------------------------------------
 def _collect_skills(skills_dir: Path) -> list[SkillEntry]:
-    """Collect valid skill entries via filter/map."""
-    candidates = [(_skill_to_entry(p), p.name) for p in sorted(skills_dir.iterdir())]
-    _ = [_debug(f"Skip: {name}") for entry, name in candidates if entry is None]
-    _ = [_debug(f"Added: {e.name}") for e, _ in candidates if e is not None]
-    return [entry for entry, _ in candidates if entry is not None]
+    candidates = [(p, _skill_to_entry(p)) for p in sorted(skills_dir.iterdir())]
+    _ = [_debug(f"Skip: {p.name}") for p, entry in candidates if entry is None]
+    return [entry for _, entry in candidates if entry is not None]
 
 
-def _write_env_cache(count: int) -> None:
-    """Write skill count to env file if available."""
-    env_file = os.environ.get("CLAUDE_ENV_FILE")
-    _ = env_file and (
-        Path(env_file).open("a").write(f"export CLAUDE_SKILL_COUNT={count}\n"),
-        _debug(f"Cached count={count}"),
-    )
+def _collect_nx_targets(project_dir: Path) -> frozenset[str]:
+    nx_json = _parse_json_file(project_dir / "nx.json")
+    return frozenset(nx_json.get("targetDefaults", {}).keys()) if nx_json else frozenset()
 
 
-def _build_response(entries: list[SkillEntry]) -> dict[str, object]:
-    """Build JSON response via pure transformation."""
-    lines = [_format_entry(e) for e in entries]
-    _ = _write_env_cache(len(lines))
-    _debug(f"Outputting {len(lines)} skills")
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": f"<{WRAPPER}>\n{'\n'.join(lines)}\n</{WRAPPER}>",
-        }
-    }
+# --- [FORMATTERS] -------------------------------------------------------------
+def _format_skill_xml(skill: SkillEntry) -> str:
+    return f'    <skill name="{skill.name}">{skill.trigger}</skill>'
 
 
-def _run_pipeline(skills_dir: Path) -> str | None:
-    """Execute pipeline, return JSON or None."""
-    return (
-        None
-        if not skills_dir.exists()
-        else (
-            None
-            if not (entries := _collect_skills(skills_dir))
-            else json.dumps(_build_response(entries))
-        )
-    )
+def _format_group_xml(name: str, targets: tuple[str, ...], available: frozenset[str]) -> str | None:
+    found = [t for t in targets if t in available]
+    return f'    <group name="{name}">{" ".join(found)}</group>' if found else None
+
+
+def _format_xml(skills: list[SkillEntry], targets: frozenset[str]) -> str:
+    """Format as XML tags per Anthropic Claude 4.x best practices."""
+    skill_lines = [_format_skill_xml(s) for s in skills]
+    group_lines = [
+        line
+        for name, group_targets in B.target_groups
+        if (line := _format_group_xml(name, group_targets, targets))
+    ]
+
+    # Add ungrouped targets
+    used = {t for _, group in B.target_groups for t in group}
+    ungrouped = sorted(targets - used)
+    _ = ungrouped and group_lines.append(f'    <group name="other">{" ".join(ungrouped)}</group>')
+
+    return "\n".join([
+        "<session_context>",
+        f'  <skills count="{len(skills)}">',
+        *skill_lines,
+        "  </skills>",
+        '  <nx_targets command="nx run-many -t {target}">',
+        *group_lines,
+        "  </nx_targets>",
+        "</session_context>",
+    ])
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> None:
-    """Hook entry point."""
     _debug("Starting")
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR", ".")).resolve()
     skills_dir = project_dir / ".claude" / "skills"
 
-    _debug(f"Project: {project_dir}")
-    _debug(f"Skills: {skills_dir}")
+    skills = _collect_skills(skills_dir) if skills_dir.exists() else []
+    targets = _collect_nx_targets(project_dir)
 
-    result = _run_pipeline(skills_dir)
-    _ = result is None and _debug("No skills found")
-    _ = result and print(result)
+    _debug(f"Found: {len(skills)} skills, {len(targets)} targets")
+
+    match (skills, targets):
+        case ([], ts) if not ts:
+            _debug("No skills or targets found")
+        case _:
+            print(_format_xml(skills, targets))
+
     sys.exit(0)
 
 

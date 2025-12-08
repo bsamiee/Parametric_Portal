@@ -29,11 +29,7 @@
             "Bash(git:*)",
             "Bash(gh:*)",
             "Bash(node:*)",
-            "mcp__context7__*",
-            "mcp__github__*",
-            "mcp__perplexity__*",
-            "mcp__exa__*",
-            "mcp__nx__*"
+            "Bash(uv:*)"
         ],
         "ask": [],
         "deny": []
