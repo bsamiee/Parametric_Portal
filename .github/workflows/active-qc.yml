@@ -178,11 +178,21 @@ jobs:
         if: github.event_name == 'issues' && (github.event.action == 'labeled' || github.event.action == 'unlabeled' || github.event.action == 'opened')
         runs-on: ubuntu-latest
         timeout-minutes: 3
+    pin-renovate-dashboard:
+        name: Pin Renovate Dashboard
+        if: |
+            github.event_name == 'issues' &&
+            (github.event.action == 'opened' || github.event.action == 'edited') &&
+            github.event.issue.title == '[DASHBOARD] Dependency Dashboard' &&
+            contains(github.event.issue.labels.*.name, 'pinned')
+        runs-on: ubuntu-latest
+        timeout-minutes: 2
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
               with:
                   sparse-checkout: |
                       .github/scripts
+                      .github
                       package.json
                       pnpm-workspace.yaml
                       pnpm-lock.yaml
@@ -209,6 +219,12 @@ jobs:
                           core.info('[LABEL-VALIDATOR] ✗ Fixed label violations');
                           result.fixes.forEach((fix) => core.info(`  - ${fix}`));
                       }
+            - uses: ./.github/actions/label
+              with:
+                  action: 'labeled'
+                  label: 'pinned'
+                  node_id: ${{ github.event.issue.node_id }}
+                  number: ${{ github.event.issue.number }}
 
     # --- Issue Commands (comment-triggered) -----------------------------------
     mark-duplicate:
