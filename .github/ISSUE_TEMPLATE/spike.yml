@@ -1,0 +1,106 @@
+name: Spike
+description: Research task with knowledge outputs (documents, decisions)
+title: "[SPIKE]: "
+labels: ["kind:spike", "status:triage"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              <!-- ai-meta
+              kind: spike
+              project_id: 
+              phase: 
+              status: triage
+              agent: 
+              effort: 
+              -->
+
+    - type: input
+      id: project_id
+      attributes:
+          label: Parent Project ID
+          description: Link to parent project (if applicable)
+          placeholder: "agentic-framework-001"
+      validations:
+          required: false
+
+    - type: textarea
+      id: objective
+      attributes:
+          label: Research Question
+          description: What do we need to learn or decide?
+          placeholder: "Investigate whether library X can support requirement Y"
+      validations:
+          required: true
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Context
+          description: Why is this research needed? What decisions depend on it?
+          placeholder: "We need to choose a library for feature Z. Options include..."
+      validations:
+          required: true
+
+    - type: textarea
+      id: acceptance_criteria
+      attributes:
+          label: Acceptance Criteria (Knowledge Outputs)
+          description: What artifacts will be produced? (documents, decisions, POCs)
+          placeholder: |
+              - [ ] Document comparing libraries A vs B vs C
+              - [ ] Decision recorded in ADR format
+              - [ ] POC demonstrating feasibility
+              - [ ] Follow-up tasks identified
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - "low"
+              - "medium"
+              - "high"
+              - "critical"
+          default: 1
+      validations:
+          required: true
+
+    - type: dropdown
+      id: agent
+      attributes:
+          label: Assigned Agent
+          description: Which agent should conduct this research?
+          options:
+              - "human"
+              - "claude"
+              - "copilot"
+              - "gemini"
+              - "codex"
+          default: 0
+      validations:
+          required: false
+
+    - type: input
+      id: effort
+      attributes:
+          label: Estimated Effort (story points)
+          description: Time-boxed research duration
+          placeholder: "2"
+      validations:
+          required: false
+
+    - type: textarea
+      id: research_approach
+      attributes:
+          label: Research Approach
+          description: How will we investigate this?
+          placeholder: |
+              1. Review official documentation
+              2. Build minimal POC
+              3. Benchmark performance
+              4. Document findings
+      validations:
+          required: false

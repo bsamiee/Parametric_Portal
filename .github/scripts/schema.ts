@@ -303,14 +303,40 @@ const B = Object.freeze({
         categories: {
             action: ['blocked', 'implement', 'review'] as const,
             agent: ['claude', 'codex', 'copilot', 'gemini'] as const,
+            kind: ['kind:project', 'kind:task', 'kind:spike'] as const,
+            legacy: { action: ['blocked', 'implement', 'review'] as const, priority: ['critical'] as const } as const,
             lifecycle: ['pinned', 'stale'] as const,
-            priority: ['critical'] as const,
+            phase: [
+                'phase:0-foundation',
+                'phase:1-planning',
+                'phase:2-impl-core',
+                'phase:3-impl-extensions',
+                'phase:4-hardening',
+                'phase:5-release',
+            ] as const,
+            priority: ['priority:critical', 'priority:high', 'priority:medium', 'priority:low'] as const,
             special: ['dependencies', 'security'] as const,
+            status: [
+                'status:triage',
+                'status:implement',
+                'status:in-progress',
+                'status:review',
+                'status:blocked',
+                'status:done',
+                'status:idea',
+                'status:planning',
+            ] as const,
         },
-        exempt: ['critical', 'implement', 'pinned', 'security'] as const,
+        exempt: ['priority:critical', 'status:implement', 'pinned', 'security'] as const,
         gql: {
             pin: `mutation($issueId:ID!){pinIssue(input:{issueId:$issueId}){issue{id}}}`,
             unpin: `mutation($issueId:ID!){unpinIssue(input:{issueId:$issueId}){issue{id}}}`,
+        } as const,
+        invariants: {
+            maxPerAxis: { kind: 1, phase: 1, priority: 1, status: 1 } as const,
+            mutuallyExclusive: [
+                ['status:implement', 'status:review', 'status:in-progress', 'status:blocked'] as const,
+            ] as const,
         } as const,
     },
     meta: {

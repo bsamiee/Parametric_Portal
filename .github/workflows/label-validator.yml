@@ -1,0 +1,87 @@
+name: 'Label Validator'
+
+on:
+  issues:
+    types: ['labeled', 'unlabeled', 'opened', 'reopened']
+  pull_request:
+    types: ['labeled', 'unlabeled', 'opened', 'reopened']
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}'
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: 'bash'
+
+jobs:
+  validate:
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 3
+    permissions:
+      contents: 'read'
+      issues: 'write'
+      pull-requests: 'write'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683' # v4.2.2
+        with:
+          sparse-checkout: '.github/scripts'
+          sparse-checkout-cone-mode: false
+
+      - name: 'Setup Node.js'
+        uses: 'actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af' # v4.1.0
+        with:
+          node-version: '25.2.1'
+
+      - name: 'Setup pnpm'
+        uses: 'pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2' # v4.0.0
+        with:
+          version: '10.23.0'
+
+      - name: 'Install dependencies'
+        run: 'pnpm install --frozen-lockfile'
+
+      - name: 'Validate labels'
+        uses: 'actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea' # v7.0.1
+        with:
+          script: |-
+            const { run } = await import('${{ github.workspace }}/.github/scripts/label-validator.ts');
+            const result = await run({
+              context,
+              core,
+              github,
+            });
+
+            if (result.valid) {
+              core.info('[LABEL-VALIDATOR] ✓ All label invariants satisfied');
+            } else {
+              core.info('[LABEL-VALIDATOR] ✗ Fixed label violations');
+              result.fixes.forEach((fix) => core.info(`  - ${fix}`));
+            }
+
+      - name: 'Comment on violations (if any)'
+        if: failure()
+        uses: 'actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea' # v7.0.1
+        with:
+          script: |-
+            const number = context.issue.number;
+            const body = `
+            > [!WARNING]
+            > **Label Invariant Violations Detected**
+            >
+            > This issue has conflicting labels. The label validator will automatically fix them.
+            >
+            > **Rules:**
+            > - Maximum 1 label per axis: \`kind:\`, \`status:\`, \`phase:\`, \`priority:\`
+            > - When multiple labels exist on same axis, the highest priority is kept
+
+            _Automated by label-validator workflow_
+            `;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body,
+            });

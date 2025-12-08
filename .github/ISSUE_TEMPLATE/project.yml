@@ -1,0 +1,124 @@
+name: Project
+description: Top-level initiative (e.g., Agentic Framework)
+title: "[PROJECT]: "
+labels: ["kind:project", "status:triage", "phase:1-planning"]
+body:
+    - type: markdown
+      attributes:
+          value: |
+              <!-- ai-meta
+              kind: project
+              project_id: 
+              phase: 1-planning
+              status: triage
+              agent: 
+              effort: 
+              -->
+
+    - type: input
+      id: project_id
+      attributes:
+          label: Project ID
+          description: Unique identifier for this project (e.g., agentic-framework-001)
+          placeholder: "my-project-001"
+      validations:
+          required: true
+
+    - type: textarea
+      id: objective
+      attributes:
+          label: Objective
+          description: High-level goal and purpose of this project
+          placeholder: "Build a framework that..."
+      validations:
+          required: true
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Context
+          description: Background, motivation, and relevant information
+          placeholder: "Currently we have... We need this because..."
+      validations:
+          required: true
+
+    - type: textarea
+      id: scope
+      attributes:
+          label: Scope
+          description: What's included and excluded from this project
+          placeholder: |
+              **In Scope:**
+              - Feature A
+              - Feature B
+              
+              **Out of Scope:**
+              - Feature X
+              - Feature Y
+      validations:
+          required: true
+
+    - type: textarea
+      id: acceptance_criteria
+      attributes:
+          label: Acceptance Criteria
+          description: How will we know this project is complete?
+          placeholder: |
+              - [ ] Deliverable 1
+              - [ ] Deliverable 2
+              - [ ] All child tasks closed
+      validations:
+          required: true
+
+    - type: dropdown
+      id: phase
+      attributes:
+          label: Phase
+          description: Current project phase
+          options:
+              - "0-foundation"
+              - "1-planning"
+              - "2-impl-core"
+              - "3-impl-extensions"
+              - "4-hardening"
+              - "5-release"
+          default: 1
+      validations:
+          required: true
+
+    - type: dropdown
+      id: priority
+      attributes:
+          label: Priority
+          options:
+              - "low"
+              - "medium"
+              - "high"
+              - "critical"
+          default: 1
+      validations:
+          required: true
+
+    - type: dropdown
+      id: agent
+      attributes:
+          label: Primary Agent
+          description: Which agent should coordinate this project?
+          options:
+              - "human"
+              - "claude"
+              - "copilot"
+              - "gemini"
+              - "codex"
+          default: 0
+      validations:
+          required: false
+
+    - type: input
+      id: effort
+      attributes:
+          label: Estimated Effort (story points)
+          description: Rough estimate of complexity (Fibonacci scale)
+          placeholder: "8"
+      validations:
+          required: false
