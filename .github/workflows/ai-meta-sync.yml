@@ -1,0 +1,113 @@
+name: 'AI Meta Sync'
+
+on:
+  issues:
+    types: ['opened', 'edited']
+
+concurrency:
+  group: '${{ github.workflow }}-${{ github.event.issue.number }}'
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: 'bash'
+
+jobs:
+  sync:
+    runs-on: 'ubuntu-latest'
+    timeout-minutes: 3
+    permissions:
+      contents: 'read'
+      issues: 'write'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683' # v4.2.2
+        with:
+          sparse-checkout: '.github/scripts'
+          sparse-checkout-cone-mode: false
+
+      - name: 'Setup Node.js'
+        uses: 'actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af' # v4.1.0
+        with:
+          node-version: '25.2.1'
+
+      - name: 'Setup pnpm'
+        uses: 'pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2' # v4.0.0
+        with:
+          version: '10.23.0'
+
+      - name: 'Install dependencies'
+        run: 'pnpm install --frozen-lockfile'
+
+      - name: 'Parse AI meta and sync labels'
+        uses: 'actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea' # v7.0.1
+        with:
+          script: |-
+            const { parse, toLabels } = await import('${{ github.workspace }}/.github/scripts/ai-meta-parser.ts');
+            const issueBody = context.payload.issue.body;
+            const issueNumber = context.payload.issue.number;
+
+            core.info(`[AI-META-SYNC] Parsing issue #${issueNumber}`);
+
+            const result = parse(issueBody);
+
+            if (!result.success) {
+              core.info(`[AI-META-SYNC] No valid ai-meta block found: ${result.error}`);
+              return;
+            }
+
+            const meta = result.meta;
+            core.info(`[AI-META-SYNC] Found metadata: ${JSON.stringify(meta, null, 2)}`);
+
+            const labels = toLabels(meta);
+            core.info(`[AI-META-SYNC] Generated labels: ${labels.join(', ')}`);
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: [...labels],
+              });
+              core.info(`[AI-META-SYNC] ✓ Applied ${labels.length} labels`);
+            }
+
+      - name: 'Comment on parse errors'
+        if: failure()
+        uses: 'actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea' # v7.0.1
+        with:
+          script: |-
+            const number = context.issue.number;
+            const body = `
+            > [!TIP]
+            > **AI Metadata Block**
+            >
+            > Add a hidden YAML block to automatically apply labels:
+            >
+            > \`\`\`html
+            > <!-- ai-meta
+            > kind: task
+            > project_id: my-project-001
+            > phase: 2-impl-core
+            > status: implement
+            > agent: claude
+            > effort: 3
+            > -->
+            > \`\`\`
+            >
+            > **Valid values:**
+            > - \`kind\`: project, task, spike, refactor
+            > - \`phase\`: 0-foundation, 1-planning, 2-impl-core, 3-impl-extensions, 4-hardening, 5-release
+            > - \`status\`: triage, implement, in-progress, review, blocked, done, idea, planning
+            > - \`agent\`: claude, copilot, gemini, codex, human
+            > - \`effort\`: positive number (story points)
+
+            _Automated by ai-meta-sync workflow_
+            `;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body,
+            });
