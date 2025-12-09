@@ -32,7 +32,7 @@ jobs:
         if: github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: .github/labels.yml
                   sparse-checkout-cone-mode: false
@@ -49,7 +49,7 @@ jobs:
         if: always() && (needs.sync-labels.result == 'success' || needs.sync-labels.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github/actions/issue-ops
@@ -85,7 +85,7 @@ jobs:
         if: always() && (needs.stale-management.result == 'success' || needs.stale-management.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github/scripts
@@ -98,7 +98,7 @@ jobs:
               with:
                   node-version-file: package.json
 
-            - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+            - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
               env:
                   NODE_OPTIONS: --import tsx
               with:
@@ -118,7 +118,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github
@@ -139,7 +139,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:
-            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
               with:
                   sparse-checkout: |
                       .github/scripts
@@ -153,7 +153,7 @@ jobs:
                   node-version-file: package.json
 
             - name: Branch Maintenance
-              uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+              uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
               env:
                   NODE_OPTIONS: --import tsx
               with:
@@ -173,7 +173,7 @@ jobs:
         timeout-minutes: 10
         steps:
             - name: Cleanup Workflow Runs
-              uses: viascom/github-maintenance-action@v0.1.0
+              uses: viascom/github-maintenance-action@34d1cdb1c66dd31745d8f106eb33c15a0e3d60ed # v0.1.0
               with:
                   github_token: ${{ secrets.GITHUB_TOKEN }}
                   repository: ${{ github.repository }}

@@ -33,7 +33,7 @@ jobs:
         id: 'mint_identity_token'
         if: |-
           ${{ vars.APP_ID }}
-        uses: 'actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b' # ratchet:actions/create-github-app-token@v2
+        uses: 'actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf' # v2
         with:
           app-id: '${{ vars.APP_ID }}'
           private-key: '${{ secrets.APP_PRIVATE_KEY }}'
@@ -43,7 +43,7 @@ jobs:
 
       - name: 'Run Gemini CLI'
         id: 'run_gemini'
-        uses: 'google-github-actions/run-gemini-cli@v0' # ratchet:exclude
+        uses: 'google-github-actions/run-gemini-cli@635ea06c806bdd9d252334d92222e72674a653e8' # v0
         env:
           TITLE: '${{ github.event.pull_request.title || github.event.issue.title }}'
           DESCRIPTION: '${{ github.event.pull_request.body || github.event.issue.body }}'
