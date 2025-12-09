@@ -28,7 +28,10 @@ const B = Object.freeze({
     validSets: (() => {
         const stripPrefix = (label: string): string =>
             label.replace(
-                new RegExp(`^(${(Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>).join('|')}):`, ''),
+                new RegExp(
+                    `^(${(Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>).join('|')}):`,
+                    '',
+                ),
                 '',
             );
         return {
@@ -54,9 +57,7 @@ const parseYaml = (yaml: string): Record<string, unknown> =>
             .filter((line) => line.trim() && !line.trim().startsWith('#'))
             .map((line) => {
                 const colonIndex = line.indexOf(':');
-                return colonIndex === -1
-                    ? []
-                    : [line.slice(0, colonIndex).trim(), line.slice(colonIndex + 1).trim()];
+                return colonIndex === -1 ? [] : [line.slice(0, colonIndex).trim(), line.slice(colonIndex + 1).trim()];
             })
             .filter(([key, val]) => key && val)
             .map(([key, val]) => [key, parseValue(val as string)]),
@@ -83,11 +84,11 @@ const validators: Record<keyof AiMeta, Validator> = {
     effort: (obj) =>
         obj.effort && !validateEffort(obj.effort) ? `Invalid effort: ${obj.effort}. Must be a positive number` : null,
     kind: (obj) =>
-        !obj.kind
-            ? 'Missing required field: kind'
-            : !validateField('kind', obj.kind)
-              ? `Invalid kind: ${obj.kind}. Must be one of: ${B.validSets.kind.join(', ')}`
-              : null,
+        obj.kind
+            ? validateField('kind', obj.kind)
+                ? null
+                : `Invalid kind: ${obj.kind}. Must be one of: ${B.validSets.kind.join(', ')}`
+            : 'Missing required field: kind',
     phase: (obj) =>
         obj.phase && !validateField('phase', obj.phase)
             ? `Invalid phase: ${obj.phase}. Must be one of: ${B.validSets.phase.join(', ')}`
@@ -103,7 +104,7 @@ const validate = (obj: Record<string, unknown>): ParseResult => {
     const errors = Object.values(validators)
         .map((validator) => validator(obj))
         .filter(Boolean) as ReadonlyArray<string>;
-    
+
     return errors.length > 0
         ? { error: errors[0], success: false }
         : {
@@ -122,11 +123,15 @@ const validate = (obj: Record<string, unknown>): ParseResult => {
 // --- Entry Point -------------------------------------------------------------
 
 const parse = (body: string | null): ParseResult => {
-    if (!body) return { error: 'Empty body', success: false };
-    
+    if (!body) {
+        return { error: 'Empty body', success: false };
+    }
+
     const yaml = extractYaml(body);
-    if (!yaml) return { error: 'No ai-meta block found', success: false };
-    
+    if (!yaml) {
+        return { error: 'No ai-meta block found', success: false };
+    }
+
     return validate(parseYaml(yaml));
 };
 
