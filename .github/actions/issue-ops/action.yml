@@ -62,7 +62,7 @@ runs:
     using: composite
     steps:
         - name: Execute Issue Helper Operation
-          uses: actions-cool/issues-helper@v3.7.2
+          uses: actions-cool/issues-helper@3809910bc12872edc9b8132f122069ac16cd16ee # v3.7.3
           with:
               actions: ${{ inputs.operation }}
               token: ${{ github.token }}
