@@ -44,26 +44,27 @@ const B = Object.freeze({
 // --- Pure Functions ----------------------------------------------------------
 
 const extractAxis = (label: string): LabelAxis | null =>
-    (Object.keys(B.axisPrefix) as ReadonlyArray<LabelAxis>).find((axis) => label.startsWith(B.axisPrefix[axis])) ?? null;
+    (Object.keys(B.axisPrefix) as ReadonlyArray<LabelAxis>).find((axis) => label.startsWith(B.axisPrefix[axis])) ??
+    null;
 
 const groupByAxis = (
     labels: ReadonlyArray<string>,
-): Record<LabelAxis, ReadonlyArray<string>> & { readonly other: ReadonlyArray<string> } =>
-    labels.reduce(
-        (acc, label) => {
-            const axis = extractAxis(label) ?? 'other';
-            return { ...acc, [axis]: [...acc[axis], label] };
-        },
-        { kind: [], other: [], phase: [], priority: [], status: [] } as Record<
-            LabelAxis | 'other',
-            ReadonlyArray<string>
-        >,
-    ) as Record<LabelAxis, ReadonlyArray<string>> & { readonly other: ReadonlyArray<string> };
+): Record<LabelAxis, ReadonlyArray<string>> & { readonly other: ReadonlyArray<string> } => {
+    const result: Record<LabelAxis | 'other', string[]> = { kind: [], other: [], phase: [], priority: [], status: [] };
+    for (const label of labels) {
+        const axis = extractAxis(label) ?? 'other';
+        result[axis].push(label);
+    }
+    return result;
+};
 
 const findViolations = (groups: Record<LabelAxis, ReadonlyArray<string>>): ReadonlyArray<string> =>
     (Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<LabelAxis>)
         .filter((axis) => groups[axis].length > B_schema.labels.invariants.maxPerAxis[axis])
-        .map((axis) => `Too many ${axis} labels (${groups[axis].length}/${B_schema.labels.invariants.maxPerAxis[axis]}): ${groups[axis].join(', ')}`);
+        .map(
+            (axis) =>
+                `Too many ${axis} labels (${groups[axis].length}/${B_schema.labels.invariants.maxPerAxis[axis]}): ${groups[axis].join(', ')}`,
+        );
 
 const selectPreferred = (labels: ReadonlyArray<string>, axis: LabelAxis): string =>
     labels.find((label) => (B.priorityOrder[axis] as ReadonlyArray<string>).includes(label)) ?? labels[0];
@@ -93,7 +94,9 @@ const applyFixes = async (
     await Promise.all(
         fixes.flatMap((fix) => {
             core.info(`[LABEL-VALIDATOR] Fixing ${fix.axis}: keeping ${fix.keep}, removing ${fix.remove.join(', ')}`);
-            return fix.remove.map((label) => mutate(ctx, { action: 'remove', labels: [label], n: issue.number, t: 'label' }));
+            return fix.remove.map((label) =>
+                mutate(ctx, { action: 'remove', labels: [label], n: issue.number, t: 'label' }),
+            );
         }),
     );
 };
@@ -110,7 +113,9 @@ const run = async (params: RunParams): Promise<ValidationResult> => {
 
     if (violations.length > 0) {
         params.core.info(`[LABEL-VALIDATOR] Found ${violations.length} violations`);
-        violations.forEach((v) => params.core.info(`  - ${v}`));
+        for (const v of violations) {
+            params.core.info(`  - ${v}`);
+        }
         await applyFixes(ctx, issue, fixes, params.core);
     }
 
