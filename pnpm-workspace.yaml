@@ -6,11 +6,11 @@ catalog:
   '@anthropic-ai/sdk': 0.71.0
   '@anthropic-ai/tokenizer': 0.0.4
   '@biomejs/biome': 2.3.7
-  '@effect/experimental': 0.57.4
-  '@effect/platform': 0.93.3
+  '@effect/experimental': 0.57.11
+  '@effect/platform': 0.93.6
   '@effect/platform-browser': 0.73.0
   '@effect/schema': 0.75.5
-  '@effect/vitest': 0.25.1
+  '@effect/vitest': 0.27.0
   '@fast-check/vitest': 0.2.3
   '@nx/js': 22.2.0-canary.20251125-7e00ec4
   '@nx/react': 22.2.0-canary.20251125-7e00ec4
@@ -43,7 +43,7 @@ catalog:
   clsx: 2.1.1
   cmdk: 1.1.1
   date-fns: 4.1.0
-  effect: 3.19.6
+  effect: 3.19.9
   fast-check: 4.3.0
   happy-dom: 20.0.11
   immer: 11.0.0
