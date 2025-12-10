@@ -1,17 +1,17 @@
 #!/usr/bin/env tsx
 /**
  * AI metadata parser: extracts and validates machine-readable YAML from issue bodies.
- * Uses B.labels.categories from schema.ts, no duplication.
+ * Uses B.labels.groups from schema.ts for validation.
  */
-import { B as B_schema } from './schema.ts';
+import { B } from './schema.ts';
 
 // --- Types -------------------------------------------------------------------
 
 type AiMeta = {
-    readonly kind: string;
-    readonly project_id?: string;
+    readonly type: string;
+    readonly project?: string;
     readonly phase?: string;
-    readonly status?: string;
+    readonly state?: string;
     readonly agent?: string;
     readonly effort?: number;
 };
@@ -22,30 +22,18 @@ type ParseResult =
 
 // --- Constants ---------------------------------------------------------------
 
-const B = Object.freeze({
-    labelAxes: Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>,
-    metaPattern: /<!--\s*ai-meta\s*\n([\s\S]*?)\n\s*-->/,
-    validSets: (() => {
-        const stripPrefix = (label: string): string =>
-            label.replace(
-                new RegExp(
-                    `^(${(Object.keys(B_schema.labels.invariants.maxPerAxis) as ReadonlyArray<string>).join('|')}):`,
-                    '',
-                ),
-                '',
-            );
-        return {
-            agent: B_schema.labels.categories.agent,
-            kind: B_schema.labels.categories.kind.map(stripPrefix),
-            phase: B_schema.labels.categories.phase.map(stripPrefix),
-            status: B_schema.labels.categories.status.map(stripPrefix),
-        } as const;
-    })(),
-} as const);
+const META_PATTERN = /<!--\s*ai-meta\s*\n([\s\S]*?)\n\s*-->/;
+
+const VALID_SETS = Object.freeze({
+    agent: B.labels.groups.agent,
+    phase: B.labels.groups.phase,
+    state: B.labels.groups.status,
+    type: ['task', 'spike', 'project'] as const,
+});
 
 // --- Pure Functions ----------------------------------------------------------
 
-const extractYaml = (body: string): string | null => B.metaPattern.exec(body)?.[1]?.trim() ?? null;
+const extractYaml = (body: string): string | null => META_PATTERN.exec(body)?.[1]?.trim() ?? null;
 
 const parseValue = (raw: string): string | number | boolean =>
     /^\d+$/.test(raw) ? parseInt(raw, 10) : raw === 'true' ? true : raw === 'false' ? false : raw;
@@ -63,41 +51,40 @@ const parseYaml = (yaml: string): Record<string, unknown> =>
             .map(([key, val]) => [key, parseValue(val as string)]),
     );
 
-const validateField = <K extends keyof typeof B.validSets>(
+const validateField = <K extends keyof typeof VALID_SETS>(
     key: K,
     value: unknown,
-): value is (typeof B.validSets)[K][number] =>
-    typeof value === 'string' && (B.validSets[key] as ReadonlyArray<string>).includes(value);
+): value is (typeof VALID_SETS)[K][number] =>
+    typeof value === 'string' && (VALID_SETS[key] as ReadonlyArray<string>).includes(value);
 
 const validateEffort = (value: unknown): value is number => typeof value === 'number' && value > 0;
 
 // --- Dispatch Tables ---------------------------------------------------------
 
-type ValidationError = string;
-type Validator = (obj: Record<string, unknown>) => ValidationError | null;
+type Validator = (obj: Record<string, unknown>) => string | null;
 
 const validators: Record<keyof AiMeta, Validator> = {
     agent: (obj) =>
         obj.agent && !validateField('agent', obj.agent)
-            ? `Invalid agent: ${obj.agent}. Must be one of: ${B.validSets.agent.join(', ')}`
+            ? `Invalid agent: ${obj.agent}. Must be one of: ${VALID_SETS.agent.join(', ')}`
             : null,
     effort: (obj) =>
         obj.effort && !validateEffort(obj.effort) ? `Invalid effort: ${obj.effort}. Must be a positive number` : null,
-    kind: (obj) =>
-        obj.kind
-            ? validateField('kind', obj.kind)
-                ? null
-                : `Invalid kind: ${obj.kind}. Must be one of: ${B.validSets.kind.join(', ')}`
-            : 'Missing required field: kind',
     phase: (obj) =>
         obj.phase && !validateField('phase', obj.phase)
-            ? `Invalid phase: ${obj.phase}. Must be one of: ${B.validSets.phase.join(', ')}`
+            ? `Invalid phase: ${obj.phase}. Must be one of: ${VALID_SETS.phase.join(', ')}`
             : null,
-    project_id: () => null,
-    status: (obj) =>
-        obj.status && !validateField('status', obj.status)
-            ? `Invalid status: ${obj.status}. Must be one of: ${B.validSets.status.join(', ')}`
+    project: () => null,
+    state: (obj) =>
+        obj.state && !validateField('state', obj.state)
+            ? `Invalid state: ${obj.state}. Must be one of: ${VALID_SETS.state.join(', ')}`
             : null,
+    type: (obj) =>
+        obj.type
+            ? validateField('type', obj.type)
+                ? null
+                : `Invalid type: ${obj.type}. Must be one of: ${VALID_SETS.type.join(', ')}`
+            : 'Missing required field: type',
 };
 
 const validate = (obj: Record<string, unknown>): ParseResult => {
@@ -111,10 +98,10 @@ const validate = (obj: Record<string, unknown>): ParseResult => {
               meta: {
                   agent: obj.agent as string | undefined,
                   effort: obj.effort as number | undefined,
-                  kind: obj.kind as string,
                   phase: obj.phase as string | undefined,
-                  project_id: obj.project_id as string | undefined,
-                  status: obj.status as string | undefined,
+                  project: obj.project as string | undefined,
+                  state: obj.state as string | undefined,
+                  type: obj.type as string,
               },
               success: true,
           };
@@ -126,20 +113,15 @@ const parse = (body: string | null): ParseResult => {
     if (!body) {
         return { error: 'Empty body', success: false };
     }
-
     const yaml = extractYaml(body);
-    if (!yaml) {
-        return { error: 'No ai-meta block found', success: false };
-    }
-
-    return validate(parseYaml(yaml));
+    return yaml ? validate(parseYaml(yaml)) : { error: 'No ai-meta block found', success: false };
 };
 
 const toLabels = (meta: AiMeta): ReadonlyArray<string> =>
     [
-        `kind:${meta.kind}`,
-        meta.phase ? `phase:${meta.phase}` : null,
-        meta.status ? `status:${meta.status}` : null,
+        meta.type,
+        meta.phase ?? null,
+        meta.state ?? null,
         meta.agent && meta.agent !== 'human' ? meta.agent : null,
     ].filter((label): label is string => label !== null);
 

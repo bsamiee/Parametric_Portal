@@ -69,3 +69,5 @@ lerna-debug.log*
 .AppleDouble
 .LSOverride
 Thumbs.db
+
+.gemini/

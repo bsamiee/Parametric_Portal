@@ -3,7 +3,7 @@
  * Report generator: fetches data, formats tables, outputs to summary/comment/issue.
  * Uses fn.report, fn.rowsCount, call, mutate from schema.ts.
  */
-import { type Ctx, call, createCtx, fn, type Issue, type LabelCat, mutate, type RunParams } from './schema.ts';
+import { type Ctx, call, createCtx, fn, type Issue, mutate, type RunParams } from './schema.ts';
 
 // --- Types -------------------------------------------------------------------
 
@@ -18,7 +18,7 @@ type ContentConfig = {
         readonly labels?: ReadonlyArray<string>;
         readonly title?: string;
     };
-    readonly filters?: ReadonlyArray<{ readonly label: string; readonly cat: LabelCat; readonly idx?: number }>;
+    readonly filters?: ReadonlyArray<{ readonly label: string; readonly display?: string }>;
     readonly row?: 'count' | 'list';
 };
 
@@ -27,8 +27,8 @@ type ContentConfig = {
 const reportSpecs: Record<string, ContentConfig> = Object.freeze({
     aging: {
         filters: [
-            { cat: 'priority', label: 'Critical' },
-            { cat: 'lifecycle', idx: 1, label: 'Stale' },
+            { display: 'Critical', label: 'critical' },
+            { display: 'Stale', label: 'stale' },
         ],
         fmt: { format: 'table', headers: ['Category', 'Count'], title: 'Issue Aging Report' },
         out: { output: 'summary' },

@@ -3,17 +3,6 @@ description: Report a bug or unexpected behavior
 title: "[FIX]: "
 labels: ["fix"]
 body:
-    - type: dropdown
-      id: breaking
-      attributes:
-          label: Breaking Change
-          description: Will fixing this bug change existing behavior?
-          options:
-              - "no"
-              - "yes"
-      validations:
-          required: true
-
     - type: textarea
       id: description
       attributes:
@@ -62,12 +51,3 @@ body:
               - critical
       validations:
           required: true
-
-    - type: textarea
-      id: logs
-      attributes:
-          label: Error Logs
-          description: Relevant error messages or stack traces
-          render: shell
-      validations:
-          required: false

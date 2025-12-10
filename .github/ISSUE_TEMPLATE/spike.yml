@@ -1,7 +1,7 @@
 name: Spike
 description: Research task with knowledge outputs (documents, decisions)
 title: "[SPIKE]: "
-labels: ["kind:spike", "status:triage"]
+labels: ["spike", "triage"]
 body:
     - type: textarea
       id: ai_meta
@@ -10,23 +10,22 @@ body:
           description: Machine-readable metadata for AI agent coordination
           value: |
               <!-- ai-meta
-              kind: spike
-              project_id: 
-              phase: 
-              status: triage
-              agent: 
-              effort: 
+              type: spike
+              project:
+              phase:
+              state: triage
+              agent:
               -->
           render: markdown
       validations:
           required: true
 
     - type: input
-      id: project_id
+      id: project
       attributes:
-          label: Parent Project ID
+          label: Parent Project
           description: Link to parent project (if applicable)
-          placeholder: "agentic-framework-001"
+          placeholder: "agentic-framework"
       validations:
           required: false
 
@@ -80,21 +79,11 @@ body:
           label: Assigned Agent
           description: Which agent should conduct this research?
           options:
-              - "human"
               - "claude"
               - "copilot"
               - "gemini"
               - "codex"
           default: 0
-      validations:
-          required: false
-
-    - type: input
-      id: effort
-      attributes:
-          label: Estimated Effort (story points)
-          description: Time-boxed research duration
-          placeholder: "2"
       validations:
           required: false
 

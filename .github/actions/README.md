@@ -4,34 +4,9 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 
 ## Actions Catalog
 
-### changed-detection
-**Purpose**: Detect changed files and affected Nx projects  
-**Marketplace Action**: `tj-actions/changed-files@v47`  
-**Use Cases**:
-- Nx affected command optimization
-- Conditional workflow execution
-- Matrix job generation
-
-**Usage**:
-```yaml
-- uses: ./.github/actions/changed-detection
-  with:
-    mode: fast # or comprehensive, matrix
-    files_pattern: '**.ts|**.tsx'
-    globs_pattern: 'apps/**,packages/**'
-```
-
-**Outputs**:
-- `changed_files`: JSON array of file paths
-- `affected_projects`: Nx projects impacted
-- `stats_json`: Add/modify/delete counts
-- `has_changes`: Boolean indicator
-
----
-
 ### slash-dispatch
-**Purpose**: Unified slash command dispatcher  
-**Marketplace Action**: `peter-evans/slash-command-dispatch@v4.0.1`  
+**Purpose**: Unified slash command dispatcher
+**Marketplace Action**: `peter-evans/slash-command-dispatch@v4.0.1`
 **Use Cases**:
 - Issue/PR comment commands
 - ChatOps workflows
@@ -62,8 +37,8 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ---
 
 ### node-env
-**Purpose**: Node.js + pnpm + Nx environment setup  
-**Marketplace Action**: `pnpm/action-setup@v4.1.0`  
+**Purpose**: Node.js + pnpm + Nx environment setup
+**Marketplace Action**: `pnpm/action-setup@v4.1.0`
 **Use Cases**:
 - CI job initialization
 - Dependency installation
@@ -81,7 +56,7 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ---
 
 ### git-identity
-**Purpose**: Configure Git user for automated commits  
+**Purpose**: Configure Git user for automated commits
 **Use Cases**:
 - Auto-fix commits
 - Release automation
@@ -90,7 +65,7 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ---
 
 ### auto-fix
-**Purpose**: Apply automated fixes and commit changes  
+**Purpose**: Apply automated fixes and commit changes
 **Use Cases**:
 - Biome auto-repair
 - Formatting corrections
@@ -98,18 +73,8 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 
 ---
 
-### issue-ops
-**Purpose**: Unified issue/PR operations  
-**Marketplace Action**: `actions-cool/issues-helper@v3.7.2`  
-**Use Cases**:
-- Stale management
-- Label operations
-- Duplicate marking
-
----
-
 ### pr-hygiene
-**Purpose**: PR review hygiene automation  
+**Purpose**: PR review hygiene automation
 **Use Cases**:
 - Stale review dismissal
 - Comment cleanup
@@ -118,7 +83,7 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ---
 
 ### label
-**Purpose**: Label operations via GitHub GraphQL  
+**Purpose**: Label operations via GitHub GraphQL
 **Use Cases**:
 - Issue pinning/unpinning
 - Dynamic label management
@@ -126,7 +91,7 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ---
 
 ### meta-fixer
-**Purpose**: AI-powered metadata correction  
+**Purpose**: AI-powered metadata correction
 **Use Cases**:
 - Title normalization
 - Label inference
@@ -135,7 +100,7 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 ---
 
 ### normalize-commit
-**Purpose**: Conventional commit message normalization  
+**Purpose**: Conventional commit message normalization
 **Use Cases**:
 - Commit history cleanup
 - Changelog generation
@@ -148,13 +113,6 @@ All marketplace action versions and SHAs are centralized in `.github/scripts/sch
 
 ```typescript
 const B = Object.freeze({
-  changes: {
-    action: {
-      name: 'tj-actions/changed-files',
-      ref: '24d32ffd492484c1d75e0c0b894501ddb9d30d62',
-      version: '47',
-    },
-  },
   slashDispatch: {
     action: {
       name: 'peter-evans/slash-command-dispatch',

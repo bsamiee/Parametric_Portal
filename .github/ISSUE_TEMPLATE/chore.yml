@@ -4,17 +4,6 @@ title: "[CHORE]: "
 labels: ["chore"]
 body:
     - type: dropdown
-      id: breaking
-      attributes:
-          label: Breaking Change
-          description: Will this chore affect compatibility (e.g., drop Node version)?
-          options:
-              - "no"
-              - "yes"
-      validations:
-          required: true
-
-    - type: dropdown
       id: chore_type
       attributes:
           label: Chore Type

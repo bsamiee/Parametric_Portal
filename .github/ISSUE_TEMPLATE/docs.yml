@@ -35,14 +35,6 @@ body:
       validations:
           required: true
 
-    - type: textarea
-      id: rationale
-      attributes:
-          label: Rationale
-          description: Why is this documentation needed?
-      validations:
-          required: true
-
     - type: dropdown
       id: priority
       attributes:

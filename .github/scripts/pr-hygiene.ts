@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * PR review hygiene: resolves outdated threads, replies to addressed comments, cleans AI prompts.
- * Uses B.hygiene, B.labels.categories.agent, fn.formatTime, call, md.marker from schema.ts.
+ * Uses B.hygiene, B.labels.groups.agent, fn.formatTime, call, md.marker from schema.ts.
  */
 import { B, type Core, type Ctx, call, createCtx, fn, type RunParams, type User } from './schema.ts';
 
@@ -36,9 +36,9 @@ type Action = 'resolve' | 'reply' | 'valuable' | 'skip';
 // --- Constants ---------------------------------------------------------------
 
 const H = Object.freeze({
-    agentBots: [...B.labels.categories.agent.map((a) => `${a}[bot]`), ...B.dashboard.bots, ...B.hygiene.botAliases],
-    agentMentions: B.labels.categories.agent.map((a) => `@${a}`),
-    agentSlashCommands: B.labels.categories.agent.flatMap((a) =>
+    agentBots: [...B.labels.groups.agent.map((a) => `${a}[bot]`), ...B.dashboard.bots, ...B.hygiene.botAliases],
+    agentMentions: B.labels.groups.agent.map((a) => `@${a}`),
+    agentSlashCommands: B.labels.groups.agent.flatMap((a) =>
         B.hygiene.slashCommands.map((cmd) => `/${a} ${cmd}`.toLowerCase()),
     ),
     display: B.hygiene.display,
@@ -256,12 +256,19 @@ const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<
 const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, core: Core): Promise<HygieneResult> => {
     const { resolved, replied, deleted } = result;
     const body = `### 🧹 PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
-
-    // INTEGRATION: Use PR-MONITOR marker with section mode to consolidate with other workflow outputs
-    // This replaces the standalone PR-HYGIENE comment with integration into main PR comment
     const { mutate, createCtx: createMutateCtx } = await import('./schema.ts');
     await mutate(
-        createMutateCtx({ context: { repo: { owner: ctx.owner, repo: ctx.repo } }, core, github: ctx.github }),
+        createMutateCtx({
+            context: {
+                payload: {
+                    action: '',
+                    issue: { body: null, created_at: '', labels: [], node_id: '', number: prNumber, title: '' },
+                },
+                repo: { owner: ctx.owner, repo: ctx.repo },
+            },
+            core,
+            github: ctx.github,
+        }),
         {
             body,
             marker: 'PR-MONITOR',

@@ -1,8 +1,25 @@
 name: Refactor
 description: Restructure code without changing behavior
 title: "[REFACTOR]: "
-labels: ["refactor"]
+labels: ["refactor", "triage"]
 body:
+    - type: textarea
+      id: ai_meta
+      attributes:
+          label: AI Metadata (Do not edit)
+          description: Machine-readable metadata for AI agent coordination
+          value: |
+              <!-- ai-meta
+              type: refactor
+              project:
+              phase:
+              state: triage
+              agent:
+              -->
+          render: markdown
+      validations:
+          required: true
+
     - type: dropdown
       id: breaking
       attributes:
@@ -64,3 +81,17 @@ body:
               - critical
       validations:
           required: true
+
+    - type: dropdown
+      id: agent
+      attributes:
+          label: Assigned Agent
+          description: Which agent should handle this refactor?
+          options:
+              - "claude"
+              - "copilot"
+              - "gemini"
+              - "codex"
+          default: 0
+      validations:
+          required: false

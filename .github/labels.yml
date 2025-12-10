@@ -1,4 +1,4 @@
-# --- Commit Type Labels (PR/Commit Correlation) ------------------------------
+# --- Type Labels (Commit Prefix Correlation) ----------------------------------
 
 - name: fix
   color: "f05223"
@@ -40,113 +40,37 @@
   color: "93c572"
   description: "Build system or tooling"
 
-# --- Issue-Only Type Labels (no commit prefix) --------------------------------
-
 - name: help
   color: "702963"
   description: "Question or assistance needed"
 
-# --- Kind Axis (Agentic: Work Unit Type) --------------------------------------
+# --- Agentic Type Labels ------------------------------------------------------
 
-- name: kind:project
-  color: "8b5cf6"
-  description: "Top-level initiative (e.g., Agentic Framework)"
-
-- name: kind:task
+- name: task
   color: "3b82f6"
-  description: "Default work unit leading to code changes"
+  description: "Work unit leading to code changes"
 
-- name: kind:spike
+- name: spike
   color: "06b6d4"
   description: "Research task with knowledge outputs"
 
-- name: kind:refactor
-  color: "3a140e"
-  description: "Code restructuring without behavior change"
+- name: project
+  color: "8b5cf6"
+  description: "Top-level initiative"
 
-# --- Status Axis (Agentic: Current State) -------------------------------------
+# --- Status Labels ------------------------------------------------------------
 
-- name: status:triage
+- name: triage
   color: "9ca3af"
   description: "Newly created, not yet shaped"
-
-- name: status:implement
-  color: "ee3a95"
-  description: "Ready for implementation by AI/human"
-
-- name: status:in-progress
-  color: "fbbf24"
-  description: "Someone (agent or human) is working"
-
-- name: status:review
-  color: "fff58a"
-  description: "Needs review"
-
-- name: status:blocked
-  color: "fed700"
-  description: "Cannot proceed"
-
-- name: status:done
-  color: "10b981"
-  description: "Completed and merged"
-
-- name: status:idea
-  color: "e5e7eb"
-  description: "Untriaged raw input"
-
-- name: status:planning
-  color: "c7d2fe"
-  description: "Being shaped into a plan"
-
-# --- Phase Axis (Agentic: Project Lifecycle) ----------------------------------
-
-- name: phase:0-foundation
-  color: "1e293b"
-  description: "Phase 0: Foundation work"
-
-- name: phase:1-planning
-  color: "475569"
-  description: "Phase 1: Planning"
-
-- name: phase:2-impl-core
-  color: "64748b"
-  description: "Phase 2: Core implementation"
-
-- name: phase:3-impl-extensions
-  color: "94a3b8"
-  description: "Phase 3: Extensions implementation"
-
-- name: phase:4-hardening
-  color: "cbd5e1"
-  description: "Phase 4: Hardening and stabilization"
-
-- name: phase:5-release
-  color: "f1f5f9"
-  description: "Phase 5: Release preparation"
-
-# --- Priority Axis (Agentic: Urgency) -----------------------------------------
-
-- name: priority:critical
-  color: "ff473e"
-  description: "Must be addressed immediately"
-
-- name: priority:high
-  color: "fb923c"
-  description: "High priority"
-
-- name: priority:medium
-  color: "fcd34d"
-  description: "Medium priority"
-
-- name: priority:low
-  color: "d4d4d8"
-  description: "Low priority"
-
-# --- Original Action Labels (Pre-existing, kept for backward compatibility) ---
 
 - name: implement
   color: "ee3a95"
   description: "Ready for implementation by AI/human"
+
+- name: in-progress
+  color: "fbbf24"
+  description: "Someone (agent or human) is working"
 
 - name: review
   color: "fff58a"
@@ -156,9 +80,61 @@
   color: "fed700"
   description: "Cannot proceed"
 
+- name: done
+  color: "10b981"
+  description: "Completed and merged"
+
+- name: idea
+  color: "e5e7eb"
+  description: "Untriaged raw input"
+
+- name: planning
+  color: "c7d2fe"
+  description: "Being shaped into a plan"
+
+# --- Phase Labels -------------------------------------------------------------
+
+- name: 0-foundation
+  color: "1e293b"
+  description: "Phase 0: Foundation work"
+
+- name: 1-planning
+  color: "475569"
+  description: "Phase 1: Planning"
+
+- name: 2-impl-core
+  color: "64748b"
+  description: "Phase 2: Core implementation"
+
+- name: 3-impl-extensions
+  color: "94a3b8"
+  description: "Phase 3: Extensions implementation"
+
+- name: 4-hardening
+  color: "cbd5e1"
+  description: "Phase 4: Hardening and stabilization"
+
+- name: 5-release
+  color: "f1f5f9"
+  description: "Phase 5: Release preparation"
+
+# --- Priority Labels ----------------------------------------------------------
+
 - name: critical
   color: "ff473e"
-  description: "Critical priority"
+  description: "Must be addressed immediately"
+
+- name: high
+  color: "fb923c"
+  description: "High priority"
+
+- name: medium
+  color: "fcd34d"
+  description: "Medium priority"
+
+- name: low
+  color: "d4d4d8"
+  description: "Low priority"
 
 # --- Agent Labels (Mutually Exclusive) ----------------------------------------
 
@@ -178,16 +154,6 @@
   color: "848482"
   description: "Assign to OpenAI Codex"
 
-# --- Lifecycle Labels ---------------------------------------------------------
-
-- name: stale
-  color: "2a3439"
-  description: "No recent activity"
-
-- name: pinned
-  color: "123524"
-  description: "Exempt from stale"
-
 # --- Special Labels -----------------------------------------------------------
 
 - name: security
@@ -205,3 +171,15 @@
 - name: dashboard
   color: "00a693"
   description: "Repository metrics dashboard"
+
+- name: migration
+  color: "5e35b1"
+  description: "Migration tracking for major updates"
+
+- name: stale
+  color: "2a3439"
+  description: "No recent activity"
+
+- name: pinned
+  color: "123524"
+  description: "Exempt from stale"

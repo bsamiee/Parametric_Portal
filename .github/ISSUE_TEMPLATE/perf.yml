@@ -4,17 +4,6 @@ title: "[PERF]: "
 labels: ["perf"]
 body:
     - type: dropdown
-      id: breaking
-      attributes:
-          label: Breaking Change
-          description: Will this optimization change APIs or behavior?
-          options:
-              - "no"
-              - "yes"
-      validations:
-          required: true
-
-    - type: dropdown
       id: perf_type
       attributes:
           label: Performance Area

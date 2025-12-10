@@ -1,7 +1,7 @@
 name: Project
 description: Top-level initiative (e.g., Agentic Framework)
 title: "[PROJECT]: "
-labels: ["kind:project", "status:triage", "phase:1-planning"]
+labels: ["project", "triage", "1-planning"]
 body:
     - type: textarea
       id: ai_meta
@@ -10,23 +10,22 @@ body:
           description: Machine-readable metadata for AI agent coordination
           value: |
               <!-- ai-meta
-              kind: project
-              project_id: 
+              type: project
+              project:
               phase: 1-planning
-              status: triage
-              agent: 
-              effort: 
+              state: triage
+              agent:
               -->
           render: markdown
       validations:
           required: true
 
     - type: input
-      id: project_id
+      id: project
       attributes:
           label: Project ID
-          description: Unique identifier for this project (e.g., agentic-framework-001)
-          placeholder: "my-project-001"
+          description: Unique identifier for this project (e.g., agentic-framework)
+          placeholder: "my-project"
       validations:
           required: true
 
@@ -111,20 +110,10 @@ body:
           label: Primary Agent
           description: Which agent should coordinate this project?
           options:
-              - "human"
               - "claude"
               - "copilot"
               - "gemini"
               - "codex"
           default: 0
-      validations:
-          required: false
-
-    - type: input
-      id: effort
-      attributes:
-          label: Estimated Effort (story points)
-          description: Rough estimate of complexity (Fibonacci scale)
-          placeholder: "8"
       validations:
           required: false

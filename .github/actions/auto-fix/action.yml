@@ -46,7 +46,7 @@ runs:
               git commit -m "${{ inputs.commit-message }}" \
                 -m "" \
                 -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
-              
+
               # Retry logic for push to handle race conditions
               n=0
               until [ "$n" -ge 3 ]
