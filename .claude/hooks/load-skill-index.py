@@ -17,7 +17,6 @@ from typing import Final, NamedTuple
 type Frontmatter = dict[str, str]
 type ParseState = tuple[Frontmatter, str | None, list[str]]
 
-
 class SkillEntry(NamedTuple):
     """Skill with name and trigger phrase."""
 
