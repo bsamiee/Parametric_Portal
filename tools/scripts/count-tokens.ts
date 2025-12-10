@@ -47,7 +47,7 @@ const run = (): void => {
 
     if (!args.length) {
         // biome-ignore lint/suspicious/noConsole: CLI output
-        console.log('\n  usage: pnpm tokens <file|dir...>\n');
+        console.log('\n  usage: uv run .claude/skills/nx-tools/scripts/nx.py tokens --path <file|dir>\n');
         return;
     }
 

@@ -20,5 +20,5 @@
 
 ## [4][PROTOCOL]
 - **Target:** Single file or small directory.
-- **Action:** Read -> Refactor -> Verify (`pnpm typecheck`).
+- **Action:** Read -> Refactor -> Verify (`nx run-many -t typecheck`).
 - **Constraint:** **NEVER** change business logic. Modification restricted to implementation structure.

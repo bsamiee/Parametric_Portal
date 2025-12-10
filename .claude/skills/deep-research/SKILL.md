@@ -16,13 +16,14 @@ description: >-
 Conduct comprehensive topic research via parallel agent dispatch.
 
 **Workflow:**
-1. §ORIENT — Execute 3 EXA queries, map landscape, extract facets
+1. §ORIENT — Execute 3 Exa searches via `exa-tools` skill, map landscape, extract facets
 2. §ROUND_1 — Dispatch 6-10 agents for breadth coverage via `parallel-dispatch` skill
 3. §CRITIQUE_1 — Filter findings, retain quality, build skeleton with gaps
 4. §ROUND_2 — Dispatch 6-10 agents to flesh out skeleton
 5. §CRITIQUE_2 — Synthesize holistically, deduplicate, produce final output
 
 **Dependencies:**
+- `exa-tools` — Web search and code context queries
 - `parallel-dispatch` — Agent orchestration mechanics
 - `report.md` — Sub-agent output format (CRITICAL → FINDINGS → SOURCES)
 
@@ -36,13 +37,13 @@ Conduct comprehensive topic research via parallel agent dispatch.
 
 <br>
 
-Main agent executes exactly 3 EXA MCP queries; these map topic structure.
+Main agent executes exactly 3 Exa searches via `exa-tools` skill; these map topic structure.
 
 Map domain landscape; identify facets for agent assignment.<br>
 Produce facet list (6-10 independent research areas) for Round 1.
 
 [IMPORTANT]:
-- [ALWAYS] Execute 3 EXA queries before dispatch.
+- [ALWAYS] Execute 3 Exa searches via `exa-tools` skill before dispatch.
 - [ALWAYS] Extract facet boundaries from results.
 - [NEVER] Dispatch before orient completes.
 
@@ -139,7 +140,7 @@ Main agent (NOT sub-agent) compiles final research output.
 <br>
 
 [VERIFY]:
-- [ ] Orient: 3 EXA queries executed
+- [ ] Orient: 3 Exa searches executed via `exa-tools` skill
 - [ ] Round 1: 6-10 agents in ONE message
 - [ ] Critique 1: Skeleton built, gaps identified
 - [ ] Round 2: Same count, focused on skeleton

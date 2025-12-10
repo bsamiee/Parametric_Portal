@@ -26,7 +26,7 @@ Analyze request. Map codebase. Produce rigorous execution plan (`PLAN.md`).
 3.  **PLANNING**
     -   Draft `PLAN.md` structure.
     -   Define atomic steps for `implement` agent.
-    -   Specify verification gates (e.g., "Pass `pnpm typecheck`").
+    -   Specify verification gates (e.g., "Pass `nx run-many -t typecheck`").
 
 # [H1][OUTPUT]
 Post comment with **Architectural Blueprint**:

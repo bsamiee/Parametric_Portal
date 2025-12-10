@@ -1,5 +1,12 @@
 #!/usr/bin/env tsx
 /**
+ * @deprecated DEAD CODE - This script is NOT called by any workflow.
+ * All stale operations use the marketplace action wrapper instead:
+ * - `.github/actions/issue-ops/action.yml` wraps `actions-cool/issues-helper@v3.7.2`
+ * - Workflows: active-qc.yml, passive-qc.yml, security.yml all use the action wrapper
+ *
+ * TODO: Either delete this file or integrate into passive-qc.yml if schema-driven approach needed.
+ *
  * Issue Helper orchestration: compose Issue Helper operations with schema-driven dispatch.
  * Uses B (API constants), fn (utilities), call (GitHub API) from schema.ts.
  * Note: B.helper config values should be passed as spec parameters from calling workflows.

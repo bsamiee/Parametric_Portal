@@ -1,3 +1,21 @@
+## 0.6.1 (2025-12-09)
+
+### [FEATURES]]
+
+- Advanced architecture templates with optimized ELK layout and enhanced Dracula theme ([#98](https://github.com/bsamiee/Parametric_Portal/pull/98))
+- Add orthogonal label system for AI agent coordination ([#100](https://github.com/bsamiee/Parametric_Portal/pull/100))
+
+### [BUG_FIXES]
+
+- integrate marketplace actions, fix PR title normalization, consolidate workflow comments, fix Gemini dispatch permissions, and automate Claude Code Review ([#97](https://github.com/bsamiee/Parametric_Portal/pull/97))
+- consolidate PR comments into body, simplify Gemini auth, fix workflow issues ([5b777be](https://github.com/bsamiee/Parametric_Portal/commit/5b777be))
+- **ci:** resolve Biome lint errors in label-validator ([7d63a69](https://github.com/bsamiee/Parametric_Portal/commit/7d63a69))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Copilot @Copilot
+
 ## 0.6.0 (2025-12-08)
 
 ### [FEATURES]]

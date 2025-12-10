@@ -26,4 +26,4 @@
 1.  **Input:** Read full file.
 2.  **Action:** Reorder to Canonical Order.
 3.  **Action:** Extract literals to `B`.
-4.  **Verify:** `pnpm typecheck`.
+4.  **Verify:** `nx run-many -t typecheck`.

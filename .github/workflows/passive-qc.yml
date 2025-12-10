@@ -64,7 +64,7 @@ jobs:
                   inactive-day: '3'
                   inactive-mode: 'comment,issue'
                   inactive-label: 'stale'
-                  exclude-labels: 'pinned,security,critical'
+                  exclude-labels: 'critical,implement,pinned,security'
                   issue-state: 'open'
 
             # Close issues/PRs marked stale for 7+ days
@@ -75,7 +75,7 @@ jobs:
                   inactive-day: '7'
                   inactive-mode: 'comment,issue'
                   labels: 'stale'
-                  exclude-labels: 'pinned,security,critical'
+                  exclude-labels: 'critical,implement,pinned,security'
                   close-reason: 'not_planned'
                   issue-state: 'open'
 

@@ -10,7 +10,7 @@ catalog:
   '@effect/platform': 0.93.3
   '@effect/platform-browser': 0.73.0
   '@effect/schema': 0.75.5
-  '@effect/vitest': 0.25.1
+  '@effect/vitest': 0.27.0
   '@fast-check/vitest': 0.2.3
   '@nx/js': 22.2.0-canary.20251125-7e00ec4
   '@nx/react': 22.2.0-canary.20251125-7e00ec4
@@ -43,10 +43,10 @@ catalog:
   clsx: 2.1.1
   cmdk: 1.1.1
   date-fns: 4.1.0
-  effect: 3.19.6
+  effect: 3.19.9
   fast-check: 4.3.0
   happy-dom: 20.0.10
-  immer: 11.0.0
+  immer: 11.0.1
   jspdf: 3.0.4
   jszip: 3.10.1
   lefthook: 2.0.4

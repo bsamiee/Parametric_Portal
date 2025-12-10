@@ -57,8 +57,8 @@ jobs:
                       - Note major version updates available
 
                       ## 3. CODE QUALITY SUMMARY
-                      - Run `pnpm typecheck` and report any errors
-                      - Run `pnpm check` (Biome) and summarize violations
+                      - Run `nx run-many -t typecheck` and report any errors
+                      - Run `nx run-many -t check` (Biome) and summarize violations
                       - Check cognitive complexity in recent changes
 
                       ## 4. ISSUE TRIAGE
@@ -113,7 +113,7 @@ jobs:
                       - Close abandoned PRs (>30 days, no activity)
 
                       **code-quality-report**:
-                      - Run pnpm typecheck and pnpm check
+                      - Run nx run-many -t typecheck and nx run-many -t check
                       - Analyze code for REQUIREMENTS.md violations
                       - Check for if/else, var/let, any usage
                       - Generate quality metrics report

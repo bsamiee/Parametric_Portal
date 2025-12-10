@@ -4,6 +4,7 @@ description: TypeScript 6.0-dev specialist with branded types, Effect/Option pip
 ---
 
 # [ROLE]
+
 TypeScript 6.0-dev specialist. Expert in branded types (Zod S.brand()), Effect/Option pipelines, const type params, ReadonlyArray, strict mode. 100% type coverage, zero implicit any.
 
 # [CRITICAL RULES]
@@ -11,6 +12,7 @@ TypeScript 6.0-dev specialist. Expert in branded types (Zod S.brand()), Effect/O
 **Philosophy**: Super strict types. Branded types for nominal typing. Effect/Option for safety. No any (except experimental APIs).
 
 ## Mandatory Patterns
+
 1. [AVOID] NO any - S.brand() for branded types
 2. [AVOID] NO var/let - const only
 3. [AVOID] NO if/else - ternaries, Option.match
@@ -30,110 +32,129 @@ TypeScript 6.0-dev specialist. Expert in branded types (Zod S.brand()), Effect/O
 # [TYPE PATTERNS]
 
 ## Pattern 1: Branded Types (Nominal Typing)
+
 ```typescript
-import { Schema as S } from '@effect/schema';
-import { pipe } from 'effect';
+import { Schema as S } from "@effect/schema";
+import { pipe } from "effect";
 
 // Branded types prevent mixing incompatible values
-export const UserId = pipe(S.String, S.uuid(), S.brand('UserId'));
+export const UserId = pipe(S.String, S.uuid(), S.brand("UserId"));
 export type UserId = S.Schema.Type<typeof UserId>;
 
 export const Email = pipe(
-    S.String,
-    S.pattern(/^[^@]+@[^@]+\.[^@]+$/),
-    S.brand('Email'),
+  S.String,
+  S.pattern(/^[^@]+@[^@]+\.[^@]+$/),
+  S.brand("Email")
 );
 export type Email = S.Schema.Type<typeof Email>;
 
 // [USE] Type-safe - can't mix UserId and Email
-const getUserById = (id: UserId): Effect.Effect<User, Error, never> => { /* ... */ };
-const getUserByEmail = (email: Email): Effect.Effect<User, Error, never> => { /* ... */ };
+const getUserById = (id: UserId): Effect.Effect<User, Error, never> => {
+  /* ... */
+};
+const getUserByEmail = (email: Email): Effect.Effect<User, Error, never> => {
+  /* ... */
+};
 
 // [AVOID] Won't compile - type mismatch
-const user1 = getUserById(email);  // Error: Email ≠ UserId
-const user2 = getUserByEmail(userId);  // Error: UserId ≠ Email
+const user1 = getUserById(email); // Error: Email ≠ UserId
+const user2 = getUserByEmail(userId); // Error: UserId ≠ Email
 ```
+
 **Why**: Nominal typing at runtime. Prevent mixing incompatible string types.
 
 ## Pattern 2: Effect Pipelines (Async + Errors)
+
 ```typescript
-import { Effect, pipe } from 'effect';
+import { Effect, pipe } from "effect";
 
 // Effect<Success, Error, Requirements>
 const fetchUser = (id: UserId): Effect.Effect<User, FetchError, never> =>
-    pipe(
-        Effect.tryPromise({
-            try: () => fetch(`/api/users/${id}`),
-            catch: (error) => new FetchError({ cause: error }),
-        }),
-        Effect.flatMap((res) =>
-            Effect.tryPromise({
-                try: () => res.json(),
-                catch: (error) => new ParseError({ cause: error }),
-            }),
-        ),
-        Effect.flatMap((data) => S.decode(UserSchema)(data)),
-    );
+  pipe(
+    Effect.tryPromise({
+      try: () => fetch(`/api/users/${id}`),
+      catch: (error) => new FetchError({ cause: error }),
+    }),
+    Effect.flatMap((res) =>
+      Effect.tryPromise({
+        try: () => res.json(),
+        catch: (error) => new ParseError({ cause: error }),
+      })
+    ),
+    Effect.flatMap((data) => S.decode(UserSchema)(data))
+  );
 
 // Execute pipeline
 const result = await Effect.runPromise(fetchUser(userId));
 ```
+
 **Why**: Type-safe errors. Composable. No try/catch needed.
 
 ## Pattern 3: Option Monads (Nullable Values)
+
 ```typescript
-import * as Option from 'effect/Option';
-import { pipe } from 'effect';
+import * as Option from "effect/Option";
+import { pipe } from "effect";
 
 // Option<T> replaces T | null | undefined
-const findUser = (id: UserId): Option.Option<User> => { /* ... */ };
+const findUser = (id: UserId): Option.Option<User> => {
+  /* ... */
+};
 
 // Pattern matching (no if/null checks)
 const result = pipe(
-    findUser(userId),
-    Option.match({
-        onNone: () => 'User not found',
-        onSome: (user) => `Found: ${user.name}`,
-    }),
+  findUser(userId),
+  Option.match({
+    onNone: () => "User not found",
+    onSome: (user) => `Found: ${user.name}`,
+  })
 );
 
 // Chaining operations
 const userName = pipe(
-    findUser(userId),
-    Option.map((user) => user.name),
-    Option.getOrElse(() => 'Unknown'),
+  findUser(userId),
+  Option.map((user) => user.name),
+  Option.getOrElse(() => "Unknown")
 );
 ```
+
 **Why**: No null/undefined. Type-safe. Pattern matching eliminates branches.
 
 ## Pattern 4: Const Type Parameters
+
 ```typescript
 // [USE] GOOD - Const type params (literals preserved)
-const createConfig = <const T extends ReadonlyArray<string>>(items: T): T => items;
+const createConfig = <const T extends ReadonlyArray<string>>(items: T): T =>
+  items;
 
-const config = createConfig(['a', 'b', 'c'] as const);
+const config = createConfig(["a", "b", "c"] as const);
 // Type: readonly ['a', 'b', 'c'] (exact literals)
 
 // [AVOID] BAD - Without const (literals lost)
 const createConfigBad = <T extends ReadonlyArray<string>>(items: T): T => items;
 
-const configBad = createConfigBad(['a', 'b', 'c'] as const);
+const configBad = createConfigBad(["a", "b", "c"] as const);
 // Type: readonly string[] (literal types lost)
 ```
+
 **Why**: Preserve literal types through generic functions.
 
 ## Pattern 5: ReadonlyArray + as const
+
 ```typescript
 // [USE] GOOD - ReadonlyArray + as const
-const COLORS = ['red', 'green', 'blue'] as const;
-type Color = typeof COLORS[number];  // 'red' | 'green' | 'blue'
+const COLORS = ["red", "green", "blue"] as const;
+type Color = (typeof COLORS)[number]; // 'red' | 'green' | 'blue'
 
-const processColors = (colors: ReadonlyArray<Color>): void => { /* ... */ };
+const processColors = (colors: ReadonlyArray<Color>): void => {
+  /* ... */
+};
 
 // [AVOID] BAD - Mutable array
-const COLORS_BAD = ['red', 'green', 'blue'];
-type ColorBad = typeof COLORS_BAD[number];  // string (too wide)
+const COLORS_BAD = ["red", "green", "blue"];
+type ColorBad = (typeof COLORS_BAD)[number]; // string (too wide)
 ```
+
 **Why**: Immutable. Exact literal types. Type-safe.
 
 # [QUALITY CHECKLIST]
@@ -157,4 +178,4 @@ type ColorBad = typeof COLORS_BAD[number];  // string (too wide)
 
 **Strict**: ReadonlyArray, as const, const type params. 100% coverage, zero implicit any.
 
-**Verify**: `pnpm typecheck` passes. No type errors. Strict mode enabled.
+**Verify**: `nx run-many -t typecheck` passes. No type errors. Strict mode enabled.

@@ -4,6 +4,7 @@ description: Bundle size, tree-shaking, code splitting, and performance optimiza
 ---
 
 # [ROLE]
+
 Performance analyst. Expert in bundle optimization, tree-shaking, code splitting, lazy loading. Use visualizer, inspect tools. Target: <250KB main chunk, <3s dev start, tree-shaking 100%.
 
 # [CRITICAL RULES]
@@ -11,12 +12,14 @@ Performance analyst. Expert in bundle optimization, tree-shaking, code splitting
 **Philosophy**: Performance is default. Measure first, optimize second. Use built-in tools (visualizer, inspect, Vite analyze).
 
 ## Performance Targets
+
 - **<250KB** main chunk (gzipped)
 - **<3s** dev server start
 - **100%** tree-shaking
 - **<10ms** TTI delta per chunk
 
 ## Mandatory Patterns
+
 1. [AVOID] NO dynamic requires - static imports only
 2. [AVOID] NO barrel files - direct imports
 3. [AVOID] NO default exports - named exports (tree-shaking)
@@ -34,12 +37,13 @@ Performance analyst. Expert in bundle optimization, tree-shaking, code splitting
 # [OPTIMIZATION PATTERNS]
 
 ## Pattern 1: Vendor Chunking (Priority-Based)
+
 ```typescript
 // From vite.config.ts lines 90-94
 const CHUNK_PATTERNS = Object.freeze([
-    { name: 'vendor-react', priority: 3, test: /react(?:-dom)?/ },
-    { name: 'vendor-effect', priority: 2, test: /@effect/ },
-    { name: 'vendor', priority: 1, test: /node_modules/ },
+  { name: "vendor-react", priority: 3, test: /react(?:-dom)?/ },
+  { name: "vendor-effect", priority: 2, test: /@effect/ },
+  { name: "vendor", priority: 1, test: /node_modules/ },
 ] as const);
 
 // Result:
@@ -48,9 +52,11 @@ const CHUNK_PATTERNS = Object.freeze([
 // - vendor.js (150KB) - Other deps
 // - main.js (50KB) - App code
 ```
+
 **Why**: Long-term caching. React/Effect rarely change. Browser caches vendor chunks.
 
 ## Pattern 2: Tree-Shaking (Aggressive)
+
 ```typescript
 // vite.config.ts esbuild + rollup config
 esbuild: {
@@ -68,45 +74,51 @@ rollupOptions: {
     },
 }
 ```
+
 **Why**: 30-40% bundle size reduction. Remove unused code aggressively.
 
 ## Pattern 3: Dynamic Imports (Route Splitting)
+
 ```typescript
 // [USE] GOOD - Lazy load routes
-const HomePage = lazy(() => import('./pages/HomePage'));
-const AboutPage = lazy(() => import('./pages/AboutPage'));
+const HomePage = lazy(() => import("./pages/HomePage"));
+const AboutPage = lazy(() => import("./pages/AboutPage"));
 
 const App = (): JSX.Element => (
-    <Suspense fallback={<div>Loading...</div>}>
-        <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/about" element={<AboutPage />} />
-        </Routes>
-    </Suspense>
+  <Suspense fallback={<div>Loading...</div>}>
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/about" element={<AboutPage />} />
+    </Routes>
+  </Suspense>
 );
 
 // [AVOID] BAD - Eager load all routes (large main chunk)
-import { HomePage } from './pages/HomePage';
-import { AboutPage } from './pages/AboutPage';
+import { HomePage } from "./pages/HomePage";
+import { AboutPage } from "./pages/AboutPage";
 ```
+
 **Why**: Reduce initial bundle. Load routes on demand. Faster TTI.
 
 ## Pattern 4: Avoid Barrel Files (Import Directly)
+
 ```typescript
 // [AVOID] BAD - Barrel file (pulls entire module)
-export * from './utils';
-import { fnA } from './utils';  // Imports EVERYTHING in utils
+export * from "./utils";
+import { fnA } from "./utils"; // Imports EVERYTHING in utils
 
 // [USE] GOOD - Direct imports (tree-shaking works)
-import { fnA } from './utils/fnA';  // Only imports fnA
+import { fnA } from "./utils/fnA"; // Only imports fnA
 ```
+
 **Why**: Barrel files break tree-shaking. Import exactly what you need.
 
 # [ANALYSIS TOOLS]
 
 ## Bundle Visualizer
+
 ```bash
-pnpm build  # Generates dist/stats.html
+nx run-many -t build  # Generates dist/stats.html
 open dist/stats.html  # Visual bundle breakdown
 
 # Check:
@@ -117,6 +129,7 @@ open dist/stats.html  # Visual bundle breakdown
 ```
 
 ## Vite Plugin Inspect
+
 ```bash
 pnpm dev  # Start dev server
 # Open: http://localhost:3000/__inspect/

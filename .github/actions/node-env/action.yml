@@ -1,5 +1,5 @@
 name: Node Environment
-description: Node.js + pnpm setup with caching, Nx monorepo support, and distributed task execution
+description: Node.js + pnpm setup with caching and Nx monorepo support
 inputs:
     node-version:
         description: Node.js version (ignored if node-version-file is set)
@@ -19,30 +19,9 @@ inputs:
     nx:
         description: Enable Nx caching and affected setup
         default: 'false'
-    nx-cloud-token:
-        description: Nx Cloud access token (enables remote cache)
-        required: false
     nx-main-branch:
         description: Main branch for affected comparison
         default: 'main'
-    nx-distribute:
-        description: Enable Nx Agents for distributed task execution
-        default: 'false'
-    nx-distribute-config:
-        description: Path to dynamic agent distribution config (e.g., .nx/workflows/distribution-config.yaml)
-        default: ''
-    nx-agents:
-        description: Number of Nx Agents for distribution (fallback if no config specified)
-        default: '3'
-    nx-stop-on-success:
-        description: Stop agents when first non-dependent run group succeeds
-        default: 'true'
-    nx-auto-fix:
-        description: Enable Nx Cloud auto-apply-fixes feature
-        default: 'false'
-    nx-fix-tasks:
-        description: Glob patterns for tasks eligible for auto-fix (e.g., *check*,*lint* or * for all)
-        default: '*'
 
 outputs:
     nx-base:
@@ -58,42 +37,18 @@ runs:
         - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
           with:
               version: ${{ inputs.pnpm-version }}
+
         - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.3.0
           with:
               node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
               node-version-file: ${{ inputs.node-version-file }}
-              # Only enable pnpm cache when install is true (avoids post-run failures on sparse checkout)
               cache: ${{ inputs.install == 'true' && 'pnpm' || '' }}
 
-        # Nx Cloud remote cache - set token early for nx-cloud CLI
-        - name: Configure Nx Cloud
-          if: inputs.nx == 'true' && inputs.nx-cloud-token != ''
-          shell: bash
-          run: echo "NX_CLOUD_ACCESS_TOKEN=${{ inputs.nx-cloud-token }}" >> $GITHUB_ENV
-
-        # Start distributed CI run BEFORE dependencies (TTG optimization)
-        # See: https://nx.dev/docs/guides/nx-cloud/optimize-your-ttg
-        - name: Start Nx Agents
-          if: inputs.nx == 'true' && inputs.nx-distribute == 'true' && inputs.nx-cloud-token != ''
-          shell: bash
-          run: |
-              # Use dynamic config file if provided, otherwise use fixed agent count and machine type
-              DISTRIBUTE_ON="${{ inputs.nx-distribute-config != '' && inputs.nx-distribute-config || format('{0} linux-medium-js', env.AGENTS) }}"
-              npx nx-cloud start-ci-run \
-                --distribute-on="$DISTRIBUTE_ON" \
-                --stop-agents-after=typecheck,build,test \
-                ${{ inputs.nx-stop-on-success == 'true' && '--stop-agents-on-failure' || '' }} \
-                ${{ inputs.nx-auto-fix == 'true' && format('--auto-apply-fixes={0}', inputs.nx-fix-tasks) || '' }} \
-                ${{ inputs.nx-auto-fix == 'true' && format('--fix-tasks={0}', inputs.nx-fix-tasks) || '' }}
-          env:
-              AGENTS: ${{ inputs.nx-agents }}
-
-        # Install dependencies after Nx Agents start
-        - if: inputs.install == 'true'
+        - name: Install dependencies
+          if: inputs.install == 'true'
           shell: bash
           run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}
 
-        # Nx local cache
         - name: Restore Nx cache
           if: inputs.nx == 'true'
           uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
@@ -104,7 +59,6 @@ runs:
                   ${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}-
                   ${{ runner.os }}-nx-
 
-        # Set base/head SHAs for affected commands
         - name: Set affected SHAs
           id: shas
           if: inputs.nx == 'true'

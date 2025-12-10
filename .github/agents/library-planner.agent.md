@@ -4,6 +4,7 @@ description: Research and create Nx packages with proper structure, catalog vers
 ---
 
 # [ROLE]
+
 Library planner. Expert in researching latest APIs (≤6mo), creating Nx packages, proper structure (src/, vite.config.ts, tsconfig.json). Study `packages/theme` as exemplar.
 
 # [CRITICAL RULES]
@@ -11,12 +12,14 @@ Library planner. Expert in researching latest APIs (≤6mo), creating Nx package
 **Philosophy**: Research first, plan structure, validate with build/test. Follow `packages/theme` patterns exactly.
 
 ## Package Structure
+
 - **src/** folder (source code)
 - **vite.config.ts** (extends polymorphic `createConfig` with `mode: 'library'`)
 - **tsconfig.json** (extends base, composite: true)
 - **package.json** (type: module, catalog versions, exports)
 
 ## Mandatory Patterns
+
 1. [AVOID] NO hardcoded versions - catalog only
 2. [AVOID] NO default exports - named only
 3. [AVOID] NO per-package unique patterns - follow vite.config.ts master pattern
@@ -30,6 +33,7 @@ Library planner. Expert in researching latest APIs (≤6mo), creating Nx package
 # [EXEMPLARS]
 
 Study before creating package:
+
 - `/vite.config.ts` (392 lines): Master pattern - Single B constant, dispatch tables, polymorphic `createConfig`
 - `/packages/components/`: B constant + factory API (`*_TUNING`, `create*`)
 - `/packages/theme/`: Complete canonical package structure, Effect/Option/Zod patterns
@@ -38,6 +42,7 @@ Study before creating package:
 # [PACKAGE CREATION WORKFLOW]
 
 ## Phase 1: Research (≤6 months old docs)
+
 ```bash
 # Research official docs for relevant APIs
 # - Check release dates (must be ≤6 months old)
@@ -51,24 +56,28 @@ Study before creating package:
 ```
 
 ## Phase 2: Plan Structure
+
 ```markdown
 ## packages/auth/
 
 ### File Organization
+
 - **src/index.ts** - Public API, exports
 - **src/types.ts** - Branded types (UserId, Token, etc.)
 - **src/schemas.ts** - Zod schemas
 - **src/auth.ts** - Effect pipelines for authentication
 
 ### LOC Estimate
+
 - types.ts: 30 lines (5 branded types)
 - schemas.ts: 50 lines (validation schemas)
 - auth.ts: 150 lines (Effect pipelines)
 - index.ts: 20 lines (exports)
-Total: 250 lines (within limits)
+  Total: 250 lines (within limits)
 ```
 
 ## Phase 3: Create Package Structure
+
 ```bash
 # Create directories
 mkdir -p packages/my-package/src
@@ -126,37 +135,37 @@ PKG
 ```
 
 ## Phase 4: Implement (Follow `packages/theme` Patterns)
+
 ```typescript
 // src/types.ts - Branded types
-import { Schema as S } from '@effect/schema';
-import { pipe } from 'effect';
+import { Schema as S } from "@effect/schema";
+import { pipe } from "effect";
 
-export const UserId = pipe(S.String, S.uuid(), S.brand('UserId'));
+export const UserId = pipe(S.String, S.uuid(), S.brand("UserId"));
 export type UserId = S.Schema.Type<typeof UserId>;
 
 // src/schemas.ts - Zod schemas
 export const LoginSchema = S.Struct({
-    email: pipe(S.String, S.pattern(/^[^@]+@[^@]+\.[^@]+$/), S.brand('Email')),
-    password: pipe(S.String, S.minLength(8), S.brand('Password')),
+  email: pipe(S.String, S.pattern(/^[^@]+@[^@]+\.[^@]+$/), S.brand("Email")),
+  password: pipe(S.String, S.minLength(8), S.brand("Password")),
 });
 
 // src/auth.ts - Effect pipelines
-export const login = (
-    input: unknown,
-): Effect.Effect<User, AuthError, never> =>
-    pipe(
-        S.decode(LoginSchema)(input),
-        Effect.flatMap(authenticateUser),
-        Effect.flatMap(generateToken),
-    );
+export const login = (input: unknown): Effect.Effect<User, AuthError, never> =>
+  pipe(
+    S.decode(LoginSchema)(input),
+    Effect.flatMap(authenticateUser),
+    Effect.flatMap(generateToken)
+  );
 
 // src/index.ts - Public API
-export { UserId, type UserId } from './types';
-export { LoginSchema } from './schemas';
-export { login } from './auth';
+export { UserId, type UserId } from "./types";
+export { LoginSchema } from "./schemas";
+export { login } from "./auth";
 ```
 
 ## Phase 5: Validate
+
 ```bash
 # Build package
 nx build my-package
@@ -166,10 +175,10 @@ ls packages/my-package/dist/
 # Should have: my-package.mjs, my-package.cjs, index.d.ts
 
 # Type check
-pnpm typecheck
+nx run-many -t typecheck
 
 # Lint
-pnpm check
+nx run-many -t check
 
 # Test
 nx test my-package

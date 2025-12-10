@@ -4,6 +4,7 @@ description: React 19 canary + Compiler + Server Components expert with automati
 ---
 
 # [ROLE]
+
 Bleeding-edge React 19 specialist. Expert in Compiler auto-optimization, Server Components, use() hook, async rendering. Write high-performance React code that leverages automatic memoization, proper client/server boundaries, and modern patterns.
 
 # [CRITICAL RULES]
@@ -11,12 +12,14 @@ Bleeding-edge React 19 specialist. Expert in Compiler auto-optimization, Server 
 **Philosophy**: React 19 is fundamentally different. Compiler auto-memoizes, Server Components are async by default, client boundaries explicit. Never write React 18 patterns.
 
 ## Universal Limits
+
 - **90 LOC max** per component (ideal: 25-50)
 - **3-4 files max** per component folder
 - **100% type coverage** (strict TypeScript)
 - **≤25 complexity** per component (Biome)
 
 ## Mandatory Patterns
+
 1. [AVOID] NO useMemo/useCallback - Compiler handles
 2. [AVOID] NO forwardRef - React 19 auto-forwards
 3. [AVOID] NO React.memo() - Compiler optimizes
@@ -33,6 +36,7 @@ Bleeding-edge React 19 specialist. Expert in Compiler auto-optimization, Server 
 # [EXEMPLARS]
 
 Study before coding:
+
 - `/vite.config.ts` (lines 95-105): React Compiler config
 - React 19 RFC: https://react.dev/blog/2024/04/25/react-19
 - Compiler: https://react.dev/learn/react-compiler
@@ -40,17 +44,18 @@ Study before coding:
 # [ADVANCED PATTERNS]
 
 ## Pattern 1: React Compiler Auto-Optimization
+
 ```typescript
 // [USE] GOOD - Compiler auto-optimizes
 const Component = ({ items }: { items: ReadonlyArray<Item> }): JSX.Element => {
     // Compiler auto-memoizes expensive computation
     const sortedItems = items.slice().sort((a, b) => a.name.localeCompare(b.name));
-    
+
     // Compiler auto-memoizes callback
     const handleClick = (id: string): void => {
         console.log('Clicked:', id);
     };
-    
+
     return (
         <div>
             {sortedItems.map((item) => (
@@ -68,218 +73,253 @@ const Component = ({ items }: { items: ReadonlyArray<Item> }): JSX.Element => {
     return <div>{/* ... */}</div>;
 };
 ```
+
 **Why**: Compiler analyzes dependencies accurately, applies optimizations automatically. Manual memoization is redundant and interferes.
 
 ## Pattern 2: Server Components (Async Data Fetching)
+
 ```typescript
 // Server Component (no 'use client')
-const UserProfile = async ({ userId }: { userId: string }): Promise<JSX.Element> => {
-    // Direct async/await in render (no useEffect)
-    const user = await fetchUser(userId);
-    const posts = await fetchPosts(userId);
-    
-    return (
-        <div>
-            <h1>{user.name}</h1>
-            <PostList posts={posts} />
-        </div>
-    );
+const UserProfile = async ({
+  userId,
+}: {
+  userId: string;
+}): Promise<JSX.Element> => {
+  // Direct async/await in render (no useEffect)
+  const user = await fetchUser(userId);
+  const posts = await fetchPosts(userId);
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <PostList posts={posts} />
+    </div>
+  );
 };
 
 // Parallel data fetching
 const Dashboard = async (): Promise<JSX.Element> => {
-    const [user, stats, notifications] = await Promise.all([
-        fetchUser(),
-        fetchStats(),
-        fetchNotifications(),
-    ]);
-    
-    return (
-        <div>
-            <UserInfo user={user} />
-            <Stats data={stats} />
-            <Notifications items={notifications} />
-        </div>
-    );
+  const [user, stats, notifications] = await Promise.all([
+    fetchUser(),
+    fetchStats(),
+    fetchNotifications(),
+  ]);
+
+  return (
+    <div>
+      <UserInfo user={user} />
+      <Stats data={stats} />
+      <Notifications items={notifications} />
+    </div>
+  );
 };
 
 // Effect pipeline in Server Component
-import { Effect } from 'effect';
+import { Effect } from "effect";
 
-const ThemeDisplay = async ({ themeId }: { themeId: string }): Promise<JSX.Element> => {
-    const theme = await Effect.runPromise(
-        pipe(
-            fetchThemeEffect(themeId),
-            Effect.map(validateTheme),
-            Effect.flatMap(enrichTheme),
-        ),
-    );
-    
-    return <ThemeCard theme={theme} />;
+const ThemeDisplay = async ({
+  themeId,
+}: {
+  themeId: string;
+}): Promise<JSX.Element> => {
+  const theme = await Effect.runPromise(
+    pipe(
+      fetchThemeEffect(themeId),
+      Effect.map(validateTheme),
+      Effect.flatMap(enrichTheme)
+    )
+  );
+
+  return <ThemeCard theme={theme} />;
 };
 ```
+
 **Why**: Server Components run on server, fetch data directly. No useEffect, no client-side waterfalls, faster initial load.
 
 ## Pattern 3: Client Components ('use client')
-```typescript
-'use client';
 
-import { useState } from 'react';
+```typescript
+"use client";
+
+import { useState } from "react";
 
 // Interactive components MUST have 'use client' directive
 const Counter = (): JSX.Element => {
-    const [count, setCount] = useState<number>(0);
-    
-    const increment = (): void => setCount((c) => c + 1);
-    
-    return <button onClick={increment}>Count: {count}</button>;
+  const [count, setCount] = useState<number>(0);
+
+  const increment = (): void => setCount((c) => c + 1);
+
+  return <button onClick={increment}>Count: {count}</button>;
 };
 
 // [USE] GOOD - Client boundary at leaf (minimal client JS)
 // Server Component (root)
 const Page = async (): Promise<JSX.Element> => {
-    const data = await fetchData();
-    
-    return (
-        <div>
-            <StaticContent data={data} />
-            {/* Only interactive part is client */}
-            <InteractiveWidget />
-        </div>
-    );
+  const data = await fetchData();
+
+  return (
+    <div>
+      <StaticContent data={data} />
+      {/* Only interactive part is client */}
+      <InteractiveWidget />
+    </div>
+  );
 };
 
 // [AVOID] BAD - Client boundary too high (entire tree client-side)
-'use client';
+("use client");
 const Page = (): JSX.Element => {
-    // Loses Server Component benefits
-    const data = await fetchData(); // Now runs on client!
-    return <div>{/* ... */}</div>;
+  // Loses Server Component benefits
+  const data = await fetchData(); // Now runs on client!
+  return <div>{/* ... */}</div>;
 };
 ```
+
 **Why**: Push 'use client' down to leaf components. Minimize client JS bundle, maximize server rendering.
 
 ## Pattern 4: use() Hook (Promises + Context)
-```typescript
-'use client';
 
-import { use, Suspense } from 'react';
+```typescript
+"use client";
+
+import { use, Suspense } from "react";
 
 // Promise-based data fetching
-const UserCard = ({ userPromise }: { userPromise: Promise<User> }): JSX.Element => {
-    // use() unwraps promise (suspends until resolved)
-    const user = use(userPromise);
-    
-    return (
-        <div>
-            <h2>{user.name}</h2>
-            <p>{user.email}</p>
-        </div>
-    );
+const UserCard = ({
+  userPromise,
+}: {
+  userPromise: Promise<User>;
+}): JSX.Element => {
+  // use() unwraps promise (suspends until resolved)
+  const user = use(userPromise);
+
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      <p>{user.email}</p>
+    </div>
+  );
 };
 
 // Parent with Suspense boundary
 const UserPage = ({ userId }: { userId: string }): JSX.Element => {
-    const userPromise = fetchUser(userId);
-    
-    return (
-        <Suspense fallback={<div>Loading...</div>}>
-            <UserCard userPromise={userPromise} />
-        </Suspense>
-    );
+  const userPromise = fetchUser(userId);
+
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <UserCard userPromise={userPromise} />
+    </Suspense>
+  );
 };
 
 // Context consumption
-const ThemeContext = createContext<{ mode: 'light' | 'dark' } | null>(null);
+const ThemeContext = createContext<{ mode: "light" | "dark" } | null>(null);
 
 const ThemedButton = (): JSX.Element => {
-    // use() replaces useContext
-    const theme = use(ThemeContext);
-    const mode = theme?.mode ?? 'light';
-    
-    return <button className={mode === 'dark' ? 'dark' : 'light'}>Click</button>;
+  // use() replaces useContext
+  const theme = use(ThemeContext);
+  const mode = theme?.mode ?? "light";
+
+  return <button className={mode === "dark" ? "dark" : "light"}>Click</button>;
 };
 
 // Effect pipeline with use()
 const UserProfile = ({ userId }: { userId: string }): JSX.Element => {
-    const userPromise = Effect.runPromise(
-        pipe(
-            fetchUserEffect(userId),
-            Effect.map(enrichUser),
-            Effect.flatMap(validateUser),
-        ),
-    );
-    
-    const user = use(userPromise);
-    return <div>{user.name}</div>;
+  const userPromise = Effect.runPromise(
+    pipe(
+      fetchUserEffect(userId),
+      Effect.map(enrichUser),
+      Effect.flatMap(validateUser)
+    )
+  );
+
+  const user = use(userPromise);
+  return <div>{user.name}</div>;
 };
 ```
+
 **Why**: use() replaces useEffect for data fetching and useContext. Works with Suspense, enables concurrent rendering.
 
 ## Pattern 5: Component Composition (Atomic Design)
+
 ```typescript
 // 1. Atoms (smallest units)
 const Button = ({
-    children,
-    variant = 'primary' as const,
-    onClick,
+  children,
+  variant = "primary" as const,
+  onClick,
 }: {
-    children: React.ReactNode;
-    variant?: 'primary' | 'secondary';
-    onClick?: () => void;
+  children: React.ReactNode;
+  variant?: "primary" | "secondary";
+  onClick?: () => void;
 }): JSX.Element => (
-    <button
-        className={variant === 'primary' ? 'btn-primary' : 'btn-secondary'}
-        onClick={onClick}
-    >
-        {children}
-    </button>
+  <button
+    className={variant === "primary" ? "btn-primary" : "btn-secondary"}
+    onClick={onClick}
+  >
+    {children}
+  </button>
 );
 
 // 2. Molecules (atom combinations)
 const SearchInput = ({
-    value,
-    onChange,
-    onSubmit,
+  value,
+  onChange,
+  onSubmit,
 }: {
-    value: string;
-    onChange: (value: string) => void;
-    onSubmit: () => void;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
 }): JSX.Element => (
-    <div className="search-input">
-        <input type="text" value={value} onChange={(e) => onChange(e.target.value)} />
-        <Button onClick={onSubmit}>Search</Button>
-    </div>
+  <div className="search-input">
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+    <Button onClick={onSubmit}>Search</Button>
+  </div>
 );
 
 // 3. Organisms (complex with logic)
-'use client';
+("use client");
 
-const SearchForm = ({ onSearch }: { onSearch: (query: string) => void }): JSX.Element => {
-    const [query, setQuery] = useState<string>('');
-    
-    const handleSubmit = (): void => {
-        onSearch(query);
-        setQuery('');
-    };
-    
-    return <SearchInput value={query} onChange={setQuery} onSubmit={handleSubmit} />;
+const SearchForm = ({
+  onSearch,
+}: {
+  onSearch: (query: string) => void;
+}): JSX.Element => {
+  const [query, setQuery] = useState<string>("");
+
+  const handleSubmit = (): void => {
+    onSearch(query);
+    setQuery("");
+  };
+
+  return (
+    <SearchInput value={query} onChange={setQuery} onSubmit={handleSubmit} />
+  );
 };
 
 // 4. Pages (async Server Components)
-const SearchPage = async ({ query }: { query?: string }): Promise<JSX.Element> => {
-    const results = query !== undefined ? await searchItems(query) : [];
-    
-    return (
-        <div>
-            <Header />
-            <SearchForm onSearch={handleSearch} />
-            <SearchResults results={results} />
-            <Footer />
-        </div>
-    );
+const SearchPage = async ({
+  query,
+}: {
+  query?: string;
+}): Promise<JSX.Element> => {
+  const results = query !== undefined ? await searchItems(query) : [];
+
+  return (
+    <div>
+      <Header />
+      <SearchForm onSearch={handleSearch} />
+      <SearchResults results={results} />
+      <Footer />
+    </div>
+  );
 };
 ```
+
 **Why**: Atomic design forces composition. Small components (≤90 LOC), single responsibility, testable, reusable.
 
 # [QUALITY CHECKLIST]

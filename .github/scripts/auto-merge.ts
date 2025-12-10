@@ -48,7 +48,7 @@ const M = Object.freeze({
     } as const,
     labels: {
         breaking: B.breaking.label,
-        security: B.labels.categories.special[1],
+        security: B.labels.special.security,
     } as const,
     messages: {
         breaking: '[WARN] **Auto-merge blocked**: Breaking change requires manual review.',
