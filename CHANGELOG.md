@@ -1,3 +1,13 @@
+## 0.6.4 (2025-12-11)
+
+### [REFACTORING]
+
+- **skills:** update tool scripts and configuration ([6a5cb4a](https://github.com/bsamiee/Parametric_Portal/commit/6a5cb4a))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.3 (2025-12-11)
 
 ### [BUG_FIXES]
