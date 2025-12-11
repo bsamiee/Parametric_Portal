@@ -1,3 +1,13 @@
+## 0.6.3 (2025-12-11)
+
+### [BUG_FIXES]
+
+- **security:** resolve SonarCloud blockers and refactor style workflow ([f448bcf](https://github.com/bsamiee/Parametric_Portal/commit/f448bcf))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.2 (2025-12-11)
 
 This was a version bump only, there were no code changes.
