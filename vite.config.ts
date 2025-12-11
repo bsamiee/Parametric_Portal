@@ -189,7 +189,7 @@ const icons = () => [
 ];
 const imgOpt = (q: { readonly avif: number; readonly jpeg: number; readonly png: number; readonly webp: number }) => ({
     avif: { lossless: false, quality: q.avif },
-    exclude: /^virtual:|node_modules/,
+    exclude: /^(?:virtual:)|node_modules/,
     includePublic: true,
     jpeg: { progressive: true, quality: q.jpeg },
     logStats: true,
@@ -254,10 +254,11 @@ const plugins = {
             policy: toPolicy(c.cspPolicy),
         }),
         {
-            buildApp: async (b: ViteBuilder) =>
-                void (await Promise.all(Object.values(b.environments).map((e) => b.build(e)))),
-            buildEnd: () => void 0,
-            buildStart: () => void 0,
+            buildApp: async (b: ViteBuilder) => {
+                await Promise.all(Object.values(b.environments).map((e) => b.build(e)));
+            },
+            buildEnd: () => undefined,
+            buildStart: () => undefined,
             enforce: 'pre' as const,
             name: 'parametric-build-hooks',
         },

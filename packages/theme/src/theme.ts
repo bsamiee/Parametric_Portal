@@ -100,6 +100,9 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 const oklchToCss = (color: OklchColor): string =>
     `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${color.a < 1 ? ` / ${color.a.toFixed(2)}` : ''})`;
 
+const formatColorStep = (name: string, step: number, color: OklchColor | null | undefined): ReadonlyArray<string> =>
+    color ? [`  --color-${name}-${step}: ${oklchToCss(color)};`] : [];
+
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const createOklchColor = (l: number, c: number, h: number, a = 1): Effect.Effect<OklchColor, ParseError> =>
@@ -178,15 +181,7 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
                 Effect.map(({ scale, baseline, custom, spacing }) =>
                     [
                         '@theme {',
-                        ...steps.flatMap((step, i) =>
-                            pipe(
-                                Option.fromNullable(scale[i]),
-                                Option.match({
-                                    onNone: () => [],
-                                    onSome: (color) => [`  --color-${input.name}-${step}: ${oklchToCss(color)};`],
-                                }),
-                            ),
-                        ),
+                        ...steps.flatMap((step, i) => formatColorStep(input.name, step, scale[i])),
                         ...baseline.map(([name, color]) => `  --color-${input.name}-${name}: ${oklchToCss(color)};`),
                         ...custom.map(([name, color]) => `  --color-${input.name}-${name}: ${oklchToCss(color)};`),
                         ...spacing,

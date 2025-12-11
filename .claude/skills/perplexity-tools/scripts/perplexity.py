@@ -9,7 +9,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -33,38 +32,39 @@ class _B:
     model_ask: str = "sonar"
     model_research: str = "sonar-deep-research"
     model_reason: str = "sonar-reasoning-pro"
+    http_method: str = "POST"
+    http_path: str = "/chat/completions"
+    header_auth: str = "Authorization"
+    header_content_type: str = "Content-Type"
+    content_type_json: str = "application/json"
+    status_success: str = "success"
+    status_error: str = "error"
+    key_message: str = "message"
+    key_code: str = "code"
+    key_status: str = "status"
+    search_prefix: str = "Search: "
+    search_focus_prefix: str = " (focus: "
+    search_focus_suffix: str = ")"
 
 
 B: Final[_B] = _B()
 
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
-_OP_REFS: Final[dict[str, str]] = {"PERPLEXITY_API_KEY": "op://Tokens/Perplexity Sonar API Key/uyypyebvpvscxrxeunr27wi3gm"}
-
-
-def _op_read(ref: str) -> str:
-    """Read secret from 1Password CLI, empty on failure."""
-    try:
-        return subprocess.run(["op", "read", ref], capture_output=True, text=True, check=True).stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return ""
-
-
-def _resolve_secret(key: str) -> str:
-    """Resolve env var, expanding op:// via 1Password CLI with fallback."""
-    val = os.environ.get(key, "")
-    return (
-        val if val and not val.startswith("op://") else
-        _op_read(val if val.startswith("op://") else _OP_REFS.get(key, ""))
-    )
-
-
 def strip_think(t: str) -> str:
     return re.sub("<think>.*?</think>", "", t, flags=re.DOTALL).strip()
 
 
 def maybe_strip(content: str, should_strip: bool) -> str:
     return strip_think(content) if should_strip else content
+
+
+def extract_content(response: dict[str, Any]) -> str:
+    return response["choices"][0]["message"]["content"]
+
+
+def extract_citations(response: dict[str, Any]) -> list[Any]:
+    return response.get("citations", [])
 
 
 # --- [REGISTRY] ---------------------------------------------------------------
@@ -77,7 +77,7 @@ def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
     def register(fn: ToolFn) -> ToolFn:
         _tools[fn.__name__] = (
             fn,
-            {"method": "POST", "path": "/chat/completions", **cfg},
+            {"method": B.http_method, "path": B.http_path, **cfg},
         )
         return fn
 
@@ -89,8 +89,8 @@ def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
     model=B.model_ask,
     transform=lambda r, a: {
         "query": a["query"],
-        "response": r["choices"][0]["message"]["content"],
-        "citations": r.get("citations", []),
+        "response": extract_content(r),
+        "citations": extract_citations(r),
     },
 )
 def ask(query: str) -> dict:
@@ -102,10 +102,8 @@ def ask(query: str) -> dict:
     model=B.model_research,
     transform=lambda r, a: {
         "query": a["query"],
-        "response": maybe_strip(
-            r["choices"][0]["message"]["content"], a.get("strip_thinking", False)
-        ),
-        "citations": r.get("citations", []),
+        "response": maybe_strip(extract_content(r), a.get("strip_thinking", False)),
+        "citations": extract_citations(r),
     },
 )
 def research(query: str, strip_thinking: bool) -> dict:
@@ -117,9 +115,7 @@ def research(query: str, strip_thinking: bool) -> dict:
     model=B.model_reason,
     transform=lambda r, a: {
         "query": a["query"],
-        "response": maybe_strip(
-            r["choices"][0]["message"]["content"], a.get("strip_thinking", False)
-        ),
+        "response": maybe_strip(extract_content(r), a.get("strip_thinking", False)),
     },
 )
 def reason(query: str, strip_thinking: bool) -> dict:
@@ -131,7 +127,7 @@ def reason(query: str, strip_thinking: bool) -> dict:
     model=B.model_ask,
     transform=lambda r, a: {
         "query": a["query"],
-        "results": r.get("citations", [])[: a.get("max_results", B.max_results)],
+        "results": extract_citations(r)[: a.get("max_results", B.max_results)],
     },
 )
 def search(query: str, max_results: int, country: str) -> dict:
@@ -140,8 +136,13 @@ def search(query: str, max_results: int, country: str) -> dict:
         "messages": [
             {
                 "role": "user",
-                "content": f"Search: {query}"
-                + (f" (focus: {country})" if country else ""),
+                "content": B.search_prefix
+                + query
+                + (
+                    B.search_focus_prefix + country + B.search_focus_suffix
+                    if country
+                    else ""
+                ),
             }
         ]
     }
@@ -154,8 +155,8 @@ def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
     sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
     body = {**fn(**{k: args[k] for k in sig if k in args}), "model": cfg["model"]}
     headers = {
-        "Authorization": f"Bearer {_resolve_secret(B.key_env)}",
-        "Content-Type": "application/json",
+        B.header_auth: f"Bearer {os.environ.get(B.key_env, '')}",
+        B.header_content_type: B.content_type_json,
     }
     try:
         with httpx.Client(timeout=B.timeout) as c:
@@ -163,11 +164,15 @@ def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
                 cfg["method"], f"{B.base_url}{cfg['path']}", headers=headers, json=body
             )
             r.raise_for_status()
-            return {"status": "success", **cfg["transform"](r.json(), args)}
+            return {B.key_status: B.status_success, **cfg["transform"](r.json(), args)}
     except httpx.HTTPStatusError as e:
-        return {"status": "error", "message": str(e), "code": e.response.status_code}
+        return {
+            B.key_status: B.status_error,
+            B.key_message: str(e),
+            B.key_code: e.response.status_code,
+        }
     except httpx.RequestError as e:
-        return {"status": "error", "message": str(e)}
+        return {B.key_status: B.status_error, B.key_message: str(e)}
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
@@ -186,7 +191,7 @@ def main() -> int:
     args = vars(p.parse_args())
     result = dispatch(args.pop("command"), args)
     print(json.dumps(result))
-    return 0 if result["status"] == "success" else 1
+    return 0 if result[B.key_status] == B.status_success else 1
 
 
 if __name__ == "__main__":

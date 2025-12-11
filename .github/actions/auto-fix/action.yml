@@ -22,7 +22,9 @@ runs:
     steps:
         - name: Run Fix Command
           shell: bash
-          run: ${{ inputs.command }}
+          env:
+              FIX_COMMAND: ${{ inputs.command }}
+          run: eval "$FIX_COMMAND"
 
         - name: Check for Changes
           id: check
@@ -41,9 +43,12 @@ runs:
           id: commit
           if: steps.check.outputs.has_changes == 'true'
           shell: bash
+          env:
+              FILE_PATTERN: ${{ inputs.file-pattern }}
+              COMMIT_MESSAGE: ${{ inputs.commit-message }}
           run: |
-              git add ${{ inputs.file-pattern }}
-              git commit -m "${{ inputs.commit-message }}" \
+              git add $FILE_PATTERN
+              git commit -m "$COMMIT_MESSAGE" \
                 -m "" \
                 -m "Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
 

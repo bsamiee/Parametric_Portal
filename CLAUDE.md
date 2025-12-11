@@ -6,7 +6,7 @@ alwaysApply: true
 # [H1][CLAUDE_MANIFEST]
 >**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools` (nx workspace), `github-tools` (gh CLI), `perplexity-tools` (web research), `exa-tools` (code search), `context7-tools` (library docs).
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools` (nx workspace), `github-tools` (gh CLI), `perplexity-tools` (web research), `exa-tools` (code search), `context7-tools` (library docs), `sonarcloud-tools` (code quality), `tavily-tools` (web crawl/extract).
 
 ---
 ## [1][BEHAVIOR]

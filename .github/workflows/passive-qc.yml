@@ -173,7 +173,7 @@ jobs:
         timeout-minutes: 10
         steps:
             - name: Cleanup Workflow Runs
-              uses: viascom/github-maintenance-action@v0.1.0
+              uses: viascom/github-maintenance-action@34d1cdb1c66dd31745d8f106eb33c15a0e3d60ed # v0.1.0
               with:
                   github_token: ${{ secrets.GITHUB_TOKEN }}
                   repository: ${{ github.repository }}

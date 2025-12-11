@@ -190,7 +190,7 @@ const renderHandlers = {
                       createElement(
                           'kbd',
                           { className: utilities.cls(B.cmd.item.shortcut.base, B.cmd.var.xsFs) },
-                          item.shortcut.split(' ').map((key, index) =>
+                          item.shortcut.split(' ').map((keyChar) =>
                               createElement(
                                   'span',
                                   {
@@ -199,9 +199,9 @@ const renderHandlers = {
                                           B.cmd.var.shortcutPx,
                                           B.cmd.var.shortcutPy,
                                       ),
-                                      key: index,
+                                      key: keyChar,
                                   },
-                                  key,
+                                  keyChar,
                               ),
                           ),
                       ),

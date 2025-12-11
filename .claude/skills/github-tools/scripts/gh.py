@@ -33,6 +33,10 @@ class _B:
     state: str = "open"
     limit: int = 30
     fmt: str = "json"
+    default_branch: str = "main"
+    default_owner: str = "@me"
+    api_method: str = "GET"
+    empty_body: str = ""
 
 
 B: Final[_B] = _B()
@@ -73,6 +77,23 @@ REQUIRED: Final[dict[str, tuple[str, ...]]] = {
 }
 
 
+# --- [PURE_FUNCTIONS] ---------------------------------------------------------
+def validate_args(cmd: str, args: Args) -> list[str]:
+    """Return list of missing required arguments for command."""
+    return [
+        f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if args.get(k) is None
+    ]
+
+
+def mk_edit_flags(args: Args) -> tuple[str, ...]:
+    """Generate conditional edit flags for pr-edit and issue-edit."""
+    return (
+        *(f"--title={args['title']}" for _ in [1] if args.get("title")),
+        *(f"--body={args['body']}" for _ in [1] if args.get("body")),
+        *(f"--add-label={args['labels']}" for _ in [1] if args.get("labels")),
+    )
+
+
 # --- [DISPATCH_TABLES] --------------------------------------------------------
 handlers: dict[str, Handler] = {
     "issue-list": (
@@ -80,11 +101,11 @@ handlers: dict[str, Handler] = {
             "gh",
             "issue",
             "list",
-            f"--state={a['state']}",
-            f"--limit={a['limit']}",
+            f"--state={a.get('state', B.state)}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=number,title,state,labels,createdAt,author",
         ),
-        lambda o, a: {"state": a["state"], "issues": json.loads(o)},
+        lambda o, a: {"state": a.get("state", B.state), "issues": json.loads(o)},
     ),
     "issue-view": (
         lambda a: (
@@ -102,7 +123,7 @@ handlers: dict[str, Handler] = {
             "issue",
             "create",
             f"--title={a['title']}",
-            f"--body={a['body'] or ''}",
+            f"--body={a.get('body', B.empty_body)}",
             "--json=number,url",
         ),
         lambda o, a: {"created": json.loads(o)},
@@ -116,11 +137,11 @@ handlers: dict[str, Handler] = {
             "gh",
             "pr",
             "list",
-            f"--state={a['state']}",
-            f"--limit={a['limit']}",
+            f"--state={a.get('state', B.state)}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=number,title,state,headRefName,author,createdAt",
         ),
-        lambda o, a: {"state": a["state"], "pulls": json.loads(o)},
+        lambda o, a: {"state": a.get("state", B.state), "pulls": json.loads(o)},
     ),
     "pr-view": (
         lambda a: (
@@ -164,7 +185,7 @@ handlers: dict[str, Handler] = {
             "review",
             str(a["number"]),
             f"--{a['event'].lower()}",
-            f"--body={a['body'] or ''}",
+            f"--body={a.get('body', B.empty_body)}",
         ),
         lambda o, a: {"number": a["number"], "event": a["event"], "reviewed": True},
     ),
@@ -174,7 +195,7 @@ handlers: dict[str, Handler] = {
             "search",
             "repos",
             a["query"],
-            f"--limit={a['limit']}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=fullName,description,stargazersCount,url",
         ),
         lambda o, a: {"query": a["query"], "repos": json.loads(o)},
@@ -185,7 +206,7 @@ handlers: dict[str, Handler] = {
             "search",
             "code",
             a["query"],
-            f"--limit={a['limit']}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=path,repository,textMatches",
         ),
         lambda o, a: {"query": a["query"], "matches": json.loads(o)},
@@ -196,7 +217,7 @@ handlers: dict[str, Handler] = {
             "search",
             "issues",
             a["query"],
-            f"--limit={a['limit']}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=number,title,repository,state,url",
         ),
         lambda o, a: {"query": a["query"], "issues": json.loads(o)},
@@ -206,7 +227,7 @@ handlers: dict[str, Handler] = {
             "gh",
             "repo",
             "view",
-            a["repo"] or "",
+            a.get("repo", B.empty_body),
             "--json=name,description,defaultBranchRef,stargazerCount,url",
         ),
         lambda o, a: {"repo": json.loads(o)},
@@ -216,7 +237,7 @@ handlers: dict[str, Handler] = {
             "gh",
             "run",
             "list",
-            f"--limit={a['limit']}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=databaseId,displayTitle,status,conclusion,workflowName,createdAt,headBranch",
         ),
         lambda o, a: {"runs": json.loads(o)},
@@ -233,7 +254,10 @@ handlers: dict[str, Handler] = {
     ),
     "run-logs": (
         lambda a: (
-            "gh", "run", "view", str(a["run_id"]),
+            "gh",
+            "run",
+            "view",
+            str(a["run_id"]),
             "--log-failed" if a.get("failed") else "--log",
         ),
         lambda o, a: {"run_id": a["run_id"], "logs": o},
@@ -247,7 +271,7 @@ handlers: dict[str, Handler] = {
             "gh",
             "cache",
             "list",
-            f"--limit={a['limit']}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=id,key,sizeInBytes,createdAt,lastAccessedAt",
         ),
         lambda o, a: {"caches": json.loads(o)},
@@ -275,11 +299,11 @@ handlers: dict[str, Handler] = {
             "workflow",
             "run",
             a["workflow"],
-            f"--ref={a['ref'] or 'main'}",
+            f"--ref={a.get('ref', B.default_branch)}",
         ),
         lambda o, a: {
             "workflow": a["workflow"],
-            "ref": a["ref"] or "main",
+            "ref": a.get("ref", B.default_branch),
             "triggered": True,
         },
     ),
@@ -294,8 +318,8 @@ handlers: dict[str, Handler] = {
             "pr",
             "create",
             f"--title={a['title']}",
-            f"--body={a['body'] or ''}",
-            f"--base={a['base'] or 'main'}",
+            f"--body={a.get('body', B.empty_body)}",
+            f"--base={a.get('base', B.default_branch)}",
             "--json=number,url",
         ),
         lambda o, a: {"created": json.loads(o)},
@@ -310,9 +334,7 @@ handlers: dict[str, Handler] = {
             "pr",
             "edit",
             str(a["number"]),
-            *(f"--title={a['title']}" for _ in [1] if a["title"]),
-            *(f"--body={a['body']}" for _ in [1] if a["body"]),
-            *(f"--add-label={a['labels']}" for _ in [1] if a["labels"]),
+            *mk_edit_flags(a),
         ),
         lambda o, a: {"number": a["number"], "edited": True},
     ),
@@ -335,9 +357,7 @@ handlers: dict[str, Handler] = {
             "issue",
             "edit",
             str(a["number"]),
-            *(f"--title={a['title']}" for _ in [1] if a["title"]),
-            *(f"--body={a['body']}" for _ in [1] if a["body"]),
-            *(f"--add-label={a['labels']}" for _ in [1] if a["labels"]),
+            *mk_edit_flags(a),
         ),
         lambda o, a: {"number": a["number"], "edited": True},
     ),
@@ -355,10 +375,13 @@ handlers: dict[str, Handler] = {
             "gh",
             "project",
             "list",
-            f"--owner={a['owner'] or '@me'}",
+            f"--owner={a.get('owner', B.default_owner)}",
             "--format=json",
         ),
-        lambda o, a: {"owner": a["owner"] or "@me", "projects": json.loads(o)},
+        lambda o, a: {
+            "owner": a.get("owner", B.default_owner),
+            "projects": json.loads(o),
+        },
     ),
     "project-view": (
         lambda a: (
@@ -366,7 +389,7 @@ handlers: dict[str, Handler] = {
             "project",
             "view",
             str(a["project"]),
-            f"--owner={a['owner'] or '@me'}",
+            f"--owner={a.get('owner', B.default_owner)}",
             "--format=json",
         ),
         lambda o, a: {"project": a["project"], "details": json.loads(o)},
@@ -377,7 +400,7 @@ handlers: dict[str, Handler] = {
             "project",
             "item-list",
             str(a["project"]),
-            f"--owner={a['owner'] or '@me'}",
+            f"--owner={a.get('owner', B.default_owner)}",
             "--format=json",
         ),
         lambda o, a: {"project": a["project"], "items": json.loads(o)},
@@ -388,7 +411,7 @@ handlers: dict[str, Handler] = {
             "gh",
             "release",
             "list",
-            f"--limit={a['limit']}",
+            f"--limit={a.get('limit', B.limit)}",
             "--json=tagName,name,isDraft,isPrerelease,publishedAt",
         ),
         lambda o, a: {"releases": json.loads(o)},
@@ -405,7 +428,13 @@ handlers: dict[str, Handler] = {
     ),
     # --- [RAW_API] ------------------------------------------------------------
     "api": (
-        lambda a: ("gh", "api", a["endpoint"], "--method", a["method"]),
+        lambda a: (
+            "gh",
+            "api",
+            a["endpoint"],
+            "--method",
+            a.get("method", B.api_method),
+        ),
         lambda o, a: {
             "endpoint": a["endpoint"],
             "response": json.loads(o)
@@ -414,16 +443,6 @@ handlers: dict[str, Handler] = {
         },
     ),
 }
-
-
-# --- [PURE_FUNCTIONS] ---------------------------------------------------------
-def validate_args(cmd: str, args: Args) -> list[str]:
-    """Return list of missing required arguments for command."""
-    return [
-        f"--{k.replace('_', '-')}"
-        for k in REQUIRED.get(cmd, ())
-        if args.get(k) is None
-    ]
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
@@ -441,7 +460,7 @@ def main() -> int:
             ("--query", {}),
             ("--repo", {}),
             ("--endpoint", {}),
-            ("--method", {"default": "GET"}),
+            ("--method", {"default": B.api_method}),
             ("--event", {"choices": ["APPROVE", "REQUEST_CHANGES", "COMMENT"]}),
             ("--run-id", {"type": int}),
             ("--cache-key", {}),

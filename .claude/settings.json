@@ -3,10 +3,16 @@
     "hooks": {
         "SessionStart": [{
             "matcher": "startup|resume",
-            "hooks": [{
-                "type": "command",
-                "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/load-skill-index.py"
-            }]
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-env.sh"
+                },
+                {
+                    "type": "command",
+                    "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/load-skill-index.py"
+                }
+            ]
         }]
     },
     "permissions": {

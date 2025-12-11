@@ -17,6 +17,7 @@ from typing import Final, NamedTuple
 type Frontmatter = dict[str, str]
 type ParseState = tuple[Frontmatter, str | None, list[str]]
 
+
 class SkillEntry(NamedTuple):
     """Skill with name and trigger phrase."""
 
@@ -65,11 +66,23 @@ def _fold_line(state: ParseState, line: str) -> ParseState:
 
     match (match_, line.startswith(" "), current_field):
         case (m, False, _) if m and m.group(2).strip() in B.multiline:
-            finalized = {**result, current_field: " ".join(parts)} if current_field and parts else result
+            finalized = (
+                {**result, current_field: " ".join(parts)}
+                if current_field and parts
+                else result
+            )
             return (finalized, m.group(1).strip(), [])
         case (m, False, _) if m:
-            finalized = {**result, current_field: " ".join(parts)} if current_field and parts else result
-            return ({**finalized, m.group(1).strip(): m.group(2).strip().strip("'\"")}, None, [])
+            finalized = (
+                {**result, current_field: " ".join(parts)}
+                if current_field and parts
+                else result
+            )
+            return (
+                {**finalized, m.group(1).strip(): m.group(2).strip().strip("'\"")},
+                None,
+                [],
+            )
         case (_, True, f) if f:
             return (result, current_field, [*parts, line.strip()])
         case _:
@@ -78,7 +91,11 @@ def _fold_line(state: ParseState, line: str) -> ParseState:
 
 def _finalize(state: ParseState) -> Frontmatter:
     result, current_field, parts = state
-    return {**result, current_field: " ".join(parts)} if current_field and parts else result
+    return (
+        {**result, current_field: " ".join(parts)}
+        if current_field and parts
+        else result
+    )
 
 
 def _parse_frontmatter(content: str) -> Frontmatter:
@@ -90,15 +107,17 @@ def _parse_frontmatter(content: str) -> Frontmatter:
 def _extract_trigger(desc: str) -> str:
     """Extract 'Use when...' phrase or fallback to first sentence."""
     match = B.trigger_re.search(desc)
-    return match.group(0) if match else (desc.split(".")[0] + "." if "." in desc else desc)
+    return (
+        match.group(0) if match else (desc.split(".")[0] + "." if "." in desc else desc)
+    )
 
 
 def _parse_json_file(path: Path) -> dict | None:
     return (
-        json.loads(path.read_text())
-        if path.exists() and path.is_file()
+        (json.loads(path.read_text()) if path.exists() and path.is_file() else None)
+        if path.suffix == ".json"
         else None
-    ) if path.suffix == ".json" else None
+    )
 
 
 def _skill_to_entry(path: Path) -> SkillEntry | None:
@@ -121,7 +140,9 @@ def _collect_skills(skills_dir: Path) -> list[SkillEntry]:
 
 def _collect_nx_targets(project_dir: Path) -> frozenset[str]:
     nx_json = _parse_json_file(project_dir / "nx.json")
-    return frozenset(nx_json.get("targetDefaults", {}).keys()) if nx_json else frozenset()
+    return (
+        frozenset(nx_json.get("targetDefaults", {}).keys()) if nx_json else frozenset()
+    )
 
 
 # --- [FORMATTERS] -------------------------------------------------------------
@@ -129,7 +150,9 @@ def _format_skill_xml(skill: SkillEntry) -> str:
     return f'    <skill name="{skill.name}">{skill.trigger}</skill>'
 
 
-def _format_group_xml(name: str, targets: tuple[str, ...], available: frozenset[str]) -> str | None:
+def _format_group_xml(
+    name: str, targets: tuple[str, ...], available: frozenset[str]
+) -> str | None:
     found = [t for t in targets if t in available]
     return f'    <group name="{name}">{" ".join(found)}</group>' if found else None
 
@@ -146,18 +169,22 @@ def _format_xml(skills: list[SkillEntry], targets: frozenset[str]) -> str:
     # Add ungrouped targets
     used = {t for _, group in B.target_groups for t in group}
     ungrouped = sorted(targets - used)
-    _ = ungrouped and group_lines.append(f'    <group name="other">{" ".join(ungrouped)}</group>')
+    _ = ungrouped and group_lines.append(
+        f'    <group name="other">{" ".join(ungrouped)}</group>'
+    )
 
-    return "\n".join([
-        "<session_context>",
-        f'  <skills count="{len(skills)}">',
-        *skill_lines,
-        "  </skills>",
-        '  <nx_targets command="nx run-many -t {target}">',
-        *group_lines,
-        "  </nx_targets>",
-        "</session_context>",
-    ])
+    return "\n".join(
+        [
+            "<session_context>",
+            f'  <skills count="{len(skills)}">',
+            *skill_lines,
+            "  </skills>",
+            '  <nx_targets command="nx run-many -t {target}">',
+            *group_lines,
+            "  </nx_targets>",
+            "</session_context>",
+        ]
+    )
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------

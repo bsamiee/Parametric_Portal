@@ -49,6 +49,13 @@ const B = Object.freeze({
 
 enableMapSet();
 
+type ImmerSetter = (fn: (draft: RegistryState) => void) => void;
+
+const updateBrands = (set: ImmerSetter, brand: BrandMetadata): void =>
+    set((draft) => {
+        castDraft(draft.brands).set(brand.brandName, brand);
+    });
+
 // --- [PURE_FUNCTIONS] ------------------------------------------------------
 
 const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError, never> =>
@@ -102,13 +109,7 @@ const createRegistry = (): BrandRegistry => {
                 Effect.runSync(
                     pipe(
                         createBrandEntry(name),
-                        Effect.tap((brand) =>
-                            Effect.sync(() =>
-                                set((draft) => {
-                                    castDraft(draft.brands).set(brand.brandName, brand);
-                                }),
-                            ),
-                        ),
+                        Effect.tap((brand) => Effect.sync(() => updateBrands(set, brand))),
                         Effect.asVoid,
                     ),
                 ),

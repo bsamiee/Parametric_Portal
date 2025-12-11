@@ -70,6 +70,16 @@ const paginationStrategy = {
     rightOnly: (p: PaginationParams): ReadonlyArray<number> => [1, -1, ...range(p.total - p.totalNums + 3, p.total)],
 } as const;
 
+type DotsKey = 'ff' | 'ft' | 'tf' | 'tt';
+const dotsDispatch: Readonly<Record<DotsKey, (p: PaginationParams) => ReadonlyArray<number>>> = {
+    ff: paginationStrategy.leftOnly,
+    ft: paginationStrategy.leftOnly,
+    tf: paginationStrategy.rightOnly,
+    tt: paginationStrategy.both,
+};
+
+const dotsKey = (left: boolean, right: boolean): DotsKey => `${left ? 't' : 'f'}${right ? 't' : 'f'}` as DotsKey;
+
 const computePages = (current: number, total: number, siblingCount: number): ReadonlyArray<number> => {
     const totalNums = siblingCount * 2 + 3;
     const left = Math.max(current - siblingCount, 1);
@@ -79,11 +89,7 @@ const computePages = (current: number, total: number, siblingCount: number): Rea
     const params: PaginationParams = { left, right, showLeftDots, showRightDots, total, totalNums };
     return total <= totalNums
         ? paginationStrategy.full(params)
-        : !showLeftDots && showRightDots
-          ? paginationStrategy.leftOnly(params)
-          : showLeftDots && !showRightDots
-            ? paginationStrategy.rightOnly(params)
-            : paginationStrategy.both(params);
+        : dotsDispatch[dotsKey(showLeftDots, showRightDots)](params);
 };
 
 type TabComponentProps<T> = {

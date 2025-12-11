@@ -40,7 +40,7 @@ jobs:
               with:
                   install: 'false'
 
-            - uses: anthropics/claude-code-action@v1
+            - uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   prompt: |
@@ -93,7 +93,7 @@ jobs:
               with:
                   install: 'false'
 
-            - uses: anthropics/claude-code-action@v1
+            - uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
               with:
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   prompt: |

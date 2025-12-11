@@ -4,7 +4,7 @@ argument-hint: [folder-path] [focus: formatting|voice|taxonomy|dictum|keywords|d
 ---
 
 # [H1][REFINE-STYLE]
->**Dictum:** *Sequential verification ensures style compliance across file sets.*
+>**Dictum:** *Parallel wave dispatch maximizes throughput while preserving validation integrity.*
 
 <br>
 
@@ -51,45 +51,78 @@ Focus: ${2:-none}
 
 ---
 ## [4][WORKFLOW]
->**Dictum:** *Phase execution ensures systematic refinement.*
+>**Dictum:** *Parallel dispatch multiplies throughput via concurrent agent waves.*
 
 <br>
 
-Glob `$1` for `**/*.md`, `**/*.ts`, `**/*.tsx`. Create TodoWrite list. Process each file:
+### [4.1][INITIALIZATION]
 
-1. **[ANALYZE]** — Spawn Task agent (`general-purpose`). Agent reads file, applies style-standards, returns severity-ranked findings with line numbers. Use `report.md` format.
-2. **[VERIFY]** — Read target file. Compare findings vs loaded context (§2). Reject false positives; identify missed issues. Ensure focus domain addressed.
-3. **[EXECUTE]** — Apply corrections via Edit. Preserve semantic meaning.
-4. **[ITERATE]** — Mark file complete. Advance to next. Repeat phases 1-3.
+1. **Glob** `$1` for `**/*.md`, `**/*.ts`, `**/*.tsx`.
+2. **Load** style context via `style-summarizer` agent (single dispatch).
+3. **Create** TodoWrite list—all files pending.
+4. **Partition** files into batches of 10.
+
+### [4.2][WAVE_LOOP]
+
+For each batch (max 10 files):
+
+**Wave 1 — Analysis (Parallel):**
+- Dispatch N `style-analyzer` agents in ONE message (1 file = 1 agent).
+- Each agent receives: `file_path`, `focus`, `style_context`.
+- Collect all wave 1 results before proceeding.
+
+**Wave 2 — Correction (Parallel):**
+- Dispatch N `style-corrector` agents in ONE message (1 file = 1 agent).
+- Each agent receives: `file_path`, `analysis` (from wave 1), `style_context`, `frontmatter_end`.
+- Collect all wave 2 results.
+
+**Batch Completion:**
+- Mark batch files complete in TodoWrite.
+- Advance to next batch.
+- Repeat until all batches processed.
+
+### [4.3][AGENTS]
+
+| [WAVE] | [AGENT]           | [TOOLS]          | [SCOPE]                   |
+| :----: | ----------------- | ---------------- | ------------------------- |
+|   1    | `style-analyzer`  | Read, Glob, Grep | Analysis only (read-only) |
+|   2    | `style-corrector` | Read, Edit       | Validation + correction   |
 
 ---
 ## [5][CONSTRAINTS]
->**Dictum:** *Constraints enforce execution integrity.*
+>**Dictum:** *Constraints enforce parallel execution integrity.*
 
 <br>
 
 [IMPORTANT]:
 - [ALWAYS] Create TodoWrite list before processing.
-- [ALWAYS] Mark one file `in_progress` at time.
-- [ALWAYS] Read file prior to corrections.
-- [ALWAYS] Verify findings against loaded context—reject false positives.
+- [ALWAYS] Load style context ONCE via style-summarizer before waves.
+- [ALWAYS] Dispatch ALL wave agents in ONE message—prevents sequential bottleneck.
+- [ALWAYS] Wait for wave 1 completion before dispatching wave 2.
+- [ALWAYS] Pass wave 1 analysis to corresponding wave 2 agent.
 
 [CRITICAL]:
-- [NEVER] Execute corrections without verification.
+- [NEVER] Dispatch wave 2 without wave 1 results.
 - [NEVER] Skip files—process entire folder.
-- [NEVER] Batch completions—mark done immediately.
-- [NEVER] Trust agent blindly—orchestrator holds validation authority.
-- [NEVER] Ignore non-focus issues—focus is additive, not exclusive.
+- [NEVER] Exceed batch size of 10—agent overhead limit.
+- [NEVER] Mix analysis and correction in same agent—wave separation is mandatory.
+- [NEVER] Modify YAML frontmatter—agents enforce protection.
 
 ---
 ## [6][BEGIN]
->**Dictum:** *Execution sequence initiates refinement.*
+>**Dictum:** *Execution sequence initiates parallel refinement.*
 
 <br>
 
 1. **Glob** `$1`—enumerate files.
-2. **Create** TodoWrite list, all pending.
-3. **Note** focus `$2` when specified.
-4. **Start** first file—mark `in_progress`.
-5. **Execute** phases 1-4 sequentially.
-6. **Report** summary at completion.
+2. **Dispatch** `style-summarizer` agent—load style context.
+3. **Create** TodoWrite list, all pending.
+4. **Note** focus `$2` when specified.
+5. **Partition** files into batches of 10.
+6. **Loop** batches:
+   - Wave 1: Dispatch `style-analyzer` agents (parallel).
+   - Collect wave 1 results.
+   - Wave 2: Dispatch `style-corrector` agents (parallel, fed wave 1).
+   - Collect wave 2 results.
+   - Mark batch complete.
+7. **Report** summary: files processed, issues found, corrections applied, rejections.

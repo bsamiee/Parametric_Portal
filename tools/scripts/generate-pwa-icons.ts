@@ -102,4 +102,4 @@ const generationPipeline = pipe(
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-void Effect.runPromise(generationPipeline);
+Effect.runPromise(generationPipeline).catch(() => process.exit(1));

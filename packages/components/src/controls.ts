@@ -85,9 +85,18 @@ const createButtonControl = (input: ControlInput<'button'>) => {
     return Component;
 };
 
+type InputHtmlType = 'checkbox' | 'radio' | 'text';
+const inputTypeMap: Readonly<Record<string, InputHtmlType>> = {
+    checkbox: 'checkbox',
+    input: 'text',
+    radio: 'radio',
+    textarea: 'text',
+};
+
 const createInputControl = <T extends ControlType>(input: ControlInput<T>) => {
-    const isTextarea = input.type === 'textarea';
-    const htmlType = input.type === 'checkbox' ? 'checkbox' : input.type === 'radio' ? 'radio' : 'text';
+    const controlType = input.type ?? 'input';
+    const isTextarea = controlType === 'textarea';
+    const htmlType = inputTypeMap[controlType] ?? 'text';
     const base = utilities.cls(
         baseCls(input.fullWidth),
         'border border-current/20 bg-transparent',

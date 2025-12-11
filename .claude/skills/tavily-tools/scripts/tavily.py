@@ -8,7 +8,6 @@
 import argparse
 import json
 import os
-import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,32 +35,18 @@ class _B:
     max_depth: int = 1
     max_breadth: int = 20
     limit: int = 50
+    http_method: str = "POST"
+    empty_str: str = ""
+    zero: int = 0
+    topic_choices: tuple[str, ...] = ("general", "news")
+    depth_choices: tuple[str, ...] = ("basic", "advanced")
+    format_choices: tuple[str, ...] = ("markdown", "text")
 
 
 B: Final[_B] = _B()
 
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
-_OP_REFS: Final[dict[str, str]] = {"TAVILY_API_KEY": "op://Tokens/Tavily Auth Token/token"}
-
-
-def _op_read(ref: str) -> str:
-    """Read secret from 1Password CLI, empty on failure."""
-    try:
-        return subprocess.run(["op", "read", ref], capture_output=True, text=True, check=True).stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return ""
-
-
-def _resolve_secret(key: str) -> str:
-    """Resolve env var, expanding op:// via 1Password CLI with fallback."""
-    val = os.environ.get(key, "")
-    return (
-        val if val and not val.startswith("op://") else
-        _op_read(val if val.startswith("op://") else _OP_REFS.get(key, ""))
-    )
-
-
 def _split(s: str) -> list[str]:
     """Split comma-separated string, strip whitespace, filter empty."""
     return [x.strip() for x in s.split(",") if x.strip()] if s else []
@@ -80,7 +65,7 @@ def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
     """Register tool with HTTP config — method, path, transform."""
 
     def register(fn: ToolFn) -> ToolFn:
-        _tools[fn.__name__] = (fn, {"method": "POST", **cfg})
+        _tools[fn.__name__] = (fn, {"method": B.http_method, **cfg})
         return fn
 
     return register
@@ -234,21 +219,23 @@ def map_site(
 
 # --- [DISPATCH] ---------------------------------------------------------------
 def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Execute registered tool via HTTP — pure dispatch, no branching."""
+    """Execute registered tool via HTTP — expression-based status check."""
     fn, cfg = _tools[cmd]
     sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
     body = fn(**{k: args[k] for k in sig if k in args})
-    body["api_key"] = _resolve_secret(B.key_env)
+    body["api_key"] = os.environ.get(B.key_env, "")
 
-    try:
-        with httpx.Client(timeout=B.timeout) as c:
-            r = c.request(cfg["method"], f"{B.base_url}{cfg['path']}", json=body)
-            r.raise_for_status()
-            return {"status": "success", **cfg["transform"](r.json(), args)}
-    except httpx.HTTPStatusError as e:
-        return {"status": "error", "message": str(e), "code": e.response.status_code}
-    except httpx.RequestError as e:
-        return {"status": "error", "message": str(e)}
+    with httpx.Client(timeout=B.timeout) as c:
+        r = c.request(cfg["method"], f"{B.base_url}{cfg['path']}", json=body)
+        return (
+            {"status": "success", **cfg["transform"](r.json(), args)}
+            if r.is_success
+            else (
+                {"status": "error", "message": r.text, "code": r.status_code}
+                if isinstance(r, httpx.Response)
+                else {"status": "error", "message": str(r)}
+            )
+        )
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
@@ -260,39 +247,39 @@ def main() -> int:
         for a, o in [
             ("command", {"choices": _tools.keys()}),
             ("--query", {}),
-            ("--topic", {"default": B.topic, "choices": ["general", "news"]}),
+            ("--topic", {"default": B.topic, "choices": list(B.topic_choices)}),
             (
                 "--search-depth",
-                {"default": B.search_depth, "choices": ["basic", "advanced"]},
+                {"default": B.search_depth, "choices": list(B.depth_choices)},
             ),
             ("--max-results", {"type": int, "default": B.max_results}),
-            ("--time-range", {"default": ""}),
-            ("--days", {"type": int, "default": 0}),
-            ("--include-domains", {"default": ""}),
-            ("--exclude-domains", {"default": ""}),
+            ("--time-range", {"default": B.empty_str}),
+            ("--days", {"type": int, "default": B.zero}),
+            ("--include-domains", {"default": B.empty_str}),
+            ("--exclude-domains", {"default": B.empty_str}),
             ("--include-images", {"action": "store_true"}),
             ("--include-image-descriptions", {"action": "store_true"}),
             ("--include-raw-content", {"action": "store_true"}),
             ("--include-favicon", {"action": "store_true"}),
-            ("--country", {"default": ""}),
-            ("--start-date", {"default": ""}),
-            ("--end-date", {"default": ""}),
+            ("--country", {"default": B.empty_str}),
+            ("--start-date", {"default": B.empty_str}),
+            ("--end-date", {"default": B.empty_str}),
             ("--urls", {}),
             (
                 "--extract-depth",
-                {"default": B.extract_depth, "choices": ["basic", "advanced"]},
+                {"default": B.extract_depth, "choices": list(B.depth_choices)},
             ),
             (
                 "--format",
-                {"default": B.fmt, "dest": "fmt", "choices": ["markdown", "text"]},
+                {"default": B.fmt, "dest": "fmt", "choices": list(B.format_choices)},
             ),
             ("--url", {}),
             ("--max-depth", {"type": int, "default": B.max_depth}),
             ("--max-breadth", {"type": int, "default": B.max_breadth}),
             ("--limit", {"type": int, "default": B.limit}),
-            ("--instructions", {"default": ""}),
-            ("--select-paths", {"default": ""}),
-            ("--select-domains", {"default": ""}),
+            ("--instructions", {"default": B.empty_str}),
+            ("--select-paths", {"default": B.empty_str}),
+            ("--select-domains", {"default": B.empty_str}),
             ("--allow-external", {"action": "store_true"}),
         ]
     ]

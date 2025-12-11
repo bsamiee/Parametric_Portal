@@ -49,6 +49,8 @@ const { gap, px: elPx, py: elPy, r: elR } = B.el.var;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const wrapKey = (w?: boolean): 'true' | 'false' => (w ? 'true' : 'false');
+
 const flexCls = (d?: FlexDir, a?: FlexAlign, j?: FlexJustify, w?: boolean): string =>
     d
         ? utilities.cls(
@@ -56,12 +58,14 @@ const flexCls = (d?: FlexDir, a?: FlexAlign, j?: FlexJustify, w?: boolean): stri
               `${dir}${d}`,
               `${align}${a ?? 'stretch'}`,
               `${justify}${j ?? 'start'}`,
-              wrap[w ? 'true' : 'false'],
+              wrap[wrapKey(w)],
           )
         : '';
 
+const flowCls = (flow?: GridAutoFlow): string | undefined => (flow ? autoFlow[flow] : undefined);
+
 const gridCls = (cols?: number | string, rows?: number | string, flow?: GridAutoFlow): string =>
-    cols || rows ? utilities.cls('grid', flow ? autoFlow[flow] : undefined) : '';
+    cols || rows ? utilities.cls('grid', flowCls(flow)) : '';
 
 const gridStyle = (cols?: number | string, rows?: number | string): CSSProperties => ({
     ...(cols ? { gridTemplateColumns: typeof cols === 'number' ? `repeat(${cols}, minmax(0, 1fr))` : cols } : {}),
