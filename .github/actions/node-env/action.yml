@@ -4,9 +4,6 @@ inputs:
     install:
         description: Run pnpm install
         default: 'true'
-    frozen-lockfile:
-        description: Use --frozen-lockfile flag
-        default: 'true'
 
 runs:
     using: composite
@@ -21,4 +18,4 @@ runs:
         - name: Install dependencies
           if: inputs.install == 'true'
           shell: bash
-          run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}
+          run: pnpm install

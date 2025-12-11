@@ -46,7 +46,7 @@ No `any` • No `var`/`let` (`const` only) • No `if/else` (ternaries/`Option.m
 
 **nx.json**: Targets: build/test/typecheck/check • Crystal: auto-infers from vite.config • 4 workers
 
-**.npmrc**: engine-strict • Node 25.2.1 • save-exact • frozen-lockfile • isolated linker • zero hoist
+**.npmrc**: engine-strict • Node 25.2.1 • save-exact • isolated linker • zero hoist
 
 ## Creating Packages
 

@@ -43,6 +43,8 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 **Usage**:
 ```yaml
 - uses: ./.github/actions/node-env
+  # with:
+  #   install: 'true'  # default, set to 'false' to skip pnpm install
 ```
 
 ---
