@@ -1,3 +1,7 @@
+## 0.6.2 (2025-12-11)
+
+This was a version bump only, there were no code changes.
+
 ## 0.6.1 (2025-12-09)
 
 ### [FEATURES]]
