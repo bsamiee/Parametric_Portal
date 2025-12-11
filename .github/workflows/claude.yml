@@ -13,6 +13,7 @@ on:
 concurrency:
   group: claude-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
   cancel-in-progress: true
+
 jobs:
   claude:
     if: |
@@ -27,17 +28,15 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
-        with:
-          dotnet-version: '8.0.x'
+      - name: Setup Environment
+        uses: ./.github/actions/node-env
 
       - name: Run Claude Code
         id: claude
@@ -49,20 +48,19 @@ jobs:
           claude_args: |
             --model claude-opus-4-5-20251101
             --max-turns 15
-            --append-system-prompt "CRITICAL: Read and strictly follow CLAUDE.md for all C# code.
+            --append-system-prompt "CRITICAL: Read and strictly follow REQUIREMENTS.md and CLAUDE.md.
 
             KEY RULES (build will fail if violated):
-            - NO var - explicit types always
-            - NO if/else - use ternary, switch expressions, pattern matching
-            - Named parameters for non-obvious args
-            - Trailing commas on multi-line collections
-            - K&R brace style (opening brace on same line)
-            - One type per file
-            - Result<T> for all failable operations
-            - UnifiedOperation for polymorphic dispatch
+            - NO any - use branded types via @effect/schema
+            - NO let/var - use const only
+            - NO if/else - use dispatch tables
+            - NO for/while - use .map, .filter, Effect
+            - NO try/catch - use Effect error channel
+            - NO default exports - use named exports
 
-            Run 'dotnet build' to verify changes compile.
-            Run 'dotnet test' for test verification."
+            Run 'nx run-many -t typecheck' to verify type compliance.
+            Run 'nx run-many -t check' for Biome lint.
+            Run 'nx run-many -t test' for test verification."
           settings: |
             {
               "permissions": {
@@ -94,29 +92,24 @@ jobs:
               },
               "agents": [
                 {
-                  "name": "csharp-advanced",
-                  "description": "Advanced C# specialist for dense, algorithmic code",
-                  "prompt": "You are an advanced C# specialist. Read .github/agents/csharp-advanced.agent.md. NO var, NO if/else, NO helpers. Use expression trees, FrozenDictionary dispatch."
+                  "name": "typescript-advanced",
+                  "description": "Advanced TypeScript specialist for Effect-based code",
+                  "prompt": "You are an advanced TypeScript specialist. Read REQUIREMENTS.md. NO any, NO let/var, NO if/else. Use Effect pipelines, dispatch tables, branded types."
                 },
                 {
                   "name": "testing-specialist",
-                  "description": "C# testing with CsCheck and Rhino.Testing",
-                  "prompt": "You are a testing specialist. Read .github/agents/testing-specialist.agent.md. CsCheck for core/, NUnit+Rhino.Testing for rhino/."
+                  "description": "Testing with Vitest and Effect",
+                  "prompt": "You are a testing specialist. Use Vitest with @effect/vitest. Property-based testing with fast-check."
                 },
                 {
                   "name": "refactoring-architect",
                   "description": "Architecture refactoring for density",
-                  "prompt": "You are a refactoring architect. Read .github/agents/refactoring-architect.agent.md. Consolidate, reduce file counts."
-                },
-                {
-                  "name": "rhino-implementation",
-                  "description": "RhinoCommon geometry operations",
-                  "prompt": "You are a RhinoCommon specialist. Read .github/agents/rhino-implementation.agent.md. UnifiedOperation, V.* validation, E.* errors."
+                  "prompt": "You are a refactoring architect. Read REQUIREMENTS.md. Consolidate logic into polymorphic factories. Target 25-30 LOC per feature."
                 },
                 {
                   "name": "cleanup-specialist",
                   "description": "Code cleanup and standards enforcement",
-                  "prompt": "You are a cleanup specialist. Read .github/agents/cleanup-specialist.agent.md. Fix var, if/else, missing commas."
+                  "prompt": "You are a cleanup specialist. Fix any, let/var, if/else chains, try/catch, missing section separators."
                 }
               ]
             }
