@@ -168,6 +168,22 @@ COMMANDS: Final[dict[str, dict[str, str]]] = {
         "opts": "--query TEXT [--limit NUM]",
         "req": "--query",
     },
+    # Discussions
+    "discussion-list": {
+        "desc": "List discussions",
+        "opts": "[--category NAME] [--limit NUM]",
+        "req": "",
+    },
+    "discussion-view": {
+        "desc": "View discussion",
+        "opts": "--number NUM",
+        "req": "--number",
+    },
+    "discussion-comment": {
+        "desc": "Comment on discussion",
+        "opts": "--discussion-id ID --body TEXT",
+        "req": "--discussion-id --body",
+    },
     # Utility
     "repo-view": {"desc": "View repository", "opts": "[--repo NAME]", "req": ""},
     "api": {
@@ -208,11 +224,21 @@ REQUIRED: Final[dict[str, tuple[str, ...]]] = {
     "search-repos": ("query",),
     "search-code": ("query",),
     "search-issues": ("query",),
+    "discussion-view": ("number",),
+    "discussion-comment": ("discussion_id", "body"),
     "api": ("endpoint",),
 }
 
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
+def _repo_vars() -> tuple[str, ...]:
+    """Returns GraphQL owner/repo variable args for current repository."""
+    r = subprocess.run(("gh", "repo", "view", "--json=owner,name"), capture_output=True, text=True)
+    d = json.loads(r.stdout) if r.returncode == 0 else {}
+    owner, repo = d.get("owner", {}).get("login", ""), d.get("name", "")
+    return ("-f", f"owner={owner}", "-f", f"repo={repo}")
+
+
 def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
     """Generates usage error for correct syntax."""
     lines = [f"[ERROR] {message}", "", "[USAGE]"]
@@ -579,6 +605,35 @@ handlers: dict[str, Handler] = {
             "--json=tagName,name,body,isDraft,isPrerelease,publishedAt,assets",
         ),
         lambda o, a: {"tag": a["tag"], "release": json.loads(o)},
+    ),
+    # --- [DISCUSSIONS] --------------------------------------------------------
+    "discussion-list": (
+        lambda a: (
+            "gh", "api", "graphql",
+            "-f", f"query=query($owner:String!,$repo:String!,$limit:Int!){{repository(owner:$owner,name:$repo){{discussions(first:$limit{',categoryId:$cat' if a.get('category') else ''}){{nodes{{number title author{{login}}category{{name}}createdAt comments{{totalCount}}}}}}}}}}",
+            *_repo_vars(),
+            "-F", f"limit={a.get('limit', B.limit)}",
+            *(("-f", f"cat={a['category']}") if a.get("category") else ()),
+        ),
+        lambda o, a: {"discussions": json.loads(o).get("data", {}).get("repository", {}).get("discussions", {}).get("nodes", [])},
+    ),
+    "discussion-view": (
+        lambda a: (
+            "gh", "api", "graphql",
+            "-f", "query=query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){discussion(number:$num){id number title body author{login}category{name}createdAt comments(first:100){nodes{body author{login}createdAt}}}}}",
+            *_repo_vars(),
+            "-F", f"num={a['number']}",
+        ),
+        lambda o, a: {"number": a["number"], "discussion": json.loads(o).get("data", {}).get("repository", {}).get("discussion", {})},
+    ),
+    "discussion-comment": (
+        lambda a: (
+            "gh", "api", "graphql",
+            "-f", "query=mutation($id:ID!,$body:String!){addDiscussionComment(input:{discussionId:$id,body:$body}){comment{id}}}",
+            "-f", f"id={a['discussion_id']}",
+            "-f", f"body={a['body']}",
+        ),
+        lambda o, a: {"discussion_id": a["discussion_id"], "commented": True, "response": json.loads(o)},
     ),
     # --- [RAW_API] ------------------------------------------------------------
     "api": (

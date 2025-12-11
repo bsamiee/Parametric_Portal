@@ -255,7 +255,7 @@ const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<
 
 const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, core: Core): Promise<HygieneResult> => {
     const { resolved, replied, deleted } = result;
-    const body = `### 🧹 PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
+    const body = `### [/] PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
     const { mutate, createCtx: createMutateCtx } = await import('./schema.ts');
     await mutate(
         createMutateCtx({

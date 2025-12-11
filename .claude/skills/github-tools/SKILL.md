@@ -78,7 +78,19 @@ uv run .claude/skills/github-tools/scripts/gh.py search-issues --query "is:open 
 ```
 
 ---
-## [5][OTHER]
+## [5][DISCUSSIONS]
+
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-list
+uv run .claude/skills/github-tools/scripts/gh.py discussion-list --category planning --limit 10
+uv run .claude/skills/github-tools/scripts/gh.py discussion-view --number 42
+uv run .claude/skills/github-tools/scripts/gh.py discussion-comment --discussion-id "D_kwDOABC123" --body "Comment text"
+```
+
+[NOTE] Get `discussion-id` (GraphQL node ID) from `discussion-view` output field `id`.
+
+---
+## [6][OTHER]
 
 ```bash
 uv run .claude/skills/github-tools/scripts/gh.py release-view --tag v1.0.0
@@ -86,7 +98,7 @@ uv run .claude/skills/github-tools/scripts/gh.py api --endpoint "/repos/{owner}/
 ```
 
 ---
-## [6][OUTPUT]
+## [7][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 

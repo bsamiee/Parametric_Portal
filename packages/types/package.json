@@ -1,41 +1,41 @@
 {
-  "dependencies": {
-    "@effect/experimental": "catalog:",
-    "@effect/schema": "catalog:",
-    "date-fns": "catalog:",
-    "effect": "catalog:",
-    "immer": "catalog:",
-    "ts-pattern": "catalog:",
-    "uuid": "catalog:",
-    "zustand": "catalog:"
-  },
-  "devDependencies": {
-    "@fast-check/vitest": "catalog:",
-    "@types/uuid": "catalog:",
-    "fast-check": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  },
-  "exports": {
-    "./temporal": {
-      "import": "./dist/temporal.js",
-      "types": "./dist/temporal.d.ts"
+    "dependencies": {
+        "@effect/experimental": "catalog:",
+        "@effect/schema": "catalog:",
+        "date-fns": "catalog:",
+        "effect": "catalog:",
+        "immer": "catalog:",
+        "ts-pattern": "catalog:",
+        "uuid": "catalog:",
+        "zustand": "catalog:"
     },
-    "./types": {
-      "import": "./dist/types.js",
-      "types": "./dist/types.d.ts"
-    }
-  },
-  "name": "@parametric-portal/types",
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "dev": "vite dev --host",
-    "preview": "vite preview --host",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "type": "module",
-  "version": "0.6.5"
+    "devDependencies": {
+        "@fast-check/vitest": "catalog:",
+        "@types/uuid": "catalog:",
+        "fast-check": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
+    },
+    "exports": {
+        "./temporal": {
+            "import": "./dist/temporal.js",
+            "types": "./dist/temporal.d.ts"
+        },
+        "./types": {
+            "import": "./dist/types.js",
+            "types": "./dist/types.d.ts"
+        }
+    },
+    "name": "@parametric-portal/types",
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "type": "module",
+    "version": "0.6.5"
 }

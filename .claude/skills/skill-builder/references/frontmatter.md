@@ -11,13 +11,13 @@
 
 <br>
 
-| [FIELD]       | [TYPE] | [REQ]  | [CONSTRAINT]                                              |
-| ------------- | ------ | :----: | --------------------------------------------------------- |
-| `name`        | string |  Yes   | Lowercase+numbers+hyphens, max 64, no XML, no reserved^1^ |
-| `description` | string |  Yes   | Non-empty, max 1024 chars, no XML tags                    |
-| `type`        | enum   | Yes^2^ | `simple`, `standard`,`complex` — see structure.md         |
-| `depth`       | enum   | Yes^2^ | `base`,`extended`,`full` — see depth.md                   |
-| `model`       | string |   No   | `opus*`, `sonnet`, `haiku`, or `inherit`                  |
+| [INDEX] | [FIELD]       | [TYPE] | [REQ]  | [CONSTRAINT]                                              |
+| :-----: | ------------- | ------ | :----: | --------------------------------------------------------- |
+|   [1]   | `name`        | string |  Yes   | Lowercase+numbers+hyphens, max 64, no XML, no reserved^1^ |
+|   [2]   | `description` | string |  Yes   | Non-empty, max 1024 chars, no XML tags                    |
+|   [3]   | `type`        | enum   | Yes^2^ | `simple`, `standard`,`complex` — see structure.md         |
+|   [4]   | `depth`       | enum   | Yes^2^ | `base`,`extended`,`full` — see depth.md                   |
+|   [5]   | `model`       | string |   No   | `opus*`, `sonnet`, `haiku`, or `inherit`                  |
 
 ^1^Reserved: "anthropic", "claude" — registration fails.
 ^2^Required by skill-builder for refine workflow.
@@ -32,11 +32,11 @@
 
 <br>
 
-| [VALID]         | [INVALID]       |
-| --------------- | --------------- |
-| `pdf-processor` | `PDF_Processor` |
-| `mcp-builder`   | `mcp.builder`   |
-| `code-reviewer` | `code reviewer` |
+| [INDEX] | [VALID]         | [INVALID]       |
+| :-----: | --------------- | --------------- |
+|   [1]   | `pdf-processor` | `PDF_Processor` |
+|   [2]   | `mcp-builder`   | `mcp.builder`   |
+|   [3]   | `code-reviewer` | `code reviewer` |
 
 **Naming Form:** Gerund preferred (`processing-pdfs`), noun phrase (`pdf-processing`), or action verb (`process-pdfs`).
 
@@ -67,22 +67,22 @@
 
 ### [2.1][PATTERNS]
 
-| [PATTERN]            | [EXAMPLE]                                    | [MECHANISM]               |
-| -------------------- | -------------------------------------------- | ------------------------- |
-| "Use when" clause    | `Use when building MCP servers`              | Direct activation signal  |
-| Enumerated scenarios | `(1) creating, (2) modifying, (3) analyzing` | Parallel pattern matching |
-| Technology embedding | `Python (FastMCP) or TypeScript (SDK)`       | Framework-specific        |
-| File extension       | `working with PDF files (.pdf)`              | Path-based triggering     |
-| Catch-all            | `or any other document tasks`                | Broadens applicability    |
+| [INDEX] | [PATTERN]            | [EXAMPLE]                                    | [MECHANISM]               |
+| :-----: | -------------------- | -------------------------------------------- | ------------------------- |
+|   [1]   | "Use when" clause    | `Use when building MCP servers`              | Direct activation signal  |
+|   [2]   | Enumerated scenarios | `(1) creating, (2) modifying, (3) analyzing` | Parallel pattern matching |
+|   [3]   | Technology embedding | `Python (FastMCP) or TypeScript (SDK)`       | Framework-specific        |
+|   [4]   | File extension       | `working with PDF files (.pdf)`              | Path-based triggering     |
+|   [5]   | Catch-all            | `or any other document tasks`                | Broadens applicability    |
 
 ### [2.2][ANTI_PATTERNS]
 
-| [ANTI_PATTERN]       | [PROBLEM]                        | [FIX]                        |
-| -------------------- | -------------------------------- | ---------------------------- |
-| Vague description    | `Helps with documents`           | Add specifics + "Use when"   |
-| Implementation focus | `Uses Python library docx-js...` | Describe WHEN, not HOW       |
-| First/second person  | `I help you create...`           | Third person: "Creates..."   |
-| Missing file types   | `Work with Word documents`       | Include extension: `(.docx)` |
+| [INDEX] | [ANTI_PATTERN]       | [PROBLEM]                        | [FIX]                        |
+| :-----: | -------------------- | -------------------------------- | ---------------------------- |
+|   [1]   | Vague description    | `Helps with documents`           | Add specifics + "Use when"   |
+|   [2]   | Implementation focus | `Uses Python library docx-js...` | Describe WHEN, not HOW       |
+|   [3]   | First/second person  | `I help you create...`           | Third person: "Creates..."   |
+|   [4]   | Missing file types   | `Work with Word documents`       | Include extension: `(.docx)` |
 
 ---
 ## [3][SYNTAX]
@@ -90,14 +90,14 @@
 
 <br>
 
-| [CONSTRAINT]             | [VIOLATION]                | [RESULT]              |
-| ------------------------ | -------------------------- | --------------------- |
-| `---` on line 1          | Content before delimiter   | Skill not discovered  |
-| `---` closes on own line | Missing closing delimiter  | YAML parse failure    |
-| Spaces only (no tabs)    | Tab indentation            | Parse error           |
-| Quote special characters | Unquoted `: # @ \| >`      | Field value corrupted |
-| Name matches folder      | `name` differs from folder | Registration failure  |
-| Use `>-` for multi-line  | Literal scalar `\|`        | Indexing error        |
+| [INDEX] | [CONSTRAINT]             | [VIOLATION]                | [RESULT]              |
+| :-----: | ------------------------ | -------------------------- | --------------------- |
+|   [1]   | `---` on line 1          | Content before delimiter   | Skill not discovered  |
+|   [2]   | `---` closes on own line | Missing closing delimiter  | YAML parse failure    |
+|   [3]   | Spaces only (no tabs)    | Tab indentation            | Parse error           |
+|   [4]   | Quote special characters | Unquoted `: # @ \| >`      | Field value corrupted |
+|   [5]   | Name matches folder      | `name` differs from folder | Registration failure  |
+|   [6]   | Use `>-` for multi-line  | Literal scalar `\|`        | Indexing error        |
 
 **Multi-line:** Folded scalar `>-` renders as single line:
 ```yaml

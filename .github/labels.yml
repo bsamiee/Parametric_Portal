@@ -92,6 +92,30 @@
   color: "c7d2fe"
   description: "Being shaped into a plan"
 
+# --- Agentic PM Lifecycle Labels ----------------------------------------------
+
+- name: critique-pending
+  color: "fcd34d"
+  description: "Awaiting boardroom review"
+
+- name: critique-passed
+  color: "22c55e"
+  description: "Boardroom approved, ready to decompose"
+
+- name: scope
+  color: "3b82f6"
+  description: "Decomposed with acceptance criteria"
+
+# --- Governance Labels --------------------------------------------------------
+
+- name: drift-flagged
+  color: "f97316"
+  description: "Alignment concerns detected"
+
+- name: checkpoint-required
+  color: "ef4444"
+  description: "Phase checkpoint needed"
+
 # --- Phase Labels -------------------------------------------------------------
 
 - name: 0-foundation

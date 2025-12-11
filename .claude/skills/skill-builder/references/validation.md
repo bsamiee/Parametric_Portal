@@ -11,14 +11,14 @@ Consolidated checklist for skill-builder workflows. SKILL.md §VALIDATION contai
 
 <br>
 
-| [PHASE]    | [GATE]                 | [VERIFICATION]                                       |
-| ---------- | ---------------------- | ---------------------------------------------------- |
-| Parameters | Collection complete    | Scope, Type, Depth captured before reference loading |
-| References | All required loaded    | frontmatter.md, structure.md, depth.md read          |
-| Research   | deep-research complete | Both rounds + critiques finished, findings captured  |
-| Style      | style-summarizer run   | Voice/formatting extracted, report.md produced       |
-| Execute    | Workflow scope matched | create OR refine path executed per Scope parameter   |
-| Artifacts  | All files generated    | SKILL.md + type-appropriate folders created          |
+| [INDEX] | [PHASE]    | [GATE]                 | [VERIFICATION]                                       |
+| :-----: | ---------- | ---------------------- | ---------------------------------------------------- |
+|   [1]   | Parameters | Collection complete    | Scope, Type, Depth captured before reference loading |
+|   [2]   | References | All required loaded    | frontmatter.md, structure.md, depth.md read          |
+|   [3]   | Research   | deep-research complete | Both rounds + critiques finished, findings captured  |
+|   [4]   | Style      | style-summarizer run   | Voice/formatting extracted, report.md produced       |
+|   [5]   | Execute    | Workflow scope matched | create OR refine path executed per Scope parameter   |
+|   [6]   | Artifacts  | All files generated    | SKILL.md + type-appropriate folders created          |
 
 ---
 ## [2][FRONTMATTER]
@@ -98,16 +98,16 @@ Consolidated checklist for skill-builder workflows. SKILL.md §VALIDATION contai
 
 <br>
 
-| [SYMPTOM]                      | [CAUSE]                        | [FIX]                                              |
-| ------------------------------ | ------------------------------ | -------------------------------------------------- |
-| Skill not discovered           | Frontmatter delimiter missing  | Ensure `---` on line 1, closing `---` before body  |
-| Registration fails             | Name contains reserved word    | Remove `anthropic`, `claude` from name field       |
-| Skill invoked incorrectly      | Description lacks triggers     | Add "Use when" clause with specific scenarios      |
-| LOC limit exceeded             | Brute-force trimming attempted | Apply consolidate→restructure→densify→prune        |
-| SKILL.md duplicates references | Content separation violated    | Move HOW to references, keep WHY in SKILL.md       |
-| Folders missing for type       | Structure mismatch             | Create required folders per type table             |
-| Validation scattered           | Per-file validation sections   | Consolidate to validation.md, remove from refs     |
-| Script fails silently          | Missing --help or JSON output  | Add argparse/parseArgs with help flag, JSON output |
+| [INDEX] | [SYMPTOM]                      | [CAUSE]                        | [FIX]                                              |
+| :-----: | ------------------------------ | ------------------------------ | -------------------------------------------------- |
+|   [1]   | Skill not discovered           | Frontmatter delimiter missing  | Ensure `---` on line 1, closing `---` before body  |
+|   [2]   | Registration fails             | Name contains reserved word    | Remove `anthropic`, `claude` from name field       |
+|   [3]   | Skill invoked incorrectly      | Description lacks triggers     | Add "Use when" clause with specific scenarios      |
+|   [4]   | LOC limit exceeded             | Brute-force trimming attempted | Apply consolidate→restructure→densify→prune        |
+|   [5]   | SKILL.md duplicates references | Content separation violated    | Move HOW to references, keep WHY in SKILL.md       |
+|   [6]   | Folders missing for type       | Structure mismatch             | Create required folders per type table             |
+|   [7]   | Validation scattered           | Per-file validation sections   | Consolidate to validation.md, remove from refs     |
+|   [8]   | Script fails silently          | Missing --help or JSON output  | Add argparse/parseArgs with help flag, JSON output |
 
 ---
 ## [7][OPERATIONAL_COMMANDS]

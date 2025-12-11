@@ -94,7 +94,7 @@
                 "chore": { "changelog": false },
                 "ci": { "changelog": false },
                 "docs": { "changelog": { "title": "[DOCUMENTATION]" }, "semverBump": "none" },
-                "feat": { "changelog": { "title": "[FEATURES]]" }, "semverBump": "minor" },
+                "feat": { "changelog": { "title": "[FEATURES]" }, "semverBump": "minor" },
                 "fix": { "changelog": { "title": "[BUG_FIXES]" }, "semverBump": "patch" },
                 "perf": { "changelog": { "title": "[PERFORMANCE]" }, "semverBump": "patch" },
                 "refactor": { "changelog": { "title": "[REFACTORING]" }, "semverBump": "patch" },

@@ -21,6 +21,26 @@ public/build/
 *.d.ts.map
 *.js.map
 
+# --- [PYTHON_ARTIFACTS] -------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+venv/
+ENV/
+env/
+.uv/
+uv.lock
+
 # --- [TEST_COVERAGE] ----------------------------------------------------------
 coverage/
 .nyc_output/
@@ -30,6 +50,8 @@ htmlcov/
 test-results/
 playwright-report/
 playwright/.cache/
+.pytest_cache/
+.hypothesis/
 
 # --- [CACHES] -----------------------------------------------------------------
 .cache/
@@ -70,4 +92,5 @@ lerna-debug.log*
 .LSOverride
 Thumbs.db
 
+# --- [AI_TOOLING] -------------------------------------------------------------
 .gemini/

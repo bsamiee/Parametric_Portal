@@ -65,11 +65,11 @@ Frontmatter indexed at session start (~100 tokens). Description is ONLY field pa
 
 Type gates folder creation. Structure defines WHAT exists; Depth constrains HOW MUCH content.
 
-| [TYPE]   | [FOLDERS]                          |
-| -------- | ---------------------------------- |
-| Simple   | SKILL.md only                      |
-| Standard | +index.md, references/, templates/ |
-| Complex  | +scripts/                          |
+| [INDEX] | [TYPE]   | [FOLDERS]                          |
+| :-----: | -------- | ---------------------------------- |
+|   [1]   | Simple   | SKILL.md only                      |
+|   [2]   | Standard | +index.md, references/, templates/ |
+|   [3]   | Complex  | +scripts/                          |
 
 **Guidance:**
 - `Naming` — Skill folder matches frontmatter `name` exactly. Kebab-case throughout.
@@ -88,11 +88,11 @@ Type gates folder creation. Structure defines WHAT exists; Depth constrains HOW 
 
 Depth enforces LOC limits and nesting rights. Each level adds +50 SKILL.md, +25 reference files (cumulative).
 
-| [DEPTH]  | [SKILL.MD] | [REF_FILE] | [NESTING]      |
-| -------- | :--------: | :--------: | -------------- |
-| Base     |    <300    |    <150    | Flat only      |
-| Extended |    <350    |    <175    | 1 subfolder    |
-| Full     |    <400    |    <200    | 1-3 subfolders |
+| [INDEX] | [DEPTH]  | [SKILL.MD] | [REF_FILE] | [NESTING]      |
+| :-----: | -------- | :--------: | :--------: | -------------- |
+|   [1]   | Base     |    <300    |    <150    | Flat only      |
+|   [2]   | Extended |    <350    |    <175    | 1 subfolder    |
+|   [3]   | Full     |    <400    |    <200    | 1-3 subfolders |
 
 **Guidance:**
 - `Nesting Gate` — Subfolder requires 3+ related files OR distinct domain concern.

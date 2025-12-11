@@ -26,7 +26,8 @@ type ToolFn = Callable[..., dict[str, Any]]
 class _B:
     base_url: str = "https://api.perplexity.ai"
     key_env: str = "PERPLEXITY_API_KEY"
-    timeout: int = 60
+    timeout_default: int = 240
+    timeout_research: int = 600
     max_results: int = 10
     model_ask: str = "sonar"
     model_research: str = "sonar-deep-research"
@@ -209,6 +210,12 @@ def search(query: str, max_results: int, country: str) -> dict:
 
 
 # --- [DISPATCH] ---------------------------------------------------------------
+TIMEOUT_MAP: Final[dict[str, int]] = {
+    "research": B.timeout_research,
+    "reason": B.timeout_research,
+}
+
+
 def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
     """Execute registered tool via HTTP — pure dispatch, no branching."""
     fn, cfg = _tools[cmd]
@@ -218,8 +225,9 @@ def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
         B.header_auth: f"Bearer {os.environ.get(B.key_env, '')}",
         B.header_content_type: B.content_type_json,
     }
+    timeout = TIMEOUT_MAP.get(cmd, B.timeout_default)
     try:
-        with httpx.Client(timeout=B.timeout) as c:
+        with httpx.Client(timeout=timeout) as c:
             r = c.request(
                 cfg["method"], f"{B.base_url}{cfg['path']}", headers=headers, json=body
             )

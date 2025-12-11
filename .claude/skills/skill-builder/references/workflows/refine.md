@@ -13,11 +13,11 @@ Refine scope: compare `deep-research` findings to existing skill, apply changes 
 
 <br>
 
-| [CONDITION]      | [MODE]   | [ACTION]                                     |
-| ---------------- | -------- | -------------------------------------------- |
-| Input = existing | Optimize | Improve density, fix issues, enhance quality |
-| Input > existing | Upgrade  | Expand structure (type) or depth             |
-| Input < existing | Downsize | Combine content, refactor, remove low-value  |
+| [INDEX] | [CONDITION]      | [MODE]   | [ACTION]                                     |
+| :-----: | ---------------- | -------- | -------------------------------------------- |
+|   [1]   | Input = existing | Optimize | Improve density, fix issues, enhance quality |
+|   [2]   | Input > existing | Upgrade  | Expand structure (type) or depth             |
+|   [3]   | Input < existing | Downsize | Combine content, refactor, remove low-value  |
 
 ---
 ## [2][GAP_CATEGORIES]
@@ -25,13 +25,13 @@ Refine scope: compare `deep-research` findings to existing skill, apply changes 
 
 <br>
 
-| [CATEGORY] | [SIGNALS]                                |
-| ---------- | ---------------------------------------- |
-| Missing    | Research reveals undocumented capability |
-| Incorrect  | Existing content contradicts research    |
-| Outdated   | Deprecated patterns, superseded APIs     |
-| Redundant  | SKILL.md duplicates reference content    |
-| Tiered     | Basic/advanced/expert language present   |
+| [INDEX] | [CATEGORY] | [SIGNALS]                                |
+| :-----: | ---------- | ---------------------------------------- |
+|   [1]   | Missing    | Research reveals undocumented capability |
+|   [2]   | Incorrect  | Existing content contradicts research    |
+|   [3]   | Outdated   | Deprecated patterns, superseded APIs     |
+|   [4]   | Redundant  | SKILL.md duplicates reference content    |
+|   [5]   | Tiered     | Basic/advanced/expert language present   |
 
 ---
 ## [3][PRIORITY_RANKING]
@@ -39,13 +39,13 @@ Refine scope: compare `deep-research` findings to existing skill, apply changes 
 
 <br>
 
-| [PRIORITY] | [CLASS]         | [ACTION]                         |
-| :--------: | --------------- | -------------------------------- |
-|     0      | Incorrect       | Fix immediately—misinformation   |
-|     1      | Tiered language | Remove—violates singular quality |
-|     2      | Redundant       | Consolidate—no duplication       |
-|     3      | Outdated        | Update with research findings    |
-|     4      | Missing         | Add if within LOC headroom       |
+| [INDEX] | [PRIORITY] | [CLASS]         | [ACTION]                         |
+| :-----: | :--------: | --------------- | -------------------------------- |
+|   [1]   |     0      | Incorrect       | Fix immediately—misinformation   |
+|   [2]   |     1      | Tiered language | Remove—violates singular quality |
+|   [3]   |     2      | Redundant       | Consolidate—no duplication       |
+|   [4]   |     3      | Outdated        | Update with research findings    |
+|   [5]   |     4      | Missing         | Add if within LOC headroom       |
 
 ---
 ## [4][EXECUTION_ORDER]

@@ -15,11 +15,11 @@ Create scope: author new skill artifacts from `deep-research` findings.
 
 Scale `deep-research` agent count by Type:
 
-| [TYPE]   | [ROUND_1] | [ROUND_2] |
-| -------- | :-------: | :-------: |
-| Simple   | 6 agents  | 6 agents  |
-| Standard | 8 agents  | 8 agents  |
-| Complex  | 10 agents | 10 agents |
+| [INDEX] | [TYPE]   | [ROUND_1] | [ROUND_2] |
+| :-----: | -------- | :-------: | :-------: |
+|   [1]   | Simple   | 6 agents  | 6 agents  |
+|   [2]   | Standard | 8 agents  | 8 agents  |
+|   [3]   | Complex  | 10 agents | 10 agents |
 
 ---
 ## [2][ARTIFACT_ORDER]
@@ -27,14 +27,14 @@ Scale `deep-research` agent count by Type:
 
 <br>
 
-| [ARTIFACT]      | [TYPE_GATE]      | [PURPOSE]                              |
-| --------------- | ---------------- | -------------------------------------- |
-| SKILL.md        | All              | Main skill file with Tasks + Guidance  |
-| index.md        | Standard/Complex | Reference table for all files          |
-| validation.md   | Standard/Complex | Operational checklists, error symptoms |
-| references/*.md | Standard/Complex | Domain knowledge files                 |
-| templates/*.md  | Standard/Complex | Output scaffolds with `${placeholder}` |
-| scripts/*.py    | Complex          | Deterministic automation               |
+| [INDEX] | [ARTIFACT]      | [TYPE_GATE]      | [PURPOSE]                              |
+| :-----: | --------------- | ---------------- | -------------------------------------- |
+|   [1]   | SKILL.md        | All              | Main skill file with Tasks + Guidance  |
+|   [2]   | index.md        | Standard/Complex | Reference table for all files          |
+|   [3]   | validation.md   | Standard/Complex | Operational checklists, error symptoms |
+|   [4]   | references/*.md | Standard/Complex | Domain knowledge files                 |
+|   [5]   | templates/*.md  | Standard/Complex | Output scaffolds with `${placeholder}` |
+|   [6]   | scripts/*.py    | Complex          | Deterministic automation               |
 
 ---
 ## [3][CROSS_REFERENCE]

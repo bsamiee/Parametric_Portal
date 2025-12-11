@@ -3,6 +3,9 @@ contact_links:
     - name: Documentation
       url: https://github.com/bsamiee/Parametric_Portal/wiki
       about: Check the wiki for documentation and guides
-    - name: Discussions
-      url: https://github.com/bsamiee/Parametric_Portal/discussions
-      about: Ask questions and share ideas with the community
+    - name: Planning
+      url: https://github.com/bsamiee/Parametric_Portal/discussions/categories/planning
+      about: Start new projects and brainstorm ideas (AI-driven lifecycle)
+    - name: Q&A
+      url: https://github.com/bsamiee/Parametric_Portal/discussions/categories/q-a
+      about: Ask questions and get community support
