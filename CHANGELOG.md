@@ -1,3 +1,13 @@
+## 0.6.5 (2025-12-11)
+
+### [BUG_FIXES]
+
+- **workflows:** update Claude workflows for TypeScript monorepo ([e66fbd0](https://github.com/bsamiee/Parametric_Portal/commit/e66fbd0))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.4 (2025-12-11)
 
 ### [REFACTORING]
