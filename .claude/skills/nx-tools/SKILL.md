@@ -11,80 +11,47 @@ description: >-
 ---
 
 # [H1][NX-TOOLS]
->**Dictum:** *Single polymorphic script replaces MCP tools.*
+>**Dictum:** *Uniform interfaces eliminate invocation ambiguity.*
 
 <br>
 
-Execute nx workspace queries via unified Python CLI. Zero MCP tokens loaded.
+Query Nx workspace with unified Python CLI.
 
----
-## [1][COMMANDS]
->**Dictum:** *Dispatch table routes all commands.*
-
-<br>
-
-| [CMD]      | [NX_EQUIVALENT]               | [ARGS]                          |
-| ---------- | ----------------------------- | ------------------------------- |
-| workspace  | `nx show projects --json`     | None                            |
-| project    | `nx show project <n> --json`  | `--name <project>` (required)   |
-| affected   | `nx show projects --affected` | `--base main` (default)         |
-| run        | `nx run-many -t <target>`     | `--target <name>` (required)    |
-| tokens     | Token counter utility         | `--path <file/dir>` (optional)  |
-| path       | Returns workspace root        | None                            |
-| generators | `nx list`                     | None                            |
-| schema     | `nx g <gen> --help`           | `--generator <name>` (required) |
-| graph      | `nx graph --file=<path>`      | `--output .nx/graph.json`       |
-| docs       | `nx <topic> --help`           | `--topic <cmd>` (optional)      |
-
----
-## [2][USAGE]
->**Dictum:** *Single script, polymorphic dispatch.*
-
-<br>
+[IMPORTANT] Zero-arg commands default to `base=main`, `output=.nx/graph.json`.
 
 ```bash
-# Unified invocation pattern
-uv run .claude/skills/nx-tools/scripts/nx.py <command> [args]
-
-# Workspace queries
+# Zero-arg commands
 uv run .claude/skills/nx-tools/scripts/nx.py workspace
-uv run .claude/skills/nx-tools/scripts/nx.py project --name parametric-portal
-uv run .claude/skills/nx-tools/scripts/nx.py affected --base main
+uv run .claude/skills/nx-tools/scripts/nx.py path
+uv run .claude/skills/nx-tools/scripts/nx.py generators
+uv run .claude/skills/nx-tools/scripts/nx.py affected
+uv run .claude/skills/nx-tools/scripts/nx.py affected --base develop
+uv run .claude/skills/nx-tools/scripts/nx.py graph
+uv run .claude/skills/nx-tools/scripts/nx.py docs
+uv run .claude/skills/nx-tools/scripts/nx.py docs --topic affected
+uv run .claude/skills/nx-tools/scripts/nx.py tokens --path CLAUDE.md
 
-# Run targets
+# Required-arg commands
+uv run .claude/skills/nx-tools/scripts/nx.py project --name parametric-portal
 uv run .claude/skills/nx-tools/scripts/nx.py run --target build
 uv run .claude/skills/nx-tools/scripts/nx.py run --target typecheck
-
-# Token counting
-uv run .claude/skills/nx-tools/scripts/nx.py tokens --path CLAUDE.md
-uv run .claude/skills/nx-tools/scripts/nx.py tokens --path .claude/skills
-
-# Generators
-uv run .claude/skills/nx-tools/scripts/nx.py generators
 uv run .claude/skills/nx-tools/scripts/nx.py schema --generator @nx/react:app
-
-# Utilities
-uv run .claude/skills/nx-tools/scripts/nx.py path
-uv run .claude/skills/nx-tools/scripts/nx.py graph --output .nx/graph.json
-uv run .claude/skills/nx-tools/scripts/nx.py docs --topic affected
 ```
 
 ---
-## [3][OUTPUT]
->**Dictum:** *JSON output for Claude parsing.*
+## [1][OUTPUT]
 
-<br>
+Commands return `{"status": "success|error", ...}`.
 
-All commands output JSON to stdout with `{"status": "success|error", ...}`.
-
-**Response Fields by Command:**
-- `workspace` — `{projects: string[]}`
-- `project` — `{name: string, project: object}`
-- `affected` — `{base: string, affected: string[]}`
-- `run` — `{target: string, output: string}`
-- `tokens` — `{path: string, output: string}`
-- `path` — `{path: string}`
-- `generators` — `{generators: string}`
-- `schema` — `{generator: string, schema: string}`
-- `graph` — `{file: string}`
-- `docs` — `{topic: string, docs: string}`
+| [INDEX] | [CMD]        | [RESPONSE]                            |
+| :-----: | ------------ | ------------------------------------- |
+|   [1]   | `workspace`  | `{projects: string[]}`                |
+|   [2]   | `project`    | `{name: string, project: object}`     |
+|   [3]   | `affected`   | `{base: string, affected: string[]}`  |
+|   [4]   | `run`        | `{target: string, output: string}`    |
+|   [5]   | `generators` | `{generators: string}`                |
+|   [6]   | `schema`     | `{generator: string, schema: string}` |
+|   [7]   | `graph`      | `{file: string}`                      |
+|   [8]   | `docs`       | `{topic: string, docs: string}`       |
+|   [9]   | `tokens`     | `{path: string, output: string}`      |
+|  [10]   | `path`       | `{path: string}`                      |

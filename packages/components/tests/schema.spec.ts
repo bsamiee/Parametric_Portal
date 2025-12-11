@@ -71,7 +71,7 @@ describe('components schema', () => {
             it('produces positive values', () => {
                 const scale = resolve('scale', { scale: 5 });
                 const result = compute[key](scale);
-                expect(parseFloat(result)).toBeGreaterThan(0);
+                expect(Number.parseFloat(result)).toBeGreaterThan(0);
             });
         });
 
@@ -96,7 +96,7 @@ describe('components schema', () => {
             const c = utilities.computeScale(s);
             expect(Object.keys(c).length).toBe(36);
             for (const v of Object.values(c)) {
-                expect(parseFloat(v)).toBeGreaterThan(0);
+                expect(Number.parseFloat(v)).toBeGreaterThan(0);
             }
         });
     });

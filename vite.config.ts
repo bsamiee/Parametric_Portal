@@ -115,7 +115,7 @@ const browsers = (): Browsers =>
                         Math.max(
                             B.browsers[k],
                             ...browserslist(c)
-                                .map((q) => q.match(new RegExp(`^${k}\\s+(\\d+)`))?.[1])
+                                .map((q) => q.match(new RegExp(String.raw`^${k}\s+(\d+)`))?.[1])
                                 .filter((v): v is string => v !== undefined)
                                 .map(Number),
                         ),
@@ -189,7 +189,7 @@ const icons = () => [
 ];
 const imgOpt = (q: { readonly avif: number; readonly jpeg: number; readonly png: number; readonly webp: number }) => ({
     avif: { lossless: false, quality: q.avif },
-    exclude: /^(?:virtual:)|node_modules/,
+    exclude: /^(?:virtual:|node_modules)/,
     includePublic: true,
     jpeg: { progressive: true, quality: q.jpeg },
     logStats: true,

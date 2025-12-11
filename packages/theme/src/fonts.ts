@@ -59,6 +59,10 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
+const normalizeInputs = (input: FontInput | ReadonlyArray<FontInput>): ReadonlyArray<FontInput> =>
+    isArray(input) ? input : [input];
+
 const fn = {
     // Invert undefined check: output quoted family-only when no fallback provided.
     fallbackStack: (family: string, fallback: ReadonlyArray<string> | undefined): string =>
@@ -104,7 +108,10 @@ const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[],
                     Option.fromNullable(input.features),
                     Option.match({
                         onNone: () => '',
-                        onSome: (fs) => `  font-feature-settings: ${fs.map((f) => `"${f}"`).join(', ')};`,
+                        onSome: (fs) => {
+                            const formatted = fs.map((f) => `"${f}"`).join(', ');
+                            return `  font-feature-settings: ${formatted};`;
+                        },
                     }),
                 ),
                 '}',
@@ -179,7 +186,7 @@ const defineFonts = (inputs: FontInput | ReadonlyArray<FontInput>): Plugin => ({
         id === VIRTUAL_MODULE_ID.resolved
             ? Effect.runSync(
                   pipe(
-                      Effect.forEach(Array.isArray(inputs) ? inputs : [inputs], createFontBlocks),
+                      Effect.forEach(normalizeInputs(inputs), createFontBlocks),
                       Effect.map((results) => ['@import "tailwindcss";', ...results.flat()].join('\n\n')),
                   ),
               )

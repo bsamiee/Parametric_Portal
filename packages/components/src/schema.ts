@@ -600,7 +600,7 @@ const createBuilderContext = <K extends string, R extends SchemaKey>(
     const scale = resolve('scale', input.scale);
     const computed = utilities.computeScale(scale);
     const resolved = Object.fromEntries(
-        resolvers.map((key) => [key, resolve(key, input[key as keyof TuningConfig] as never)]),
+        resolvers.map((key) => [key, resolve(key, input[key] as Inputs[typeof key] | undefined)]),
     ) as { readonly [K in R]: Resolved[K] };
     return { ...resolved, computed, scale, vars: utilities.cssVars(computed, cssPrefix) };
 };

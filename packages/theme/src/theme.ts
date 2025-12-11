@@ -97,8 +97,14 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
+const normalizeInputs = (input: ThemeInput | ReadonlyArray<ThemeInput>): ReadonlyArray<ThemeInput> =>
+    isArray(input) ? input : [input];
+
+const formatAlphaChannel = (a: number): string => (a < 1 ? ` / ${a.toFixed(2)}` : '');
+
 const oklchToCss = (color: OklchColor): string =>
-    `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${color.a < 1 ? ` / ${color.a.toFixed(2)}` : ''})`;
+    `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${formatAlphaChannel(color.a)})`;
 
 const formatColorStep = (name: string, step: number, color: OklchColor | null | undefined): ReadonlyArray<string> =>
     color ? [`  --color-${name}-${step}: ${oklchToCss(color)};`] : [];
@@ -200,7 +206,7 @@ const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin =>
         id === VIRTUAL_MODULE_ID.resolved
             ? Effect.runSync(
                   pipe(
-                      Effect.forEach(Array.isArray(inputs) ? inputs : [inputs], (input) =>
+                      Effect.forEach(normalizeInputs(inputs), (input) =>
                           pipe(
                               S.decode(ThemeInputSchema)(input),
                               Effect.flatMap(createThemeBlock),

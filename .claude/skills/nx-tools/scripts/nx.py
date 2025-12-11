@@ -1,10 +1,9 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # ///
-"""Nx workspace CLI — unified polymorphic interface."""
+"""Nx workspace CLI — polymorphic interface with zero-arg defaults."""
 
 # --- [IMPORTS] ----------------------------------------------------------------
-import argparse
 import json
 import os
 import subprocess
@@ -24,160 +23,212 @@ type Handler = tuple[CmdBuilder, OutputFormatter]
 # --- [CONSTANTS] --------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class _B:
-    # CLI
     npx: str = "npx"
     nx: str = "nx"
     tsx: str = "tsx"
-
-    # Commands
     show: str = "show"
     run_many: str = "run-many"
-    list_cmd: str = "list"
-    generate: str = "g"
-    graph: str = "graph"
-
-    # Subcommands
-    projects: str = "projects"
-    project: str = "project"
-
-    # Flags
-    json_flag: str = "--json"
-    affected_flag: str = "--affected"
     base_prefix: str = "--base="
     file_prefix: str = "--file="
-    target_flag: str = "-t"
-    help_flag: str = "--help"
-
-    # Defaults
     base: str = "main"
     output: str = ".nx/graph.json"
     target: str = "build"
-    general: str = "general"
-
-    # Paths
     token_script: str = "tools/scripts/count-tokens.ts"
     cwd_env: str = "CLAUDE_PROJECT_DIR"
-
-    # JSON keys
-    key_projects: str = "projects"
-    key_name: str = "name"
-    key_project: str = "project"
-    key_base: str = "base"
-    key_affected: str = "affected"
-    key_target: str = "target"
-    key_output: str = "output"
-    key_path: str = "path"
-    key_generators: str = "generators"
-    key_generator: str = "generator"
-    key_schema: str = "schema"
-    key_file: str = "file"
-    key_topic: str = "topic"
-    key_docs: str = "docs"
-    key_status: str = "status"
-    key_message: str = "message"
-
-    # Status
-    success: str = "success"
-    error: str = "error"
     failed_suffix: str = " failed"
 
 
 B: Final[_B] = _B()
 
+SCRIPT_PATH: Final[str] = "uv run .claude/skills/nx-tools/scripts/nx.py"
+
+COMMANDS: Final[dict[str, dict[str, str]]] = {
+    "workspace": {
+        "desc": "List all projects in workspace",
+        "opts": "",
+        "req": "",
+    },
+    "path": {
+        "desc": "Get workspace root path",
+        "opts": "",
+        "req": "",
+    },
+    "generators": {
+        "desc": "List available generators",
+        "opts": "",
+        "req": "",
+    },
+    "project": {
+        "desc": "View project configuration",
+        "opts": "--name PROJECT",
+        "req": "--name",
+    },
+    "run": {
+        "desc": "Run target across projects",
+        "opts": "--target TARGET",
+        "req": "--target",
+    },
+    "schema": {
+        "desc": "View generator schema",
+        "opts": "--generator NAME",
+        "req": "--generator",
+    },
+    "affected": {
+        "desc": "List affected projects",
+        "opts": "[--base main]",
+        "req": "",
+    },
+    "graph": {
+        "desc": "Generate dependency graph",
+        "opts": "[--output .nx/graph.json]",
+        "req": "",
+    },
+    "tokens": {
+        "desc": "Count tokens in file/directory",
+        "opts": "[--path PATH]",
+        "req": "",
+    },
+    "docs": {
+        "desc": "View Nx command documentation",
+        "opts": "[--topic COMMAND]",
+        "req": "",
+    },
+}
+
+REQUIRED: Final[dict[str, tuple[str, ...]]] = {
+    "project": ("name",),
+    "run": ("target",),
+    "schema": ("generator",),
+}
+
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
-def nx_cmd(*parts: str) -> tuple[str, ...]:
-    """Build Nx command tuple."""
-    return (B.npx, B.nx, *parts)
+def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
+    """Generate usage error with correct syntax."""
+    return {
+        "status": "error",
+        "message": "\n".join(
+            [
+                f"[ERROR] {message}",
+                "",
+                "[USAGE]",
+                *(
+                    [
+                        f"  {SCRIPT_PATH} {cmd}{' ' + COMMANDS[cmd]['opts'] if COMMANDS[cmd]['opts'] else ''}",
+                        *(
+                            [f"  Required: {COMMANDS[cmd]['req']}"]
+                            if COMMANDS[cmd]["req"]
+                            else []
+                        ),
+                    ]
+                    if cmd and cmd in COMMANDS
+                    else [
+                        f"  {SCRIPT_PATH} <command> [options]",
+                        "",
+                        "[ZERO_ARG_COMMANDS]",
+                        *[
+                            f"  {n:<12} {i['desc']}"
+                            for n, i in COMMANDS.items()
+                            if not i["req"]
+                        ],
+                        "",
+                        "[REQUIRED_ARG_COMMANDS]",
+                        *[
+                            f"  {n:<12} {i['desc']} ({i['req']})"
+                            for n, i in COMMANDS.items()
+                            if i["req"]
+                        ],
+                        "",
+                        "[EXAMPLES]",
+                        f"  {SCRIPT_PATH} workspace",
+                        f"  {SCRIPT_PATH} project --name parametric-portal",
+                        f"  {SCRIPT_PATH} run --target build",
+                    ]
+                ),
+            ]
+        ),
+    }
 
 
-def parse_json(output: str) -> Any:
-    """Parse JSON output."""
-    return json.loads(output)
-
-
-def strip_output(output: str) -> str:
-    """Strip whitespace from output."""
-    return output.strip()
-
-
-def get_or_default(args: Args, key: str, default: str) -> str:
-    """Get argument value or default."""
-    return args[key] or default
-
-
-def base_flag(base: str) -> str:
-    """Build base flag."""
-    return f"{B.base_prefix}{base}"
-
-
-def file_flag(file: str) -> str:
-    """Build file flag."""
-    return f"{B.file_prefix}{file}"
+def _validate_args(cmd: str, args: Args) -> list[str]:
+    """Return list of missing required arguments for command."""
+    return [
+        f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if not args.get(k)
+    ]
 
 
 # --- [DISPATCH_TABLES] --------------------------------------------------------
 handlers: dict[str, Handler] = {
     "workspace": (
-        lambda _: nx_cmd(B.show, B.projects, B.json_flag),
-        lambda o, _: {B.key_projects: parse_json(o)},
+        lambda _: (B.npx, B.nx, B.show, "projects", "--json"),
+        lambda o, _: {"projects": json.loads(o)},
     ),
     "project": (
-        lambda a: nx_cmd(
-            B.show, B.project, get_or_default(a, B.key_name, ""), B.json_flag
-        ),
-        lambda o, a: {B.key_name: a[B.key_name], B.key_project: parse_json(o)},
+        lambda a: (B.npx, B.nx, B.show, "project", a.get("name") or "", "--json"),
+        lambda o, a: {"name": a.get("name", ""), "project": json.loads(o)},
     ),
     "affected": (
-        lambda a: nx_cmd(
+        lambda a: (
+            B.npx,
+            B.nx,
             B.show,
-            B.projects,
-            B.affected_flag,
-            base_flag(a[B.key_base]),
-            B.json_flag,
+            "projects",
+            "--affected",
+            f"{B.base_prefix}{a.get('base') or B.base}",
+            "--json",
         ),
-        lambda o, a: {B.key_base: a[B.key_base], B.key_affected: parse_json(o)},
+        lambda o, a: {
+            "base": a.get("base") or B.base,
+            "affected": json.loads(o),
+        },
     ),
     "run": (
-        lambda a: nx_cmd(
-            B.run_many, B.target_flag, get_or_default(a, B.key_target, B.target)
-        ),
-        lambda o, a: {B.key_target: a[B.key_target], B.key_output: strip_output(o)},
+        lambda a: (B.npx, B.nx, B.run_many, "-t", a.get("target") or B.target),
+        lambda o, a: {
+            "target": a.get("target") or B.target,
+            "output": o.strip(),
+        },
     ),
     "tokens": (
-        lambda a: (B.npx, B.tsx, B.token_script, get_or_default(a, B.key_path, ".")),
-        lambda o, a: {B.key_path: a[B.key_path], B.key_output: strip_output(o)},
+        lambda a: (B.npx, B.tsx, B.token_script, a.get("path") or "."),
+        lambda o, a: {
+            "path": a.get("path") or ".",
+            "output": o.strip(),
+        },
     ),
     "path": (
         lambda _: os.environ.get(B.cwd_env, os.getcwd()),
-        lambda o, _: {B.key_path: o},
+        lambda o, _: {"path": o},
     ),
     "generators": (
-        lambda _: nx_cmd(B.list_cmd),
-        lambda o, _: {B.key_generators: strip_output(o)},
+        lambda _: (B.npx, B.nx, "list"),
+        lambda o, _: {"generators": o.strip()},
     ),
     "schema": (
-        lambda a: nx_cmd(
-            B.generate, get_or_default(a, B.key_generator, ""), B.help_flag
-        ),
+        lambda a: (B.npx, B.nx, "g", a.get("generator") or "", "--help"),
         lambda o, a: {
-            B.key_generator: a[B.key_generator],
-            B.key_schema: strip_output(o),
+            "generator": a.get("generator", ""),
+            "schema": o.strip(),
         },
     ),
     "graph": (
-        lambda a: nx_cmd(B.graph, file_flag(a[B.key_output])),
-        lambda o, a: {B.key_file: a[B.key_output]},
+        lambda a: (
+            B.npx,
+            B.nx,
+            "graph",
+            f"{B.file_prefix}{a.get('output') or B.output}",
+        ),
+        lambda o, a: {"file": a.get("output") or B.output},
     ),
     "docs": (
         lambda a: (
-            nx_cmd(a[B.key_topic], B.help_flag)
-            if a[B.key_topic]
-            else nx_cmd(B.help_flag)
+            (B.npx, B.nx, a.get("topic", ""), "--help")
+            if a.get("topic")
+            else (B.npx, B.nx, "--help")
         ),
         lambda o, a: {
-            B.key_topic: a[B.key_topic] or B.general,
-            B.key_docs: strip_output(o),
+            "topic": a.get("topic") or "general",
+            "docs": o.strip(),
         },
     ),
 }
@@ -185,44 +236,58 @@ handlers: dict[str, Handler] = {
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    [
-        p.add_argument(a, **o)
-        for a, o in [
-            ("command", {"choices": handlers.keys()}),
-            (f"--{B.key_name}", {}),
-            (f"--{B.key_base}", {"default": B.base}),
-            (f"--{B.key_target}", {}),
-            (f"--{B.key_path}", {}),
-            (f"--{B.key_generator}", {}),
-            (f"--{B.key_output}", {"default": B.output}),
-            (f"--{B.key_topic}", {}),
-        ]
-    ]
+    """CLI entry point — zero-arg defaults with optional args."""
+    if not (args := sys.argv[1:]) or args[0] in ("-h", "--help"):
+        print(json.dumps(_usage_error("No command specified"), indent=2))
+        return 1
 
-    args = vars(p.parse_args())
-    builder, formatter = handlers[args["command"]]
-    cmd = builder(args)
+    if (cmd := args[0]) not in COMMANDS:
+        print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2))
+        return 1
 
-    match cmd:
+    # Parse optional flags (--key value or --key=value)
+    opts: Args = {}
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            if "=" in arg:
+                key, val = arg[2:].split("=", 1)
+                opts[key.replace("-", "_")] = val
+            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
+                opts[arg[2:].replace("-", "_")] = args[i + 1]
+                i += 1
+            else:
+                opts[arg[2:].replace("-", "_")] = True
+        i += 1
+
+    if missing := _validate_args(cmd, opts):
+        print(
+            json.dumps(
+                _usage_error(f"Missing required: {', '.join(missing)}", cmd), indent=2
+            )
+        )
+        return 1
+
+    builder, formatter = handlers[cmd]
+    cmd_tuple = builder(opts)
+
+    match cmd_tuple:
         case str():
-            output = cmd
+            output = cmd_tuple
         case tuple() if (
-            r := subprocess.run(cmd, capture_output=True, text=True)
+            r := subprocess.run(cmd_tuple, capture_output=True, text=True)
         ).returncode == 0:
             output = r.stdout or r.stderr
         case _:
             output = None
 
     result = (
-        {B.key_status: B.success, **formatter(output, args)}
+        {"status": "success", **formatter(output, opts)}
         if output
-        else {
-            B.key_status: B.error,
-            B.key_message: f"{args['command']}{B.failed_suffix}",
-        }
+        else {"status": "error", "message": f"{cmd}{B.failed_suffix}"}
     )
-    print(json.dumps(result))
+    print(json.dumps(result, indent=2))
     return 0 if output else 1
 
 

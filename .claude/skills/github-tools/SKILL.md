@@ -9,168 +9,91 @@ description: >-
 ---
 
 # [H1][GITHUB-TOOLS]
->**Dictum:** *Single polymorphic script replaces MCP tools.*
+>**Dictum:** *Standardized invocation reduces agent errors.*
 
 <br>
 
-Execute GitHub queries via unified Python CLI. Zero MCP tokens loaded.
+Invokes gh CLI commands through Python wrapper.
 
----
-## [1][COMMANDS]
->**Dictum:** *Dispatch table routes all commands.*
-
-<br>
-
-> [!NOTE]
-> **OAuth Scopes**: Most commands work with default `gh` auth. Project commands require additional scope:
-> ```bash
-> gh auth refresh -s read:project
-> ```
-
-<br>
-
-### [1.1][ISSUES]
-| [CMD]         | [GH_EQUIVALENT]        | [ARGS]                                   |
-| ------------- | ---------------------- | ---------------------------------------- |
-| issue-list    | `gh issue list`        | `--state` `--limit`                      |
-| issue-view    | `gh issue view <n>`    | `--number` (required)                    |
-| issue-create  | `gh issue create`      | `--title` `--body` (required)            |
-| issue-comment | `gh issue comment <n>` | `--number` `--body` (required)           |
-| issue-close   | `gh issue close <n>`   | `--number` (required)                    |
-| issue-edit    | `gh issue edit <n>`    | `--number` `--title` `--body` `--labels` |
-| issue-reopen  | `gh issue reopen <n>`  | `--number` (required)                    |
-| issue-pin     | `gh issue pin <n>`     | `--number` (required)                    |
-
-### [1.2][PULL_REQUESTS]
-| [CMD]     | [GH_EQUIVALENT]               | [ARGS]                                   |
-| --------- | ----------------------------- | ---------------------------------------- |
-| pr-list   | `gh pr list`                  | `--state` `--limit`                      |
-| pr-view   | `gh pr view <n>`              | `--number` (required)                    |
-| pr-create | `gh pr create`                | `--title` `--body` `--base`              |
-| pr-diff   | `gh pr diff <n>`              | `--number` (required)                    |
-| pr-files  | `gh pr view <n> --json=files` | `--number` (required)                    |
-| pr-checks | `gh pr checks <n>`            | `--number` (required)                    |
-| pr-edit   | `gh pr edit <n>`              | `--number` `--title` `--body` `--labels` |
-| pr-close  | `gh pr close <n>`             | `--number` (required)                    |
-| pr-ready  | `gh pr ready <n>`             | `--number` (required)                    |
-| pr-merge  | `gh pr merge <n> --squash`    | `--number` (required)                    |
-| pr-review | `gh pr review <n>`            | `--number` `--event` `--body`            |
-
-### [1.3][WORKFLOWS]
-| [CMD]         | [GH_EQUIVALENT]              | [ARGS]                           |
-| ------------- | ---------------------------- | -------------------------------- |
-| workflow-list | `gh workflow list`           | None                             |
-| workflow-view | `gh workflow view <name>`    | `--workflow` (required)          |
-| workflow-run  | `gh workflow run <name>`     | `--workflow` `--ref`             |
-| run-list      | `gh run list`                | `--limit`                        |
-| run-view      | `gh run view <id>`           | `--run-id` (required)            |
-| run-logs      | `gh run view <id> --log`     | `--run-id` (required) `--failed` |
-| run-rerun     | `gh run rerun <id> --failed` | `--run-id` (required)            |
-| run-cancel    | `gh run cancel <id>`         | `--run-id` (required)            |
-
-### [1.4][PROJECTS]
-> [!IMPORTANT]
-> Requires OAuth scope: `gh auth refresh -s read:project`
-
-| [CMD]             | [GH_EQUIVALENT]            | [ARGS]                           |
-| ----------------- | -------------------------- | -------------------------------- |
-| project-list      | `gh project list`          | `--owner` (default: @me)         |
-| project-view      | `gh project view <n>`      | `--project` (required) `--owner` |
-| project-item-list | `gh project item-list <n>` | `--project` (required) `--owner` |
-
-### [1.5][RELEASES]
-| [CMD]        | [GH_EQUIVALENT]         | [ARGS]             |
-| ------------ | ----------------------- | ------------------ |
-| release-list | `gh release list`       | `--limit`          |
-| release-view | `gh release view <tag>` | `--tag` (required) |
-
-### [1.6][CACHE_AND_LABELS]
-| [CMD]        | [GH_EQUIVALENT]         | [ARGS]                   |
-| ------------ | ----------------------- | ------------------------ |
-| cache-list   | `gh cache list`         | `--limit`                |
-| cache-delete | `gh cache delete <key>` | `--cache-key` (required) |
-| label-list   | `gh label list`         | None                     |
-
-### [1.7][SEARCH]
-| [CMD]         | [GH_EQUIVALENT]    | [ARGS]               |
-| ------------- | ------------------ | -------------------- |
-| search-repos  | `gh search repos`  | `--query` (required) |
-| search-code   | `gh search code`   | `--query` (required) |
-| search-issues | `gh search issues` | `--query` (required) |
-
-### [1.8][UTILITY]
-| [CMD]     | [GH_EQUIVALENT]     | [ARGS]                  |
-| --------- | ------------------- | ----------------------- |
-| repo-view | `gh repo view`      | `--repo` (optional)     |
-| api       | `gh api <endpoint>` | `--endpoint` `--method` |
-
----
-## [2][USAGE]
->**Dictum:** *Single script, polymorphic dispatch.*
-
-<br>
+[IMPORTANT] Zero-arg commands default to `state=open`, `limit=30`. System auto-configures OAuth scopes.
 
 ```bash
-# Unified invocation
-uv run .claude/skills/github-tools/scripts/gh.py <command> [args]
-
-# Issues
-uv run .claude/skills/github-tools/scripts/gh.py issue-list --state open --limit 10
-uv run .claude/skills/github-tools/scripts/gh.py issue-view --number 42
-uv run .claude/skills/github-tools/scripts/gh.py issue-create --title "Bug" --body "Details"
-uv run .claude/skills/github-tools/scripts/gh.py issue-close --number 42
-uv run .claude/skills/github-tools/scripts/gh.py issue-edit --number 42 --labels "bug,critical"
-uv run .claude/skills/github-tools/scripts/gh.py issue-pin --number 42
-
-# PRs
-uv run .claude/skills/github-tools/scripts/gh.py pr-create --title "Feature" --body "Desc" --base main
-uv run .claude/skills/github-tools/scripts/gh.py pr-diff --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-edit --number 99 --labels "review"
-uv run .claude/skills/github-tools/scripts/gh.py pr-ready --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-review --number 99 --event APPROVE --body "LGTM"
-
-# Workflows & Runs
+# Zero-arg commands
+uv run .claude/skills/github-tools/scripts/gh.py issue-list
+uv run .claude/skills/github-tools/scripts/gh.py pr-list
+uv run .claude/skills/github-tools/scripts/gh.py run-list
 uv run .claude/skills/github-tools/scripts/gh.py workflow-list
-uv run .claude/skills/github-tools/scripts/gh.py workflow-view --workflow ci.yml
-uv run .claude/skills/github-tools/scripts/gh.py workflow-run --workflow ci.yml --ref main
-uv run .claude/skills/github-tools/scripts/gh.py run-list --limit 10
-uv run .claude/skills/github-tools/scripts/gh.py run-view --run-id 12345
-uv run .claude/skills/github-tools/scripts/gh.py run-logs --run-id 12345 --failed
-uv run .claude/skills/github-tools/scripts/gh.py run-cancel --run-id 12345
-
-# Projects (requires: gh auth refresh -s read:project)
-uv run .claude/skills/github-tools/scripts/gh.py project-list --owner bsamiee
-uv run .claude/skills/github-tools/scripts/gh.py project-view --project 1 --owner bsamiee
-uv run .claude/skills/github-tools/scripts/gh.py project-item-list --project 1 --owner bsamiee
-
-# Releases
-uv run .claude/skills/github-tools/scripts/gh.py release-list --limit 5
-uv run .claude/skills/github-tools/scripts/gh.py release-view --tag v1.0.0
-
-# Cache & Labels
-uv run .claude/skills/github-tools/scripts/gh.py cache-list --limit 10
-uv run .claude/skills/github-tools/scripts/gh.py cache-delete --cache-key "node-cache-Linux-..."
 uv run .claude/skills/github-tools/scripts/gh.py label-list
-
-# Search
-uv run .claude/skills/github-tools/scripts/gh.py search-repos --query "nx monorepo"
-uv run .claude/skills/github-tools/scripts/gh.py search-code --query "dispatch table"
-
-# Raw API
-uv run .claude/skills/github-tools/scripts/gh.py api --endpoint repos/{owner}/{repo}/branches
+uv run .claude/skills/github-tools/scripts/gh.py release-list
+uv run .claude/skills/github-tools/scripts/gh.py cache-list
+uv run .claude/skills/github-tools/scripts/gh.py project-list
+uv run .claude/skills/github-tools/scripts/gh.py repo-view
 ```
 
 ---
-## [3][OUTPUT]
->**Dictum:** *JSON output for Claude parsing.*
+## [1][ISSUES]
 
-<br>
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py issue-list --state closed
+uv run .claude/skills/github-tools/scripts/gh.py issue-view --number 42
+uv run .claude/skills/github-tools/scripts/gh.py issue-create --title "Bug report" --body "Details"
+uv run .claude/skills/github-tools/scripts/gh.py issue-comment --number 42 --body "Comment"
+uv run .claude/skills/github-tools/scripts/gh.py issue-close --number 42
+uv run .claude/skills/github-tools/scripts/gh.py issue-edit --number 42 --title "New title" --labels "bug,urgent"
+```
 
-All commands output JSON: `{"status": "success|error", ...}`.
+---
+## [2][PULL_REQUESTS]
 
-**Key Response Patterns:**
-- List commands — `{items: object[]}`
-- View commands — `{item: object}`
-- Mutation commands — `{number: int, action: bool}`
-- Search commands — `{query: string, results: object[]}`
-- Diff commands — `{number: int, diff: string}`
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py pr-list --state closed
+uv run .claude/skills/github-tools/scripts/gh.py pr-view --number 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-create --title "Feature" --body "Description" --base main
+uv run .claude/skills/github-tools/scripts/gh.py pr-diff --number 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-files --number 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-checks --number 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-merge --number 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-review --number 99 --event APPROVE --body "LGTM"
+```
+
+---
+## [3][WORKFLOWS]
+
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py run-list --limit 10
+uv run .claude/skills/github-tools/scripts/gh.py run-view --run-id 12345
+uv run .claude/skills/github-tools/scripts/gh.py run-logs --run-id 12345 --failed
+uv run .claude/skills/github-tools/scripts/gh.py run-rerun --run-id 12345
+uv run .claude/skills/github-tools/scripts/gh.py workflow-view --workflow ci.yml
+uv run .claude/skills/github-tools/scripts/gh.py workflow-run --workflow ci.yml --ref main
+```
+
+---
+## [4][SEARCH]
+
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py search-repos --query "nx monorepo" --limit 10
+uv run .claude/skills/github-tools/scripts/gh.py search-code --query "dispatch table" --limit 10
+uv run .claude/skills/github-tools/scripts/gh.py search-issues --query "is:open label:bug" --limit 10
+```
+
+---
+## [5][OTHER]
+
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py release-view --tag v1.0.0
+uv run .claude/skills/github-tools/scripts/gh.py api --endpoint "/repos/{owner}/{repo}/issues" --method GET
+```
+
+---
+## [6][OUTPUT]
+
+Commands return: `{"status": "success|error", ...}`.
+
+| [INDEX] | [PATTERN]         | [RESPONSE]                           |
+| :-----: | ----------------- | ------------------------------------ |
+|   [1]   | List commands     | `{items: object[]}`                  |
+|   [2]   | View commands     | `{item: object}`                     |
+|   [3]   | Mutation commands | `{number: int, action: bool}`        |
+|   [4]   | Search commands   | `{query: string, results: object[]}` |
+|   [5]   | Diff commands     | `{number: int, diff: string}`        |

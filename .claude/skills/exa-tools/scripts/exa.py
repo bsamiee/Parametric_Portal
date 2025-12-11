@@ -2,10 +2,9 @@
 # /// script
 # dependencies = ["httpx"]
 # ///
-"""Exa AI — polymorphic HTTP client via decorator registration."""
+"""Exa AI — polymorphic HTTP client with centralized error control."""
 
 # --- [IMPORTS] ----------------------------------------------------------------
-import argparse
 import json
 import os
 import sys
@@ -34,29 +33,84 @@ class _B:
     http_method: str = "POST"
     search_path: str = "/search"
     content_type: str = "application/json"
-    key_query: str = "query"
-    key_results: str = "results"
-    key_context: str = "context"
-    key_status: str = "status"
-    key_message: str = "message"
-    key_code: str = "code"
-    status_success: str = "success"
-    status_error: str = "error"
     search_type_auto: str = "auto"
     search_type_neural: str = "neural"
     search_type_keyword: str = "keyword"
     category_github: str = "github"
 
-    @property
-    def search_types(self) -> list[str]:
-        return [
-            self.search_type_auto,
-            self.search_type_neural,
-            self.search_type_keyword,
-        ]
-
 
 B: Final[_B] = _B()
+
+_SEARCH_TYPES: Final[tuple[str, ...]] = (
+    B.search_type_auto,
+    B.search_type_neural,
+    B.search_type_keyword,
+)
+
+SCRIPT_PATH: Final[str] = "uv run .claude/skills/exa-tools/scripts/exa.py"
+
+COMMANDS: Final[dict[str, dict[str, str]]] = {
+    "search": {
+        "desc": "Web search with AI-powered results",
+        "opts": "--query TEXT [--num-results 8] [--type auto|neural|keyword]",
+        "req": "--query",
+    },
+    "code": {
+        "desc": "Code context search (GitHub)",
+        "opts": "--query TEXT [--num-results 10]",
+        "req": "--query",
+    },
+}
+
+REQUIRED: Final[dict[str, tuple[str, ...]]] = {
+    "search": ("query",),
+    "code": ("query",),
+}
+
+_COERCE: Final[dict[str, type]] = {"num_results": int}
+
+
+# --- [PURE_FUNCTIONS] ---------------------------------------------------------
+def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
+    """Generate usage error with correct syntax."""
+    lines = [f"[ERROR] {message}", "", "[USAGE]"]
+
+    if cmd and cmd in COMMANDS:
+        lines.append(f"  {SCRIPT_PATH} {cmd} {COMMANDS[cmd]['opts']}")
+        lines.append(f"  Required: {COMMANDS[cmd]['req']}")
+    else:
+        lines.append(f"  {SCRIPT_PATH} <command> [options]")
+        lines.append("")
+        lines.append("[COMMANDS]")
+        for name, info in COMMANDS.items():
+            lines.append(f"  {name:<8} {info['desc']}")
+        lines.append("")
+        lines.append("[EXAMPLES]")
+        lines.append(f'  {SCRIPT_PATH} search --query "Vite 7 new features"')
+        lines.append(f'  {SCRIPT_PATH} search --query "Effect-TS" --type neural')
+        lines.append(f'  {SCRIPT_PATH} code --query "React hooks examples"')
+
+    return {"status": "error", "message": "\n".join(lines)}
+
+
+def _validate_args(cmd: str, args: dict[str, Any]) -> list[str]:
+    """Return list of missing required arguments for command."""
+    return [
+        f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if not args.get(k)
+    ]
+
+
+def _make_tool_body(
+    query: str, num_results: int, type: str, category: str | None = None
+) -> dict[str, Any]:
+    """Build request body with optional category."""
+    base = {
+        "query": query,
+        "numResults": num_results,
+        "type": type,
+        "contents": {"text": True},
+    }
+    return {**base, "category": category} if category else base
 
 
 # --- [REGISTRY] ---------------------------------------------------------------
@@ -76,46 +130,11 @@ def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
     return register
 
 
-# --- [PURE_FUNCTIONS] ---------------------------------------------------------
-def _make_tool_body(
-    query: str, num_results: int, type: str, category: str | None = None
-) -> dict[str, Any]:
-    """Build request body with optional category."""
-    base = {
-        B.key_query: query,
-        "numResults": num_results,
-        "type": type,
-        "contents": {"text": True},
-    }
-    return {**base, "category": category} if category else base
-
-
-def _make_request(
-    cfg: ToolConfig, headers: dict[str, str], body: dict[str, Any], args: dict[str, Any]
-) -> dict[str, Any]:
-    """Execute HTTP request with error handling."""
-    try:
-        with httpx.Client(timeout=B.timeout) as c:
-            r = c.request(
-                cfg["method"], f"{B.base_url}{cfg['path']}", headers=headers, json=body
-            )
-            r.raise_for_status()
-            return {B.key_status: B.status_success, **cfg["transform"](r.json(), args)}
-    except httpx.HTTPStatusError as e:
-        return {
-            B.key_status: B.status_error,
-            B.key_message: str(e),
-            B.key_code: e.response.status_code,
-        }
-    except httpx.RequestError as e:
-        return {B.key_status: B.status_error, B.key_message: str(e)}
-
-
 # --- [TOOLS] ------------------------------------------------------------------
 @tool(
     transform=lambda r, a: {
-        B.key_query: a[B.key_query],
-        B.key_results: r.get(B.key_results, []),
+        "query": a["query"],
+        "results": r.get("results", []),
     }
 )
 def search(query: str, num_results: int, type: str) -> dict:
@@ -125,8 +144,8 @@ def search(query: str, num_results: int, type: str) -> dict:
 
 @tool(
     transform=lambda r, a: {
-        B.key_query: a[B.key_query],
-        B.key_context: r.get(B.key_results, []),
+        "query": a["query"],
+        "context": r.get("results", []),
     }
 )
 def code(query: str, num_results: int) -> dict:
@@ -141,30 +160,67 @@ def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
     """Execute registered tool via HTTP — pure dispatch, no branching."""
     fn, cfg = _tools[cmd]
     sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
-    body = fn(**{k: args[k] for k in sig if k in args})
+    body = fn(**{k: args.get(k, "") for k in sig})
     headers = {
         B.key_header: os.environ.get(B.key_env, ""),
         "Content-Type": B.content_type,
     }
-    return _make_request(cfg, headers, body, args)
+    try:
+        with httpx.Client(timeout=B.timeout) as c:
+            r = c.request(
+                cfg["method"], f"{B.base_url}{cfg['path']}", headers=headers, json=body
+            )
+            r.raise_for_status()
+            return {"status": "success", **cfg["transform"](r.json(), args)}
+    except httpx.HTTPStatusError as e:
+        return {"status": "error", "message": str(e), "code": e.response.status_code}
+    except httpx.RequestError as e:
+        return {"status": "error", "message": str(e)}
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    [
-        p.add_argument(a, **o)
-        for a, o in [
-            ("command", {"choices": _tools.keys()}),
-            ("--query", {"required": True}),
-            ("--num-results", {"type": int, "default": B.num_results}),
-            ("--type", {"choices": B.search_types, "default": B.search_type_auto}),
-        ]
-    ]
-    args = vars(p.parse_args())
-    result = dispatch(args.pop("command"), args)
-    print(json.dumps(result))
-    return 0 if result[B.key_status] == B.status_success else 1
+    """CLI entry point — centralized error control."""
+    if not (args := sys.argv[1:]) or args[0] in ("-h", "--help"):
+        return print(json.dumps(_usage_error("No command specified"), indent=2)) or 1
+    if (cmd := args[0]) not in COMMANDS:
+        return print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2)) or 1
+
+    # Parse flags (--key value or --key=value)
+    opts: dict[str, Any] = {
+        "num_results": B.num_results,
+        "type": B.search_type_auto,
+    }
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            if "=" in arg:
+                key, val = arg[2:].split("=", 1)
+                opts[key.replace("-", "_")] = val
+            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
+                key = arg[2:].replace("-", "_")
+                val = args[i + 1]
+                opts[key] = _COERCE.get(key, str)(val)
+                i += 1
+            else:
+                opts[arg[2:].replace("-", "_")] = True
+        i += 1
+
+    if missing := _validate_args(cmd, opts):
+        return (
+            print(
+                json.dumps(
+                    _usage_error(f"Missing required: {', '.join(missing)}", cmd),
+                    indent=2,
+                )
+            )
+            or 1
+        )
+
+    result = dispatch(cmd, opts)
+    print(json.dumps(result, indent=2))
+    return 0 if result["status"] == "success" else 1
 
 
 if __name__ == "__main__":

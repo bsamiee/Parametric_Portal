@@ -64,6 +64,13 @@ const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError
         Effect.flatMap(S.decode(BrandMetadataSchema)),
     );
 
+const registerBrandEffect = (name: string, updateFn: (brand: BrandMetadata) => void): Effect.Effect<void, ParseError> =>
+    pipe(
+        createBrandEntry(name),
+        Effect.tap((brand) => Effect.sync(() => updateFn(brand))),
+        Effect.asVoid,
+    );
+
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const temporalHandlers = {
@@ -105,14 +112,7 @@ const createRegistry = (): BrandRegistry => {
                 }),
             getBrandNames: () => [...get().brands.keys()],
             hasBrand: (name) => get().brands.has(name),
-            register: (name) =>
-                Effect.runSync(
-                    pipe(
-                        createBrandEntry(name),
-                        Effect.tap((brand) => Effect.sync(() => updateBrands(set, brand))),
-                        Effect.asVoid,
-                    ),
-                ),
+            register: (name) => Effect.runSync(registerBrandEffect(name, (brand) => updateBrands(set, brand))),
             unregister: (name) =>
                 set((draft) => {
                     castDraft(draft.brands).delete(name);

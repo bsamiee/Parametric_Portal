@@ -70,15 +70,19 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
+const normalizeInputs = (input: LayoutInput | ReadonlyArray<LayoutInput>): ReadonlyArray<LayoutInput> =>
+    isArray(input) ? input : [input];
+
 const fn = {
     // Fallback pixel value calculated when CSS custom property undefined at runtime.
     gap: (scale: number): string =>
         scale === 0 ? '0' : `var(--spacing-${scale}, ${(scale * B.gap.multiplier) / B.gap.remBase}rem)`,
-    // IIFE defers grid formula construction until CSS generation to isolate minmax string.
-    gridFormula: (minWidth: number, maxCols?: number): string =>
-        ((minmax) => (maxCols ? `repeat(${maxCols}, ${minmax})` : `repeat(auto-fit, ${minmax})`))(
-            `minmax(min(${minWidth}px, 100%), 1fr)`,
-        ),
+    // Grid formula construction with minmax calculation.
+    gridFormula: (minWidth: number, maxCols?: number): string => {
+        const minmax = `minmax(min(${minWidth}px, 100%), 1fr)`;
+        return maxCols ? `repeat(${maxCols}, ${minmax})` : `repeat(auto-fit, ${minmax})`;
+    },
     stickyOffset: (position: 'top' | 'bottom' | 'left' | 'right', gap: string): string => `${position}: ${gap};`,
 } as const;
 
@@ -199,7 +203,7 @@ const defineLayouts = (input: LayoutInput | ReadonlyArray<LayoutInput>): Plugin 
         id === VIRTUAL_MODULE_ID.resolved
             ? Effect.runSync(
                   pipe(
-                      Effect.forEach(Array.isArray(input) ? input : [input], (layoutInput) =>
+                      Effect.forEach(normalizeInputs(input), (layoutInput) =>
                           pipe(
                               S.decode(LayoutInputSchema)(layoutInput),
                               Effect.flatMap(generateLayout),

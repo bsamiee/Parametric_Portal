@@ -9,50 +9,34 @@ description: >-
 ---
 
 # [H1][CONTEXT7-TOOLS]
->**Dictum:** *Single polymorphic script replaces MCP tools.*
+>**Dictum:** *Two-step resolution ensures accurate documentation retrieval.*
 
 <br>
 
-Execute Context7 library queries via unified Python CLI. Zero MCP tokens loaded.
+Query Context7 library documentation via unified Python CLI.
 
----
-## [1][COMMANDS]
->**Dictum:** *Dispatch table routes all commands.*
-
-<br>
-
-| [CMD]   | [MCP_EQUIVALENT]                    | [ARGS]                              |
-| ------- | ----------------------------------- | ----------------------------------- |
-| resolve | `mcp__context7__resolve-library-id` | `--library` (required)              |
-| docs    | `mcp__context7__get-library-docs`   | `--library-id` `--tokens` `--topic` |
-
----
-## [2][USAGE]
->**Dictum:** *Single script, polymorphic dispatch.*
-
-<br>
+[IMPORTANT] Commands require arguments. First `resolve`, then `docs`.
 
 ```bash
-# Resolve library name to ID
+# Resolve library name → ID
 uv run .claude/skills/context7-tools/scripts/context7.py resolve --library "react"
 
-# Fetch documentation with topic filter
-uv run .claude/skills/context7-tools/scripts/context7.py docs --library-id "/facebook/react" --topic "hooks" --tokens 5000
+# Fetch documentation by resolved ID
+uv run .claude/skills/context7-tools/scripts/context7.py docs --library-id "/facebook/react"
 
-# Fetch full docs (default 5000 tokens)
-uv run .claude/skills/context7-tools/scripts/context7.py docs --library-id "/vercel/next.js"
+# Apply topic filter
+uv run .claude/skills/context7-tools/scripts/context7.py docs --library-id "/facebook/react" --topic "hooks"
+
+# Set custom token limit
+uv run .claude/skills/context7-tools/scripts/context7.py docs --library-id "/vercel/next.js" --tokens 10000
 ```
 
-[IMPORTANT] API key optional for public libraries. Auto-injected via 1Password if set.
-
 ---
-## [3][OUTPUT]
->**Dictum:** *JSON output for Claude parsing.*
+## [1][OUTPUT]
 
-<br>
+Commands return: `{"status": "success|error", ...}`.
 
-All commands output JSON: `{"status": "success|error", ...}`.
-
-**Response Fields:**
-- `resolve` — `{library: string, matches: object[]}`
-- `docs` — `{library_id: string, topic: string, documentation: object}`
+| [INDEX] | [CMD]     | [RESPONSE]                             |
+| :-----: | --------- | -------------------------------------- |
+|   [1]   | `resolve` | `{library: string, matches: object[]}` |
+|   [2]   | `docs`    | `{library_id: string, docs: object}`   |

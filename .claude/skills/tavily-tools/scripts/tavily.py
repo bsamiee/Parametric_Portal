@@ -2,10 +2,9 @@
 # /// script
 # dependencies = ["httpx"]
 # ///
-"""Tavily AI — polymorphic HTTP client via decorator registration."""
+"""Tavily AI — polymorphic HTTP client; centralized error control."""
 
 # --- [IMPORTS] ----------------------------------------------------------------
-import argparse
 import json
 import os
 import sys
@@ -19,6 +18,7 @@ import httpx
 # --- [TYPES] ------------------------------------------------------------------
 type ToolConfig = dict[str, Any]
 type ToolFn = Callable[..., dict[str, Any]]
+type TransformFn = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
 # --- [CONSTANTS] --------------------------------------------------------------
@@ -36,8 +36,6 @@ class _B:
     max_breadth: int = 20
     limit: int = 50
     http_method: str = "POST"
-    empty_str: str = ""
-    zero: int = 0
     topic_choices: tuple[str, ...] = ("general", "news")
     depth_choices: tuple[str, ...] = ("basic", "advanced")
     format_choices: tuple[str, ...] = ("markdown", "text")
@@ -45,15 +43,85 @@ class _B:
 
 B: Final[_B] = _B()
 
+SCRIPT_PATH: Final[str] = "uv run .claude/skills/tavily-tools/scripts/tavily.py"
+
+COMMANDS: Final[dict[str, dict[str, str]]] = {
+    "search": {
+        "desc": "Web search with AI-powered results",
+        "opts": "--query TEXT [--topic general|news] [--search-depth basic|advanced] [--max-results 10]",
+        "req": "--query",
+    },
+    "extract": {
+        "desc": "Extract content from URLs",
+        "opts": "--urls URL1,URL2 [--extract-depth basic|advanced] [--format markdown|text]",
+        "req": "--urls",
+    },
+    "crawl": {
+        "desc": "Crawl website from base URL",
+        "opts": "--url URL [--max-depth 1] [--max-breadth 20] [--limit 50]",
+        "req": "--url",
+    },
+    "map": {
+        "desc": "Map website structure",
+        "opts": "--url URL [--max-depth 1] [--max-breadth 20] [--limit 50]",
+        "req": "--url",
+    },
+}
+
+REQUIRED: Final[dict[str, tuple[str, ...]]] = {
+    "search": ("query",),
+    "extract": ("urls",),
+    "crawl": ("url",),
+    "map": ("url",),
+}
+
+_COERCE: Final[dict[str, type]] = {
+    "max_results": int,
+    "days": int,
+    "max_depth": int,
+    "max_breadth": int,
+    "limit": int,
+}
+
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
+def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
+    """Generates usage error for correct syntax."""
+    lines = [f"[ERROR] {message}", "", "[USAGE]"]
+
+    if cmd and cmd in COMMANDS:
+        lines.append(f"  {SCRIPT_PATH} {cmd} {COMMANDS[cmd]['opts']}")
+        lines.append(f"  Required: {COMMANDS[cmd]['req']}")
+    else:
+        lines.append(f"  {SCRIPT_PATH} <command> [options]")
+        lines.append("")
+        lines.append("[COMMANDS]")
+        for name, info in COMMANDS.items():
+            lines.append(f"  {name:<10} {info['desc']}")
+        lines.append("")
+        lines.append("[EXAMPLES]")
+        lines.append(f'  {SCRIPT_PATH} search --query "Vite 7 new features"')
+        lines.append(f'  {SCRIPT_PATH} extract --urls "https://example.com"')
+        lines.append(f'  {SCRIPT_PATH} crawl --url "https://docs.effect.website"')
+        lines.append(f'  {SCRIPT_PATH} map --url "https://nx.dev"')
+
+    return {"status": "error", "message": "\n".join(lines)}
+
+
+def _validate_args(cmd: str, args: dict[str, Any]) -> list[str]:
+    """Returns missing required arguments for command."""
+    return [
+        f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if not args.get(k)
+    ]
+
+
 def _split(s: str) -> list[str]:
-    """Split comma-separated string, strip whitespace, filter empty."""
+    """Splits comma-separated string—strips whitespace, filters empty."""
     return [x.strip() for x in s.split(",") if x.strip()] if s else []
 
 
 def _merge(base: dict, **optionals: Any) -> dict:
-    """Merge base dict with non-empty optional values."""
+    """Merges base dict with non-empty optional values."""
     return {**base, **{k: v for k, v in optionals.items() if v}}
 
 
@@ -62,7 +130,7 @@ _tools: dict[str, tuple[ToolFn, ToolConfig]] = {}
 
 
 def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
-    """Register tool with HTTP config — method, path, transform."""
+    """Registers tool—HTTP config: method, path, transform."""
 
     def register(fn: ToolFn) -> ToolFn:
         _tools[fn.__name__] = (fn, {"method": B.http_method, **cfg})
@@ -98,7 +166,7 @@ def search(
     start_date: str,
     end_date: str,
 ) -> dict:
-    """Web search with AI-powered results and optional images."""
+    """Executes web search—returns AI-powered results, optional images."""
     return _merge(
         {
             "query": query,
@@ -135,7 +203,7 @@ def extract(
     fmt: str,
     include_favicon: bool,
 ) -> dict:
-    """Extract and process content from URLs."""
+    """Extracts content from URLs."""
     return {
         "urls": _split(urls),
         "extract_depth": extract_depth or B.extract_depth,
@@ -166,7 +234,7 @@ def crawl(
     fmt: str,
     include_favicon: bool,
 ) -> dict:
-    """Crawl website starting from base URL with depth/breadth control."""
+    """Crawls website from base URL—controls depth and breadth."""
     return _merge(
         {
             "url": url,
@@ -202,7 +270,7 @@ def map_site(
     select_domains: str,
     allow_external: bool,
 ) -> dict:
-    """Map website structure and discover URLs."""
+    """Maps website structure—discovers URLs."""
     return _merge(
         {
             "url": url,
@@ -219,73 +287,104 @@ def map_site(
 
 # --- [DISPATCH] ---------------------------------------------------------------
 def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Execute registered tool via HTTP — expression-based status check."""
-    fn, cfg = _tools[cmd]
+    """Executes registered tool via HTTP—expression-based status check."""
+    fn_name = "map_site" if cmd == "map" else cmd
+    fn, cfg = _tools[fn_name]
     sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
-    body = fn(**{k: args[k] for k in sig if k in args})
+    body = fn(**{k: args.get(k, "") for k in sig})
     body["api_key"] = os.environ.get(B.key_env, "")
 
-    with httpx.Client(timeout=B.timeout) as c:
-        r = c.request(cfg["method"], f"{B.base_url}{cfg['path']}", json=body)
-        return (
-            {"status": "success", **cfg["transform"](r.json(), args)}
-            if r.is_success
-            else (
-                {"status": "error", "message": r.text, "code": r.status_code}
-                if isinstance(r, httpx.Response)
-                else {"status": "error", "message": str(r)}
-            )
-        )
+    method: str = cfg["method"]
+    path: str = cfg["path"]
+    transform: TransformFn = cfg["transform"]
+
+    try:
+        with httpx.Client(timeout=B.timeout) as c:
+            r = c.request(method, f"{B.base_url}{path}", json=body)
+            r.raise_for_status()
+            return {"status": "success", **transform(r.json(), args)}
+    except httpx.HTTPStatusError as e:
+        return {"status": "error", "message": str(e), "code": e.response.status_code}
+    except httpx.RequestError as e:
+        return {"status": "error", "message": str(e)}
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    """CLI entry point — parse args and dispatch to tool."""
-    p = argparse.ArgumentParser(description=__doc__)
-    [
-        p.add_argument(a, **o)
-        for a, o in [
-            ("command", {"choices": _tools.keys()}),
-            ("--query", {}),
-            ("--topic", {"default": B.topic, "choices": list(B.topic_choices)}),
-            (
-                "--search-depth",
-                {"default": B.search_depth, "choices": list(B.depth_choices)},
-            ),
-            ("--max-results", {"type": int, "default": B.max_results}),
-            ("--time-range", {"default": B.empty_str}),
-            ("--days", {"type": int, "default": B.zero}),
-            ("--include-domains", {"default": B.empty_str}),
-            ("--exclude-domains", {"default": B.empty_str}),
-            ("--include-images", {"action": "store_true"}),
-            ("--include-image-descriptions", {"action": "store_true"}),
-            ("--include-raw-content", {"action": "store_true"}),
-            ("--include-favicon", {"action": "store_true"}),
-            ("--country", {"default": B.empty_str}),
-            ("--start-date", {"default": B.empty_str}),
-            ("--end-date", {"default": B.empty_str}),
-            ("--urls", {}),
-            (
-                "--extract-depth",
-                {"default": B.extract_depth, "choices": list(B.depth_choices)},
-            ),
-            (
-                "--format",
-                {"default": B.fmt, "dest": "fmt", "choices": list(B.format_choices)},
-            ),
-            ("--url", {}),
-            ("--max-depth", {"type": int, "default": B.max_depth}),
-            ("--max-breadth", {"type": int, "default": B.max_breadth}),
-            ("--limit", {"type": int, "default": B.limit}),
-            ("--instructions", {"default": B.empty_str}),
-            ("--select-paths", {"default": B.empty_str}),
-            ("--select-domains", {"default": B.empty_str}),
-            ("--allow-external", {"action": "store_true"}),
-        ]
-    ]
-    args = vars(p.parse_args())
-    result = dispatch(args.pop("command"), args)
-    print(json.dumps(result))  # noqa: T201
+    """CLI entry point—centralizes error control."""
+    if not (args := sys.argv[1:]) or args[0] in ("-h", "--help"):
+        return print(json.dumps(_usage_error("No command specified"), indent=2)) or 1
+    if (cmd := args[0]) not in COMMANDS:
+        return print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2)) or 1
+
+    # Parse flags (--key value or --key=value)
+    opts: dict[str, Any] = {
+        "topic": B.topic,
+        "search_depth": B.search_depth,
+        "max_results": B.max_results,
+        "time_range": "",
+        "days": 0,
+        "include_domains": "",
+        "exclude_domains": "",
+        "include_images": False,
+        "include_image_descriptions": False,
+        "include_raw_content": False,
+        "include_favicon": False,
+        "country": "",
+        "start_date": "",
+        "end_date": "",
+        "extract_depth": B.extract_depth,
+        "fmt": B.fmt,
+        "max_depth": B.max_depth,
+        "max_breadth": B.max_breadth,
+        "limit": B.limit,
+        "instructions": "",
+        "select_paths": "",
+        "select_domains": "",
+        "allow_external": False,
+    }
+
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            if "=" in arg:
+                key, val = arg[2:].split("=", 1)
+                opts[key.replace("-", "_")] = val
+            elif arg in (
+                "--include-images",
+                "--include-image-descriptions",
+                "--include-raw-content",
+                "--include-favicon",
+                "--allow-external",
+            ):
+                opts[arg[2:].replace("-", "_")] = True
+            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
+                key = arg[2:].replace("-", "_")
+                val = args[i + 1]
+                opts[key] = _COERCE.get(key, str)(val)
+                i += 1
+            else:
+                opts[arg[2:].replace("-", "_")] = True
+        i += 1
+
+    # Handle --format -> fmt
+    if "format" in opts:
+        opts["fmt"] = opts.pop("format")
+
+    if missing := _validate_args(cmd, opts):
+        return (
+            print(
+                json.dumps(
+                    _usage_error(f"Missing required: {', '.join(missing)}", cmd),
+                    indent=2,
+                )
+            )
+            or 1
+        )
+
+    result = dispatch(cmd, opts)
+    print(json.dumps(result, indent=2))
     return 0 if result["status"] == "success" else 1
 
 

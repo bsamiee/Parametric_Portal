@@ -265,42 +265,41 @@ const createTableComponent = <T extends Record<string, unknown>>(
         // Build react-stately collection - children prop required for exactOptionalPropertyTypes
         const headerCols = columns.map((col) =>
             createElement(
-                Column as FC<{ allowsSorting: boolean; children: ReactNode; isRowHeader: boolean; key: string }>,
+                Column as FC<{ allowsSorting: boolean; children?: ReactNode; isRowHeader: boolean; key: string }>,
                 {
                     allowsSorting: col.allowsSorting ?? false,
-                    // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-                    children: col.header,
                     isRowHeader: col.isRowHeader ?? false,
                     key: String(col.key),
                 },
+                col.header,
             ),
         );
         const bodyCells = (item: T) =>
             columns.map((col) =>
-                createElement(Cell as FC<{ children: ReactNode; key: string }>, {
-                    // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-                    children: String(item[col.key] ?? ''),
-                    key: String(col.key),
-                }),
+                createElement(
+                    Cell as FC<{ children?: ReactNode; key: string }>,
+                    { key: String(col.key) },
+                    String(item[col.key] ?? ''),
+                ),
             );
         const pageOffset = currentPage !== undefined && pageSize !== undefined ? (currentPage - 1) * pageSize : 0;
         const bodyRows = displayData.map((item, idx) =>
-            createElement(Row as FC<{ children: ReactNode; key: Key }>, {
-                // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-                children: bodyCells(item),
-                key: rowKey(item, pageOffset + idx),
-            }),
+            createElement(
+                Row as FC<{ children?: ReactNode; key: Key }>,
+                { key: rowKey(item, pageOffset + idx) },
+                bodyCells(item),
+            ),
         );
-        const tableHeader = createElement(TableHeader as FC<{ children: ReactNode; key: string }>, {
-            // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-            children: headerCols,
-            key: 'header',
-        });
-        const tableBody = createElement(TableBody as FC<{ children: ReactNode; key: string }>, {
-            // biome-ignore lint/correctness/noChildrenProp: react-stately + exactOptionalPropertyTypes
-            children: bodyRows,
-            key: 'body',
-        });
+        const tableHeader = createElement(
+            TableHeader as FC<{ children?: ReactNode; key: string }>,
+            { key: 'header' },
+            headerCols,
+        );
+        const tableBody = createElement(
+            TableBody as FC<{ children?: ReactNode; key: string }>,
+            { key: 'body' },
+            bodyRows,
+        );
         // Cast to TableStateProps to satisfy exactOptionalPropertyTypes with react-stately
         const tableStateProps = {
             children: [tableHeader, tableBody],

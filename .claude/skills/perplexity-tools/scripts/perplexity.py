@@ -2,10 +2,9 @@
 # /// script
 # dependencies = ["httpx"]
 # ///
-"""Perplexity AI — polymorphic HTTP client via decorator registration."""
+"""Perplexity AI — polymorphic HTTP client for centralized error control."""
 
 # --- [IMPORTS] ----------------------------------------------------------------
-import argparse
 import json
 import os
 import re
@@ -37,11 +36,6 @@ class _B:
     header_auth: str = "Authorization"
     header_content_type: str = "Content-Type"
     content_type_json: str = "application/json"
-    status_success: str = "success"
-    status_error: str = "error"
-    key_message: str = "message"
-    key_code: str = "code"
-    key_status: str = "status"
     search_prefix: str = "Search: "
     search_focus_prefix: str = " (focus: "
     search_focus_suffix: str = ")"
@@ -49,14 +43,80 @@ class _B:
 
 B: Final[_B] = _B()
 
+SCRIPT_PATH: Final[str] = "uv run .claude/skills/perplexity-tools/scripts/perplexity.py"
+
+COMMANDS: Final[dict[str, dict[str, str]]] = {
+    "ask": {
+        "desc": "Quick question with citations",
+        "opts": "--query TEXT",
+        "req": "--query",
+    },
+    "research": {
+        "desc": "Deep research with thinking",
+        "opts": "--query TEXT [--strip-thinking]",
+        "req": "--query",
+    },
+    "reason": {
+        "desc": "Reasoning task",
+        "opts": "--query TEXT [--strip-thinking]",
+        "req": "--query",
+    },
+    "search": {
+        "desc": "Web search returning citations",
+        "opts": "--query TEXT [--max-results 10] [--country CODE]",
+        "req": "--query",
+    },
+}
+
+REQUIRED: Final[dict[str, tuple[str, ...]]] = {
+    "ask": ("query",),
+    "research": ("query",),
+    "reason": ("query",),
+    "search": ("query",),
+}
+
+_COERCE: Final[dict[str, type]] = {"max_results": int}
+
 
 # --- [PURE_FUNCTIONS] ---------------------------------------------------------
-def strip_think(t: str) -> str:
-    return re.sub("<think>.*?</think>", "", t, flags=re.DOTALL).strip()
+def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
+    """Generates usage error for correct syntax."""
+    lines = [f"[ERROR] {message}", "", "[USAGE]"]
+
+    if cmd and cmd in COMMANDS:
+        lines.append(f"  {SCRIPT_PATH} {cmd} {COMMANDS[cmd]['opts']}")
+        lines.append(f"  Required: {COMMANDS[cmd]['req']}")
+    else:
+        lines.append(f"  {SCRIPT_PATH} <command> [options]")
+        lines.append("")
+        lines.append("[COMMANDS]")
+        for name, info in COMMANDS.items():
+            lines.append(f"  {name:<10} {info['desc']}")
+        lines.append("")
+        lines.append("[EXAMPLES]")
+        lines.append(f'  {SCRIPT_PATH} ask --query "What is Effect-TS?"')
+        lines.append(
+            f'  {SCRIPT_PATH} research --query "React 19 features" --strip-thinking'
+        )
+        lines.append(f'  {SCRIPT_PATH} search --query "Nx 22 Crystal" --max-results 5')
+
+    return {"status": "error", "message": "\n".join(lines)}
 
 
-def maybe_strip(content: str, should_strip: bool) -> str:
-    return strip_think(content) if should_strip else content
+def _validate_args(cmd: str, args: dict[str, Any]) -> list[str]:
+    """Returns missing required arguments for command."""
+    return [
+        f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if not args.get(k)
+    ]
+
+
+def _strip_think(content: str, should_strip: bool) -> str:
+    """Strips <think> tags when requested."""
+    return (
+        re.sub("<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        if should_strip
+        else content
+    )
 
 
 def extract_content(response: dict[str, Any]) -> str:
@@ -72,7 +132,7 @@ _tools: dict[str, tuple[ToolFn, ToolConfig]] = {}
 
 
 def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
-    """Register tool with HTTP config — method, path, transform, model."""
+    """Registers tool—HTTP config: method, path, transform, model."""
 
     def register(fn: ToolFn) -> ToolFn:
         _tools[fn.__name__] = (
@@ -94,7 +154,7 @@ def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
     },
 )
 def ask(query: str) -> dict:
-    """Quick question with citations."""
+    """Quick question—returns citations."""
     return {"messages": [{"role": "user", "content": query}]}
 
 
@@ -102,12 +162,12 @@ def ask(query: str) -> dict:
     model=B.model_research,
     transform=lambda r, a: {
         "query": a["query"],
-        "response": maybe_strip(extract_content(r), a.get("strip_thinking", False)),
+        "response": _strip_think(extract_content(r), a.get("strip_thinking", False)),
         "citations": extract_citations(r),
     },
 )
 def research(query: str, strip_thinking: bool) -> dict:
-    """Deep research with optional thinking removal."""
+    """Deep research—optional thinking removal."""
     return {"messages": [{"role": "user", "content": query}]}
 
 
@@ -115,11 +175,11 @@ def research(query: str, strip_thinking: bool) -> dict:
     model=B.model_reason,
     transform=lambda r, a: {
         "query": a["query"],
-        "response": maybe_strip(extract_content(r), a.get("strip_thinking", False)),
+        "response": _strip_think(extract_content(r), a.get("strip_thinking", False)),
     },
 )
 def reason(query: str, strip_thinking: bool) -> dict:
-    """Reasoning task."""
+    """Executes reasoning task."""
     return {"messages": [{"role": "user", "content": query}]}
 
 
@@ -153,7 +213,7 @@ def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
     """Execute registered tool via HTTP — pure dispatch, no branching."""
     fn, cfg = _tools[cmd]
     sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
-    body = {**fn(**{k: args[k] for k in sig if k in args}), "model": cfg["model"]}
+    body = {**fn(**{k: args.get(k, "") for k in sig}), "model": cfg["model"]}
     headers = {
         B.header_auth: f"Bearer {os.environ.get(B.key_env, '')}",
         B.header_content_type: B.content_type_json,
@@ -164,34 +224,59 @@ def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
                 cfg["method"], f"{B.base_url}{cfg['path']}", headers=headers, json=body
             )
             r.raise_for_status()
-            return {B.key_status: B.status_success, **cfg["transform"](r.json(), args)}
+            return {"status": "success", **cfg["transform"](r.json(), args)}
     except httpx.HTTPStatusError as e:
-        return {
-            B.key_status: B.status_error,
-            B.key_message: str(e),
-            B.key_code: e.response.status_code,
-        }
+        return {"status": "error", "message": str(e), "code": e.response.status_code}
     except httpx.RequestError as e:
-        return {B.key_status: B.status_error, B.key_message: str(e)}
+        return {"status": "error", "message": str(e)}
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    [
-        p.add_argument(a, **o)
-        for a, o in [
-            ("command", {"choices": _tools.keys()}),
-            ("--query", {"required": True}),
-            ("--strip-thinking", {"action": "store_true"}),
-            ("--max-results", {"type": int, "default": B.max_results}),
-            ("--country", {"default": ""}),
-        ]
-    ]
-    args = vars(p.parse_args())
-    result = dispatch(args.pop("command"), args)
-    print(json.dumps(result))
-    return 0 if result[B.key_status] == B.status_success else 1
+    """CLI entry point — centralized error control."""
+    if not (args := sys.argv[1:]) or args[0] in ("-h", "--help"):
+        return print(json.dumps(_usage_error("No command specified"), indent=2)) or 1
+    if (cmd := args[0]) not in COMMANDS:
+        return print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2)) or 1
+
+    # Parse flags (--key value or --key=value)
+    opts: dict[str, Any] = {
+        "strip_thinking": False,
+        "max_results": B.max_results,
+        "country": "",
+    }
+    i = 1
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--"):
+            if "=" in arg:
+                key, val = arg[2:].split("=", 1)
+                opts[key.replace("-", "_")] = val
+            elif arg == "--strip-thinking":
+                opts["strip_thinking"] = True
+            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
+                key = arg[2:].replace("-", "_")
+                val = args[i + 1]
+                opts[key] = _COERCE.get(key, str)(val)
+                i += 1
+            else:
+                opts[arg[2:].replace("-", "_")] = True
+        i += 1
+
+    if missing := _validate_args(cmd, opts):
+        return (
+            print(
+                json.dumps(
+                    _usage_error(f"Missing required: {', '.join(missing)}", cmd),
+                    indent=2,
+                )
+            )
+            or 1
+        )
+
+    result = dispatch(cmd, opts)
+    print(json.dumps(result, indent=2))
+    return 0 if result["status"] == "success" else 1
 
 
 if __name__ == "__main__":

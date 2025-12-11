@@ -3,8 +3,8 @@ name: style-analyzer
 description: >-
   Wave 1 agent for parallel style refinement. Analyzes single file for style
   compliance issues. Read-only operation returns severity-ranked findings.
-tools: Read, Glob, Grep
-model: haiku
+tools: Read, Glob, Grep, Bash
+model: sonnet
 ---
 
 # [H1][STYLE-ANALYZER]

@@ -3,7 +3,7 @@ name: style-corrector
 description: >-
   Wave 2 agent for parallel style refinement. Validates wave 1 analysis,
   confirms findings, applies corrections via Edit. Protects YAML frontmatter.
-tools: Read, Edit
+tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
 ---
 
