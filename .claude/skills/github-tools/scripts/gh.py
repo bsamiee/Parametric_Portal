@@ -37,6 +37,41 @@ class _B:
 
 B: Final[_B] = _B()
 
+# --- [REQUIRED_ARGS] ----------------------------------------------------------
+REQUIRED: Final[dict[str, tuple[str, ...]]] = {
+    "issue-view": ("number",),
+    "issue-create": ("title",),
+    "issue-comment": ("number", "body"),
+    "issue-close": ("number",),
+    "issue-edit": ("number",),
+    "issue-reopen": ("number",),
+    "issue-pin": ("number",),
+    "pr-view": ("number",),
+    "pr-files": ("number",),
+    "pr-checks": ("number",),
+    "pr-merge": ("number",),
+    "pr-review": ("number", "event"),
+    "pr-create": ("title",),
+    "pr-diff": ("number",),
+    "pr-edit": ("number",),
+    "pr-close": ("number",),
+    "pr-ready": ("number",),
+    "run-view": ("run_id",),
+    "run-logs": ("run_id",),
+    "run-rerun": ("run_id",),
+    "run-cancel": ("run_id",),
+    "cache-delete": ("cache_key",),
+    "workflow-view": ("workflow",),
+    "workflow-run": ("workflow",),
+    "project-view": ("project",),
+    "project-item-list": ("project",),
+    "release-view": ("tag",),
+    "search-repos": ("query",),
+    "search-code": ("query",),
+    "search-issues": ("query",),
+    "api": ("endpoint",),
+}
+
 
 # --- [DISPATCH_TABLES] --------------------------------------------------------
 handlers: dict[str, Handler] = {
@@ -195,6 +230,13 @@ handlers: dict[str, Handler] = {
             "--json=databaseId,displayTitle,status,conclusion,jobs,createdAt,updatedAt",
         ),
         lambda o, a: {"run_id": a["run_id"], "run": json.loads(o)},
+    ),
+    "run-logs": (
+        lambda a: (
+            "gh", "run", "view", str(a["run_id"]),
+            "--log-failed" if a.get("failed") else "--log",
+        ),
+        lambda o, a: {"run_id": a["run_id"], "logs": o},
     ),
     "run-rerun": (
         lambda a: ("gh", "run", "rerun", str(a["run_id"]), "--failed"),
@@ -374,6 +416,16 @@ handlers: dict[str, Handler] = {
 }
 
 
+# --- [PURE_FUNCTIONS] ---------------------------------------------------------
+def validate_args(cmd: str, args: Args) -> list[str]:
+    """Return list of missing required arguments for command."""
+    return [
+        f"--{k.replace('_', '-')}"
+        for k in REQUIRED.get(cmd, ())
+        if args.get(k) is None
+    ]
+
+
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
@@ -400,17 +452,34 @@ def main() -> int:
             ("--owner", {}),
             ("--project", {"type": int}),
             ("--tag", {}),
+            ("--failed", {"action": "store_true"}),
         ]
     ]
     args = vars(p.parse_args())
-    builder, formatter = handlers[args["command"]]
+    cmd = args["command"]
+
+    # --- Validate required args before subprocess call
+    missing = validate_args(cmd, args)
+    if missing:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "message": f"{cmd} requires: {', '.join(missing)}",
+                    "missing": missing,
+                }
+            )
+        )
+        return 1
+
+    builder, formatter = handlers[cmd]
     r = subprocess.run(builder(args), capture_output=True, text=True)
     result = (
         {"status": "success", **formatter(r.stdout or r.stderr, args)}
         if r.returncode == 0
         else {
             "status": "error",
-            "message": f"{args['command']} failed",
+            "message": f"{cmd} failed",
             "stderr": r.stderr,
         }
     )

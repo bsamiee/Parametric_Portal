@@ -1,67 +1,24 @@
 name: Node Environment
-description: Node.js + pnpm setup with caching and Nx monorepo support
+description: Node.js + pnpm setup from package.json
 inputs:
-    node-version:
-        description: Node.js version (ignored if node-version-file is set)
-        default: '25.2.1'
-    node-version-file:
-        description: File containing Node.js version (e.g., package.json)
-        required: false
-    pnpm-version:
-        description: pnpm version
-        default: '10.24.0'
     install:
         description: Run pnpm install
         default: 'true'
     frozen-lockfile:
         description: Use --frozen-lockfile flag
         default: 'true'
-    nx:
-        description: Enable Nx caching and affected setup
-        default: 'false'
-    nx-main-branch:
-        description: Main branch for affected comparison
-        default: 'main'
-
-outputs:
-    nx-base:
-        description: Base SHA for Nx affected commands
-        value: ${{ steps.shas.outputs.base }}
-    nx-head:
-        description: Head SHA for Nx affected commands
-        value: ${{ steps.shas.outputs.head }}
 
 runs:
     using: composite
     steps:
         - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
-          with:
-              version: ${{ inputs.pnpm-version }}
 
         - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.3.0
           with:
-              node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
-              node-version-file: ${{ inputs.node-version-file }}
+              node-version-file: package.json
               cache: ${{ inputs.install == 'true' && 'pnpm' || '' }}
 
         - name: Install dependencies
           if: inputs.install == 'true'
           shell: bash
           run: pnpm install ${{ inputs.frozen-lockfile == 'true' && '--frozen-lockfile' || '' }}
-
-        - name: Restore Nx cache
-          if: inputs.nx == 'true'
-          uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
-          with:
-              path: .nx/cache
-              key: ${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
-              restore-keys: |
-                  ${{ runner.os }}-nx-${{ hashFiles('pnpm-lock.yaml') }}-
-                  ${{ runner.os }}-nx-
-
-        - name: Set affected SHAs
-          id: shas
-          if: inputs.nx == 'true'
-          uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
-          with:
-              main-branch-name: ${{ inputs.nx-main-branch }}

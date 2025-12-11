@@ -35,26 +35,17 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - **Maintenance**: `/duplicate`
 
 ---
-
 ### node-env
-**Purpose**: Node.js + pnpm + Nx environment setup
-**Marketplace Action**: `pnpm/action-setup@v4.1.0`
-**Use Cases**:
-- CI job initialization
-- Dependency installation
-- Nx distributed execution
+**Purpose**: Node.js + pnpm setup from package.json
+**Source**: `pnpm/action-setup@v4.1.0`, `actions/setup-node@v4.3.0`
+**Versions**: Reads `packageManager` (pnpm) and `engines.node` from `package.json`
 
 **Usage**:
 ```yaml
 - uses: ./.github/actions/node-env
-  with:
-    nx: 'true'
-    nx-cloud-token: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-    nx-distribute: 'true'
 ```
 
 ---
-
 ### git-identity
 **Purpose**: Configure Git user for automated commits
 **Use Cases**:
@@ -63,7 +54,6 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - PR synchronization
 
 ---
-
 ### auto-fix
 **Purpose**: Apply automated fixes and commit changes
 **Use Cases**:
@@ -72,7 +62,6 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - Linting fixes
 
 ---
-
 ### pr-hygiene
 **Purpose**: PR review hygiene automation
 **Use Cases**:
@@ -81,7 +70,6 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - State synchronization
 
 ---
-
 ### label
 **Purpose**: Label operations via GitHub GraphQL
 **Use Cases**:
@@ -89,7 +77,6 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - Dynamic label management
 
 ---
-
 ### meta-fixer
 **Purpose**: AI-powered metadata correction
 **Use Cases**:
@@ -98,7 +85,6 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - Body formatting
 
 ---
-
 ### normalize-commit
 **Purpose**: Conventional commit message normalization
 **Use Cases**:
@@ -106,7 +92,6 @@ Reusable composite actions for the Parametric Portal CI/CD workflows.
 - Changelog generation
 
 ---
-
 ## Configuration
 
 All marketplace action versions and SHAs are centralized in `.github/scripts/schema.ts`:

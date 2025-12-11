@@ -21,6 +21,14 @@ Execute GitHub queries via unified Python CLI. Zero MCP tokens loaded.
 
 <br>
 
+> [!NOTE]
+> **OAuth Scopes**: Most commands work with default `gh` auth. Project commands require additional scope:
+> ```bash
+> gh auth refresh -s read:project
+> ```
+
+<br>
+
 ### [1.1][ISSUES]
 | [CMD]         | [GH_EQUIVALENT]        | [ARGS]                                   |
 | ------------- | ---------------------- | ---------------------------------------- |
@@ -49,22 +57,26 @@ Execute GitHub queries via unified Python CLI. Zero MCP tokens loaded.
 | pr-review | `gh pr review <n>`            | `--number` `--event` `--body`            |
 
 ### [1.3][WORKFLOWS]
-| [CMD]         | [GH_EQUIVALENT]              | [ARGS]                  |
-| ------------- | ---------------------------- | ----------------------- |
-| workflow-list | `gh workflow list`           | None                    |
-| workflow-view | `gh workflow view <name>`    | `--workflow` (required) |
-| workflow-run  | `gh workflow run <name>`     | `--workflow` `--ref`    |
-| run-list      | `gh run list`                | `--limit`               |
-| run-view      | `gh run view <id>`           | `--run-id` (required)   |
-| run-rerun     | `gh run rerun <id> --failed` | `--run-id` (required)   |
-| run-cancel    | `gh run cancel <id>`         | `--run-id` (required)   |
+| [CMD]         | [GH_EQUIVALENT]              | [ARGS]                           |
+| ------------- | ---------------------------- | -------------------------------- |
+| workflow-list | `gh workflow list`           | None                             |
+| workflow-view | `gh workflow view <name>`    | `--workflow` (required)          |
+| workflow-run  | `gh workflow run <name>`     | `--workflow` `--ref`             |
+| run-list      | `gh run list`                | `--limit`                        |
+| run-view      | `gh run view <id>`           | `--run-id` (required)            |
+| run-logs      | `gh run view <id> --log`     | `--run-id` (required) `--failed` |
+| run-rerun     | `gh run rerun <id> --failed` | `--run-id` (required)            |
+| run-cancel    | `gh run cancel <id>`         | `--run-id` (required)            |
 
 ### [1.4][PROJECTS]
-| [CMD]             | [GH_EQUIVALENT]            | [ARGS]                   |
-| ----------------- | -------------------------- | ------------------------ |
-| project-list      | `gh project list`          | `--owner` (default: @me) |
-| project-view      | `gh project view <n>`      | `--project` `--owner`    |
-| project-item-list | `gh project item-list <n>` | `--project` `--owner`    |
+> [!IMPORTANT]
+> Requires OAuth scope: `gh auth refresh -s read:project`
+
+| [CMD]             | [GH_EQUIVALENT]            | [ARGS]                           |
+| ----------------- | -------------------------- | -------------------------------- |
+| project-list      | `gh project list`          | `--owner` (default: @me)         |
+| project-view      | `gh project view <n>`      | `--project` (required) `--owner` |
+| project-item-list | `gh project item-list <n>` | `--project` (required) `--owner` |
 
 ### [1.5][RELEASES]
 | [CMD]        | [GH_EQUIVALENT]         | [ARGS]             |
@@ -123,6 +135,7 @@ uv run .claude/skills/github-tools/scripts/gh.py workflow-view --workflow ci.yml
 uv run .claude/skills/github-tools/scripts/gh.py workflow-run --workflow ci.yml --ref main
 uv run .claude/skills/github-tools/scripts/gh.py run-list --limit 10
 uv run .claude/skills/github-tools/scripts/gh.py run-view --run-id 12345
+uv run .claude/skills/github-tools/scripts/gh.py run-logs --run-id 12345 --failed
 uv run .claude/skills/github-tools/scripts/gh.py run-cancel --run-id 12345
 
 # Projects (requires: gh auth refresh -s read:project)

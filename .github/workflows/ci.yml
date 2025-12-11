@@ -45,10 +45,7 @@ jobs:
           filter: tree:0
 
       - name: Setup Environment
-        id: env
         uses: ./.github/actions/node-env
-        with:
-          nx: 'true'
 
       - name: Setup Git Identity
         if: github.event_name == 'pull_request'
@@ -157,8 +154,6 @@ jobs:
           fetch-depth: 0
 
       - uses: ./.github/actions/node-env
-        with:
-          nx: 'true'
 
       - uses: ./.github/actions/git-identity
 
