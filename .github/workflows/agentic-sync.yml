@@ -1,4 +1,4 @@
-name: VPS Sync
+name: Agentic Server Sync
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: vps-sync
+  group: agentic-sync
   cancel-in-progress: true
 
 jobs:
@@ -14,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Sync VPS
+      - name: Sync Agentic Server
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
+          host: ${{ secrets.AGENTIC_HOST }}
+          username: ${{ secrets.AGENTIC_USER }}
+          key: ${{ secrets.AGENTIC_SSH_KEY }}
           port: 22
           script: |
             cd ~/workspace/Parametric_Portal
