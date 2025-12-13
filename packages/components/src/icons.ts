@@ -13,10 +13,7 @@ import { merged, resolve, utilities } from './schema.ts';
 
 type IconTuning = { readonly scale?: Inputs['scale'] | undefined; readonly strokeWidth?: number | undefined };
 type IconName = keyof typeof icons;
-type IconProps = SVGAttributes<SVGElement> & {
-    readonly scale?: Inputs['scale'] | undefined;
-    readonly strokeWidth?: number;
-};
+type IconProps = SVGAttributes<SVGElement> & IconTuning;
 type IconInput = {
     readonly className?: string;
     readonly name: IconName;

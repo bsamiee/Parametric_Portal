@@ -452,7 +452,7 @@ const utilities = {
     cssVars: (computed: Computed, prefix: string): Record<string, string> =>
         Object.fromEntries(
             Object.entries(computed).map(([key, value]) => [
-                `--${prefix}-${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`,
+                `--${prefix}-${key.replaceAll(/([A-Z])/g, '-$1').toLowerCase()}`,
                 value,
             ]),
         ),

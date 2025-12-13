@@ -30,13 +30,12 @@ import {
 // --- [TYPES] -----------------------------------------------------------------
 
 type DataType = 'avatar' | 'badge' | 'card' | 'list' | 'table';
-type Variant = string;
 type CardProps = HTMLAttributes<HTMLDivElement> & {
     readonly children?: ReactNode;
     readonly footer?: ReactNode;
     readonly header?: ReactNode;
 };
-type BadgeProps = HTMLAttributes<HTMLSpanElement> & { readonly children?: ReactNode; readonly variant?: Variant };
+type BadgeProps = HTMLAttributes<HTMLSpanElement> & { readonly children?: ReactNode; readonly variant?: string };
 type AvatarProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> & {
     readonly fallback?: string;
     readonly src?: string;
@@ -279,7 +278,9 @@ const createTableComponent = <T extends Record<string, unknown>>(
                 createElement(
                     Cell as FC<{ children?: ReactNode; key: string }>,
                     { key: String(col.key) },
-                    String(item[col.key] ?? ''),
+                    typeof item[col.key] === 'object' && item[col.key] !== null
+                        ? JSON.stringify(item[col.key])
+                        : String(item[col.key] ?? ''),
                 ),
             );
         const pageOffset = currentPage !== undefined && pageSize !== undefined ? (currentPage - 1) * pageSize : 0;
@@ -396,4 +397,4 @@ const createData = (tuning?: TuningFor<'data'>) =>
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { createData };
-export type { AvatarProps, BadgeProps, CardProps, DataInput, DataType, ListProps, TableProps, Variant };
+export type { AvatarProps, BadgeProps, CardProps, DataInput, DataType, ListProps, TableProps };

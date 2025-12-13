@@ -10,12 +10,11 @@ import { animStyle, B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, util
 // --- [TYPES] -----------------------------------------------------------------
 
 type FeedbackType = 'alert' | 'progress' | 'skeleton' | 'spinner' | 'toast';
-type Variant = string;
 type AlertProps = HTMLAttributes<HTMLDivElement> & {
     readonly children?: ReactNode;
     readonly icon?: ReactNode;
     readonly onDismiss?: () => void;
-    readonly variant?: Variant;
+    readonly variant?: string;
 };
 type ProgressProps = HTMLAttributes<HTMLDivElement> & { readonly value?: number };
 type SpinnerProps = HTMLAttributes<SVGElement>;
@@ -234,5 +233,4 @@ export type {
     SkeletonProps,
     SpinnerProps,
     ToastProps,
-    Variant,
 };

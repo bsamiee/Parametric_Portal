@@ -42,7 +42,7 @@ def _get_project_dir():
 
 
 def _extract_check_name(cmd):
-    return cmd[3] if len(cmd) > 3 and cmd[1] == "nx" else cmd[0]
+    return cmd[4] if len(cmd) > 4 and cmd[1] == "nx" else cmd[0]
 
 
 def _has_changes(project_dir: Path) -> bool:
