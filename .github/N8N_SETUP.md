@@ -10,30 +10,30 @@ n8n Cloud orchestrates GitHub Discussions through PM lifecycle. VPS executes Cla
 
 | #   | Task                                          | Owner  | Prereq | Status |
 | --- | --------------------------------------------- | ------ | ------ | ------ |
-| A1  | Sign up for Hostinger VPS (KVM 2)             | Human  | —      | [ ]    |
-| A2  | Sign up for n8n Cloud                         | Human  | —      | [ ]    |
-| A3  | Create GitHub PAT with `repo` + `admin:org`   | Human  | —      | [ ]    |
-| A4  | Generate SSH key pair (for n8n→VPS)           | Human  | —      | [ ]    |
+| A1  | Sign up for Hostinger VPS (KVM 2)             | Human  | —      | [X]    |
+| A2  | Sign up for n8n Cloud                         | Human  | —      | [X]    |
+| A3  | Create GitHub PAT with `repo` + `admin:org`   | Human  | —      | [X]    |
+| A4  | Generate SSH key pair (for n8n→VPS)           | Human  | —      | [X]    |
 | A5  | Add `checkpoint-required` label to labels.yml | Claude | —      | [x]    |
 
 ### Phase B: VPS Setup (Requires A1, A4)
 
 | #   | Task                                        | Owner | Prereq | Status |
 | --- | ------------------------------------------- | ----- | ------ | ------ |
-| B1  | First SSH to VPS, update system             | Human | A1     | [ ]    |
-| B2  | Add SSH public key to VPS root              | Human | A4, B1 | [ ]    |
-| B3  | Create `n8n-agent` user with SSH access     | Human | B2     | [ ]    |
-| B4  | Install CLI tools (Node 22, 4 AI CLIs)      | Human | B3     | [ ]    |
-| B5  | Install and authenticate GitHub CLI         | Human | A3, B4 | [ ]    |
-| B6  | Clone repository to `~/workspace/`          | Human | B5     | [ ]    |
-| B7  | Set API keys in `.bashrc`                   | Human | B3     | [ ]    |
-| B8  | Authenticate AI CLIs (claude, copilot, etc) | Human | B4, B7 | [ ]    |
+| B1  | First SSH to VPS, update system             | Human | A1     | [x]    |
+| B2  | Add SSH public key to VPS root              | Human | A4, B1 | [x]    |
+| B3  | Create `n8n-agent` user with SSH access     | Human | B2     | [x]    |
+| B4  | Install CLI tools (Node 22, 4 AI CLIs)      | Human | B3     | [x]    |
+| B5  | Install and authenticate GitHub CLI         | Human | A3, B4 | [x]    |
+| B6  | Clone repository to `~/workspace/`          | Human | B5     | [x]    |
+| B7  | Set API keys in `.bashrc`                   | Human | B3     | [x]    |
+| B8  | Authenticate AI CLIs (claude, copilot, etc) | Human | B4, B7 | [x]    |
 
 ### Phase C: n8n Setup (Requires A2, B1)
 
 | #   | Task                                            | Owner | Prereq     | Status |
 | --- | ----------------------------------------------- | ----- | ---------- | ------ |
-| C1  | Create SSH credential (needs VPS IP)            | Human | A2, A4, B1 | [ ]    |
+| C1  | Create SSH credential (needs VPS IP)            | Human | A2, A4, B1 | [x]    |
 | C2  | Create GitHub API credential                    | Human | A2, A3     | [ ]    |
 | C3  | Create GitHub Webhook Secret credential         | Human | A2         | [ ]    |
 | C4  | Create Webhook Auth credential                  | Human | A2         | [ ]    |
@@ -93,150 +93,27 @@ Hostinger VPS (runtime)
 
 ---
 
-## [2] Prerequisites
+## [2] Prerequisites (Completed)
 
-### `[A1]` Sign Up for Hostinger VPS
-
-1. Go to [hostinger.com/vps-hosting](https://www.hostinger.com/vps-hosting)
-2. Select **KVM 2** plan (~$6.49/mo for 24mo: 2 vCPU, 8GB RAM, 100GB NVMe)
-3. Choose **Ubuntu 24.04** as OS
-4. Complete purchase
-5. Open **hPanel** dashboard → note the **IP address**
-
-### `[A2]` Sign Up for n8n Cloud
-
-1. Go to [app.n8n.cloud/register](https://app.n8n.cloud/register)
-2. Sign up for **Starter** (free trial) or **Pro** ($50/mo, recommended for boardroom timeouts)
-3. Note your instance URL: `https://your-name.app.n8n.cloud`
-
-### `[A3]` Create GitHub PAT
-
-1. Go to [github.com/settings/tokens?type=beta](https://github.com/settings/tokens?type=beta)
-2. Click **Generate new token** (fine-grained)
-3. Expiration: 90 days recommended
-4. Repository access: Select **Parametric_Portal**
-5. Permissions:
-   - **Repository**: Contents, Issues, Pull requests, Discussions (Read/Write)
-   - **Organization**: Members (Read) — if using org features
-6. Copy token (starts with `github_pat_`)
-
-### `[A4]` Generate SSH Key Pair
-
-```bash
-# Run on your local machine
-ssh-keygen -t ed25519 -C "n8n-vps" -f ~/.ssh/n8n-vps
-# Press Enter twice (no passphrase for automation)
-
-# View public key (add to VPS)
-cat ~/.ssh/n8n-vps.pub
-
-# View private key (add to n8n credential)
-cat ~/.ssh/n8n-vps
-```
+- **A1**: Hostinger VPS KVM 2 (Ubuntu 24.04) — IP: `31.97.131.41`
+- **A2**: n8n Cloud account created
+- **A3**: GitHub PAT (fine-grained) with repo + discussions permissions
+- **A4**: SSH key pair in 1Password (`n8n VPS` item)
 
 ---
 
-## [3] VPS Setup
+## [3] VPS Setup (Completed)
 
-### `[B1]` First SSH Connection
+- **B1**: System updated, timezone UTC
+- **B2**: SSH public key added to root
+- **B3**: `n8n-agent` user created with SSH access
+- **B4**: Node 22.21.1 (nvm), pnpm 10.25.0, Claude Code 2.0.69, Gemini CLI 0.20.2, Copilot CLI 0.0.369
+- **B5**: GitHub CLI 2.83.2 authenticated
+- **B6**: Repo cloned to `~/workspace/Parametric_Portal`, hourly cron pull
+- **B7**: API keys in `~/.bashrc` and `~/.profile` (EXA, PERPLEXITY, TAVILY, SONAR, GITHUB, HOSTINGER)
+- **B8**: Claude, Gemini, Copilot authenticated (Codex skipped - OAuth dead)
 
-```bash
-# SSH into VPS as root (use password from Hostinger email)
-ssh root@YOUR_VPS_IP
-
-# Update system packages
-apt update && apt upgrade -y
-
-# Set timezone
-timedatectl set-timezone UTC
-```
-
-### `[B2]` Add SSH Public Key
-
-```bash
-# Still as root on VPS
-mkdir -p ~/.ssh
-echo "YOUR_PUBLIC_KEY_FROM_A4" >> ~/.ssh/authorized_keys
-chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys
-```
-
-### `[B3]` Create n8n-agent User
-
-```bash
-# As root on VPS
-useradd -m -s /bin/bash n8n-agent
-mkdir -p /home/n8n-agent/.ssh
-cp ~/.ssh/authorized_keys /home/n8n-agent/.ssh/
-chown -R n8n-agent:n8n-agent /home/n8n-agent/.ssh
-chmod 700 /home/n8n-agent/.ssh
-chmod 600 /home/n8n-agent/.ssh/authorized_keys
-```
-
-### `[B4]` Install CLI Tools
-
-```bash
-# Switch to n8n-agent
-su - n8n-agent
-
-# Install nvm + Node.js 22
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-source ~/.bashrc && nvm install 22 && nvm use 22
-corepack enable && corepack prepare pnpm@latest --activate
-
-# Install AI CLI agents
-npm install -g @anthropic-ai/claude-code  # Claude Code
-npm install -g @github/copilot            # GitHub Copilot CLI
-npm install -g @openai/codex              # OpenAI Codex CLI
-npm install -g @google/gemini-cli         # Google Gemini CLI
-```
-
-### `[B5]` Install GitHub CLI
-
-```bash
-# As n8n-agent on VPS (requires sudo)
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-sudo apt update && sudo apt install gh -y
-
-# Authenticate with PAT from A3
-gh auth login --with-token <<< "YOUR_GITHUB_PAT_FROM_A3"
-```
-
-### `[B6]` Clone Repository
-
-```bash
-# As n8n-agent
-mkdir -p ~/workspace && cd ~/workspace
-git clone https://github.com/bsamiee/Parametric_Portal.git
-
-# Cron: auto-pull hourly
-(crontab -l 2>/dev/null; echo "0 * * * * cd ~/workspace/Parametric_Portal && git pull origin main") | crontab -
-```
-
-### `[B7]` Set API Keys
-
-```bash
-# Append to ~/.bashrc
-cat >> ~/.bashrc << 'EOF'
-
-# AI CLI API Keys
-export ANTHROPIC_API_KEY="sk-ant-..."     # Claude Code
-export OPENAI_API_KEY="sk-..."            # Codex CLI
-export GEMINI_API_KEY="..."               # Gemini CLI (optional, OAuth available)
-export GITHUB_TOKEN="ghp_..."             # GitHub CLI
-EOF
-
-source ~/.bashrc
-```
-
-### `[B8]` Authenticate AI CLIs
-
-| CLI         | Auth Command              | Requirement                     |
-| ----------- | ------------------------- | ------------------------------- |
-| Claude Code | `claude` (follow prompts) | Anthropic API key or Claude Pro |
-| Copilot CLI | `copilot` → `/login`      | Copilot Pro/Business/Enterprise |
-| Codex CLI   | `codex` (follow prompts)  | ChatGPT Plus/Pro/Business       |
-| Gemini CLI  | `gemini` (follow prompts) | Google account (free tier)      |
+**SSH Access:** `ssh n8n` (after home-manager rebuild with new matchBlock)
 
 ---
 
