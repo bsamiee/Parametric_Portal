@@ -1,3 +1,13 @@
+## 0.6.6 (2025-12-13)
+
+### [BUG_FIXES]
+
+- **quality:** resolve SonarCloud code smells ([b370575](https://github.com/bsamiee/Parametric_Portal/commit/b370575))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.5 (2025-12-11)
 
 ### [BUG_FIXES]
