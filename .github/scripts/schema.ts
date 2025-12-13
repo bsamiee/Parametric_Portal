@@ -246,6 +246,7 @@ const B = Object.freeze({
                 'security',
                 'stale',
                 'drift-flagged',
+                'checkpoint-required',
             ] as const,
             status: [
                 'triage',

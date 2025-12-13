@@ -116,6 +116,10 @@
   color: "f97316"
   description: "Alignment concerns detected"
 
+- name: checkpoint-required
+  color: "dc2626"
+  description: "Phase checkpoint needed before proceeding"
+
 # --- Phase Labels -------------------------------------------------------------
 
 - name: 0-foundation
