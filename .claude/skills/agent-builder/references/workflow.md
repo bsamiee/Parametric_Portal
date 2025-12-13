@@ -40,7 +40,7 @@ Load agent-builder sections per Type:
 ---
 ### [2.2][LOAD_STANDARDS]
 
-Invoke `style-summarizer`. Extract voice constraints and formatting rules:
+Invoke `skill-summarizer` with skill `style-standards`. Extract voice constraints and formatting rules:
 - Voice: imperative prompt body, third person description.
 - Formatting: H2 with sigils, constraint markers.
 

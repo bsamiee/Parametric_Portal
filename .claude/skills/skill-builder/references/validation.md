@@ -16,7 +16,7 @@ Consolidated checklist for skill-builder workflows. SKILL.md §VALIDATION contai
 |   [1]   | Parameters | Collection complete    | Scope, Type, Depth captured before reference loading |
 |   [2]   | References | All required loaded    | frontmatter.md, structure.md, depth.md read          |
 |   [3]   | Research   | deep-research complete | Both rounds + critiques finished, findings captured  |
-|   [4]   | Style      | style-summarizer run   | Voice/formatting extracted, report.md produced       |
+|   [4]   | Style      | skill-summarizer run   | Voice/formatting extracted from style-standards      |
 |   [5]   | Execute    | Workflow scope matched | create OR refine path executed per Scope parameter   |
 |   [6]   | Artifacts  | All files generated    | SKILL.md + type-appropriate folders created          |
 

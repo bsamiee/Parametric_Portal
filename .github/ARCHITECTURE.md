@@ -50,12 +50,12 @@ Labels are the state machine. Workflows react to label changes.
 
 All four agents are used. Each has code review capability + varying strengths.
 
-| Agent      | Code Review                  | Full CLI (n8n+VPS)       | Strength                        |
-| ---------- | ---------------------------- | ------------------------ | ------------------------------- |
-| **Claude** | GitHub Action (API)          | Claude Code CLI          | Deep reasoning, complex tasks   |
-| **Gemini** | GitHub Action (API)          | Gemini CLI               | Multimodal, fast, cost-efficient|
-| **Copilot**| Native (Copilot Pro)         | Copilot CLI (planned)    | IDE integration, suggestions    |
-| **Codex**  | Built-in review function     | (TBD)                    | Weakest of four, supplementary  |
+| Agent       | Code Review              | Full CLI (n8n+VPS)    | Strength                         |
+| ----------- | ------------------------ | --------------------- | -------------------------------- |
+| **Claude**  | GitHub Action (API)      | Claude Code CLI       | Deep reasoning, complex tasks    |
+| **Gemini**  | GitHub Action (API)      | Gemini CLI            | Multimodal, fast, cost-efficient |
+| **Copilot** | Native (Copilot Pro)     | Copilot CLI (planned) | IDE integration, suggestions     |
+| **Codex**   | Built-in review function | (TBD)                 | Weakest of four, supplementary   |
 
 **Code review** = API calls via GitHub Actions (adequate, all 4 support this).
 **Full CLI** = n8n + VPS execution for implementation work (Claude, Gemini primary).
@@ -96,13 +96,13 @@ PR merged              n8n → Mark issues done, close
 
 ## Key Files
 
-| File                | Purpose                                        |
-| ------------------- | ---------------------------------------------- |
-| `README.md`         | Detailed workflow/action inventory             |
-| `N8N_SETUP.md`      | n8n + VPS setup for CLI agent execution        |
-| `AGENTIC_PM_PLAN.md`| AI-first PM lifecycle implementation plan      |
-| `labels.yml`        | 43 labels across 7 categories                  |
-| `scripts/schema.ts` | Central B constant, dispatch tables, utilities |
+| File                 | Purpose                                        |
+| -------------------- | ---------------------------------------------- |
+| `README.md`          | Detailed workflow/action inventory             |
+| `N8N_SETUP.md`       | n8n + VPS setup for CLI agent execution        |
+| `AGENTIC_PM_PLAN.md` | AI-first PM lifecycle implementation plan      |
+| `labels.yml`         | 43 labels across 7 categories                  |
+| `scripts/schema.ts`  | Central B constant, dispatch tables, utilities |
 
 ---
 
@@ -124,24 +124,42 @@ PR merged              n8n → Mark issues done, close
 
 ## Agentic PM System
 
-Full AI-first project management lifecycle with minimal human gates. See [`AGENTIC_PM_PLAN.md`](AGENTIC_PM_PLAN.md) for implementation details.
+AI-first project management. Discussions for planning, Issues for execution.
 
 ```
-INTAKE → BRAINSTORM → REFINE → PLAN → [Human] → BOARDROOM → [Human] → DECOMPOSE → IMPLEMENT → DRIFT CHECK → DONE
+INTAKE → EXPLORE → PLAN → [BOARDROOM ⟷ REFINE]* → DECOMPOSE → [HUMAN] → DISPATCH → IMPLEMENT → DONE
+                                ↑       ↓
+                                └───────┘ (loop while revise, max 3)
 ```
 
-**Labels** (5 new, drives n8n workflows):
+### Skills (Claude Code)
 
-| Label                 | Trigger                          |
-| --------------------- | -------------------------------- |
-| `critique-pending`    | Boardroom agent ensemble         |
-| `critique-passed`     | Approval gate for decomposition  |
-| `scope`               | Task decomposition workflow      |
-| `drift-flagged`       | Governance alert on PR           |
-| `checkpoint-required` | Phase boundary review            |
+| Skill       | Input                  | Output                  | Marker                               |
+| ----------- | ---------------------- | ----------------------- | ------------------------------------ |
+| `explore`   | Discussion             | Recommendation          | `<!-- SKILL_COMPLETE: explore -->`   |
+| `plan`      | explore output         | PLAN.md draft           | `<!-- SKILL_COMPLETE: plan -->`      |
+| `boardroom` | PLAN.md                | 5-agent critique + vote | `<!-- SKILL_COMPLETE: boardroom -->` |
+| `refine`    | PLAN.md + critique     | Refined PLAN.md         | `<!-- SKILL_COMPLETE: refine -->`    |
+| `decompose` | PLAN.md (approved)     | Task plan (no issues)   | `<!-- SKILL_COMPLETE: decompose -->` |
+| `dispatch`  | Task plan + human gate | GitHub issues           | `<!-- SKILL_COMPLETE: dispatch -->`  |
 
-**Key design**:
-- **Agnostic intake**: Teams/Slack/GitHub/API via single n8n normalizer
-- **Boardroom critique**: 5-personality agent debate before plan approval
-- **Drift prevention**: Living PLAN.md updated after each task
-- **Governance agent**: Alignment checks on every PR
+### Orchestration
+
+n8n detects completion markers → triggers `governance` agent → pass → next skill.
+
+| Label               | Purpose                               |
+| ------------------- | ------------------------------------- |
+| `critique-pending`  | Triggers boardroom skill              |
+| `refine-pending`    | Boardroom voted revise → refine skill |
+| `dispatch-approved` | Human approved → dispatch skill       |
+| `scope`             | Tasks decomposed                      |
+| `drift-flagged`     | Governance detected misalignment      |
+
+### Design
+
+- **ICE Engine**: Kickstart once → runs autonomously until human gate
+- **Governance**: Validates stage output vs input (binary pass/fail)
+- **Boardroom Loop**: 5-personality critique → refine → repeat until approve (max 3)
+- **Single Human Gate**: Review decomposition before issue dispatch
+
+See [`AGENTIC_PM_PLAN.md`](AGENTIC_PM_PLAN.md) for full specification.

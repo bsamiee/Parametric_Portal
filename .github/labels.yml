@@ -98,9 +98,13 @@
   color: "fcd34d"
   description: "Awaiting boardroom review"
 
-- name: critique-passed
+- name: refine-pending
+  color: "f59e0b"
+  description: "Boardroom voted revise, awaiting plan refinement"
+
+- name: dispatch-approved
   color: "22c55e"
-  description: "Boardroom approved, ready to decompose"
+  description: "Human approved decomposition, ready for issue creation"
 
 - name: scope
   color: "3b82f6"
@@ -111,10 +115,6 @@
 - name: drift-flagged
   color: "f97316"
   description: "Alignment concerns detected"
-
-- name: checkpoint-required
-  color: "ef4444"
-  description: "Phase checkpoint needed"
 
 # --- Phase Labels -------------------------------------------------------------
 

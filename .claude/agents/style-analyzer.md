@@ -5,6 +5,7 @@ description: >-
   compliance issues. Read-only operation returns severity-ranked findings.
 tools: Read, Glob, Grep, Bash
 model: sonnet
+color: "#8e68ad"
 ---
 
 # [H1][STYLE-ANALYZER]
@@ -23,7 +24,7 @@ Analyze single file for style-standards compliance. Return severity-ranked findi
 **Required Context:**
 - `file_path` — Absolute path to target file
 - `focus` — Elevated domain (formatting|voice|taxonomy|dictum|keywords|density|none)
-- `style_context` — Synthesized style-standards (from style-summarizer)
+- `style_context` — Synthesized style-standards (from skill-summarizer)
 
 ---
 ## [2][PROCESS]

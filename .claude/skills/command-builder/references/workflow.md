@@ -42,7 +42,7 @@ Load command-builder sections per Pattern:
 ---
 ### [2.2][LOAD_STANDARDS]
 
-Invoke `style-summarizer`. Extract:
+Invoke `skill-summarizer` with skill `style-standards`. Extract:
 - Voice constraints (verb-first descriptions, imperative tasks).
 - Formatting rules (H2 sections, constraint markers).
 

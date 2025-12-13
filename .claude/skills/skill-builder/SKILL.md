@@ -19,7 +19,7 @@ Create and refine Claude Code skills via structured workflows.
 4. Read [depth.md](./references/depth.md) — LOC limits, nesting gated by Depth
 5. (complex) Read [scripting.md](./references/scripting.md) — Automation standards
 6. Capture requirements — purpose, triggers, outputs
-7. Invoke `style-summarizer` — Extract voice, formatting, taxonomy; all sub-agents use `report.md` output
+7. Invoke `skill-summarizer` with skill `style-standards` — Extract voice, formatting, taxonomy
 8. Invoke `deep-research` — Domain research for skill topic
 9. Plan with 3 agents — file inventory, section structure, content framework
 10. Execute per Scope:
@@ -35,7 +35,7 @@ Create and refine Claude Code skills via structured workflows.
 
 **Dependencies:**
 - `deep-research` — Domain research via parallel agents
-- `style-summarizer` — Voice and formatting extraction
+- `skill-summarizer` — Voice and formatting extraction (with skill `style-standards`)
 - `report.md` — Sub-agent output format
 
 [REFERENCE]: [index.md](./index.md) — Complete file listing
@@ -145,7 +145,7 @@ Templates define output scaffolds. Agent combines user input with template skele
 [VERIFY] Completion:
 - [ ] Parameters: Scope, Type, Depth collected and applied.
 - [ ] Research: `deep-research` completed fully before authoring.
-- [ ] Style: `style-summarizer` constraints applied to output.
+- [ ] Style: `skill-summarizer` constraints applied to output.
 - [ ] Workflow: Executed per Scope (create | refine).
 - [ ] Quality: LOC within limits, content separation enforced.
 

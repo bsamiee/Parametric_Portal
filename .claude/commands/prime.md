@@ -7,7 +7,7 @@ description: Initialize session with codebase context and style standards.
 
 <br>
 
-Execute sections in sequence. Summarize findings post-execution.
+Execute sections in sequence.
 
 ---
 ## [1][DISCOVER]
@@ -23,7 +23,7 @@ Run `eza . --tree --git-ignore` mapping repository structure.
 
 <br>
 
-Use `style-summarizer` subagent synthesizing style standards. When unavailable, read `.claude/skills/style-standards/SKILL.md` directly.
+Execute `/learn-skill style-standards`
 
 ---
 ## [3][READ]

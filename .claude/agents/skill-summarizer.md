@@ -7,6 +7,7 @@ description: >-
 tools: Read, Glob, Grep, Bash
 model: sonnet
 skills: skill-builder
+color: "#c21e57"
 ---
 
 Read skill folder (full or targeted section). Structure knowledge for main agent context injection.

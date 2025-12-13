@@ -8,9 +8,11 @@ AI-first project management with GitHub as state layer, n8n as orchestrator, CLI
 
 | Principle                | Implementation                                             |
 | ------------------------ | ---------------------------------------------------------- |
+| ICE Engine Model         | Kickstart once → runs autonomously until completion        |
 | Agnostic Intake          | Single n8n normalizer accepts Teams/Slack/GitHub/API       |
-| Boardroom Critique       | Multi-personality agent debate with automated convergence  |
-| Minimal Human Gates      | Human at: plan direction, plan approval, final delivery    |
+| Governance Validation    | `governance` agent validates each stage output vs input    |
+| Boardroom Loop           | Multi-personality critique with automated refine cycles    |
+| Single Human Gate        | Human reviews decomposition before issue dispatch          |
 | Context-Bounded Tasks    | Every task fits single agent context window                |
 | Living Plan              | PLAN.md updated after each task, drift measured against it |
 | Discussions for Planning | Issues reserved for executable work only                   |
@@ -20,24 +22,25 @@ AI-first project management with GitHub as state layer, n8n as orchestrator, CLI
 ## [2] Lifecycle Stages
 
 ```
-INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
-    → BOARDROOM → [HUMAN: Approval] → DECOMPOSE
-    → IMPLEMENT → DRIFT CHECK → [CHECKPOINT] → DONE → [HUMAN: Delivery]
+INTAKE → EXPLORE → PLAN → [BOARDROOM ⟷ REFINE]* → DECOMPOSE → [HUMAN] → DISPATCH → IMPLEMENT → DONE
+                                ↑       ↓
+                                └───────┘ (loop while revise, max 3)
 ```
 
-| Stage       | Label                 | Artifact             | Agent/Skill         |
-| ----------- | --------------------- | -------------------- | ------------------- |
-| Intake      | `idea`                | Discussion created   | n8n workflow        |
-| Brainstorm  | `planning`            | Discussion           | `brainstorm` skill  |
-| Refine      | `planning`            | Discussion (updated) | `refine` skill      |
-| Plan        | `planning`            | PLAN.md draft        | `plan` skill        |
-| Boardroom   | `critique-pending`    | Critique report      | `boardroom` skill   |
-| Approved    | `critique-passed`     | PLAN.md finalized    | —                   |
-| Decompose   | `scope`               | Task issues          | `decompose` skill   |
-| Implement   | `implement`           | PR                   | Agent CLI           |
-| Drift Check | `drift-flagged`       | PLAN.md updated      | `drift-check` skill |
-| Checkpoint  | `checkpoint-required` | Progress report      | `checkpoint` skill  |
-| Done        | `done`                | Deliverables         | —                   |
+**Stage Transitions:** Each skill outputs completion marker. `governance` agent validates output against original input. If valid → auto-proceed. If invalid → flag for review.
+
+| Stage       | Label              | Artifact            | Agent/Skill        |
+| ----------- | ------------------ | ------------------- | ------------------ |
+| Intake      | `idea`             | Discussion created  | n8n workflow       |
+| Explore     | `planning`         | Discussion comment  | `explore` skill    |
+| Plan        | `planning`         | PLAN.md draft       | `plan` skill       |
+| Boardroom   | `critique-pending` | Critique report     | `boardroom` skill  |
+| Refine      | `refine-pending`   | Refined PLAN.md     | `refine` skill     |
+| Decompose   | `scope`            | Task plan (comment) | `decompose` skill  |
+| Approval    | `dispatch-approved`| —                   | Human gate         |
+| Dispatch    | `implement`        | GitHub issues       | `dispatch` skill   |
+| Implement   | `in-progress`      | PR                  | Agent CLI          |
+| Done        | `done`             | Deliverables        | —                  |
 
 ---
 
@@ -45,9 +48,10 @@ INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
 
 ### Phase 1: Foundation (Labels + Discussions + Tooling) ✓ COMPLETE
 
-**Labels** (`.github/labels.yml`) — 5 added:
+**Labels** (`.github/labels.yml`) — 6 added:
 - [x] `critique-pending` — Awaiting boardroom review
-- [x] `critique-passed` — Boardroom approved, ready to decompose
+- [x] `refine-pending` — Boardroom voted revise, awaiting refinement
+- [x] `dispatch-approved` — Human approved decomposition
 - [x] `scope` — Decomposed with acceptance criteria
 - [x] `drift-flagged` — Alignment concerns detected
 - [x] `checkpoint-required` — Phase checkpoint needed
@@ -79,17 +83,18 @@ INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
 
 ---
 
-### Phase 2: Skills (Claude Code) — IN PROGRESS
+### Phase 2: Skills (Claude Code) ✓ COMPLETE
 
-| Skill         | Path                          | Purpose                                      | Priority |
-| ------------- | ----------------------------- | -------------------------------------------- | -------- |
-| `brainstorm`  | `.claude/skills/brainstorm/`  | Explore possibilities, generate options      | P1       |
-| `refine`      | `.claude/skills/refine/`      | Narrow scope, define problem                 | P1       |
-| `plan`        | `.claude/skills/plan/`        | Create PLAN.md with objectives, architecture | P1       |
-| `boardroom`   | `.claude/skills/boardroom/`   | Orchestrate multi-personality critique       | P1       |
-| `decompose`   | `.claude/skills/decompose/`   | Break plan into context-bounded tasks        | P1       |
-| `drift-check` | `.claude/skills/drift-check/` | PR alignment against task + project          | P2       |
-| `checkpoint`  | `.claude/skills/checkpoint/`  | Phase-level progress review                  | P2       |
+| Skill       | Path                         | Purpose                                      | Priority |
+| ----------- | ---------------------------- | -------------------------------------------- | -------- |
+| `explore`   | `.claude/skills/explore/`    | Research options, recommend approach         | P1       |
+| `plan`      | `.claude/skills/plan/`       | Create PLAN.md with objectives, architecture | P1       |
+| `boardroom` | `.claude/skills/boardroom/`  | Orchestrate multi-personality critique       | P1       |
+| `refine`    | `.claude/skills/refine/`     | Incorporate boardroom critique into plan     | P1       |
+| `decompose` | `.claude/skills/decompose/`  | Break plan into task inventory (no issues)   | P1       |
+| `dispatch`  | `.claude/skills/dispatch/`   | Create GitHub issues from approved plan      | P1       |
+
+**Note:** `brainstorm` skill renamed to `explore`. Boardroom→Refine loop replaces human approval gate.
 
 **Skill structure** (each):
 ```
@@ -101,7 +106,7 @@ INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
 
 ---
 
-### Phase 3: Boardroom Agents
+### Phase 3: Agents ✓ COMPLETE
 
 | Agent                  | Path              | Personality       | Focus                                     |
 | ---------------------- | ----------------- | ----------------- | ----------------------------------------- |
@@ -110,56 +115,85 @@ INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
 | `boardroom-pragmatist` | `.claude/agents/` | Senior Engineer   | Feasibility, timeline, resources          |
 | `boardroom-contrarian` | `.claude/agents/` | Devil's Advocate  | Assumptions, edge cases, failure modes    |
 | `boardroom-integrator` | `.claude/agents/` | Platform Engineer | Cross-system impact, dependencies         |
-| `governance`           | `.claude/agents/` | Alignment Checker | Drift detection, plan updates             |
+| `governance`           | `.claude/agents/` | Alignment Checker | Validates stage output vs input, drift    |
 
-**Agent output schema**:
-```typescript
-{
-  vote: "approve" | "revise" | "block",
-  confidence: 0-100,
-  assessment: string,
-  concerns: [{ severity, description, suggestion }],
-  strengths: string[],
-  questions: string[]
-}
-```
+**Boardroom output**: Each agent votes `approve | revise | block` with assessment. Majority vote determines outcome.
+
+**Governance role**: Runs after each stage to validate output addresses original input. Binary pass/fail — no confidence scores.
 
 ---
 
-### Phase 4: Commands
+### Phase 4: Commands ✓ COMPLETE
 
-| Command        | Path                              | Usage                           | Invokes           |
-| -------------- | --------------------------------- | ------------------------------- | ----------------- |
-| `/brainstorm`  | `.claude/commands/brainstorm.md`  | `/brainstorm <topic>`           | brainstorm skill  |
-| `/refine`      | `.claude/commands/refine.md`      | `/refine #<discussion>`         | refine skill      |
-| `/plan`        | `.claude/commands/plan.md`        | `/plan #<discussion>`           | plan skill        |
-| `/boardroom`   | `.claude/commands/boardroom.md`   | `/boardroom #<project>`         | boardroom skill   |
-| `/decompose`   | `.claude/commands/decompose.md`   | `/decompose #<project>`         | decompose skill   |
-| `/drift-check` | `.claude/commands/drift-check.md` | `/drift-check #<pr> #<project>` | drift-check skill |
+**Purpose:** Commands are thin orchestrator-invokable entry points that enable n8n to dispatch skills consistently via SSH. Each command loads skill context, provides agent guidance, and executes a single lifecycle stage.
+
+**Namespace:** `.claude/commands/pm/` → Commands invoked as `/pm:explore`, `/pm:plan`, etc.
+
+**Quality Standards:**
+- LOC < 50 (thin wrapper, not business logic)
+- Single `$1` argument (Discussion number)
+- Skill context loaded via `@path` references
+- Tools scoped to skill requirements
+- 1-3 sentence guidance block anchoring agent behavior
+- Verb-first description, <80 chars
+
+**Command Template:**
+```markdown
+---
+description: {verb-first, <80 chars, outcome-focused}
+argument-hint: [discussion-number]
+allowed-tools: {tools scoped to skill pattern}
+---
+
+## Context
+@.claude/skills/{skill}/SKILL.md
+
+## Guidance
+{1-3 sentences describing expected behavior, constraints, and success criteria}
+
+## Task
+Execute {skill} skill for Discussion #$1. Follow skill workflow sections sequentially. Post output with completion marker.
+```
+
+**Command Roster:**
+
+| [INDEX] | [COMMAND]       | [PATH]                          | [TOOLS]                      | [GUIDANCE]                                                                 |
+| :-----: | --------------- | ------------------------------- | ---------------------------- | -------------------------------------------------------------------------- |
+|   [1]   | `/pm:explore`   | `.claude/commands/pm/explore`   | Task, Read, Glob, Bash       | Research options for Discussion idea. Recommend approach with trade-offs.  |
+|   [2]   | `/pm:plan`      | `.claude/commands/pm/plan`      | Task, Read, Edit, Glob, Bash | Create PLAN.md draft from explore output. Define objectives, architecture. |
+|   [3]   | `/pm:boardroom` | `.claude/commands/pm/boardroom` | Task, Read, Glob, Bash       | Dispatch 5 critique agents in parallel. Synthesize votes, post report.     |
+|   [4]   | `/pm:refine`    | `.claude/commands/pm/refine`    | Task, Read, Edit, Glob, Bash | Incorporate boardroom critique into revised plan. Track cycle count.       |
+|   [5]   | `/pm:decompose` | `.claude/commands/pm/decompose` | Task, Read, Glob, Bash       | Break approved plan into context-bounded tasks. Output plan for review.    |
+|   [6]   | `/pm:dispatch`  | `.claude/commands/pm/dispatch`  | Task, Read, Glob, Bash       | Create GitHub issues from approved decomposition. Apply task labels.       |
+|   [7]   | `/pm:govern`    | `.claude/commands/pm/govern`    | Task, Read, Glob             | Validate stage output vs input. Binary pass/fail. Flag drift if invalid.   |
+
+**n8n Invocation:** `ssh vps "cd /repo && claude '/pm:explore #42'"`
 
 ---
 
 ### Phase 5: n8n Workflows
 
-| Workflow                   | Trigger                  | Action                                      |
-| -------------------------- | ------------------------ | ------------------------------------------- |
-| **Intake Normalizer**      | Webhook (any source)     | Normalize payload → route by intent         |
-| **Discussion Router**      | `discussion_opened`      | Classify → trigger brainstorm or fast-track |
-| **Lifecycle Orchestrator** | Label transitions        | Trigger appropriate skill on VPS            |
-| **Boardroom Trigger**      | `critique-pending` added | SSH → run boardroom skill                   |
-| **Drift Monitor**          | PR merged                | SSH → run drift-check, update PLAN.md       |
-| **Checkpoint Trigger**     | N tasks complete         | SSH → generate checkpoint report            |
-| **Response Router**        | Skill output             | Route response back to source               |
+| Workflow                   | Trigger                           | Action                                        |
+| -------------------------- | --------------------------------- | --------------------------------------------- |
+| **Intake Normalizer**      | Webhook (any source)              | Normalize payload → create Discussion         |
+| **Lifecycle Orchestrator** | Skill completion marker           | Run governance check → trigger next skill     |
+| **Boardroom Trigger**      | `critique-pending` label          | SSH → `/pm:boardroom #<discussion>`           |
+| **Refine Trigger**         | `refine-pending` label            | SSH → `/pm:refine #<discussion>`              |
+| **Decompose Trigger**      | Boardroom approve (majority vote) | SSH → `/pm:decompose #<discussion>`           |
+| **Dispatch Trigger**       | `dispatch-approved` label         | SSH → `/pm:dispatch #<discussion>`            |
+| **Drift Monitor**          | PR merged                         | SSH → `/pm:govern #<discussion> implement`    |
 
-**Source adapters** (n8n nodes):
-- Teams adapter
-- Slack adapter
-- GitHub Discussion adapter
-- API webhook adapter
+**Orchestration Pattern:**
+1. Skill completes → posts `<!-- SKILL_COMPLETE: {skill} -->` marker
+2. n8n detects marker → triggers `/pm:govern #<discussion> <stage>` to validate
+3. Governance passes → n8n triggers next command automatically
+4. Governance fails → labels Discussion `drift-flagged` for human review
+
+**Source adapters** (n8n nodes): Teams, Slack, GitHub Discussion, API webhook
 
 ---
 
-### Phase 6: Governance & Drift
+### Phase 6: Governance & Living Plan
 
 **PLAN.md template** (created per project):
 ```markdown
@@ -168,7 +202,6 @@ INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
 ## Current State
 - Phase: {phase}
 - Progress: {X}/{Y} tasks
-- Drift Score: {score}%
 - Updated: {timestamp}
 
 ## Objectives
@@ -178,25 +211,20 @@ INTAKE → BRAINSTORM → REFINE → PLAN → [HUMAN: Direction]
 - {decision}: {choice} (Rationale: ...)
 
 ## Completed Work
-| Task | PR  | Alignment | Notes |
-| ---- | --- | --------- | ----- |
+| Task | PR  | Aligned | Notes |
+| ---- | --- | ------- | ----- |
 
 ## Deviation Log
-| Task | Expected | Actual | Impact |
-| ---- | -------- | ------ | ------ |
+| Task | Expected | Actual | Resolution |
+| ---- | -------- | ------ | ---------- |
 
 ## Upcoming
 - [ ] Task: ...
 ```
 
-**Drift thresholds**:
-- ≥90%: Auto-approve
-- 70-89%: Flag for human
-- <70%: Block merge
+**Governance validation**: `governance` agent compares PR/output against original task + PLAN.md. Binary pass/fail — if output addresses input requirements, proceed. If not, flag for review.
 
-**Checkpoint triggers**:
-- Every 5 tasks OR phase boundary
-- Cumulative drift <80%
+**Drift handling**: When deviation detected, governance agent updates PLAN.md deviation log and determines if deviation is acceptable (scope clarification) or blocking (misalignment).
 
 ---
 
@@ -217,24 +245,19 @@ const TASK_CONSTRAINTS = {
 
 ## [5] Human Gates
 
-| Gate             | Trigger                   | Action                         |
-| ---------------- | ------------------------- | ------------------------------ |
-| Plan Direction   | Plan created after refine | Approve objectives or redirect |
-| Plan Approval    | Boardroom confidence ≥80% | Sign off or request revision   |
-| Phase Checkpoint | N tasks OR phase boundary | Optional progress review       |
-| Final Delivery   | All tasks complete        | Accept deliverables            |
+| Gate                    | Trigger                     | Action                              |
+| ----------------------- | --------------------------- | ----------------------------------- |
+| Decomposition Approval  | Decompose skill completes   | Review task plan → `dispatch-approved` |
 
-**Escalation**:
-- Boardroom confidence <60% → Immediate escalation
-- Drift score <70% → Block + notify
-- Task blocked >48h → Notify
-- Unanimous blocker → Halt
+**Single human gate.** Boardroom→Refine loop handles plan refinement automatically. Human reviews final decomposition before any issues are created.
+
+**Escalation**: Governance flags `drift-flagged` when output doesn't address input. Boardroom `block` or no majority halts pipeline for human intervention.
 
 ---
 
 ## [6] Implementation Order
 
-### Phase 1: Foundation ✓
+### Phase 1: Foundation ✓ COMPLETE
 - [x] Labels — Add 5 labels to `.github/labels.yml`
 - [x] Schema — Update `B.labels.groups` in `schema.ts`
 - [x] Docs — Update `README.md`, `ARCHITECTURE.md`
@@ -242,40 +265,37 @@ const TASK_CONSTRAINTS = {
 - [x] Discussions — Enabled (`Planning` + `Q&A` categories)
 - [x] Tooling — Add Discussion commands to `github-tools` (GraphQL)
 
-### Phase 2: Claude Code Skills — IN PROGRESS
-- [x] `brainstorm` skill — Explore possibilities, generate options
-- [ ] `refine` skill — Narrow scope, define problem
-- [ ] `plan` skill — Create PLAN.md with objectives, architecture
-- [ ] `boardroom` skill — Orchestrate multi-personality critique
-- [ ] `decompose` skill — Break plan into context-bounded tasks
+### Phase 2: Skills ✓ COMPLETE
+- [x] `explore` skill — Research + recommend approach (replaced brainstorm)
+- [x] `plan` skill — Create PLAN.md with objectives, architecture
+- [x] `boardroom` skill — Orchestrate 5-agent critique
+- [x] `decompose` skill — Break plan into context-bounded tasks
 
-### Phase 3: Boardroom Agents
-- [ ] `boardroom-strategist` agent — VP Engineering perspective
-- [ ] `boardroom-architect` agent — Staff Engineer perspective
-- [ ] `boardroom-pragmatist` agent — Senior Engineer perspective
-- [ ] `boardroom-contrarian` agent — Devil's Advocate perspective
-- [ ] `boardroom-integrator` agent — Platform Engineer perspective
-- [ ] `governance` agent — Drift detection, alignment checks
+### Phase 3: Agents ✓ COMPLETE
+- [x] `governance` agent — Validates stage output vs input (runs after each skill)
+- [x] `boardroom-strategist` agent — VP Engineering perspective
+- [x] `boardroom-architect` agent — Staff Engineer perspective
+- [x] `boardroom-pragmatist` agent — Senior Engineer perspective
+- [x] `boardroom-contrarian` agent — Devil's Advocate perspective
+- [x] `boardroom-integrator` agent — Platform Engineer perspective
 
-### Phase 4: Commands
-- [ ] `/brainstorm` command
-- [ ] `/refine` command
-- [ ] `/plan` command
-- [ ] `/boardroom` command
-- [ ] `/decompose` command
-- [ ] `/drift-check` command
+### Phase 4: Commands ✓ COMPLETE
+- [x] `/pm:explore` — Research options, recommend approach
+- [x] `/pm:plan` — Create PLAN.md draft from explore output
+- [x] `/pm:boardroom` — Dispatch 5 critique agents, synthesize votes
+- [x] `/pm:refine` — Incorporate critique into revised plan
+- [x] `/pm:decompose` — Break plan into context-bounded tasks
+- [x] `/pm:dispatch` — Create GitHub issues from approved plan
+- [x] `/pm:govern` — Validate stage output vs input
 
-### Phase 5: P2 Skills
-- [ ] `drift-check` skill — PR alignment against task + project
-- [ ] `checkpoint` skill — Phase-level progress review
-
-### Phase 6: n8n Workflows (External)
-- [ ] Intake Normalizer — Webhook receiver, payload normalization
-- [ ] Discussion Router — Classify intent, trigger skills
-- [ ] Lifecycle Orchestrator — Label transition handlers
+### Phase 5: n8n Workflows (External)
+- [ ] Intake Normalizer — Webhook receiver → create Discussion
+- [ ] Lifecycle Orchestrator — Skill completion → governance → next skill
 - [ ] Boardroom Trigger — `critique-pending` → SSH → boardroom skill
-- [ ] Drift Monitor — PR merged → SSH → drift-check
-- [ ] Checkpoint Trigger — N tasks complete → checkpoint report
+- [ ] Refine Trigger — `refine-pending` → SSH → refine skill
+- [ ] Decompose Trigger — Boardroom approve → SSH → decompose skill
+- [ ] Dispatch Trigger — `dispatch-approved` → SSH → dispatch skill
+- [ ] Drift Monitor — PR merged → SSH → governance agent
 
 ---
 
@@ -283,40 +303,40 @@ const TASK_CONSTRAINTS = {
 
 ### Create
 
-| Path                                     | Type    | Status |
-| ---------------------------------------- | ------- | ------ |
-| `.claude/skills/brainstorm/SKILL.md`     | Skill   | ✓ DONE |
-| `.claude/skills/refine/SKILL.md`         | Skill   |        |
-| `.claude/skills/plan/SKILL.md`           | Skill   |        |
-| `.claude/skills/boardroom/SKILL.md`      | Skill   |        |
-| `.claude/skills/decompose/SKILL.md`      | Skill   |        |
-| `.claude/skills/drift-check/SKILL.md`    | Skill   |        |
-| `.claude/skills/checkpoint/SKILL.md`     | Skill   |        |
-| `.claude/agents/boardroom-strategist.md` | Agent   |        |
-| `.claude/agents/boardroom-architect.md`  | Agent   |        |
-| `.claude/agents/boardroom-pragmatist.md` | Agent   |        |
-| `.claude/agents/boardroom-contrarian.md` | Agent   |        |
-| `.claude/agents/boardroom-integrator.md` | Agent   |        |
-| `.claude/agents/governance.md`           | Agent   |        |
-| `.claude/commands/brainstorm.md`         | Command |        |
-| `.claude/commands/refine.md`             | Command |        |
-| `.claude/commands/plan.md`               | Command |        |
-| `.claude/commands/boardroom.md`          | Command |        |
-| `.claude/commands/decompose.md`          | Command |        |
-| `.claude/commands/drift-check.md`        | Command |        |
+| Path                                     | Type    | Status     |
+| ---------------------------------------- | ------- | ---------- |
+| `.claude/skills/explore/SKILL.md`        | Skill   | ✓ DONE     |
+| `.claude/skills/plan/SKILL.md`           | Skill   | ✓ DONE     |
+| `.claude/skills/boardroom/SKILL.md`      | Skill   | ✓ DONE     |
+| `.claude/skills/refine/SKILL.md`         | Skill   | ✓ DONE     |
+| `.claude/skills/decompose/SKILL.md`      | Skill   | ✓ DONE     |
+| `.claude/skills/dispatch/SKILL.md`       | Skill   | ✓ DONE     |
+| `.claude/agents/governance.md`           | Agent   | ✓ DONE     |
+| `.claude/agents/boardroom-strategist.md` | Agent   | ✓ DONE     |
+| `.claude/agents/boardroom-architect.md`  | Agent   | ✓ DONE     |
+| `.claude/agents/boardroom-pragmatist.md` | Agent   | ✓ DONE     |
+| `.claude/agents/boardroom-contrarian.md` | Agent   | ✓ DONE     |
+| `.claude/agents/boardroom-integrator.md` | Agent   | ✓ DONE     |
+| `.claude/commands/pm/explore.md`         | Command | ✓ DONE     |
+| `.claude/commands/pm/plan.md`            | Command | ✓ DONE     |
+| `.claude/commands/pm/boardroom.md`       | Command | ✓ DONE     |
+| `.claude/commands/pm/refine.md`          | Command | ✓ DONE     |
+| `.claude/commands/pm/decompose.md`       | Command | ✓ DONE     |
+| `.claude/commands/pm/dispatch.md`        | Command | ✓ DONE     |
+| `.claude/commands/pm/govern.md`          | Command | ✓ DONE     |
 
 ### Modify
 
-| Path                                        | Change                                     | Status  |
-| ------------------------------------------- | ------------------------------------------ | ------- |
-| `.github/labels.yml`                        | Add 5 lifecycle/governance labels          | ✓ DONE  |
-| `.github/scripts/schema.ts`                 | Update B.labels.groups (status + special)  | ✓ DONE  |
-| `.github/README.md`                         | Update label categories table              | ✓ DONE  |
-| `.github/ARCHITECTURE.md`                   | Reference this plan + labels table         | ✓ DONE  |
-| `.github/ISSUE_TEMPLATE/config.yml`         | Discussion contact links (Planning, Q&A)   | ✓ DONE  |
-| `.claude/skills/github-tools/scripts/gh.py` | Add Discussion commands (GraphQL)          | ✓ DONE  |
-| `.claude/skills/github-tools/SKILL.md`      | Document Discussion commands               | ✓ DONE  |
-| `.github/N8N_SETUP.md`                      | Add intake + lifecycle workflows           | Phase 6 |
+| Path                                        | Change                                    | Status  |
+| ------------------------------------------- | ----------------------------------------- | ------- |
+| `.github/labels.yml`                        | Add 5 lifecycle/governance labels         | ✓ DONE  |
+| `.github/scripts/schema.ts`                 | Update B.labels.groups (status + special) | ✓ DONE  |
+| `.github/README.md`                         | Update label categories table             | ✓ DONE  |
+| `.github/ARCHITECTURE.md`                   | Reference this plan + labels table        | ✓ DONE  |
+| `.github/ISSUE_TEMPLATE/config.yml`         | Discussion contact links (Planning, Q&A)  | ✓ DONE  |
+| `.claude/skills/github-tools/scripts/gh.py` | Add Discussion commands (GraphQL)         | ✓ DONE  |
+| `.claude/skills/github-tools/SKILL.md`      | Document Discussion commands              | ✓ DONE  |
+| `.github/N8N_SETUP.md`                      | Add lifecycle orchestrator workflows      | Phase 5 |
 
 ---
 
@@ -340,11 +360,11 @@ const TASK_CONSTRAINTS = {
 
 ## [9] Success Criteria
 
-- [ ] Discussion created → auto-progresses through brainstorm/refine/plan
-- [ ] Plan triggers boardroom → 5 agents critique in parallel
-- [ ] Boardroom outputs confidence score + concerns
-- [ ] Approved plan decomposes into context-bounded tasks
-- [ ] Each task PR checked for drift against PLAN.md
-- [ ] Cumulative drift tracked, checkpoints triggered
-- [ ] Human gates only at: direction, approval, delivery
+- [ ] Discussion created → auto-progresses through explore → plan → boardroom
+- [ ] Governance agent validates each stage output vs input (pass/fail)
+- [ ] Invalid output → flags for human review (no confidence scoring)
+- [ ] Boardroom: 5 agents critique in parallel, majority vote determines outcome
+- [ ] Approved plan decomposes into context-bounded tasks automatically
+- [ ] Each task PR validated by governance agent against PLAN.md
+- [ ] Single human gate at decomposition approval before issue dispatch
 - [ ] Works from Teams/Slack/GitHub/API (same flow)

@@ -5,6 +5,7 @@ description: >-
   confirms findings, applies corrections via Edit. Protects YAML frontmatter.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
+color: "#6c3082"
 ---
 
 # [H1][STYLE-CORRECTOR]
@@ -23,7 +24,7 @@ Validate wave 1 analysis, confirm findings against file content, apply correctio
 **Required Context:**
 - `file_path` — Absolute path to target file
 - `analysis` — Wave 1 output (style-analyzer findings)
-- `style_context` — Synthesized style-standards (from style-summarizer)
+- `style_context` — Synthesized style-standards (from skill-summarizer)
 - `frontmatter_end` — Line number where frontmatter ends (from analysis)
 
 ---

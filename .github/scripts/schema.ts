@@ -246,7 +246,6 @@ const B = Object.freeze({
                 'security',
                 'stale',
                 'drift-flagged',
-                'checkpoint-required',
             ] as const,
             status: [
                 'triage',
@@ -258,7 +257,6 @@ const B = Object.freeze({
                 'idea',
                 'planning',
                 'critique-pending',
-                'critique-passed',
                 'scope',
             ] as const,
             type: [
