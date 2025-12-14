@@ -1,124 +1,87 @@
 # Agentic Infrastructure Architecture
 
-GitHub is the state layer. AI agents operate on that state via two execution paths.
-
----
-
-## Core Concept
+GitHub is the state layer. AI agents operate via two execution paths.
 
 ```
-GitHub (State)          Execution Path A              Execution Path B
-─────────────────       ─────────────────             ─────────────────
-Issues                  GitHub Actions                n8n Cloud + VPS
-Labels                  (event-driven, fast)          (full CLI agents)
-Pull Requests           │                             │
-Comments                ▼                             ▼
-                        Simple operations             Claude Code CLI
-                        API calls (adequate)          Gemini CLI
-                        Code review                   Full tool use
-                        Label sync                    File access, git, PRs
-                        Meta fixes                    Multi-turn sessions
+GitHub (State)              GitHub Actions              n8n Cloud + VPS
+───────────────             ──────────────              ───────────────
+Issues, Labels, PRs    ──►  Simple API calls       ──►  Full CLI agents
+Discussions, Comments       Code review, sync           File access, git, PRs
 ```
 
 ---
 
-## Two Execution Paths
+## Execution Paths
 
-| Path               | When to Use                    | Example                                                  |
-| ------------------ | ------------------------------ | -------------------------------------------------------- |
-| **GitHub Actions** | Fast, simple, event-driven     | PR title normalization, label sync, code review comments |
-| **n8n + VPS**      | Full agent capabilities needed | Implement features, decompose projects, complex analysis |
-
-**GitHub Actions** = adequate for simple API calls (single request/response).
-**n8n + VPS** = required when agents need tool use, file access, multi-turn reasoning.
+| Path               | Use Case                          | Examples                                      |
+| ------------------ | --------------------------------- | --------------------------------------------- |
+| **GitHub Actions** | Fast, single request/response     | Code review, label sync, PR normalization     |
+| **n8n + VPS**      | Multi-turn reasoning, file access | Feature implementation, project decomposition |
 
 ---
 
-## State Management (Labels)
+## State Management
 
-Labels are the state machine. Workflows react to label changes.
+Labels drive the state machine. Workflows react to label changes.
 
-| Category   | Labels                                                                           | Purpose                 |
-| ---------- | -------------------------------------------------------------------------------- | ----------------------- |
-| **Agent**  | `claude`, `gemini`, `copilot`, `codex`                                           | Dispatch to specific AI |
-| **Status** | `idea` → `triage` → `planning` → `implement` → `in-progress` → `review` → `done` | Workflow state          |
-| **Type**   | `task`, `spike`, `project`, `fix`, `feat`, etc.                                  | Work classification     |
-
----
-
-## AI Agents (4 Active)
-
-All four agents are used. Each has code review capability + varying strengths.
-
-| Agent       | Code Review              | Full CLI (n8n+VPS)    | Strength                         |
-| ----------- | ------------------------ | --------------------- | -------------------------------- |
-| **Claude**  | GitHub Action (API)      | Claude Code CLI       | Deep reasoning, complex tasks    |
-| **Gemini**  | GitHub Action (API)      | Gemini CLI            | Multimodal, fast, cost-efficient |
-| **Copilot** | Native (Copilot Pro)     | Copilot CLI (planned) | IDE integration, suggestions     |
-| **Codex**   | Built-in review function | (TBD)                 | Weakest of four, supplementary   |
-
-**Code review** = API calls via GitHub Actions (adequate, all 4 support this).
-**Full CLI** = n8n + VPS execution for implementation work (Claude, Gemini primary).
-
-Copilot Pro provides native code review without custom workflows. Codex review is supplementary.
+| Category   | Labels                                                                | Purpose                 |
+| ---------- | --------------------------------------------------------------------- | ----------------------- |
+| **Agent**  | `claude`, `gemini`, `copilot`, `codex`                                | Dispatch to specific AI |
+| **Status** | `idea` → `planning` → `implement` → `in-progress` → `review` → `done` | Workflow state          |
+| **Type**   | `task`, `spike`, `project`, `fix`, `feat`                             | Work classification     |
 
 ---
 
-## Workflow Lifecycle
+## AI Agents
 
-```
-[SPIKE] idea           Human brainstorms
-    ↓
-[PROJECT] planning     n8n → Claude CLI decomposes into TASKs
-    ↓
-[TASK] implement       n8n → Agent label triggers CLI execution
-    ↓
-[TASK] in-progress     Agent working (CLI on VPS)
-    ↓
-PR created             Agent pushes code
-    ↓
-PR merged              n8n → Mark issues done, close
-```
+| Agent       | Code Review   | Full CLI        | Strength                      |
+| ----------- | ------------- | --------------- | ----------------------------- |
+| **Claude**  | GitHub Action | Claude Code CLI | Deep reasoning, complex tasks |
+| **Gemini**  | GitHub Action | Gemini CLI      | Multimodal, fast              |
+| **Copilot** | Native        | (planned)       | IDE integration               |
+| **Codex**   | Built-in      | (TBD)           | Supplementary                 |
 
 ---
 
-## Infrastructure Components
+## Infrastructure
 
-| Component          | Role                                    | Location             |
-| ------------------ | --------------------------------------- | -------------------- |
-| **GitHub**         | State layer (issues, labels, PRs)       | github.com           |
-| **GitHub Actions** | Fast event handlers, simple API calls   | `.github/workflows/` |
-| **n8n Cloud**      | Orchestrator, webhook receiver, routing | n8n.cloud            |
-| **Hostinger VPS**  | Runtime for CLI agents                  | Remote server        |
-| **CLI Tools**      | Claude Code, Gemini CLI, gh             | Installed on VPS     |
+| Component          | Role                           | Location               |
+| ------------------ | ------------------------------ | ---------------------- |
+| **GitHub**         | State layer                    | github.com             |
+| **GitHub Actions** | Fast event handlers            | `.github/workflows/`   |
+| **n8n Cloud**      | Webhook receiver, orchestrator | `bsamie.app.n8n.cloud` |
+| **Hostinger VPS**  | CLI agent runtime              | `31.97.131.41`         |
 
----
+### SSH Access
 
-## Key Files
+Three SSH key pairs enable different access patterns:
 
-| File                 | Purpose                                        |
-| -------------------- | ---------------------------------------------- |
-| `README.md`          | Detailed workflow/action inventory             |
-| `N8N_SETUP.md`       | n8n + VPS setup for CLI agent execution        |
-| `AGENTIC_PM_PLAN.md` | AI-first PM lifecycle implementation plan      |
-| `labels.yml`         | 43 labels across 7 categories                  |
-| `scripts/schema.ts`  | Central B constant, dispatch tables, utilities |
+| Key                           | Location                       | Direction            | Purpose                  |
+| ----------------------------- | ------------------------------ | -------------------- | ------------------------ |
+| **Github Authentication key** | 1Password                      | Local/n8n → VPS      | Human + n8n SSH into VPS |
+| **github-actions key**        | GitHub Secrets (`N8N_SSH_KEY`) | GitHub Actions → VPS | `n8n-sync.yml` code sync |
+| **VPS n8n-agent**             | GitHub Deploy Keys             | VPS → GitHub         | VPS git operations       |
 
----
+**n8n Cloud Credential** (`VPS SSH`):
 
-## Why Two Paths?
+| Field       | Value                                   |
+| ----------- | --------------------------------------- |
+| Host        | `31.97.131.41`                          |
+| Port        | `22`                                    |
+| Username    | `n8n-agent`                             |
+| Private Key | 1Password → "Github Authentication key" |
 
-**API calls are fine for:**
-- Code review (read diff, post comments)
-- Label management
-- Metadata normalization
-- Simple Q&A responses
+### Webhooks (Active)
 
-**CLI agents required for:**
-- Implementing features (file writes, git commits)
-- Project decomposition (multi-step reasoning)
-- Complex refactoring (codebase-wide changes)
-- Any task needing tool use beyond text generation
+| URL                          | Events                           | Status |
+| ---------------------------- | -------------------------------- | ------ |
+| `.../webhook/pm-discussions` | Discussions, Discussion comments | Active |
+| `.../webhook/pm-issues`      | Issues                           | Active |
+| `.../webhook/pm-pulls`       | Pull requests                    | Active |
+
+Base URL: `https://bsamie.app.n8n.cloud`
+
+**Note**: Webhooks configured in GitHub. n8n workflows pending.
 
 ---
 
@@ -127,39 +90,31 @@ PR merged              n8n → Mark issues done, close
 AI-first project management. Discussions for planning, Issues for execution.
 
 ```
-INTAKE → EXPLORE → PLAN → [BOARDROOM ⟷ REFINE]* → DECOMPOSE → [HUMAN] → DISPATCH → IMPLEMENT → DONE
-                                ↑       ↓
-                                └───────┘ (loop while revise, max 3)
+INTAKE → EXPLORE → PLAN → [BOARDROOM ⟷ REFINE]* → DECOMPOSE → [HUMAN] → DISPATCH → DONE
 ```
 
-### Skills (Claude Code)
+| Skill       | Trigger                   | Output           |
+| ----------- | ------------------------- | ---------------- |
+| `explore`   | `planning` label          | Recommendation   |
+| `plan`      | explore marker            | PLAN.md draft    |
+| `boardroom` | plan marker               | 5-agent critique |
+| `refine`    | revise vote               | Refined PLAN.md  |
+| `decompose` | approve vote              | Task inventory   |
+| `dispatch`  | `dispatch-approved` label | GitHub issues    |
 
-| Skill       | Input                  | Output                  | Marker                               |
-| ----------- | ---------------------- | ----------------------- | ------------------------------------ |
-| `explore`   | Discussion             | Recommendation          | `<!-- SKILL_COMPLETE: explore -->`   |
-| `plan`      | explore output         | PLAN.md draft           | `<!-- SKILL_COMPLETE: plan -->`      |
-| `boardroom` | PLAN.md                | 5-agent critique + vote | `<!-- SKILL_COMPLETE: boardroom -->` |
-| `refine`    | PLAN.md + critique     | Refined PLAN.md         | `<!-- SKILL_COMPLETE: refine -->`    |
-| `decompose` | PLAN.md (approved)     | Task plan (no issues)   | `<!-- SKILL_COMPLETE: decompose -->` |
-| `dispatch`  | Task plan + human gate | GitHub issues           | `<!-- SKILL_COMPLETE: dispatch -->`  |
+**Orchestration**: n8n detects `<!-- SKILL_COMPLETE: {skill} -->` markers → triggers next skill.
 
-### Orchestration
-
-n8n detects completion markers → triggers `governance` agent → pass → next skill.
-
-| Label               | Purpose                               |
-| ------------------- | ------------------------------------- |
-| `critique-pending`  | Triggers boardroom skill              |
-| `refine-pending`    | Boardroom voted revise → refine skill |
-| `dispatch-approved` | Human approved → dispatch skill       |
-| `scope`             | Tasks decomposed                      |
-| `drift-flagged`     | Governance detected misalignment      |
-
-### Design
-
-- **ICE Engine**: Kickstart once → runs autonomously until human gate
-- **Governance**: Validates stage output vs input (binary pass/fail)
-- **Boardroom Loop**: 5-personality critique → refine → repeat until approve (max 3)
-- **Single Human Gate**: Review decomposition before issue dispatch
+**Human Gate**: Review decomposition before issue dispatch.
 
 See [`AGENTIC_PM_PLAN.md`](AGENTIC_PM_PLAN.md) for full specification.
+
+---
+
+## Key Files
+
+| File                 | Purpose                            |
+| -------------------- | ---------------------------------- |
+| `labels.yml`         | Label definitions                  |
+| `scripts/schema.ts`  | Central constants, dispatch tables |
+| `N8N_SETUP.md`       | n8n + VPS setup guide              |
+| `AGENTIC_PM_PLAN.md` | PM system specification            |

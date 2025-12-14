@@ -1,4 +1,4 @@
-# --- Type Labels (Commit Prefix Correlation) ----------------------------------
+# --- Type Labels (Commit Prefix Correlation) ---------------------------------
 
 - name: fix
   color: "f05223"

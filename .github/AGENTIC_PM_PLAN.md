@@ -29,18 +29,18 @@ INTAKE → EXPLORE → PLAN → [BOARDROOM ⟷ REFINE]* → DECOMPOSE → [HUMAN
 
 **Stage Transitions:** Each skill outputs completion marker. `governance` agent validates output against original input. If valid → auto-proceed. If invalid → flag for review.
 
-| Stage       | Label              | Artifact            | Agent/Skill        |
-| ----------- | ------------------ | ------------------- | ------------------ |
-| Intake      | `idea`             | Discussion created  | n8n workflow       |
-| Explore     | `planning`         | Discussion comment  | `explore` skill    |
-| Plan        | `planning`         | PLAN.md draft       | `plan` skill       |
-| Boardroom   | `critique-pending` | Critique report     | `boardroom` skill  |
-| Refine      | `refine-pending`   | Refined PLAN.md     | `refine` skill     |
-| Decompose   | `scope`            | Task plan (comment) | `decompose` skill  |
-| Approval    | `dispatch-approved`| —                   | Human gate         |
-| Dispatch    | `implement`        | GitHub issues       | `dispatch` skill   |
-| Implement   | `in-progress`      | PR                  | Agent CLI          |
-| Done        | `done`             | Deliverables        | —                  |
+| Stage     | Label               | Artifact            | Agent/Skill       |
+| --------- | ------------------- | ------------------- | ----------------- |
+| Intake    | `idea`              | Discussion created  | n8n workflow      |
+| Explore   | `planning`          | Discussion comment  | `explore` skill   |
+| Plan      | `planning`          | PLAN.md draft       | `plan` skill      |
+| Boardroom | `critique-pending`  | Critique report     | `boardroom` skill |
+| Refine    | `refine-pending`    | Refined PLAN.md     | `refine` skill    |
+| Decompose | `scope`             | Task plan (comment) | `decompose` skill |
+| Approval  | `dispatch-approved` | —                   | Human gate        |
+| Dispatch  | `implement`         | GitHub issues       | `dispatch` skill  |
+| Implement | `in-progress`       | PR                  | Agent CLI         |
+| Done      | `done`              | Deliverables        | —                 |
 
 ---
 
@@ -85,14 +85,14 @@ INTAKE → EXPLORE → PLAN → [BOARDROOM ⟷ REFINE]* → DECOMPOSE → [HUMAN
 
 ### Phase 2: Skills (Claude Code) ✓ COMPLETE
 
-| Skill       | Path                         | Purpose                                      | Priority |
-| ----------- | ---------------------------- | -------------------------------------------- | -------- |
-| `explore`   | `.claude/skills/explore/`    | Research options, recommend approach         | P1       |
-| `plan`      | `.claude/skills/plan/`       | Create PLAN.md with objectives, architecture | P1       |
-| `boardroom` | `.claude/skills/boardroom/`  | Orchestrate multi-personality critique       | P1       |
-| `refine`    | `.claude/skills/refine/`     | Incorporate boardroom critique into plan     | P1       |
-| `decompose` | `.claude/skills/decompose/`  | Break plan into task inventory (no issues)   | P1       |
-| `dispatch`  | `.claude/skills/dispatch/`   | Create GitHub issues from approved plan      | P1       |
+| Skill       | Path                        | Purpose                                      | Priority |
+| ----------- | --------------------------- | -------------------------------------------- | -------- |
+| `explore`   | `.claude/skills/explore/`   | Research options, recommend approach         | P1       |
+| `plan`      | `.claude/skills/plan/`      | Create PLAN.md with objectives, architecture | P1       |
+| `boardroom` | `.claude/skills/boardroom/` | Orchestrate multi-personality critique       | P1       |
+| `refine`    | `.claude/skills/refine/`    | Incorporate boardroom critique into plan     | P1       |
+| `decompose` | `.claude/skills/decompose/` | Break plan into task inventory (no issues)   | P1       |
+| `dispatch`  | `.claude/skills/dispatch/`  | Create GitHub issues from approved plan      | P1       |
 
 **Note:** `brainstorm` skill renamed to `explore`. Boardroom→Refine loop replaces human approval gate.
 
@@ -173,15 +173,15 @@ Execute {skill} skill for Discussion #$1. Follow skill workflow sections sequent
 
 ### Phase 5: n8n Workflows
 
-| Workflow                   | Trigger                           | Action                                        |
-| -------------------------- | --------------------------------- | --------------------------------------------- |
-| **Intake Normalizer**      | Webhook (any source)              | Normalize payload → create Discussion         |
-| **Lifecycle Orchestrator** | Skill completion marker           | Run governance check → trigger next skill     |
-| **Boardroom Trigger**      | `critique-pending` label          | SSH → `/pm:boardroom #<discussion>`           |
-| **Refine Trigger**         | `refine-pending` label            | SSH → `/pm:refine #<discussion>`              |
-| **Decompose Trigger**      | Boardroom approve (majority vote) | SSH → `/pm:decompose #<discussion>`           |
-| **Dispatch Trigger**       | `dispatch-approved` label         | SSH → `/pm:dispatch #<discussion>`            |
-| **Drift Monitor**          | PR merged                         | SSH → `/pm:govern #<discussion> implement`    |
+| Workflow                   | Trigger                           | Action                                     |
+| -------------------------- | --------------------------------- | ------------------------------------------ |
+| **Intake Normalizer**      | Webhook (any source)              | Normalize payload → create Discussion      |
+| **Lifecycle Orchestrator** | Skill completion marker           | Run governance check → trigger next skill  |
+| **Boardroom Trigger**      | `critique-pending` label          | SSH → `/pm:boardroom #<discussion>`        |
+| **Refine Trigger**         | `refine-pending` label            | SSH → `/pm:refine #<discussion>`           |
+| **Decompose Trigger**      | Boardroom approve (majority vote) | SSH → `/pm:decompose #<discussion>`        |
+| **Dispatch Trigger**       | `dispatch-approved` label         | SSH → `/pm:dispatch #<discussion>`         |
+| **Drift Monitor**          | PR merged                         | SSH → `/pm:govern #<discussion> implement` |
 
 **Orchestration Pattern:**
 1. Skill completes → posts `<!-- SKILL_COMPLETE: {skill} -->` marker
@@ -245,9 +245,9 @@ const TASK_CONSTRAINTS = {
 
 ## [5] Human Gates
 
-| Gate                    | Trigger                     | Action                              |
-| ----------------------- | --------------------------- | ----------------------------------- |
-| Decomposition Approval  | Decompose skill completes   | Review task plan → `dispatch-approved` |
+| Gate                   | Trigger                   | Action                                 |
+| ---------------------- | ------------------------- | -------------------------------------- |
+| Decomposition Approval | Decompose skill completes | Review task plan → `dispatch-approved` |
 
 **Single human gate.** Boardroom→Refine loop handles plan refinement automatically. Human reviews final decomposition before any issues are created.
 
@@ -303,27 +303,27 @@ const TASK_CONSTRAINTS = {
 
 ### Create
 
-| Path                                     | Type    | Status     |
-| ---------------------------------------- | ------- | ---------- |
-| `.claude/skills/explore/SKILL.md`        | Skill   | ✓ DONE     |
-| `.claude/skills/plan/SKILL.md`           | Skill   | ✓ DONE     |
-| `.claude/skills/boardroom/SKILL.md`      | Skill   | ✓ DONE     |
-| `.claude/skills/refine/SKILL.md`         | Skill   | ✓ DONE     |
-| `.claude/skills/decompose/SKILL.md`      | Skill   | ✓ DONE     |
-| `.claude/skills/dispatch/SKILL.md`       | Skill   | ✓ DONE     |
-| `.claude/agents/governance.md`           | Agent   | ✓ DONE     |
-| `.claude/agents/boardroom-strategist.md` | Agent   | ✓ DONE     |
-| `.claude/agents/boardroom-architect.md`  | Agent   | ✓ DONE     |
-| `.claude/agents/boardroom-pragmatist.md` | Agent   | ✓ DONE     |
-| `.claude/agents/boardroom-contrarian.md` | Agent   | ✓ DONE     |
-| `.claude/agents/boardroom-integrator.md` | Agent   | ✓ DONE     |
-| `.claude/commands/pm/explore.md`         | Command | ✓ DONE     |
-| `.claude/commands/pm/plan.md`            | Command | ✓ DONE     |
-| `.claude/commands/pm/boardroom.md`       | Command | ✓ DONE     |
-| `.claude/commands/pm/refine.md`          | Command | ✓ DONE     |
-| `.claude/commands/pm/decompose.md`       | Command | ✓ DONE     |
-| `.claude/commands/pm/dispatch.md`        | Command | ✓ DONE     |
-| `.claude/commands/pm/govern.md`          | Command | ✓ DONE     |
+| Path                                     | Type    | Status |
+| ---------------------------------------- | ------- | ------ |
+| `.claude/skills/explore/SKILL.md`        | Skill   | ✓ DONE |
+| `.claude/skills/plan/SKILL.md`           | Skill   | ✓ DONE |
+| `.claude/skills/boardroom/SKILL.md`      | Skill   | ✓ DONE |
+| `.claude/skills/refine/SKILL.md`         | Skill   | ✓ DONE |
+| `.claude/skills/decompose/SKILL.md`      | Skill   | ✓ DONE |
+| `.claude/skills/dispatch/SKILL.md`       | Skill   | ✓ DONE |
+| `.claude/agents/governance.md`           | Agent   | ✓ DONE |
+| `.claude/agents/boardroom-strategist.md` | Agent   | ✓ DONE |
+| `.claude/agents/boardroom-architect.md`  | Agent   | ✓ DONE |
+| `.claude/agents/boardroom-pragmatist.md` | Agent   | ✓ DONE |
+| `.claude/agents/boardroom-contrarian.md` | Agent   | ✓ DONE |
+| `.claude/agents/boardroom-integrator.md` | Agent   | ✓ DONE |
+| `.claude/commands/pm/explore.md`         | Command | ✓ DONE |
+| `.claude/commands/pm/plan.md`            | Command | ✓ DONE |
+| `.claude/commands/pm/boardroom.md`       | Command | ✓ DONE |
+| `.claude/commands/pm/refine.md`          | Command | ✓ DONE |
+| `.claude/commands/pm/decompose.md`       | Command | ✓ DONE |
+| `.claude/commands/pm/dispatch.md`        | Command | ✓ DONE |
+| `.claude/commands/pm/govern.md`          | Command | ✓ DONE |
 
 ### Modify
 
