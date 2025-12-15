@@ -55,10 +55,12 @@ const H = Object.freeze({
             const overflow = f.length > maxFiles ? ` +${f.length - maxFiles}` : '';
             return `[X] **Addressed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})\n\n_Files: ${fileList}${overflow}_`;
         },
-        outdated: (sha: string | null, path: string | null): string =>
-            sha
-                ? `[X] **Code changed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})${path ? ` (${path})` : ''}`
-                : `[X] **Outdated** — code has changed since this comment`,
+        outdated: (sha: string | null, path: string | null): string => {
+            const pathStr = path ? ` (${path})` : '';
+            return sha
+                ? `[X] **Code changed** in [\`${sha.slice(0, B.probe.shaLength)}\`](../commit/${sha})${pathStr}`
+                : `[X] **Outdated** — code has changed since this comment`;
+        },
     },
     valuablePatterns: B.hygiene.valuablePatterns,
 } as const);
@@ -82,19 +84,23 @@ const isPrompt = (body: string): boolean => {
 
 const isValuable = (body: string): boolean => H.valuablePatterns.some((p) => p.test(body));
 
-const pathMatch = (path: string | null, files: ReadonlyArray<string>): boolean =>
-    path !== null && files.some((f) => f === path);
+const pathMatch = (path: string | null, files: ReadonlyArray<string>): boolean => path !== null && files.includes(path);
 
-const classify = (t: Thread, commits: ReadonlyArray<CommitFile>): Action =>
-    t.isResolved
-        ? 'skip'
-        : t.isOutdated
-          ? 'resolve'
-          : isValuable(t.comments.nodes.map((c) => c.body).join(' '))
-            ? 'valuable' // Thumbs up valuable feedback, no resolve
-            : commits.some((c) => pathMatch(t.path, c.files))
-              ? 'reply'
-              : 'skip';
+const classify = (t: Thread, commits: ReadonlyArray<CommitFile>): Action => {
+    if (t.isResolved) {
+        return 'skip';
+    }
+    if (t.isOutdated) {
+        return 'resolve';
+    }
+    if (isValuable(t.comments.nodes.map((c) => c.body).join(' '))) {
+        return 'valuable';
+    }
+    if (commits.some((c) => pathMatch(t.path, c.files))) {
+        return 'reply';
+    }
+    return 'skip';
+};
 
 // --- Dispatch Tables ---------------------------------------------------------
 

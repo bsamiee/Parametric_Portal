@@ -51,8 +51,10 @@ const getDominantType = (commits: ReadonlyArray<Commit>): TypeKey => {
     const entries = Array.from(countsMap.entries());
     return (entries.sort(([, a], [, b]) => b - a)[0]?.[0] as TypeKey) ?? 'chore';
 };
-const titleType = (title: string): TypeKey | null =>
-    ((m) => (m ? (m[1].toLowerCase() as TypeKey) : null))(B.pr.pattern.exec(title));
+const titleType = (title: string): TypeKey | null => {
+    const match = B.pr.pattern.exec(title);
+    return match ? (match[1].toLowerCase() as TypeKey) : null;
+};
 const formatPrTitle = (type: TypeKey, brk: boolean, subject: string): string =>
     `${B.meta.fmt.title(type, brk)} ${subject}`;
 
@@ -66,12 +68,12 @@ const analyzePr = (pr: PR, commits: ReadonlyArray<Commit>): Analysis => {
     const commitType = getDominantType(commits);
     const prType = titleType(pr.title);
     const subject = stripConventionalPrefix(pr.title);
-    const labels = pr.labels.map((l) => l.name);
+    const labels = new Set(pr.labels.map((l) => l.name));
     const ops: ReadonlyArray<LabelOp> = (
         [
             !hasType(pr.labels) && commitType ? { name: commitType, op: 'add' as const } : null,
-            actualBrk && !labels.includes(B.breaking.label) ? { name: B.breaking.label, op: 'add' as const } : null,
-            !actualBrk && labels.includes(B.breaking.label) ? { name: B.breaking.label, op: 'remove' as const } : null,
+            actualBrk && !labels.has(B.breaking.label) ? { name: B.breaking.label, op: 'add' as const } : null,
+            !actualBrk && labels.has(B.breaking.label) ? { name: B.breaking.label, op: 'remove' as const } : null,
         ] as ReadonlyArray<LabelOp | null>
     ).filter((op): op is LabelOp => op !== null);
     const needsFix =
@@ -90,11 +92,13 @@ const run = async (params: RunParams & { readonly spec: SyncSpec }): Promise<Syn
     const pr = (await call(ctx, 'pull.get', params.spec.prNumber)) as PR;
     const commits = ((await call(ctx, 'pull.listCommits', params.spec.prNumber)) ?? []) as ReadonlyArray<Commit>;
     const { titleFix, labelOps, breaking } = analyzePr(pr, commits);
-    const titleChange = titleFix
-        ? (await call(ctx, 'pull.update', params.spec.prNumber, { title: titleFix }))
-            ? [`title: ${pr.title} → ${titleFix}`]
-            : []
-        : [];
+    const titleChange: ReadonlyArray<string> = await (async () => {
+        if (!titleFix) {
+            return [];
+        }
+        const updated = await call(ctx, 'pull.update', params.spec.prNumber, { title: titleFix });
+        return updated ? [`title: ${pr.title} → ${titleFix}`] : [];
+    })();
     const adds = labelOps.filter((o) => o.op === 'add').map((o) => o.name);
     const removes = labelOps.filter((o) => o.op === 'remove').map((o) => o.name);
     const addChanges: ReadonlyArray<string> =

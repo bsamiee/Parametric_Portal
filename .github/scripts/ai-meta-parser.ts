@@ -35,8 +35,18 @@ const VALID_SETS = Object.freeze({
 
 const extractYaml = (body: string): string | null => META_PATTERN.exec(body)?.[1]?.trim() ?? null;
 
-const parseValue = (raw: string): string | number | boolean =>
-    /^\d+$/.test(raw) ? parseInt(raw, 10) : raw === 'true' ? true : raw === 'false' ? false : raw;
+const boolMap = Object.freeze({ false: false, true: true } as const);
+
+const parseNumber = (raw: string): number | null => (/^\d+$/.test(raw) ? Number.parseInt(raw, 10) : null);
+
+const parseValue = (raw: string): string | number | boolean => {
+    const asBool = (boolMap as Record<string, boolean>)[raw];
+    if (asBool !== undefined) {
+        return asBool;
+    }
+    const asNum = parseNumber(raw);
+    return asNum ?? raw;
+};
 
 const parseYaml = (yaml: string): Record<string, unknown> =>
     Object.fromEntries(
@@ -79,12 +89,13 @@ const validators: Record<keyof AiMeta, Validator> = {
         obj.state && !validateField('state', obj.state)
             ? `Invalid state: ${obj.state}. Must be one of: ${VALID_SETS.state.join(', ')}`
             : null,
-    type: (obj) =>
-        obj.type
-            ? validateField('type', obj.type)
-                ? null
-                : `Invalid type: ${obj.type}. Must be one of: ${VALID_SETS.type.join(', ')}`
-            : 'Missing required field: type',
+    type: (obj) => {
+        if (!obj.type) {
+            return 'Missing required field: type';
+        }
+        const isValid = validateField('type', obj.type);
+        return isValid ? null : `Invalid type: ${obj.type}. Must be one of: ${VALID_SETS.type.join(', ')}`;
+    },
 };
 
 const validate = (obj: Record<string, unknown>): ParseResult => {
@@ -92,19 +103,16 @@ const validate = (obj: Record<string, unknown>): ParseResult => {
         .map((validator) => validator(obj))
         .filter(Boolean) as ReadonlyArray<string>;
 
-    return errors.length > 0
-        ? { error: errors[0], success: false }
-        : {
-              meta: {
-                  agent: obj.agent as string | undefined,
-                  effort: obj.effort as number | undefined,
-                  phase: obj.phase as string | undefined,
-                  project: obj.project as string | undefined,
-                  state: obj.state as string | undefined,
-                  type: obj.type as string,
-              },
-              success: true,
-          };
+    const meta = {
+        agent: obj.agent as string | undefined,
+        effort: obj.effort as number | undefined,
+        phase: obj.phase as string | undefined,
+        project: obj.project as string | undefined,
+        state: obj.state as string | undefined,
+        type: obj.type as string,
+    };
+
+    return errors.length > 0 ? { error: errors[0], success: false } : { meta, success: true };
 };
 
 // --- Entry Point -------------------------------------------------------------

@@ -39,7 +39,7 @@ type BranchAnalysis = {
 
 const M = Object.freeze({
     messages: {
-        deleted: (count: number): string => `Deleted ${count} stale branch${count !== 1 ? 'es' : ''}`,
+        deleted: (count: number): string => `Deleted ${count} stale branch${count === 1 ? '' : 'es'}`,
         draftWarn: (days: number): string =>
             `[WARN] **Draft PR Cleanup Notice**\n\n` +
             `This draft PR has been inactive for ${days} days.\n` +
@@ -48,7 +48,7 @@ const M = Object.freeze({
             `- Mark the PR as ready for review, or\n` +
             `- Add activity (push commits or comments)\n\n` +
             `_This is an automated maintenance message._`,
-        flagged: (count: number): string => `Flagged ${count} draft PR${count !== 1 ? 's' : ''} for cleanup`,
+        flagged: (count: number): string => `Flagged ${count} draft PR${count === 1 ? '' : 's'} for cleanup`,
     } as const,
     protected: ['main', 'master', 'develop', 'release', 'gh-pages'] as const,
     report: {
@@ -68,6 +68,15 @@ const M = Object.freeze({
 const isProtected = (branch: string): boolean => M.protected.some((p) => branch === p || branch.startsWith(`${p}/`));
 const branchAge = (date: string): number => fn.age(date, new Date());
 const shouldWarnDraft = (pr: PR): boolean => pr.draft && branchAge(pr.updated_at) >= M.thresholds.draftWarn;
+
+const branchActionMap = Object.freeze({
+    active: (branch: string): BranchAnalysis => ({ action: 'skip', branch, reason: 'has-active-pr' }),
+    draft: (branch: string): BranchAnalysis => ({ action: 'warn', branch, reason: 'draft-pr' }),
+    protected: (): BranchAnalysis => ({ action: 'skip' }) as never,
+    recent: (branch: string): BranchAnalysis => ({ action: 'skip', branch, reason: 'recent' }),
+    stale: (branch: string, age: number): BranchAnalysis => ({ action: 'delete', branch, reason: `stale-${age}d` }),
+} as const);
+
 const shouldDeleteBranch = (branch: Branch, prs: ReadonlyArray<PR>, commit: BranchCommit): BranchAnalysis => {
     const prForBranch = prs.find((pr) => pr.head.ref === branch.name);
     const age = branchAge(commit.commit.committer.date);
@@ -76,15 +85,19 @@ const shouldDeleteBranch = (branch: Branch, prs: ReadonlyArray<PR>, commit: Bran
     const hasDraftPr = prForBranch?.draft;
     const isStale = age >= M.thresholds.branchStale;
 
-    return isProtectedBranch
-        ? { action: 'skip', branch: branch.name, reason: 'protected' }
-        : hasActivePr
-          ? { action: 'skip', branch: branch.name, reason: 'has-active-pr' }
-          : hasDraftPr
-            ? { action: 'warn', branch: branch.name, reason: 'draft-pr' }
-            : isStale
-              ? { action: 'delete', branch: branch.name, reason: `stale-${age}d` }
-              : { action: 'skip', branch: branch.name, reason: 'recent' };
+    if (isProtectedBranch) {
+        return { action: 'skip', branch: branch.name, reason: 'protected' };
+    }
+    if (hasActivePr) {
+        return branchActionMap.active(branch.name);
+    }
+    if (hasDraftPr) {
+        return branchActionMap.draft(branch.name);
+    }
+    if (isStale) {
+        return branchActionMap.stale(branch.name, age);
+    }
+    return branchActionMap.recent(branch.name);
 };
 
 // --- Dispatch Tables ---------------------------------------------------------
@@ -186,7 +199,9 @@ const run = async (params: RunParams & { readonly spec: MaintenanceSpec }): Prom
     } as const;
     const result = await kindDispatch[params.spec.kind]();
 
-    void (result.branchErrors > 0 && params.core.info(`[WARN] ${result.branchErrors} branch deletion(s) failed`));
+    if (result.branchErrors > 0) {
+        params.core.info(`[WARN] ${result.branchErrors} branch deletion(s) failed`);
+    }
     params.core.info(
         `${prefix}[MAINTENANCE] ${M.messages.deleted(result.branchesDeleted)}, ${M.messages.flagged(result.branchesFlagged)}`,
     );

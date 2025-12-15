@@ -65,9 +65,11 @@ type Metrics = {
 
 const { colors, targets } = B.dashboard;
 const since = (days: number): Date => new Date(Date.now() - days * B.time.day);
-const isBot = (pr: PR): boolean => B.dashboard.bots.some((bot) => pr.user.login === bot);
-const url = (repo: string, path: string, query = ''): string =>
-    `https://github.com/${repo}/${path}${query ? `?q=${query}` : ''}`;
+const isBot = (pr: PR): boolean => (B.dashboard.bots as ReadonlyArray<string>).includes(pr.user.login);
+const url = (repo: string, path: string, query = ''): string => {
+    const q = query ? `?q=${query}` : '';
+    return `https://github.com/${repo}/${path}${q}`;
+};
 
 // --- Pure Functions ----------------------------------------------------------
 
@@ -109,11 +111,12 @@ const collect = async (ctx: Ctx): Promise<Metrics> => {
             const passed = runs.filter((run) => run.conclusion === 'success').length;
             const lastRun = runs[0];
             const chunk = Math.ceil(total / B.dashboard.sparklineWidth);
+            const calcRate = (slice: ReadonlyArray<WorkflowRun>): number =>
+                slice.length > 0
+                    ? Math.round((slice.filter((run) => run.conclusion === 'success').length / slice.length) * 100)
+                    : 0;
             const recentRates = Array.from({ length: B.dashboard.sparklineWidth }, (_, index) =>
-                ((slice) =>
-                    slice.length > 0
-                        ? Math.round((slice.filter((run) => run.conclusion === 'success').length / slice.length) * 100)
-                        : 0)(runs.slice(index * chunk, Math.min((index + 1) * chunk, total))),
+                calcRate(runs.slice(index * chunk, Math.min((index + 1) * chunk, total))),
             ).reverse();
             return total > 0
                 ? {
@@ -192,12 +195,15 @@ const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
         );
     },
     badges: (metrics, repo) => {
-        const ciColor =
-            metrics.workflowRate >= targets.workflowSuccess
-                ? colors.success
-                : metrics.workflowRate >= targets.workflowWarning
-                  ? colors.warning
-                  : colors.error;
+        const ciColor = (() => {
+            if (metrics.workflowRate >= targets.workflowSuccess) {
+                return colors.success;
+            }
+            if (metrics.workflowRate >= targets.workflowWarning) {
+                return colors.warning;
+            }
+            return colors.error;
+        })();
         const badges = [
             md.shieldLink(
                 'CI',
@@ -245,10 +251,19 @@ const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
                     : md.shield('', '!', colors.warning, 'flat-square'),
                 md.url.workflow(repo, file),
             );
-        const trendPct = (rates: ReadonlyArray<number>): string =>
-            ((diff) => (diff > 0 ? `+${diff}%` : diff < 0 ? `${diff}%` : '-'))(
-                rates.length >= 2 ? rates[rates.length - 1] - rates[0] : 0,
-            );
+        const trendPct = (rates: ReadonlyArray<number>): string => {
+            const diff = rates.length >= 2 ? rates[rates.length - 1] - rates[0] : 0;
+            const diffStr = (d: number): string => {
+                if (d > 0) {
+                    return `+${d}%`;
+                }
+                if (d < 0) {
+                    return `${d}%`;
+                }
+                return '-';
+            };
+            return diffStr(diff);
+        };
         const rows = metrics.workflows.map((wf) => [
             md.link(wf.name, md.url.workflow(repo, wf.file)),
             String(wf.runs),

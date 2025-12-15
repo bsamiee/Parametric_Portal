@@ -303,7 +303,7 @@ const B = Object.freeze({
     } as const,
     patterns: {
         commit: /^(\w+)(!?)(?:\(.+\))?:\s*(.+)$/,
-        header: (f: string) => new RegExp(`###\\s*${f}[\\s\\S]*?(?=###|$)`, 'i'),
+        header: (f: string) => new RegExp(String.raw`###\s*${f}[\s\S]*?(?=###|$)`, 'i'),
         headerStrip: /###\s*[^\n]+\n?/,
         placeholder: /^_?No response_?$/i,
     },
@@ -413,13 +413,11 @@ const fn = {
                 `- **${(section as Extract<Section, { kind: 'field' }>).label}**: ${interpolate((section as Extract<Section, { kind: 'field' }>).value)}`,
             heading: (section) =>
                 `${'#'.repeat((section as Extract<Section, { kind: 'heading' }>).level)} ${interpolate((section as Extract<Section, { kind: 'heading' }>).text)}`,
-            list: (section) =>
-                (section as Extract<Section, { kind: 'list' }>).items
-                    .map(
-                        (item, index) =>
-                            `${(section as Extract<Section, { kind: 'list' }>).ordered ? `${index + 1}.` : '-'} ${interpolate(item)}`,
-                    )
-                    .join('\n'),
+            list: (section) => {
+                const s = section as Extract<Section, { kind: 'list' }>;
+                const prefix = (index: number): string => (s.ordered ? `${index + 1}.` : '-');
+                return s.items.map((item, index) => `${prefix(index)} ${interpolate(item)}`).join('\n');
+            },
             task: (section) => md.task((section as Extract<Section, { kind: 'task' }>).items),
             text: (section) => interpolate((section as Extract<Section, { kind: 'text' }>).content),
             timestamp: () => `_Generated: ${new Date().toISOString()}_`,
@@ -487,7 +485,15 @@ const fn = {
     timestamp: (date: Date): string => `_Generated: ${date.toISOString()}_`,
     trend: (current: number, previous: number): string => {
         const trends = { neg: '[-]', pos: '[+]', same: '[=]' } as const;
-        const direction = current > previous ? 'pos' : current < previous ? 'neg' : 'same';
+        const direction: keyof typeof trends = (() => {
+            if (current > previous) {
+                return 'pos';
+            }
+            if (current < previous) {
+                return 'neg';
+            }
+            return 'same';
+        })();
         return trends[direction];
     },
     trunc: (text: string | null, limit = B.probe.bodyTruncate): string => (text ?? '').substring(0, limit),
@@ -660,8 +666,14 @@ const call = async (ctx: Ctx, key: string, ...args: ReadonlyArray<unknown>): Pro
             ? await ctx.github.graphql(op.query as string, params)
             : await ctx.github.rest[op.api?.[0] ?? ''][op.api?.[1] ?? ''](params);
         // SECURITY: Type guard replaces unsafe type assertion (runtime validation)
-        const data = isGraphQL ? result : isRestApiResponse(result) ? result.data : undefined;
-        return data !== undefined ? transform(data) : undefined;
+        const extractData = (): unknown => {
+            if (isGraphQL) {
+                return result;
+            }
+            return isRestApiResponse(result) ? result.data : undefined;
+        };
+        const data = extractData();
+        return data === undefined ? undefined : transform(data);
     };
 
     return op.safe ? execute().catch(() => undefined) : execute();
@@ -680,7 +692,7 @@ const merge = (
         const start = `<!-- SECTION-START: ${sectionId} -->`;
         const end = `<!-- SECTION-END: ${sectionId} -->`;
         const section = `${start}\n${content}\n${end}`;
-        const pattern = new RegExp(`${start}[\\s\\S]*?${end}`);
+        const pattern = new RegExp(String.raw`${start}[\s\S]*?${end}`);
         return pattern.test(prev) ? prev.replace(pattern, section) : `${prev}\n\n${section}`;
     }
     return {

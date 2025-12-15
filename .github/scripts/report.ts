@@ -42,8 +42,8 @@ const reportSpecs: Record<string, ContentConfig> = Object.freeze({
 type SourceFn = (ctx: Ctx, cfg: ContentConfig, spec: ContentSpec, p: RunParams) => Promise<unknown>;
 const dataSources: Record<string, SourceFn> = {
     fetch: async (ctx, cfg) => call(ctx, cfg.src.op, ...(cfg.src.args ?? [])),
-    params: async (_, __, spec) => Promise.resolve(spec),
-    payload: async (_, __, ___, params) => Promise.resolve(params.context.payload),
+    params: async (_, __, spec) => spec,
+    payload: async (_, __, ___, params) => params.context.payload,
 };
 
 // --- Dispatch Tables ---------------------------------------------------------

@@ -56,11 +56,14 @@ const fixRules: Record<
         write: (ctx, number, value) => call(ctx, 'issue.updateMeta', number, { body: value }),
     },
     commit: {
-        fix: (_, commits) =>
-            ((bad) =>
-                bad
-                    ? `${classifyType(bad.message)}${isBreak(bad.message, null) ? '!' : ''}: ${stripConventionalPrefix(bad.message)}`
-                    : null)(commits?.find((commit) => !B.patterns.commit.test(commit.message))),
+        fix: (_, commits) => {
+            const bad = commits?.find((commit) => !B.patterns.commit.test(commit.message));
+            if (!bad) {
+                return null;
+            }
+            const breakIndicator = isBreak(bad.message, null) ? '!' : '';
+            return `${classifyType(bad.message)}${breakIndicator}: ${stripConventionalPrefix(bad.message)}`;
+        },
         ok: (_, commits) => commits?.every((commit) => B.patterns.commit.test(commit.message)) ?? true,
         prompt: (issue) => `Fix commit to conventional: type: desc. Current: "${issue.title}". Return ONLY message.`,
         write: () => Promise.resolve(),
@@ -122,19 +125,18 @@ const fixTarget = (ctx: Ctx, config: MetaConfig, target: Target, issue: Issue): 
                   value ? fixRules[target].write(ctx, issue.number, value.trim().split('\n')[0]).then(() => 1) : 0,
               ))(fixRules[target].fix(issue));
 
-const syncBreakingLabel = (ctx: Ctx, issue: Issue): Promise<number> =>
-    ((breaking, hasLabel) =>
-        breaking !== hasLabel
-            ? mutate(ctx, {
-                  action: breaking ? 'add' : 'remove',
-                  labels: [B.breaking.label],
-                  n: issue.number,
-                  t: 'label',
-              }).then(() => 1)
-            : Promise.resolve(0))(
-        isBreak(issue.title, issue.body),
-        issue.labels.some((label) => label.name === B.breaking.label),
-    );
+const syncBreakingLabel = (ctx: Ctx, issue: Issue): Promise<number> => {
+    const breaking = isBreak(issue.title, issue.body);
+    const hasLabel = issue.labels.some((label) => label.name === B.breaking.label);
+    return breaking === hasLabel
+        ? Promise.resolve(0)
+        : mutate(ctx, {
+              action: breaking ? 'add' : 'remove',
+              labels: [B.breaking.label],
+              n: issue.number,
+              t: 'label',
+          }).then(() => 1);
+};
 
 // --- Entry Point -------------------------------------------------------------
 
