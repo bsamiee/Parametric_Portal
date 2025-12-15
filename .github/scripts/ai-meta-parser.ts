@@ -28,7 +28,7 @@ const VALID_SETS = Object.freeze({
     agent: B.labels.groups.agent,
     phase: B.labels.groups.phase,
     state: B.labels.groups.status,
-    type: ['task', 'spike', 'project'] as const,
+    type: ['task', 'project'] as const,
 });
 
 // --- Pure Functions ----------------------------------------------------------

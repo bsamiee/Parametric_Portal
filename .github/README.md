@@ -8,7 +8,7 @@ AI-first automation framework using GitHub as state management. Issues exist for
 
 | Path                       | Purpose                                                                                |
 | -------------------------- | -------------------------------------------------------------------------------------- |
-| `labels.yml`               | 43 labels across 7 categories (type, agentic, status, phase, priority, agent, special) |
+| `labels.yml`               | 39 labels across 7 categories (type, agentic, status, phase, priority, agent, special) |
 | `dependabot.yml`           | Security-only patches (version updates delegated to Renovate)                          |
 | `copilot-instructions.md`  | AI assistant guidelines enforcing REQUIREMENTS.md standards                            |
 | `PULL_REQUEST_TEMPLATE.md` | PR template with Summary, Related Issues, Changes sections                             |
@@ -67,7 +67,6 @@ AI-first automation framework using GitHub as state management. Issues exist for
 | ------------------- | ------------- | --------------------------- | ------- |
 | project.yml         | `[PROJECT]:`  | project, triage, 1-planning | Yes     |
 | task.yml            | `[TASK]:`     | task, triage                | Yes     |
-| spike.yml           | `[SPIKE]:`    | spike, triage               | Yes     |
 | refactor.yml        | `[REFACTOR]:` | refactor, triage            | Yes     |
 | feature_request.yml | `[FEAT]:`     | feat                        | No      |
 | bug_report.yml      | `[FIX]:`      | fix                         | No      |
@@ -155,13 +154,12 @@ B = Object.freeze({
 | Category       | Labels                                                                                       | Purpose                               |
 | -------------- | -------------------------------------------------------------------------------------------- | ------------------------------------- |
 | **type**       | fix, feat, docs, style, refactor, test, chore, perf, ci, build, help                         | Commit type correlation               |
-| **agentic**    | task, spike, project                                                                         | Work unit classification              |
-| **status**     | idea, triage, planning, critique-pending, critique-passed, scope, implement, in-progress, review, blocked, done | Workflow state (includes PM lifecycle) |
+| **agentic**    | task, project                                                                                | Work unit classification              |
+| **status**     | triage, implement, in-progress, review, blocked, done                                        | Workflow state                        |
 | **phase**      | 0-foundation → 5-release                                                                     | Project phase tracking                |
 | **priority**   | critical, high, medium, low                                                                  | Urgency ranking                       |
 | **agent**      | claude, gemini, copilot, codex                                                               | Agent assignment (mutually exclusive) |
-| **special**    | security, breaking, dependencies, migration, dashboard, stale, pinned                        | Cross-cutting concerns                |
-| **governance** | drift-flagged, checkpoint-required                                                           | Agentic PM alignment tracking         |
+| **special**    | security, breaking, dependencies, dashboard, stale, pinned                                   | Cross-cutting concerns                |
 
 ### Label Behaviors
 
