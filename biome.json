@@ -2,7 +2,7 @@
     "$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
     "plugins": [],
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
-    "files": { "ignoreUnknown": true, "includes": ["**", "!.claude/settings.json"] },
+    "files": { "ignoreUnknown": true, "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows"] },
     "assist": {
         "actions": { "source": { "useSortedProperties": "on", "organizeImports": "on", "useSortedKeys": "on" } }
     },

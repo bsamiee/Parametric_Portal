@@ -80,7 +80,8 @@ def _run_all_checks(project_dir: Path) -> tuple[str, ...]:
     results = tuple(_run_check(cmd, project_dir) for cmd in B.checks)
     return tuple(
         _format_failure(cmd, err)
-        for cmd, (success, err) in zip(B.checks, results, strict=True)
+        for cmd, result in zip(B.checks, results, strict=True)
+        for success, err in (result,)
         if not success
     )
 

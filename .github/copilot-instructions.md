@@ -74,21 +74,6 @@ No `any` • No `var`/`let` (`const` only) • No `if/else` (ternaries/`Option.m
 
 **Quality Targets**: 25-30 lines/feature • 100% type coverage • 80% test coverage (V8) • ≤25 complexity • <3s dev start • <250KB main chunk
 
-## Custom Agents (Delegate First)
-
-**10 Specialized Agents** (`.github/agents/*.agent.md`):
-
-1. **typescript-advanced** - TS 6.0-dev, branded types, Effect/Option pipelines
-2. **react-specialist** - React 19 canary, Compiler, Server Components
-3. **vite-nx-specialist** - Vite 7 env API, Nx 22 Crystal inference, dispatch tables
-4. **testing-specialist** - Vitest, property-based tests, Effect/Option testing
-5. **performance-analyst** - Bundle size, tree-shaking, code splitting
-6. **refactoring-architect** - Pipeline migration, dispatch tables, B constant consolidation
-7. **library-planner** - Research, create Nx packages with proper structure
-8. **integration-specialist** - Unified B constants, catalog versions, workspace consistency
-9. **documentation-specialist** - Update docs, code comments, cross-references
-10. **cleanup-specialist** - Algorithmic density, pattern consolidation
-
 ## Canonical Patterns
 
 **Single B Constant** (replace scattered constants):
@@ -175,7 +160,7 @@ export const createConfig = (input) => pipe(decode, dispatch);
 
 ## Interaction Guidelines
 
-**Code Generation**: Read `vite.config.ts` first (master pattern) • Match `packages/components` style • Single B constant • Dispatch tables • Schema validation • No mutations • Expression-only • Research first (≤6mo docs) • **Delegate to custom agents** when domain matches • Never relax rules
+**Code Generation**: Read `vite.config.ts` first (master pattern) • Match `packages/components` style • Single B constant • Dispatch tables • Schema validation • No mutations • Expression-only • Research first (≤6mo docs) • Never relax rules
 
 **Questions**: Cite REQUIREMENTS.md/AGENTS.MD • Link official docs • Show concrete examples • Explain why (density, type safety) • Reference vite.config.ts patterns
 
