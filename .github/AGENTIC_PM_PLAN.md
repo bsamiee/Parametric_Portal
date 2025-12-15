@@ -157,17 +157,17 @@ Execute {skill} skill for Discussion #$1. Follow skill workflow sections sequent
 
 **Command Roster:**
 
-| [INDEX] | [COMMAND]       | [PATH]                          | [TOOLS]                      | [GUIDANCE]                                                                 |
-| :-----: | --------------- | ------------------------------- | ---------------------------- | -------------------------------------------------------------------------- |
-|   [1]   | `/pm:explore`   | `.claude/commands/pm/explore`   | Task, Read, Glob, Bash       | Research options for Discussion idea. Recommend approach with trade-offs.  |
-|   [2]   | `/pm:plan`      | `.claude/commands/pm/plan`      | Task, Read, Edit, Glob, Bash | Create PLAN.md draft from explore output. Define objectives, architecture. |
-|   [3]   | `/pm:boardroom` | `.claude/commands/pm/boardroom` | Task, Read, Glob, Bash       | Dispatch 5 critique agents in parallel. Synthesize votes, post report.     |
-|   [4]   | `/pm:refine`    | `.claude/commands/pm/refine`    | Task, Read, Edit, Glob, Bash | Incorporate boardroom critique into revised plan. Track cycle count.       |
-|   [5]   | `/pm:decompose` | `.claude/commands/pm/decompose` | Task, Read, Glob, Bash       | Break approved plan into context-bounded tasks. Output plan for review.    |
-|   [6]   | `/pm:dispatch`  | `.claude/commands/pm/dispatch`  | Task, Read, Glob, Bash       | Create GitHub issues from approved decomposition. Apply task labels.       |
-|   [7]   | `/pm:govern`    | `.claude/commands/pm/govern`    | Task, Read, Glob             | Validate stage output vs input. Binary pass/fail. Flag drift if invalid.   |
+| [INDEX] | [COMMAND]       | [PATH]                          | [GUIDANCE]                                                                 |
+| :-----: | --------------- | ------------------------------- | -------------------------------------------------------------------------- |
+|   [1]   | `/pm:explore`   | `.claude/commands/pm/explore`   | Research options for Discussion idea. Recommend approach with trade-offs.  |
+|   [2]   | `/pm:plan`      | `.claude/commands/pm/plan`      | Create PLAN.md draft from explore output. Define objectives, architecture. |
+|   [3]   | `/pm:boardroom` | `.claude/commands/pm/boardroom` | Dispatch 5 critique agents in parallel. Synthesize votes, post report.     |
+|   [4]   | `/pm:refine`    | `.claude/commands/pm/refine`    | Incorporate boardroom critique into revised plan. Track cycle count.       |
+|   [5]   | `/pm:decompose` | `.claude/commands/pm/decompose` | Break approved plan into context-bounded tasks. Output plan for review.    |
+|   [6]   | `/pm:dispatch`  | `.claude/commands/pm/dispatch`  | Create GitHub issues from approved decomposition. Apply task labels.       |
+|   [7]   | `/pm:govern`    | `.claude/commands/pm/govern`    | Validate stage output vs input. Binary pass/fail. Flag drift if invalid.   |
 
-**n8n Invocation:** `ssh vps "cd /repo && claude '/pm:explore #42'"`
+**n8n Invocation:** `ssh n8n "cd ~/workspace/Parametric_Portal && claude '/pm:explore #42'"`
 
 ---
 

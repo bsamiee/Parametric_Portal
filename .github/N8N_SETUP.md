@@ -82,7 +82,9 @@ GitHub Webhook Events
 - [x] Hostinger VPS KVM 2 (Ubuntu 24.04) — `31.97.131.41`
 - [x] n8n Cloud account — `bsamie.app.n8n.cloud`
 - [x] VPS user `n8n-agent` with SSH key access
-- [x] Claude Code, Gemini CLI installed on VPS
+- [x] Repo synced to `~/workspace/Parametric_Portal` (via `n8n-sync.yml`)
+- [x] Environment file at `~/.env` (sourced by bashrc, contains API tokens)
+- [x] Claude Code, Gemini CLI, Copilot CLI, Codex CLI installed on VPS
 - [x] GitHub CLI authenticated on VPS
 
 ### n8n Configuration

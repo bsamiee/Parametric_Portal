@@ -79,8 +79,8 @@ Consolidated validation for all Mermaid diagram types; SKILL.md §3 contains hig
 | :-----: | ------------------------------------ | ---------- | --------------------------------------- |
 |   [1]   | `accTitle`/`accDescr` before diagram | Critical   | Place after diagram type declaration    |
 |   [2]   | Missing `accDescr` on complex graphs | High       | Add description for WCAG 2.1 compliance |
-|   [3]   | Accessibility in `block-beta`        | Critical   | Known bug #6524—avoid in `block-beta`   |
-|   [4]   | Accessibility in `mindmap`           | Critical   | Known bug #4167—treated as parse error  |
+|   [3]   | Accessibility in `block-beta`        | Critical   | Known bug avoid in `block-beta`         |
+|   [4]   | Accessibility in `mindmap`           | Critical   | Known bug treated as parse error        |
 |   [5]   | Empty `accTitle` or `accDescr`       | Medium     | Provide meaningful text content         |
 
 ### [3.2][VERIFY]
