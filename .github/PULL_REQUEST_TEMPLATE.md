@@ -2,7 +2,8 @@
 
 <!-- Describe what this PR does and why -->
 
-<!-- Link related issues: "Fixes #123" or "Closes #456" -->
+<!-- ## [RELATED_ISSUES] -->
+<!-- Link related issues if any with proper section header: "Fixes #123" or "Closes #456" -->
 
 ## [Changes]
 

@@ -17,6 +17,8 @@ TOKEN_CACHE="$HOME/.config/hm-op-session.sh"
     # gh CLI prefers GH_TOKEN; GITHUB_TOKEN for other tools (Actions, etc.)
     [[ -n "$GH_TOKEN" ]] && echo "export GH_TOKEN=\"$GH_TOKEN\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$GITHUB_TOKEN" ]] && echo "export GITHUB_TOKEN=\"$GITHUB_TOKEN\"" >> "$CLAUDE_ENV_FILE"
+    # GitHub Projects (Classic PAT - fine-grained PATs don't support Projects API)
+    [[ -n "$GH_PROJECTS_TOKEN" ]] && echo "export GH_PROJECTS_TOKEN=\"$GH_PROJECTS_TOKEN\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$HOSTINGER_TOKEN" ]] && echo "export HOSTINGER_TOKEN=\"$HOSTINGER_TOKEN\"" >> "$CLAUDE_ENV_FILE"
 }
 

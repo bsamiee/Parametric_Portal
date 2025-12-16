@@ -80,17 +80,85 @@ uv run .claude/skills/github-tools/scripts/gh.py search-issues --query "is:open 
 ---
 ## [5][DISCUSSIONS]
 
+**Queries**
 ```bash
 uv run .claude/skills/github-tools/scripts/gh.py discussion-list
-uv run .claude/skills/github-tools/scripts/gh.py discussion-list --category planning --limit 10
+uv run .claude/skills/github-tools/scripts/gh.py discussion-list --category "D_kwDOCat123" --limit 10 --answered
 uv run .claude/skills/github-tools/scripts/gh.py discussion-view --number 42
-uv run .claude/skills/github-tools/scripts/gh.py discussion-comment --discussion-id "D_kwDOABC123" --body "Comment text"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-category-list
+uv run .claude/skills/github-tools/scripts/gh.py discussion-pinned
 ```
 
-[NOTE] Get `discussion-id` (GraphQL node ID) from `discussion-view` output field `id`.
+**Lifecycle**
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-create --category-id "D_kwDOCat123" --title "Topic" --body "Content"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-update --discussion-id "D_kwDOABC123" --title "New title" --body "Updated"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-delete --discussion-id "D_kwDOABC123"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-close --discussion-id "D_kwDOABC123" --reason RESOLVED
+uv run .claude/skills/github-tools/scripts/gh.py discussion-reopen --discussion-id "D_kwDOABC123"
+```
+
+**Moderation**
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-lock --discussion-id "D_kwDOABC123" --reason SPAM
+uv run .claude/skills/github-tools/scripts/gh.py discussion-unlock --discussion-id "D_kwDOABC123"
+```
+
+**Comments**
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-comment --discussion-id "D_kwDOABC123" --body "Comment"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-comment --discussion-id "D_kwDOABC123" --body "Reply" --reply-to "DC_kwDOCmt456"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-comment-update --comment-id "DC_kwDOCmt456" --body "Edited"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-comment-delete --comment-id "DC_kwDOCmt456"
+```
+
+**Answers**
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-mark-answer --comment-id "DC_kwDOCmt456"
+uv run .claude/skills/github-tools/scripts/gh.py discussion-unmark-answer --comment-id "DC_kwDOCmt456"
+```
+
+**Labels**
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-add-label --discussion-id "D_kwDOABC123" --label-ids '["LA_kwDOLbl789"]'
+uv run .claude/skills/github-tools/scripts/gh.py discussion-remove-label --discussion-id "D_kwDOABC123" --label-ids '["LA_kwDOLbl789"]'
+```
+
+**Reactions**
+```bash
+uv run .claude/skills/github-tools/scripts/gh.py discussion-react --subject-id "D_kwDOABC123" --reaction THUMBS_UP
+```
+
+[NOTE] Get `discussion-id` from `discussion-view` output `id` field. Get `category-id` from `discussion-category-list`. Get `comment-id` from comment nodes in `discussion-view`. Get `label-ids` from `label-list` (use `node_id` field). Reaction values: `THUMBS_UP`, `THUMBS_DOWN`, `LAUGH`, `HOORAY`, `CONFUSED`, `HEART`, `ROCKET`, `EYES`.
 
 ---
-## [6][OTHER]
+## [6][PROJECTS_V2]
+
+```bash
+# View/List
+uv run .claude/skills/github-tools/scripts/gh.py project-view --project 1
+uv run .claude/skills/github-tools/scripts/gh.py project-item-list --project 1
+uv run .claude/skills/github-tools/scripts/gh.py project-field-list --project 1
+
+# CRUD
+uv run .claude/skills/github-tools/scripts/gh.py project-create --title "Sprint 1"
+uv run .claude/skills/github-tools/scripts/gh.py project-close --project 1
+uv run .claude/skills/github-tools/scripts/gh.py project-delete --project 1
+
+# Items
+uv run .claude/skills/github-tools/scripts/gh.py project-item-add --project 1 --url "https://github.com/owner/repo/issues/42"
+uv run .claude/skills/github-tools/scripts/gh.py project-item-edit --id ITEM_ID --project-id PROJECT_NODE_ID --field-id FIELD_ID --single-select-option-id OPT_ID
+uv run .claude/skills/github-tools/scripts/gh.py project-item-delete --project 1 --id ITEM_ID
+uv run .claude/skills/github-tools/scripts/gh.py project-item-archive --project 1 --id ITEM_ID
+
+# Fields
+uv run .claude/skills/github-tools/scripts/gh.py project-field-create --project 1 --name "Priority" --data-type SINGLE_SELECT --single-select-options "High,Medium,Low"
+```
+
+[NOTE] Get `ITEM_ID`, `FIELD_ID` from `project-item-list`/`project-field-list`. Get `PROJECT_NODE_ID` from `project-view` output `id` field. Field edit supports: `--text`, `--number`, `--date`, `--single-select-option-id`, `--iteration-id`.
+
+---
+## [7][OTHER]
 
 ```bash
 uv run .claude/skills/github-tools/scripts/gh.py release-view --tag v1.0.0
@@ -98,7 +166,7 @@ uv run .claude/skills/github-tools/scripts/gh.py api --endpoint "/repos/{owner}/
 ```
 
 ---
-## [7][OUTPUT]
+## [8][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 

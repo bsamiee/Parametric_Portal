@@ -184,6 +184,25 @@ const B = Object.freeze({
         window: 7,
         workflow: 'dashboard.yml',
     } as const,
+    discussion: {
+        gql: {
+            addComment: `mutation($id:ID!,$body:String!,$replyTo:ID){addDiscussionComment(input:{discussionId:$id,body:$body,replyToId:$replyTo}){comment{id}}}`,
+            addLabels: `mutation($id:ID!,$labelIds:[ID!]!){addLabelsToLabelable(input:{labelableId:$id,labelIds:$labelIds}){labelable{...on Discussion{id}}}}`,
+            addReaction: `mutation($id:ID!,$content:ReactionContent!){addReaction(input:{subjectId:$id,content:$content}){reaction{id}}}`,
+            close: `mutation($id:ID!,$reason:DiscussionCloseReason){closeDiscussion(input:{discussionId:$id,reason:$reason}){discussion{id}}}`,
+            create: `mutation($repoId:ID!,$catId:ID!,$title:String!,$body:String!){createDiscussion(input:{repositoryId:$repoId,categoryId:$catId,title:$title,body:$body}){discussion{id number}}}`,
+            delete: `mutation($id:ID!){deleteDiscussion(input:{id:$id}){discussion{id}}}`,
+            deleteComment: `mutation($id:ID!){deleteDiscussionComment(input:{id:$id}){comment{id}}}`,
+            lock: `mutation($id:ID!,$reason:LockReason){lockLockable(input:{lockableId:$id,lockReason:$reason}){lockedRecord{...on Discussion{id}}}}`,
+            markAnswer: `mutation($id:ID!){markDiscussionCommentAsAnswer(input:{id:$id}){discussion{id}}}`,
+            removeLabels: `mutation($id:ID!,$labelIds:[ID!]!){removeLabelsFromLabelable(input:{labelableId:$id,labelIds:$labelIds}){labelable{...on Discussion{id}}}}`,
+            reopen: `mutation($id:ID!){reopenDiscussion(input:{discussionId:$id}){discussion{id}}}`,
+            unlock: `mutation($id:ID!){unlockLockable(input:{lockableId:$id}){unlockedRecord{...on Discussion{id}}}}`,
+            unmarkAnswer: `mutation($id:ID!){unmarkDiscussionCommentAsAnswer(input:{id:$id}){discussion{id}}}`,
+            update: `mutation($id:ID!,$title:String,$body:String,$catId:ID){updateDiscussion(input:{discussionId:$id,title:$title,body:$body,categoryId:$catId}){discussion{id}}}`,
+            updateComment: `mutation($id:ID!,$body:String!){updateDiscussionComment(input:{commentId:$id,body:$body}){comment{id}}}`,
+        } as const,
+    } as const,
     helper: {
         commands: {
             duplicate: { label: 'duplicate', requirePermission: 'write', trigger: '/duplicate' } as const,
@@ -297,7 +316,15 @@ const B = Object.freeze({
             issue: { get: 'issue.get', labels: 'issue.addLabels', list: 'issue.list', update: 'issue.updateMeta' },
             milestone: { list: 'milestone.list', update: 'milestone.update' },
             pr: { get: 'pull.get', labels: 'issue.addLabels', list: 'pull.list', update: 'pull.update' },
-            project: { add: 'project.addItem', list: 'project.list' },
+            projectV2: {
+                addItem: 'projectV2.addItem',
+                archiveItem: 'projectV2.archiveItem',
+                create: 'projectV2.create',
+                deleteItem: 'projectV2.deleteItem',
+                get: 'projectV2.get',
+                list: 'projectV2.list',
+                updateField: 'projectV2.updateField',
+            },
             release: { create: 'release.create', latest: 'release.latest' },
         } as const,
     } as const,
@@ -314,7 +341,12 @@ const B = Object.freeze({
     probe: {
         bodyTruncate: 500,
         gql: {
-            discussion: `query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){discussion(number:$n){body title author{login}createdAt category{name}labels(first:10){nodes{name}}answer{author{login}body createdAt}reactionGroups{content users{totalCount}}comments(first:100){nodes{body author{login}createdAt reactionGroups{content users{totalCount}}replies(first:50){nodes{body author{login}createdAt reactionGroups{content users{totalCount}}}}}}}}}`,
+            discussion: `query($owner:String!,$repo:String!,$n:Int!){repository(owner:$owner,name:$repo){discussion(number:$n){id body title author{login}createdAt category{name id}labels(first:10){nodes{name}}answer{author{login}body createdAt}reactionGroups{content users{totalCount}}comments(first:100){nodes{id body author{login}createdAt reactionGroups{content users{totalCount}}replies(first:50){nodes{id body author{login}createdAt reactionGroups{content users{totalCount}}}}}}}}}`,
+            discussionCategories: `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){discussionCategories(first:25){nodes{id name emoji description isAnswerable}}}}`,
+            discussions: `query($owner:String!,$repo:String!,$first:Int!,$categoryId:ID,$answered:Boolean){repository(owner:$owner,name:$repo){discussions(first:$first,categoryId:$categoryId,answered:$answered){nodes{number title body author{login}category{name id}createdAt updatedAt labels(first:10){nodes{name}}isAnswered locked}pageInfo{hasNextPage endCursor}}}}`,
+            pinnedDiscussions: `query($owner:String!,$repo:String!){repository(owner:$owner,name:$repo){pinnedDiscussions(first:10){nodes{discussion{number title}pinnedBy{login}}}}}`,
+            projectV2: `query($owner:String!,$number:Int!){organization(login:$owner){projectV2(number:$number){id title shortDescription public closed url fields(first:50){nodes{...on ProjectV2FieldCommon{id name dataType}...on ProjectV2SingleSelectField{options{id name}}...on ProjectV2IterationField{configuration{iterations{id title startDate}}}}}items(first:100){nodes{id type content{...on Issue{id number title}...on PullRequest{id number title}}fieldValues(first:20){nodes{...on ProjectV2ItemFieldSingleSelectValue{name optionId field{...on ProjectV2FieldCommon{name}}}}}}}}}}`,
+            projectV2List: `query($owner:String!,$first:Int!){organization(login:$owner){projectsV2(first:$first){nodes{id number title shortDescription public closed url}}}}`,
         } as const,
         markers: { prReview: 'PR-REVIEW-SUMMARY' } as const,
         shaLength: 7,
@@ -550,10 +582,90 @@ const ops: Record<string, Op> = {
     'comment.create': { api: ['issues', 'createComment'], map: ([number, body]) => ({ body, issue_number: number }) },
     'comment.list': { api: ['issues', 'listComments'], map: ([number]) => ({ issue_number: number }) },
     'comment.update': { api: ['issues', 'updateComment'], map: ([id, body]) => ({ body, comment_id: id }) },
+    'discussion.addComment': {
+        map: ([id, body, replyTo]) => ({ body, id, replyTo }),
+        out: prop('addDiscussionComment', 'comment'),
+        query: B.discussion.gql.addComment,
+    },
+    'discussion.addLabels': {
+        map: ([id, labelIds]) => ({ id, labelIds }),
+        query: B.discussion.gql.addLabels,
+    },
+    'discussion.addReaction': {
+        map: ([id, content]) => ({ content, id }),
+        query: B.discussion.gql.addReaction,
+    },
+    'discussion.categories': {
+        map: () => ({}),
+        out: prop('repository', 'discussionCategories', 'nodes'),
+        query: B.probe.gql.discussionCategories,
+    },
+    'discussion.close': {
+        map: ([id, reason]) => ({ id, reason }),
+        query: B.discussion.gql.close,
+    },
+    'discussion.create': {
+        map: ([repoId, catId, title, body]) => ({ body, catId, repoId, title }),
+        out: prop('createDiscussion', 'discussion'),
+        query: B.discussion.gql.create,
+    },
+    'discussion.delete': {
+        map: ([id]) => ({ id }),
+        query: B.discussion.gql.delete,
+        safe: true,
+    },
+    'discussion.deleteComment': {
+        map: ([id]) => ({ id }),
+        query: B.discussion.gql.deleteComment,
+        safe: true,
+    },
     'discussion.get': {
         map: ([number]) => ({ n: number }),
         out: prop('repository', 'discussion'),
         query: B.probe.gql.discussion,
+    },
+    'discussion.list': {
+        map: ([first, categoryId, answered]) => ({ answered, categoryId, first: first ?? 30 }),
+        out: prop('repository', 'discussions', 'nodes'),
+        query: B.probe.gql.discussions,
+    },
+    'discussion.lock': {
+        map: ([id, reason]) => ({ id, reason }),
+        query: B.discussion.gql.lock,
+    },
+    'discussion.markAnswer': {
+        map: ([id]) => ({ id }),
+        query: B.discussion.gql.markAnswer,
+    },
+    'discussion.pinned': {
+        map: () => ({}),
+        out: prop('repository', 'pinnedDiscussions', 'nodes'),
+        query: B.probe.gql.pinnedDiscussions,
+    },
+    'discussion.removeLabels': {
+        map: ([id, labelIds]) => ({ id, labelIds }),
+        query: B.discussion.gql.removeLabels,
+    },
+    'discussion.reopen': {
+        map: ([id]) => ({ id }),
+        query: B.discussion.gql.reopen,
+    },
+    'discussion.unlock': {
+        map: ([id]) => ({ id }),
+        query: B.discussion.gql.unlock,
+    },
+    'discussion.unmarkAnswer': {
+        map: ([id]) => ({ id }),
+        query: B.discussion.gql.unmarkAnswer,
+    },
+    'discussion.update': {
+        map: ([id, title, body, catId]) => ({ body, catId, id, title }),
+        out: prop('updateDiscussion', 'discussion'),
+        query: B.discussion.gql.update,
+    },
+    'discussion.updateComment': {
+        map: ([id, body]) => ({ body, id }),
+        query: B.discussion.gql.updateComment,
     },
     'issue.addLabels': { api: ['issues', 'addLabels'], map: ([number, labels]) => ({ issue_number: number, labels }) },
     'issue.create': { api: ['issues', 'create'], map: ([title, labels, body]) => ({ body, labels, title }) },
@@ -579,15 +691,40 @@ const ops: Record<string, Op> = {
         api: ['issues', 'updateMilestone'],
         map: ([number, data]) => ({ milestone_number: number, ...(data as object) }),
     },
-    'project.addItem': {
-        api: ['projects', 'createCard'],
-        map: ([column, contentId]) => ({ column_id: column, content_id: contentId }),
-        safe: true,
+    'projectV2.addItem': {
+        map: ([projectId, contentId]) => ({ contentId, projectId }),
+        out: prop('addProjectV2ItemById', 'item'),
+        query: `mutation($projectId:ID!,$contentId:ID!){addProjectV2ItemById(input:{projectId:$projectId,contentId:$contentId}){item{id}}}`,
     },
-    'project.list': {
-        api: ['projects', 'listForRepo'],
-        map: ([state]) => ({ per_page: B.api.perPage, state }),
-        safe: true,
+    'projectV2.archiveItem': {
+        map: ([projectId, itemId]) => ({ itemId, projectId }),
+        out: prop('archiveProjectV2Item', 'item'),
+        query: `mutation($projectId:ID!,$itemId:ID!){archiveProjectV2Item(input:{projectId:$projectId,itemId:$itemId}){item{id isArchived}}}`,
+    },
+    'projectV2.create': {
+        map: ([ownerId, title]) => ({ ownerId, title }),
+        out: prop('createProjectV2', 'projectV2'),
+        query: `mutation($ownerId:ID!,$title:String!){createProjectV2(input:{ownerId:$ownerId,title:$title}){projectV2{id number title url}}}`,
+    },
+    'projectV2.deleteItem': {
+        map: ([projectId, itemId]) => ({ itemId, projectId }),
+        out: prop('deleteProjectV2Item', 'deletedItemId'),
+        query: `mutation($projectId:ID!,$itemId:ID!){deleteProjectV2Item(input:{projectId:$projectId,itemId:$itemId}){deletedItemId}}`,
+    },
+    'projectV2.get': {
+        map: ([number]) => ({ number }),
+        out: prop('organization', 'projectV2'),
+        query: B.probe.gql.projectV2,
+    },
+    'projectV2.list': {
+        map: ([first]) => ({ first: first ?? B.api.perPage }),
+        out: prop('organization', 'projectsV2', 'nodes'),
+        query: B.probe.gql.projectV2List,
+    },
+    'projectV2.updateField': {
+        map: ([projectId, itemId, fieldId, value]) => ({ fieldId, itemId, projectId, value }),
+        out: prop('updateProjectV2ItemFieldValue', 'projectV2Item'),
+        query: `mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$value:ProjectV2FieldValue!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:$value}){projectV2Item{id}}}`,
     },
     'pull.get': { api: ['pulls', 'get'], map: ([number]) => ({ pull_number: number }) },
     'pull.list': {
