@@ -121,6 +121,14 @@
             "groupName": "styling",
             "labels": ["dependencies", "styling"],
             "matchPackageNames": ["tailwindcss", "@tailwindcss/**", "lightningcss"]
+        },
+        {
+            "automerge": true,
+            "description": "Group SonarCloud tooling",
+            "groupName": "sonarcloud",
+            "labels": ["dependencies", "tooling"],
+            "matchPackageNames": ["@sonar/**", "sonarqube-scanner"],
+            "matchUpdateTypes": ["minor", "patch"]
         }
     ],
     "platformAutomerge": true,

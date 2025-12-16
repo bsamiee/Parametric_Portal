@@ -234,7 +234,7 @@ const usePageNavigation = (vimBindingsEnabled?: boolean) => {
         },
         [stack.length, search, pop, vimBindingsEnabled],
     );
-    return { activePage: stack[stack.length - 1] ?? B.cmd.initialPage, handleKeyDown, push, search, setSearch };
+    return { activePage: stack.at(-1) ?? B.cmd.initialPage, handleKeyDown, push, search, setSearch };
 };
 
 const ListContent = ({

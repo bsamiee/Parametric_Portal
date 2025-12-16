@@ -149,8 +149,18 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 [VERIFY] Execute before any commit:
 - [ ] Run `nx run-many -t typecheck` → zero errors, zero suppressions.
 - [ ] Run `nx run-many -t check` → zero Biome violations.
+- [ ] Run `pnpm sonar` → SonarCloud analysis (requires `SONAR_TOKEN`).
 - [ ] Pattern compliance → B constant, dispatch tables, Effect pipelines.
 - [ ] Extend existing `createX` factories → never bypass.
+
+[IMPORTANT] **Quality Tool Chain:**
+| [INDEX] | [TOOL]     | [NX_TARGET]  | [PURPOSE]                            |
+| :-----: | ---------- | ------------ | ------------------------------------ |
+|   [1]   | TypeScript | `typecheck`  | Static type analysis                 |
+|   [2]   | Biome      | `check`      | Lint + format (70+ rules)            |
+|   [3]   | Vitest     | `test`       | Unit tests + V8 coverage (80% min)   |
+|   [4]   | SonarCloud | `pnpm sonar` | Security, bugs, code smells, metrics |
+|   [5]   | Stryker    | `mutate`     | Mutation testing                     |
 
 [CRITICAL] Direct tool invocation—breaks Nx orchestration.
 

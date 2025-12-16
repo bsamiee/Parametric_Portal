@@ -58,6 +58,7 @@ playwright/.cache/
 .nx/*
 .vite-inspect/
 .vite/
+.scannerwork/
 
 # --- [ENVIRONMENT_VARIABLES] --------------------------------------------------
 .env

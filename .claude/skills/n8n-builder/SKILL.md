@@ -21,8 +21,8 @@ Generate valid n8n workflow JSON.
 3. Read [connections.md](./references/connections.md) — Graph topology, AI types
 4. (dynamic values) Read [expressions.md](./references/expressions.md) — Variables, functions
 5. (specific nodes) Read [integrations.md](./references/integrations.md) — Node parameters
-6. Generate JSON — Apply template, validate structure
-7. Verify — Schema compliance, unique IDs/names
+6. Generate JSON — Apply template from [workflow.template.md](./templates/workflow.template.md)
+7. Validate — Run `uv run .claude/skills/n8n-builder/scripts/validate-workflow.py`
 
 [REFERENCE]: [index.md](./index.md) — File listing.
 
@@ -163,25 +163,25 @@ Generate valid n8n workflow JSON.
 
 <br>
 
+**Script:**
+```bash
+uv run .claude/skills/n8n-builder/scripts/validate-workflow.py workflow.json
+uv run .claude/skills/n8n-builder/scripts/validate-workflow.py workflow.json --strict
+```
+
+**Checks (12 automated):**
+- `root_required` — name, nodes, connections present
+- `node_id_unique` / `node_name_unique` — no duplicates
+- `node_id_uuid` — valid UUID format
+- `conn_targets_exist` — connection targets reference existing nodes
+- `conn_ai_type_match` — AI connection key matches type property
+- `settings_exec_order_ai` — LangChain workflows require `executionOrder: "v1"`
+- `settings_caller_policy` / `node_on_error` — enum value validation
+
 **Guidance:**
 - `API Deployment` — Use POST then PUT pattern; single POST may ignore settings due to API bug.
 - `Performance` — `saveExecutionProgress: true` triggers DB I/O per node; disable for high-throughput (>1000 RPM).
-- `Error Diagnosis` — Silent failures typically indicate duplicate IDs or AI connection type mismatches.
 - `Source Control` — Strip `instanceId` when sharing; credential files contain stubs only, not secrets.
-- `Settings Revert` — `callerPolicy` may revert to default on API import; verify via GET after POST.
-- `Activation` — Workflow activation fails silently without valid trigger node; check after import.
-
-**Best-Practices:**
-- [ALWAYS] Validate unique node.id and node.name before export; duplicates cause silent failures.
-- [ALWAYS] Verify settings via GET request after API import; some settings silently revert.
-- [NEVER] Skip `executionOrder: "v1"` for workflows containing AI or async nodes.
-
-[VERIFY]:
-- [ ] `nodes` array non-empty
-- [ ] All `node.id` unique UUIDs
-- [ ] All `node.name` unique strings
-- [ ] `connections` reference existing node names
-- [ ] AI connections use correct type (not `main`)
 
 [REFERENCE]: [→validation.md](./references/validation.md)
 

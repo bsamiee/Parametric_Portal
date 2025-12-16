@@ -79,4 +79,5 @@ catalog:
   vite-plugin-webfont-dl: 3.11.1
   vite-tsconfig-paths: 5.1.4
   vitest: 4.0.14
+  '@sonar/scan': 4.3.2
   zustand: 5.0.8

@@ -10,3 +10,4 @@
 |   [6]   | [rag.md](./references/rag.md)                            | RAG Pipeline    | RAG pipelines ground responses in domain knowledge |
 |   [7]   | [validation.md](./references/validation.md)              | Quality Gates   | Early validation reduces debugging cost            |
 |   [8]   | [workflow.template.md](./templates/workflow.template.md) | Templates       | Minimal structures provide generation scaffolds    |
+|   [9]   | [validate-workflow.py](./scripts/validate-workflow.py)   | Scripts         | Automated constraint enforcement via dispatch      |

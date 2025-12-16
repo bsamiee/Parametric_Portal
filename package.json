@@ -24,6 +24,7 @@
         "@radix-ui/react-separator": "catalog:",
         "@radix-ui/react-slot": "catalog:",
         "@rollup/plugin-typescript": "catalog:",
+        "@sonar/scan": "catalog:",
         "@stryker-mutator/core": "catalog:",
         "@stryker-mutator/vitest-runner": "catalog:",
         "@tailwindcss/vite": "catalog:",
@@ -85,6 +86,7 @@
     "private": true,
     "scripts": {
         "prepare": "lefthook install",
+        "sonar": "npx @sonar/scan",
         "tokens": "tsx tools/scripts/count-tokens.ts"
     },
     "type": "module",

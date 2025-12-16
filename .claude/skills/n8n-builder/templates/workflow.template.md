@@ -140,8 +140,7 @@
 ---
 ## [EXTENSION]
 
-**Add HTTP Tool:** Insert node, connect via `ai_tool` to AI Agent.
-**Add Postgres Memory:** Replace `memoryBufferWindow` with `memoryPostgresChat`, add `tableName`.
-**Add Production Vector Store:** Replace `vectorStoreInMemory` with `vectorStorePGVector` or `vectorStorePinecone`.
+**Add HTTP Tool:** Insert node, connect via `ai_tool` to AI Agent.<br>
+**Add Postgres Memory:** Replace `memoryBufferWindow` with `memoryPostgresChat`, add `tableName`.<br>
+**Add Production Vector Store:** Replace `vectorStoreInMemory` with `vectorStorePGVector` or `vectorStorePinecone`.<br>
 **Add Output Parser:** Insert `outputParserStructured` node, connect via `ai_outputParser` to AI Agent.
-

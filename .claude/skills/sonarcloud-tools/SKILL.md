@@ -17,6 +17,26 @@ Execute SonarCloud queries through unified Python CLI.
 
 [IMPORTANT] Commands accept zero arguments. Defaults: `project=bsamiee_Parametric_Portal`, `organization=bsamiee`. 1Password auto-injects API token.
 
+---
+## [0][SCANNER]
+>**Dictum:** *Local scanner enables pre-push quality gates.*
+
+<br>
+
+**Run Analysis:**
+```bash
+pnpm sonar
+```
+
+**Requirements:**
+- `SONAR_TOKEN` environment variable (1Password injection or export)<br>
+- Coverage reports at `packages/*/coverage/lcov.info` (run `nx run-many -t test` first)
+
+**Configuration:** `sonar-project.properties` at repo root.
+
+---
+## [1][API_QUERIES]
+
 ```bash
 # Zero-arg invocation (most common)
 uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues
@@ -36,7 +56,7 @@ uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py measures --metrics 
 ```
 
 ---
-## [1][OUTPUT]
+## [2][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 

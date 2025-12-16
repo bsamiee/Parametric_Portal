@@ -63,6 +63,7 @@ alwaysApply: true
 - [ALWAYS] **Build/Targets:** `@nx.json` (target defaults, cache settings).
 - [ALWAYS] **Compilation:** `@tsconfig.base.json` (strict types, exact optional properties).
 - [ALWAYS] **Bundling:** `@vite.config.ts` (centralized plugins, PWA, compression).
+- [ALWAYS] **Code Quality:** `@sonar-project.properties` (SonarCloud analysis, rule exclusions).
 
 [CRITICAL]:
 - [NEVER] Handroll logic handled by configuration files.

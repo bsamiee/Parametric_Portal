@@ -56,7 +56,7 @@ No `any` • No `var`/`let` (`const` only) • No `if/else` (ternaries/`Option.m
 
 **Code**: Single `B` constant → Pure Utils → Dispatch Tables (if polymorphic) → Effect Pipeline → Factory Function → Export (`*_TUNING`, `create*`)
 
-**Validate**: `nx run-many -t typecheck` • `nx run-many -t check` • `nx build my-package` • `nx test my-package`
+**Validate**: `nx run-many -t typecheck` • `nx run-many -t check` • `pnpm sonar` • `nx build my-package` • `nx test my-package`
 
 ## Project Structure
 
@@ -72,7 +72,7 @@ No `any` • No `var`/`let` (`const` only) • No `if/else` (ternaries/`Option.m
 
 **MUST NOT**: Scatter multiple frozen constants • Use if/else (use dispatch tables) • Use `any` • Use `let`/mutations • Imperative loops • try/catch (use Effect) • Default exports (except configs) • Skip schema validation
 
-**Quality Targets**: 25-30 lines/feature • 100% type coverage • 80% test coverage (V8) • ≤25 complexity • <3s dev start • <250KB main chunk
+**Quality Targets**: 25-30 lines/feature • 100% type coverage • 80% test coverage (V8) • ≤25 complexity • <3s dev start • <250KB main chunk • SonarCloud quality gate pass
 
 ## Canonical Patterns
 
@@ -164,11 +164,11 @@ export const createConfig = (input) => pipe(decode, dispatch);
 
 **Questions**: Cite REQUIREMENTS.md/AGENTS.MD • Link official docs • Show concrete examples • Explain why (density, type safety) • Reference vite.config.ts patterns
 
-**Debugging**: Check catalog versions → `nx run-many -t typecheck` + `nx run-many -t check` → `nx reset` if stale → Verify B constant structure → Ensure dispatch tables type-check
+**Debugging**: Check catalog versions → `nx run-many -t typecheck` + `nx run-many -t check` + `pnpm sonar` → `nx reset` if stale → Verify B constant structure → Ensure dispatch tables type-check
 
 ## Resources & Conventions
 
-**Available Commands**: `nx run-many -t build` • `nx run-many -t test` • `nx run-many -t typecheck` • `nx run-many -t check`
+**Available Commands**: `nx run-many -t build` • `nx run-many -t test` • `nx run-many -t typecheck` • `nx run-many -t check` • `pnpm sonar`
 
 **File Naming**: `*.config.ts` • `*.{test,spec}.{ts,tsx}` • `*.bench.{ts,tsx}`
 

@@ -4,6 +4,19 @@
 <br>
 
 ---
+## [0][SCRIPT]
+
+```bash
+# Basic validation (warnings for UUID/position issues)
+uv run .claude/skills/n8n-builder/scripts/validate-workflow.py workflow.json
+
+# Strict mode (warnings become errors)
+uv run .claude/skills/n8n-builder/scripts/validate-workflow.py workflow.json --strict
+```
+
+**Output:** JSON with `status`, `errors`, `warnings` arrays.
+
+---
 ## [1][GENERATION_RULES]
 
 1. Generate UUID per node.id.
@@ -64,12 +77,21 @@ tags/         → Tag metadata definitions
 `saveExecutionProgress: true` triggers DB I/O after each node—avoid for high-throughput workflows.
 
 ---
-## [6][CHECKLIST]
+## [6][CHECKS]
 
-- [ ] `nodes` array non-empty
-- [ ] All `node.id` unique UUIDs
-- [ ] All `node.name` unique strings
-- [ ] `settings.executionOrder` = `"v1"`
-- [ ] `connections` reference existing node names
-- [ ] AI connections use correct type keys
-- [ ] Credentials reference valid names
+| [INDEX] | [CHECK]                  | [SEVERITY] | [AUTOMATED] |
+| :-----: | ------------------------ | :--------: | :---------: |
+|   [1]   | `root_required`          |   Error    |     Yes     |
+|   [2]   | `root_types`             |   Error    |     Yes     |
+|   [3]   | `node_required`          |   Error    |     Yes     |
+|   [4]   | `node_id_uuid`           |  Warning   |     Yes     |
+|   [5]   | `node_id_unique`         |   Error    |     Yes     |
+|   [6]   | `node_name_unique`       |   Error    |     Yes     |
+|   [7]   | `node_position`          |  Warning   |     Yes     |
+|   [8]   | `node_on_error`          |   Error    |     Yes     |
+|   [9]   | `conn_targets_exist`     |   Error    |     Yes     |
+|  [10]   | `conn_ai_type_match`     |   Error    |     Yes     |
+|  [11]   | `settings_caller_policy` |   Error    |     Yes     |
+|  [12]   | `settings_exec_order_ai` |   Error    |     Yes     |
+
+Run `validate-workflow.py --help` for check descriptions.
