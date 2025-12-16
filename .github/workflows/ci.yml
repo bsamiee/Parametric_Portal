@@ -90,7 +90,7 @@ jobs:
 
       - name: Test
         if: steps.auto-fix.outputs.has-changes != 'true'
-        run: pnpm exec nx affected -t test
+        run: pnpm exec nx affected -t test -- --coverage
 
       - name: Generate Project Graph
         if: always()

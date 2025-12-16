@@ -83,6 +83,11 @@
     },
     "name": "parametric-portal",
     "packageManager": "pnpm@10.25.0",
+    "pnpm": {
+        "overrides": {
+            "node-forge": "1.3.3"
+        }
+    },
     "private": true,
     "scripts": {
         "prepare": "lefthook install",
