@@ -21,7 +21,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for source changes
+        id: changes
+        run: |
+          # Check if any TypeScript/JavaScript source files changed
+          if git diff --name-only HEAD~1 HEAD | grep -qE '\.(ts|tsx|js|jsx)$'; then
+            echo "has_source_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_source_changes=false" >> $GITHUB_OUTPUT
+            echo "[SKIP] No source files changed - skipping analysis"
+          fi
+
       - name: Download coverage artifacts
+        if: steps.changes.outputs.has_source_changes == 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ci-artifacts
@@ -30,6 +42,7 @@ jobs:
         continue-on-error: true
 
       - name: Analyze with SonarCloud
+        if: steps.changes.outputs.has_source_changes == 'true'
         uses: SonarSource/sonarcloud-github-action@4006f663ecaf1f8093e8e4abb9227f6041f52216
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
