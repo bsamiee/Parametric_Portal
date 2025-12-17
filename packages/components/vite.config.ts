@@ -1,4 +1,5 @@
 import { Effect } from 'effect';
+import type { UserConfig } from 'vite';
 import { defineConfig } from 'vite';
 import { createConfig } from '../../vite.config.ts';
 
@@ -35,5 +36,5 @@ export default defineConfig(
             mode: 'library',
             name: 'ParametricComponents',
         }),
-    ),
+    ) as UserConfig,
 );

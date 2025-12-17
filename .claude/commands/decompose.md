@@ -33,6 +33,7 @@ argument-hint: [plan-file]
 - [ALWAYS] Parse ALL work units before creating issues.
 - [ALWAYS] Create in dependency order (WU-1 before WU-2 if depends).
 - [ALWAYS] Include validation checklist in every issue.
+- [ALWAYS] Include PR_WORKFLOW section (branch → work → push → PR).
 - [ALWAYS] Use `[TASK]:` prefix for titles.
 - [NEVER] Create issues if Work Units section missing.
 - [NEVER] Skip label validation.

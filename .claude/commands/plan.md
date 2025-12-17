@@ -1,6 +1,6 @@
 ---
 description: Create phase-based implementation spec from brainstorm + deep codebase investigation
-argument-hint: [brainstorm-file]
+argument-hint: [brainstorm-file] [context?]
 ---
 
 # [H1][PLAN]
@@ -13,7 +13,7 @@ argument-hint: [brainstorm-file]
 ---
 ## [1][PATH]
 
-**Input:** `$1` (brainstorm file path)
+**Input:** `$1` (brainstorm file path), `$2` (optional context)
 **Output:** `dirname($1)/plan.md`
 
 **Example:** `@docs/projects/foo/brainstorm.md` → `docs/projects/foo/plan.md`
@@ -22,6 +22,7 @@ argument-hint: [brainstorm-file]
 ## [2][INPUTS]
 
 **Brainstorm:** @$1
+**Context:** `$2` (optional — additional constraints, focus areas, or refinements)
 
 Extract from brainstorm:
 - **Scope** — Build target
@@ -44,11 +45,11 @@ Dispatch 4-5 agents via `parallel-dispatch` for **deep** codebase investigation.
 |   [3]   | **Integration**  | Wiring points                | Exports, consumers, touch points           |
 |   [4]   | **Tests**        | Coverage requirements        | Test files, patterns, gaps to fill         |
 
-**Agent Context:** Include selected approach + design constraints from brainstorm.
+**Agent Context:** Include selected approach + design constraints from brainstorm + `$2` context if provided.
 
 [CRITICAL]:
 - [ALWAYS] Dispatch ALL agents in ONE message block.
-- [ALWAYS] Include brainstorm context in agent prompts.
+- [ALWAYS] Include brainstorm context + `$2` in agent prompts.
 - [ALWAYS] Return file paths, line numbers, concrete targets.
 - [NEVER] Re-investigate patterns/constraints—brainstorm did that.
 
@@ -117,6 +118,7 @@ Write to `dirname($1)/plan.md` as spec sheet:
 [VERIFY]:
 - [ ] `nx run-many -t typecheck` — zero errors
 - [ ] `nx run-many -t check` — zero violations
+- [ ] `pnpm sonar` — no new issues
 - [ ] [Specific verification for this unit]
 
 ---

@@ -86,13 +86,13 @@ const foldHandlers = <A, E, R>(state: AsyncState<A, E>, h: FoldHandlers<A, E, R>
     match(state)
         .with({ _tag: B.tags.idle }, () => h.onIdle())
         .with({ _tag: B.tags.loading }, (s) => h.onLoading(s.startedAt))
-        .with({ _tag: B.tags.success }, (s) => h.onSuccess(s.data as A, s.timestamp))
-        .with({ _tag: B.tags.failure }, (s) => h.onFailure(s.error as E, s.timestamp))
+        .with({ _tag: B.tags.success }, (s) => h.onSuccess(s.data, s.timestamp))
+        .with({ _tag: B.tags.failure }, (s) => h.onFailure(s.error, s.timestamp))
         .exhaustive();
 
 const mapHandlers = <A, E, B>(state: AsyncState<A, E>, f: (a: A) => B, ts: () => number): AsyncState<B, E> =>
     match(state)
-        .with({ _tag: B.tags.success }, (s) => mkSuccess(f(s.data as A), ts))
+        .with({ _tag: B.tags.success }, (s) => mkSuccess(f(s.data), ts))
         .otherwise(() => state as AsyncState<B, E>);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -123,5 +123,5 @@ const createAsync = <A, E = Error>(config: AsyncConfig = {}): Effect.Effect<Asyn
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as ASYNC_TUNING, createAsync };
+export { B as ASYNC_TUNING, createAsync, mkFailure, mkIdle, mkLoading, mkSuccess };
 export type { AsyncApi, AsyncConfig, AsyncState, Failure, FoldHandlers, Idle, Loading, Success };

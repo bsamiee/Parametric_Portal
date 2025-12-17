@@ -40,7 +40,6 @@ const PositiveSchema = pipe(S.Number, S.positive());
 const NonNegativeIntSchema = pipe(S.Number, S.int(), S.nonNegative());
 
 const ScaleSchema = S.Struct({
-    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('scale'), { default: () => 'scale' as const }),
     baseUnit: S.optionalWith(pipe(PositiveSchema, S.brand('Unit')), { default: () => 0.25 as never }),
     density: S.optionalWith(pipe(S.Number, S.between(0.5, 2), S.brand('Density')), { default: () => 1 as never }),
@@ -51,7 +50,6 @@ const ScaleSchema = S.Struct({
 });
 
 const BehaviorSchema = S.Struct({
-    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('behavior'), { default: () => 'behavior' as const }),
     asChild: optionalBoolean(false),
     disabled: optionalBoolean(false),
@@ -62,7 +60,6 @@ const BehaviorSchema = S.Struct({
 });
 
 const OverlaySchema = S.Struct({
-    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('overlay'), { default: () => 'overlay' as const }),
     backdrop: optionalBoolean(true),
     closeOnEscape: optionalBoolean(true),
@@ -76,7 +73,6 @@ const OverlaySchema = S.Struct({
 });
 
 const FeedbackSchema = S.Struct({
-    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('feedback'), { default: () => 'feedback' as const }),
     autoDismiss: optionalBoolean(true),
     dismissible: optionalBoolean(true),
@@ -84,7 +80,6 @@ const FeedbackSchema = S.Struct({
 });
 
 const AnimationSchema = S.Struct({
-    // biome-ignore lint/style/useNamingConvention: Effect Schema discriminant convention
     _tag: S.optionalWith(S.Literal('animation'), { default: () => 'animation' as const }),
     delay: S.optionalWith(NonNegativeIntSchema, { default: () => 0 as never }),
     duration: S.optionalWith(NonNegativeIntSchema, { default: () => 200 as never }),

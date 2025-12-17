@@ -3,9 +3,10 @@ name: design-synthesis
 type: simple
 depth: extended
 description: >-
-  Autonomous design exploration from research input. Synthesizes external findings
-  with light codebase investigation to produce approach selection and design decisions.
-  Use after research phase, before implementation planning. Human OUT OF LOOP.
+  Synthesizes research findings into design decisions via codebase investigation.
+  Use when (1) translating research into implementation approaches, (2) selecting
+  between design alternatives, (3) executing after /research or deep-research, or
+  (4) preparing input for /plan phase.
 ---
 
 # [H1][DESIGN-SYNTHESIS]

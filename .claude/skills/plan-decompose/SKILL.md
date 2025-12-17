@@ -3,9 +3,10 @@ name: plan-decompose
 type: simple
 depth: extended
 description: >-
-  Extracts work units from plan.md and creates sequenced GitHub issues.
-  Use after /plan to decompose implementation spec into actionable issues
-  with validation checklists and dependency linking.
+  Extracts work units from plan artifacts and creates sequenced GitHub issues.
+  Use when (1) decomposing plan.md into actionable issues, (2) creating issues
+  with validation checklists, (3) linking issue dependencies, or (4) executing
+  after /plan command completion.
 ---
 
 # [H1][PLAN-DECOMPOSE]
@@ -152,12 +153,28 @@ task,triage,[priority]
 [Copied from work unit validation section]
 
 ---
-## [6][COMPLETION]
+## [6][PR_WORKFLOW]
+
+**Branch:** `feat/[issue-number]-[slug]`
+
+[EXECUTE]:
+1. [ ] Create branch: `git checkout -b feat/[issue-number]-[slug]`
+2. [ ] Implement all tasks in §TASKS
+3. [ ] Run validation checks in §VALIDATION
+4. [ ] Commit changes with message referencing issue
+5. [ ] Push branch: `git push -u origin feat/[issue-number]-[slug]`
+6. [ ] Create PR: `gh pr create --title "[TASK]: [name]"` (uses `.github/PULL_REQUEST_TEMPLATE.md`)
+7. [ ] Add `Closes #[issue-number]` to PR summary section
+
+---
+## [7][COMPLETION]
 
 [VERIFY]:
-- All tasks implemented
-- All validation checks pass
-- No new typecheck/lint/sonar issues
+- [ ] All tasks implemented
+- [ ] `nx run-many -t typecheck` — zero errors
+- [ ] `nx run-many -t check` — zero Biome violations
+- [ ] `pnpm sonar` — no new code smells/issues
+- [ ] PR created and linked to issue
 ```
 
 ### [3.4][CREATE_ISSUE]
@@ -244,6 +261,7 @@ Return creation summary:
 - [ALWAYS] Create in dependency order.
 - [ALWAYS] Track WU → issue mapping.
 - [ALWAYS] Include validation checklist in every issue.
+- [ALWAYS] Include PR_WORKFLOW section in every issue.
 - [ALWAYS] Use `[TASK]:` prefix for titles.
 - [NEVER] Create issues without Work Units section.
 - [NEVER] Skip dependency linking.

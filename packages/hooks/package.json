@@ -1,17 +1,13 @@
 {
     "dependencies": {
-        "@effect/experimental": "catalog:",
         "@effect/schema": "catalog:",
-        "date-fns": "catalog:",
+        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:",
-        "immer": "catalog:",
-        "ts-pattern": "catalog:",
-        "uuid": "catalog:",
-        "zustand": "catalog:"
+        "react": "catalog:"
     },
     "devDependencies": {
         "@fast-check/vitest": "catalog:",
-        "@types/uuid": "catalog:",
+        "@types/react": "catalog:",
         "fast-check": "catalog:",
         "typescript": "catalog:",
         "vite": "catalog:",
@@ -26,20 +22,32 @@
             "import": "./dist/async.js",
             "types": "./dist/async.d.ts"
         },
-        "./stores": {
-            "import": "./dist/stores.js",
-            "types": "./dist/stores.d.ts"
+        "./boundary": {
+            "import": "./dist/boundary.js",
+            "types": "./dist/boundary.d.ts"
         },
-        "./temporal": {
-            "import": "./dist/temporal.js",
-            "types": "./dist/temporal.d.ts"
+        "./form": {
+            "import": "./dist/form.js",
+            "types": "./dist/form.d.ts"
         },
-        "./types": {
-            "import": "./dist/types.js",
-            "types": "./dist/types.d.ts"
+        "./runtime": {
+            "import": "./dist/runtime.js",
+            "types": "./dist/runtime.d.ts"
+        },
+        "./store": {
+            "import": "./dist/store.js",
+            "types": "./dist/store.d.ts"
+        },
+        "./suspense": {
+            "import": "./dist/suspense.js",
+            "types": "./dist/suspense.d.ts"
+        },
+        "./transition": {
+            "import": "./dist/transition.js",
+            "types": "./dist/transition.d.ts"
         }
     },
-    "name": "@parametric-portal/types",
+    "name": "@parametric-portal/hooks",
     "scripts": {
         "build": "vite build",
         "check": "biome check .",

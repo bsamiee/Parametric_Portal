@@ -28,8 +28,8 @@ argument-hint: [topic] [slug?]
 1. Parse `$1` for topic, `$2` for optional slug override.
 2. Generate slug from topic if `$2` not provided.
 3. Create `docs/projects/{slug}/` directory.
-4. Execute `deep-research` skill workflow.
-5. Write findings to `docs/projects/{slug}/research.md`.
+4. Execute `deep-research` skill workflow with output path: `docs/projects/{slug}/research.md`.
+5. Main agent writes SINGLE file to `docs/projects/{slug}/research.md`—sub-agents return text only.
 
 ---
 ## [3][CONSTRAINTS]
@@ -38,8 +38,10 @@ argument-hint: [topic] [slug?]
 - [ALWAYS] Sources from **2025** only (last 6 months preferred).
 - [ALWAYS] Create project folder before writing.
 - [ALWAYS] Slug: lowercase, hyphens, 2-3 words max.
+- [ALWAYS] Main agent writes single `research.md`—sub-agents return text only.
 - [NEVER] Use information older than 2025.
 - [NEVER] Nested folders within project.
+- [NEVER] Sub-agents write files (Write, Edit, Bash).
 
 ---
 ## [4][TOOLS]

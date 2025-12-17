@@ -25,11 +25,16 @@ Conduct comprehensive topic research via parallel agent dispatch.
 **Dependencies:**
 - `exa-tools` — Web search and code context queries
 - `parallel-dispatch` — Agent orchestration mechanics
-- `report.md` — Sub-agent output format (CRITICAL → FINDINGS → SOURCES)
 
 **Input:**
 - `Topic`: Domain to research
+- `OutputPath`: Target file path (passed by invoking command, default: `report.md`)
 - `Constraints`: Context, scaffold, style from invoking skill
+
+[CRITICAL]:
+- [ALWAYS] Main agent writes to `OutputPath` only—no other files.
+- [ALWAYS] Sub-agents RETURN structured text—main agent is sole file writer.
+- [NEVER] Sub-agents use Write, Edit, Bash, or create any files.
 
 ---
 ## [1][ORIENT]
@@ -61,13 +66,14 @@ Dispatch 6-10 sub-agents via `parallel-dispatch`. Assign each agent unique scope
 ```
 Scope: [Specific facet from orient]
 Objective: Research this facet comprehensively
-Output: Use report.md format (CRITICAL → FINDINGS → SOURCES)
+Output: Return structured text (CRITICAL → FINDINGS → SOURCES)
 Context: [Topic background, constraints]
+Constraint: DO NOT write files—return text only
 ```
 
 [CRITICAL]:
 - [ALWAYS] Dispatch ALL agents in ONE message block.
-- [ALWAYS] Specify report.md output format.
+- [ALWAYS] Include "DO NOT write files" constraint in every agent prompt.
 - [NEVER] Create overlapping scopes.
 
 ---
@@ -106,15 +112,16 @@ Dispatch 6-10 sub-agents (same count as Round 1) via `parallel-dispatch`.
 ```
 Scope: [Gap or depth-target from skeleton]
 Objective: [Focused: fill gap | Wide: broaden context]
-Output: Use report.md format (CRITICAL → FINDINGS → SOURCES)
+Output: Return structured text (CRITICAL → FINDINGS → SOURCES)
 Context: [Skeleton content—build on, don't repeat]
 Prior: [Relevant Round 1 findings]
+Constraint: DO NOT write files—return text only
 ```
 
 [CRITICAL]:
 - [ALWAYS] Same agent count as Round 1.
 - [ALWAYS] Include skeleton context.
-- [ALWAYS] Specify report.md output format.
+- [ALWAYS] Include "DO NOT write files" constraint in every agent prompt.
 
 ---
 ## [5][CRITIQUE_2]
@@ -122,13 +129,13 @@ Prior: [Relevant Round 1 findings]
 
 <br>
 
-Main agent (NOT sub-agent) compiles final research output.
+Main agent (NOT sub-agent) compiles final research output and writes to `OutputPath`.
 
 **Integrate:** Merge Round 2 → skeleton. Cross-reference rounds. Resolve conflicts (prioritize sourced, current, convergent).
 
 **Filter:** Remove duplicates, out-of-scope content, superseded items, unresolved conflicts.
 
-**Output Format:**
+**Write:** Single file to `OutputPath` with structure:
 - `## [1][FINDINGS]` — Synthesized research by domain
 - `## [2][CONFIDENCE]` — High (convergent) | Medium (single-source) | Low (gaps)
 - `## [3][SOURCES]` — All sources with attribution
@@ -141,8 +148,8 @@ Main agent (NOT sub-agent) compiles final research output.
 
 [VERIFY]:
 - [ ] Orient: 3 Exa searches executed via `exa-tools` skill
-- [ ] Round 1: 6-10 agents in ONE message
+- [ ] Round 1: 6-10 agents in ONE message, all returned text (no file writes)
 - [ ] Critique 1: Skeleton built, gaps identified
-- [ ] Round 2: Same count, focused on skeleton
+- [ ] Round 2: Same count, focused on skeleton, all returned text (no file writes)
 - [ ] Critique 2: Final synthesis, duplicates removed
-- [ ] All sub-agents used report.md format
+- [ ] Single file written to `OutputPath` by main agent only
