@@ -14,8 +14,8 @@ argument-hint: [agent-path] [goal: optimize|upgrade|audit] [target-type: readonl
 
 <br>
 
-Agent: $1<br>
-Goal: $2<br>
+Agent: $1
+Goal: $2
 Target Type: ${3:-current}
 
 ---
