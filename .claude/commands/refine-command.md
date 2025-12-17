@@ -14,8 +14,8 @@ argument-hint: [command-path] [goal: optimize|upgrade|audit] [target-pattern: fi
 
 <br>
 
-Command: $1<br>
-Goal: $2<br>
+Command: $1
+Goal: $2
 Target Pattern: ${3:-current}
 
 ---
