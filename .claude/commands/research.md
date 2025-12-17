@@ -1,31 +1,47 @@
 ---
-description: Execute deep-research workflow, output research_{slug}.md to target directory
-argument-hint: [topic, optional: "save to DIR"]
+description: Execute deep-research workflow, establish project folder
+argument-hint: [topic] [slug?]
 ---
 
 # [H1][RESEARCH]
->**Dictum:** *Delegated research with temporal constraints ensures relevant findings.*
+>**Dictum:** *Research establishes project context via folder creation.*
 
 <br>
 
 @.claude/skills/deep-research/SKILL.md
 
 ---
-## [1][TASK]
+## [1][PATH]
 
-1. Parse **$ARGUMENTS** for topic and optional directory from request (default: `.`).
-2. Execute `deep-research` skill workflow for topic.
-3. Write findings to a SINGLE `{dir}/research_{slug}.md` file — derive 1-2 word slug from topic (e.g., `research_react19.md`).
+**Output:** `docs/projects/{slug}/research.md`
+
+| [INDEX] | [SOURCE]     | [SLUG]                                    |
+| :-----: | ------------ | ----------------------------------------- |
+|   [1]   | `$2` (given) | Use verbatim                              |
+|   [2]   | `$1` (topic) | Derive: lowercase, hyphens, 2-3 words max |
+
+**Example:** `/research "Effect Schema Validation"` → `docs/projects/effect-schema-validation/research.md`
 
 ---
-## [2][CONSTRAINTS]
+## [2][TASK]
+
+1. Parse `$1` for topic, `$2` for optional slug override.
+2. Generate slug from topic if `$2` not provided.
+3. Create `docs/projects/{slug}/` directory.
+4. Execute `deep-research` skill workflow.
+5. Write findings to `docs/projects/{slug}/research.md`.
+
+---
+## [3][CONSTRAINTS]
 
 [CRITICAL]:
 - [ALWAYS] Sources from **2025** only (last 6 months preferred).
-- [ALWAYS] Output to `research_{slug}.md` — slug: lowercase, no spaces, 1-2 words max.
+- [ALWAYS] Create project folder before writing.
+- [ALWAYS] Slug: lowercase, hyphens, 2-3 words max.
 - [NEVER] Use information older than 2025.
+- [NEVER] Nested folders within project.
 
 ---
-## [3][TOOLS]
+## [4][TOOLS]
 
 Available research skills: `exa-tools`, `perplexity-tools`, `tavily-tools`

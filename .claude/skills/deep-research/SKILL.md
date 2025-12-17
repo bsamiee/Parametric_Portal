@@ -78,10 +78,10 @@ Context: [Topic background, constraints]
 
 Main agent (NOT sub-agent) processes Round 1 outputs.
 
-| [ACTION] | [CRITERIA]                                                                  |
-| -------- | --------------------------------------------------------------------------- |
-| Remove   | Lacks focus, duplicates content, missing sources, pre-2024, fails quality   |
-| Retain   | Addresses topic, includes sources, dates 2024-2025, converges across agents |
+| [INDEX] | [ACTION] | [CRITERIA]                                                                  |
+| :-----: | -------- | --------------------------------------------------------------------------- |
+|   [1]   | Remove   | Lacks focus, duplicates content, missing sources, pre-2024, fails quality   |
+|   [2]   | Retain   | Addresses topic, includes sources, dates 2024-2025, converges across agents |
 
 **Skeleton:** Build from retained → `[Domain N]: [findings]` + `Gaps:` + `Depth-Targets:`
 
@@ -97,10 +97,10 @@ Dispatch 6-10 sub-agents (same count as Round 1) via `parallel-dispatch`.
 
 **Agent Assignment:**
 
-| [TYPE]  | [PURPOSE]                   | [COUNT] |
-| ------- | --------------------------- | ------- |
-| Focused | Specific gaps from skeleton | 4-6     |
-| Wide    | Broader context for areas   | 2-4     |
+| [INDEX] | [TYPE]  | [PURPOSE]                   | [COUNT] |
+| :-----: | ------- | --------------------------- | ------- |
+|   [1]   | Focused | Specific gaps from skeleton | 4-6     |
+|   [2]   | Wide    | Broader context for areas   | 2-4     |
 
 **Agent Prompt:**
 ```
