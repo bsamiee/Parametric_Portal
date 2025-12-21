@@ -83,6 +83,14 @@ const mkClipboardError = (message: string): ClipboardError => ({ _tag: 'Clipboar
 const mkDownloadError = (message: string): DownloadError => ({ _tag: 'DownloadError', message });
 const mkExportError = (message: string): ExportError => ({ _tag: 'ExportError', message });
 
+const interruptFiber =
+    <A, E, R>(
+        runtime: { runPromise: (effect: Effect.Effect<unknown, unknown, R>) => Promise<unknown> },
+        fiber: Fiber.RuntimeFiber<A, E>,
+    ) =>
+    () =>
+        void runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+
 const sanitizeFilename = (text: string): string =>
     text
         .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
@@ -257,14 +265,6 @@ const createExportEffect = (input: ExportInput, setState: StateSetter<void, Expo
         Effect.catchAll(onFailure<void, ExportError>(setState, ts)),
     );
 
-const _interruptFiber =
-    <R, _E>(
-        runtime: { runPromise: (effect: Effect.Effect<unknown, unknown, R>) => Promise<unknown> },
-        fiber: Fiber.RuntimeFiber<unknown, unknown>,
-    ) =>
-    () =>
-        void runtime.runPromise(Fiber.interrupt(fiber));
-
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createBrowserHooks = <R, E>(
@@ -309,12 +309,11 @@ const createBrowserHooks = <R, E>(
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => {
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
+            return cleanup;
+        }, [runtime]);
 
         return { copy, paste, reset, state };
     };
@@ -343,12 +342,11 @@ const createBrowserHooks = <R, E>(
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => {
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
+            return cleanup;
+        }, [runtime]);
 
         return { download, reset, state };
     };
@@ -377,12 +375,11 @@ const createBrowserHooks = <R, E>(
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => {
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
+            return cleanup;
+        }, [runtime]);
 
         return { exportAs, reset, state };
     };

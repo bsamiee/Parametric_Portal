@@ -2,10 +2,19 @@
  * Application shell: Sidebar rail + centered workspace (CommandBar + Stage).
  * Mirrors the Arsenal architecture: rail icons, collapsible drawer, centered content.
  */
-import type { ReactNode } from 'react';
+import { type ReactNode, useMemo } from 'react';
 import { OverlayProvider } from 'react-aria';
 import { appRuntime, RuntimeProvider, usePersist } from '../core.ts';
-import { chatSlice, contextSlice, historySlice, librarySlice, previewSlice, uiSlice } from '../stores.ts';
+import {
+    chatSlice,
+    contextSlice,
+    historySlice,
+    type LibraryState,
+    librarySlice,
+    type ParametricAsset,
+    previewSlice,
+    uiSlice,
+} from '../stores.ts';
 import { Flex } from '../ui.ts';
 import { CommandPaletteWithExport, ExportDialog, useExportDialog } from './overlays.tsx';
 import { CommandBar, Sidebar, Stage } from './panels.tsx';
@@ -31,10 +40,42 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const AppContent = (): ReactNode => {
+    const libraryPersist = useMemo(
+        () => ({
+            migrate: (stored: unknown, initialState: LibraryState): LibraryState => {
+                const state =
+                    stored && typeof stored === 'object'
+                        ? (stored as Partial<LibraryState> & { savedIds?: ReadonlyArray<string> })
+                        : null;
+                const {
+                    savedAssets: _savedAssets,
+                    savedIds: _savedIds,
+                    customAssets: _customAssets,
+                    ...rest
+                } = state ?? {};
+                const customAssets = Array.isArray(state?.customAssets)
+                    ? state.customAssets
+                    : initialState.customAssets;
+                const savedAssets = Array.isArray(state?.savedAssets)
+                    ? state.savedAssets
+                    : Array.isArray(state?.savedIds)
+                      ? state.savedIds
+                            .map((id) => historySlice.getState().assets.find((asset) => asset.id === id))
+                            .filter((asset): asset is ParametricAsset => asset !== undefined)
+                      : [];
+
+                return state
+                    ? { ...initialState, ...rest, customAssets, savedAssets }
+                    : { ...initialState, customAssets, savedAssets };
+            },
+        }),
+        [],
+    );
+
     usePersist(chatSlice, B.persist.chat);
     usePersist(contextSlice, B.persist.context);
     usePersist(historySlice, B.persist.history);
-    usePersist(librarySlice, B.persist.library);
+    usePersist(librarySlice, B.persist.library, libraryPersist);
     usePersist(previewSlice, B.persist.preview);
     usePersist(uiSlice, B.persist.ui);
     const exportDialog = useExportDialog();

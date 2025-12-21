@@ -25,15 +25,17 @@ type DevToolsExtension = {
     readonly connect: (options: { readonly name: string }) => DevToolsConnection;
 };
 
-type PersistOptions = {
+type PersistOptions<T = unknown> = {
     readonly debounceMs?: number;
+    readonly migrate?: (stored: unknown, initialState: T) => T;
+    readonly onError?: (error: unknown) => void;
 };
 
 type StoreHooksApi<_R = never> = {
     readonly usePersist: <T, A extends Record<string, unknown> = Record<string, never>>(
         slice: StoreSlice<T, A>,
         key: string,
-        options?: PersistOptions,
+        options?: PersistOptions<T>,
     ) => void;
     readonly useStoreActions: <T, A extends Record<string, unknown> = Record<string, never>>(
         slice: StoreSlice<T, A>,
@@ -107,6 +109,15 @@ const mkValueUpdater =
     (a: A) =>
         Effect.sync(() => setValue(a));
 
+const interruptFiberSync = <A, E>(fiber: Fiber.RuntimeFiber<A, E>): void => {
+    Effect.runSync(Fiber.interrupt(fiber));
+};
+
+const interruptFiberAsync = <A, E, R>(
+    runtime: { runPromise: (effect: Effect.Effect<unknown, unknown, R>) => Promise<unknown> },
+    fiber: Fiber.RuntimeFiber<A, E>,
+): void => void runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+
 const createUseStoreSlice =
     (enableDevtools: boolean, storeName: string) =>
     <T, A extends Record<string, unknown> = Record<string, never>>(slice: StoreSlice<T, A>): T => {
@@ -161,11 +172,7 @@ const createUseSubscriptionRef =
             const streamEffect = Stream.runForEach(ref.changes, updateValue);
             const fiber = runtime?.runFork(streamEffect) ?? Effect.runFork(streamEffect);
 
-            return () => {
-                runtime
-                    ? runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {})
-                    : Effect.runSync(Fiber.interrupt(fiber));
-            };
+            return () => (runtime === undefined ? interruptFiberSync(fiber) : interruptFiberAsync(runtime, fiber));
         }, [ref, updateValue]);
 
         return value;
@@ -174,28 +181,48 @@ const createUseSubscriptionRef =
 const usePersist = <T, A extends Record<string, unknown> = Record<string, never>>(
     slice: StoreSlice<T, A>,
     key: string,
-    options?: PersistOptions,
+    options?: PersistOptions<T>,
 ): void => {
     const debounceMs = options?.debounceMs ?? B.defaults.persistDebounceMs;
+    const migrate = options?.migrate;
+    const errorHandler =
+        options?.onError ??
+        ((error: unknown) => {
+            globalThis.console?.error?.(`[StorePersist:${key}]`, error);
+        });
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: debounceMs derived from options which is in deps
     useEffect(() => {
         // SSR guard
         if (globalThis.window === undefined) {
             return;
         }
 
+        // Effect-compatible error wrapper defined inside effect to avoid dep issues
+        const wrapError = (error: unknown) => Effect.sync(() => errorHandler(error));
+
         // Hydrate on mount - merge with initialState to handle schema evolution
         const stored = localStorage.getItem(key);
-        stored !== null && slice.actions.set({ ...slice.initialState, ...(JSON.parse(stored) as Partial<T>) } as T);
+        const handleParsed = (value: unknown) => {
+            const next = migrate
+                ? migrate(value, slice.initialState)
+                : ({ ...slice.initialState, ...(value as Partial<T>) } as T);
+            slice.actions.set(next);
+        };
+        stored !== null &&
+            Effect.runSync(
+                Effect.try(() => JSON.parse(stored) as unknown).pipe(
+                    Effect.match({
+                        onFailure: errorHandler,
+                        onSuccess: handleParsed,
+                    }),
+                ),
+            );
 
         // Persist handler - Effect wraps localStorage for error resilience
         const persistState = (state: T) =>
             Effect.runSync(
-                Effect.sync(() => localStorage.setItem(key, JSON.stringify(state))).pipe(
-                    Effect.catchAll(() => Effect.void),
-                ),
+                Effect.sync(() => localStorage.setItem(key, JSON.stringify(state))).pipe(Effect.catchAll(wrapError)),
             );
 
         const unsubscribe = slice.subscribe((state) => {
@@ -207,7 +234,7 @@ const usePersist = <T, A extends Record<string, unknown> = Record<string, never>
             timeoutRef.current !== null && clearTimeout(timeoutRef.current);
             unsubscribe();
         };
-    }, [slice, key, options]);
+    }, [slice, key, debounceMs, migrate, errorHandler]);
 };
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

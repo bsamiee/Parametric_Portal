@@ -20,6 +20,7 @@ import {
     type ParametricAsset,
     type ParametricIntent,
     previewSlice,
+    type SavedAsset,
     type SidebarTab,
     STORE_TUNING,
     uiSlice,
@@ -53,13 +54,9 @@ type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTermin
 type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: number };
 type PreviewState = 'empty' | 'generating' | 'ready';
 
-// Base props required by all panel content components
-type BasePanelProps = {
-    readonly assets: ReadonlyArray<ParametricAsset>;
-};
-
 // Props for history panel
-type HistoryPanelProps = BasePanelProps & {
+type HistoryPanelProps = {
+    readonly assets: ReadonlyArray<ParametricAsset>;
     readonly currentId: string | null;
     readonly onClear: () => void;
     readonly onDelete: (id: string) => void;
@@ -67,13 +64,13 @@ type HistoryPanelProps = BasePanelProps & {
 };
 
 // Props for library panel
-type LibraryPanelProps = BasePanelProps & {
+type LibraryPanelProps = {
     readonly customAssets: ReadonlyArray<CustomAsset>;
     readonly onAddAttachment: (id: string, name: string, svg: string) => void;
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
-    readonly onToggleSaved: (id: string) => void;
-    readonly savedIds: ReadonlyArray<string>;
+    readonly onRemoveSaved: (id: string) => void;
+    readonly savedAssets: ReadonlyArray<SavedAsset>;
 };
 
 // Union type for dispatch table - all props needed by any panel renderer
@@ -240,15 +237,13 @@ const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: Hist
     );
 
 const LibraryContent = ({
-    assets,
     customAssets,
-    savedIds,
+    savedAssets,
     onAddAttachment,
     onOpenUpload,
     onRemoveCustomAsset,
-    onToggleSaved,
+    onRemoveSaved,
 }: LibraryPanelProps): ReactNode => {
-    const savedAssets = assets.filter((a) => savedIds.includes(a.id));
     const hasContent = customAssets.length > 0 || savedAssets.length > 0;
 
     return (
@@ -299,17 +294,18 @@ const LibraryContent = ({
                                     Saved
                                 </span>
                                 {savedAssets.map((asset) => {
-                                    const svg = asset.variants[0]?.svg;
+                                    const variantIndex = asset.selectedVariantIndex ?? 0;
+                                    const svg = asset.variants[variantIndex]?.svg;
                                     return (
                                         <ListItem
                                             key={asset.id}
                                             className='sidebar-item'
-                                            onClick={() => onToggleSaved(asset.id)}
+                                            onClick={() => onRemoveSaved(asset.id)}
                                             onAction={() => svg && onAddAttachment(asset.id, asset.prompt, svg)}
                                             thumbnail={
-                                                asset.variants[0] ? (
+                                                svg ? (
                                                     <SvgPreview
-                                                        svg={asset.variants[0].svg}
+                                                        svg={svg}
                                                         sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
                                                         className='w-full h-full'
                                                     />
@@ -409,42 +405,47 @@ const SessionContent = (): ReactNode => {
 
 const InspectorContent = (): ReactNode => {
     const historyActions = useStoreActions(historySlice);
+    const { currentSvg } = useStoreSlice(previewSlice);
     const currentAsset = historyActions.getCurrentAsset();
 
-    return currentAsset ? (
+    return currentSvg ? (
         <ScrollArea className='h-full'>
             <Stack gap className='divide-y divide-(--panel-border-dark)'>
-                <div className='inspector-section'>
-                    <h3 className='inspector-header'>Metadata</h3>
-                    <Stack gap>
-                        <div className='inspector-row'>
-                            <span className='text-(--panel-text-muted)'>Intent</span>
-                            <span className='intent-badge' data-intent={currentAsset.intent}>
-                                {currentAsset.intent.toUpperCase()}
-                            </span>
+                {currentAsset && (
+                    <>
+                        <div className='inspector-section'>
+                            <h3 className='inspector-header'>Metadata</h3>
+                            <Stack gap>
+                                <div className='inspector-row'>
+                                    <span className='text-(--panel-text-muted)'>Intent</span>
+                                    <span className='intent-badge' data-intent={currentAsset.intent}>
+                                        {currentAsset.intent.toUpperCase()}
+                                    </span>
+                                </div>
+                                <div className='inspector-row'>
+                                    <span className='text-(--panel-text-muted)'>Variants</span>
+                                    <span className='text-(--panel-text-secondary)'>
+                                        {currentAsset.variants.length}
+                                    </span>
+                                </div>
+                                <div className='inspector-row'>
+                                    <span className='text-(--panel-text-muted)'>Created</span>
+                                    <span className='text-(--panel-text-secondary) text-xs'>
+                                        {new Date(currentAsset.timestamp).toLocaleString()}
+                                    </span>
+                                </div>
+                            </Stack>
                         </div>
-                        <div className='inspector-row'>
-                            <span className='text-(--panel-text-muted)'>Variants</span>
-                            <span className='text-(--panel-text-secondary)'>{currentAsset.variants.length}</span>
+                        <div className='inspector-section pt-4'>
+                            <h3 className='inspector-header'>Prompt</h3>
+                            <p className='text-sm text-(--panel-text-secondary)'>{currentAsset.prompt}</p>
                         </div>
-                        <div className='inspector-row'>
-                            <span className='text-(--panel-text-muted)'>Created</span>
-                            <span className='text-(--panel-text-secondary) text-xs'>
-                                {new Date(currentAsset.timestamp).toLocaleString()}
-                            </span>
-                        </div>
-                    </Stack>
-                </div>
-                <div className='inspector-section pt-4'>
-                    <h3 className='inspector-header'>Prompt</h3>
-                    <p className='text-sm text-(--panel-text-secondary)'>{currentAsset.prompt}</p>
-                </div>
-                {currentAsset.variants[0] && (
-                    <div className='inspector-section pt-4'>
-                        <h3 className='inspector-header'>Source</h3>
-                        <pre className='inspector-code'>{currentAsset.variants[0].svg}</pre>
-                    </div>
+                    </>
                 )}
+                <div className='inspector-section pt-4'>
+                    <h3 className='inspector-header'>Source</h3>
+                    <pre className='inspector-code'>{currentSvg}</pre>
+                </div>
             </Stack>
         </ScrollArea>
     ) : (
@@ -464,7 +465,7 @@ const panelRenderers = {
 const Sidebar = (): ReactNode => {
     const { isSidebarOpen, activeTab } = useStoreSlice(uiSlice);
     const { assets, currentId } = useStoreSlice(historySlice);
-    const { customAssets, savedIds } = useStoreSlice(librarySlice);
+    const { customAssets, savedAssets } = useStoreSlice(librarySlice);
     const uiActions = useStoreActions(uiSlice);
     const historyActions = useStoreActions(historySlice);
     const libraryActions = useStoreActions(librarySlice);
@@ -491,11 +492,12 @@ const Sidebar = (): ReactNode => {
         (id: string) => {
             historyActions.selectAsset(id);
             const asset = assets.find((a) => a.id === id);
+            asset && contextActions.set(asset.context);
             const variantIndex = asset?.selectedVariantIndex ?? 0;
             const svg = asset?.variants[variantIndex]?.svg;
             svg && previewActions.setSvg(svg);
         },
-        [assets, historyActions, previewActions],
+        [assets, historyActions, previewActions, contextActions],
     );
 
     const handleUpload = useCallback(
@@ -510,13 +512,19 @@ const Sidebar = (): ReactNode => {
         currentId,
         customAssets,
         onAddAttachment: (id, name, svg) => contextActions.addAttachment({ id, name, svg }),
-        onClear: historyActions.clearAll,
-        onDelete: historyActions.deleteAsset,
+        onClear: () => {
+            libraryActions.clearSavedAssets();
+            historyActions.clearAll();
+        },
+        onDelete: (id) => {
+            historyActions.deleteAsset(id);
+            libraryActions.isSaved(id) && libraryActions.removeSavedAsset(id);
+        },
         onOpenUpload: () => setIsUploadOpen(true),
         onRemoveCustomAsset: libraryActions.removeCustomAsset,
+        onRemoveSaved: libraryActions.removeSavedAsset,
         onSelect: handleSelectAsset,
-        onToggleSaved: libraryActions.toggleSaved,
-        savedIds,
+        savedAssets,
     };
 
     return (
@@ -668,8 +676,6 @@ const CommandBar = (): ReactNode => {
 
         // Handle cancelled requests - don't log error for intentional cancellation
         if (!apiFactory.isSuccess(apiResponse) && apiResponse.code === 'REQUEST_CANCELLED') {
-            submittedRef.current = null;
-            abortControllerRef.current = null;
             return;
         }
 
@@ -855,19 +861,20 @@ const Viewport = ({ isLoading, sanitized, showGrid, showSafeArea, zoom }: Viewpo
     const state = derivePreviewState(isLoading, Boolean(sanitized));
     const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
     const { assets, currentId } = useStoreSlice(historySlice);
-    const { savedIds } = useStoreSlice(librarySlice);
+    const { savedAssets } = useStoreSlice(librarySlice);
     const historyActions = useStoreActions(historySlice);
     const libraryActions = useStoreActions(librarySlice);
     const previewActions = useStoreActions(previewSlice);
 
-    const isSaved = currentId ? savedIds.includes(currentId) : false;
+    const isSaved = currentId ? savedAssets.some((asset) => asset.id === currentId) : false;
     const currentAsset = currentId ? assets.find((a) => a.id === currentId) : null;
     const variantIndex = currentAsset?.selectedVariantIndex ?? 0;
     const variantCount = currentAsset?.variants.length ?? 0;
 
     const handleToggleSave = useCallback(() => {
-        currentId && libraryActions.toggleSaved(currentId);
-    }, [currentId, libraryActions]);
+        currentAsset &&
+            (isSaved ? libraryActions.removeSavedAsset(currentAsset.id) : libraryActions.addSavedAsset(currentAsset));
+    }, [currentAsset, isSaved, libraryActions]);
     const handlePrevVariant = useCallback(() => {
         if (!currentAsset || variantIndex <= 0) {
             return;

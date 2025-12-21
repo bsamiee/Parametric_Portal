@@ -157,12 +157,7 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => (fiberRef.current === null ? undefined : interruptFiber(runtime, fiberRef.current)), [runtime]);
 
         return { mutate, reset, state };
     };

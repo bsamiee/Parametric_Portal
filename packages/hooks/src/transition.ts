@@ -49,6 +49,14 @@ const onTransitionSuccess =
     (data: A) =>
         Effect.sync(() => setState(mkSuccess(data, ts)));
 
+const interruptFiber =
+    <A, E, R>(
+        runtime: { runPromise: (effect: Effect.Effect<unknown, unknown, R>) => Promise<unknown> },
+        fiber: Fiber.RuntimeFiber<A, E>,
+    ) =>
+    () =>
+        void runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+
 const onTransitionFailure =
     <A, E>(setState: React.Dispatch<React.SetStateAction<AsyncState<A, E>>>, ts: () => number) =>
     (error: E) => {
@@ -88,12 +96,11 @@ const createTransitionHooks = <R, E>(
             });
         }, [runtime, effect]);
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => {
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
+            return cleanup;
+        }, [runtime]);
 
         return { isPending, start, state };
     };
@@ -123,12 +130,11 @@ const createTransitionHooks = <R, E>(
             [runtime, effect, setOptimistic],
         );
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => {
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
+            return cleanup;
+        }, [runtime]);
 
         return { addOptimistic, optimisticState, state };
     };

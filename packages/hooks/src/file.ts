@@ -64,6 +64,14 @@ const B = Object.freeze({
 
 const mkFileError = (message: string): FileError => ({ _tag: 'FileError', message });
 
+const interruptFiber =
+    <A, E, R>(
+        runtime: { runPromise: (effect: Effect.Effect<unknown, unknown, R>) => Promise<unknown> },
+        fiber: Fiber.RuntimeFiber<A, E>,
+    ) =>
+    () =>
+        void runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+
 const filesToReadonlyArray = (fileList: FileList | null): ReadonlyArray<File> => (fileList ? Array.from(fileList) : []);
 
 const dataTransferToFiles = (dataTransfer: DataTransfer | null): ReadonlyArray<File> =>
@@ -144,10 +152,12 @@ const createFileHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FileHooksCo
             input?.addEventListener('change', handleChange);
             globalThis.document?.body.appendChild(input);
 
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
             return () => {
                 input?.removeEventListener('change', handleChange);
                 input?.remove();
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
+                cleanup?.();
             };
         }, [runtime, resolvedAccept, resolvedMultiple]);
 
@@ -199,12 +209,11 @@ const createFileHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FileHooksCo
             [runtime],
         );
 
-        useEffect(
-            () => () => {
-                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
-            },
-            [runtime],
-        );
+        useEffect(() => {
+            const fiber = fiberRef.current;
+            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
+            return cleanup;
+        }, [runtime]);
 
         return {
             isDragOver,

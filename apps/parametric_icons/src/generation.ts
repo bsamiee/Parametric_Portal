@@ -234,7 +234,8 @@ const scopeIds = (svg: string, scope: Scope): string => {
               const escaped = escapeRegExp(oldId);
               return result
                   .replaceAll(new RegExp(String.raw`url\(#${escaped}\)`, 'g'), `url(#${newId})`)
-                  .replaceAll(new RegExp(String.raw`href=['"]#${escaped}['"]`, 'g'), `href="#${newId}"`);
+                  .replaceAll(new RegExp(String.raw`href=['"]#${escaped}['"]`, 'g'), `href="#${newId}"`)
+                  .replaceAll(new RegExp(String.raw`xlink:href=['"]#${escaped}['"]`, 'g'), `xlink:href="#${newId}"`);
           }, withScopedIds);
 };
 

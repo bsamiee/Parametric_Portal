@@ -20,6 +20,7 @@ type ContextState = S.Schema.Type<typeof ContextStateSchema>;
 type UiState = S.Schema.Type<typeof UiStateSchema>;
 type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
 type ParametricAsset = S.Schema.Type<typeof ParametricAssetSchema>;
+type SavedAsset = ParametricAsset;
 type ReferenceAttachment = S.Schema.Type<typeof ReferenceSchema>;
 type HistoryState = S.Schema.Type<typeof HistoryStateSchema>;
 type LibraryState = S.Schema.Type<typeof LibraryStateSchema>;
@@ -97,7 +98,7 @@ type CustomAsset = S.Schema.Type<typeof CustomAssetSchema>;
 
 const LibraryStateSchema = S.Struct({
     customAssets: S.Array(CustomAssetSchema),
-    savedIds: S.Array(S.String),
+    savedAssets: S.Array(ParametricAssetSchema),
 });
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -111,7 +112,7 @@ const B = Object.freeze({
         output: 'single',
     } as ContextState,
     history: { assets: [], currentId: null, maxItems: 64 },
-    library: { customAssets: [], savedIds: [] } as LibraryState,
+    library: { customAssets: [], savedAssets: [] } as LibraryState,
     preview: { currentSvg: null, zoom: 1 } as PreviewState,
     ui: { activeTab: 'history', isSidebarOpen: false, showGrid: false, showSafeArea: false } as UiState,
     variantCount: { batch: 3, single: 1 },
@@ -158,11 +159,13 @@ type HistoryActions = {
 };
 
 type LibraryActions = {
+    readonly addSavedAsset: (asset: SavedAsset) => void;
     readonly addCustomAsset: (name: string, svg: string) => void;
+    readonly clearSavedAssets: () => void;
     readonly getCustomAsset: (id: string) => CustomAsset | undefined;
     readonly isSaved: (id: string) => boolean;
     readonly removeCustomAsset: (id: string) => void;
-    readonly toggleSaved: (id: string) => void;
+    readonly removeSavedAsset: (id: string) => void;
 };
 
 type UiActions = {
@@ -254,17 +257,20 @@ const librarySlice: StoreSlice<LibraryState, LibraryActions> = storeApi.createSl
             const id = typesApi.generateUuidv7Sync();
             set({ ...get(), customAssets: [...get().customAssets, { id, name, svg }] });
         },
-        getCustomAsset: (id: string) => get().customAssets.find((a) => a.id === id),
-        isSaved: (id: string) => get().savedIds.includes(id),
-        removeCustomAsset: (id: string) =>
-            set({ ...get(), customAssets: get().customAssets.filter((a) => a.id !== id) }),
-        toggleSaved: (id: string) =>
+        addSavedAsset: (asset: SavedAsset) =>
             set({
                 ...get(),
-                savedIds: get().savedIds.includes(id)
-                    ? get().savedIds.filter((i) => i !== id)
-                    : [...get().savedIds, id],
+                savedAssets: get().savedAssets.some((a) => a.id === asset.id)
+                    ? get().savedAssets
+                    : [...get().savedAssets, asset],
             }),
+        clearSavedAssets: () => set({ ...get(), savedAssets: [] }),
+        getCustomAsset: (id: string) => get().customAssets.find((a) => a.id === id),
+        isSaved: (id: string) => get().savedAssets.some((asset) => asset.id === id),
+        removeCustomAsset: (id: string) =>
+            set({ ...get(), customAssets: get().customAssets.filter((a) => a.id !== id) }),
+        removeSavedAsset: (id: string) =>
+            set({ ...get(), savedAssets: get().savedAssets.filter((asset) => asset.id !== id) }),
     }),
     initialState: B.library,
     name: 'library',
@@ -311,6 +317,7 @@ export type {
     PreviewActions,
     PreviewState,
     ReferenceAttachment,
+    SavedAsset,
     SidebarTab,
     SvgVariant,
     UiActions,

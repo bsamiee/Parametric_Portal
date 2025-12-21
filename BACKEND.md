@@ -8,8 +8,8 @@ Unified backend architecture using Effect ecosystem: `@effect/platform-node` for
 
 ```
 packages/
-├── database/           # Schema types, client layer, migrations
-└── server/             # HTTP middleware, errors, shared layers
+├── database/           # DONE: Client layer, Model.Class entities, branded IDs
+└── server/             # HTTP infrastructure, middleware, errors, security
 
 apps/
 ├── parametric_icons/   # Existing frontend (port 3001)
@@ -19,635 +19,240 @@ apps/
 
 **Per-App API Pattern:** Each app gets a route namespace under unified `apps/api`. Shared infrastructure lives in packages.
 
+**Topology:**
+- `packages/database` — Connection layer, Model.Class entities, branded IDs (IMPLEMENTED)
+- `packages/server` — HTTP middleware, errors, security, OpenAPI (TO BUILD)
+- `apps/api` — Route handlers, SqlResolver usage, migrations (TO BUILD)
+
 ---
 ## [2][DEPENDENCIES]
 
 Add to `pnpm-workspace.yaml` catalog:
 
 ```yaml
-'@effect/platform-node': 0.96.3
-'@effect/sql': 0.44.4
-'@effect/sql-pg': 0.46.2
+'@effect/platform': 0.94.0
+'@effect/platform-node': 0.94.0
+'@effect/opentelemetry': 0.49.0
 ```
 
-[IMPORTANT]:
-- `@effect/sql-pg` uses `postgres.js` internally — no separate driver dependency needed.
-- Versions must align with `effect: 3.19.9` in existing catalog.
-- `tsx` already in catalog (`4.20.6`) for dev/migrate scripts.
+[ALREADY IN CATALOG]:
+- `@effect/sql`: 0.49.0
+- `@effect/sql-pg`: 0.50.0
+- `@effect/experimental`: 0.58.0
+- `effect`: 3.19.13
 
 ---
-## [3][PACKAGES]
+## [3][PACKAGES/SERVER]
 
-### [3.1][packages/database]
-
-```
-packages/database/
-├── src/
-│   ├── schema.ts       # Branded types, validation schemas
-│   ├── client.ts       # PgClient layer
-│   └── migrations/     # Versioned SQL migrations
-│       └── 0001_init.ts
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
-
-**package.json:**
-```json
-{
-    "name": "@parametric-portal/database",
-    "version": "0.1.0",
-    "type": "module",
-    "exports": {
-        "./schema": {
-            "types": "./src/schema.ts",
-            "import": "./src/schema.ts",
-            "default": "./src/schema.ts"
-        },
-        "./client": {
-            "types": "./src/client.ts",
-            "import": "./src/client.ts",
-            "default": "./src/client.ts"
-        }
-    },
-    "dependencies": {
-        "@effect/schema": "catalog:",
-        "@effect/sql": "catalog:",
-        "@effect/sql-pg": "catalog:",
-        "effect": "catalog:"
-    },
-    "devDependencies": {
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
-    },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
-    }
-}
-```
-
-**src/schema.ts:**
-```typescript
-/** Provides branded domain types and validation schemas for database entities. */
-import { Schema as S } from '@effect/schema';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-const AssetId = S.String.pipe(S.brand('AssetId'));
-type AssetId = typeof AssetId.Type;
-
-const UserId = S.String.pipe(S.brand('UserId'));
-type UserId = typeof UserId.Type;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const Asset = S.Struct({
-  id: AssetId,
-  userId: S.NullOr(UserId),
-  prompt: S.String,
-  svg: S.String,
-  metadata: S.NullOr(S.Struct({ colorMode: S.String, intent: S.String })),
-  createdAt: S.DateFromString,
-});
-type Asset = typeof Asset.Type;
-
-const User = S.Struct({
-  id: UserId,
-  email: S.String,
-  apiKeyHash: S.NullOr(S.String),
-  createdAt: S.DateFromString,
-});
-type User = typeof User.Type;
-
-const ApiKey = S.Struct({
-  id: S.String,
-  userId: UserId,
-  keyHash: S.String,
-  name: S.String,
-  lastUsedAt: S.NullOr(S.DateFromString),
-  expiresAt: S.NullOr(S.DateFromString),
-  createdAt: S.DateFromString,
-});
-type ApiKey = typeof ApiKey.Type;
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { ApiKey, Asset, AssetId, User, UserId };
-```
-
-**src/client.ts:**
-```typescript
-/** Provides PostgreSQL client layer with connection pooling via @effect/sql-pg. */
-import { PgClient } from '@effect/sql-pg';
-import { Config } from 'effect';
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    pool: { max: 10, idleTimeout: '30 seconds', connectTimeout: '5 seconds' },
-} as const);
-
-// --- [LAYERS] ----------------------------------------------------------------
-
-const PgLive = PgClient.layerConfig({
-    database: Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
-    host: Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
-    password: Config.redacted('POSTGRES_PASSWORD'),
-    port: Config.number('POSTGRES_PORT').pipe(Config.withDefault(5432)),
-    username: Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
-    maxConnections: Config.succeed(B.pool.max),
-    idleTimeout: Config.succeed(B.pool.idleTimeout),
-    connectTimeout: Config.succeed(B.pool.connectTimeout),
-});
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { B as DATABASE_TUNING, PgLive };
-```
-
-**src/migrations/0001_init.ts:**
-```typescript
-/** Initial database schema migration: users, assets, api_keys tables. */
-import { SqlClient } from '@effect/sql';
-import { Effect } from 'effect';
-
-// --- [MIGRATION] -------------------------------------------------------------
-
-export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
-  CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
-  CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email TEXT NOT NULL UNIQUE,
-    api_key_hash TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-
-  CREATE TABLE assets (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    prompt TEXT NOT NULL,
-    svg TEXT NOT NULL,
-    metadata JSONB,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-
-  CREATE TABLE api_keys (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key_hash TEXT NOT NULL,
-    name TEXT NOT NULL,
-    last_used_at TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-
-  CREATE INDEX idx_assets_user_id ON assets(user_id);
-  CREATE INDEX idx_assets_created_at ON assets(created_at DESC);
-  CREATE INDEX idx_api_keys_user_id ON api_keys(user_id);
-`);
-```
-
-**vite.config.ts:**
-```typescript
-/** Configure Vite library build for @parametric-portal/database package. */
-import { Effect } from 'effect';
-import type { UserConfig } from 'vite';
-import { defineConfig } from 'vite';
-import { createConfig } from '../../vite.factory.ts';
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-export default defineConfig(
-    Effect.runSync(
-        createConfig({
-            entry: {
-                client: './src/client.ts',
-                schema: './src/schema.ts',
-            },
-            external: ['effect', '@effect/schema', '@effect/sql', '@effect/sql-pg'],
-            mode: 'library',
-            name: 'ParametricDatabase',
-        }),
-    ) as UserConfig,
-);
-```
-
-**tsconfig.json:**
-```json
-{
-    "compilerOptions": {
-        "outDir": "dist",
-        "rootDir": "src",
-        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/database.tsbuildinfo"
-    },
-    "exclude": ["dist", "node_modules"],
-    "extends": "../../tsconfig.base.json",
-    "include": ["src/**/*"],
-    "references": []
-}
-```
-
----
-
-### [3.2][packages/server]
+### [3.1][STRUCTURE]
 
 ```
 packages/server/
 ├── src/
-│   ├── errors.ts       # API error types
-│   └── middleware.ts   # CORS, logging middleware
+│   ├── api.ts          # HttpApi utilities, base API factories
+│   ├── errors.ts       # Typed API error hierarchy
+│   ├── middleware.ts   # CORS, logging, compression, rate limiting
+│   ├── security.ts     # Auth middleware, API key validation
+│   └── openapi.ts      # OpenAPI/Swagger generation
 ├── package.json
 ├── tsconfig.json
 └── vite.config.ts
 ```
 
-**package.json:**
-```json
-{
-    "name": "@parametric-portal/server",
-    "version": "0.1.0",
-    "type": "module",
-    "exports": {
-        "./errors": {
-            "types": "./src/errors.ts",
-            "import": "./src/errors.ts",
-            "default": "./src/errors.ts"
-        },
-        "./middleware": {
-            "types": "./src/middleware.ts",
-            "import": "./src/middleware.ts",
-            "default": "./src/middleware.ts"
-        }
-    },
-    "dependencies": {
-        "@effect/platform": "catalog:",
-        "@effect/platform-node": "catalog:",
-        "@effect/schema": "catalog:",
-        "effect": "catalog:"
-    },
-    "devDependencies": {
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
-    },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
-    }
-}
-```
+### [3.2][API LAYER PATTERNS]
 
-**src/errors.ts:**
+**Use @effect/platform HttpApi for declarative endpoint definitions:**
+
+| API                                         | Purpose                         |
+| ------------------------------------------- | ------------------------------- |
+| `HttpApi.make(name)`                        | Create named API definition     |
+| `HttpApiGroup.make(name)`                   | Group related endpoints         |
+| `HttpApiEndpoint.get/post/put/del`          | Define endpoint with method     |
+| `HttpApiEndpoint.setPayload(schema)`        | Request body validation         |
+| `HttpApiEndpoint.addSuccess(schema)`        | Success response schema         |
+| `HttpApiEndpoint.addError(error)`           | Error response schema           |
+| `HttpApiBuilder.api(api)`                   | Build API Layer from definition |
+| `HttpApiBuilder.group(api, name, handlers)` | Implement group handlers        |
+| `HttpApiBuilder.serve()`                    | Create HTTP server from API     |
+
+**Use HttpApiMiddleware for composable middleware:**
+
+| Middleware                          | Purpose                        |
+| ----------------------------------- | ------------------------------ |
+| `HttpApiMiddleware.cors`            | CORS with configurable origins |
+| `HttpApiMiddleware.logger`          | Request/response logging       |
+| `HttpApiMiddleware.compression`     | Response compression           |
+| `HttpApiMiddleware.securityHeaders` | Security headers               |
+
+**Use HttpApiSecurity for authentication:**
+
+| Security                 | Purpose                   |
+| ------------------------ | ------------------------- |
+| `HttpApiSecurity.apiKey` | API key header extraction |
+| `HttpApiSecurity.bearer` | Bearer token extraction   |
+| `HttpApiSecurity.basic`  | Basic auth extraction     |
+
+### [3.3][ERROR HIERARCHY]
+
+**Use Schema.TaggedError for typed errors:**
+
 ```typescript
-/** Provides API error types for HTTP endpoints. */
-import { HttpApiError } from '@effect/platform';
-import { Schema as S } from '@effect/schema';
+import { Schema as S } from 'effect';
 
-// --- [TYPES] -----------------------------------------------------------------
-
-class ApiError extends S.TaggedError<ApiError>()('ApiError', {
-  code: S.Number,
-  message: S.String,
-  details: S.optional(S.Unknown),
+class NotFoundError extends S.TaggedError<NotFoundError>()('NotFoundError', {
+    resource: S.String,
+    id: S.String,
 }) {}
 
-// --- [EXPORT] ----------------------------------------------------------------
+class ValidationError extends S.TaggedError<ValidationError>()('ValidationError', {
+    field: S.String,
+    message: S.String,
+}) {}
 
-export { ApiError, HttpApiError };
+class UnauthorizedError extends S.TaggedError<UnauthorizedError>()('UnauthorizedError', {
+    reason: S.String,
+}) {}
+
+class RateLimitError extends S.TaggedError<RateLimitError>()('RateLimitError', {
+    retryAfterMs: S.Number,
+}) {}
 ```
 
-**src/middleware.ts:**
+### [3.4][MIDDLEWARE COMPOSITION]
+
+**B constant for all tuning parameters:**
+
 ```typescript
-/** Provides CORS and logging middleware for HTTP API endpoints. */
-import { HttpMiddleware } from '@effect/platform';
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
 const B = Object.freeze({
-  cors: {
-    headers: 'Content-Type, Authorization, X-API-Key',
-    methods: 'GET, POST, PUT, DELETE, OPTIONS',
-    origin: '*',
-  },
-} as const);
-
-// --- [MIDDLEWARE] ------------------------------------------------------------
-
-const corsMiddleware = HttpMiddleware.cors({ allowedOrigins: [B.cors.origin] });
-
-const loggerMiddleware = HttpMiddleware.logger;
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { B as SERVER_TUNING, corsMiddleware, loggerMiddleware };
-```
-
-**vite.config.ts:**
-```typescript
-/** Configure Vite library build for @parametric-portal/server package. */
-import { Effect } from 'effect';
-import type { UserConfig } from 'vite';
-import { defineConfig } from 'vite';
-import { createConfig } from '../../vite.factory.ts';
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-export default defineConfig(
-    Effect.runSync(
-        createConfig({
-            entry: {
-                errors: './src/errors.ts',
-                middleware: './src/middleware.ts',
-            },
-            external: ['effect', '@effect/schema', '@effect/platform', '@effect/platform-node'],
-            mode: 'library',
-            name: 'ParametricServer',
-        }),
-    ) as UserConfig,
-);
-```
-
-**tsconfig.json:**
-```json
-{
-    "compilerOptions": {
-        "outDir": "dist",
-        "rootDir": "src",
-        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/server.tsbuildinfo"
+    cors: {
+        origins: ['*'],
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        headers: ['Content-Type', 'Authorization', 'X-API-Key'],
+        maxAge: 86400,
     },
-    "exclude": ["dist", "node_modules"],
-    "extends": "../../tsconfig.base.json",
-    "include": ["src/**/*"],
-    "references": []
-}
+    rateLimit: {
+        windowMs: 60000,
+        maxRequests: 100,
+    },
+    compression: {
+        threshold: 1024,
+    },
+} as const);
+```
+
+### [3.5][OPENAPI GENERATION]
+
+**Use HttpApiSwagger for auto-generated docs:**
+
+```typescript
+import { HttpApiSwagger } from '@effect/platform';
+
+const SwaggerLive = HttpApiSwagger.layer({
+    path: '/docs',
+    format: 'json',
+});
 ```
 
 ---
 ## [4][APPS/API]
 
+### [4.1][STRUCTURE]
+
 ```
 apps/api/
 ├── src/
-│   ├── main.ts         # Entry point
+│   ├── main.ts         # Entry point with Layer composition
 │   ├── api.ts          # HttpApi definition
 │   ├── migrate.ts      # Migration runner
 │   └── routes/
 │       ├── health.ts   # Health endpoint
-│       └── icons.ts    # Icon generation endpoints
+│       └── icons.ts    # Icon CRUD + generation
 ├── Dockerfile
 ├── package.json
 ├── tsconfig.json
 └── vite.config.ts
 ```
 
-**package.json:**
-```json
-{
-    "name": "@parametric-portal/api",
-    "version": "0.1.0",
-    "type": "module",
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "tsx watch src/main.ts",
-        "migrate": "tsx src/migrate.ts",
-        "start": "node dist/main.js",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
-    },
-    "dependencies": {
-        "@anthropic-ai/sdk": "catalog:",
-        "@effect/platform": "catalog:",
-        "@effect/platform-node": "catalog:",
-        "@effect/schema": "catalog:",
-        "@effect/sql": "catalog:",
-        "@effect/sql-pg": "catalog:",
-        "@parametric-portal/database": "workspace:*",
-        "@parametric-portal/server": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
-        "effect": "catalog:"
-    },
-    "devDependencies": {
-        "tsx": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
-    }
-}
-```
+### [4.2][SQLRESOLVER USAGE]
 
-**src/api.ts:**
+**[CRITICAL] SqlResolver requires SqlClient in Effect scope — define inside Effect.gen, NOT at module level:**
+
 ```typescript
-/** Provides HttpApi definition with endpoint schemas for ParametricApi. */
-import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema } from '@effect/platform';
-import { Schema as S } from '@effect/schema';
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const GenerateRequest = S.Struct({
-    prompt: S.String.pipe(S.minLength(1), S.maxLength(1000)),
-    colorMode: S.optional(S.Literal('light', 'dark')),
-    intent: S.optional(S.Literal('create', 'refine')),
-    variantCount: S.optional(S.Number.pipe(S.between(1, 3))),
+// CORRECT: Inside Effect.gen
+Effect.gen(function* () {
+    const resolver = yield* SqlResolver.findById('GetAssetById', {
+        Id: AssetIdSchema,
+        Result: Asset,
+        ResultId: (a) => a.id,
+        execute: (ids) => sql`SELECT * FROM assets WHERE ${sql.in('id', ids)}`,
+    });
+    return yield* resolver.execute(assetId);
 });
 
-const GenerateResponse = S.Struct({
-    id: S.String,
-    variants: S.Array(S.Struct({ id: S.String, svg: S.String })),
-});
-
-const AssetResponse = S.Struct({
-    id: S.String,
-    prompt: S.String,
-    svg: S.String,
-    metadata: S.NullOr(S.Unknown),
-    createdAt: S.String,
-});
-
-const HealthResponse = S.Struct({
-    status: S.Literal('healthy'),
-    database: S.Literal('connected'),
-    timestamp: S.String,
-});
-
-// --- [PATH_PARAMS] -----------------------------------------------------------
-
-const idParam = HttpApiSchema.param('id', S.String);
-
-// --- [ENDPOINTS] -------------------------------------------------------------
-
-const healthEndpoint = HttpApiEndpoint.get('health', '/health').addSuccess(HealthResponse);
-
-const generateEndpoint = HttpApiEndpoint.post('generate', '/icons/generate')
-    .setPayload(GenerateRequest)
-    .addSuccess(GenerateResponse);
-
-const listAssetsEndpoint = HttpApiEndpoint.get('listAssets', '/icons/assets')
-    .addSuccess(S.Struct({ assets: S.Array(AssetResponse) }));
-
-const getAssetEndpoint = HttpApiEndpoint.get('getAsset')`/icons/assets/${idParam}`
-    .addSuccess(AssetResponse)
-    .addError(HttpApiError.NotFound);
-
-const deleteAssetEndpoint = HttpApiEndpoint.del('deleteAsset')`/icons/assets/${idParam}`
-    .addSuccess(S.Struct({ deleted: S.Boolean }))
-    .addError(HttpApiError.NotFound);
-
-// --- [GROUPS] ----------------------------------------------------------------
-
-const HealthGroup = HttpApiGroup.make('health').add(healthEndpoint);
-
-const IconsGroup = HttpApiGroup.make('icons')
-    .add(generateEndpoint)
-    .add(listAssetsEndpoint)
-    .add(getAssetEndpoint)
-    .add(deleteAssetEndpoint);
-
-// --- [API] -------------------------------------------------------------------
-
-const AppApi = HttpApi.make('ParametricApi').add(HealthGroup).add(IconsGroup);
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { AppApi, HealthGroup, IconsGroup };
+// WRONG: Module level (no SqlClient in scope)
+const resolver = SqlResolver.findById(...); // ERROR
 ```
 
-**src/routes/health.ts:**
+**SqlResolver patterns:**
+
+| Method                 | Returns            | Use Case                                |
+| ---------------------- | ------------------ | --------------------------------------- |
+| `SqlResolver.findById` | `Option<A>` per ID | Single entity lookup with batching      |
+| `SqlResolver.grouped`  | `Array<A>` per key | N+1 prevention (e.g., assets by userId) |
+| `SqlResolver.ordered`  | `A` per request    | Maintain request-result order           |
+| `SqlResolver.void`     | `void`             | Side-effect operations                  |
+
+### [4.3][SQLSCHEMA USAGE]
+
+**Type-safe query wrappers with automatic validation:**
+
 ```typescript
-/** Provides health check endpoint handler with database connectivity verification. */
-import { HttpApiBuilder } from '@effect/platform';
-import { SqlClient } from '@effect/sql';
-import { Effect } from 'effect';
-import { AppApi } from '../api.ts';
+import { SqlSchema } from '@effect/sql';
 
-// --- [HANDLERS] --------------------------------------------------------------
+// Inside route handler
+Effect.gen(function* () {
+    const findAll = SqlSchema.findAll({
+        Request: S.Struct({ limit: S.Number, offset: S.Number }),
+        Result: Asset,
+        execute: ({ limit, offset }) => sql`
+            SELECT * FROM assets
+            ORDER BY created_at DESC
+            LIMIT ${limit} OFFSET ${offset}
+        `,
+    });
 
-const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
-    handlers.handle('health', () =>
-        Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
-            const [{ now }] = yield* sql<{ now: Date }>`SELECT now()`;
-            return { status: 'healthy' as const, database: 'connected' as const, timestamp: now.toISOString() };
-        }),
-    ),
-);
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { HealthLive };
+    return yield* findAll({ limit: 100, offset: 0 });
+});
 ```
 
-**src/routes/icons.ts:**
+| Method              | Returns                | Use Case                                 |
+| ------------------- | ---------------------- | ---------------------------------------- |
+| `SqlSchema.findAll` | `Effect<readonly A[]>` | Paginated lists                          |
+| `SqlSchema.findOne` | `Effect<Option<A>>`    | Optional single result                   |
+| `SqlSchema.single`  | `Effect<A>`            | Exactly one result (throws if not found) |
+| `SqlSchema.void`    | `Effect<void>`         | Insert/update/delete                     |
+
+### [4.4][MODEL.CLASS INTEGRATION]
+
+**Import from @parametric-portal/database/models:**
+
 ```typescript
-/** Provides icon CRUD endpoint handlers with Anthropic integration for generation. */
-import { HttpApiBuilder, HttpApiError } from '@effect/platform';
-import { SqlClient } from '@effect/sql';
-import Anthropic from '@anthropic-ai/sdk';
-import { Effect } from 'effect';
-import { AppApi } from '../api.ts';
+import { Asset, User, ApiKey } from '@parametric-portal/database/models';
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    model: 'claude-sonnet-4-20250514',
-    maxTokens: 24576,
-} as const);
-
-// --- [HANDLERS] --------------------------------------------------------------
-
-const IconsLive = HttpApiBuilder.group(AppApi, 'icons', (handlers) =>
-    handlers
-        .handle('generate', ({ payload }) =>
-            Effect.gen(function* () {
-                const sql = yield* SqlClient.SqlClient;
-                const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-                const response = yield* Effect.tryPromise(() =>
-                    anthropic.messages.create({
-                        model: B.model,
-                        max_tokens: B.maxTokens,
-                        messages: [{ role: 'user', content: payload.prompt }],
-                    }),
-                );
-
-                const svg = response.content[0]?.type === 'text' ? response.content[0].text : '';
-                const assetId = crypto.randomUUID();
-
-                yield* sql`
-                    INSERT INTO assets (id, prompt, svg, metadata)
-                    VALUES (${assetId}, ${payload.prompt}, ${svg}, ${JSON.stringify({
-                        colorMode: payload.colorMode ?? 'dark',
-                        intent: payload.intent ?? 'create',
-                    })})
-                `;
-
-                return { id: assetId, variants: [{ id: crypto.randomUUID(), svg }] };
-            }),
-        )
-        .handle('listAssets', () =>
-            Effect.gen(function* () {
-                const sql = yield* SqlClient.SqlClient;
-                const assets = yield* sql`
-                    SELECT id, prompt, svg, metadata, created_at as "createdAt"
-                    FROM assets ORDER BY created_at DESC LIMIT 100
-                `;
-                return { assets: assets.map((a) => ({ ...a, createdAt: String(a.createdAt) })) };
-            }),
-        )
-        .handle('getAsset', ({ path }) =>
-            Effect.gen(function* () {
-                const sql = yield* SqlClient.SqlClient;
-                const [asset] = yield* sql`
-                    SELECT id, prompt, svg, metadata, created_at as "createdAt"
-                    FROM assets WHERE id = ${path.id}
-                `;
-                return asset
-                    ? { ...asset, createdAt: String(asset.createdAt) }
-                    : yield* Effect.fail(new HttpApiError.NotFound());
-            }),
-        )
-        .handle('deleteAsset', ({ path }) =>
-            Effect.gen(function* () {
-                const sql = yield* SqlClient.SqlClient;
-                yield* sql`DELETE FROM assets WHERE id = ${path.id}`;
-                return { deleted: true };
-            }),
-        ),
-);
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { B as ICONS_TUNING, IconsLive };
+// Auto-generated variants available:
+Asset           // Select schema (query results)
+Asset.insert    // Insert schema (excludes Generated fields)
+Asset.update    // Update schema
+Asset.json      // API response (excludes Sensitive fields)
+Asset.jsonCreate // API create payload
+Asset.jsonUpdate // API update payload
 ```
 
-**src/main.ts:**
+### [4.5][LAYER COMPOSITION]
+
+**Proper dependency injection via Layer:**
+
 ```typescript
-/** Provides API server entry point with Layer composition for database and HTTP. */
-import { HttpApiBuilder } from '@effect/platform';
-import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
-import { Layer } from 'effect';
-import { createServer } from 'node:http';
-import { PgLive } from '@parametric-portal/database/client';
-import { AppApi } from './api.ts';
-import { HealthLive } from './routes/health.ts';
-import { IconsLive } from './routes/icons.ts';
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    port: 4000,
-    host: '0.0.0.0',
-} as const);
-
-// --- [LAYERS] ----------------------------------------------------------------
-
 const ApiLive = HttpApiBuilder.api(AppApi).pipe(
     Layer.provide(HealthLive),
     Layer.provide(IconsLive),
@@ -655,44 +260,27 @@ const ApiLive = HttpApiBuilder.api(AppApi).pipe(
 
 const ServerLive = HttpApiBuilder.serve().pipe(
     Layer.provide(ApiLive),
+    Layer.provide(SwaggerLive),
     Layer.provide(PgLive),
-    Layer.provide(NodeHttpServer.layer(createServer, { port: B.port, host: B.host })),
+    Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),
 );
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
 
 Layer.launch(ServerLive).pipe(NodeRuntime.runMain);
 ```
 
-**src/migrate.ts:**
-```typescript
-/** Provides database migration runner using PgMigrator with filesystem loader. */
-import { NodeContext, NodeRuntime } from '@effect/platform-node';
-import { PgMigrator } from '@effect/sql-pg';
-import { Effect, Layer } from 'effect';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { PgLive } from '@parametric-portal/database/client';
+### [4.6][SQL STATEMENT HELPERS]
 
-// --- [CONSTANTS] -------------------------------------------------------------
+**Use @effect/sql built-in helpers (NO WRAPPING):**
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = resolve(__dirname, '../packages/database/src/migrations');
-
-// --- [LAYERS] ----------------------------------------------------------------
-
-const MigratorLive = PgMigrator.layer({
-    loader: PgMigrator.fromFileSystem(MIGRATIONS_DIR),
-}).pipe(Layer.provide(PgLive), Layer.provide(NodeContext.layer));
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-Effect.gen(function* () {
-    yield* Effect.log('[MIGRATE] Starting database migrations...');
-}).pipe(Effect.provide(MigratorLive), NodeRuntime.runMain);
-```
-
-[IMPORTANT]: `PgMigrator.layer` auto-runs pending migrations when layer is constructed. The `Effect.gen` block executes after migrations complete.
+| Helper               | Purpose                 |
+| -------------------- | ----------------------- |
+| `sql.in('col', ids)` | IN clause with array    |
+| `sql.and([...])`     | AND multiple conditions |
+| `sql.or([...])`      | OR multiple conditions  |
+| `sql.insert(data)`   | Insert object/array     |
+| `sql.update(data)`   | Update with SET clauses |
+| `sql.literal(str)`   | Raw SQL (no escaping)   |
+| `sql.csv([...])`     | Comma-separated values  |
 
 ---
 ## [5][DOCKER]
@@ -782,60 +370,7 @@ volumes:
 ```
 
 ---
-## [6][FRONTEND_INTEGRATION]
-
-Update `apps/parametric_icons/src/generation.ts`:
-
-```typescript
-/** Provides icon generation API client for frontend integration. */
-import { HttpClient, HttpClientRequest, HttpClientResponse } from '@effect/platform-browser';
-import { Effect, pipe } from 'effect';
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    api: { base: import.meta.env.VITE_API_URL ?? 'http://localhost:4000' },
-} as const);
-
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
-
-const generateIcon = (input: { prompt: string; colorMode?: 'light' | 'dark' }) =>
-    pipe(
-        HttpClientRequest.post(`${B.api.base}/icons/generate`),
-        HttpClientRequest.bodyJson(input),
-        Effect.flatMap(HttpClient.fetch),
-        Effect.flatMap(HttpClientResponse.json),
-        Effect.scoped,
-    );
-
-// --- [EXPORT] ----------------------------------------------------------------
-
-export { B as GENERATION_TUNING, generateIcon };
-```
-
-Add to `apps/parametric_icons/.env`:
-```
-VITE_API_URL=http://localhost:4000
-```
-
----
-## [7][IMPLEMENTATION_STEPS]
-
-| [STEP] | [ACTION]                    | [COMMAND]                                                                                         |
-| ------ | --------------------------- | ------------------------------------------------------------------------------------------------- |
-| 1      | Add dependencies to catalog | Edit `pnpm-workspace.yaml`                                                                        |
-| 2      | Create `packages/database`  | `mkdir -p packages/database/src/migrations`                                                       |
-| 3      | Create `packages/server`    | `mkdir -p packages/server/src`                                                                    |
-| 4      | Create `apps/api`           | `mkdir -p apps/api/src/routes`                                                                    |
-| 5      | Install dependencies        | `pnpm install`                                                                                    |
-| 6      | Build packages              | `pnpm exec nx run-many -t build --projects=@parametric-portal/database,@parametric-portal/server` |
-| 7      | Start PostgreSQL            | `docker compose up postgres -d`                                                                   |
-| 8      | Run migrations              | `pnpm exec nx migrate @parametric-portal/api`                                                     |
-| 9      | Start API                   | `pnpm exec nx dev @parametric-portal/api`                                                         |
-| 10     | Update frontend             | Replace Anthropic SDK with API calls                                                              |
-
----
-## [8][ENVIRONMENT]
+## [6][ENVIRONMENT]
 
 **.env (project root):**
 ```
@@ -855,103 +390,7 @@ API_PORT=4000
 ```
 
 ---
-## [9][HOSTINGER_DEPLOYMENT]
-
-### [9.1][VPS_SETUP]
-
-```bash
-# SSH into VPS
-ssh root@YOUR_VPS_IP
-
-# Install Docker (if not installed)
-curl -fsSL https://get.docker.com | sh
-systemctl enable docker && systemctl start docker
-
-# Install Docker Compose plugin
-apt update && apt install -y docker-compose-plugin
-
-# Create app directory
-mkdir -p /var/www/parametric_icons
-```
-
-### [9.2][DEPLOY_BACKEND]
-
-```bash
-# Clone repo and start containers
-cd /opt && git clone YOUR_REPO_URL parametric
-cd /opt/parametric
-
-# Create .env file
-cat > .env << 'EOF'
-POSTGRES_PASSWORD=GENERATE_SECURE_PASSWORD
-ANTHROPIC_API_KEY=sk-ant-...
-EOF
-
-# Start services
-docker compose up -d
-```
-
-### [9.3][DEPLOY_FRONTEND]
-
-```bash
-# Build locally, then copy dist to VPS
-pnpm exec nx build @parametric-portal/parametric-icons
-scp -r apps/parametric_icons/dist/* root@YOUR_VPS_IP:/var/www/parametric_icons/
-```
-
-### [9.4][NGINX_CONFIG]
-
-```bash
-# Install nginx
-apt install -y nginx
-
-# Create config
-cat > /etc/nginx/sites-available/parametric << 'EOF'
-server {
-    listen 80;
-    server_name YOUR_DOMAIN;
-
-    add_header X-Content-Type-Options nosniff;
-    add_header X-Frame-Options DENY;
-
-    root /var/www/parametric_icons;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    location ~* \.(js|css|png|jpg|svg|woff2)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:4000/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-EOF
-
-# Enable site
-ln -sf /etc/nginx/sites-available/parametric /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t && systemctl reload nginx
-```
-
-### [9.5][SSL_SETUP]
-
-```bash
-apt install -y certbot python3-certbot-nginx
-certbot --nginx -d YOUR_DOMAIN --non-interactive --agree-tos -m YOUR_EMAIL
-```
-
----
-## [10][NX_TARGETS]
+## [7][NX_TARGETS]
 
 Add to `nx.json` targetDefaults:
 
@@ -977,32 +416,52 @@ Add to `nx.json` targetDefaults:
 }
 ```
 
-[IMPORTANT]: Migrations are not cacheable (`cache: false`). The `start` target depends on `build` to ensure dist exists.
-
 ---
-## [11][MIGRATIONS]
+## [8][MIGRATIONS]
 
-**What migrations are:** Version-controlled SQL scripts that manage database schema changes over time.
+**Migrations live in apps/api, use @parametric-portal/database/client:**
 
-**Why needed:**
-- Track applied schema changes
-- Ensure consistent database state across environments
-- Enable team collaboration on schema changes
-- Support deployment consistency
+```typescript
+import { NodeContext, NodeRuntime } from '@effect/platform-node';
+import { PgMigrator } from '@effect/sql-pg';
+import { Effect, Layer } from 'effect';
+import { PgLive } from '@parametric-portal/database/client';
 
-**How they work:**
-1. Migration files are Effect programs that run SQL
-2. `PgMigrator` tracks applied migrations in `effect_sql_migrations` table
-3. Only unapplied migrations run on each `migrate` command
-4. Migrations are forward-only (no automatic rollback)
+const MigratorLive = PgMigrator.layer({
+    loader: PgMigrator.fromFileSystem('./src/migrations'),
+}).pipe(Layer.provide(PgLive), Layer.provide(NodeContext.layer));
+
+Effect.gen(function* () {
+    yield* Effect.log('[MIGRATE] Running migrations...');
+}).pipe(Effect.provide(MigratorLive), NodeRuntime.runMain);
+```
 
 **Migration file pattern:**
 ```typescript
-// src/migrations/0002_add_column.ts
+// src/migrations/0001_init.ts
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
 
 export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
-  ALTER TABLE assets ADD COLUMN tags TEXT[];
+  CREATE TABLE assets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    prompt TEXT NOT NULL,
+    svg TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
 `);
 ```
+
+---
+## [9][IMPLEMENTATION_STEPS]
+
+| [STEP] | [ACTION]                     | [COMMAND]                                      |
+| ------ | ---------------------------- | ---------------------------------------------- |
+| 1      | Add platform deps to catalog | Edit `pnpm-workspace.yaml`                     |
+| 2      | Create `packages/server`     | `mkdir -p packages/server/src`                 |
+| 3      | Create `apps/api`            | `mkdir -p apps/api/src/routes`                 |
+| 4      | Install dependencies         | `pnpm install`                                 |
+| 5      | Build packages               | `pnpm exec nx build @parametric-portal/server` |
+| 6      | Start PostgreSQL             | `docker compose up postgres -d`                |
+| 7      | Run migrations               | `pnpm exec nx migrate @parametric-portal/api`  |
+| 8      | Start API                    | `pnpm exec nx dev @parametric-portal/api`      |

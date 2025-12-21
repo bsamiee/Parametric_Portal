@@ -1,0 +1,39 @@
+{
+    "name": "@parametric-portal/database",
+    "version": "0.1.0",
+    "type": "module",
+    "exports": {
+        "./client": {
+            "types": "./src/client.ts",
+            "import": "./src/client.ts",
+            "default": "./src/client.ts"
+        },
+        "./models": {
+            "types": "./src/models.ts",
+            "import": "./src/models.ts",
+            "default": "./src/models.ts"
+        },
+        "./schema": {
+            "types": "./src/schema.ts",
+            "import": "./src/schema.ts",
+            "default": "./src/schema.ts"
+        }
+    },
+    "dependencies": {
+        "@effect/experimental": "catalog:",
+        "@effect/sql": "catalog:",
+        "@effect/sql-pg": "catalog:",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
+    },
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    }
+}
