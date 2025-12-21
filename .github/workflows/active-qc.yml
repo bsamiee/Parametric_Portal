@@ -63,8 +63,6 @@ jobs:
                       pnpm-lock.yaml
 
             - uses: ./.github/actions/node-env
-              with:
-                  node-version-file: package.json
 
             - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
               env:
@@ -100,7 +98,6 @@ jobs:
             - uses: ./.github/actions/pr-hygiene
               with:
                   pr_number: ${{ github.event.pull_request.number }}
-                  owner_logins: ${{ github.repository_owner }}
 
     # --- Issue Metadata Jobs --------------------------------------------------
     issue-meta:
@@ -124,8 +121,6 @@ jobs:
                   anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
             - uses: ./.github/actions/node-env
-              with:
-                  node-version-file: package.json
 
             - name: AI Meta Sync
               uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1

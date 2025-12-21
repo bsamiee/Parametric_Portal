@@ -4,6 +4,8 @@ description: 'Transform [TYPE!]: to type!: format for Nx release compatibility'
 runs:
     using: composite
     steps:
+        - uses: ./.github/actions/git-identity
+
         - name: Transform to conventional commit
           shell: bash
           run: |
@@ -29,9 +31,6 @@ runs:
                 echo "Transforming commit message:"
                 echo "  Old: $SUBJECT"
                 echo "  New: $NEW_SUBJECT"
-
-                git config user.name "github-actions[bot]"
-                git config user.email "github-actions[bot]@users.noreply.github.com"
 
                 # Preserve body if present
                 if [ -z "$BODY" ]; then

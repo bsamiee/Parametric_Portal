@@ -39,10 +39,14 @@ jobs:
             - name: Run pnpm audit
               id: audit
               run: |
-                  pnpm audit --audit-level=moderate --json > audit-results.json || true
+                  # Run audit and capture exit code (don't use || true which swallows the code)
+                  set +e
+                  pnpm audit --audit-level=moderate --json > audit-results.json
                   exit_code=$?
+                  set -e
+                  # Exit codes: 0=clean, 1=vulns found (expected), other=failure
                   if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 1 ]; then
-                    echo "[ERROR] Audit command failed"
+                    echo "[ERROR] Audit command failed with exit code $exit_code"
                     cat audit-results.json
                     exit "$exit_code"
                   fi
