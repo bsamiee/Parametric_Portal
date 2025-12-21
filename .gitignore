@@ -97,3 +97,8 @@ Thumbs.db
 .archive/
 .archive
 .playwright-mcp/
+
+# Gemini CLI auto-generated files (keep commands/ and extensions/ tracked)
+.gemini/telemetry.log
+.gemini/settings.json
+.gemini/.DS_Store

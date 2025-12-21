@@ -31,6 +31,7 @@ const B = Object.freeze({
 
 const baseConfig = Effect.runSync(
     createConfig({
+        builder: { buildStrategy: 'serial' },
         mode: 'app',
         name: B.app.name,
         port: B.app.port,
