@@ -64,6 +64,7 @@ jobs:
       request: '${{ steps.extract_command.outputs.request }}'
       additional_context: '${{ steps.extract_command.outputs.additional_context }}'
       issue_number: '${{ github.event.pull_request.number || github.event.issue.number }}'
+      is_auto_triggered: '${{ steps.extract_command.outputs.is_auto_triggered }}'
     steps:
       - name: 'Extract command'
         id: 'extract_command'
@@ -77,8 +78,9 @@ jobs:
             const request = process.env.REQUEST || '';
             core.setOutput('request', request);
 
-            if (eventType === 'pull_request_target.opened' || eventType === 'pull_request_target.ready_for_review') {
+            if (eventType === 'pull_request_target.opened' || eventType === 'pull_request_target.ready_for_review' || eventType === 'pull_request_target.synchronize') {
               core.setOutput('command', 'review');
+              core.setOutput('is_auto_triggered', 'true');
             } else if (request.startsWith("@gemini-cli /review")) {
               core.setOutput('command', 'review');
               const additionalContext = request.replace(/^@gemini-cli \/review/, '').trim();
@@ -92,6 +94,7 @@ jobs:
             }
 
       - name: 'Acknowledge request'
+        if: steps.extract_command.outputs.is_auto_triggered != 'true'
         env:
           GITHUB_TOKEN: '${{ github.token }}'
           ISSUE_NUMBER: '${{ github.event.pull_request.number || github.event.issue.number }}'

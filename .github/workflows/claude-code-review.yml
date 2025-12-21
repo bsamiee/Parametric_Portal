@@ -1,10 +1,5 @@
 name: Claude Code Review
 
-# IMPORTANT: Using pull_request_target to bypass first-time contributor approval requirements.
-# This is secure because:
-# 1. Workflow code runs from BASE branch (main), not the PR
-# 2. We explicitly checkout PR head ref to REVIEW (not execute) the code
-# 3. No untrusted code execution occurs - only static analysis and review
 on:
   pull_request_target:
     types: [opened, synchronize, ready_for_review]
@@ -15,7 +10,6 @@ concurrency:
 
 jobs:
   claude-review:
-    # Skip draft PRs and ensure PR is from same repo (not external fork)
     if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -24,111 +18,29 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
-      actions: read
 
     steps:
-      # Checkout PR head ref explicitly (pull_request_target defaults to base branch)
       - name: Checkout PR head
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Setup Environment
-        uses: ./.github/actions/node-env
-
-      - name: Create review output directory
-        run: mkdir -p .github/review-output
-
       - name: Run Claude Code Review
-        id: claude-review
         uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          track_progress: 'true'
           prompt: |
-            Review PR #${{ github.event.pull_request.number }} against REQUIREMENTS.md and CLAUDE.md standards.
+            Review this PR against the project's coding standards in REQUIREMENTS.md.
 
-            ## OUTPUT REQUIREMENT
+            Focus on:
+            - Code quality and correctness
+            - Adherence to functional/monadic patterns (Effect, Option, dispatch tables)
+            - No any, let/var, if/else chains, for/while loops, try/catch, default exports
+            - Proper use of branded types and B constants
 
-            Generate structured JSON output to `.github/review-output/pr-${{ github.event.pull_request.number }}.json`.
-
-            Schema:
-            ```json
-            {
-              "pr_number": ${{ github.event.pull_request.number }},
-              "verdict": "approve" | "request_changes",
-              "violations": [
-                {
-                  "rule": "RULE_ID",
-                  "file": "relative/path.ts",
-                  "start_line": 1,
-                  "end_line": 1,
-                  "current": "code that violates",
-                  "suggested": "code that fixes",
-                  "severity": "error",
-                  "context": "explanation"
-                }
-              ],
-              "passed_checks": ["RULE_ID", ...],
-              "metadata": {
-                "review_timestamp": "ISO 8601 timestamp",
-                "typecheck_status": "success" | "failure",
-                "lint_status": "success" | "failure"
-              }
-            }
-            ```
-
-            Valid RULE_IDs: NO_ANY, NO_LET_VAR, NO_IF_ELSE, NO_FOR_WHILE, NO_TRY_CATCH,
-            NO_DEFAULT_EXPORT, DISPATCH_TABLE, EFFECT_PIPELINE, OPTION_MONAD,
-            BRANDED_TYPES, B_CONSTANT, SECTION_SEPARATORS, EXPRESSION_CENTRIC
-
-            ## MANDATORY CHECKS
-
-            **TypeScript violations** (search patterns):
-            - `any` type → use branded types via @effect/schema (NO_ANY)
-            - `let`/`var` → use `const` only (NO_LET_VAR)
-            - `if/else` chains → use dispatch tables (NO_IF_ELSE)
-            - `for/while` loops → use `.map`, `.filter`, Effect (NO_FOR_WHILE)
-            - `try/catch` → use Effect error channel (NO_TRY_CATCH)
-            - `export default` → use named exports (NO_DEFAULT_EXPORT)
-
-            **Architecture violations**:
-            - Missing dispatch tables for type-based routing (DISPATCH_TABLE)
-            - Missing Effect pipeline for async/failable operations (EFFECT_PIPELINE)
-            - Nullable values without Option.fromNullable (OPTION_MONAD)
-            - Domain primitives without branded types (BRANDED_TYPES)
-            - Config not consolidated in B constant (B_CONSTANT)
-
-            **Organization violations**:
-            - Missing section separators (SECTION_SEPARATORS)
-            - Blocks `{}` when expression suffices (EXPRESSION_CENTRIC)
-
-            ## EXECUTION STEPS
-
-            1. Run `nx run-many -t typecheck` to check type compliance
-            2. Run `nx run-many -t check` to verify Biome lint
-            3. Search changed files for pattern violations
-            4. Write JSON to `.github/review-output/pr-${{ github.event.pull_request.number }}.json`
-            5. Use `gh pr review` with `--approve` or `--request-changes` based on verdict
-
+            Post inline comments on specific lines with issues.
+            Approve if standards are met, request changes if violations found.
           claude_args: |
-            --model claude-opus-4-5-20251101
-
-      - name: Save PR metadata for downstream workflows
-        if: always()
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
-        run: |
-          echo "$PR_NUMBER" > .github/review-output/pr-number.txt
-          echo "$HEAD_BRANCH" > .github/review-output/head-branch.txt
-
-      - name: Upload review output
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: review-output
-          path: .github/review-output/
-          if-no-files-found: warn
-          retention-days: 30
+            --model claude-sonnet-4-20250514
