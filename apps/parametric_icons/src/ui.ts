@@ -2,7 +2,6 @@
  * UI components via factory functions from @parametric-portal/components.
  * Uses algorithmic scaling from schema.ts (scale 1-10, density 0.5-2, baseUnit rem).
  */
-import { createCommand } from '@parametric-portal/components/command';
 import { createControls } from '@parametric-portal/components/controls';
 import { createData } from '@parametric-portal/components/data';
 import { createElements } from '@parametric-portal/components/elements';
@@ -56,7 +55,6 @@ const ICON_GAP = `${B.iconScale.scale * B.algo.iconGapMul * B.iconScale.density 
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const command = createCommand({ scale: B.scale });
 const controls = createControls({ behavior: B.behavior, scale: B.scale });
 const iconControls = createControls({ behavior: B.behavior, scale: B.iconScale });
 const data = createData({ behavior: B.behavior, scale: B.scale });
@@ -72,7 +70,6 @@ const utility = createUtility({ scale: B.scale });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-const { Dialog: CommandDialog } = command;
 const { Button, Input, Textarea } = controls;
 const { Button: IconButton } = iconControls;
 const { Card, ListItem, Thumb } = data;
@@ -93,7 +90,6 @@ export {
     Button,
     Card,
     Carousel,
-    CommandDialog,
     ContextSelector,
     Dialog,
     Divider,

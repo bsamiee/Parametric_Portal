@@ -43,7 +43,7 @@ import {
     SvgPreview,
     Thumb,
 } from '../ui.ts';
-import { UploadDialog } from './upload-dialog.tsx';
+import { UploadDialog } from './overlays.tsx';
 
 // --- [ICON_NAMES] ------------------------------------------------------------
 

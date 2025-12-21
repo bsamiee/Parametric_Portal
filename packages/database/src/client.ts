@@ -25,7 +25,7 @@ type TransformConfig = {
     readonly enabled: boolean;
 };
 
-type PgClientLayer = Layer.Layer<SqlClient, SqlError | ConfigError.ConfigError, never>;
+type PgClientLayer = Layer.Layer<SqlClient | PgClient.PgClient, SqlError | ConfigError.ConfigError, never>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 

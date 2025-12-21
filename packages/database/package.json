@@ -17,10 +17,21 @@
             "types": "./src/schema.ts",
             "import": "./src/schema.ts",
             "default": "./src/schema.ts"
+        },
+        "./migrator": {
+            "types": "./src/migrator.ts",
+            "import": "./src/migrator.ts",
+            "default": "./src/migrator.ts"
+        },
+        "./repositories": {
+            "types": "./src/repositories.ts",
+            "import": "./src/repositories.ts",
+            "default": "./src/repositories.ts"
         }
     },
     "dependencies": {
         "@effect/experimental": "catalog:",
+        "@effect/platform": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/sql-pg": "catalog:",
         "effect": "catalog:"

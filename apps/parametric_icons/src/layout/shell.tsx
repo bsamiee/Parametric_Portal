@@ -16,7 +16,7 @@ import {
     uiSlice,
 } from '../stores.ts';
 import { Flex } from '../ui.ts';
-import { CommandPaletteWithExport, ExportDialog, useExportDialog } from './overlays.tsx';
+import { ExportDialog, useExportDialog } from './overlays.tsx';
 import { CommandBar, Sidebar, Stage } from './panels.tsx';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -82,7 +82,6 @@ const AppContent = (): ReactNode => {
 
     return (
         <>
-            <CommandPaletteWithExport openExportDialog={exportDialog.open} />
             <ExportDialog {...exportDialog} />
 
             <Flex className={B.styles.root}>

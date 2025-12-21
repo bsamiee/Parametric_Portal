@@ -1,0 +1,30 @@
+{
+    "name": "@parametric-portal/api",
+    "version": "0.1.0",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "tsx watch src/main.ts",
+        "migrate": "tsx src/migrate.ts",
+        "start": "node dist/main.js",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "catalog:",
+        "@effect/platform": "catalog:",
+        "@effect/platform-node": "catalog:",
+        "@effect/sql": "catalog:",
+        "@parametric-portal/database": "workspace:*",
+        "@parametric-portal/server": "workspace:*",
+        "arctic": "catalog:",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "@types/node": "catalog:",
+        "tsx": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:"
+    }
+}

@@ -6,7 +6,7 @@ import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess 
 import type { ManagedRuntime } from 'effect';
 import { Cause, Effect, Exit, Fiber } from 'effect';
 import { type ComponentType, type DependencyList, type ReactNode, useCallback, useEffect, useState } from 'react';
-import type { RuntimeApi } from './runtime.ts';
+import type { RuntimeApi } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
 

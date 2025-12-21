@@ -1,266 +1,98 @@
 # [H1][BACKEND_PLAN]
 >**Dictum:** *Effect-native backend with per-app APIs and shared infrastructure.*
 
-Unified backend architecture using Effect ecosystem: `@effect/platform-node` for HTTP, `@effect/sql-pg` for PostgreSQL.
-
 ---
 ## [1][ARCHITECTURE]
 
 ```
 packages/
-├── database/           # DONE: Client layer, Model.Class entities, branded IDs
-└── server/             # HTTP infrastructure, middleware, errors, security
+├── database/           # DONE: Client, Models (User, Asset, ApiKey, Session, OAuthAccount, Organization)
+└── server/             # DONE: Middleware (SessionAuth, ApiKeyAuth), Errors, HttpApi factories
 
 apps/
 ├── parametric_icons/   # Existing frontend (port 3001)
-└── api/                # Backend API (port 4000)
-    └── routes/         # Route handlers by domain
-```
-
-**Per-App API Pattern:** Each app gets a route namespace under unified `apps/api`. Shared infrastructure lives in packages.
-
-**Topology:**
-- `packages/database` — Connection layer, Model.Class entities, branded IDs (IMPLEMENTED)
-- `packages/server` — HTTP middleware, errors, security, OpenAPI (TO BUILD)
-- `apps/api` — Route handlers, SqlResolver usage, migrations (TO BUILD)
-
----
-## [2][DEPENDENCIES]
-
-Add to `pnpm-workspace.yaml` catalog:
-
-```yaml
-'@effect/platform': 0.94.0
-'@effect/platform-node': 0.94.0
-'@effect/opentelemetry': 0.49.0
-```
-
-[ALREADY IN CATALOG]:
-- `@effect/sql`: 0.49.0
-- `@effect/sql-pg`: 0.50.0
-- `@effect/experimental`: 0.58.0
-- `effect`: 3.19.13
-
----
-## [3][PACKAGES/SERVER]
-
-### [3.1][STRUCTURE]
-
-```
-packages/server/
-├── src/
-│   ├── api.ts          # HttpApi utilities, base API factories
-│   ├── errors.ts       # Typed API error hierarchy
-│   ├── middleware.ts   # CORS, logging, compression, rate limiting
-│   ├── security.ts     # Auth middleware, API key validation
-│   └── openapi.ts      # OpenAPI/Swagger generation
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
-
-### [3.2][API LAYER PATTERNS]
-
-**Use @effect/platform HttpApi for declarative endpoint definitions:**
-
-| API                                         | Purpose                         |
-| ------------------------------------------- | ------------------------------- |
-| `HttpApi.make(name)`                        | Create named API definition     |
-| `HttpApiGroup.make(name)`                   | Group related endpoints         |
-| `HttpApiEndpoint.get/post/put/del`          | Define endpoint with method     |
-| `HttpApiEndpoint.setPayload(schema)`        | Request body validation         |
-| `HttpApiEndpoint.addSuccess(schema)`        | Success response schema         |
-| `HttpApiEndpoint.addError(error)`           | Error response schema           |
-| `HttpApiBuilder.api(api)`                   | Build API Layer from definition |
-| `HttpApiBuilder.group(api, name, handlers)` | Implement group handlers        |
-| `HttpApiBuilder.serve()`                    | Create HTTP server from API     |
-
-**Use HttpApiMiddleware for composable middleware:**
-
-| Middleware                          | Purpose                        |
-| ----------------------------------- | ------------------------------ |
-| `HttpApiMiddleware.cors`            | CORS with configurable origins |
-| `HttpApiMiddleware.logger`          | Request/response logging       |
-| `HttpApiMiddleware.compression`     | Response compression           |
-| `HttpApiMiddleware.securityHeaders` | Security headers               |
-
-**Use HttpApiSecurity for authentication:**
-
-| Security                 | Purpose                   |
-| ------------------------ | ------------------------- |
-| `HttpApiSecurity.apiKey` | API key header extraction |
-| `HttpApiSecurity.bearer` | Bearer token extraction   |
-| `HttpApiSecurity.basic`  | Basic auth extraction     |
-
-### [3.3][ERROR HIERARCHY]
-
-**Use Schema.TaggedError for typed errors:**
-
-```typescript
-import { Schema as S } from 'effect';
-
-class NotFoundError extends S.TaggedError<NotFoundError>()('NotFoundError', {
-    resource: S.String,
-    id: S.String,
-}) {}
-
-class ValidationError extends S.TaggedError<ValidationError>()('ValidationError', {
-    field: S.String,
-    message: S.String,
-}) {}
-
-class UnauthorizedError extends S.TaggedError<UnauthorizedError>()('UnauthorizedError', {
-    reason: S.String,
-}) {}
-
-class RateLimitError extends S.TaggedError<RateLimitError>()('RateLimitError', {
-    retryAfterMs: S.Number,
-}) {}
-```
-
-### [3.4][MIDDLEWARE COMPOSITION]
-
-**B constant for all tuning parameters:**
-
-```typescript
-const B = Object.freeze({
-    cors: {
-        origins: ['*'],
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        headers: ['Content-Type', 'Authorization', 'X-API-Key'],
-        maxAge: 86400,
-    },
-    rateLimit: {
-        windowMs: 60000,
-        maxRequests: 100,
-    },
-    compression: {
-        threshold: 1024,
-    },
-} as const);
-```
-
-### [3.5][OPENAPI GENERATION]
-
-**Use HttpApiSwagger for auto-generated docs:**
-
-```typescript
-import { HttpApiSwagger } from '@effect/platform';
-
-const SwaggerLive = HttpApiSwagger.layer({
-    path: '/docs',
-    format: 'json',
-});
+└── api/                # TO BUILD: Route handlers, migrations, OAuth callbacks
+    └── routes/
 ```
 
 ---
-## [4][APPS/API]
+## [2][APPS/API]
 
-### [4.1][STRUCTURE]
+### [2.1][STRUCTURE]
 
 ```
 apps/api/
 ├── src/
-│   ├── main.ts         # Entry point with Layer composition
-│   ├── api.ts          # HttpApi definition
-│   ├── migrate.ts      # Migration runner
+│   ├── main.ts              # Entry point with Layer composition
+│   ├── api.ts               # HttpApi definition
+│   ├── migrate.ts           # Migration runner
 │   └── routes/
-│       ├── health.ts   # Health endpoint
-│       └── icons.ts    # Icon CRUD + generation
-├── Dockerfile
+│       ├── health.ts        # Health endpoints
+│       ├── auth.ts          # OAuth flows (Google, GitHub, Microsoft)
+│       └── icons.ts         # Icon CRUD + generation
+├── migrations/
+│   ├── 0001_users.ts
+│   ├── 0002_sessions.ts
+│   └── 0003_organizations.ts
 ├── package.json
 ├── tsconfig.json
 └── vite.config.ts
 ```
 
-### [4.2][SQLRESOLVER USAGE]
-
-**[CRITICAL] SqlResolver requires SqlClient in Effect scope — define inside Effect.gen, NOT at module level:**
+### [2.2][IMPORTS FROM PACKAGES]
 
 ```typescript
-// CORRECT: Inside Effect.gen
-Effect.gen(function* () {
-    const resolver = yield* SqlResolver.findById('GetAssetById', {
-        Id: AssetIdSchema,
-        Result: Asset,
-        ResultId: (a) => a.id,
-        execute: (ids) => sql`SELECT * FROM assets WHERE ${sql.in('id', ids)}`,
-    });
-    return yield* resolver.execute(assetId);
-});
+// From @parametric-portal/database
+import { PgLive } from '@parametric-portal/database/client';
+import { Asset, User, Session, OAuthAccount, Organization, OrganizationMember } from '@parametric-portal/database/models';
+import { UserIdSchema, SessionIdSchema, OAuthProviderSchema } from '@parametric-portal/database/schema';
 
-// WRONG: Module level (no SqlClient in scope)
-const resolver = SqlResolver.findById(...); // ERROR
+// From @parametric-portal/server
+import { createApi, createGroup, createHealthGroup, addStandardErrors, SwaggerLayer } from '@parametric-portal/server/api';
+import { SessionAuth, createSessionAuthLayer, OAuthService, createCorsLayer } from '@parametric-portal/server/middleware';
+import { UnauthorizedError, OAuthError, NotFoundError } from '@parametric-portal/server/errors';
 ```
 
-**SqlResolver patterns:**
+### [2.3][OAUTH ROUTES]
 
-| Method                 | Returns            | Use Case                                |
-| ---------------------- | ------------------ | --------------------------------------- |
-| `SqlResolver.findById` | `Option<A>` per ID | Single entity lookup with batching      |
-| `SqlResolver.grouped`  | `Array<A>` per key | N+1 prevention (e.g., assets by userId) |
-| `SqlResolver.ordered`  | `A` per request    | Maintain request-result order           |
-| `SqlResolver.void`     | `void`             | Side-effect operations                  |
-
-### [4.3][SQLSCHEMA USAGE]
-
-**Type-safe query wrappers with automatic validation:**
+**Use Arctic for OAuth protocol (already in catalog):**
 
 ```typescript
-import { SqlSchema } from '@effect/sql';
+import { GitHub, Google, MicrosoftEntraId } from 'arctic';
 
-// Inside route handler
-Effect.gen(function* () {
-    const findAll = SqlSchema.findAll({
-        Request: S.Struct({ limit: S.Number, offset: S.Number }),
-        Result: Asset,
-        execute: ({ limit, offset }) => sql`
-            SELECT * FROM assets
-            ORDER BY created_at DESC
-            LIMIT ${limit} OFFSET ${offset}
-        `,
-    });
-
-    return yield* findAll({ limit: 100, offset: 0 });
-});
+const providers = {
+    github: new GitHub(config.github.clientId, config.github.clientSecret),
+    google: new Google(config.google.clientId, config.google.clientSecret, config.google.redirectUri),
+    microsoft: new MicrosoftEntraId(config.microsoft.tenantId, config.microsoft.clientId, config.microsoft.clientSecret, config.microsoft.redirectUri),
+} as const;
 ```
 
-| Method              | Returns                | Use Case                                 |
-| ------------------- | ---------------------- | ---------------------------------------- |
-| `SqlSchema.findAll` | `Effect<readonly A[]>` | Paginated lists                          |
-| `SqlSchema.findOne` | `Effect<Option<A>>`    | Optional single result                   |
-| `SqlSchema.single`  | `Effect<A>`            | Exactly one result (throws if not found) |
-| `SqlSchema.void`    | `Effect<void>`         | Insert/update/delete                     |
+**Route endpoints:**
 
-### [4.4][MODEL.CLASS INTEGRATION]
+| Endpoint                         | Method | Purpose                                  |
+| -------------------------------- | ------ | ---------------------------------------- |
+| `/auth/oauth/:provider`          | GET    | Redirect to provider auth URL            |
+| `/auth/oauth/:provider/callback` | GET    | Handle callback, create session          |
+| `/auth/refresh`                  | POST   | Refresh session token                    |
+| `/auth/logout`                   | POST   | Revoke session                           |
+| `/auth/me`                       | GET    | Current user info (requires SessionAuth) |
 
-**Import from @parametric-portal/database/models:**
-
-```typescript
-import { Asset, User, ApiKey } from '@parametric-portal/database/models';
-
-// Auto-generated variants available:
-Asset           // Select schema (query results)
-Asset.insert    // Insert schema (excludes Generated fields)
-Asset.update    // Update schema
-Asset.json      // API response (excludes Sensitive fields)
-Asset.jsonCreate // API create payload
-Asset.jsonUpdate // API update payload
-```
-
-### [4.5][LAYER COMPOSITION]
-
-**Proper dependency injection via Layer:**
+### [2.4][LAYER COMPOSITION]
 
 ```typescript
+import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
+import { createServer } from 'node:http';
+
 const ApiLive = HttpApiBuilder.api(AppApi).pipe(
     Layer.provide(HealthLive),
+    Layer.provide(AuthLive),
     Layer.provide(IconsLive),
 );
 
 const ServerLive = HttpApiBuilder.serve().pipe(
     Layer.provide(ApiLive),
-    Layer.provide(SwaggerLive),
+    Layer.provide(SwaggerLayer),
+    Layer.provide(createCorsLayer()),
     Layer.provide(PgLive),
     Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),
 );
@@ -268,67 +100,98 @@ const ServerLive = HttpApiBuilder.serve().pipe(
 Layer.launch(ServerLive).pipe(NodeRuntime.runMain);
 ```
 
-### [4.6][SQL STATEMENT HELPERS]
+### [2.5][SQLRESOLVER PATTERNS]
 
-**Use @effect/sql built-in helpers (NO WRAPPING):**
+**[CRITICAL] Define resolvers inside Effect.gen (requires SqlClient in scope):**
 
-| Helper               | Purpose                 |
-| -------------------- | ----------------------- |
-| `sql.in('col', ids)` | IN clause with array    |
-| `sql.and([...])`     | AND multiple conditions |
-| `sql.or([...])`      | OR multiple conditions  |
-| `sql.insert(data)`   | Insert object/array     |
-| `sql.update(data)`   | Update with SET clauses |
-| `sql.literal(str)`   | Raw SQL (no escaping)   |
-| `sql.csv([...])`     | Comma-separated values  |
+```typescript
+Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const findSession = SqlSchema.findOne({
+        Request: S.String,
+        Result: Session,
+        execute: (tokenHash) => sql`SELECT * FROM sessions WHERE token_hash = ${tokenHash} AND expires_at > now()`,
+    });
+    return yield* findSession(tokenHash);
+});
+```
 
 ---
-## [5][DOCKER]
+## [3][MIGRATIONS]
 
-**.dockerignore (project root):**
+**Create tables for auth entities:**
+
+```typescript
+// 0001_users.ts
+export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
+  CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT NOT NULL UNIQUE,
+    api_key_hash TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+`);
+
+// 0002_sessions.ts
+export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
+  CREATE TABLE sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE TABLE oauth_accounts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_account_id TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    refresh_token TEXT,
+    access_token_expires_at TIMESTAMPTZ,
+    scope TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(provider, provider_account_id)
+  );
+  CREATE TABLE refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+`);
+
+// 0003_organizations.ts
+export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
+  CREATE TABLE organizations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE TABLE organization_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(organization_id, user_id)
+  );
+`);
 ```
-node_modules
-.git
-*.md
-dist
-.nx
-.claude
-coverage
-*.log
-.env*
-```
 
-**apps/api/Dockerfile:**
-```dockerfile
-FROM node:22-slim AS base
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
-WORKDIR /app
+---
+## [4][DOCKER]
 
-FROM base AS deps
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-COPY packages/database/package.json ./packages/database/
-COPY packages/server/package.json ./packages/server/
-COPY packages/types/package.json ./packages/types/
-COPY apps/api/package.json ./apps/api/
-RUN pnpm install --frozen-lockfile
-
-FROM deps AS build
-COPY . .
-RUN pnpm exec nx build @parametric-portal/api
-
-FROM node:22-slim AS runtime
-WORKDIR /app
-COPY --from=build /app/apps/api/dist ./dist
-COPY --from=build /app/node_modules ./node_modules
-ENV NODE_ENV=production
-EXPOSE 4000
-USER node
-CMD ["node", "dist/main.js"]
-```
-
-**docker-compose.yml (project root):**
+**docker-compose.yml:**
 ```yaml
 services:
   postgres:
@@ -351,14 +214,13 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-      target: runtime
     environment:
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: parametric
-      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET}
+      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
+      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET}
     ports:
       - "4000:4000"
     depends_on:
@@ -370,98 +232,12 @@ volumes:
 ```
 
 ---
-## [6][ENVIRONMENT]
+## [5][IMPLEMENTATION]
 
-**.env (project root):**
-```
-POSTGRES_PASSWORD=your_secure_password
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-**apps/api/.env:**
-```
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=parametric
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your_secure_password
-ANTHROPIC_API_KEY=sk-ant-...
-API_PORT=4000
-```
-
----
-## [7][NX_TARGETS]
-
-Add to `nx.json` targetDefaults:
-
-```json
-{
-  "migrate": {
-    "cache": false,
-    "executor": "nx:run-commands",
-    "options": {
-      "command": "tsx src/migrate.ts",
-      "cwd": "{projectRoot}"
-    }
-  },
-  "start": {
-    "cache": false,
-    "dependsOn": ["build"],
-    "executor": "nx:run-commands",
-    "options": {
-      "command": "node dist/main.js",
-      "cwd": "{projectRoot}"
-    }
-  }
-}
-```
-
----
-## [8][MIGRATIONS]
-
-**Migrations live in apps/api, use @parametric-portal/database/client:**
-
-```typescript
-import { NodeContext, NodeRuntime } from '@effect/platform-node';
-import { PgMigrator } from '@effect/sql-pg';
-import { Effect, Layer } from 'effect';
-import { PgLive } from '@parametric-portal/database/client';
-
-const MigratorLive = PgMigrator.layer({
-    loader: PgMigrator.fromFileSystem('./src/migrations'),
-}).pipe(Layer.provide(PgLive), Layer.provide(NodeContext.layer));
-
-Effect.gen(function* () {
-    yield* Effect.log('[MIGRATE] Running migrations...');
-}).pipe(Effect.provide(MigratorLive), NodeRuntime.runMain);
-```
-
-**Migration file pattern:**
-```typescript
-// src/migrations/0001_init.ts
-import { SqlClient } from '@effect/sql';
-import { Effect } from 'effect';
-
-export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
-  CREATE TABLE assets (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    prompt TEXT NOT NULL,
-    svg TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-`);
-```
-
----
-## [9][IMPLEMENTATION_STEPS]
-
-| [STEP] | [ACTION]                     | [COMMAND]                                      |
-| ------ | ---------------------------- | ---------------------------------------------- |
-| 1      | Add platform deps to catalog | Edit `pnpm-workspace.yaml`                     |
-| 2      | Create `packages/server`     | `mkdir -p packages/server/src`                 |
-| 3      | Create `apps/api`            | `mkdir -p apps/api/src/routes`                 |
-| 4      | Install dependencies         | `pnpm install`                                 |
-| 5      | Build packages               | `pnpm exec nx build @parametric-portal/server` |
-| 6      | Start PostgreSQL             | `docker compose up postgres -d`                |
-| 7      | Run migrations               | `pnpm exec nx migrate @parametric-portal/api`  |
-| 8      | Start API                    | `pnpm exec nx dev @parametric-portal/api`      |
+| [STEP] | [ACTION]                  | [COMMAND]                                          |
+| ------ | ------------------------- | -------------------------------------------------- |
+| 1      | Create apps/api structure | `mkdir -p apps/api/src/routes apps/api/migrations` |
+| 2      | Install dependencies      | `pnpm install`                                     |
+| 3      | Start PostgreSQL          | `docker compose up postgres -d`                    |
+| 4      | Run migrations            | `pnpm exec nx migrate @parametric-portal/api`      |
+| 5      | Start API                 | `pnpm exec nx dev @parametric-portal/api`          |

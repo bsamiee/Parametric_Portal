@@ -8,10 +8,12 @@ export default defineConfig(
         createConfig({
             entry: {
                 client: './src/client.ts',
+                migrator: './src/migrator.ts',
                 models: './src/models.ts',
+                repositories: './src/repositories.ts',
                 schema: './src/schema.ts',
             },
-            external: ['effect', '@effect/sql', '@effect/sql-pg'],
+            external: ['effect', '@effect/experimental', '@effect/sql', '@effect/sql-pg'],
             mode: 'library',
             name: 'ParametricDatabase',
         }),

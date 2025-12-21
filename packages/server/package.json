@@ -1,0 +1,40 @@
+{
+    "name": "@parametric-portal/server",
+    "version": "0.1.0",
+    "type": "module",
+    "exports": {
+        "./api": {
+            "types": "./src/api.ts",
+            "import": "./src/api.ts",
+            "default": "./src/api.ts"
+        },
+        "./errors": {
+            "types": "./src/errors.ts",
+            "import": "./src/errors.ts",
+            "default": "./src/errors.ts"
+        },
+        "./middleware": {
+            "types": "./src/middleware.ts",
+            "import": "./src/middleware.ts",
+            "default": "./src/middleware.ts"
+        }
+    },
+    "dependencies": {
+        "@effect/platform": "catalog:",
+        "@effect/sql": "catalog:",
+        "@parametric-portal/database": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
+    },
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    }
+}

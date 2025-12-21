@@ -4,7 +4,7 @@
 
 import { Cause, type Effect, Exit, type ManagedRuntime } from 'effect';
 import { use, useRef } from 'react';
-import type { RuntimeApi } from './runtime.ts';
+import type { RuntimeApi } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
 

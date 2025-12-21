@@ -7,7 +7,7 @@
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkSuccess } from '@parametric-portal/types/async';
 import { Effect, Fiber, pipe, Schema as S } from 'effect';
 import { useActionState, useCallback, useRef, useState } from 'react';
-import type { RuntimeApi } from './runtime.ts';
+import type { RuntimeApi } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
 

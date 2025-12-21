@@ -12,8 +12,15 @@ type PaletteConfig = {
     readonly accent: OklchParams;
     readonly surface: OklchParams;
 };
+type ModifierShifts = {
+    readonly alphaShift?: number;
+    readonly chromaShift?: number;
+    readonly lightnessShift?: number;
+};
+type ModifierKey = 'active' | 'disabled' | 'dragged' | 'focus' | 'hover' | 'pressed' | 'selected';
 type PresetOverrides = {
     readonly accent?: Partial<OklchParams>;
+    readonly modifiers?: Partial<Record<ModifierKey, boolean | ModifierShifts>>;
     readonly surface?: Partial<OklchParams>;
 };
 
@@ -76,16 +83,34 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const mergeModifiers = (
+    base: Record<string, boolean | object> | undefined,
+    overrides: Partial<Record<ModifierKey, boolean | ModifierShifts>> | undefined,
+): Record<string, boolean | object> | undefined =>
+    overrides && base
+        ? Object.fromEntries(
+              Object.entries(base).map(([key, value]) => {
+                  const override = overrides[key as ModifierKey];
+                  return override === undefined
+                      ? [key, value]
+                      : typeof override === 'boolean' || typeof value === 'boolean'
+                        ? [key, override]
+                        : [key, { ...(value as object), ...override }];
+              }),
+          )
+        : base;
+
 const mkTheme = (
     name: string,
     oklch: OklchParams,
     opts: { readonly modifiers?: Record<string, boolean | object>; readonly scale?: number; readonly spacing?: number },
+    modifierOverrides?: Partial<Record<ModifierKey, boolean | ModifierShifts>>,
 ): ThemeInput =>
     ({
         chroma: oklch.chroma,
         hue: oklch.hue,
         lightness: oklch.lightness,
-        modifiers: opts.modifiers,
+        modifiers: mergeModifiers(opts.modifiers, modifierOverrides),
         name,
         scale: opts.scale ?? 11,
         spacing: opts.spacing,
@@ -96,21 +121,24 @@ const getPresetThemes = (preset: PresetName, overrides?: PresetOverrides): Reado
     const surface = { ...palette.surface, ...overrides?.surface };
     const accent = { ...palette.accent, ...overrides?.accent };
     const pink = 'pink' in palette ? palette.pink : palette.accent;
+    const mods = overrides?.modifiers;
 
     return Object.freeze([
-        mkTheme('surface', surface, { modifiers: B.modifiers.all, scale: B.scales.surface, spacing: 24 }),
-        mkTheme('text', palette.text, { modifiers: B.modifiers.text, scale: B.scales.text }),
-        mkTheme('muted', palette.muted, { modifiers: B.modifiers.hover, scale: B.scales.muted }),
-        mkTheme('accent', accent, { modifiers: B.modifiers.all, scale: B.scales.accent }),
-        mkTheme('cyan', palette.cyan, { modifiers: B.modifiers.hover, scale: 7 }),
-        mkTheme('pink', pink, { modifiers: B.modifiers.hover, scale: 7 }),
-        mkTheme('success', palette.green, { modifiers: B.modifiers.status, scale: B.scales.success }),
-        mkTheme('warning', palette.orange, { modifiers: B.modifiers.status, scale: B.scales.warning }),
-        mkTheme('highlight', palette.yellow, { modifiers: B.modifiers.hover, scale: 5 }),
-        mkTheme('destructive', palette.destructive, {
-            modifiers: B.modifiers.destructive,
-            scale: B.scales.destructive,
-        }),
+        mkTheme('surface', surface, { modifiers: B.modifiers.all, scale: B.scales.surface, spacing: 24 }, mods),
+        mkTheme('text', palette.text, { modifiers: B.modifiers.text, scale: B.scales.text }, mods),
+        mkTheme('muted', palette.muted, { modifiers: B.modifiers.hover, scale: B.scales.muted }, mods),
+        mkTheme('accent', accent, { modifiers: B.modifiers.all, scale: B.scales.accent }, mods),
+        mkTheme('cyan', palette.cyan, { modifiers: B.modifiers.hover, scale: 7 }, mods),
+        mkTheme('pink', pink, { modifiers: B.modifiers.hover, scale: 7 }, mods),
+        mkTheme('success', palette.green, { modifiers: B.modifiers.status, scale: B.scales.success }, mods),
+        mkTheme('warning', palette.orange, { modifiers: B.modifiers.status, scale: B.scales.warning }, mods),
+        mkTheme('highlight', palette.yellow, { modifiers: B.modifiers.hover, scale: 5 }, mods),
+        mkTheme(
+            'destructive',
+            palette.destructive,
+            { modifiers: B.modifiers.destructive, scale: B.scales.destructive },
+            mods,
+        ),
     ]);
 };
 
@@ -122,4 +150,4 @@ const getPalette = (preset: PresetName): PaletteConfig => ({
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as PRESET_TUNING, getPalette, getPresetThemes };
-export type { PaletteConfig, PresetName, PresetOverrides };
+export type { ModifierKey, ModifierShifts, PaletteConfig, PresetName, PresetOverrides };

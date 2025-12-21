@@ -60,6 +60,13 @@ const CfgSchema = S.Union(
         mode: S.Literal('library'),
         name: S.String,
     }),
+    S.Struct({
+        entry: S.String,
+        external: S.optional(S.Array(S.String)),
+        mode: S.Literal('server'),
+        name: S.String,
+        port: S.optional(pipe(S.Number, S.int(), S.between(1024, 65535))),
+    }),
 );
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -328,9 +335,9 @@ const plugins = {
     ],
     library: () => [
         tsconfigPaths({ projects: ['./tsconfig.json'] }),
-        // Inspect only in build mode for libraries
         Inspect({ build: true, dev: false, outputDir: '.vite-inspect' }),
     ],
+    server: () => [tsconfigPaths({ projects: ['./tsconfig.json'] })],
 } as const;
 
 const config: {
@@ -438,6 +445,20 @@ const config: {
         esbuild: esbuild(false),
         plugins: plugins.library(),
         resolve: resolve(),
+    }),
+    server: (c, _b) => ({
+        build: {
+            lib: { entry: c.entry, fileName: 'main', formats: ['es'] as const, name: c.name },
+            rollupOptions: {
+                external: [/^node:/, /^@effect/, /^effect/, /^arctic/, /^@anthropic-ai/, ...(c.external ?? [])],
+                output: { exports: 'named' as const },
+            },
+            sourcemap: true,
+            target: 'node22',
+        },
+        plugins: plugins.server(),
+        resolve: resolve(),
+        ssr: { target: 'node' as const },
     }),
 };
 

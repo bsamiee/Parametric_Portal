@@ -2,8 +2,7 @@
     "compilerOptions": {
         "outDir": "dist",
         "rootDir": "src",
-        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/components.tsbuildinfo",
-        "types": ["vite/client"]
+        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/server.tsbuildinfo"
     },
     "exclude": ["dist", "node_modules"],
     "extends": "../../tsconfig.base.json",

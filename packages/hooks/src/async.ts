@@ -7,7 +7,7 @@ import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess 
 import type { ManagedRuntime, Schedule } from 'effect';
 import { Duration, Effect, Fiber } from 'effect';
 import { type DependencyList, useCallback, useEffect, useRef, useState } from 'react';
-import type { RuntimeApi } from './runtime.ts';
+import type { RuntimeApi } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
 

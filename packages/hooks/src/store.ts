@@ -5,7 +5,7 @@
 import type { StoreActions, StoreSlice } from '@parametric-portal/types/stores';
 import { Effect, Fiber, Stream, SubscriptionRef } from 'effect';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { RuntimeApi } from './runtime.ts';
+import type { RuntimeApi } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
 

@@ -74,7 +74,7 @@ type CommandInput<T extends CommandType = 'palette'> = Partial<TuningFor<'cmd'>>
     readonly scale?: Inputs['scale'];
     readonly type?: T;
 };
-type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
+type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay' | 'scale'>;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -378,7 +378,7 @@ const createCommandFactory = <T extends CommandType>(commandType: T, input: Comm
 };
 
 const createCommandComponent = <T extends CommandType>(input: CommandInput<T>) => {
-    const ctx = createBuilderContext('cmd', ['animation', 'behavior', 'overlay'] as const, input);
+    const ctx = createBuilderContext('cmd', ['animation', 'behavior', 'overlay', 'scale'] as const, input);
     const commandType = (input.type ?? 'palette') as T;
     const component = createCommandFactory(commandType, input, ctx);
     component.displayName = `Command(${commandType})`;

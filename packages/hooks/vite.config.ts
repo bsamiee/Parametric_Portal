@@ -11,6 +11,7 @@ export default defineConfig(
                 boundary: './src/boundary.ts',
                 browser: './src/browser.ts',
                 devtools: './src/devtools.ts',
+                file: './src/file.ts',
                 form: './src/form.ts',
                 runtime: './src/runtime.tsx',
                 store: './src/store.ts',
