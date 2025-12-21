@@ -90,8 +90,8 @@ describe('forms package', () => {
 
         it('validates field against schema - failure', () => {
             const api = loadApi();
-            const field = api.createField('age', 'not-a-number');
-            const schema = S.Number;
+            const field = api.createField('email', '');
+            const schema = S.NonEmptyString;
             const result = Effect.runSync(api.validateField(field, schema));
             expect(api.isError(result)).toBe(true);
         });

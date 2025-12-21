@@ -109,10 +109,8 @@ describe('api package', () => {
             const apiInstance = loadApi();
             const response = apiInstance.success(data);
             const mapped = apiInstance.map(response, (d) => ({ doubled: d.value * 2 }));
-            expect(apiInstance.isSuccess(mapped)).toBe(true);
-            if (apiInstance.isSuccess(mapped)) {
-                expect(mapped.data).toEqual({ doubled: data.value * 2 });
-            }
+            expect(mapped._tag).toBe(API_TUNING.tags.success);
+            expect((mapped as { readonly data: { doubled: number } }).data).toEqual({ doubled: data.value * 2 });
         });
 
         it.prop([arbitraryHttpStatusError, fc.string(), fc.string()])(
@@ -121,11 +119,10 @@ describe('api package', () => {
                 const apiInstance = loadApi();
                 const response = apiInstance.error(status as never, code, message);
                 const mapped = apiInstance.map(response, (d) => ({ doubled: d.value * 2 }));
-                expect(apiInstance.isError(mapped)).toBe(true);
-                if (apiInstance.isError(mapped)) {
-                    expect(mapped.code).toBe(code);
-                    expect(mapped.message).toBe(message);
-                }
+                expect(mapped._tag).toBe(API_TUNING.tags.error);
+                const errorResponse = mapped as { readonly code: string; readonly message: string };
+                expect(errorResponse.code).toBe(code);
+                expect(errorResponse.message).toBe(message);
             },
         );
     });

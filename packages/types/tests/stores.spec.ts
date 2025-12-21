@@ -4,7 +4,7 @@
 import { it } from '@fast-check/vitest';
 import fc from 'fast-check';
 import { describe, expect, vi } from 'vitest';
-import { STORE_TUNING, store } from '../src/stores.ts';
+import { STORE_TUNING, type StoreSlice, store } from '../src/stores.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -12,6 +12,15 @@ const loadApi = () => store();
 
 const arbitrarySliceName = fc.string({ maxLength: 20, minLength: 1 });
 const arbitraryInitialState = fc.record({ count: fc.integer() });
+
+const createCounterActions = (set: (v: { count: number }) => void, get: () => { count: number }) => ({
+    double: () => set({ count: get().count * 2 }),
+    increment: () => set({ count: get().count + 1 }),
+});
+
+// Type-safe cast helper for heterogeneous slice combinations (bypasses variance constraint)
+const asSliceRecord = <T extends Record<string, unknown>>(slices: T) =>
+    slices as unknown as Record<string, StoreSlice<unknown>>;
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -79,16 +88,7 @@ describe('stores package', () => {
         it('supports custom actions', () => {
             const api = loadApi();
             const slice = api.createSlice({
-                actions: (set, get) => ({
-                    double: () => {
-                        const current = get();
-                        set({ count: current.count * 2 });
-                    },
-                    increment: () => {
-                        const current = get();
-                        set({ count: current.count + 1 });
-                    },
-                }),
+                actions: createCounterActions,
                 initialState: { count: 5 },
                 name: 'counter',
             });
@@ -133,27 +133,27 @@ describe('stores package', () => {
             const api = loadApi();
             const counterSlice = api.createSlice({ initialState: { count: 0 }, name: 'counter' });
             const userSlice = api.createSlice({ initialState: { name: 'John' }, name: 'user' });
-            const combined = api.combineSlices({ counter: counterSlice, user: userSlice });
+            const combined = api.combineSlices(asSliceRecord({ counter: counterSlice, user: userSlice }));
             const state = combined.getState();
-            expect(state.counter.count).toBe(0);
-            expect(state.user.name).toBe('John');
+            expect((state.counter as { count: number }).count).toBe(0);
+            expect((state.user as { name: string }).name).toBe('John');
         });
 
         it('propagates slice updates to combined state', () => {
             const api = loadApi();
             const counterSlice = api.createSlice({ initialState: { count: 0 }, name: 'counter' });
             const userSlice = api.createSlice({ initialState: { name: 'John' }, name: 'user' });
-            const combined = api.combineSlices({ counter: counterSlice, user: userSlice });
+            const combined = api.combineSlices(asSliceRecord({ counter: counterSlice, user: userSlice }));
             counterSlice.actions.set({ count: 42 });
             const state = combined.getState();
-            expect(state.counter.count).toBe(42);
+            expect((state.counter as { count: number }).count).toBe(42);
         });
 
         it('notifies subscribers on any slice change', () => {
             const api = loadApi();
             const counterSlice = api.createSlice({ initialState: { count: 0 }, name: 'counter' });
             const userSlice = api.createSlice({ initialState: { name: 'John' }, name: 'user' });
-            const combined = api.combineSlices({ counter: counterSlice, user: userSlice });
+            const combined = api.combineSlices(asSliceRecord({ counter: counterSlice, user: userSlice }));
             const subscriber = vi.fn();
             combined.subscribe(subscriber);
             counterSlice.actions.set({ count: 1 });

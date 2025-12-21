@@ -9,10 +9,10 @@ import { ASYNC_TUNING, asyncState } from '../src/async.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const loadApi = () => asyncState<{ readonly value: number }>();
+const loadApi = () => asyncState<{ readonly value: number }, Error>();
 
 const arbitraryData = fc.record({ value: fc.integer() });
-const arbitraryError = fc.record({ message: fc.string() });
+const arbitraryError = fc.string().map((msg) => new Error(msg));
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -91,7 +91,7 @@ describe('async package', () => {
             const api = loadApi();
             const state = api.failure(error);
             expect(state._tag).toBe(ASYNC_TUNING.tags.failure);
-            expect(state.error).toEqual(error);
+            expect(state.error).toBe(error);
             expect(state.timestamp).toBeGreaterThan(0);
             expect(api.isFailure(state)).toBe(true);
         });
@@ -103,7 +103,7 @@ describe('async package', () => {
             const idle = api.idle;
             const loading = api.loading();
             const success = api.success({ value: 1 });
-            const failure = api.failure({ message: 'error' });
+            const failure = api.failure(new Error('test error'));
 
             expect(api.isIdle(idle)).toBe(true);
             expect(api.isLoading(loading)).toBe(true);
@@ -122,31 +122,29 @@ describe('async package', () => {
             const api = loadApi();
             const state = api.success(data);
             const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(api.isSuccess(mapped)).toBe(true);
-            if (api.isSuccess(mapped)) {
-                expect(mapped.data).toEqual({ doubled: data.value * 2 });
-            }
+            expect(mapped._tag).toBe(ASYNC_TUNING.tags.success);
+            expect((mapped as { readonly data: { doubled: number } }).data).toEqual({ doubled: data.value * 2 });
         });
 
         it('preserves idle state', () => {
             const api = loadApi();
             const state = api.idle;
             const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(api.isIdle(mapped)).toBe(true);
+            expect(mapped._tag).toBe(ASYNC_TUNING.tags.idle);
         });
 
         it('preserves loading state', () => {
             const api = loadApi();
             const state = api.loading();
             const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(api.isLoading(mapped)).toBe(true);
+            expect(mapped._tag).toBe(ASYNC_TUNING.tags.loading);
         });
 
         it.prop([arbitraryError])('preserves failure state', (error) => {
             const api = loadApi();
             const state = api.failure(error);
             const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(api.isFailure(mapped)).toBe(true);
+            expect(mapped._tag).toBe(ASYNC_TUNING.tags.failure);
         });
     });
 
@@ -191,7 +189,7 @@ describe('async package', () => {
             const api = loadApi();
             const state = api.failure(error);
             const result = api.fold(state, {
-                onFailure: (e) => `failure:${e.message}`,
+                onFailure: (e) => `failure:${(e as Error).message}`,
                 onIdle: () => 'idle',
                 onLoading: () => 'loading',
                 onSuccess: () => 'success',
