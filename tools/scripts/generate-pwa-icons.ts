@@ -37,7 +37,7 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const deriveOutputPath = (size: number, mode: IconMode): string =>
-    path.join(B.output, `icon-${size}${mode === 'maskable' ? '-maskable' : ''}.png`);
+    path.join(B.output, mode === 'maskable' ? 'icon-maskable.png' : `icon-${size}.png`);
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -93,7 +93,6 @@ const generationPipeline = pipe(
     ),
     Effect.catchAll((error) =>
         Effect.sync(() => {
-            // biome-ignore lint/suspicious/noConsole: script output
             console.error(`\n[ERROR] ${error.reason}`);
             process.exit(1);
         }),

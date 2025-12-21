@@ -1,66 +1,30 @@
 /**
- * Generate grid, stack, sticky, and container CSS utilities via schema validation.
+ * Generate CSS layout utilities from schema-validated inputs.
+ * Grounding: Single-source schema enforcement prevents runtime CSS errors.
  */
-import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
-import { Effect, pipe } from 'effect';
+import { Effect, pipe, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 import type { Plugin } from 'vite';
+import {
+    ContainerLayoutSchema,
+    GridLayoutSchema,
+    type LayoutInput,
+    LayoutInputSchema,
+    StackLayoutSchema,
+    StickyLayoutSchema,
+} from './schemas.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type LayoutInput = S.Schema.Type<typeof LayoutInputSchema>;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const PixelValue = pipe(S.Number, S.int(), S.positive(), S.brand('PixelValue'));
-const GridColumns = pipe(S.Number, S.int(), S.between(1, 12), S.brand('GridColumns'));
-const GapScale = pipe(S.Number, S.int(), S.nonNegative(), S.brand('GapScale'));
-
-const GridLayoutSchema = S.Struct({
-    alignItems: S.optional(S.Literal('start', 'end', 'center', 'stretch', 'baseline')),
-    containerQuery: S.optional(S.Boolean),
-    gap: S.optionalWith(GapScale, { default: () => 4 as S.Schema.Type<typeof GapScale> }),
-    justifyItems: S.optional(S.Literal('start', 'end', 'center', 'stretch')),
-    maxColumns: S.optional(GridColumns),
-    minItemWidth: PixelValue,
-    name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-    type: S.Literal('grid'),
-});
-
-const StackLayoutSchema = S.Struct({
-    align: S.optional(S.Literal('start', 'end', 'center', 'stretch', 'baseline')),
-    containerQuery: S.optional(S.Boolean),
-    direction: S.Literal('horizontal', 'vertical'),
-    gap: S.optionalWith(GapScale, { default: () => 4 as S.Schema.Type<typeof GapScale> }),
-    justify: S.optional(S.Literal('start', 'end', 'center', 'between', 'around', 'evenly')),
-    name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-    type: S.Literal('stack'),
-    wrap: S.optional(S.Boolean),
-});
-
-const StickyLayoutSchema = S.Struct({
-    name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-    offset: GapScale,
-    position: S.Literal('top', 'bottom', 'left', 'right'),
-    type: S.Literal('sticky'),
-    zIndex: S.optional(pipe(S.Number, S.int(), S.between(0, 100))),
-});
-
-const ContainerLayoutSchema = S.Struct({
-    containerQuery: S.optional(S.Boolean),
-    maxWidth: PixelValue,
-    name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-    padding: S.optionalWith(GapScale, { default: () => 4 as S.Schema.Type<typeof GapScale> }),
-    type: S.Literal('container'),
-});
-
-const LayoutInputSchema = S.Union(GridLayoutSchema, StackLayoutSchema, StickyLayoutSchema, ContainerLayoutSchema);
+type LayoutInputRaw = S.Schema.Encoded<typeof LayoutInputSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     gap: { multiplier: 4, remBase: 16 },
     sticky: { zindex: 10 },
+    tailwindMarker: '@import "tailwindcss";',
+    virtualImportPattern: /@import\s+['"]virtual:parametric-layouts['"];?\s*/g,
 } as const);
 
 const VIRTUAL_MODULE_ID = Object.freeze({
@@ -71,14 +35,12 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
-const normalizeInputs = (input: LayoutInput | ReadonlyArray<LayoutInput>): ReadonlyArray<LayoutInput> =>
+const normalizeInputs = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): ReadonlyArray<LayoutInputRaw> =>
     isArray(input) ? input : [input];
 
 const fn = {
-    // Fallback pixel value calculated when CSS custom property undefined at runtime.
     gap: (scale: number): string =>
         scale === 0 ? '0' : `var(--spacing-${scale}, ${(scale * B.gap.multiplier) / B.gap.remBase}rem)`,
-    // Grid formula construction with minmax calculation.
     gridFormula: (minWidth: number, maxCols?: number): string => {
         const minmax = `minmax(min(${minWidth}px, 100%), 1fr)`;
         return maxCols ? `repeat(${maxCols}, ${minmax})` : `repeat(auto-fit, ${minmax})`;
@@ -94,7 +56,6 @@ const generateGridLayout = (input: Extract<LayoutInput, { type: 'grid' }>): Effe
         Effect.map((config) => {
             const gridFormula = fn.gridFormula(config.minItemWidth, config.maxColumns);
             const gapValue = fn.gap(config.gap);
-            // Emit newline-terminated rules only when property defined to preserve CSS block formatting.
             const alignRule = config.alignItems ? `  align-items: ${config.alignItems};\n` : '';
             const containerRule = config.containerQuery ? `  container-type: inline-size;\n` : '';
             const justifyRule = config.justifyItems ? `  justify-items: ${config.justifyItems};\n` : '';
@@ -195,32 +156,43 @@ const layoutHandlers = Object.freeze({
 
 const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> => layoutHandlers[input.type](input);
 
+/** Generate all layout CSS blocks without Tailwind import. */
+const generateAllLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): string =>
+    Effect.runSync(
+        pipe(
+            Effect.forEach(normalizeInputs(input), (layoutInput) =>
+                pipe(
+                    S.decode(LayoutInputSchema)(layoutInput),
+                    Effect.flatMap(generateLayout),
+                    Effect.catchAll((error) => Effect.succeed(`/* Failed: ${layoutInput.name} - ${error._tag} */`)),
+                ),
+            ),
+            Effect.map((blocks) => blocks.join('\n\n')),
+        ),
+    );
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const defineLayouts = (input: LayoutInput | ReadonlyArray<LayoutInput>): Plugin => ({
+const defineLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): Plugin => ({
     enforce: 'pre',
     load: (id) =>
-        id === VIRTUAL_MODULE_ID.resolved
-            ? Effect.runSync(
-                  pipe(
-                      Effect.forEach(normalizeInputs(input), (layoutInput) =>
-                          pipe(
-                              S.decode(LayoutInputSchema)(layoutInput),
-                              Effect.flatMap(generateLayout),
-                              Effect.catchAll((error) =>
-                                  Effect.succeed(`/* Failed: ${layoutInput.name} - ${error._tag} */`),
-                              ),
-                          ),
-                      ),
-                      Effect.map((blocks) => ['@import "tailwindcss";', ...blocks].join('\n\n')),
-                  ),
-              )
-            : undefined,
+        id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllLayouts(input)}` : undefined,
     name: 'parametric-layouts',
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
+    transform: (code, id) =>
+        // Inject layouts CSS into entry CSS file (bypasses enhanced-resolve limitation)
+        !id.endsWith('main.css') || !code.includes(B.tailwindMarker)
+            ? undefined
+            : code
+                  .replaceAll(B.virtualImportPattern, '')
+                  .replace(
+                      B.tailwindMarker,
+                      `${B.tailwindMarker}\n\n/* --- [LAYOUTS] --- */\n${generateAllLayouts(input)}`,
+                  ),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B, defineLayouts };
-export type { LayoutInput };
+export type { LayoutInputRaw };
+export type { LayoutInput } from './schemas.ts';

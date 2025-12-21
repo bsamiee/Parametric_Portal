@@ -1,5 +1,6 @@
 /**
- * Async state hooks bridging Effect with React via fiber cleanup.
+ * Bridge Effect execution with React state via managed fibers.
+ * Unified async hooks: useQuery (declarative), useMutation (imperative), with caching and retry variants.
  */
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess } from '@parametric-portal/types/async';
@@ -10,8 +11,8 @@ import type { RuntimeApi } from './runtime.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type CallbackState<A, I, E> = {
-    readonly execute: (input: I) => void;
+type MutationState<A, I, E> = {
+    readonly mutate: (input: I) => void;
     readonly reset: () => void;
     readonly state: AsyncState<A, E>;
 };
@@ -27,19 +28,18 @@ type RetryState<A, E> = {
 };
 
 type AsyncHooksApi<R> = {
-    readonly useAsyncCallback: <A, E, I>(fn: (input: I) => Effect.Effect<A, E, R>) => CallbackState<A, I, E>;
-    readonly useAsyncEffect: <A, E>(effect: Effect.Effect<A, E, R>, deps: DependencyList) => AsyncState<A, E>;
-    readonly useAsyncEffectCached: <A, E>(
+    readonly useMutation: <A, I, E>(fn: (input: I) => Effect.Effect<A, E, R>) => MutationState<A, I, E>;
+    readonly useQuery: <A, E>(effect: Effect.Effect<A, E, R>, deps: DependencyList) => AsyncState<A, E>;
+    readonly useQueryCached: <A, E>(
         effect: Effect.Effect<A, E, R>,
         ttl: Duration.DurationInput,
         deps: DependencyList,
     ) => CachedState<A, E>;
-    readonly useAsyncEffectWithRetry: <A, E>(
+    readonly useQueryRetry: <A, E>(
         effect: Effect.Effect<A, E, R>,
         schedule: Schedule.Schedule<unknown, E>,
         deps: DependencyList,
     ) => RetryState<A, E>;
-    readonly useAsyncState: <A, E>(effect: Effect.Effect<A, E, R>) => AsyncState<A, E>;
 };
 
 type AsyncHooksConfig = {
@@ -100,13 +100,30 @@ const onCacheSuccess =
             setState(mkSuccess(data, ts));
         });
 
+const executeCachedEffect = <A, E, R, RuntimeE>(
+    runtime: ManagedRuntime.ManagedRuntime<R, RuntimeE>,
+    effect: Effect.Effect<A, E, R>,
+    setState: StateSetter<A, E>,
+    cacheRef: { current: CacheEntry<A> | null },
+    ttlMs: number,
+    ts: () => number,
+): (() => void) => {
+    setState(mkLoading(ts));
+    const cachedEffect = effect.pipe(
+        Effect.tap(onCacheSuccess(setState, cacheRef, ttlMs, ts)),
+        Effect.catchAll(onFailure<A, E>(setState, ts)),
+    );
+    const fiber = runtime.runFork(cachedEffect);
+    return interruptFiber(runtime, fiber);
+};
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooksConfig = {}): AsyncHooksApi<R> => {
     const { useRuntime } = runtimeApi;
     const ts = config.timestampProvider ?? B.defaults.timestamp;
 
-    const useAsyncEffect = <A, Err>(effect: Effect.Effect<A, Err, R>, deps: DependencyList): AsyncState<A, Err> => {
+    const useQuery = <A, Err>(effect: Effect.Effect<A, Err, R>, deps: DependencyList): AsyncState<A, Err> => {
         const runtime = useRuntime();
         const [state, setState] = useState<AsyncState<A, Err>>(mkIdle);
 
@@ -120,25 +137,12 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
         return state;
     };
 
-    const useAsyncState = <A, Err>(effect: Effect.Effect<A, Err, R>): AsyncState<A, Err> => {
-        const runtime = useRuntime();
-        const [state, setState] = useState<AsyncState<A, Err>>(mkIdle);
-
-        useEffect(() => {
-            setState(mkLoading(ts));
-            const fiber = runtime.runFork(wrapEffect(effect, setState, ts));
-            return interruptFiber(runtime, fiber);
-        }, [effect, runtime]);
-
-        return state;
-    };
-
-    const useAsyncCallback = <A, Err, I>(fn: (input: I) => Effect.Effect<A, Err, R>): CallbackState<A, I, Err> => {
+    const useMutation = <A, Err, I>(fn: (input: I) => Effect.Effect<A, Err, R>): MutationState<A, I, Err> => {
         const runtime = useRuntime();
         const [state, setState] = useState<AsyncState<A, Err>>(mkIdle);
         const fiberRef = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
 
-        const execute = useCallback(
+        const mutate = useCallback(
             (input: I) => {
                 setState(mkLoading(ts));
                 fiberRef.current = runtime.runFork(wrapEffect(fn(input), setState, ts));
@@ -159,10 +163,10 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
             [runtime],
         );
 
-        return { execute, reset, state };
+        return { mutate, reset, state };
     };
 
-    const useAsyncEffectWithRetry = <A, Err>(
+    const useQueryRetry = <A, Err>(
         effect: Effect.Effect<A, Err, R>,
         schedule: Schedule.Schedule<unknown, Err>,
         deps: DependencyList,
@@ -190,7 +194,7 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
         return { attempts, state };
     };
 
-    const useAsyncEffectCached = <A, Err>(
+    const useQueryCached = <A, Err>(
         effect: Effect.Effect<A, Err, R>,
         ttl: Duration.DurationInput,
         deps: DependencyList,
@@ -207,20 +211,12 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
 
         useEffect(() => {
             const now = ts();
-
-            isCacheValid(cacheRef.current, now)
-                ? setState(mkSuccess(cacheRef.current.value, ts))
-                : (() => {
-                      setState(mkLoading(ts));
-
-                      const cachedEffect = effect.pipe(
-                          Effect.tap(onCacheSuccess(setState, cacheRef, ttlMs, ts)),
-                          Effect.catchAll(onFailure<A, Err>(setState, ts)),
-                      );
-
-                      const fiber = runtime.runFork(cachedEffect);
-                      return interruptFiber(runtime, fiber);
-                  })();
+            const cached = cacheRef.current;
+            return isCacheValid(cached, now)
+                ? (() => {
+                      setState(mkSuccess(cached.value, ts));
+                  })()
+                : executeCachedEffect(runtime, effect, setState, cacheRef, ttlMs, ts);
             // biome-ignore lint/correctness/useExhaustiveDependencies: deps is intentionally dynamic for caller control
         }, deps);
 
@@ -228,17 +224,16 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
     };
 
     return Object.freeze({
-        useAsyncCallback,
-        useAsyncEffect,
-        useAsyncEffectCached,
-        useAsyncEffectWithRetry,
-        useAsyncState,
+        useMutation,
+        useQuery,
+        useQueryCached,
+        useQueryRetry,
     });
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { AsyncHooksApi, AsyncHooksConfig, CachedState, CallbackState, CacheEntry, RetryState, StateSetter };
+export type { AsyncHooksApi, AsyncHooksConfig, CachedState, CacheEntry, MutationState, RetryState, StateSetter };
 export {
     B as ASYNC_HOOKS_TUNING,
     createAsyncHooks,

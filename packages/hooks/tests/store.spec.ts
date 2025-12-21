@@ -1,10 +1,10 @@
 /**
- * Tests for store hooks factory.
+ * Validate store hooks factory behavior and configuration immutability.
  */
 import { describe, expect, it } from 'vitest';
 import { createStoreHooks, STORE_HOOKS_TUNING } from '../src/store.ts';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('store', () => {
     describe('STORE_HOOKS_TUNING', () => {
@@ -18,6 +18,10 @@ describe('store', () => {
 
         it('should have defaults.name', () => {
             expect(STORE_HOOKS_TUNING.defaults.name).toBe('StoreHooks');
+        });
+
+        it('should have defaults.persistDebounceMs', () => {
+            expect(STORE_HOOKS_TUNING.defaults.persistDebounceMs).toBe(300);
         });
 
         it('should have devtools.actionTypes', () => {
@@ -45,6 +49,16 @@ describe('store', () => {
         it('should have useStoreSelector property', () => {
             const api = createStoreHooks();
             expect(typeof api.useStoreSelector).toBe('function');
+        });
+
+        it('should have usePersist property', () => {
+            const api = createStoreHooks();
+            expect(typeof api.usePersist).toBe('function');
+        });
+
+        it('should have useSubscriptionRef property', () => {
+            const api = createStoreHooks();
+            expect(typeof api.useSubscriptionRef).toBe('function');
         });
 
         it('should accept enableDevtools config', () => {

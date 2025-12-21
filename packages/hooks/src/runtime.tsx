@@ -1,5 +1,5 @@
 /**
- * Runtime-injected hooks for Effect execution via React Context.
+ * Inject Effect runtime via React Context for layer substitution per subtree.
  */
 import { type Layer, ManagedRuntime, Option } from 'effect';
 import { type Context, createContext, type ReactNode, useContext } from 'react';
@@ -39,8 +39,9 @@ const createRuntimeContext = <R, E>(): Context<ManagedRuntime.ManagedRuntime<R, 
 
 const createRuntimeProvider =
     <R, E>(ctx: Context<ManagedRuntime.ManagedRuntime<R, E> | null>) =>
-    ({ children, runtime }: RuntimeProviderProps<R, E>): ReactNode =>
-        ctx.Provider({ children, value: runtime });
+    ({ children, runtime }: RuntimeProviderProps<R, E>): ReactNode => (
+        <ctx.Provider value={runtime}>{children}</ctx.Provider>
+    );
 
 const createUseRuntime =
     <R, E>(ctx: Context<ManagedRuntime.ManagedRuntime<R, E> | null>, name: string) =>

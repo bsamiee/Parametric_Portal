@@ -5,7 +5,7 @@
  */
 import { Effect, pipe } from 'effect';
 import { defineConfig, mergeConfig } from 'vitest/config';
-import viteConfig from './vite.config.ts';
+import { createConfig } from './vite.factory.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -109,5 +109,12 @@ const createVitestConfig = () =>
     );
 
 // --- [EXPORT] ----------------------------------------------------------------
+
+const viteConfig = Effect.runSync(
+    createConfig({
+        mode: 'app',
+        name: 'VitestRunner',
+    }),
+);
 
 export default mergeConfig(viteConfig, defineConfig(Effect.runSync(createVitestConfig())));

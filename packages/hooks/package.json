@@ -1,8 +1,9 @@
 {
     "dependencies": {
-        "@effect/schema": "catalog:",
+        "@parametric-portal/devtools": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "effect": "catalog:",
+        "jszip": "catalog:",
         "react": "catalog:"
     },
     "devDependencies": {
@@ -14,37 +15,55 @@
         "vitest": "catalog:"
     },
     "exports": {
-        "./api": {
-            "import": "./dist/api.js",
-            "types": "./dist/api.d.ts"
-        },
         "./async": {
-            "import": "./dist/async.js",
-            "types": "./dist/async.d.ts"
+            "types": "./src/async.ts",
+            "import": "./src/async.ts",
+            "default": "./src/async.ts"
+        },
+        "./browser": {
+            "types": "./src/browser.ts",
+            "import": "./src/browser.ts",
+            "default": "./src/browser.ts"
         },
         "./boundary": {
-            "import": "./dist/boundary.js",
-            "types": "./dist/boundary.d.ts"
+            "types": "./src/boundary.ts",
+            "import": "./src/boundary.ts",
+            "default": "./src/boundary.ts"
         },
         "./form": {
-            "import": "./dist/form.js",
-            "types": "./dist/form.d.ts"
+            "types": "./src/form.ts",
+            "import": "./src/form.ts",
+            "default": "./src/form.ts"
         },
         "./runtime": {
-            "import": "./dist/runtime.js",
-            "types": "./dist/runtime.d.ts"
+            "types": "./src/runtime.tsx",
+            "import": "./src/runtime.tsx",
+            "default": "./src/runtime.tsx"
         },
         "./store": {
-            "import": "./dist/store.js",
-            "types": "./dist/store.d.ts"
+            "types": "./src/store.ts",
+            "import": "./src/store.ts",
+            "default": "./src/store.ts"
         },
         "./suspense": {
-            "import": "./dist/suspense.js",
-            "types": "./dist/suspense.d.ts"
+            "types": "./src/suspense.ts",
+            "import": "./src/suspense.ts",
+            "default": "./src/suspense.ts"
         },
         "./transition": {
-            "import": "./dist/transition.js",
-            "types": "./dist/transition.d.ts"
+            "types": "./src/transition.ts",
+            "import": "./src/transition.ts",
+            "default": "./src/transition.ts"
+        },
+        "./devtools": {
+            "types": "./src/devtools.ts",
+            "import": "./src/devtools.ts",
+            "default": "./src/devtools.ts"
+        },
+        "./file": {
+            "types": "./src/file.ts",
+            "import": "./src/file.ts",
+            "default": "./src/file.ts"
         }
     },
     "name": "@parametric-portal/hooks",

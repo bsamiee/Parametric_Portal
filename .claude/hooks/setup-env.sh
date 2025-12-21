@@ -10,6 +10,7 @@ TOKEN_CACHE="$HOME/.config/hm-op-session.sh"
 
 # Persist to CLAUDE_ENV_FILE for sub-agent inheritance
 [[ -n "$CLAUDE_ENV_FILE" ]] && {
+    [[ -n "$ANTHROPIC_API_KEY" ]] && echo "export ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$EXA_API_KEY" ]] && echo "export EXA_API_KEY=\"$EXA_API_KEY\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$PERPLEXITY_API_KEY" ]] && echo "export PERPLEXITY_API_KEY=\"$PERPLEXITY_API_KEY\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$TAVILY_API_KEY" ]] && echo "export TAVILY_API_KEY=\"$TAVILY_API_KEY\"" >> "$CLAUDE_ENV_FILE"

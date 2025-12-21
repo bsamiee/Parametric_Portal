@@ -1,11 +1,11 @@
 /**
- * Tests for form hooks factory.
+ * Validate form hooks factory behavior.
  */
 import { describe, expect, it } from 'vitest';
-import { createFormHooks, FORM_HOOKS_TUNING } from '../src/form.ts';
-import { createRuntimeHooks } from '../src/runtime.ts';
+import { createActionStateHooks, FORM_HOOKS_TUNING, useFormField } from '../src/form.ts';
+import { createRuntimeHooks } from '../src/runtime.tsx';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('form', () => {
     describe('FORM_HOOKS_TUNING', () => {
@@ -37,29 +37,29 @@ describe('form', () => {
         });
     });
 
-    describe('createFormHooks', () => {
+    describe('useFormField', () => {
+        it('should be a function', () => {
+            expect(typeof useFormField).toBe('function');
+        });
+    });
+
+    describe('createActionStateHooks', () => {
         it('should return frozen API object', () => {
             const runtimeApi = createRuntimeHooks();
-            const api = createFormHooks(runtimeApi);
+            const api = createActionStateHooks(runtimeApi);
             expect(Object.isFrozen(api)).toBe(true);
-        });
-
-        it('should have useFormField property', () => {
-            const runtimeApi = createRuntimeHooks();
-            const api = createFormHooks(runtimeApi);
-            expect(typeof api.useFormField).toBe('function');
         });
 
         it('should have useActionStateEffect property', () => {
             const runtimeApi = createRuntimeHooks();
-            const api = createFormHooks(runtimeApi);
+            const api = createActionStateHooks(runtimeApi);
             expect(typeof api.useActionStateEffect).toBe('function');
         });
 
         it('should accept timestampProvider config', () => {
             const runtimeApi = createRuntimeHooks();
             const customTs = () => 12345;
-            const api = createFormHooks(runtimeApi, { timestampProvider: customTs });
+            const api = createActionStateHooks(runtimeApi, { timestampProvider: customTs });
             expect(Object.isFrozen(api)).toBe(true);
         });
     });

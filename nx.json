@@ -4,12 +4,12 @@
     "extends": "nx/presets/npm.json",
     "installation": {
         "plugins": {
-            "@nx/js": "22.2.0-canary.20251125-7e00ec4",
-            "@nx/react": "22.2.0-canary.20251125-7e00ec4",
-            "@nx/vite": "22.2.0-canary.20251125-7e00ec4",
-            "@nx/vitest": "22.2.0-canary.20251125-7e00ec4"
+            "@nx/js": "22.3.3",
+            "@nx/react": "22.3.3",
+            "@nx/vite": "22.3.3",
+            "@nx/vitest": "22.3.3"
         },
-        "version": "22.2.0-canary.20251125-7e00ec4"
+        "version": "22.3.3"
     },
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
@@ -57,7 +57,7 @@
     "parallel": 4,
     "plugins": [
         {
-            "exclude": ["vite.config.ts", "vitest.config.ts"],
+            "include": ["apps/**/*", "packages/**/*"],
             "options": {
                 "buildTargetName": "build",
                 "previewTargetName": "preview",
@@ -67,7 +67,7 @@
             "plugin": "@nx/vite/plugin"
         },
         {
-            "exclude": ["vitest.config.ts"],
+            "include": ["apps/**/*", "packages/**/*"],
             "options": {
                 "testTargetName": "test"
             },
@@ -113,6 +113,9 @@
             "fallbackCurrentVersionResolver": "disk"
         }
     },
+    "sync": {
+        "disabledTaskSyncGenerators": ["@nx/js:typescript-sync"]
+    },
     "targetDefaults": {
         "analyze": {
             "cache": true,
@@ -126,14 +129,45 @@
             "cache": true,
             "dependsOn": ["^build"],
             "inputs": ["production", "^production"],
-            "outputs": ["{projectRoot}/dist"]
+            "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },
         "check": {
             "cache": true,
-            "inputs": ["lint"]
+            "executor": "nx:run-commands",
+            "inputs": ["lint"],
+            "options": {
+                "command": "biome check .",
+                "cwd": "{projectRoot}"
+            }
         },
         "dev": {
-            "cache": false
+            "cache": false,
+            "configurations": {
+                "debug": {
+                    "env": {
+                        "VITE_DEVTOOLS_CONSOLE": "true",
+                        "VITE_DEVTOOLS_EXPERIMENTAL": "true",
+                        "VITE_DEVTOOLS_LOG_LEVEL": "Debug",
+                        "VITE_DEVTOOLS_PERFORMANCE": "true"
+                    }
+                },
+                "minimal": {
+                    "env": {
+                        "VITE_DEVTOOLS_CONSOLE": "false",
+                        "VITE_DEVTOOLS_EXPERIMENTAL": "false",
+                        "VITE_DEVTOOLS_LOG_LEVEL": "Warning",
+                        "VITE_DEVTOOLS_PERFORMANCE": "false"
+                    }
+                },
+                "production": {
+                    "env": {
+                        "VITE_DEVTOOLS_CONSOLE": "false",
+                        "VITE_DEVTOOLS_EXPERIMENTAL": "false",
+                        "VITE_DEVTOOLS_LOG_LEVEL": "Error",
+                        "VITE_DEVTOOLS_PERFORMANCE": "false"
+                    }
+                }
+            }
         },
         "fix": {
             "cache": false,
@@ -196,8 +230,13 @@
         },
         "typecheck": {
             "cache": true,
-            "dependsOn": ["^typecheck"],
-            "inputs": ["typescript", "sharedGlobals"]
+            "dependsOn": ["^build"],
+            "executor": "nx:run-commands",
+            "inputs": ["typescript", "sharedGlobals"],
+            "options": {
+                "command": "tsc --project tsconfig.json --noEmit",
+                "cwd": "{projectRoot}"
+            }
         },
         "validate:compression": {
             "cache": false,

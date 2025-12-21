@@ -47,7 +47,7 @@ jobs:
           track_progress: "true"
           claude_args: |
             --model claude-opus-4-5-20251101
-            --max-turns 15
+            --max-turns 20
             --append-system-prompt "CRITICAL: Read and strictly follow REQUIREMENTS.md and CLAUDE.md.
 
             KEY RULES (build will fail if violated):

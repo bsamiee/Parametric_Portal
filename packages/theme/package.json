@@ -1,6 +1,5 @@
 {
     "dependencies": {
-        "@effect/schema": "catalog:",
         "effect": "catalog:"
     },
     "devDependencies": {
@@ -11,17 +10,45 @@
         "vitest": "catalog:"
     },
     "exports": {
+        "./colors": {
+            "types": "./src/colors.ts",
+            "import": "./src/colors.ts",
+            "default": "./src/colors.ts"
+        },
+        "./factories": {
+            "types": "./src/factories.ts",
+            "import": "./src/factories.ts",
+            "default": "./src/factories.ts"
+        },
         "./fonts": {
-            "import": "./dist/fonts.js",
-            "types": "./dist/fonts.d.ts"
+            "types": "./src/fonts.ts",
+            "import": "./src/fonts.ts",
+            "default": "./src/fonts.ts"
         },
         "./layouts": {
-            "import": "./dist/layouts.js",
-            "types": "./dist/layouts.d.ts"
+            "types": "./src/layouts.ts",
+            "import": "./src/layouts.ts",
+            "default": "./src/layouts.ts"
+        },
+        "./presets": {
+            "types": "./src/presets.ts",
+            "import": "./src/presets.ts",
+            "default": "./src/presets.ts"
+        },
+        "./schemas": {
+            "types": "./src/schemas.ts",
+            "import": "./src/schemas.ts",
+            "default": "./src/schemas.ts"
         },
         "./theme": {
-            "import": "./dist/theme.js",
-            "types": "./dist/theme.d.ts"
+            "types": "./src/theme.ts",
+            "import": "./src/theme.ts",
+            "default": "./src/theme.ts"
+        },
+        "./utils": {
+            "types": "./src/utils.ts",
+            "import": "./src/utils.ts",
+            "default": "./src/utils.ts"
         }
     },
     "name": "@parametric-portal/theme",

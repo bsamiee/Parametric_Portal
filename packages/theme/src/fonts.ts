@@ -1,47 +1,15 @@
 /**
- * Generate @font-face rules and semantic weight utilities via schema validation.
+ * Generate @font-face rules and semantic utilities via validated schema.
+ * Grounding: Vite plugin exposes virtual module for Tailwind integration.
  */
-import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 import type { Plugin } from 'vite';
+import { type FontInput, FontInputSchema, type FontWeight } from './schemas.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type FontWeight = S.Schema.Type<typeof FontWeightSchema>;
-type FontInput = S.Schema.Type<typeof FontInputSchema>;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const FontWeightSchema = pipe(S.Number, S.int(), S.between(100, 900), S.brand('FontWeight'));
-
-const FontAxisConfigSchema = S.Struct({
-    default: S.Number,
-    max: S.Number,
-    min: S.Number,
-});
-
-const WeightSpecSchema = S.Record({
-    key: pipe(S.String, S.pattern(/^[a-z]+$/)),
-    value: FontWeightSchema,
-});
-
-const FontInputSchema = S.Struct({
-    axes: S.optional(
-        S.Record({
-            key: pipe(S.String, S.pattern(/^[a-z]{4}$/)),
-            value: FontAxisConfigSchema,
-        }),
-    ),
-    display: S.optional(S.Literal('swap', 'block', 'fallback', 'optional', 'auto')),
-    fallback: S.optional(S.Array(S.Literal('sans-serif', 'serif', 'monospace', 'system-ui'))),
-    family: S.String,
-    features: S.optional(S.Array(S.String)),
-    name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-    src: S.String,
-    type: S.Literal('variable', 'static'),
-    weights: WeightSpecSchema,
-});
+type FontInputRaw = S.Schema.Encoded<typeof FontInputSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -50,6 +18,8 @@ const B = Object.freeze({
         static: { format: 'woff2', tech: undefined },
         variable: { format: 'woff2', tech: 'variations' },
     },
+    tailwindMarker: '@import "tailwindcss";',
+    virtualImportPattern: /@import\s+['"]virtual:parametric-fonts['"];?\s*/g,
 } as const);
 
 const VIRTUAL_MODULE_ID = Object.freeze({
@@ -60,11 +30,10 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
-const normalizeInputs = (input: FontInput | ReadonlyArray<FontInput>): ReadonlyArray<FontInput> =>
+const normalizeInputs = (input: FontInputRaw | ReadonlyArray<FontInputRaw>): ReadonlyArray<FontInputRaw> =>
     isArray(input) ? input : [input];
 
-const fn = {
-    // Invert undefined check: output quoted family-only when no fallback provided.
+const fontUtilities = {
     fallbackStack: (family: string, fallback: ReadonlyArray<string> | undefined): string =>
         pipe(
             Option.fromNullable(fallback),
@@ -83,6 +52,7 @@ const fn = {
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
+/** Generate @font-face CSS block from validated input. Grounding: Handles static and variable font formats with optional features. */
 const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[], ParseError> =>
     pipe(
         Effect.succeed(B.format[input.type]),
@@ -90,16 +60,14 @@ const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[],
             [
                 '@font-face {',
                 `  font-family: "${input.family}";`,
-                // Include tech as space-delimited string for @supports() compatibility in variable fonts.
-                `  src: url('${input.src}') 			format(${pipe(
+                `  src: url('${input.src}') format(${pipe(
                     Option.fromNullable(tech),
                     Option.match({
                         onNone: () => `'${format}'`,
-                        onSome: (t) => `'${format} ${t}'`,
+                        onSome: (t) => `'${format}-${t}'`,
                     }),
-                )});
-                `,
-                `  font-weight: ${fn.weightRange(input.weights)};`,
+                )});`,
+                `  font-weight: ${fontUtilities.weightRange(input.weights)};`,
                 pipe(
                     Option.fromNullable(input.display),
                     Option.match({ onNone: () => '', onSome: (d) => `  font-display: ${d};` }),
@@ -119,6 +87,7 @@ const createFontFaceBlock = (input: FontInput): Effect.Effect<readonly string[],
         ),
     );
 
+/** Generate semantic weight utility classes. Grounding: Enables .font-{name}-{weight} pattern for design tokens. */
 const createSemanticUtilities = (
     input: FontInput,
 ): Effect.Effect<ReadonlyArray<readonly [string, string]>, ParseError> =>
@@ -132,10 +101,13 @@ const createSemanticUtilities = (
         ),
     );
 
+/** Generate CSS custom properties for font family. Grounding: Exposes --font-{name} variables for Tailwind theme integration. */
 const createThemeVariables = (input: FontInput): Effect.Effect<readonly string[], ParseError> =>
     pipe(
         Effect.all({
-            family: Effect.succeed(`--font-${input.name}: ${fn.fallbackStack(input.family, input.fallback)};`),
+            family: Effect.succeed(
+                `--font-${input.name}: ${fontUtilities.fallbackStack(input.family, input.fallback)};`,
+            ),
             variations: pipe(
                 Option.fromNullable(input.axes),
                 Option.match({
@@ -153,14 +125,15 @@ const createThemeVariables = (input: FontInput): Effect.Effect<readonly string[]
             pipe(
                 Option.fromNullable(variations),
                 Option.match({
-                    onNone: () => ['@theme {', `  ${family}`, '}'],
-                    onSome: (v) => ['@theme {', `  ${family}`, `  ${v}`, '}'],
+                    onNone: () => [':root {', `  ${family}`, '}'],
+                    onSome: (v) => [':root {', `  ${family}`, `  ${v}`, '}'],
                 }),
             ),
         ),
     );
 
-const createFontBlocks = (input: FontInput): Effect.Effect<readonly string[], ParseError> =>
+/** Orchestrate font-face, variables, and utility generation. Grounding: Validates input then combines three CSS block types. */
+const createFontBlocks = (input: FontInputRaw): Effect.Effect<readonly string[], ParseError> =>
     pipe(
         S.decode(FontInputSchema)(input),
         Effect.flatMap((validated) =>
@@ -178,24 +151,38 @@ const createFontBlocks = (input: FontInput): Effect.Effect<readonly string[], Pa
         Effect.catchAll((error) => Effect.succeed([`/* Font parsing failed: ${input.name} - ${error._tag} */`])),
     );
 
+/** Generate all font CSS blocks without Tailwind import. */
+const generateAllFonts = (inputs: FontInputRaw | ReadonlyArray<FontInputRaw>): string =>
+    Effect.runSync(
+        pipe(
+            Effect.forEach(normalizeInputs(inputs), createFontBlocks),
+            Effect.map((results) => results.flat().join('\n\n')),
+        ),
+    );
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const defineFonts = (inputs: FontInput | ReadonlyArray<FontInput>): Plugin => ({
+/** Create Vite plugin exposing virtual font module. Grounding: Resolves virtual:parametric-fonts for runtime CSS injection. */
+const defineFonts = (inputs: FontInputRaw | ReadonlyArray<FontInputRaw>): Plugin => ({
     enforce: 'pre',
     load: (id) =>
-        id === VIRTUAL_MODULE_ID.resolved
-            ? Effect.runSync(
-                  pipe(
-                      Effect.forEach(normalizeInputs(inputs), createFontBlocks),
-                      Effect.map((results) => ['@import "tailwindcss";', ...results.flat()].join('\n\n')),
-                  ),
-              )
-            : undefined,
+        id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllFonts(inputs)}` : undefined,
     name: 'parametric-fonts',
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
+    transform: (code, id) =>
+        // Inject fonts CSS into entry CSS file (bypasses enhanced-resolve limitation)
+        !id.endsWith('main.css') || !code.includes(B.tailwindMarker)
+            ? undefined
+            : code
+                  .replaceAll(B.virtualImportPattern, '')
+                  .replace(
+                      B.tailwindMarker,
+                      `${B.tailwindMarker}\n\n/* --- [FONTS] --- */\n${generateAllFonts(inputs)}`,
+                  ),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B, defineFonts };
-export type { FontInput };
+export type { FontInputRaw };
+export type { FontInput } from './schemas.ts';

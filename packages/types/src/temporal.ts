@@ -1,10 +1,10 @@
 /**
  * Define temporal operations via Effect-wrapped date-fns: parse, format, addDays, daysBetween with Immer brand registry.
  */
-import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
+
 import { addDays, differenceInDays, format, parseISO } from 'date-fns';
-import { Effect, pipe } from 'effect';
+import { Effect, pipe, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 import { castDraft, enableMapSet, produce } from 'immer';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
@@ -56,7 +56,7 @@ const updateBrands = (set: ImmerSetter, brand: BrandMetadata): void =>
         castDraft(draft.brands).set(brand.brandName, brand);
     });
 
-// --- [PURE_FUNCTIONS] ------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError, never> =>
     pipe(

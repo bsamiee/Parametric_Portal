@@ -7,10 +7,9 @@ alwaysApply: true
 
 ## [1][CONSTRAINTS]
 
-[APPROACH]: Surgical, targeted changes. Examine existing patterns before proposing. Minimal modifications. Zero abstractions.
+[APPROACH] Surgical, targeted changes. Examine existing patterns before proposing. Minimal modifications. Zero abstractions.
 
 [FORBIDDEN]:
-
 - NEVER create wrappers adding no semantic value beyond delegation
 - NEVER create helpers serving fewer than three call-sites
 - NEVER create separate single-item and array-item function variants
@@ -20,7 +19,6 @@ alwaysApply: true
 - NEVER write comments describing what; reserve for why
 
 [REQUIRED]:
-
 - Replace `any` with branded types via @effect/schema
 - Replace `try/catch` with Effect error channel
 - Replace `if/else` chains with dispatch tables
@@ -45,7 +43,8 @@ alwaysApply: true
 ### [2.2][TOOLING_CONFIGURATIONS]
 
 [STACK]: TypeScript 6.0-dev, React 19 canary, Vite 7, Tailwind v4, LightningCSS, Nx 22 Crystal.
-[BUILD]: Nx distributed caching + affected commands. Single `vite.config.ts` extended per package. LightningCSS (Rust) replaces PostCSS.
+[BUILD]: Nx distributed caching + affected commands. Single `vite.factory.ts` extended per package. LightningCSS (Rust) replaces PostCSS.
+[CLI]: Always run Nx via `pnpm exec nx <command>`. Never use bare `nx` (binary not in PATH).
 [QUALITY]: Biome for lint + format. Vitest for tests. SonarCloud for static analysis. 80% V8 coverage minimum.
 [CONFIG]: Single frozen B constant per file. Catalog-managed dependencies via pnpm-workspace.yaml. Target inference via Nx plugins.
 
@@ -61,7 +60,7 @@ alwaysApply: true
 ---
 ### [3.1][ALGORITHMIC]
 
-[IMPORTANT]: DERIVE values from base constant via formula
+[IMPORTANT] DERIVE values from base constant via formula
 
 The derivation formula IS the code. MUST compute ALL values from immutable base B—never hardcode.
 - **Zero Literals**: FORBIDDEN: Numeric literals in logic. Exception: base constant `B`. MUST trace every value to `B` through visible arithmetic.
@@ -98,7 +97,7 @@ const scale = Object.freeze({
 ---
 ### [3.2][PARAMETRIC]
 
-[IMPORTANT]: SUPPLY values at call-site via factory parameters
+[IMPORTANT] SUPPLY values at call-site via factory parameters
 
 Configuration at call-site. MUST expose tuning parameters through factory functions—never bury controls.
 - **Zero Scatter**: FORBIDDEN: Config access outside B constant. MUST centralize all tunable defaults in ONE object.
@@ -138,7 +137,7 @@ const resilient = createRetry({ timeoutMs: 30000, maxAttempts: 5 });
 ---
 ### [3.3][POLYMORPHIC]
 
-[IMPORTANT]: SELECT implementation via keyed dispatch table
+[IMPORTANT] SELECT implementation via keyed dispatch table
 
 Select implementation via dispatch. MUST route ALL behavior through keyed handler tables—never branch with conditionals.
 - **Zero Branching**: FORBIDDEN: `if/else` or `switch` for type-based dispatch. MUST use handler tables: `handlers[discriminant](data)`.
@@ -175,7 +174,7 @@ console.log(area(circle), area(rect)); // 78.54, 12
 ---
 ### [3.4][FUNCTIONAL-MONADIC]
 
-[IMPORTANT]: CHAIN operations via monadic bind (`pipe`, `flatMap`)
+[IMPORTANT] CHAIN operations via monadic bind (`pipe`, `flatMap`)
 
 Compose computations through typed channels. MUST route async/failable operations through Effect pipelines—never use try/catch.
 - **Zero Exceptions**: FORBIDDEN: `try/catch` or `throw` in Effect code. MUST handle errors via Effect error channel (E parameter).
@@ -220,7 +219,7 @@ const processUser = (raw: RawUser) =>
 ---
 ### [3.5][EXPRESSION-CENTRIC]
 
-[ESSENCE]: EXPRESS logic via value-producing constructs (ternary, implicit return, `pipe`)
+[ESSENCE] EXPRESS logic via value-producing constructs (ternary, implicit return, `pipe`)
 
 Code as expressions, not statements. MUST write every construct to produce a value—never execute without returning.
 - **Zero Blocks**: FORBIDDEN: curly braces `{}` in single-expression contexts. MUST use implicit returns: `x => x * 2`.
@@ -258,7 +257,7 @@ const summarize = (users: ReadonlyArray<RawUser>) =>
 ---
 ### [3.6][BLEEDING-EDGE]
 
-[ESSENCE]: LEVERAGE newest stable APIs via centralized base configurations
+[ESSENCE] LEVERAGE newest stable APIs via centralized base configurations
 
 Platform-first tooling selection. MUST adopt cutting-edge stable or canary APIs—never rely on deprecated patterns.
 
@@ -328,51 +327,52 @@ export default defineConfig({
 
 ### [4.1][SECTION_ORGANIZATION]
 
-[IMPORTANT]: Canonical section order and naming. MUST use exact labels, exact order, maximum 2 words per label.
+[IMPORTANT] Canonical section order and naming. MUST use exact labels, exact order, maximum 2 words per label.
 
-**Separator Format**: `// --- Label ` + dashes to column 80 (total 80 chars)
+**Separator Format**: `// --- [LABEL] ` + dashes to column 80 (total 80 chars)
 
 ```typescript
-// --- Types -------------------------------------------------------------------
-// --- Schema ------------------------------------------------------------------
-// --- Constants ---------------------------------------------------------------
-// --- Pure Functions ----------------------------------------------------------
-// --- Dispatch Tables ---------------------------------------------------------
-// --- Effect Pipeline ---------------------------------------------------------
-// --- Entry Point -------------------------------------------------------------
-// --- Export ------------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 ```
 
 **Character Breakdown**:
 - `// --- ` = 7 chars (comment prefix + opening dashes + space)
-- `Label` = variable (max 2 words, title case)
+- `[LABEL]` = variable (max 2 words, UPPERCASE, underscores for spaces)
 - ` ` = 1 char (space before closing dashes)
 - `---...---` = padding dashes to reach 80 chars total
 
 **Canonical Sections** (order is mandatory, omit unused):
-1. `Types` — type aliases, interfaces, discriminated unions
-2. `Schema` — @effect/schema definitions
-3. `Constants` — B constant, frozen config objects
-4. `Pure Functions` — stateless utilities
-5. `Dispatch Tables` — keyed handler objects
-6. `Effect Pipeline` — Effect.gen, pipe chains
-7. `Entry Point` — run(), main(), createX()
-8. `Export` — named exports
+1. `[TYPES]` — type aliases, interfaces, discriminated unions
+2. `[SCHEMA]` — @effect/schema definitions
+3. `[CONSTANTS]` — B constant, frozen config objects
+4. `[PURE_FUNCTIONS]` — stateless utilities
+5. `[DISPATCH_TABLES]` — keyed handler objects
+6. `[EFFECT_PIPELINE]` — Effect.gen, pipe chains
+7. `[ENTRY_POINT]` — run(), main(), createX()
+8. `[EXPORT]` — named exports
 
 **Domain-Specific Sections** (insert between Constants and Pure Functions when required):
-- `Markdown` — md.* generators (schema.ts only)
-- `Providers` — external API adapters
-- `Renderers` — output formatters
+- `[MARKDOWN]` — md.* generators (schema.ts only)
+- `[PROVIDERS]` — external API adapters
+- `[RENDERERS]` — output formatters
 
 **FORBIDDEN**:
-- Parentheticals in labels: `Constants (B)` → `Constants`
-- Labels >2 words: `Pure Utility Functions` → `Pure Functions`
-- Non-canonical labels: `Helpers`, `Handlers`, `Utils`, `Config`
-- Descriptive suffixes: `Schema (Single Union)` → `Schema`
+- Parentheticals in labels: `[CONSTANTS] (B)` → `[CONSTANTS]`
+- Labels >2 words: `[PURE_UTILITY_FUNCTIONS]` → `[PURE_FUNCTIONS]`
+- Non-canonical labels: `[HELPERS]`, `[HANDLERS]`, `[UTILS]`, `[CONFIG]`
+- Descriptive suffixes: `[SCHEMA] (Single Union)` → `[SCHEMA]`
+- Missing brackets: `// --- Types ---` → `// --- [TYPES] ---`
 
 ### [4.2][DOCUMENTATION_STANDARDS]
 
-[RULE]: JSDoc headers, comments, and naming conventions defined in `docs/standards/AGENTIC-DOCUMENTATION.md`.
+[IMPORTANT] JSDoc headers, comments, and naming conventions defined in `docs/standards/AGENTIC-DOCUMENTATION.md`.
 
 ### [4.3][LAYER_STRUCTURE]
 
@@ -385,3 +385,16 @@ export default defineConfig({
 
 [PATTERN]: 3-step pipelines for simple transformations (input → transform → output)
 [PATTERN]: 4-step pipelines for failable operations (input → validate → transform → handle)
+
+---
+## [5][MONOREPO_TOPOLOGY]
+
+>**Dictum:** *Packages export mechanisms; apps define values.*
+
+| Layer        | Owns                                                                             | Example                                                               |
+| ------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `packages/*` | Types, schemas, factories, pure functions, dispatch tables, CSS variable *slots* | `createMenu({ scale })` returns structure referencing `var(--menu-*)` |
+| `apps/*`     | CSS variable values, factory invocations, visual overrides                       | `:root { --menu-item-selected-bg: oklch(32% 0.04 275); }`             |
+
+**FORBIDDEN**: Color/font/spacing literals in `packages/*`.<br>
+**Dropdown Menu**: Package renders title/label/active/checkmark structure. App provides `--menu-dropdown-bg`, `--menu-item-selected-bg` values.

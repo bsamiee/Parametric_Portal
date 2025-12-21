@@ -1,20 +1,28 @@
-/**
- * Configure theme library build with fonts, layouts, and theme entry points.
- */
+/** Configure Vite library build for @parametric-portal/theme package. Grounding: Multi-entry export strategy supports tree-shaking per theme module. */
+
 import { Effect } from 'effect';
 import type { UserConfig } from 'vite';
 import { defineConfig } from 'vite';
-import { createConfig } from '../../vite.config.ts';
+import { createConfig } from '../../vite.factory.ts';
 
-// --- [EXPORT] ----------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 export default defineConfig(
     Effect.runSync(
         createConfig({
-            entry: { fonts: './src/fonts.ts', layouts: './src/layouts.ts', theme: './src/theme.ts' },
-            external: ['effect', '@effect/schema'],
+            entry: {
+                colors: './src/colors.ts',
+                factories: './src/factories.ts',
+                fonts: './src/fonts.ts',
+                layouts: './src/layouts.ts',
+                presets: './src/presets.ts',
+                schemas: './src/schemas.ts',
+                theme: './src/theme.ts',
+                utils: './src/utils.ts',
+            },
+            external: ['effect', '@effect/schema'], // Peer dependencies excluded from bundle
             mode: 'library',
             name: 'ParametricTheme',
         }),
-    ) as UserConfig,
+    ) as UserConfig, // Type assertion required: Effect.runSync returns unknown, defineConfig expects UserConfig
 );

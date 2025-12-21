@@ -1,9 +1,8 @@
 /**
- * Define domain primitives via Effect Schema branded types: Uuidv7, Email, HexColor, IsoDate, Slug, Url with cached ID generation.
+ * Provide domain primitives via Effect Schema branded types.
  */
-import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
-import { Cache, Duration, Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 import { match, P } from 'ts-pattern';
 import { v7 as uuidv7 } from 'uuid';
 
@@ -29,7 +28,6 @@ type TypesApi = {
     readonly createIdGenerator: typeof createIdGenerator;
     readonly generateUuidv7: Effect.Effect<Uuidv7, never, never>;
     readonly isUuidv7: (u: unknown) => u is Uuidv7;
-    readonly isUuidv7Cached: (uuid: string) => Effect.Effect<boolean, never, never>;
     readonly match: typeof match;
     readonly Option: typeof Option;
     readonly P: typeof P;
@@ -42,7 +40,7 @@ type TypesApi = {
 const B = Object.freeze({
     cache: { capacity: 1000, ttlMinutes: 5 },
     patterns: {
-        email: /^[^@]+@[^@]+$/,
+        email: /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/,
         hexColor: /^#[0-9a-f]{6}$/i,
         isoDate: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/,
         slug: /^[a-z0-9-]+$/,
@@ -107,18 +105,11 @@ const brands = Object.freeze({
     uuidv7: Uuidv7Schema,
 } as const);
 
-// --- [PURE_FUNCTIONS] ------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
-
-const createIdCache = (cfg: TypesConfig) =>
-    Cache.make({
-        capacity: cfg.cacheCapacity ?? B.cache.capacity,
-        lookup: (uuid: string) => Effect.succeed(S.is(baseSchemas.uuidv7)(uuid)),
-        timeToLive: Duration.minutes(cfg.cacheTtlMinutes ?? B.cache.ttlMinutes),
-    });
 
 const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect<A, ParseError, never> =>
     pipe(
@@ -126,28 +117,22 @@ const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect
         Effect.flatMap((uuid) => S.decode(schema)(uuid)),
     );
 
-const createTypes = (config: TypesConfig = {}): Effect.Effect<TypesApi, never, never> =>
-    pipe(
-        createIdCache(config),
-        Effect.map((cache) =>
-            Object.freeze({
-                brands,
-                createIdGenerator,
-                generateUuidv7: Effect.sync(() => castToUuidv7(uuidv7())),
-                isUuidv7: S.is(Uuidv7Schema),
-                isUuidv7Cached: (uuid: string) => cache.get(uuid),
-                match,
-                Option,
-                P,
-                patterns,
-                schemas,
-            } as TypesApi),
-        ),
-    );
+const types = (_config: TypesConfig = {}): TypesApi =>
+    Object.freeze({
+        brands,
+        createIdGenerator,
+        generateUuidv7: Effect.sync(() => castToUuidv7(uuidv7())),
+        isUuidv7: S.is(Uuidv7Schema),
+        match,
+        Option,
+        P,
+        patterns,
+        schemas,
+    } as TypesApi);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TYPES_TUNING, createTypes };
+export { B as TYPES_TUNING, types };
 export type {
     Email,
     HexColor,

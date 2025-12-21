@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "composite": false,
+        "outDir": "dist",
+        "paths": {
+            "@parametric-portal/components/*": ["../../packages/components/src/*"],
+            "@parametric-portal/devtools/*": ["../../packages/devtools/src/*"],
+            "@parametric-portal/hooks/*": ["../../packages/hooks/src/*"],
+            "@parametric-portal/theme/*": ["../../packages/theme/src/*"],
+            "@parametric-portal/types/*": ["../../packages/types/src/*"]
+        },
+        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/parametric-icons.tsbuildinfo",
+        "types": ["vite/client"]
+    },
+    "exclude": ["dist", "node_modules"],
+    "extends": "../../tsconfig.base.json",
+    "include": ["src/**/*", "*.config.ts"],
+    "references": []
+}

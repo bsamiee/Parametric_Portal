@@ -1,9 +1,9 @@
 /**
- * Tests for runtime hooks factory.
+ * Validate runtime hooks factory.
  */
 import { Context, Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { createAppRuntime, createRuntimeHooks, RUNTIME_TUNING } from '../src/runtime.ts';
+import { createAppRuntime, createRuntimeHooks, RUNTIME_TUNING } from '../src/runtime.tsx';
 
 // --- [TYPES] -----------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 /**
- * Error boundary hooks bridging Effect Exit/Cause with React error boundaries.
+ * Bridge Effect Exit/Cause with React error boundaries.
  */
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess } from '@parametric-portal/types/async';
@@ -95,16 +95,14 @@ const createBoundaryHooks = <R, E>(
         useEffect(() => {
             setState(mkLoading(ts));
 
-            const eff = Effect.gen(function* () {
-                const result = yield* effect;
-                return result;
-            });
+            const fiber = runtime.runFork(effect);
 
-            const fiber = runtime.runFork(eff);
-
-            void runtime
-                .runPromise(Fiber.await(fiber))
-                .then((exit) => handleExit(exit as Exit.Exit<A, Err>, setState, setError, ts));
+            runtime.runFork(
+                Effect.gen(function* () {
+                    const exit = yield* Fiber.await(fiber);
+                    handleExit(exit as Exit.Exit<A, Err>, setState, setError, ts);
+                }),
+            );
 
             return interruptFiber(runtime, fiber);
             // biome-ignore lint/correctness/useExhaustiveDependencies: deps is intentionally dynamic for caller control

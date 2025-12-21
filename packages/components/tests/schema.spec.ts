@@ -76,10 +76,10 @@ describe('components schema', () => {
         });
 
         describe.each(SCALE_CONFIGS)('with config %o', (config) => {
-            it('computes all 36 values correctly', () => {
+            it('computes all 38 values correctly', () => {
                 const scale = resolve('scale', config);
                 const computed = utilities.computeScale(scale);
-                expect(Object.keys(computed).length).toBe(36);
+                expect(Object.keys(computed).length).toBe(38);
                 for (const v of Object.values(computed)) {
                     expect(v).toMatch(/^\d+(\.\d{3})?(rem|px)$/);
                 }
@@ -94,7 +94,7 @@ describe('components schema', () => {
         ])('produces valid computed object for scale=%i density=%f', (scale, density) => {
             const s = resolve('scale', { density, scale });
             const c = utilities.computeScale(s);
-            expect(Object.keys(c).length).toBe(36);
+            expect(Object.keys(c).length).toBe(38);
             for (const v of Object.values(c)) {
                 expect(Number.parseFloat(v)).toBeGreaterThan(0);
             }

@@ -1,0 +1,789 @@
+/**
+ * Theme CSS: Tailwind v4 base + parametric theme injected via transform hooks.
+ * Plugin order in vite.config.ts: defineLayouts → defineFonts → defineThemes.
+ * Each plugin injects its CSS after this @import via transform hook.
+ */
+@import 'tailwindcss';
+
+/* Scan component library packages for Tailwind class detection */
+@source '../../../packages/components/src';
+@source '../../../packages/hooks/src';
+@source '../../../packages/theme/src';
+
+/* --- [KEYFRAMES] ----------------------------------------------------------- */
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes spinnerDash {
+    0% {
+        stroke-dasharray: 1, 150;
+        stroke-dashoffset: 0;
+    }
+    50% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -35;
+    }
+    100% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -124;
+    }
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* --- [PANEL_VARIABLES] ----------------------------------------------------- */
+
+:root {
+    /* Surface backgrounds — progressive lightness scale */
+    --panel-bg-dark: oklch(14% 0.04 275);
+    --panel-bg-medium: oklch(18% 0.04 275);
+    --panel-bg-light: oklch(22% 0.04 275);
+    --panel-bg-lighter: oklch(26% 0.04 275);
+    --panel-bg-lightest: oklch(28% 0.04 275);
+
+    /* Borders — subtle separation */
+    --panel-border-dark: oklch(20% 0.03 275);
+    --panel-border-light: oklch(30% 0.04 275);
+    --panel-border-preview: oklch(50% 0.06 240);
+
+    /* Text colors — semantic scale */
+    --panel-text-primary: oklch(97% 0.01 60);
+    --panel-text-strong: oklch(85% 0.02 240);
+    --panel-text-secondary: oklch(60% 0.02 240);
+    --panel-text-muted: oklch(55% 0.04 240);
+    --panel-text-placeholder: oklch(50% 0.04 240);
+
+    /* Icon colors — state-based */
+    --panel-icon-default: oklch(65% 0.06 240);
+    --panel-icon-hover: oklch(80% 0.04 240);
+    --panel-icon-muted: oklch(40% 0.04 240);
+    --panel-icon-active: oklch(70% 0.06 240);
+
+    /* Control variants — button styling */
+    --ctrl-destructive-bg: oklch(60% 0.25 25);
+    --ctrl-destructive-text: oklch(98% 0.01 0);
+    --ctrl-destructive-hover: oklch(55% 0.25 25);
+    --ctrl-destructive-ring: oklch(60% 0.25 25);
+    --ctrl-ghost-hover: oklch(100% 0 0 / 0.1);
+    --ctrl-outline-border: currentColor / 0.2;
+    --ctrl-outline-hover: oklch(100% 0 0 / 0.05);
+    --ctrl-primary-bg: currentColor;
+    --ctrl-primary-text: oklch(98% 0.01 0);
+    --ctrl-secondary-bg: currentColor / 0.1;
+    --ctrl-secondary-hover: currentColor / 0.2;
+    --ctrl-switch-thumb: oklch(98% 0.01 0);
+    --ctrl-switch-track: currentColor / 0.2;
+    --ctrl-switch-track-on: currentColor;
+
+    /* Pressed/toggle state — Dracula cyan (#94F2E8) */
+    --ctrl-pressed-bg: oklch(82% 0.14 175 / 0.18);
+    --ctrl-pressed-border: oklch(82% 0.14 175);
+    --ctrl-pressed-text: oklch(82% 0.14 175);
+
+    /* Solid button variant — matches input bar fill */
+    --ctrl-solid-bg: var(--panel-bg-light);
+    --ctrl-solid-text: var(--panel-text-secondary);
+    --ctrl-solid-hover: var(--panel-bg-lighter);
+
+    /* Card styling — transparent border for sidebar items */
+    --data-card-border: transparent;
+    --data-card-bg: transparent;
+
+    /* Tooltip styling — light surface for contrast */
+    --ov-tooltip-bg: oklch(97% 0.01 60);
+    --ov-tooltip-font-family: var(--font-ui), system-ui, sans-serif;
+    --ov-tooltip-font-size: 0.8125rem;
+    --ov-tooltip-font-weight: 500;
+    --ov-tooltip-min-height: 2rem;
+    --ov-tooltip-padding-x: 0.75rem;
+    --ov-tooltip-padding-y: 0.375rem;
+    --ov-tooltip-radius: 0.5rem;
+    --ov-tooltip-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.25);
+    --ov-tooltip-text: oklch(12% 0.04 275);
+    --ov-tooltip-z-index: 9999;
+
+    /* --- Menu Variables --- */
+
+    /* Dropdown container — matches input bar (22% lightness) */
+    --menu-dropdown-bg: oklch(22% 0.04 275);
+    --menu-dropdown-gap: 0.25rem;
+    --menu-dropdown-max-height: 20rem;
+    --menu-dropdown-padding: 0.375rem;
+    --menu-dropdown-radius: 0.5rem;
+    --menu-dropdown-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.3);
+
+    /* Section headers — muted, uppercase */
+    --menu-header-color: oklch(55% 0.04 240);
+    --menu-header-font-size: 0.6875rem;
+    --menu-header-padding-x: 0.375rem;
+    --menu-header-padding-y: 0.375rem;
+
+    /* Menu items — progressive lightening for states */
+    --menu-item-font-size: 0.8125rem;
+    --menu-item-gap: 0.375rem;
+    --menu-item-height: 2rem;
+    --menu-item-hover-bg: oklch(26% 0.04 275);
+    --menu-item-icon-gap: 0.5rem;
+    --menu-item-padding-x: 0.375rem;
+    --menu-item-padding-y: 0.25rem;
+    --menu-item-radius: 0.375rem;
+    --menu-item-selected-bg: oklch(28% 0.04 275);
+    --menu-item-selected-text: oklch(97% 0.01 60);
+    --menu-item-text: oklch(65% 0.04 240);
+
+    /* Checkmark — cyan accent */
+    --menu-check-color: oklch(75% 0.14 200);
+    --menu-check-size: 0.875rem;
+
+    /* Icons */
+    --menu-icon-opacity: 0.7;
+    --menu-icon-size: 1rem;
+
+    /* Separators */
+    --menu-separator-bg: oklch(30% 0.04 275);
+    --menu-separator-spacing: 0.25rem;
+
+    /* Trigger — dim labels, bright values */
+    --menu-trigger-bg: transparent;
+    --menu-trigger-font-size: 0.8125rem;
+    --menu-trigger-gap: 0.5rem;
+    --menu-trigger-hover-bg: oklch(26% 0.04 275);
+    --menu-trigger-icon: oklch(55% 0.04 240);
+    --menu-trigger-indicator: oklch(55% 0.04 240);
+    --menu-trigger-indicator-size: 0.5rem;
+    --menu-trigger-indicator-margin: 0.25rem;
+    --menu-trigger-indicator-opacity: 0.7;
+    --menu-trigger-indicator-rotation: 180deg;
+    --menu-trigger-label: oklch(55% 0.04 240);
+    --menu-trigger-min-width: 0;
+    --menu-trigger-padding-x: 0.75rem;
+    --menu-trigger-padding-y: 0.375rem;
+    --menu-trigger-radius: 0.5rem;
+    --menu-trigger-value: oklch(90% 0.02 60);
+
+    /* InputBar state slots — values for package-defined CSS variable slots */
+    --bar-icon-opacity: 0.7;
+    --bar-placeholder-opacity: 0.5;
+    --bar-disabled-opacity: 0.4;
+    --bar-loading-cursor: not-allowed;
+
+    /* Submit button — deep magenta (#d82f94) with cyan arrow */
+    --submit-btn-bg: oklch(55% 0.3 338);
+    --submit-btn-text: oklch(82% 0.14 175);
+
+    /* Thumb component — matches sidebar-item-thumb styling */
+    --data-thumb-bg: var(--panel-bg-lighter);
+    --data-thumb-radius: 0.5rem;
+    --data-thumb-action-bg: var(--panel-bg-dark);
+    --data-thumb-action-border: oklch(70% 0.12 195);
+    --data-thumb-action-color: var(--panel-text-primary);
+    --data-thumb-action-hover-bg: var(--panel-bg-dark);
+    --data-thumb-action-hover-border: var(--ctrl-destructive-bg);
+    --data-thumb-action-hover-color: var(--ctrl-destructive-bg);
+
+    /* ListItem component — sidebar card styling */
+    --data-listitem-gap: 0.75rem;
+    --data-listitem-padding-x: 0.75rem;
+    --data-listitem-padding-y: 0.75rem;
+    --data-listitem-radius: 0.5rem;
+    --data-listitem-hover-bg: oklch(18% 0.03 275);
+    --data-listitem-selected-bg: oklch(20% 0.03 275);
+    --data-listitem-thumb-size: 2.75rem;
+    --data-listitem-thumb-radius: 0.5rem;
+    --data-listitem-thumb-bg: var(--panel-bg-lighter);
+    --data-listitem-thumb-padding: 0.375rem;
+
+    /* Animation slots — values for package-defined CSS variable slots */
+    --bar-spinner-animation: spin 0.8s ease-in-out infinite;
+    --fb-enter-animation: fadeIn 200ms ease-out;
+    --fb-exit-animation: fadeOut 150ms ease-in;
+    --cmd-loading-animation: spin 1s linear infinite;
+    --data-loading-animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    --menu-loading-animation: spin 1s linear infinite;
+}
+
+/* --- [MENU_STATES] --------------------------------------------------------- */
+
+/* Menu item state colors via data attributes */
+[data-focused='true']:not([data-selected='true']) {
+    background-color: var(--menu-item-hover-bg);
+}
+
+[data-selected='true'] {
+    color: var(--menu-item-selected-text);
+    background-color: var(--menu-item-selected-bg);
+}
+
+li:not([data-selected='true']) {
+    color: var(--menu-item-text);
+}
+
+/* --- [LAYOUT_CLASSES] ------------------------------------------------------ */
+
+/* Sidebar */
+.sidebar {
+    z-index: 50;
+    display: flex;
+    height: 100%;
+    user-select: none;
+    box-shadow: var(--tw-shadow, 0 25px 50px -12px rgb(0 0 0 / 0.25));
+}
+.sidebar-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    align-items: center;
+    width: 72px;
+    height: 100%;
+    padding-block: 1.5rem;
+    background: var(--panel-bg-dark);
+    border-right: 1px solid var(--panel-border-dark);
+}
+.sidebar-drawer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background: var(--panel-bg-dark);
+    border-right: 1px solid var(--panel-border-dark);
+    transition: all 300ms;
+}
+.sidebar-drawer-header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    height: 3.5rem;
+    padding-inline: 1.5rem;
+    border-bottom: 1px solid var(--panel-border-dark);
+}
+.sidebar-drawer-content {
+    flex: 1;
+    min-width: 20rem;
+    padding: 1.25rem;
+    overflow-y: auto;
+}
+
+/* Rail button — sidebar rail icons */
+.rail-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    color: var(--panel-icon-default);
+    border-radius: 0.5rem;
+    transition:
+        color 150ms,
+        background-color 150ms;
+}
+.rail-btn:hover {
+    color: var(--panel-icon-hover);
+    background: var(--panel-bg-lighter);
+}
+
+/* Command bar */
+.command-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+    width: 100%;
+    max-width: 1000px;
+    margin-inline: auto;
+}
+.command-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    text-align: center;
+    user-select: none;
+}
+.command-title {
+    font-family: var(--font-display, sans-serif);
+    font-size: 3rem;
+    font-weight: 500;
+    color: var(--panel-text-primary);
+    letter-spacing: -0.025em;
+}
+.command-subtitle {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--panel-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.25em;
+}
+
+/* Input capsule */
+.input-capsule {
+    width: 100%;
+    background: var(--panel-bg-light);
+    border: 1px solid var(--panel-border-light);
+    border-radius: 2rem;
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+    transition: background-color 200ms;
+}
+.input-capsule:hover {
+    background: var(--panel-bg-lighter);
+}
+
+/* Input wrapper - groups attachments tray and input capsule with no gap */
+.input-wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+/* Attachments tray - dashed border with legend-style label */
+.attachments-tray {
+    --attachment-border: oklch(70% 0.12 195);
+    position: relative;
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 1rem 1rem 0.75rem;
+    margin-bottom: 0.75rem;
+    background: oklch(70% 0.12 195 / 0.06);
+    border: 1px dashed var(--attachment-border);
+    border-radius: 0.75rem;
+}
+.attachments-label {
+    position: absolute;
+    top: -1px;
+    left: 0.75rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: oklch(20% 0.04 195);
+    text-transform: capitalize;
+    letter-spacing: 0.025em;
+    background: var(--attachment-border);
+    border-radius: 0.25rem;
+    transform: translateY(-100%);
+}
+
+/* Sidebar item - alignment override (CSS variables handle gap/padding/radius) */
+.sidebar-item {
+    align-items: flex-start;
+}
+.sidebar-action-btn {
+    padding: 0.25rem;
+    opacity: 0.5;
+    transition: all 150ms;
+}
+.sidebar-action-btn:hover {
+    opacity: 1;
+}
+.sidebar-action-btn-destructive:hover {
+    color: oklch(65% 0.25 25);
+    background: oklch(65% 0.25 25 / 0.1);
+}
+
+/* Clear history button */
+.clear-history-btn {
+    width: 100%;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--panel-text-secondary);
+    text-align: center;
+    cursor: pointer;
+    background: var(--panel-bg-light);
+    border: none;
+    border-radius: 0.5rem;
+    transition: background-color 150ms;
+}
+.clear-history-btn:hover {
+    background: var(--panel-bg-lighter);
+}
+
+/* Context row */
+.context-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding-inline: 1rem;
+}
+.context-trigger {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.375rem 0.75rem;
+    white-space: nowrap;
+    cursor: pointer;
+    border-radius: 0.5rem;
+    transition: background-color 150ms;
+}
+.context-trigger:hover {
+    background: oklch(100% 0 0 / 0.05);
+}
+.context-divider {
+    width: 1px;
+    height: 1rem;
+    background: var(--panel-border-light);
+}
+
+/* Stage */
+.stage {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 1000px;
+    height: 100%;
+    margin-inline: auto;
+}
+.preview-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 500px;
+    aspect-ratio: 1;
+    border: 1px dashed color-mix(in oklch, var(--panel-border-preview) 40%, transparent);
+    border-radius: 0.5rem;
+}
+
+/* HUD controls */
+.hud-controls {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    z-index: 50;
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    padding: 0.375rem;
+    background: color-mix(in oklch, var(--panel-bg-medium) 90%, transparent);
+    border: 1px solid var(--panel-border-light);
+    border-radius: 0.5rem;
+    backdrop-filter: blur(8px);
+}
+.hud-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    color: var(--panel-icon-default);
+    border-radius: 0.5rem;
+    transition:
+        color 150ms,
+        background-color 150ms;
+}
+.hud-btn:hover {
+    color: var(--panel-icon-hover);
+    background: var(--panel-bg-lighter);
+}
+
+/* Viewport HUD (top-right actions) */
+.viewport-hud {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 40;
+    display: flex;
+    gap: 0.25rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms;
+}
+.group:hover .viewport-hud {
+    opacity: 1;
+}
+.viewport-hud-inner {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    pointer-events: auto;
+    background: color-mix(in oklch, var(--panel-bg-medium) 90%, transparent);
+    border: 1px solid var(--panel-border-light);
+    border-radius: 0.5rem;
+    backdrop-filter: blur(8px);
+}
+.viewport-hud-btn {
+    padding: 0.375rem;
+    color: var(--panel-icon-default);
+    border-radius: 0.25rem;
+    transition:
+        color 150ms,
+        background-color 150ms;
+}
+.viewport-hud-btn:hover {
+    color: var(--panel-icon-hover);
+    background: var(--panel-bg-lighter);
+}
+.viewport-hud-btn[data-saved='true'] svg {
+    color: oklch(60% 0.15 160);
+    fill: oklch(60% 0.15 160);
+}
+
+/* CAD reticle corner marks */
+.cad-reticle-corner {
+    border-color: var(--panel-border-preview);
+    border-style: solid;
+    border-width: 1px 0 0 1px;
+}
+
+/* Variant navigation (bottom-right, within-asset cycling) */
+.variant-nav {
+    position: absolute;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    z-index: 30;
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    padding: 0.125rem;
+    font-family: var(--font-mono, monospace);
+    background: color-mix(in oklch, var(--panel-bg-medium) 80%, transparent);
+    border: 1px solid var(--panel-border-light);
+    border-radius: 0.25rem;
+    backdrop-filter: blur(8px);
+}
+.variant-nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    color: var(--panel-icon-default);
+    border-radius: 0.125rem;
+    transition: all 150ms;
+}
+.variant-nav-btn:hover:not(:disabled) {
+    color: var(--panel-icon-hover);
+    background: var(--panel-bg-lighter);
+}
+.variant-nav-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.3;
+}
+.variant-nav-label {
+    padding-inline: 0.25rem;
+    font-size: 0.5625rem;
+    color: var(--panel-text-muted);
+    letter-spacing: 0.05em;
+}
+
+/* Inspector */
+.inspector-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.inspector-header {
+    font-size: 0.625rem;
+    font-weight: 700;
+    color: var(--panel-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.inspector-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.875rem;
+}
+.inspector-code {
+    max-height: 8rem;
+    padding: 0.75rem;
+    overflow: auto;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.625rem;
+    color: var(--panel-text-muted);
+    user-select: all;
+    background: var(--panel-bg-dark);
+    border-radius: 0.5rem;
+}
+
+/* --- [VARIANT_STYLES] ------------------------------------------------------ */
+
+/* Intent badge variants */
+.intent-badge {
+    padding: 0.125rem 0.375rem;
+    font-size: 0.5625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 0.25rem;
+}
+.intent-badge[data-intent='create'] {
+    color: oklch(75% 0.15 85);
+    background: oklch(75% 0.15 85 / 0.15);
+}
+.intent-badge[data-intent='refine'] {
+    color: oklch(70% 0.15 200);
+    background: color-mix(in oklch, oklch(70% 0.15 200) 20%, transparent);
+}
+.intent-badge[data-intent='upload'] {
+    color: oklch(70% 0.12 195);
+    background: oklch(70% 0.12 195 / 0.15);
+}
+
+/* Session message - matches sidebar-item styling pattern */
+.session-message {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    transition: background-color 150ms;
+}
+.session-message:hover {
+    background: oklch(18% 0.03 275);
+}
+.session-message-icon {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.375rem;
+    transition: background-color 150ms;
+}
+.session-message-icon[data-role='user'] {
+    color: oklch(70% 0.14 195);
+    background: oklch(70% 0.14 195 / 0.15);
+}
+.session-message-icon[data-role='assistant'] {
+    color: oklch(75% 0.15 85);
+    background: oklch(75% 0.15 85 / 0.15);
+}
+.session-message-label {
+    display: block;
+    font-size: 0.625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.session-message-label[data-role='user'] {
+    color: oklch(70% 0.14 195);
+}
+.session-message-label[data-role='assistant'] {
+    color: oklch(75% 0.15 85);
+}
+
+/* Session thinking card */
+.session-thinking-card {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.75rem;
+    background: var(--panel-bg-medium);
+    border-radius: 0.5rem;
+}
+
+/* Processing skeleton */
+.skeleton {
+    height: 0.75rem;
+    background: color-mix(in oklch, oklch(50% 0.02 240) 50%, transparent);
+    border-radius: 0.25rem;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* InputBar loading spinner — border-based visual */
+.input-capsule [data-loading='true'] button span {
+    display: block;
+    border: 2px solid var(--panel-icon-muted);
+    border-top-color: var(--panel-icon-hover);
+    border-radius: 50%;
+}
+
+/* --- [APP_STYLES] ---------------------------------------------------------- */
+
+html {
+    font-family: var(--font-ui), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    color: var(--color-text-100, oklch(97% 0.01 60));
+    background-color: var(--color-surface-300, oklch(20% 0.04 275));
+}
+
+/* Scrollbar styling using generated surface tokens */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-surface-350);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--color-surface-450);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-surface-hover);
+}
+
+/* Focus visible outline using accent tokens */
+:focus-visible {
+    outline: 2px solid var(--color-accent-300);
+    outline-offset: 2px;
+}
+
+/* Selection highlight using accent with opacity */
+::selection {
+    background-color: color-mix(in oklch, var(--color-accent-300) 50%, transparent);
+}

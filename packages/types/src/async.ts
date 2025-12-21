@@ -1,8 +1,7 @@
 /**
- * Define async state machine via discriminated union: Idle, Loading, Success, Failure with fold, map, match utilities.
+ * Provide async state machine via discriminated union with fold, map, match utilities.
  */
-import { Schema as S } from '@effect/schema';
-import { Effect, Option, pipe } from 'effect';
+import { Option, Schema as S } from 'effect';
 import { match, P } from 'ts-pattern';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -24,7 +23,7 @@ type AsyncApi<A, E = Error> = {
     readonly isLoading: (state: AsyncState<A, E>) => state is Loading;
     readonly isSuccess: (state: AsyncState<A, E>) => state is Success<A>;
     readonly loading: () => Loading;
-    readonly map: <B>(state: AsyncState<A, E>, f: (a: A) => B) => AsyncState<B, E>;
+    readonly map: <Out>(state: AsyncState<A, E>, f: (a: A) => Out) => AsyncState<Out, E>;
     readonly match: typeof match;
     readonly Option: typeof Option;
     readonly P: typeof P;
@@ -73,7 +72,7 @@ const schemas = Object.freeze({
     success: SuccessSchema,
 } as const);
 
-// --- [PURE_FUNCTIONS] ------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const mkIdle = (): Idle => ({ _tag: B.tags.idle });
 const mkLoading = (ts: () => number): Loading => ({ _tag: B.tags.loading, startedAt: ts() });
@@ -90,38 +89,35 @@ const foldHandlers = <A, E, R>(state: AsyncState<A, E>, h: FoldHandlers<A, E, R>
         .with({ _tag: B.tags.failure }, (s) => h.onFailure(s.error, s.timestamp))
         .exhaustive();
 
-const mapHandlers = <A, E, B>(state: AsyncState<A, E>, f: (a: A) => B, ts: () => number): AsyncState<B, E> =>
+const mapHandlers = <A, E, Out>(state: AsyncState<A, E>, f: (a: A) => Out, ts: () => number): AsyncState<Out, E> =>
     match(state)
         .with({ _tag: B.tags.success }, (s) => mkSuccess(f(s.data), ts))
-        .otherwise(() => state as AsyncState<B, E>);
+        .otherwise(() => state as AsyncState<Out, E>);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createAsync = <A, E = Error>(config: AsyncConfig = {}): Effect.Effect<AsyncApi<A, E>, never, never> =>
-    pipe(
-        Effect.sync(() => config.timestampProvider ?? B.timestamp),
-        Effect.map((ts) =>
-            Object.freeze({
-                failure: (error: E) => mkFailure(error, ts),
-                fold: <R>(state: AsyncState<A, E>, handlers: FoldHandlers<A, E, R>) => foldHandlers(state, handlers),
-                idle: mkIdle(),
-                isFailure: (state: AsyncState<A, E>): state is Failure<E> => state._tag === B.tags.failure,
-                isIdle: (state: AsyncState<A, E>): state is Idle => state._tag === B.tags.idle,
-                isLoading: (state: AsyncState<A, E>): state is Loading => state._tag === B.tags.loading,
-                isSuccess: (state: AsyncState<A, E>): state is Success<A> => state._tag === B.tags.success,
-                loading: () => mkLoading(ts),
-                map: <B>(state: AsyncState<A, E>, f: (a: A) => B) => mapHandlers(state, f, ts),
-                match,
-                Option,
-                P,
-                schemas,
-                success: (data: A) => mkSuccess(data, ts),
-                tags: B.tags,
-            } as AsyncApi<A, E>),
-        ),
-    );
+const asyncState = <A, E = Error>(config: AsyncConfig = {}): AsyncApi<A, E> => {
+    const ts = config.timestampProvider ?? B.timestamp;
+    return Object.freeze({
+        failure: (error: E) => mkFailure(error, ts),
+        fold: <R>(state: AsyncState<A, E>, handlers: FoldHandlers<A, E, R>) => foldHandlers(state, handlers),
+        idle: mkIdle(),
+        isFailure: (state: AsyncState<A, E>): state is Failure<E> => state._tag === B.tags.failure,
+        isIdle: (state: AsyncState<A, E>): state is Idle => state._tag === B.tags.idle,
+        isLoading: (state: AsyncState<A, E>): state is Loading => state._tag === B.tags.loading,
+        isSuccess: (state: AsyncState<A, E>): state is Success<A> => state._tag === B.tags.success,
+        loading: () => mkLoading(ts),
+        map: <Out>(state: AsyncState<A, E>, f: (a: A) => Out) => mapHandlers(state, f, ts),
+        match,
+        Option,
+        P,
+        schemas,
+        success: (data: A) => mkSuccess(data, ts),
+        tags: B.tags,
+    } as AsyncApi<A, E>);
+};
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as ASYNC_TUNING, createAsync, mkFailure, mkIdle, mkLoading, mkSuccess };
+export { asyncState, B as ASYNC_TUNING, mkFailure, mkIdle, mkLoading, mkSuccess };
 export type { AsyncApi, AsyncConfig, AsyncState, Failure, FoldHandlers, Idle, Loading, Success };

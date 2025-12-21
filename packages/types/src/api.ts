@@ -1,8 +1,7 @@
 /**
- * Define API response discriminated unions via Effect Schema: ApiSuccess, ApiError, PaginatedResponse with status code validation.
+ * Provides API response discriminated unions via Effect Schema: ApiSuccess, ApiError, PaginatedResponse with status code validation.
  */
-import { Schema as S } from '@effect/schema';
-import { Effect, Option, pipe } from 'effect';
+import { Option, pipe, Schema as S } from 'effect';
 import { match, P } from 'ts-pattern';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -183,31 +182,26 @@ const mapHandlers = <T, U>(response: ApiResponse<T>, f: (data: T) => U): ApiResp
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createApi = <T>(config: ApiConfig = {}): Effect.Effect<ApiApi<T>, never, never> =>
-    pipe(
-        Effect.sync(() => config.defaultPageSize ?? B.defaults.pageSize),
-        Effect.map((_pageSize) =>
-            Object.freeze({
-                error: mkError,
-                fold: <R>(response: ApiResponse<T>, handlers: FoldHandlers<T, R>) => foldHandlers(response, handlers),
-                isError: (response: ApiResponse<T>): response is ApiError => response._tag === B.tags.error,
-                isSuccess: (response: ApiResponse<T>): response is ApiSuccess<T> => response._tag === B.tags.success,
-                map: <U>(response: ApiResponse<T>, f: (data: T) => U) => mapHandlers(response, f),
-                match,
-                Option,
-                P,
-                paginated: (data: ReadonlyArray<T>, pagination: PaginationMeta, status?: HttpStatusSuccess) =>
-                    mkPaginated(data, pagination, status ?? defaultStatus()),
-                schemas,
-                success: (data: T, status?: HttpStatusSuccess) => mkSuccess(data, status ?? defaultStatus()),
-                tags: B.tags,
-            } as ApiApi<T>),
-        ),
-    );
+const api = <T>(_config: ApiConfig = {}): ApiApi<T> =>
+    Object.freeze({
+        error: mkError,
+        fold: <R>(response: ApiResponse<T>, handlers: FoldHandlers<T, R>) => foldHandlers(response, handlers),
+        isError: (response: ApiResponse<T>): response is ApiError => response._tag === B.tags.error,
+        isSuccess: (response: ApiResponse<T>): response is ApiSuccess<T> => response._tag === B.tags.success,
+        map: <U>(response: ApiResponse<T>, f: (data: T) => U) => mapHandlers(response, f),
+        match,
+        Option,
+        P,
+        paginated: (data: ReadonlyArray<T>, pagination: PaginationMeta, status?: HttpStatusSuccess) =>
+            mkPaginated(data, pagination, status ?? defaultStatus()),
+        schemas,
+        success: (data: T, status?: HttpStatusSuccess) => mkSuccess(data, status ?? defaultStatus()),
+        tags: B.tags,
+    } as ApiApi<T>);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as API_TUNING, createApi };
+export { api, B as API_TUNING };
 export type {
     ApiApi,
     ApiConfig,

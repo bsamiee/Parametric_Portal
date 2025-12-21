@@ -20,12 +20,12 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [ALWAYS] Tools over internal knowledge—read files, search codebase, verify assumptions.
 - [ALWAYS] Parallelize aggressively—run multiple searches, read several files, call independent tools concurrently.
 - [ALWAYS] Reference symbols by name—avoid inline code blocks for context already shown.
-- [ALWAYS] Prefer running tasks through `nx` (`nx run`, `nx run-many`, `nx affected`) instead of underlying tooling directly.
 - [ALWAYS] Use `nx-tools` skill scripts for workspace queries (zero MCP overhead).
 
 [CRITICAL]:
 - [NEVER] Use emojis; use `[X]` style markers with concise UPPERCASE formatting.
 - [NEVER] Bypass Nx (breaks caching).
+- [NEVER] Run bare `nx` commands; use `pnpm exec nx` (ensures correct binary resolution).
 
 ---
 ## [2][PHILOSOPHY]
@@ -72,6 +72,16 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [ALWAYS] Narrow types via discriminated unions.
 - [ALWAYS] Produce multiple outputs from one pipeline.
 - [ALWAYS] Target 25-30 LOC per feature, complexity ≤25.
+
+[IMPORTANT]: **Topology** — Packages export mechanisms; apps define values.
+- [ALWAYS] Package B constants define CSS variable *slots* (`var(--prefix-key)`), not values.
+- [ALWAYS] Package factories (`createX`) accept scale/behavior config; derive dimensions algorithmically.
+- [ALWAYS] Apps define CSS variables in `main.css`; call factories in `theme.config.ts`/`ui.ts`.
+- [ALWAYS] Packages own: types, schemas, factories, pure functions, dispatch tables.
+- [ALWAYS] Apps own: CSS variable values, factory invocations, visual overrides.
+
+[CRITICAL]: **Topology** — Prohibited patterns.
+- [NEVER] Color/font/spacing literals in `packages/*`.
 
 ---
 ## [3][CONSTRAINTS]
@@ -139,29 +149,3 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 
 **Canonical order** (omit unused): Types → Schema → Constants → Pure Functions → Dispatch Tables → Effect Pipeline → Entry Point → Export.<br>
 **FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, any parentheticals.
-
----
-## [6][VALIDATION]
->**Dictum:** *Validation gates enforce quality.*
-
-<br>
-
-[VERIFY] Execute before any commit:
-- [ ] Run `nx run-many -t typecheck` → zero errors, zero suppressions.
-- [ ] Run `nx run-many -t check` → zero Biome violations.
-- [ ] Run `pnpm sonar` → SonarCloud analysis (requires `SONAR_TOKEN`).
-- [ ] Pattern compliance → B constant, dispatch tables, Effect pipelines.
-- [ ] Extend existing `createX` factories → never bypass.
-
-[IMPORTANT] **Quality Tool Chain:**
-| [INDEX] | [TOOL]     | [NX_TARGET]  | [PURPOSE]                            |
-| :-----: | ---------- | ------------ | ------------------------------------ |
-|   [1]   | TypeScript | `typecheck`  | Static type analysis                 |
-|   [2]   | Biome      | `check`      | Lint + format (70+ rules)            |
-|   [3]   | Vitest     | `test`       | Unit tests + V8 coverage (80% min)   |
-|   [4]   | SonarCloud | `pnpm sonar` | Security, bugs, code smells, metrics |
-|   [5]   | Stryker    | `mutate`     | Mutation testing                     |
-
-[CRITICAL] Direct tool invocation—breaks Nx orchestration.
-
-[REFERENCE] Task configuration: [→nx.json](nx.json) → `targetDefaults`.

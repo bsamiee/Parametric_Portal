@@ -23,7 +23,8 @@ type Handler = tuple[CmdBuilder, OutputFormatter]
 # --- [CONSTANTS] --------------------------------------------------------------
 @dataclass(frozen=True, slots=True)
 class _B:
-    npx: str = "npx"
+    pnpm: str = "pnpm"
+    exec: str = "exec"
     nx: str = "nx"
     tsx: str = "tsx"
     show: str = "show"
@@ -36,6 +37,7 @@ class _B:
     token_script: str = "tools/scripts/count-tokens.ts"
     cwd_env: str = "CLAUDE_PROJECT_DIR"
     failed_suffix: str = " failed"
+    daemon_env: str = "NX_DAEMON"
 
 
 B: Final[_B] = _B()
@@ -160,16 +162,17 @@ def _validate_args(cmd: str, args: Args) -> list[str]:
 # --- [DISPATCH_TABLES] --------------------------------------------------------
 handlers: dict[str, Handler] = {
     "workspace": (
-        lambda _: (B.npx, B.nx, B.show, "projects", "--json"),
+        lambda _: (B.pnpm, B.exec, B.nx, B.show, "projects", "--json"),
         lambda o, _: {"projects": json.loads(o)},
     ),
     "project": (
-        lambda a: (B.npx, B.nx, B.show, "project", a.get("name") or "", "--json"),
+        lambda a: (B.pnpm, B.exec, B.nx, B.show, "project", a.get("name") or "", "--json"),
         lambda o, a: {"name": a.get("name", ""), "project": json.loads(o)},
     ),
     "affected": (
         lambda a: (
-            B.npx,
+            B.pnpm,
+            B.exec,
             B.nx,
             B.show,
             "projects",
@@ -183,14 +186,14 @@ handlers: dict[str, Handler] = {
         },
     ),
     "run": (
-        lambda a: (B.npx, B.nx, B.run_many, "-t", a.get("target") or B.target),
+        lambda a: (B.pnpm, B.exec, B.nx, B.run_many, "-t", a.get("target") or B.target),
         lambda o, a: {
             "target": a.get("target") or B.target,
             "output": o.strip(),
         },
     ),
     "tokens": (
-        lambda a: (B.npx, B.tsx, B.token_script, a.get("path") or "."),
+        lambda a: (B.pnpm, B.exec, B.tsx, B.token_script, a.get("path") or "."),
         lambda o, a: {
             "path": a.get("path") or ".",
             "output": o.strip(),
@@ -201,11 +204,11 @@ handlers: dict[str, Handler] = {
         lambda o, _: {"path": o},
     ),
     "generators": (
-        lambda _: (B.npx, B.nx, "list"),
+        lambda _: (B.pnpm, B.exec, B.nx, "list"),
         lambda o, _: {"generators": o.strip()},
     ),
     "schema": (
-        lambda a: (B.npx, B.nx, "g", a.get("generator") or "", "--help"),
+        lambda a: (B.pnpm, B.exec, B.nx, "g", a.get("generator") or "", "--help"),
         lambda o, a: {
             "generator": a.get("generator", ""),
             "schema": o.strip(),
@@ -213,7 +216,8 @@ handlers: dict[str, Handler] = {
     ),
     "graph": (
         lambda a: (
-            B.npx,
+            B.pnpm,
+            B.exec,
             B.nx,
             "graph",
             f"{B.file_prefix}{a.get('output') or B.output}",
@@ -222,9 +226,9 @@ handlers: dict[str, Handler] = {
     ),
     "docs": (
         lambda a: (
-            (B.npx, B.nx, a.get("topic", ""), "--help")
+            (B.pnpm, B.exec, B.nx, a.get("topic", ""), "--help")
             if a.get("topic")
-            else (B.npx, B.nx, "--help")
+            else (B.pnpm, B.exec, B.nx, "--help")
         ),
         lambda o, a: {
             "topic": a.get("topic") or "general",
@@ -271,12 +275,13 @@ def main() -> int:
 
     builder, formatter = handlers[cmd]
     cmd_tuple = builder(opts)
+    env = {**os.environ, B.daemon_env: "false"}
 
     match cmd_tuple:
         case str():
             output = cmd_tuple
         case tuple() if (
-            r := subprocess.run(cmd_tuple, capture_output=True, text=True)
+            r := subprocess.run(cmd_tuple, capture_output=True, text=True, env=env)
         ).returncode == 0:
             output = r.stdout or r.stderr
         case _:

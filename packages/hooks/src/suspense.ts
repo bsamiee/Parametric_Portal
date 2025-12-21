@@ -1,5 +1,5 @@
 /**
- * Suspense hooks bridging React 19 use() with Effect execution (experimental).
+ * Bridge React 19 use() with Effect execution for Suspense integration.
  */
 
 import { Cause, type Effect, Exit, type ManagedRuntime } from 'effect';
@@ -113,13 +113,12 @@ const createSuspenseHooks = <R, E>(
         const runtime = useRuntime();
         const cacheRef = useRef<CacheEntry<A, Err> | null>(null);
 
-        // Initialize cache - separate assignment from expression
+        // Nullish coalescing preserves cache identity across renders
         cacheRef.current ??= createCacheEntry<A, Err>();
         const cache = cacheRef.current;
 
         const getOrCreatePromise = (): Promise<A> => cache.promise ?? createPromiseFromEffect(effect, runtime, cache);
 
-        // Handle resolved/rejected states directly, suspend for idle/pending
         const throwIfRejected = (): void => {
             cache.status === B.status.rejected &&
                 (() => {

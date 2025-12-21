@@ -1,15 +1,36 @@
 /**
  * Form control components: render button, checkbox, input, radio, switch, textarea.
  * Uses B.ctrl, utilities, stateCls, resolve from schema.ts with React Aria accessibility.
+ * Tooltips use unified useTooltipState + renderTooltipPortal from schema.ts.
  */
 import { Slot } from '@radix-ui/react-slot';
-import type { CSSProperties, ForwardedRef, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from 'react';
-import { createElement, forwardRef, useMemo } from 'react';
+import type {
+    CSSProperties,
+    ForwardedRef,
+    ForwardRefExoticComponent,
+    InputHTMLAttributes,
+    ReactNode,
+    RefAttributes,
+    TextareaHTMLAttributes,
+} from 'react';
+import { createElement, forwardRef, useMemo, useRef } from 'react';
 import type { AriaButtonOptions, AriaSwitchProps } from 'react-aria';
 import { mergeProps, useButton, useFocusRing, useHover, useSwitch } from 'react-aria';
 import { useToggleState } from 'react-stately';
-import type { Inputs, TuningFor } from './schema.ts';
-import { B, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
+import type { Inputs, TooltipSide, TuningFor } from './schema.ts';
+import {
+    B,
+    computeOffsetPx,
+    merged,
+    pick,
+    renderTooltipPortal,
+    resolve,
+    stateCls,
+    TUNING_KEYS,
+    useForwardedRef,
+    useTooltipState,
+    utilities,
+} from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -21,6 +42,8 @@ type ButtonProps = AriaButtonOptions<'button'> & {
     readonly className?: string;
     readonly leftIcon?: ReactNode;
     readonly rightIcon?: ReactNode;
+    readonly tooltip?: string;
+    readonly tooltipSide?: TooltipSide;
     readonly variant?: ButtonVariant;
 };
 type InputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'disabled'> & {
@@ -41,35 +64,70 @@ type ControlInput<T extends ControlType = 'button'> = {
     readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
+type ControlsApi = Readonly<{
+    Button: ForwardRefExoticComponent<ButtonProps & RefAttributes<HTMLButtonElement>>;
+    Checkbox: ForwardRefExoticComponent<InputProps & RefAttributes<HTMLInputElement>>;
+    create: <T extends ControlType>(input: ControlInput<T>) => ForwardRefExoticComponent<RefAttributes<unknown>>;
+    Input: ForwardRefExoticComponent<InputProps & RefAttributes<HTMLInputElement>>;
+    Radio: ForwardRefExoticComponent<InputProps & RefAttributes<HTMLInputElement>>;
+    Switch: ForwardRefExoticComponent<SwitchProps & RefAttributes<HTMLInputElement>>;
+    Textarea: ForwardRefExoticComponent<TextareaProps & RefAttributes<HTMLTextAreaElement>>;
+}>;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const { base, h, px, py, fs, r, g } = B.ctrl.var;
-const baseCls = (fw?: boolean): string => utilities.cls(base, h, px, py, fs, r, g, fw ? 'w-full' : 'w-auto');
+const { base, h, px, py, fs, r, g, wFull, wAuto } = B.ctrl.var;
+const baseCls = (fw?: boolean): string => utilities.cls(base, h, px, py, fs, r, g, fw ? wFull : wAuto);
 
 const createButtonControl = (input: ControlInput<'button'>) => {
     const behavior = resolve('behavior', input.behavior);
     const scale = resolve('scale', input.scale);
-    const vars = utilities.cssVars(utilities.computeScale(scale), 'ctrl');
+    const computed = utilities.computeScale(scale);
+    const vars = utilities.cssVars(computed, 'ctrl');
     const base = utilities.cls(baseCls(input.fullWidth), stateCls.ctrl(behavior), input.className);
+    const tooltipOffsetPx = computeOffsetPx(scale, B.algo.tooltipOffMul);
+
     const Component = forwardRef((props: ButtonProps, fRef: ForwardedRef<HTMLButtonElement>) => {
-        const { asChild, children, className, leftIcon, rightIcon, variant = 'default', ...aria } = props;
+        const {
+            asChild,
+            children,
+            className,
+            leftIcon,
+            rightIcon,
+            tooltip,
+            tooltipSide = 'top',
+            variant = 'default',
+            ...aria
+        } = props;
         const ref = useForwardedRef(fRef);
-        const { buttonProps, isPressed } = useButton(
-            { ...aria, isDisabled: behavior.disabled || behavior.loading },
-            ref,
-        );
-        const { hoverProps, isHovered } = useHover({ isDisabled: behavior.disabled || behavior.loading });
+        const triggerRef = useRef<HTMLButtonElement>(null);
+        const isDisabled = behavior.disabled || behavior.loading;
+
+        const { buttonProps, isPressed } = useButton({ ...aria, isDisabled }, ref);
+        const { hoverProps, isHovered } = useHover({ isDisabled });
         const { focusProps, isFocusVisible } = useFocusRing();
-        const mergedProps = mergeProps(buttonProps, hoverProps, focusProps, {
+
+        const tooltipState = useTooltipState(triggerRef, {
+            ...(tooltip !== undefined && { content: tooltip }),
+            isDisabled,
+            offsetPx: tooltipOffsetPx,
+            side: tooltipSide,
+        });
+
+        const mergedProps = mergeProps(buttonProps, hoverProps, focusProps, tooltip ? tooltipState.triggerProps : {}, {
             className: utilities.cls(base, B.ctrl.variant[variant], className),
             'data-focus': isFocusVisible || undefined,
             'data-hover': isHovered || undefined,
             'data-pressed': isPressed || undefined,
             'data-variant': variant,
-            ref,
+            ref: (node: HTMLButtonElement | null) => {
+                (ref as { current: HTMLButtonElement | null }).current = node;
+                (triggerRef as { current: HTMLButtonElement | null }).current = node;
+                tooltipState.refs.setReference(node);
+            },
             style: vars as CSSProperties,
         });
+
         const content = createElement(
             'span',
             { className: utilities.cls('inline-flex items-center', B.ctrl.var.g) },
@@ -77,21 +135,33 @@ const createButtonControl = (input: ControlInput<'button'>) => {
             children,
             rightIcon,
         );
-        return (asChild ?? input.asChild)
-            ? createElement(Slot, mergedProps, content)
-            : createElement('button', { ...mergedProps, type: 'button' }, content);
+
+        const buttonEl =
+            (asChild ?? input.asChild)
+                ? createElement(Slot, mergedProps, content)
+                : createElement('button', { ...mergedProps, type: 'button' }, content);
+
+        return createElement(
+            'span',
+            { className: 'relative inline-flex' },
+            buttonEl,
+            renderTooltipPortal(tooltipState),
+        );
     });
+
     Component.displayName = 'Ctrl(button)';
     return Component;
 };
 
 type InputHtmlType = 'checkbox' | 'radio' | 'text';
-const inputTypeMap: Readonly<Record<string, InputHtmlType>> = {
+const inputTypeMap = {
+    button: 'text',
     checkbox: 'checkbox',
     input: 'text',
     radio: 'radio',
+    switch: 'text',
     textarea: 'text',
-};
+} as const satisfies Readonly<Record<ControlType, InputHtmlType>>;
 
 const createInputControl = <T extends ControlType>(input: ControlInput<T>) => {
     const controlType = input.type ?? 'input';
@@ -99,7 +169,7 @@ const createInputControl = <T extends ControlType>(input: ControlInput<T>) => {
     const htmlType = inputTypeMap[controlType] ?? 'text';
     const base = utilities.cls(
         baseCls(input.fullWidth),
-        'border border-current/20 bg-transparent',
+        B.ctrl.var.inputBorder,
         isTextarea ? 'resize-y min-h-16' : undefined,
         input.className,
     );
@@ -193,19 +263,28 @@ const create = <T extends ControlType>(input: ControlInput<T>) =>
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createControls = (tuning?: TuningFor<'ctrl'>) =>
+const createControls = (tuning?: TuningFor<'ctrl'>): ControlsApi =>
     Object.freeze({
-        Button: create({ type: 'button', ...pick(tuning, TUNING_KEYS.ctrl) }),
-        Checkbox: create({ type: 'checkbox', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Button: createButtonControl({ type: 'button', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Checkbox: createInputControl<'checkbox'>({ type: 'checkbox', ...pick(tuning, TUNING_KEYS.ctrl) }),
         create: <T extends ControlType>(input: ControlInput<T>) =>
             create({ ...input, ...merged(tuning, input, TUNING_KEYS.ctrl) }),
-        Input: create({ type: 'input', ...pick(tuning, TUNING_KEYS.ctrl) }),
-        Radio: create({ type: 'radio', ...pick(tuning, TUNING_KEYS.ctrl) }),
-        Switch: create({ type: 'switch', ...pick(tuning, TUNING_KEYS.ctrl) }),
-        Textarea: create({ type: 'textarea', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Input: createInputControl<'input'>({ type: 'input', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Radio: createInputControl<'radio'>({ type: 'radio', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Switch: createSwitchControl({ type: 'switch', ...pick(tuning, TUNING_KEYS.ctrl) }),
+        Textarea: createInputControl<'textarea'>({ type: 'textarea', ...pick(tuning, TUNING_KEYS.ctrl) }),
     });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { createControls };
-export type { ButtonProps, ButtonVariant, ControlInput, ControlType, InputProps, SwitchProps, TextareaProps };
+export type {
+    ButtonProps,
+    ButtonVariant,
+    ControlInput,
+    ControlsApi,
+    ControlType,
+    InputProps,
+    SwitchProps,
+    TextareaProps,
+};

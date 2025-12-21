@@ -1,16 +1,35 @@
 /**
- * Overlay components: render dialog, drawer, modal, popover, sheet, tooltip.
+ * Overlay components: render dialog, drawer, modal, popover, sheet.
  * Uses B.ov, utilities, animStyle from schema.ts with React Aria focus management.
+ * Tooltips use unified useTooltipState + renderTooltipPortal from schema.ts.
  */
-import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
-import { createElement, forwardRef, useEffect, useState } from 'react';
+import type {
+    CSSProperties,
+    ForwardedRef,
+    ForwardRefExoticComponent,
+    HTMLAttributes,
+    ReactNode,
+    RefAttributes,
+} from 'react';
+import { createElement, forwardRef, useLayoutEffect } from 'react';
 import { FocusScope, useDialog, useModal, useOverlay, usePreventScroll } from 'react-aria';
 import type { Inputs, Resolved, TuningFor } from './schema.ts';
-import { animStyle, B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
+import {
+    animStyle,
+    B,
+    computeOffsetPx,
+    merged,
+    pick,
+    resolve,
+    TUNING_KEYS,
+    useForwardedRef,
+    useTooltipPosition,
+    utilities,
+} from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type OverlayType = 'dialog' | 'drawer' | 'modal' | 'popover' | 'sheet' | 'tooltip';
+type OverlayType = 'dialog' | 'drawer' | 'modal' | 'popover' | 'sheet';
 type Position = 'bottom' | 'left' | 'right' | 'top';
 type BaseProps = HTMLAttributes<HTMLDivElement> & {
     readonly children?: ReactNode;
@@ -21,12 +40,12 @@ type ModalSize = keyof typeof B.ov.size;
 type ModalProps = BaseProps & { readonly size?: ModalSize; readonly title?: string };
 type DialogProps = ModalProps & {
     readonly cancelLabel?: string;
+    readonly confirmDisabled?: boolean;
     readonly confirmLabel?: string;
     readonly onConfirm?: () => void;
 };
 type DrawerProps = BaseProps & { readonly position?: Position };
 type PopoverProps = BaseProps & { readonly triggerRef: React.RefObject<HTMLElement> };
-type TooltipProps = Omit<BaseProps, 'onClose'> & { readonly triggerRef: React.RefObject<HTMLElement> };
 type OverlayInput<T extends OverlayType = 'modal'> = {
     readonly animation?: Inputs['animation'] | undefined;
     readonly className?: string;
@@ -34,6 +53,20 @@ type OverlayInput<T extends OverlayType = 'modal'> = {
     readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
+type OverlayComponentMap = {
+    readonly dialog: ForwardRefExoticComponent<DialogProps & RefAttributes<HTMLDivElement>>;
+    readonly drawer: ForwardRefExoticComponent<DrawerProps & RefAttributes<HTMLDivElement>>;
+    readonly modal: ForwardRefExoticComponent<ModalProps & RefAttributes<HTMLDivElement>>;
+    readonly popover: ForwardRefExoticComponent<PopoverProps & RefAttributes<HTMLDivElement>>;
+    readonly sheet: ForwardRefExoticComponent<DrawerProps & RefAttributes<HTMLDivElement>>;
+};
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const overlayCls = {
+    content: utilities.cls(B.ov.var.r, B.ov.var.px, B.ov.var.py),
+    radius: B.ov.var.r,
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -65,9 +98,11 @@ const createModalComponent = (
                 ...modalProps,
                 ...dialogProps,
                 className: utilities.cls(
-                    'w-full shadow-xl max-h-[90vh] overflow-y-auto',
+                    B.ov.modal.content,
+                    B.ov.modal.shadow,
+                    B.ov.modal.maxH,
+                    overlayCls.radius,
                     B.ov.size[size],
-                    B.ov.var.r,
                     input.className,
                     className,
                 ),
@@ -79,7 +114,7 @@ const createModalComponent = (
                       'div',
                       {
                           ...titleProps,
-                          className: utilities.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py),
+                          className: utilities.cls(B.ov.title.base, B.ov.title.font, B.ov.var.px, B.ov.var.py),
                       },
                       title,
                   )
@@ -91,7 +126,7 @@ const createModalComponent = (
                   'div',
                   {
                       ...underlayProps,
-                      className: utilities.cls('fixed inset-0 flex items-center justify-center', B.ov.backdrop),
+                      className: utilities.cls(B.ov.modal.underlay, B.ov.backdrop),
                       style: utilities.zStyle(overlay, true),
                   },
                   createFocusScope({ autoFocus: true, contain: overlay.trapFocus, restoreFocus: true }, content),
@@ -111,6 +146,7 @@ const createDialogComponent = (
             cancelLabel = 'Cancel',
             children,
             className,
+            confirmDisabled = false,
             confirmLabel = 'Confirm',
             isOpen,
             onClose,
@@ -136,9 +172,11 @@ const createDialogComponent = (
                 ...modalProps,
                 ...dialogProps,
                 className: utilities.cls(
-                    'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-xl w-full overflow-hidden',
+                    B.ov.dialog.pos,
+                    B.ov.modal.shadow,
+                    'w-full',
+                    overlayCls.radius,
                     B.ov.size[size],
-                    B.ov.var.r,
                     input.className,
                     className,
                 ),
@@ -151,7 +189,7 @@ const createDialogComponent = (
                       'div',
                       {
                           ...titleProps,
-                          className: utilities.cls('border-b font-semibold text-lg', B.ov.var.px, B.ov.var.py),
+                          className: utilities.cls(B.ov.title.base, B.ov.title.font, B.ov.var.px, B.ov.var.py),
                       },
                       title,
                   )
@@ -159,7 +197,7 @@ const createDialogComponent = (
             createElement('div', { className: utilities.cls(B.ov.var.px, B.ov.var.py) }, children),
             createElement(
                 'div',
-                { className: utilities.cls('border-t flex justify-end gap-3', B.ov.var.px, B.ov.var.py) },
+                { className: utilities.cls(B.ov.dialog.footer, B.ov.var.px, B.ov.var.py) },
                 createElement(
                     'button',
                     { className: 'px-4 py-2 rounded border', onClick: onClose, type: 'button' },
@@ -168,7 +206,15 @@ const createDialogComponent = (
                 onConfirm
                     ? createElement(
                           'button',
-                          { className: 'px-4 py-2 rounded', onClick: onConfirm, type: 'button' },
+                          {
+                              className: utilities.cls(
+                                  'px-4 py-2 rounded',
+                                  confirmDisabled && 'opacity-50 cursor-not-allowed',
+                              ),
+                              disabled: confirmDisabled,
+                              onClick: onConfirm,
+                              type: 'button',
+                          },
                           confirmLabel,
                       )
                     : null,
@@ -179,7 +225,7 @@ const createDialogComponent = (
                   'div',
                   {
                       ...underlayProps,
-                      className: utilities.cls('fixed inset-0', B.ov.backdrop),
+                      className: utilities.cls(B.ov.pos.fixed, B.ov.backdrop),
                       style: utilities.zStyle(overlay, true),
                   },
                   createFocusScope({ autoFocus: true, contain: overlay.trapFocus, restoreFocus: true }, content),
@@ -211,10 +257,12 @@ const createDrawerComponent = (
                 ...overlayProps,
                 ...modalProps,
                 className: utilities.cls(
-                    'fixed shadow-xl overflow-hidden',
+                    'fixed',
+                    B.ov.modal.shadow,
+                    B.ov.popover.base,
+                    overlayCls.radius,
                     B.ov.pos[position],
                     isHorizontal ? 'h-full' : 'w-full',
-                    B.ov.var.r,
                     input.className,
                     className,
                 ),
@@ -232,7 +280,7 @@ const createDrawerComponent = (
                   'div',
                   {
                       ...underlayProps,
-                      className: utilities.cls('fixed inset-0', B.ov.backdrop),
+                      className: utilities.cls(B.ov.pos.fixed, B.ov.backdrop),
                       style: utilities.zStyle(overlay, true),
                   },
                   createFocusScope({ autoFocus: true, contain: overlay.trapFocus, restoreFocus: true }, content),
@@ -251,16 +299,14 @@ const createPopoverComponent = (
         const { children, className, isOpen, onClose, style, triggerRef, ...rest } = props;
         const ref = useForwardedRef(fRef);
         const { overlayProps } = useOverlay({ isDismissable: overlay.closeOnOutsideClick, isOpen, onClose }, ref);
-        const [position, setPosition] = useState({ left: 0, top: 0 });
-        const offsetPx = Math.round(scale.scale * B.algo.popoverOffMul * scale.density * scale.baseUnit * 4 * 16);
-        useEffect(() => {
-            const trigger = triggerRef.current;
-            setPosition(
-                trigger
-                    ? { left: trigger.offsetLeft, top: trigger.offsetTop + trigger.offsetHeight + offsetPx }
-                    : { left: 0, top: 0 },
-            );
-        }, [triggerRef, offsetPx]);
+        const offsetPx = computeOffsetPx(scale, B.algo.popoverOffMul);
+        const { floatingStyles, refs } = useTooltipPosition(isOpen, 'bottom', offsetPx);
+
+        // Sync trigger ref with floating-ui reference
+        useLayoutEffect(() => {
+            triggerRef.current && refs.setReference(triggerRef.current);
+        }, [triggerRef, refs]);
+
         return isOpen
             ? createElement(
                   'div',
@@ -268,52 +314,20 @@ const createPopoverComponent = (
                       ...rest,
                       ...overlayProps,
                       className: utilities.cls(
-                          'absolute shadow-lg border overflow-hidden',
-                          B.ov.var.r,
+                          B.ov.popover.shadow,
+                          B.ov.popover.border,
+                          B.ov.popover.base,
+                          overlayCls.radius,
                           input.className,
                           className,
                       ),
-                      ref,
-                      style: { ...vars, ...utilities.zStyle(overlay), ...position, ...style } as CSSProperties,
+                      ref: (node: HTMLDivElement | null) => {
+                          (ref as { current: HTMLDivElement | null }).current = node;
+                          refs.setFloating(node);
+                      },
+                      style: { ...vars, ...utilities.zStyle(overlay), ...floatingStyles, ...style } as CSSProperties,
                   },
                   createElement('div', { className: utilities.cls(B.ov.var.px, B.ov.var.py) }, children),
-              )
-            : null;
-    });
-
-const createTooltipComponent = (
-    input: OverlayInput<'tooltip'>,
-    _vars: Record<string, string>,
-    overlay: Resolved['overlay'],
-    _animation: Resolved['animation'],
-    scale: Resolved['scale'],
-) =>
-    forwardRef((props: TooltipProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { children, className, isOpen, style, triggerRef, ...rest } = props;
-        const ref = useForwardedRef(fRef);
-        const [position, setPosition] = useState({ left: 0, top: 0 });
-        const offsetPx = Math.round(scale.scale * B.algo.tooltipOffMul * scale.density * scale.baseUnit * 4 * 16);
-        useEffect(() => {
-            const trigger = triggerRef.current;
-            setPosition(
-                trigger ? { left: trigger.offsetLeft, top: trigger.offsetTop - offsetPx } : { left: 0, top: 0 },
-            );
-        }, [triggerRef, offsetPx]);
-        return isOpen
-            ? createElement(
-                  'div',
-                  {
-                      ...rest,
-                      className: utilities.cls(
-                          'absolute text-xs px-2 py-1 rounded shadow-lg pointer-events-none',
-                          input.className,
-                          className,
-                      ),
-                      ref,
-                      role: 'tooltip',
-                      style: { ...utilities.zStyle(overlay), ...position, ...style } as CSSProperties,
-                  },
-                  children,
               )
             : null;
     });
@@ -326,10 +340,9 @@ const builderHandlers = {
     modal: createModalComponent,
     popover: createPopoverComponent,
     sheet: createDrawerComponent,
-    tooltip: createTooltipComponent,
 } as const;
 
-const createOverlayComponent = <T extends OverlayType>(input: OverlayInput<T>) => {
+const createOverlayComponent = <T extends OverlayType>(input: OverlayInput<T>): OverlayComponentMap[T] => {
     const scale = resolve('scale', input.scale);
     const overlay = resolve(
         'overlay',
@@ -346,7 +359,7 @@ const createOverlayComponent = <T extends OverlayType>(input: OverlayInput<T>) =
             overlay: Resolved['overlay'],
             animation: Resolved['animation'],
             scale: Resolved['scale'],
-        ) => ReturnType<typeof forwardRef>
+        ) => OverlayComponentMap[T]
     )(input, vars, overlay, animation, scale);
     component.displayName = `Overlay(${input.type ?? 'modal'})`;
     return component;
@@ -367,7 +380,6 @@ const createOverlays = (tuning?: TuningFor<'ov'>) =>
             ...pick(tuning, ['animation', 'scale']),
             overlay: { ...tuning?.overlay, position: 'bottom' },
         }),
-        Tooltip: createOverlayComponent({ type: 'tooltip', ...pick(tuning, ['scale']) }),
     });
 
 // --- [EXPORT] ----------------------------------------------------------------
@@ -383,5 +395,4 @@ export type {
     OverlayType,
     PopoverProps,
     Position,
-    TooltipProps,
 };

@@ -5,6 +5,7 @@
         "allowUnusedLabels": false,
         "assumeChangesOnlyAffectDirectDependencies": true,
         "composite": true,
+        "customConditions": ["types", "import"],
         "declaration": true,
         "declarationMap": true,
         "emitDeclarationOnly": false,

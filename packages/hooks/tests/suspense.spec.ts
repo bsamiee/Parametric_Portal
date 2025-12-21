@@ -1,11 +1,11 @@
 /**
- * Tests for suspense hooks factory.
+ * Validate suspense hooks factory behavior.
  */
 import { describe, expect, it } from 'vitest';
-import { createRuntimeHooks } from '../src/runtime.ts';
+import { createRuntimeHooks } from '../src/runtime.tsx';
 import { createSuspenseHooks, SUSPENSE_HOOKS_TUNING } from '../src/suspense.ts';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('suspense', () => {
     describe('SUSPENSE_HOOKS_TUNING', () => {

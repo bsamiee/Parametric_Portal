@@ -2,14 +2,12 @@
     "extends": "./tsconfig.base.json",
     "files": [],
     "references": [
-        {
-            "path": "./packages/theme"
-        },
-        {
-            "path": "./packages/types"
-        },
-        {
-            "path": "./tools"
-        }
+        { "path": "./packages/theme" },
+        { "path": "./packages/types" },
+        { "path": "./packages/devtools" },
+        { "path": "./tools" },
+        { "path": "./apps/parametric_icons" },
+        { "path": "./packages/components" },
+        { "path": "./packages/hooks" }
     ]
 }

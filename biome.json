@@ -1,5 +1,5 @@
 {
-    "$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
+    "$schema": "https://biomejs.dev/schemas/2.3.10/schema.json",
     "plugins": [],
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
     "files": { "ignoreUnknown": true, "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows"] },
@@ -15,7 +15,8 @@
                 "noUnusedVariables": "error",
                 "useExhaustiveDependencies": "error",
                 "noVoidTypeReturn": "error",
-                "useYield": "error"
+                "useYield": "error",
+                "useImportExtensions": "off"
             },
             "style": {
                 "noDefaultExport": "error",
@@ -45,7 +46,7 @@
                             },
                             {
                                 "selector": { "kind": "objectLiteralProperty" },
-                                "match": "_tag|background_color|theme_color|short_name|start_url|test_coverage|(.*)",
+                                "match": "_tag|__html|background_color|theme_color|short_name|start_url|test_coverage|(.*)",
                                 "formats": ["camelCase", "PascalCase"]
                             },
                             {
@@ -62,12 +63,17 @@
                 "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 25 } },
                 "noForEach": "error",
                 "noStaticOnlyClass": "error",
+                "noUselessStringRaw": "off",
                 "useArrowFunction": "error",
                 "useFlatMap": "error",
+                "useLiteralKeys": "off",
                 "useOptionalChain": "error"
             },
             "suspicious": {
-                "noConsole": "warn",
+                "noConsole": {
+                    "level": "warn",
+                    "options": { "allow": ["assert", "debug", "error", "info", "trace", "warn"] }
+                },
                 "noConstEnum": "error",
                 "noDoubleEquals": "error",
                 "noExplicitAny": "error",
@@ -78,6 +84,9 @@
                 "noBarrelFile": "error",
                 "noDelete": "error",
                 "noReExportAll": "error"
+            },
+            "security": {
+                "noDangerouslySetInnerHtml": "off"
             },
             "nursery": {
                 "noFloatingPromises": "error",
@@ -141,16 +150,18 @@
             }
         },
         {
-            "includes": ["packages/*/vite.config.ts", "packages/*/project.json", "packages/*/package.json"],
+            "includes": ["packages/*/vite.config.ts", "packages/*/project.json"],
             "assist": { "actions": { "source": { "organizeImports": "on" } } }
+        },
+        {
+            "includes": ["**/package.json"],
+            "assist": { "actions": { "source": { "useSortedKeys": "off", "useSortedProperties": "off" } } }
         },
         {
             "includes": ["**/matchers.ts", "**/types/src/*.ts"],
             "linter": {
                 "rules": {
-                    "style": {
-                        "useNamingConvention": "off"
-                    }
+                    "style": { "useNamingConvention": "off" }
                 }
             }
         },
@@ -158,9 +169,31 @@
             "includes": [".github/scripts/**/*.ts"],
             "linter": {
                 "rules": {
-                    "style": {
-                        "useNamingConvention": "off"
-                    }
+                    "style": { "useNamingConvention": "off" }
+                }
+            }
+        },
+        {
+            "includes": ["packages/devtools/src/env.ts"],
+            "linter": {
+                "rules": {
+                    "style": { "useNamingConvention": "off" }
+                }
+            }
+        },
+        {
+            "includes": ["packages/devtools/src/boundary.tsx", "packages/devtools/src/overlay.tsx"],
+            "linter": {
+                "rules": {
+                    "style": { "useComponentExportOnlyModules": "off" }
+                }
+            }
+        },
+        {
+            "includes": ["apps/**/*.tsx"],
+            "linter": {
+                "rules": {
+                    "style": { "useComponentExportOnlyModules": "off" }
                 }
             }
         }

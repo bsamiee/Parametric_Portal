@@ -2,17 +2,31 @@
  * Selection components: render combobox, menu, select with filtering and sections.
  * Uses B, utilities, animStyle, createBuilderContext from schema.ts with React Stately state.
  */
-import type { CSSProperties, FC, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
-import { createElement, forwardRef, useRef } from 'react';
+
+import { Check } from 'lucide-react';
+import type {
+    CSSProperties,
+    FC,
+    ForwardedRef,
+    ForwardRefExoticComponent,
+    HTMLAttributes,
+    ReactNode,
+    RefAttributes,
+} from 'react';
+import { createElement, forwardRef, useLayoutEffect, useRef, useState } from 'react';
 import {
+    DismissButton,
+    FocusScope,
     useButton,
     useComboBox,
     useFilter,
     useHiddenSelect,
+    useListBox,
     useMenu,
     useMenuItem,
     useMenuTrigger,
     useOption,
+    useOverlay,
     useSelect,
 } from 'react-aria';
 import type { Selection as AriaSelection, Key, ListState, Node, TreeState } from 'react-stately';
@@ -32,12 +46,13 @@ import {
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type SelectionType = 'combobox' | 'menu' | 'select';
+type SelectionType = 'combobox' | 'context' | 'menu' | 'select';
 type ItemData = { readonly disabled?: boolean; readonly key: Key; readonly label: ReactNode };
 type SectionData = { readonly items: ReadonlyArray<ItemData>; readonly key: Key; readonly title?: ReactNode };
 type MenuProps = HTMLAttributes<HTMLDivElement> & {
     readonly disabledKeys?: Iterable<Key>;
     readonly items: ReadonlyArray<ItemData | SectionData>;
+    readonly label?: string;
     readonly onAction?: (key: Key) => void;
     readonly onClose?: () => void;
     readonly onSelectionChange?: (keys: AriaSelection) => void;
@@ -70,11 +85,24 @@ type ComboboxProps = HTMLAttributes<HTMLDivElement> & {
     readonly placeholder?: string;
     readonly selectedKey?: Key | null;
 };
+type ContextOptionData = { readonly icon?: ReactNode; readonly key: Key; readonly label: string };
+type ContextSelectorProps = HTMLAttributes<HTMLDivElement> & {
+    readonly label: string;
+    readonly onChange: (key: Key) => void;
+    readonly options: ReadonlyArray<ContextOptionData>;
+    readonly value: Key;
+};
 type SelectionInput<T extends SelectionType = 'menu'> = {
     readonly className?: string;
     readonly scale?: Inputs['scale'];
     readonly type?: T;
 } & Partial<TuningFor<'menu'>>;
+type SelectionComponentMap = {
+    readonly combobox: ForwardRefExoticComponent<ComboboxProps & RefAttributes<HTMLDivElement>>;
+    readonly context: ForwardRefExoticComponent<ContextSelectorProps & RefAttributes<HTMLDivElement>>;
+    readonly menu: ForwardRefExoticComponent<MenuProps & RefAttributes<HTMLDivElement>>;
+    readonly select: ForwardRefExoticComponent<SelectProps & RefAttributes<HTMLDivElement>>;
+};
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -85,16 +113,24 @@ const Option = <T>({ item, state }: OptionProps<T>) => {
     const { isDisabled, isFocused, isSelected, optionProps } = useOption({ key: item.key }, state, ref);
     return createElement(
         'li',
-        merge(
-            optionProps,
-            B.menu.item.base,
-            B.menu.var.itemH,
-            B.menu.var.itemPx,
-            B.menu.var.itemPy,
-            isDisabled && B.menu.item.disabled,
-            isFocused && B.menu.item.hover,
-            isSelected && B.menu.item.selected,
-        ),
+        {
+            ...merge(
+                optionProps,
+                B.menu.item.base,
+                B.menu.var.itemR,
+                B.menu.var.itemFs,
+                B.menu.var.itemH,
+                B.menu.var.itemPx,
+                B.menu.var.itemPy,
+                B.menu.var.itemText,
+                B.menu.var.itemFocusedBg,
+                B.menu.var.itemSelectedBg,
+                B.menu.var.itemSelectedText,
+                isDisabled && B.menu.item.disabled,
+            ),
+            'data-focused': isFocused || undefined,
+            'data-selected': isSelected || undefined,
+        },
         item.rendered,
     );
 };
@@ -105,6 +141,7 @@ type MenuItemCompProps<T> = {
     readonly onClose: () => void;
     readonly state: TreeState<T>;
 };
+const menuItemCls = 'flex w-full items-center justify-between cursor-pointer outline-none transition-colors';
 const MenuItemComp = <T>({ item, onAction, onClose, state }: MenuItemCompProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLLIElement>(B.menu.item.focus);
     const { isDisabled, isFocused, menuItemProps } = useMenuItem(
@@ -112,18 +149,32 @@ const MenuItemComp = <T>({ item, onAction, onClose, state }: MenuItemCompProps<T
         state,
         ref,
     );
+    const isSelected = state.selectionManager.isSelected(item.key);
     return createElement(
         'li',
-        merge(
-            menuItemProps,
-            B.menu.item.base,
-            B.menu.var.itemH,
-            B.menu.var.itemPx,
-            B.menu.var.itemPy,
-            isDisabled && B.menu.item.disabled,
-            isFocused && B.menu.item.hover,
-        ),
-        item.rendered,
+        {
+            ...merge(
+                menuItemProps,
+                menuItemCls,
+                B.menu.var.itemG,
+                B.menu.var.itemPx,
+                B.menu.var.itemPy,
+                B.menu.var.itemR,
+                B.menu.var.itemFs,
+                B.menu.var.itemText,
+                B.menu.var.itemFocusedBg,
+                B.menu.var.itemSelectedBg,
+                B.menu.var.itemSelectedText,
+                isDisabled && B.menu.item.disabled,
+            ),
+            'data-focused': isFocused || undefined,
+            'data-selected': isSelected || undefined,
+        },
+        createElement('span', { className: utilities.cls('flex items-center', B.menu.var.itemIconG) }, item.rendered),
+        isSelected &&
+            createElement(Check, {
+                className: utilities.cls('shrink-0', B.menu.var.checkColor, B.menu.var.checkSize),
+            }),
     );
 };
 
@@ -133,24 +184,27 @@ type SectionCompProps<T> = {
     readonly section: Node<T>;
     readonly state: TreeState<T>;
 };
+const sectionHeaderCls = utilities.cls(
+    B.menu.section.header,
+    B.menu.var.headerColor,
+    B.menu.var.headerFs,
+    B.menu.var.headerPx,
+    B.menu.var.headerPy,
+);
+const sectionSeparatorCls = utilities.cls(B.menu.section.separator, B.menu.var.separatorBg, B.menu.var.separatorSp);
 const SectionComp = <T>({ onAction, onClose, section, state }: SectionCompProps<T>) =>
     createElement(
         'li',
         { key: section.key },
-        section.rendered &&
-            createElement(
-                'div',
-                { className: utilities.cls(B.menu.section.header, B.menu.var.itemPx, B.menu.var.itemPy) },
-                section.rendered,
-            ),
+        section.rendered && createElement('div', { className: sectionHeaderCls }, section.rendered),
         createElement(
             'ul',
-            null,
+            { className: 'list-none m-0 p-0' },
             [...section.childNodes].map((item) =>
                 createElement(MenuItemComp, { item, key: item.key, onClose, state, ...(onAction && { onAction }) }),
             ),
         ),
-        createElement('div', { className: utilities.cls(B.menu.section.separator, B.menu.var.separatorSp) }),
+        createElement('div', { className: sectionSeparatorCls }),
     );
 
 const isSection = (item: ItemData | SectionData): item is SectionData => 'items' in item;
@@ -180,12 +234,16 @@ const buildSections = (items: ReadonlyArray<ItemData | SectionData>) =>
               }),
     );
 const dropdownCls = utilities.cls(
-    'absolute left-0 w-full shadow-lg border rounded-md overflow-hidden',
+    'absolute overflow-hidden overflow-y-auto list-none m-0 min-w-fit',
+    B.menu.var.dropdownPos,
+    B.menu.var.dropdownBg,
+    B.menu.var.dropdownR,
+    B.menu.var.dropdownShadow,
     B.menu.var.dropdownMaxH,
-    'overflow-y-auto',
+    B.menu.var.dropdownPad,
 );
+const labelCls = utilities.cls('block', B.menu.var.labelMb, B.menu.var.labelFs, B.menu.var.labelFw);
 const baseStyle = (ctx: Ctx, style?: CSSProperties): CSSProperties => ({
-    ...ctx.vars,
     ...animStyle(ctx.animation),
     ...style,
 });
@@ -196,6 +254,7 @@ const createMenuComponent = (input: SelectionInput<'menu'>, ctx: Ctx) =>
             className,
             disabledKeys,
             items,
+            label,
             onAction,
             onClose,
             onSelectionChange,
@@ -207,8 +266,13 @@ const createMenuComponent = (input: SelectionInput<'menu'>, ctx: Ctx) =>
         } = props;
         const ref = useForwardedRef(fRef),
             triggerRef = useRef<HTMLButtonElement>(null),
-            menuRef = useRef<HTMLUListElement>(null);
+            menuRef = useRef<HTMLUListElement>(null),
+            overlayRef = useRef<HTMLDivElement>(null);
+        const [triggerWidth, setTriggerWidth] = useState<number | null>(null);
         const menuState = useMenuTriggerState({});
+        useLayoutEffect(() => {
+            menuState.isOpen && triggerRef.current && setTriggerWidth(triggerRef.current.offsetWidth);
+        }, [menuState.isOpen]);
         const closeHandler = onClose ?? menuState.close;
         const { menuProps: triggerMenuProps, menuTriggerProps } = useMenuTrigger({}, menuState, triggerRef);
         const treeState = useTreeState({
@@ -224,12 +288,16 @@ const createMenuComponent = (input: SelectionInput<'menu'>, ctx: Ctx) =>
             menuRef,
         );
         const { buttonProps } = useButton(menuTriggerProps, triggerRef);
+        const { overlayProps } = useOverlay(
+            { isDismissable: true, isOpen: menuState.isOpen, onClose: closeHandler, shouldCloseOnBlur: true },
+            overlayRef,
+        );
         return createElement(
             'div',
             {
                 ...rest,
                 className: utilities.cls(
-                    'relative inline-block',
+                    'relative inline-block [contain:layout]',
                     stateCls.menu(ctx.behavior),
                     input.className,
                     className,
@@ -241,41 +309,55 @@ const createMenuComponent = (input: SelectionInput<'menu'>, ctx: Ctx) =>
                 'button',
                 {
                     ...buttonProps,
-                    className: utilities.cls(B.menu.trigger.base, B.menu.var.triggerMinW, 'cursor-pointer'),
+                    className: utilities.cls(B.menu.trigger.base, 'cursor-pointer'),
                     'data-state': menuState.isOpen ? 'open' : 'closed',
                     disabled: ctx.behavior.disabled,
                     ref: triggerRef,
                     type: 'button',
                 },
                 trigger,
-                createElement('span', { className: B.menu.trigger.indicator }, '\u25BC'),
             ),
             menuState.isOpen &&
                 createElement(
-                    'ul',
-                    {
-                        ...menuProps,
-                        ...triggerMenuProps,
-                        className: dropdownCls,
-                        ref: menuRef,
-                        style: { ...utilities.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
-                    },
-                    [...treeState.collection].map((item) =>
-                        item.type === 'section'
-                            ? createElement(SectionComp, {
-                                  key: item.key,
-                                  onClose: closeHandler,
-                                  section: item,
-                                  state: treeState,
-                                  ...(onAction && { onAction }),
-                              })
-                            : createElement(MenuItemComp, {
-                                  item,
-                                  key: item.key,
-                                  onClose: closeHandler,
-                                  state: treeState,
-                                  ...(onAction && { onAction }),
-                              }),
+                    FocusScope,
+                    { contain: true, restoreFocus: true } as Parameters<typeof FocusScope>[0],
+                    createElement(
+                        'div',
+                        { ...overlayProps, ref: overlayRef },
+                        createElement(DismissButton, { onDismiss: closeHandler }),
+                        createElement(
+                            'ul',
+                            {
+                                ...menuProps,
+                                ...triggerMenuProps,
+                                className: utilities.cls(dropdownCls, B.menu.var.dropdownGap),
+                                ref: menuRef,
+                                style: {
+                                    ...utilities.zStyle(ctx.overlay),
+                                    top: '100%',
+                                    width: triggerWidth ?? undefined,
+                                },
+                            },
+                            label && createElement('li', { className: sectionHeaderCls }, label),
+                            [...treeState.collection].map((item) =>
+                                item.type === 'section'
+                                    ? createElement(SectionComp, {
+                                          key: item.key,
+                                          onClose: closeHandler,
+                                          section: item,
+                                          state: treeState,
+                                          ...(onAction && { onAction }),
+                                      })
+                                    : createElement(MenuItemComp, {
+                                          item,
+                                          key: item.key,
+                                          onClose: closeHandler,
+                                          state: treeState,
+                                          ...(onAction && { onAction }),
+                                      }),
+                            ),
+                        ),
+                        createElement(DismissButton, { onDismiss: closeHandler }),
                     ),
                 ),
         );
@@ -311,7 +393,7 @@ const createSelectComponent = (input: SelectionInput<'select'>, ctx: Ctx) =>
             ...(selectedKey !== undefined && { selectedKey }),
             ...(onSelectionChange && { onSelectionChange: (k: Key | null) => onSelectionChange(k) }),
         });
-        const { labelProps, menuProps, triggerProps, valueProps } = useSelect(
+        const { labelProps, triggerProps, valueProps } = useSelect(
             {
                 'aria-label': label ? String(label) : 'Select',
                 isDisabled: ctx.behavior.disabled,
@@ -327,12 +409,26 @@ const createSelectComponent = (input: SelectionInput<'select'>, ctx: Ctx) =>
             state,
             triggerRef,
         );
+        const { listBoxProps } = useListBox(
+            { 'aria-label': label ? String(label) : 'Select options' },
+            state,
+            listBoxRef,
+        );
+        const triggerCls = utilities.cls(
+            B.menu.trigger.base,
+            B.menu.var.triggerR,
+            B.menu.var.itemH,
+            B.menu.var.triggerMinW,
+            B.menu.var.itemPx,
+            'border cursor-pointer w-full text-left',
+            isInvalid && 'border-[var(--error-color)]',
+        );
         return createElement(
             'div',
             {
                 ...rest,
                 className: utilities.cls(
-                    'relative inline-block',
+                    'relative inline-flex',
                     stateCls.menu(ctx.behavior),
                     input.className,
                     className,
@@ -340,20 +436,13 @@ const createSelectComponent = (input: SelectionInput<'select'>, ctx: Ctx) =>
                 ref,
                 style: baseStyle(ctx, style),
             },
-            label && createElement('label', { ...labelProps, className: 'block mb-1 text-sm font-medium' }, label),
+            label && createElement('label', { ...labelProps, className: labelCls }, label),
             createElement('input', selectProps),
             createElement(
                 'button',
                 {
                     ...buttonProps,
-                    className: utilities.cls(
-                        B.menu.trigger.base,
-                        B.menu.var.triggerMinW,
-                        B.menu.var.itemH,
-                        B.menu.var.itemPx,
-                        'border rounded-md cursor-pointer w-full text-left',
-                        isInvalid && 'border-red-500',
-                    ),
+                    className: triggerCls,
                     'data-state': state.isOpen ? 'open' : 'closed',
                     disabled: ctx.behavior.disabled,
                     ref: triggerRef,
@@ -370,14 +459,16 @@ const createSelectComponent = (input: SelectionInput<'select'>, ctx: Ctx) =>
                 createElement(
                     'ul',
                     {
-                        ...menuProps,
-                        className: dropdownCls,
+                        ...listBoxProps,
+                        className: utilities.cls(dropdownCls, B.menu.var.dropdownGap),
                         ref: listBoxRef,
-                        style: { ...utilities.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...utilities.zStyle(ctx.overlay), top: '100%' },
                     },
                     [...state.collection].map((item) => createElement(Option, { item, key: item.key, state })),
                 ),
-            isInvalid && errorMessage && createElement('div', { className: 'text-red-500 text-sm mt-1' }, errorMessage),
+            isInvalid &&
+                errorMessage &&
+                createElement('div', { className: 'text-[var(--error-color)] text-sm mt-1' }, errorMessage),
         );
     });
 
@@ -417,7 +508,7 @@ const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
             ...(onInputChange && { onInputChange }),
             ...(onSelectionChange && { onSelectionChange: (k: Key | null) => onSelectionChange(k) }),
         });
-        const { buttonProps, inputProps, labelProps, listBoxProps } = useComboBox(
+        const { buttonProps, inputProps, labelProps } = useComboBox(
             {
                 'aria-label': label ? String(label) : 'Combobox',
                 buttonRef,
@@ -428,12 +519,28 @@ const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
             },
             state,
         );
+        const { listBoxProps } = useListBox(
+            { 'aria-label': label ? String(label) : 'Combobox options' },
+            state,
+            listBoxRef,
+        );
+        const inputCls = utilities.cls(
+            'flex-1 border border-r-0 outline-none rounded-r-none',
+            B.menu.var.triggerR,
+            B.menu.var.itemH,
+            B.menu.var.itemPx,
+        );
+        const buttonCls = utilities.cls(
+            'border cursor-pointer px-2 rounded-l-none',
+            B.menu.var.triggerR,
+            B.menu.var.itemH,
+        );
         return createElement(
             'div',
             {
                 ...rest,
                 className: utilities.cls(
-                    'relative inline-block',
+                    'relative inline-flex',
                     stateCls.menu(ctx.behavior),
                     input.className,
                     className,
@@ -441,17 +548,13 @@ const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
                 ref,
                 style: baseStyle(ctx, style),
             },
-            label && createElement('label', { ...labelProps, className: 'block mb-1 text-sm font-medium' }, label),
+            label && createElement('label', { ...labelProps, className: labelCls }, label),
             createElement(
                 'div',
                 { className: 'flex' },
                 createElement('input', {
                     ...inputProps,
-                    className: utilities.cls(
-                        'flex-1 border border-r-0 rounded-l-md outline-none',
-                        B.menu.var.itemH,
-                        B.menu.var.itemPx,
-                    ),
+                    className: inputCls,
                     disabled: ctx.behavior.disabled,
                     placeholder,
                     ref: inputRef,
@@ -460,7 +563,7 @@ const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
                     'button',
                     {
                         ...buttonProps,
-                        className: utilities.cls('border rounded-r-md cursor-pointer px-2', B.menu.var.itemH),
+                        className: buttonCls,
                         disabled: ctx.behavior.disabled,
                         ref: buttonRef,
                         type: 'button',
@@ -472,14 +575,146 @@ const createComboboxComponent = (input: SelectionInput<'combobox'>, ctx: Ctx) =>
                 createElement(
                     'div',
                     {
-                        className: dropdownCls,
+                        className: utilities.cls(dropdownCls, B.menu.var.dropdownGap),
                         ref: popoverRef,
-                        style: { ...utilities.zStyle(ctx.overlay), marginTop: ctx.computed.dropdownGap, top: '100%' },
+                        style: { ...utilities.zStyle(ctx.overlay), top: '100%' },
                     },
                     createElement(
                         'ul',
                         { ...listBoxProps, className: 'outline-none', ref: listBoxRef },
                         [...state.collection].map((item) => createElement(Option, { item, key: item.key, state })),
+                    ),
+                ),
+        );
+    });
+
+const contextTriggerCls = utilities.cls(
+    'inline-flex items-center cursor-pointer transition-colors',
+    B.menu.var.itemG,
+    B.menu.var.itemPx,
+    B.menu.var.itemPy,
+    B.menu.var.itemR,
+);
+const createContextSelectorComponent = (input: SelectionInput<'context'>, ctx: Ctx) =>
+    forwardRef((props: ContextSelectorProps, fRef: ForwardedRef<HTMLDivElement>) => {
+        const { className, label, onChange, options, style, value, ...rest } = props;
+        const ref = useForwardedRef(fRef),
+            triggerRef = useRef<HTMLButtonElement>(null),
+            menuRef = useRef<HTMLUListElement>(null),
+            overlayRef = useRef<HTMLDivElement>(null);
+        const [triggerWidth, setTriggerWidth] = useState<number | null>(null);
+        const menuState = useMenuTriggerState({});
+        useLayoutEffect(() => {
+            menuState.isOpen && triggerRef.current && setTriggerWidth(triggerRef.current.offsetWidth);
+        }, [menuState.isOpen]);
+        const selected = options.find((o) => o.key === value) ?? options[0];
+        const items = options.map((opt) => ({
+            key: opt.key,
+            label: createElement(
+                'span',
+                { className: utilities.cls('flex items-center', B.menu.var.itemIconG) },
+                opt.icon,
+                opt.label,
+            ),
+        }));
+        const { menuProps: triggerMenuProps, menuTriggerProps } = useMenuTrigger({}, menuState, triggerRef);
+        const treeState = useTreeState({
+            children: buildSections(items),
+            selectedKeys: new Set([value]),
+            selectionMode: 'single',
+        });
+        const { menuProps } = useMenu(
+            { 'aria-label': label, onAction: (key) => onChange(key), onClose: menuState.close },
+            treeState,
+            menuRef,
+        );
+        const { buttonProps } = useButton(menuTriggerProps, triggerRef);
+        const { overlayProps } = useOverlay(
+            { isDismissable: true, isOpen: menuState.isOpen, onClose: menuState.close, shouldCloseOnBlur: true },
+            overlayRef,
+        );
+        return createElement(
+            'div',
+            {
+                ...rest,
+                className: utilities.cls(
+                    'relative inline-block [contain:layout]',
+                    stateCls.menu(ctx.behavior),
+                    input.className,
+                    className,
+                ),
+                ref,
+                style: baseStyle(ctx, style),
+            },
+            createElement(
+                'button',
+                {
+                    ...buttonProps,
+                    className: contextTriggerCls,
+                    'data-state': menuState.isOpen ? 'open' : 'closed',
+                    disabled: ctx.behavior.disabled,
+                    ref: triggerRef,
+                    type: 'button',
+                },
+                selected?.icon &&
+                    createElement(
+                        'span',
+                        { className: utilities.cls('inline-flex items-center', B.menu.var.triggerLabelColor) },
+                        selected.icon,
+                    ),
+                createElement(
+                    'span',
+                    { className: utilities.cls(B.menu.var.labelFs, B.menu.var.triggerLabelColor) },
+                    label,
+                ),
+                createElement(
+                    'span',
+                    { className: utilities.cls(B.menu.var.itemFs, B.menu.var.triggerValueColor) },
+                    selected?.label,
+                ),
+                createElement(
+                    'span',
+                    {
+                        className: utilities.cls(
+                            'inline-flex items-center',
+                            B.menu.trigger.indicator,
+                            B.menu.var.triggerLabelColor,
+                        ),
+                    },
+                    '\u25BC',
+                ),
+            ),
+            menuState.isOpen &&
+                createElement(
+                    FocusScope,
+                    { contain: true, restoreFocus: true } as Parameters<typeof FocusScope>[0],
+                    createElement(
+                        'div',
+                        { ...overlayProps, ref: overlayRef },
+                        createElement(DismissButton, { onDismiss: menuState.close }),
+                        createElement(
+                            'ul',
+                            {
+                                ...menuProps,
+                                ...triggerMenuProps,
+                                className: utilities.cls(dropdownCls, B.menu.var.dropdownGap),
+                                ref: menuRef,
+                                style: {
+                                    ...utilities.zStyle(ctx.overlay),
+                                    top: '100%',
+                                    width: triggerWidth ?? undefined,
+                                },
+                            },
+                            [...treeState.collection].map((item) =>
+                                createElement(MenuItemComp, {
+                                    item,
+                                    key: item.key,
+                                    onClose: menuState.close,
+                                    state: treeState,
+                                }),
+                            ),
+                        ),
+                        createElement(DismissButton, { onDismiss: menuState.close }),
                     ),
                 ),
         );
@@ -495,15 +730,16 @@ const SELECTION_TUNING_KEYS: ReadonlyArray<'animation' | 'behavior' | 'overlay' 
 ];
 const builderHandlers = {
     combobox: createComboboxComponent,
+    context: createContextSelectorComponent,
     menu: createMenuComponent,
     select: createSelectComponent,
 } as const;
 
-const createSelectionComponent = <T extends SelectionType>(input: SelectionInput<T>) => {
+const createSelectionComponent = <T extends SelectionType>(input: SelectionInput<T>): SelectionComponentMap[T] => {
     const ctx = createBuilderContext('menu', ['animation', 'behavior', 'overlay'] as const, input);
     const selectionType = (input.type ?? 'menu') as T;
     const builder = builderHandlers[selectionType];
-    const component = (builder as unknown as (input: SelectionInput<T>, ctx: Ctx) => ReturnType<typeof forwardRef>)(
+    const component = (builder as unknown as (input: SelectionInput<T>, ctx: Ctx) => SelectionComponentMap[T])(
         input,
         ctx,
     );
@@ -519,6 +755,10 @@ const createSelection = (tuning?: TuningFor<'menu'>) =>
             type: 'combobox',
             ...pick(tuning, SELECTION_TUNING_KEYS),
         } as SelectionInput<'combobox'>),
+        ContextSelector: createSelectionComponent({
+            type: 'context',
+            ...pick(tuning, SELECTION_TUNING_KEYS),
+        } as SelectionInput<'context'>),
         create: <T extends SelectionType>(input: SelectionInput<T>) =>
             createSelectionComponent({
                 ...input,
@@ -537,4 +777,14 @@ const createSelection = (tuning?: TuningFor<'menu'>) =>
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { createSelection };
-export type { ComboboxProps, ItemData, MenuProps, SectionData, SelectionInput, SelectionType, SelectProps };
+export type {
+    ComboboxProps,
+    ContextOptionData,
+    ContextSelectorProps,
+    ItemData,
+    MenuProps,
+    SectionData,
+    SelectionInput,
+    SelectionType,
+    SelectProps,
+};

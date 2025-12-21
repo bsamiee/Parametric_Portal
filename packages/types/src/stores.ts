@@ -1,8 +1,7 @@
 /**
- * Define store slice contracts via typed patterns: StoreSlice, StoreActions, CombinedStore with subscription management.
+ * Provide store slice contracts via typed patterns: StoreSlice, StoreActions, CombinedStore with subscription management.
  */
-import { Schema as S } from '@effect/schema';
-import { Effect, Option, pipe } from 'effect';
+import { Option, pipe, Schema as S } from 'effect';
 import { match, P } from 'ts-pattern';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -74,7 +73,7 @@ const schemas = Object.freeze({
     sliceName: SliceNameSchema,
 } as const);
 
-// --- [PURE_FUNCTIONS] ------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const mkSliceName = (name: string): SliceName => name as SliceName;
 
@@ -162,27 +161,18 @@ const mkCombinedStore = <S extends Record<string, StoreSlice<unknown>>>(slices: 
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createStore = (config: StoreConfig = {}): Effect.Effect<StoreApi, never, never> =>
-    pipe(
-        Effect.sync(() => ({
-            enableDevtools: config.enableDevtools ?? B.defaults.enableDevtools,
-            name: config.name ?? B.defaults.name,
-        })),
-        Effect.map((_cfg) =>
-            Object.freeze({
-                combineSlices: <S extends Record<string, StoreSlice<unknown>>>(slices: S) => mkCombinedStore(slices),
-                createSlice: <T, A extends Record<string, unknown> = Record<string, never>>(
-                    sliceConfig: SliceConfig<T, A>,
-                ) => mkSlice(sliceConfig),
-                match,
-                Option,
-                P,
-                schemas,
-            } as StoreApi),
-        ),
-    );
+const store = (_config: StoreConfig = {}): StoreApi =>
+    Object.freeze({
+        combineSlices: <S extends Record<string, StoreSlice<unknown>>>(slices: S) => mkCombinedStore(slices),
+        createSlice: <T, A extends Record<string, unknown> = Record<string, never>>(sliceConfig: SliceConfig<T, A>) =>
+            mkSlice(sliceConfig),
+        match,
+        Option,
+        P,
+        schemas,
+    } as StoreApi);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as STORE_TUNING, createStore };
+export { B as STORE_TUNING, store };
 export type { CombinedStore, SliceConfig, SliceName, StoreActions, StoreApi, StoreConfig, StoreSlice };

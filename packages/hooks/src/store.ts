@@ -1,5 +1,5 @@
 /**
- * Store hooks bridging StoreSlice with React via useSyncExternalStore.
+ * Bridge StoreSlice with React via useSyncExternalStore.
  */
 
 import type { StoreActions, StoreSlice } from '@parametric-portal/types/stores';
@@ -25,10 +25,26 @@ type DevToolsExtension = {
     readonly connect: (options: { readonly name: string }) => DevToolsConnection;
 };
 
+type PersistOptions = {
+    readonly debounceMs?: number;
+};
+
 type StoreHooksApi<_R = never> = {
-    readonly useStoreActions: <T, A extends Record<string, unknown>>(slice: StoreSlice<T, A>) => StoreActions<T> & A;
-    readonly useStoreSelector: <T, S>(slice: StoreSlice<T>, selector: (state: T) => S) => S;
-    readonly useStoreSlice: <T>(slice: StoreSlice<T>) => T;
+    readonly usePersist: <T, A extends Record<string, unknown> = Record<string, never>>(
+        slice: StoreSlice<T, A>,
+        key: string,
+        options?: PersistOptions,
+    ) => void;
+    readonly useStoreActions: <T, A extends Record<string, unknown> = Record<string, never>>(
+        slice: StoreSlice<T, A>,
+    ) => StoreActions<T> & A;
+    readonly useStoreSelector: <T, S, A extends Record<string, unknown> = Record<string, never>>(
+        slice: StoreSlice<T, A>,
+        selector: (state: T) => S,
+    ) => S;
+    readonly useStoreSlice: <T, A extends Record<string, unknown> = Record<string, never>>(
+        slice: StoreSlice<T, A>,
+    ) => T;
     readonly useSubscriptionRef: <A>(ref: SubscriptionRef.SubscriptionRef<A>) => A;
 };
 
@@ -44,6 +60,7 @@ const B = Object.freeze({
     defaults: {
         enableDevtools: false,
         name: 'StoreHooks',
+        persistDebounceMs: 300,
     },
     devtools: {
         actionTypes: {
@@ -64,7 +81,10 @@ const getDevToolsExtension = (): DevToolsExtension | null =>
           ((globalThis as unknown as { __REDUX_DEVTOOLS_EXTENSION__?: DevToolsExtension })
               .__REDUX_DEVTOOLS_EXTENSION__ ?? null);
 
-const connectSliceToDevtools = <T>(slice: StoreSlice<T>, storeName: string): DevToolsConnection | null => {
+const connectSliceToDevtools = <T, A extends Record<string, unknown> = Record<string, never>>(
+    slice: StoreSlice<T, A>,
+    storeName: string,
+): DevToolsConnection | null => {
     const extension = getDevToolsExtension();
     if (extension === null) {
         return null;
@@ -89,7 +109,7 @@ const mkValueUpdater =
 
 const createUseStoreSlice =
     (enableDevtools: boolean, storeName: string) =>
-    <T>(slice: StoreSlice<T>): T => {
+    <T, A extends Record<string, unknown> = Record<string, never>>(slice: StoreSlice<T, A>): T => {
         const connectionRef = useRef<DevToolsConnection | null>(null);
 
         // biome-ignore lint/correctness/useExhaustiveDependencies: enableDevtools and storeName are stable factory closure captures
@@ -115,12 +135,15 @@ const createUseStoreSlice =
 
 const createUseStoreActions =
     () =>
-    <T, A extends Record<string, unknown>>(slice: StoreSlice<T, A>): StoreActions<T> & A =>
+    <T, A extends Record<string, unknown> = Record<string, never>>(slice: StoreSlice<T, A>): StoreActions<T> & A =>
         slice.actions;
 
 const createUseStoreSelector =
     () =>
-    <T, S>(slice: StoreSlice<T>, selector: (state: T) => S): S => {
+    <T, S, A extends Record<string, unknown> = Record<string, never>>(
+        slice: StoreSlice<T, A>,
+        selector: (state: T) => S,
+    ): S => {
         const getSnapshot = useCallback(() => selector(slice.getState()), [slice, selector]);
         return useSyncExternalStore(slice.subscribe, getSnapshot, getSnapshot);
     };
@@ -135,9 +158,7 @@ const createUseSubscriptionRef =
         useEffect(() => {
             const getRuntime = runtimeApi?.useRuntime;
             const runtime = getRuntime?.();
-
             const streamEffect = Stream.runForEach(ref.changes, updateValue);
-
             const fiber = runtime?.runFork(streamEffect) ?? Effect.runFork(streamEffect);
 
             return () => {
@@ -148,6 +169,45 @@ const createUseSubscriptionRef =
         return value;
     };
 
+const usePersist = <T, A extends Record<string, unknown> = Record<string, never>>(
+    slice: StoreSlice<T, A>,
+    key: string,
+    options?: PersistOptions,
+): void => {
+    const debounceMs = options?.debounceMs ?? B.defaults.persistDebounceMs;
+    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: debounceMs derived from options which is in deps
+    useEffect(() => {
+        // SSR guard
+        if (globalThis.window === undefined) {
+            return;
+        }
+
+        // Hydrate on mount - merge with initialState to handle schema evolution
+        const stored = localStorage.getItem(key);
+        stored !== null && slice.actions.set({ ...slice.initialState, ...(JSON.parse(stored) as Partial<T>) } as T);
+
+        // Persist handler - Effect wraps localStorage for error resilience
+        const persistState = (state: T) =>
+            Effect.runSync(
+                Effect.sync(() => localStorage.setItem(key, JSON.stringify(state))).pipe(
+                    Effect.catchAll(() => Effect.void),
+                ),
+            );
+
+        const unsubscribe = slice.subscribe((state) => {
+            timeoutRef.current !== null && clearTimeout(timeoutRef.current);
+            timeoutRef.current = setTimeout(persistState, debounceMs, state);
+        });
+
+        return () => {
+            timeoutRef.current !== null && clearTimeout(timeoutRef.current);
+            unsubscribe();
+        };
+    }, [slice, key, options]);
+};
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createStoreHooks = <R = never>(config: StoreHooksConfig<R> = {}): StoreHooksApi<R> => {
@@ -155,6 +215,7 @@ const createStoreHooks = <R = never>(config: StoreHooksConfig<R> = {}): StoreHoo
     const storeName = config.name ?? B.defaults.name;
 
     return Object.freeze({
+        usePersist,
         useStoreActions: createUseStoreActions(),
         useStoreSelector: createUseStoreSelector(),
         useStoreSlice: createUseStoreSlice(enableDevtools, storeName),
@@ -164,5 +225,5 @@ const createStoreHooks = <R = never>(config: StoreHooksConfig<R> = {}): StoreHoo
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { DevToolsConnection, DevToolsExtension, DevToolsMessage, StoreHooksApi, StoreHooksConfig };
+export type { DevToolsConnection, DevToolsExtension, DevToolsMessage, PersistOptions, StoreHooksApi, StoreHooksConfig };
 export { B as STORE_HOOKS_TUNING, createStoreHooks };

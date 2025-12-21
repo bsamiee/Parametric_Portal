@@ -1,11 +1,14 @@
-import { Schema as S } from '@effect/schema';
 import { it } from '@fast-check/vitest';
-import { Effect } from 'effect';
+import { Effect, Schema as S } from 'effect';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
 import { createTypes, TYPES_TUNING } from '../src/types.ts';
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+/**
+ * Validate type system branded types and schemas.
+ */
+
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const loadApi = () => Effect.runSync(createTypes());
 
@@ -42,7 +45,7 @@ const BRAND_TEST_CASES = [
     ['percentage', 101, false],
 ] as const;
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('types package', () => {
     describe('api surface', () => {

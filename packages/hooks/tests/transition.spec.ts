@@ -1,11 +1,11 @@
 /**
- * Tests for transition hooks factory.
+ * Validate transition hooks factory behavior.
  */
 import { describe, expect, it } from 'vitest';
-import { createRuntimeHooks } from '../src/runtime.ts';
+import { createRuntimeHooks } from '../src/runtime.tsx';
 import { createTransitionHooks, TRANSITION_HOOKS_TUNING } from '../src/transition.ts';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('transition', () => {
     describe('TRANSITION_HOOKS_TUNING', () => {

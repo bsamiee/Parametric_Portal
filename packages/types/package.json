@@ -1,7 +1,6 @@
 {
     "dependencies": {
         "@effect/experimental": "catalog:",
-        "@effect/schema": "catalog:",
         "date-fns": "catalog:",
         "effect": "catalog:",
         "immer": "catalog:",
@@ -19,24 +18,39 @@
     },
     "exports": {
         "./api": {
-            "import": "./dist/api.js",
-            "types": "./dist/api.d.ts"
+            "types": "./src/api.ts",
+            "import": "./src/api.ts",
+            "default": "./src/api.ts"
         },
         "./async": {
-            "import": "./dist/async.js",
-            "types": "./dist/async.d.ts"
+            "types": "./src/async.ts",
+            "import": "./src/async.ts",
+            "default": "./src/async.ts"
         },
         "./stores": {
-            "import": "./dist/stores.js",
-            "types": "./dist/stores.d.ts"
+            "types": "./src/stores.ts",
+            "import": "./src/stores.ts",
+            "default": "./src/stores.ts"
         },
         "./temporal": {
-            "import": "./dist/temporal.js",
-            "types": "./dist/temporal.d.ts"
+            "types": "./src/temporal.ts",
+            "import": "./src/temporal.ts",
+            "default": "./src/temporal.ts"
+        },
+        "./forms": {
+            "types": "./src/forms.ts",
+            "import": "./src/forms.ts",
+            "default": "./src/forms.ts"
         },
         "./types": {
-            "import": "./dist/types.js",
-            "types": "./dist/types.d.ts"
+            "types": "./src/types.ts",
+            "import": "./src/types.ts",
+            "default": "./src/types.ts"
+        },
+        "./files": {
+            "types": "./src/files.ts",
+            "import": "./src/files.ts",
+            "default": "./src/files.ts"
         }
     },
     "name": "@parametric-portal/types",

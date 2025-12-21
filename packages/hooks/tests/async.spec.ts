@@ -1,11 +1,11 @@
 /**
- * Tests for async hooks factory.
+ * Validate async hooks factory behavior.
  */
 import { describe, expect, it } from 'vitest';
 import { ASYNC_HOOKS_TUNING, createAsyncHooks, createCacheEntry, isCacheValid } from '../src/async.ts';
-import { createRuntimeHooks } from '../src/runtime.ts';
+import { createRuntimeHooks } from '../src/runtime.tsx';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('async', () => {
     describe('ASYNC_HOOKS_TUNING', () => {
@@ -64,34 +64,28 @@ describe('async', () => {
             expect(Object.isFrozen(api)).toBe(true);
         });
 
-        it('should have useAsyncEffect property', () => {
+        it('should have useQuery property', () => {
             const runtimeApi = createRuntimeHooks();
             const api = createAsyncHooks(runtimeApi);
-            expect(typeof api.useAsyncEffect).toBe('function');
+            expect(typeof api.useQuery).toBe('function');
         });
 
-        it('should have useAsyncState property', () => {
+        it('should have useMutation property', () => {
             const runtimeApi = createRuntimeHooks();
             const api = createAsyncHooks(runtimeApi);
-            expect(typeof api.useAsyncState).toBe('function');
+            expect(typeof api.useMutation).toBe('function');
         });
 
-        it('should have useAsyncCallback property', () => {
+        it('should have useQueryCached property', () => {
             const runtimeApi = createRuntimeHooks();
             const api = createAsyncHooks(runtimeApi);
-            expect(typeof api.useAsyncCallback).toBe('function');
+            expect(typeof api.useQueryCached).toBe('function');
         });
 
-        it('should have useAsyncEffectCached property', () => {
+        it('should have useQueryRetry property', () => {
             const runtimeApi = createRuntimeHooks();
             const api = createAsyncHooks(runtimeApi);
-            expect(typeof api.useAsyncEffectCached).toBe('function');
-        });
-
-        it('should have useAsyncEffectWithRetry property', () => {
-            const runtimeApi = createRuntimeHooks();
-            const api = createAsyncHooks(runtimeApi);
-            expect(typeof api.useAsyncEffectWithRetry).toBe('function');
+            expect(typeof api.useQueryRetry).toBe('function');
         });
 
         it('should accept timestampProvider config', () => {

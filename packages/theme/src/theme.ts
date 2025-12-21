@@ -1,74 +1,12 @@
 /**
- * Transform OKLCH color scales via Effect schema validation and modifier application.
+ * Generate type-safe theme CSS from OKLCH specifications.
+ * Grounding: Single-source-of-truth for Tailwind @theme blocks via Vite virtual modules.
  */
-import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 import type { Plugin } from 'vite';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type OklchColor = S.Schema.Type<typeof OklchColorSchema>;
-type ThemeInput = S.Schema.Type<typeof ThemeInputSchema>;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const ModifierOverrideSchema = S.Union(
-    S.Literal(true),
-    S.Struct({
-        alphaShift: S.optional(S.Number),
-        chromaShift: S.optional(S.Number),
-        lightnessShift: S.optional(S.Number),
-    }),
-);
-
-const OklchColorSchema = pipe(
-    S.Struct({
-        a: pipe(S.Number, S.between(0, 1), S.brand('Alpha')),
-        c: pipe(S.Number, S.between(0, 0.4), S.brand('Chroma')),
-        // Normalize hue to [0, 360) using double-modulo to handle negative inputs.
-        h: pipe(
-            S.Number,
-            S.transform(S.Number, { decode: (h) => ((h % 360) + 360) % 360, encode: (h) => h }),
-            S.brand('Hue'),
-        ),
-        l: pipe(S.Number, S.between(0, 1), S.brand('Lightness')),
-    }),
-    S.brand('OklchColor'),
-);
-
-const ThemeInputSchema = S.Struct({
-    alpha: S.optional(pipe(S.Number, S.between(0, 1))),
-    chroma: pipe(S.Number, S.between(0, 0.4)),
-    customModifiers: S.optional(
-        S.Array(
-            S.Struct({
-                alphaShift: S.Number,
-                chromaShift: S.Number,
-                lightnessShift: S.Number,
-                name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-            }),
-        ),
-    ),
-    hue: pipe(S.Number, S.between(0, 360)),
-    lightness: pipe(S.Number, S.between(0, 1)),
-    modifiers: S.optional(
-        S.partial(
-            S.Struct({
-                active: ModifierOverrideSchema,
-                disabled: ModifierOverrideSchema,
-                dragged: ModifierOverrideSchema,
-                focus: ModifierOverrideSchema,
-                hover: ModifierOverrideSchema,
-                pressed: ModifierOverrideSchema,
-                selected: ModifierOverrideSchema,
-            }),
-        ),
-    ),
-    name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
-    scale: pipe(S.Number, S.int(), S.between(2, 20)),
-    spacing: S.optional(pipe(S.Number, S.int(), S.between(1, 100))),
-});
+import { createOklch, toCSS } from './colors.ts';
+import { type OklchColor, type ThemeInput, ThemeInputSchema } from './schemas.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -88,6 +26,8 @@ const B = Object.freeze({
         increment: 50,
     },
     spacing: { increment: 0.25 },
+    tailwindMarker: '@import "tailwindcss";',
+    virtualImportPattern: /@import\s+['"]virtual:parametric-theme['"];?\s*/g,
 } as const);
 
 const VIRTUAL_MODULE_ID = Object.freeze({
@@ -97,28 +37,26 @@ const VIRTUAL_MODULE_ID = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
+/** Type guard for theme input arrays. Grounding: TS 6.0-dev requires explicit narrowing for readonly arrays. */
+const isThemeInputArray = (input: ThemeInput | ReadonlyArray<ThemeInput>): input is ReadonlyArray<ThemeInput> =>
+    Array.isArray(input);
+
+/** Normalize theme input to array. Grounding: API accepts single or batch definitions. */
 const normalizeInputs = (input: ThemeInput | ReadonlyArray<ThemeInput>): ReadonlyArray<ThemeInput> =>
-    isArray(input) ? input : [input];
+    isThemeInputArray(input) ? input : [input];
 
-const formatAlphaChannel = (a: number): string => (a < 1 ? ` / ${a.toFixed(2)}` : '');
-
-const oklchToCss = (color: OklchColor): string =>
-    `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${formatAlphaChannel(color.a)})`;
-
+/** Format color CSS variable or skip if undefined. Grounding: Schema permits optional modifier overrides. */
 const formatColorStep = (name: string, step: number, color: OklchColor | null | undefined): ReadonlyArray<string> =>
-    color ? [`  --color-${name}-${step}: ${oklchToCss(color)};`] : [];
+    color ? [`  --color-${name}-${step}: ${toCSS(color)};`] : [];
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
-const createOklchColor = (l: number, c: number, h: number, a = 1): Effect.Effect<OklchColor, ParseError> =>
-    S.decode(OklchColorSchema)({ a, c, h, l } as const);
-
+/** Apply relative shifts to OKLCH channels. Grounding: Multiplicative shifts preserve perceptual relationships. */
 const applyShifts = (
     shifts: { alphaShift: number; chromaShift: number; lightnessShift: number },
     color: OklchColor,
 ): Effect.Effect<OklchColor, ParseError> =>
-    createOklchColor(
+    createOklch(
         color.l * (1 + shifts.lightnessShift * B.multipliers.lightness),
         color.c * (1 + shifts.chromaShift * B.multipliers.chroma),
         color.h,
@@ -127,11 +65,10 @@ const applyShifts = (
 
 const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> =>
     pipe(
-        createOklchColor(input.lightness, input.chroma, input.hue, input.alpha),
+        createOklch(input.lightness, input.chroma, input.hue, input.alpha),
         Effect.flatMap((base) => {
             const steps = Array.from({ length: input.scale }, (_, i) => (i + 1) * B.scale.increment);
             const mid = steps[Math.floor(input.scale / 2)] ?? steps[0] ?? 0;
-            // Include only modifiers specified in input to inherit baseline defaults.
             const enabledBaseline = (Object.keys(B.baseline) as ReadonlyArray<keyof typeof B.baseline>).filter((key) =>
                 pipe(Option.fromNullable(input.modifiers?.[key]), Option.isSome),
             );
@@ -140,7 +77,6 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
                     baseline: Effect.forEach(enabledBaseline, (key) => {
                         const baseline = B.baseline[key];
                         const override = input.modifiers?.[key];
-                        // Merge partial modifier overrides with baseline defaults via nullish coalescing.
                         const shifts =
                             override === true
                                 ? baseline
@@ -161,9 +97,9 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
                         ),
                     ),
                     scale: Effect.forEach(steps, (step) => {
-                        // Asymmetric lightness scaling: expand toward white [norm > 0] or black [norm < 0] from midpoint.
+                        // Scale lightness asymmetrically. Grounding: Perceptual uniformity requires non-linear tint/shade distribution.
                         const norm = (step - mid) / mid;
-                        return createOklchColor(
+                        return createOklch(
                             base.l + norm * (norm > 0 ? 1 - base.l : base.l) * B.scale.algorithm.lightnessRange,
                             base.c * (1 - (Math.abs(step - mid) / mid) * B.scale.algorithm.chromaDecay),
                             base.h,
@@ -188,8 +124,8 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
                     [
                         '@theme {',
                         ...steps.flatMap((step, i) => formatColorStep(input.name, step, scale[i])),
-                        ...baseline.map(([name, color]) => `  --color-${input.name}-${name}: ${oklchToCss(color)};`),
-                        ...custom.map(([name, color]) => `  --color-${input.name}-${name}: ${oklchToCss(color)};`),
+                        ...baseline.map(([name, color]) => `  --color-${input.name}-${name}: ${toCSS(color)};`),
+                        ...custom.map(([name, color]) => `  --color-${input.name}-${name}: ${toCSS(color)};`),
                         ...spacing,
                         '}',
                     ].join('\n'),
@@ -198,30 +134,42 @@ const createThemeBlock = (input: ThemeInput): Effect.Effect<string, ParseError> 
         }),
     );
 
+/** Generate all theme CSS blocks without Tailwind import. */
+const generateAllThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): string =>
+    Effect.runSync(
+        pipe(
+            Effect.forEach(normalizeInputs(inputs), (input) =>
+                pipe(
+                    S.decode(ThemeInputSchema)(input),
+                    Effect.flatMap(createThemeBlock),
+                    Effect.catchAll((error) => Effect.succeed(`/* Failed: ${input.name} - ${error._tag} */`)),
+                ),
+            ),
+            Effect.map((blocks) => blocks.join('\n\n')),
+        ),
+    );
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin => ({
     enforce: 'pre',
     load: (id) =>
-        id === VIRTUAL_MODULE_ID.resolved
-            ? Effect.runSync(
-                  pipe(
-                      Effect.forEach(normalizeInputs(inputs), (input) =>
-                          pipe(
-                              S.decode(ThemeInputSchema)(input),
-                              Effect.flatMap(createThemeBlock),
-                              Effect.catchAll((error) => Effect.succeed(`/* Failed: ${input.name} - ${error._tag} */`)),
-                          ),
-                      ),
-                      Effect.map((blocks) => ['@import "tailwindcss";', ...blocks].join('\n\n')),
-                  ),
-              )
-            : undefined,
+        id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllThemes(inputs)}` : undefined,
     name: 'parametric-theme',
     resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
+    transform: (code, id) =>
+        // Inject theme CSS into entry CSS file (bypasses enhanced-resolve limitation)
+        !id.endsWith('main.css') || !code.includes(B.tailwindMarker)
+            ? undefined
+            : code
+                  .replaceAll(B.virtualImportPattern, '')
+                  .replace(
+                      B.tailwindMarker,
+                      `${B.tailwindMarker}\n\n/* --- [THEME] --- */\n${generateAllThemes(inputs)}`,
+                  ),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B, defineThemes };
-export type { ThemeInput };
+export type { ThemeInput } from './schemas.ts';

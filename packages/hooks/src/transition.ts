@@ -1,10 +1,10 @@
 /**
- * Transition hooks bridging React 19 useTransition/useOptimistic with Effect fiber execution.
+ * Bridge React 19 useTransition/useOptimistic with Effect fiber execution.
  */
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess } from '@parametric-portal/types/async';
-import { Effect, type Fiber } from 'effect';
-import { useCallback, useOptimistic, useRef, useState, useTransition } from 'react';
+import { Effect, Fiber } from 'effect';
+import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from 'react';
 import type { RuntimeApi } from './runtime.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -88,6 +88,13 @@ const createTransitionHooks = <R, E>(
             });
         }, [runtime, effect]);
 
+        useEffect(
+            () => () => {
+                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            },
+            [runtime],
+        );
+
         return { isPending, start, state };
     };
 
@@ -114,6 +121,13 @@ const createTransitionHooks = <R, E>(
                 fiberRef.current = runtime.runFork(eff);
             },
             [runtime, effect, setOptimistic],
+        );
+
+        useEffect(
+            () => () => {
+                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            },
+            [runtime],
         );
 
         return { addOptimistic, optimisticState, state };

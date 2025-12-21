@@ -1,15 +1,15 @@
 /**
- * Form hooks bridging Effect Schema validation with React 19 useActionState.
+ * Bridge Effect Schema validation with React 19 useActionState.
+ * useFormField: synchronous validation (no runtime required)
+ * useActionStateEffect: async action with Effect (requires runtime)
  */
 
-import { Schema as S } from '@effect/schema';
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkSuccess } from '@parametric-portal/types/async';
-import { Effect, Fiber, pipe } from 'effect';
+import { Effect, Fiber, pipe, Schema as S } from 'effect';
 import { useActionState, useCallback, useRef, useState } from 'react';
 import type { RuntimeApi } from './runtime.ts';
 
-// --- [LOCAL_TYPES] -----------------------------------------------------------
-// Form types defined locally since @parametric-portal/types/forms is not exported
+// --- [TYPES] -----------------------------------------------------------------
 
 // biome-ignore lint/style/useNamingConvention: _brand is standard Effect branded type convention
 type FieldName = string & { readonly _brand: 'FieldName' };
@@ -42,24 +42,21 @@ type FormField<T> = {
 
 type ActionStateResult<S, I> = readonly [S, (input: I) => void, boolean];
 
-// --- [TYPES] -----------------------------------------------------------------
-
 type FormFieldState<V> = {
     readonly field: FormField<V>;
     readonly setTouched: () => void;
     readonly setValue: (value: V) => void;
-    readonly validate: () => Effect.Effect<ValidationResult, never, never>;
+    readonly validate: () => ValidationResult;
 };
 
-type FormHooksApi<R> = {
+type ActionStateHooksApi<R> = {
     readonly useActionStateEffect: <A, E, I>(
         action: (input: I) => Effect.Effect<A, E, R>,
         initialState: AsyncState<A, E>,
     ) => ActionStateResult<AsyncState<A, E>, I>;
-    readonly useFormField: <V>(name: string, initialValue: V, schema: S.Schema<V>) => FormFieldState<V>;
 };
 
-type FormHooksConfig = {
+type ActionStateConfig = {
     readonly timestampProvider?: () => number;
 };
 
@@ -104,10 +101,7 @@ const mkValidationSuccess = (field: FieldName): ValidationResult => ({
     field,
 });
 
-const validateWithSchema = <V>(
-    field: FormField<V>,
-    schema: S.Schema<V>,
-): Effect.Effect<ValidationResult, never, never> =>
+const validateWithSchema = <V>(field: FormField<V>, schema: S.Schema<V>): ValidationResult =>
     pipe(
         Effect.try(() => S.decodeUnknownSync(schema)(field.value)),
         Effect.map(() => mkValidationSuccess(field.name)),
@@ -116,6 +110,7 @@ const validateWithSchema = <V>(
                 mkValidationError(field.name, 'schema', error instanceof Error ? error.message : 'Validation failed'),
             ),
         ),
+        Effect.runSync,
     );
 
 const updateFieldValue = <V>(field: FormField<V>, value: V): FormField<V> => ({
@@ -129,11 +124,6 @@ const updateFieldTouched = <V>(field: FormField<V>): FormField<V> => ({
     state: field.state === B.states.pristine ? B.states.touched : field.state,
 });
 
-const onValidationComplete =
-    <V>(setField: React.Dispatch<React.SetStateAction<FormField<V>>>) =>
-    (result: ValidationResult) =>
-        Effect.sync(() => setField((prev: FormField<V>) => updateFieldErrors(prev, result)));
-
 const updateFieldErrors = <V>(field: FormField<V>, result: ValidationResult): FormField<V> => ({
     ...field,
     errors: result._tag === B.tags.error ? [result] : [],
@@ -141,24 +131,34 @@ const updateFieldErrors = <V>(field: FormField<V>, result: ValidationResult): Fo
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createFormHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FormHooksConfig = {}): FormHooksApi<R> => {
+/**
+ * Standalone form field hook (no runtime required - validation is synchronous)
+ */
+const useFormField = <V>(name: string, initialValue: V, schema: S.Schema<V>): FormFieldState<V> => {
+    const [field, setField] = useState<FormField<V>>(() => mkField(name, initialValue));
+
+    const setValue = useCallback((value: V) => setField((prev: FormField<V>) => updateFieldValue(prev, value)), []);
+
+    const setTouched = useCallback(() => setField((prev: FormField<V>) => updateFieldTouched(prev)), []);
+
+    const validate = useCallback(() => {
+        const result = validateWithSchema(field, schema);
+        setField((prev: FormField<V>) => updateFieldErrors(prev, result));
+        return result;
+    }, [field, schema]);
+
+    return { field, setTouched, setValue, validate };
+};
+
+/**
+ * Factory for runtime-dependent action state hook
+ */
+const createActionStateHooks = <R, E>(
+    runtimeApi: RuntimeApi<R, E>,
+    config: ActionStateConfig = {},
+): ActionStateHooksApi<R> => {
     const { useRuntime } = runtimeApi;
     const ts = config.timestampProvider ?? B.defaults.timestamp;
-
-    const useFormField = <V>(name: string, initialValue: V, schema: S.Schema<V>): FormFieldState<V> => {
-        const [field, setField] = useState<FormField<V>>(() => mkField(name, initialValue));
-
-        const setValue = useCallback((value: V) => setField((prev: FormField<V>) => updateFieldValue(prev, value)), []);
-
-        const setTouched = useCallback(() => setField((prev: FormField<V>) => updateFieldTouched(prev)), []);
-
-        const validate = useCallback(
-            () => pipe(validateWithSchema(field, schema), Effect.tap(onValidationComplete(setField))),
-            [field, schema],
-        );
-
-        return { field, setTouched, setValue, validate };
-    };
 
     const useActionStateEffect = <A, Err, I>(
         action: (input: I) => Effect.Effect<A, Err, R>,
@@ -184,13 +184,10 @@ const createFormHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FormHooksCo
         return useActionState(actionFn, initialState);
     };
 
-    return Object.freeze({
-        useActionStateEffect,
-        useFormField,
-    });
+    return Object.freeze({ useActionStateEffect });
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { FormFieldState, FormHooksApi, FormHooksConfig };
-export { B as FORM_HOOKS_TUNING, createFormHooks };
+export type { ActionStateConfig, ActionStateHooksApi, FormFieldState };
+export { B as FORM_HOOKS_TUNING, createActionStateHooks, useFormField };

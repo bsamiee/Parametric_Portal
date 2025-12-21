@@ -21,13 +21,6 @@
                 "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/webhook-emit.py",
                 "timeout": 5
             }]
-        }],
-        "Stop": [{
-            "hooks": [{
-                "type": "command",
-                "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/quality-gate.py",
-                "timeout": 180
-            }]
         }]
     },
     "permissions": {

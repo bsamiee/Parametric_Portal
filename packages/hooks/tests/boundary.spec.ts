@@ -1,11 +1,11 @@
 /**
- * Tests for boundary hooks factory.
+ * Validate boundary hooks factory behavior.
  */
 import { describe, expect, it } from 'vitest';
 import { BOUNDARY_HOOKS_TUNING, createBoundaryHooks } from '../src/boundary.ts';
-import { createRuntimeHooks } from '../src/runtime.ts';
+import { createRuntimeHooks } from '../src/runtime.tsx';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [TESTS] -----------------------------------------------------------------
 
 describe('boundary', () => {
     describe('BOUNDARY_HOOKS_TUNING', () => {

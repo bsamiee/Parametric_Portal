@@ -4,7 +4,7 @@
  */
 import { Command as Cmdk, useCommandState } from 'cmdk';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
-import { createElement, forwardRef, useCallback, useMemo, useState } from 'react';
+import { createElement, forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Inputs, Resolved, ResolvedContext, TuningFor } from './schema.ts';
 import {
     animStyle,
@@ -64,6 +64,7 @@ type BaseProps = HTMLAttributes<HTMLDivElement> & {
 };
 type DialogProps = BaseProps & {
     readonly container?: HTMLElement | null;
+    readonly globalShortcut?: string | false;
     readonly onOpenChange?: (open: boolean) => void;
     readonly open?: boolean;
     readonly overlayClassName?: string;
@@ -76,6 +77,18 @@ type CommandInput<T extends CommandType = 'palette'> = Partial<TuningFor<'cmd'>>
 type Ctx = ResolvedContext<'animation' | 'behavior' | 'overlay'>;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const commandCls = {
+    empty: utilities.cls(B.cmd.var.smFs, B.cmd.var.emptyPy),
+    heading: utilities.cls(B.cmd.var.xsFs, B.cmd.var.headingPx, B.cmd.var.headingPy),
+    input: utilities.cls(B.cmd.var.inputH, B.cmd.var.px, B.cmd.var.py),
+    item: utilities.cls(B.cmd.var.itemH, B.cmd.var.px, B.cmd.var.py),
+    list: utilities.cls(B.cmd.var.listMaxH, B.cmd.var.listMinH),
+    loading: utilities.cls(B.cmd.var.emptyPy),
+    root: B.cmd.var.r,
+    shortcut: B.cmd.var.xsFs,
+    shortcutKey: utilities.cls(B.cmd.item.shortcut.key, B.cmd.var.shortcutPx, B.cmd.var.shortcutPy),
+} as const;
 
 const commandHelpers = {
     baseStyle: (ctx: Ctx, style?: CSSProperties): CSSProperties => ({
@@ -95,18 +108,13 @@ const commandHelpers = {
                   },
     isSeparator: (item: ItemData | SeparatorData): item is SeparatorData => 'type' in item && item.type === 'separator',
     itemCls: (disabled?: boolean) =>
+        utilities.cls(B.cmd.item.base, disabled && B.cmd.item.disabled, B.cmd.item.selected),
+    listCls: (animation: Resolved['animation']): string =>
         utilities.cls(
-            B.cmd.item.base,
-            B.cmd.var.itemH,
-            B.cmd.var.px,
-            B.cmd.var.py,
-            disabled && B.cmd.item.disabled,
-            B.cmd.item.selected,
+            commandCls.list,
+            `h-[var(${B.cmd.list.heightVar})]`,
+            animation.enabled && `transition-[height] duration-${animation.duration} ${animation.easing}`,
         ),
-    listStyle: (animation: Resolved['animation']): CSSProperties => ({
-        height: `var(${B.cmd.list.heightVar})`,
-        transition: animation.enabled ? `height ${animation.duration}ms ${animation.easing}` : undefined,
-    }),
     prevent: (event: React.KeyboardEvent, action: () => void) => {
         event.preventDefault();
         action();
@@ -155,14 +163,7 @@ const renderHandlers = {
                     heading: group.heading
                         ? createElement(
                               'div',
-                              {
-                                  className: utilities.cls(
-                                      B.cmd.group.heading.base,
-                                      B.cmd.var.headingPx,
-                                      B.cmd.var.headingPy,
-                                      B.cmd.var.xsFs,
-                                  ),
-                              },
+                              { className: utilities.cls(B.cmd.group.heading.base, commandCls.heading) },
                               group.heading,
                           )
                         : undefined,
@@ -176,7 +177,7 @@ const renderHandlers = {
             : createElement(
                   Cmdk.Item,
                   {
-                      className: commandHelpers.itemCls(item.disabled),
+                      className: utilities.cls(commandHelpers.itemCls(item.disabled), commandCls.item),
                       key: item.key,
                       value: item.value ?? String(item.label),
                       ...(item.disabled !== undefined && { disabled: item.disabled }),
@@ -189,16 +190,12 @@ const renderHandlers = {
                   item.shortcut &&
                       createElement(
                           'kbd',
-                          { className: utilities.cls(B.cmd.item.shortcut.base, B.cmd.var.xsFs) },
+                          { className: utilities.cls(B.cmd.item.shortcut.base, commandCls.shortcut) },
                           item.shortcut.split(' ').map((keyChar) =>
                               createElement(
                                   'span',
                                   {
-                                      className: utilities.cls(
-                                          B.cmd.item.shortcut.key,
-                                          B.cmd.var.shortcutPx,
-                                          B.cmd.var.shortcutPy,
-                                      ),
+                                      className: utilities.cls(B.cmd.item.shortcut.key, commandCls.shortcutKey),
                                       key: keyChar,
                                   },
                                   keyChar,
@@ -259,15 +256,12 @@ const ListContent = ({
     const enhance = useMemo(() => commandHelpers.enhance(pages, push), [pages, push]);
     return createElement(
         Cmdk.List,
-        {
-            className: utilities.cls(B.cmd.list.base, B.cmd.var.listMinH, B.cmd.var.listMaxH),
-            style: commandHelpers.listStyle(ctx.animation),
-        },
+        { className: utilities.cls(B.cmd.list.base, commandHelpers.listCls(ctx.animation)) },
         loading &&
             createElement(
                 Cmdk.Loading,
                 {
-                    className: utilities.cls(B.cmd.loading.base, B.cmd.var.emptyPy),
+                    className: utilities.cls(B.cmd.loading.base, commandCls.loading),
                     ...(loadingLabel && { label: loadingLabel }),
                     ...(progress !== undefined && { progress }),
                 },
@@ -275,7 +269,7 @@ const ListContent = ({
             ),
         createElement(
             Cmdk.Empty,
-            { className: utilities.cls(B.cmd.empty.base, B.cmd.var.emptyPy, B.cmd.var.smFs) },
+            { className: utilities.cls(B.cmd.empty.base, commandCls.empty) },
             'No results found.',
         ),
         page?.groups?.map(renderHandlers.group),
@@ -290,6 +284,7 @@ const createCommandFactory = <T extends CommandType>(commandType: T, input: Comm
         const {
             className,
             container,
+            globalShortcut = config.globalShortcut,
             label = B.cmd.label,
             loading,
             loadingContent,
@@ -307,6 +302,29 @@ const createCommandFactory = <T extends CommandType>(commandType: T, input: Comm
             ...rest
         } = props;
         const ref = useForwardedRef(fRef);
+        const isControlled = open !== undefined;
+        const [internalOpen, setInternalOpen] = useState(false);
+        const actualOpen = isControlled ? open : internalOpen;
+        const handleOpenChange = useCallback(
+            (nextOpen: boolean) => {
+                !isControlled && setInternalOpen(nextOpen);
+                onOpenChange?.(nextOpen);
+            },
+            [isControlled, onOpenChange],
+        );
+        useEffect(() => {
+            const shortcutKey = globalShortcut;
+            const shouldListen = shortcutKey && commandType === 'dialog';
+            const handler = (e: KeyboardEvent) => {
+                const isMatch = (e.metaKey || e.ctrlKey) && e.key === shortcutKey;
+                isMatch && e.preventDefault();
+                isMatch && handleOpenChange(true);
+            };
+            shouldListen && document.addEventListener('keydown', handler);
+            return () => {
+                shouldListen && document.removeEventListener('keydown', handler);
+            };
+        }, [globalShortcut, handleOpenChange, commandType]);
         const navigation = usePageNavigation(vimBindings);
         const [simpleSearch, setSimpleSearch] = useState('');
         const [search, setSearch] = config.useNav
@@ -334,10 +352,10 @@ const createCommandFactory = <T extends CommandType>(commandType: T, input: Comm
                     value: props.value,
                 }),
                 ...(config.useNav && { onKeyDown: navigation.handleKeyDown }),
-                ...dialogPropsFor[commandType](overlayClassName, container, onOpenChange, open),
+                ...dialogPropsFor[commandType](overlayClassName, container, handleOpenChange, actualOpen),
             },
             createElement(Cmdk.Input, {
-                className: utilities.cls(B.cmd.input.base, B.cmd.var.inputH, B.cmd.var.px),
+                className: utilities.cls(B.cmd.input.base, commandCls.input),
                 onValueChange: setSearch,
                 placeholder: page?.placeholder ?? placeholder,
                 value: search,

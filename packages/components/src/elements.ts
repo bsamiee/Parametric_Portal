@@ -4,7 +4,7 @@
  */
 import { Slot } from '@radix-ui/react-slot';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
-import { createElement, forwardRef } from 'react';
+import { createElement, forwardRef, useMemo } from 'react';
 import type { Inputs, TuningFor } from './schema.ts';
 import { B, merged, pick, resolve, stateCls, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
@@ -36,16 +36,36 @@ type ElementInput<T extends Tag = 'div'> = {
 type DividerInput = {
     readonly className?: string;
     readonly decorative?: boolean;
+};
+type DividerRuntimeProps = {
+    readonly className?: string;
     readonly orientation?: DividerOrientation;
 };
-type ElementProps = HTMLAttributes<HTMLElement> & { readonly asChild?: boolean; readonly children?: ReactNode };
-type DividerProps = HTMLAttributes<HTMLDivElement>;
+type LayoutProps = {
+    readonly align?: FlexAlign;
+    readonly autoFlow?: GridAutoFlow;
+    readonly columns?: number | string;
+    readonly direction?: FlexDir;
+    readonly gap?: boolean;
+    readonly justify?: FlexJustify;
+    readonly padding?: boolean;
+    readonly radius?: boolean;
+    readonly rows?: number | string;
+    readonly wrap?: boolean;
+};
+type ElementProps = HTMLAttributes<HTMLElement> &
+    LayoutProps & {
+        readonly asChild?: boolean;
+        readonly behavior?: Inputs['behavior'] | undefined;
+        readonly children?: ReactNode;
+        readonly scale?: Inputs['scale'] | undefined;
+    };
+type DividerProps = HTMLAttributes<HTMLDivElement> & DividerRuntimeProps;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const { dir, align, justify, wrap } = B.el.flex;
 const { autoFlow } = B.el.grid;
-const { gap, px: elPx, py: elPy, r: elR } = B.el.var;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -73,22 +93,85 @@ const gridStyle = (cols?: number | string, rows?: number | string): CSSPropertie
 });
 
 const varCls = (g?: boolean, p?: boolean, r?: boolean): string =>
-    utilities.cls(g ? gap : undefined, p ? `${elPx} ${elPy}` : undefined, r ? elR : undefined);
+    utilities.cls(
+        g ? B.el.var.gap : undefined,
+        p ? utilities.cls(B.el.var.px, B.el.var.py) : undefined,
+        r ? B.el.var.r : undefined,
+    );
 
 const createElementComponent = <T extends Tag>(input: ElementInput<T>) => {
-    const behavior = resolve('behavior', input.behavior);
-    const scale = resolve('scale', input.scale);
-    const vars = utilities.cssVars(utilities.computeScale(scale), 'el');
-    const gridStyleObject = gridStyle(input.columns, input.rows);
-    const base = utilities.cls(
-        varCls(input.gap, input.padding, input.radius),
-        flexCls(input.direction, input.align, input.justify, input.wrap),
-        gridCls(input.columns, input.rows, input.autoFlow),
-        input.className,
-    );
     const Component = forwardRef((props: ElementProps, fRef: ForwardedRef<HTMLElement>) => {
-        const { asChild, children, className, style, ...rest } = props;
+        const {
+            align: propAlign,
+            asChild,
+            autoFlow: propAutoFlow,
+            behavior: propBehavior,
+            children,
+            className,
+            columns: propColumns,
+            direction: propDirection,
+            gap: propGap,
+            justify: propJustify,
+            padding: propPadding,
+            radius: propRadius,
+            rows: propRows,
+            scale: propScale,
+            style,
+            wrap: propWrap,
+            ...rest
+        } = props;
         const ref = useForwardedRef(fRef);
+        const { behavior, vars, gridStyleObject, base } = useMemo(() => {
+            const align = propAlign ?? input.align;
+            const autoFlow = propAutoFlow ?? input.autoFlow;
+            const columns = propColumns ?? input.columns;
+            const direction = propDirection ?? input.direction;
+            const gap = propGap ?? input.gap;
+            const justify = propJustify ?? input.justify;
+            const padding = propPadding ?? input.padding;
+            const radius = propRadius ?? input.radius;
+            const rows = propRows ?? input.rows;
+            const wrap = propWrap ?? input.wrap;
+            const resolvedBehavior = resolve('behavior', { ...input.behavior, ...propBehavior });
+            const resolvedScale = resolve('scale', { ...input.scale, ...propScale });
+            return {
+                base: utilities.cls(
+                    flexCls(direction, align, justify, wrap),
+                    gridCls(columns, rows, autoFlow),
+                    varCls(gap, padding, radius),
+                    input.className,
+                ),
+                behavior: resolvedBehavior,
+                gridStyleObject: gridStyle(columns, rows),
+                vars: utilities.cssVars(utilities.computeScale(resolvedScale), 'el'),
+            };
+        }, [
+            input.align,
+            input.autoFlow,
+            input.behavior,
+            input.className,
+            input.columns,
+            input.direction,
+            input.gap,
+            input.justify,
+            input.padding,
+            input.radius,
+            input.rows,
+            input.scale,
+            input.wrap,
+            propAlign,
+            propAutoFlow,
+            propBehavior,
+            propColumns,
+            propDirection,
+            propGap,
+            propJustify,
+            propPadding,
+            propRadius,
+            propRows,
+            propScale,
+            propWrap,
+        ]);
         const elProps = {
             ...rest,
             'aria-busy': behavior.loading || undefined,
@@ -107,9 +190,8 @@ const createElementComponent = <T extends Tag>(input: ElementInput<T>) => {
 };
 
 const createDividerComponent = (input: DividerInput) => {
-    const orientation = input.orientation ?? 'horizontal';
     const Component = forwardRef((props: DividerProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { className, ...rest } = props;
+        const { className, orientation = 'horizontal', ...rest } = props;
         const ref = useForwardedRef(fRef);
         return createElement('div', {
             ...rest,
@@ -120,7 +202,7 @@ const createDividerComponent = (input: DividerInput) => {
             role: 'separator',
         });
     });
-    Component.displayName = `Divider(${orientation})`;
+    Component.displayName = 'Divider';
     return Component;
 };
 
@@ -135,6 +217,13 @@ const createElements = (tuning?: TuningFor<'el'>) =>
         Divider: createDividerComponent({}),
         Flex: createElementComponent({ direction: 'row', gap: true, ...pick(tuning, TUNING_KEYS.el) }),
         Grid: createElementComponent({ columns: 3, gap: true, ...pick(tuning, TUNING_KEYS.el) }),
+        Sidebar: createElementComponent({
+            direction: 'col',
+            gap: true,
+            padding: true,
+            tag: 'aside',
+            ...pick(tuning, TUNING_KEYS.el),
+        }),
         Stack: createElementComponent({ direction: 'col', gap: true, ...pick(tuning, TUNING_KEYS.el) }),
     });
 
@@ -145,11 +234,13 @@ export type {
     DividerInput,
     DividerOrientation,
     DividerProps,
+    DividerRuntimeProps,
     ElementInput,
     ElementProps,
     FlexAlign,
     FlexDir,
     FlexJustify,
     GridAutoFlow,
+    LayoutProps,
     Tag,
 };

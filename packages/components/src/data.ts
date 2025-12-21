@@ -1,9 +1,19 @@
 /**
- * Data display components: render avatar, badge, card, list, table with sorting.
+ * Data display components: render avatar, badge, card, list, table, thumb with sorting.
  * Uses B, utilities, stateCls, useCollectionEl from schema.ts with React Stately state.
+ * Thumbnails use unified useTooltipState + renderTooltipPortal from schema.ts.
  */
-import type { CSSProperties, FC, ForwardedRef, HTMLAttributes, ImgHTMLAttributes, ReactNode } from 'react';
-import { createElement, forwardRef } from 'react';
+import type {
+    CSSProperties,
+    FC,
+    ForwardedRef,
+    ForwardRefExoticComponent,
+    HTMLAttributes,
+    ImgHTMLAttributes,
+    ReactNode,
+    RefAttributes,
+} from 'react';
+import { createElement, forwardRef, useRef } from 'react';
 import {
     useTable,
     useTableCell,
@@ -14,22 +24,25 @@ import {
 } from 'react-aria';
 import type { Key, Node, SortDescriptor, TableState, TableStateProps } from 'react-stately';
 import { Cell, Column, Row, TableBody, TableHeader, useTableState } from 'react-stately';
-import type { Computed, Inputs, Resolved, TuningFor } from './schema.ts';
+import type { Computed, Inputs, Resolved, TooltipSide, TuningFor } from './schema.ts';
 import {
     B,
+    computeOffsetPx,
     merged,
     pick,
+    renderTooltipPortal,
     resolve,
     stateCls,
     TUNING_KEYS,
     useCollectionEl,
     useForwardedRef,
+    useTooltipState,
     utilities,
 } from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type DataType = 'avatar' | 'badge' | 'card' | 'list' | 'table';
+type DataType = 'avatar' | 'badge' | 'card' | 'list' | 'listitem' | 'table' | 'thumb';
 type CardProps = HTMLAttributes<HTMLDivElement> & {
     readonly children?: ReactNode;
     readonly footer?: ReactNode;
@@ -39,6 +52,21 @@ type BadgeProps = HTMLAttributes<HTMLSpanElement> & { readonly children?: ReactN
 type AvatarProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> & {
     readonly fallback?: string;
     readonly src?: string;
+};
+type ThumbProps = HTMLAttributes<HTMLDivElement> & {
+    readonly action?: ReactNode;
+    readonly children?: ReactNode;
+    readonly onAction?: () => void;
+    readonly tooltip?: string;
+    readonly tooltipSide?: TooltipSide;
+};
+type ListItemProps = HTMLAttributes<HTMLButtonElement> & {
+    readonly action?: ReactNode;
+    readonly badge?: ReactNode;
+    readonly children?: ReactNode;
+    readonly isSelected?: boolean;
+    readonly onAction?: () => void;
+    readonly thumbnail?: ReactNode;
 };
 type ListProps<T> = HTMLAttributes<HTMLUListElement> & {
     readonly items: ReadonlyArray<T>;
@@ -74,10 +102,21 @@ type DataInput<T extends DataType = 'card'> = {
     readonly scale?: Inputs['scale'] | undefined;
     readonly type?: T;
 };
+type DataComponentMap = {
+    readonly avatar: ForwardRefExoticComponent<AvatarProps & RefAttributes<HTMLSpanElement>>;
+    readonly badge: ForwardRefExoticComponent<BadgeProps & RefAttributes<HTMLSpanElement>>;
+    readonly card: ForwardRefExoticComponent<CardProps & RefAttributes<HTMLDivElement>>;
+    readonly list: ForwardRefExoticComponent<ListProps<unknown> & RefAttributes<HTMLUListElement>>;
+    readonly listitem: ForwardRefExoticComponent<ListItemProps & RefAttributes<HTMLButtonElement>>;
+    readonly table: ForwardRefExoticComponent<TableProps<Record<string, unknown>> & RefAttributes<HTMLTableElement>>;
+    readonly thumb: ForwardRefExoticComponent<ThumbProps & RefAttributes<HTMLDivElement>>;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const { px, py, r: dataRadius } = B.data.var;
+const dataCls = {
+    cell: utilities.cls(B.data.var.px, B.data.var.py),
+} as const;
 
 const createAvatarComponent = (input: DataInput<'avatar'>, computed: Computed) =>
     forwardRef((props: AvatarProps, fRef: ForwardedRef<HTMLSpanElement>) => {
@@ -87,19 +126,15 @@ const createAvatarComponent = (input: DataInput<'avatar'>, computed: Computed) =
             'span',
             {
                 ...rest,
-                className: utilities.cls(
-                    'inline-flex items-center justify-center overflow-hidden rounded-full',
-                    input.className,
-                    className,
-                ),
+                className: utilities.cls(B.data.avatar.base, input.className, className),
                 ref,
                 style: { height: computed.height, width: computed.height, ...style } as CSSProperties,
             },
             src
-                ? createElement('img', { alt, className: 'h-full w-full object-cover', src })
+                ? createElement('img', { alt, className: B.data.avatar.image, src })
                 : createElement(
                       'span',
-                      { className: 'text-sm font-medium' },
+                      { className: B.data.avatar.fallback },
                       fallback ?? alt?.charAt(0).toUpperCase() ?? '?',
                   ),
         );
@@ -114,7 +149,9 @@ const createBadgeComponent = (input: DataInput<'badge'>, vars: Record<string, st
             {
                 ...rest,
                 className: utilities.cls(
-                    'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                    B.data.badge.base,
+                    B.data.var.badgePx,
+                    B.data.var.badgePy,
                     input.className,
                     className,
                 ),
@@ -126,7 +163,12 @@ const createBadgeComponent = (input: DataInput<'badge'>, vars: Record<string, st
         );
     });
 
-const createCardComponent = (input: DataInput<'card'>, vars: Record<string, string>, behavior: Resolved['behavior']) =>
+const createCardComponent = (
+    input: DataInput<'card'>,
+    vars: Record<string, string>,
+    behavior: Resolved['behavior'],
+    computed: Computed,
+) =>
     forwardRef((props: CardProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { children, className, footer, header, style, ...rest } = props;
         const ref = useForwardedRef(fRef);
@@ -136,21 +178,19 @@ const createCardComponent = (input: DataInput<'card'>, vars: Record<string, stri
                 ...rest,
                 'aria-busy': behavior.loading || undefined,
                 'aria-disabled': behavior.disabled || undefined,
-                className: utilities.cls(
-                    dataRadius,
-                    'border shadow-sm overflow-hidden',
-                    stateCls.data(behavior),
-                    input.className,
-                    className,
-                ),
+                className: utilities.cls(B.data.card.base, stateCls.data(behavior), input.className, className),
                 ref,
-                style: { ...vars, ...style } as CSSProperties,
+                style: { borderRadius: computed.radius, ...vars, ...style } as CSSProperties,
             },
             header
-                ? createElement('div', { className: utilities.cls('border-b font-semibold', px, py) }, header)
+                ? createElement(
+                      'div',
+                      { className: utilities.cls('border-b', B.data.card.heading, dataCls.cell) },
+                      header,
+                  )
                 : null,
-            createElement('div', { className: utilities.cls(px, py) }, children),
-            footer ? createElement('div', { className: utilities.cls('border-t', px, py) }, footer) : null,
+            createElement('div', { className: dataCls.cell }, children),
+            footer ? createElement('div', { className: utilities.cls('border-t', dataCls.cell) }, footer) : null,
         );
     });
 
@@ -177,6 +217,112 @@ const createListComponent = <T>(
         );
     });
 
+const createThumbComponent = (
+    input: DataInput<'thumb'>,
+    vars: Record<string, string>,
+    _behavior: Resolved['behavior'],
+    computed: Computed,
+    scale: Resolved['scale'],
+) =>
+    forwardRef((props: ThumbProps, fRef: ForwardedRef<HTMLDivElement>) => {
+        const { action, children, className, onAction, style, tooltip, tooltipSide = 'top', ...rest } = props;
+        const ref = useForwardedRef(fRef);
+        const triggerRef = useRef<HTMLDivElement>(null);
+        const tooltipOffsetPx = computeOffsetPx(scale, B.algo.tooltipOffMul);
+        const tooltipState = useTooltipState(triggerRef, {
+            ...(tooltip !== undefined && { content: tooltip }),
+            offsetPx: tooltipOffsetPx,
+            side: tooltipSide,
+        });
+        return createElement(
+            'div',
+            {
+                ...rest,
+                ...tooltipState.triggerProps,
+                className: utilities.cls(B.data.thumb.base, input.className, className),
+                ref: (node: HTMLDivElement | null) => {
+                    (ref as { current: HTMLDivElement | null }).current = node;
+                    (triggerRef as { current: HTMLDivElement | null }).current = node;
+                    tooltipState.refs.setReference(node);
+                },
+                style: { height: computed.height, width: computed.height, ...vars, ...style } as CSSProperties,
+            },
+            createElement('div', { className: B.data.thumb.content }, children),
+            action &&
+                createElement(
+                    'button',
+                    {
+                        'aria-label': tooltip ? `Remove ${tooltip}` : 'Remove',
+                        className: B.data.thumb.action,
+                        onClick: onAction,
+                        type: 'button',
+                    },
+                    action,
+                ),
+            renderTooltipPortal(tooltipState),
+        );
+    });
+
+const createListItemComponent = (input: DataInput<'listitem'>, vars: Record<string, string>, _computed: Computed) =>
+    forwardRef((props: ListItemProps, fRef: ForwardedRef<HTMLButtonElement>) => {
+        const { action, badge, children, className, isSelected, onAction, style, thumbnail, ...rest } = props;
+        const ref = useForwardedRef(fRef);
+        return createElement(
+            'button',
+            {
+                ...rest,
+                className: utilities.cls(
+                    B.data.listItem.base,
+                    B.data.listItem.hover,
+                    B.data.var.listItemG,
+                    B.data.var.listItemPx,
+                    B.data.var.listItemPy,
+                    isSelected && B.data.listItem.selected,
+                    input.className,
+                    className,
+                ),
+                'data-selected': isSelected || undefined,
+                ref,
+                style: { gap: 'var(--data-listitem-gap)', ...vars, ...style } as CSSProperties,
+                type: 'button',
+            },
+            thumbnail &&
+                createElement(
+                    'div',
+                    {
+                        className: utilities.cls(B.data.listItem.thumb, B.data.var.listItemThumbSize),
+                        style: {
+                            height: 'var(--data-listitem-thumb-size)',
+                            width: 'var(--data-listitem-thumb-size)',
+                        },
+                    },
+                    thumbnail,
+                ),
+            createElement('div', { className: B.data.listItem.content }, children),
+            (badge ?? action) &&
+                createElement(
+                    'div',
+                    { className: utilities.cls(B.data.listItem.action, B.data.var.g) },
+                    badge,
+                    action &&
+                        createElement(
+                            'span',
+                            {
+                                className: 'cursor-pointer',
+                                onClick: (e: React.MouseEvent) => {
+                                    e.stopPropagation();
+                                    onAction?.();
+                                },
+                                onKeyDown: (e: React.KeyboardEvent) => e.key === 'Enter' && onAction?.(),
+                                role: 'button',
+                                tabIndex: 0,
+                            },
+                            action,
+                        ),
+                ),
+        );
+    });
+
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 type TColHeaderProps<T> = { readonly column: Node<T>; readonly state: TableState<T> };
@@ -190,9 +336,8 @@ const TColHeader = <T>({ column, state }: TColHeaderProps<T>) => {
         'th',
         merge(
             columnHeaderProps,
-            'text-left font-semibold',
-            px,
-            py,
+            B.data.table.header.base,
+            dataCls.cell,
             column.props?.allowsSorting && B.data.table.header.sortable,
         ),
         column.rendered,
@@ -228,13 +373,14 @@ type TCellProps<T> = { readonly cell: Node<T>; readonly state: TableState<T> };
 const TCell = <T>({ cell, state }: TCellProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLTableCellElement>(B.data.table.cell.focus);
     const { gridCellProps } = useTableCell({ node: cell }, state, ref);
-    return createElement('td', merge(gridCellProps, px, py), cell.rendered);
+    return createElement('td', merge(gridCellProps, dataCls.cell), cell.rendered);
 };
 
 const createTableComponent = <T extends Record<string, unknown>>(
     input: DataInput<'table'>,
     vars: Record<string, string>,
     behavior: Resolved['behavior'],
+    computed: Computed,
 ) =>
     forwardRef((props: TableProps<T>, fRef: ForwardedRef<HTMLTableElement>) => {
         const {
@@ -313,7 +459,7 @@ const createTableComponent = <T extends Record<string, unknown>>(
             }),
             ...(defaultSortDescriptor && { defaultSortDescriptor }),
             ...(sortDescriptor && { sortDescriptor }),
-            ...(disabledKeys && { disabledKeys: disabledKeys as Iterable<Key> }),
+            ...(disabledKeys && { disabledKeys }),
             ...(onSelectionChange && { onSelectionChange: onSelectionChange as (keys: 'all' | Set<Key>) => void }),
             ...(onSortChange && { onSortChange }),
         } as TableStateProps<object>;
@@ -328,14 +474,9 @@ const createTableComponent = <T extends Record<string, unknown>>(
                 ...gridProps,
                 'aria-busy': behavior.loading || undefined,
                 'aria-disabled': behavior.disabled || undefined,
-                className: utilities.cls(
-                    'w-full border-collapse text-sm',
-                    stateCls.data(behavior),
-                    input.className,
-                    className,
-                ),
+                className: utilities.cls('w-full border-collapse', stateCls.data(behavior), input.className, className),
                 ref,
-                style: { ...vars, ...style } as CSSProperties,
+                style: { fontSize: computed.smallFontSize, ...vars, ...style } as CSSProperties,
             },
             createElement(
                 'thead',
@@ -361,22 +502,26 @@ const builderHandlers = {
     badge: createBadgeComponent,
     card: createCardComponent,
     list: createListComponent,
+    listitem: createListItemComponent,
     table: createTableComponent,
+    thumb: createThumbComponent,
 } as const;
 
-const createDataComponent = <T extends DataType>(input: DataInput<T>) => {
+const createDataComponent = <T extends DataType>(input: DataInput<T>): DataComponentMap[T] => {
     const scale = resolve('scale', input.scale);
     const behavior = resolve('behavior', input.behavior);
     const computed = utilities.computeScale(scale);
     const vars = utilities.cssVars(computed, 'data');
     const builder = builderHandlers[input.type ?? 'card'];
     const component = (
-        builder as (
+        builder as unknown as (
             input: DataInput<T>,
             vars: Record<string, string>,
             behavior: Resolved['behavior'],
-        ) => ReturnType<typeof forwardRef>
-    )(input, vars, behavior);
+            computed: Computed,
+            scale: Resolved['scale'],
+        ) => DataComponentMap[T]
+    )(input, vars, behavior, computed, scale);
     component.displayName = `Data(${input.type ?? 'card'})`;
     return component;
 };
@@ -391,10 +536,22 @@ const createData = (tuning?: TuningFor<'data'>) =>
         create: <T extends DataType>(input: DataInput<T>) =>
             createDataComponent({ ...input, ...merged(tuning, input, TUNING_KEYS.data) }),
         List: createDataComponent({ type: 'list', ...pick(tuning, TUNING_KEYS.data) }),
+        ListItem: createDataComponent({ type: 'listitem', ...pick(tuning, ['scale']) }),
         Table: createDataComponent({ type: 'table', ...pick(tuning, TUNING_KEYS.data) }),
+        Thumb: createDataComponent({ type: 'thumb', ...pick(tuning, ['scale']) }),
     });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { createData };
-export type { AvatarProps, BadgeProps, CardProps, DataInput, DataType, ListProps, TableProps };
+export type {
+    AvatarProps,
+    BadgeProps,
+    CardProps,
+    DataInput,
+    DataType,
+    ListItemProps,
+    ListProps,
+    TableProps,
+    ThumbProps,
+};

@@ -1,9 +1,8 @@
 /**
- * Define form validation types via Effect Schema: FieldState, ValidationError, FormField, FormState with declarative rule composition.
+ * Provide form validation types via Effect Schema.
  */
-import { Schema as S } from '@effect/schema';
-import type { ParseError } from '@effect/schema/ParseResult';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 import { match, P } from 'ts-pattern';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -128,7 +127,7 @@ const schemas = Object.freeze({
     validationSuccess: ValidationSuccessSchema,
 } as const);
 
-// --- [PURE_FUNCTIONS] ------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const mkFieldName = (name: string): FieldName => name as FieldName;
 
