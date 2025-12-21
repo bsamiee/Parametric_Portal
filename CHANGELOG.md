@@ -1,3 +1,13 @@
+## 0.6.9 (2025-12-21)
+
+### [REFACTORING]
+
+- scope d.ts ignore to dist/, add biome override for vite-env ([c7630a7](https://github.com/bsamiee/Parametric_Portal/commit/c7630a7))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.8 (2025-12-21)
 
 ### [BUG_FIXES]
