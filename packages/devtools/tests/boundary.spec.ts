@@ -33,10 +33,11 @@ describe('boundary', () => {
             ]);
         });
 
-        it.each(B.callbacks)('%s logs at %s level', (callbackName, expectedLevel) => {
+        it.each(B.callbacks)('%s logs at %s level', async (callbackName, expectedLevel) => {
             const { layer: loggerLayer, logs } = mockLogger();
             createRootErrorOptions({ loggerLayer, onError: vi.fn() })[callbackName](new Error('test'), {});
-            expect([logs.length, logs[0]?.level]).toEqual([1, expectedLevel]);
+            await vi.waitFor(() => expect(logs.length).toBe(1));
+            expect(logs[0]?.level).toBe(expectedLevel);
         });
 
         it('onUncaughtError invokes onError with phase context', () => {

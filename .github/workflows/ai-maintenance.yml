@@ -40,13 +40,8 @@ jobs:
               with:
                   install: 'false'
 
-            - name: Setup Claude Code
-              id: claude-setup
-              uses: ./.github/actions/claude-setup
-
             - uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
               with:
-                  path_to_claude_code_executable: ${{ steps.claude-setup.outputs.executable }}
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   prompt: |
                       Perform weekly maintenance tasks:
@@ -98,13 +93,8 @@ jobs:
               with:
                   install: 'false'
 
-            - name: Setup Claude Code
-              id: claude-setup
-              uses: ./.github/actions/claude-setup
-
             - uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
               with:
-                  path_to_claude_code_executable: ${{ steps.claude-setup.outputs.executable }}
                   claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
                   prompt: |
                       Run maintenance task: ${{ inputs.task }}
