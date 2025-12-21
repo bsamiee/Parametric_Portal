@@ -155,6 +155,7 @@
         },
         {
             "includes": ["**/package.json"],
+            "formatter": { "enabled": false },
             "assist": { "actions": { "source": { "useSortedKeys": "off", "useSortedProperties": "off" } } }
         },
         {
