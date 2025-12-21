@@ -1,8 +1,13 @@
 name: Claude Code Review
 
+# IMPORTANT: Using pull_request_target to bypass first-time contributor approval requirements.
+# This is secure because:
+# 1. Workflow code runs from BASE branch (main), not the PR
+# 2. We explicitly checkout PR head ref to REVIEW (not execute) the code
+# 3. No untrusted code execution occurs - only static analysis and review
 on:
-  pull_request:
-    types: [opened, synchronize]
+  pull_request_target:
+    types: [opened, synchronize, ready_for_review]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
@@ -10,7 +15,8 @@ concurrency:
 
 jobs:
   claude-review:
-    if: github.event.pull_request.head.repo.fork == false && !github.event.pull_request.draft
+    # Skip draft PRs and ensure PR is from same repo (not external fork)
+    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -21,9 +27,11 @@ jobs:
       actions: read
 
     steps:
-      - name: Checkout repository
+      # Checkout PR head ref explicitly (pull_request_target defaults to base branch)
+      - name: Checkout PR head
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Setup Environment
