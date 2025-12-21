@@ -1,67 +1,67 @@
 {
-    "dependencies": {
-        "@effect/experimental": "catalog:",
-        "date-fns": "catalog:",
-        "effect": "catalog:",
-        "immer": "catalog:",
-        "ts-pattern": "catalog:",
-        "uuid": "catalog:",
-        "zustand": "catalog:"
+  "dependencies": {
+    "@effect/experimental": "catalog:",
+    "date-fns": "catalog:",
+    "effect": "catalog:",
+    "immer": "catalog:",
+    "ts-pattern": "catalog:",
+    "uuid": "catalog:",
+    "zustand": "catalog:"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "catalog:",
+    "@types/uuid": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "exports": {
+    "./api": {
+      "types": "./src/api.ts",
+      "import": "./src/api.ts",
+      "default": "./src/api.ts"
     },
-    "devDependencies": {
-        "@fast-check/vitest": "catalog:",
-        "@types/uuid": "catalog:",
-        "fast-check": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./async": {
+      "types": "./src/async.ts",
+      "import": "./src/async.ts",
+      "default": "./src/async.ts"
     },
-    "exports": {
-        "./api": {
-            "types": "./src/api.ts",
-            "import": "./src/api.ts",
-            "default": "./src/api.ts"
-        },
-        "./async": {
-            "types": "./src/async.ts",
-            "import": "./src/async.ts",
-            "default": "./src/async.ts"
-        },
-        "./stores": {
-            "types": "./src/stores.ts",
-            "import": "./src/stores.ts",
-            "default": "./src/stores.ts"
-        },
-        "./temporal": {
-            "types": "./src/temporal.ts",
-            "import": "./src/temporal.ts",
-            "default": "./src/temporal.ts"
-        },
-        "./forms": {
-            "types": "./src/forms.ts",
-            "import": "./src/forms.ts",
-            "default": "./src/forms.ts"
-        },
-        "./types": {
-            "types": "./src/types.ts",
-            "import": "./src/types.ts",
-            "default": "./src/types.ts"
-        },
-        "./files": {
-            "types": "./src/files.ts",
-            "import": "./src/files.ts",
-            "default": "./src/files.ts"
-        }
+    "./stores": {
+      "types": "./src/stores.ts",
+      "import": "./src/stores.ts",
+      "default": "./src/stores.ts"
     },
-    "name": "@parametric-portal/types",
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./temporal": {
+      "types": "./src/temporal.ts",
+      "import": "./src/temporal.ts",
+      "default": "./src/temporal.ts"
     },
-    "type": "module",
-    "version": "0.6.6"
+    "./forms": {
+      "types": "./src/forms.ts",
+      "import": "./src/forms.ts",
+      "default": "./src/forms.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./files": {
+      "types": "./src/files.ts",
+      "import": "./src/files.ts",
+      "default": "./src/files.ts"
+    }
+  },
+  "name": "@parametric-portal/types",
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "dev": "vite dev --host",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "type": "module",
+  "version": "0.6.7"
 }

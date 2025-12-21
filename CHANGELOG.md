@@ -1,3 +1,26 @@
+## 0.6.7 (2025-12-21)
+
+### [FEATURES]
+
+- **ci:** add VPS auto-sync workflow ([84f8d14](https://github.com/bsamiee/Parametric_Portal/commit/84f8d14))
+- **parametric-icons:** add icon generator app with AI integration ([7abc72f](https://github.com/bsamiee/Parametric_Portal/commit/7abc72f))
+
+### [BUG_FIXES]
+
+- **sonar:** separate resourceKey patterns for S6748 ([25de0b8](https://github.com/bsamiee/Parametric_Portal/commit/25de0b8))
+- **sonar:** use universal file pattern for rule exclusions ([8d371ce](https://github.com/bsamiee/Parametric_Portal/commit/8d371ce))
+
+### [REFACTORING]
+
+- **ci:** rename VPS sync to Agentic Server Sync ([dc2eb67](https://github.com/bsamiee/Parametric_Portal/commit/dc2eb67))
+- **ci:** rename to n8n Server Sync ([44a3a6c](https://github.com/bsamiee/Parametric_Portal/commit/44a3a6c))
+
+### ❤️ Thank You
+
+- bsamiee
+- Claude Opus 4.5
+- n8n-agent
+
 ## 0.6.6 (2025-12-13)
 
 ### [BUG_FIXES]
