@@ -4,28 +4,33 @@
 import { makeRepositories } from '@parametric-portal/database/repositories';
 import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/database/schema';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
+import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
-import { hashToken, OAuthService, SessionContext } from '@parametric-portal/server/middleware';
+import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
 import { DateTime, Duration, Effect, Option, pipe } from 'effect';
 
 import { AppApi } from '../api.ts';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const createSessionTokens = () =>
-    Effect.gen(function* () {
-        const sessionToken = crypto.randomUUID();
-        const refreshToken = crypto.randomUUID();
-        const sessionHash = yield* hashToken(sessionToken);
-        const refreshHash = yield* hashToken(refreshToken);
-        return { refreshHash, refreshToken, sessionHash, sessionToken };
-    });
 const computeExpiry = (duration: Duration.Duration) => new Date(Date.now() + Duration.toMillis(duration));
 const toSessionResponse = (sessionToken: string, expiresAt: Date, refreshToken: string) => ({
     accessToken: sessionToken,
     expiresAt: DateTime.unsafeFromDate(expiresAt),
     refreshToken,
 });
+
+const createSessionTokenPairs = () =>
+    Effect.gen(function* () {
+        const session = yield* createTokenPair();
+        const refresh = yield* createTokenPair();
+        return {
+            refreshHash: refresh.hash,
+            refreshToken: String(refresh.token),
+            sessionHash: session.hash,
+            sessionToken: String(session.token),
+        };
+    });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -67,7 +72,7 @@ const handleOAuthCallback = (provider: OAuthProvider, code: string, state: strin
                 userId: user.id,
             });
 
-            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createSessionTokens();
+            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createSessionTokenPairs();
             const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
             const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
 
@@ -84,8 +89,8 @@ const handleRefresh = (refreshTokenInput: string) =>
     pipe(
         Effect.gen(function* () {
             const repos = yield* makeRepositories;
-            const hash = yield* hashToken(refreshTokenInput);
-            const tokenOpt = yield* repos.refreshTokens.findValidByTokenHash(hash);
+            const hashInput = yield* hashString(refreshTokenInput);
+            const tokenOpt = yield* repos.refreshTokens.findValidByTokenHash(hashInput);
             const token = yield* Option.match(tokenOpt, {
                 onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
                 onSome: Effect.succeed,
@@ -93,7 +98,7 @@ const handleRefresh = (refreshTokenInput: string) =>
 
             yield* repos.refreshTokens.revoke(token.id);
 
-            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createSessionTokens();
+            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createSessionTokenPairs();
             const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
             const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
 

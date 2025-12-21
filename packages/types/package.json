@@ -50,6 +50,11 @@
       "types": "./src/files.ts",
       "import": "./src/files.ts",
       "default": "./src/files.ts"
+    },
+    "./database": {
+      "types": "./src/database.ts",
+      "import": "./src/database.ts",
+      "default": "./src/database.ts"
     }
   },
   "name": "@parametric-portal/types",

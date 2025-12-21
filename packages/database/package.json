@@ -34,6 +34,7 @@
         "@effect/platform": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/sql-pg": "catalog:",
+        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {
