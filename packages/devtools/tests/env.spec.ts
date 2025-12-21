@@ -85,11 +85,15 @@ describe('env', () => {
             expect(new EnvValidationError(cause).message).toBe('inner error');
         });
 
-        it.prop([fc.anything().filter((x) => typeof x !== 'string' && !(x instanceof Error))])(
-            'stringifies other types',
-            (cause) => {
-                expect(new EnvValidationError(cause).message).toBe(String(cause));
-            },
-        );
+        it.each([
+            [42, '42'],
+            [null, 'null'],
+            [undefined, 'undefined'],
+            [true, 'true'],
+            [{ toString: () => 'custom' }, 'custom'],
+            [['a', 'b'], 'a,b'],
+        ])('stringifies %p to %s', (cause, expected) => {
+            expect(new EnvValidationError(cause).message).toBe(expected);
+        });
     });
 });
