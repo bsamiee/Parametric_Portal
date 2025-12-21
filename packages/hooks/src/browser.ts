@@ -304,14 +304,14 @@ const createBrowserHooks = <R, E>(
         }, [runtime, deserializer]);
 
         const reset = useCallback(() => {
-            fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );
@@ -338,14 +338,14 @@ const createBrowserHooks = <R, E>(
         );
 
         const reset = useCallback(() => {
-            fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );
@@ -372,14 +372,14 @@ const createBrowserHooks = <R, E>(
         );
 
         const reset = useCallback(() => {
-            fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );

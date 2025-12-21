@@ -147,7 +147,7 @@ const createFileHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FileHooksCo
             return () => {
                 input?.removeEventListener('change', handleChange);
                 input?.remove();
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             };
         }, [runtime, resolvedAccept, resolvedMultiple]);
 
@@ -156,7 +156,7 @@ const createFileHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FileHooksCo
         }, []);
 
         const reset = useCallback(() => {
-            fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             fiberRef.current = null;
             if (inputRef.current) {
                 inputRef.current.value = '';
@@ -201,7 +201,7 @@ const createFileHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: FileHooksCo
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );

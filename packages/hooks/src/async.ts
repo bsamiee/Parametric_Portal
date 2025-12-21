@@ -78,8 +78,9 @@ const wrapEffect = <A, E, R>(effect: Effect.Effect<A, E, R>, setState: StateSett
 
 const interruptFiber =
     <A, E, R>(runtime: ManagedRuntime.ManagedRuntime<R, E>, fiber: Fiber.RuntimeFiber<A, E>) =>
-    () =>
-        void runtime.runPromise(Fiber.interrupt(fiber));
+    () => {
+        runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+    };
 
 const isCacheValid = <A>(entry: CacheEntry<A> | null, now: number): entry is CacheEntry<A> =>
     entry !== null && now < entry.expiresAt;
@@ -151,14 +152,14 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
         );
 
         const reset = useCallback(() => {
-            fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );

@@ -67,7 +67,7 @@ const handleExit = <A, E>(
 const interruptFiber =
     <A, E, R>(runtime: ManagedRuntime.ManagedRuntime<R, E>, fiber: Fiber.RuntimeFiber<A, E>): (() => void) =>
     () => {
-        void runtime.runPromise(Fiber.interrupt(fiber));
+        runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
     };
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

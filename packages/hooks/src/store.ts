@@ -162,7 +162,9 @@ const createUseSubscriptionRef =
             const fiber = runtime?.runFork(streamEffect) ?? Effect.runFork(streamEffect);
 
             return () => {
-                runtime ? void runtime.runPromise(Fiber.interrupt(fiber)) : Effect.runSync(Fiber.interrupt(fiber));
+                runtime
+                    ? runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {})
+                    : Effect.runSync(Fiber.interrupt(fiber));
             };
         }, [ref, updateValue]);
 

@@ -90,7 +90,7 @@ const createTransitionHooks = <R, E>(
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );
@@ -125,7 +125,7 @@ const createTransitionHooks = <R, E>(
 
         useEffect(
             () => () => {
-                fiberRef.current && void runtime.runPromise(Fiber.interrupt(fiberRef.current));
+                fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
             },
             [runtime],
         );
