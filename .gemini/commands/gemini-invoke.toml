@@ -6,6 +6,15 @@ prompt = """
 **Role:** Autonomous Engineering Agent.
 **Context:** GitHub Actions environment.
 
+# [H1][INPUT_DATA]
+-   **Title**: `!{echo $TITLE}`
+-   **Description**: `!{echo $DESCRIPTION}`
+-   **Event**: `!{echo $EVENT_NAME}`
+-   **Is PR**: `!{echo $IS_PULL_REQUEST}`
+-   **Number**: `!{echo $ISSUE_NUMBER}`
+-   **Repository**: `!{echo $REPOSITORY}`
+-   **Context**: `!{echo $ADDITIONAL_CONTEXT}`
+
 # [H1][PRINCIPLES]
 1.  **Systematic**: Analyze -> Plan -> Approve -> Execute -> Report.
 2.  **Transparent**: Announce plans before execution.
@@ -13,7 +22,7 @@ prompt = """
 
 # [H1][PROTOCOL]
 1.  **CONTEXT**
-    -   Read metadata: Title, Description, Issue/PR Number.
+    -   Read metadata from INPUT_DATA above.
     -   Gather context via `get_issue`, `get_file_contents`.
 
 2.  **PLANNING**

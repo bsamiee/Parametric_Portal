@@ -94,7 +94,6 @@ lerna-debug.log*
 Thumbs.db
 
 # --- [AI_TOOLING] -------------------------------------------------------------
-.gemini/
 .archive/
 .archive
 .playwright-mcp/

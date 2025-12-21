@@ -1,14 +1,10 @@
 name: PR Hygiene
-description: Automated PR review cleanup - resolve outdated threads, respond to addressed feedback, cleanup owner prompts
+description: Automated PR review cleanup - resolve outdated threads, respond to addressed feedback, cleanup user comments
 
 inputs:
     pr_number:
         description: Pull request number
         required: true
-    owner_logins:
-        description: Comma-separated owner/admin logins whose prompts should be cleaned
-        required: false
-        default: ''
 
 outputs:
     resolved:
@@ -17,16 +13,17 @@ outputs:
     replied:
         description: Number of review comments replied to
         value: ${{ steps.run.outputs.replied }}
+    minimized:
+        description: Number of comments minimized
+        value: ${{ steps.run.outputs.minimized }}
     deleted:
-        description: Number of owner prompts deleted
+        description: Number of user comments deleted
         value: ${{ steps.run.outputs.deleted }}
 
 runs:
     using: composite
     steps:
         - uses: ./.github/actions/node-env
-          with:
-              node-version-file: package.json
 
         - id: run
           uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
@@ -35,16 +32,16 @@ runs:
           with:
               script: |
                   const { run } = await import('${{ github.workspace }}/.github/scripts/pr-hygiene.ts');
-                  const ownerLogins = '${{ inputs.owner_logins }}'.split(',').map(s => s.trim()).filter(Boolean);
                   const result = await run({
                       context: { repo: context.repo, payload: context.payload },
                       core,
                       github,
                       spec: {
                           prNumber: parseInt('${{ inputs.pr_number }}'),
-                          ownerLogins: ownerLogins.length > 0 ? ownerLogins : [context.repo.owner],
+                          ownerLogins: [],
                       },
                   });
                   core.setOutput('resolved', result.resolved);
                   core.setOutput('replied', result.replied);
+                  core.setOutput('minimized', result.minimized);
                   core.setOutput('deleted', result.deleted);

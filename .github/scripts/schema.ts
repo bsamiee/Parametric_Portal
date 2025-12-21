@@ -844,27 +844,20 @@ const mutateHandlers: {
     readonly [K in MutateSpec['t']]: (ctx: Ctx, spec: Extract<MutateSpec, { t: K }>) => Promise<void>;
 } = {
     comment: async (ctx, spec) => {
-        // First check PR body for marker (preferred location for consolidated reports)
+        // Check PR body for marker (preferred location for consolidated reports)
         const pr = (await call(ctx, 'pull.get', spec.n)) as { body: string | null };
-        if (pr.body?.includes(spec.marker)) {
-            const updatedBody = merge(pr.body, spec.body, spec.mode ?? 'replace', spec.sectionId);
-            await call(ctx, 'pull.update', spec.n, { body: updatedBody });
-            return;
-        }
-        // Fallback: check comments for marker
-        const comments = (await call(ctx, 'comment.list', spec.n)) as ReadonlyArray<Comment>;
-        const existing = comments.find((comment) => comment.body?.includes(spec.marker));
-        const actions = {
-            create: () => call(ctx, 'comment.create', spec.n, spec.body),
-            update: () =>
-                call(
-                    ctx,
-                    'comment.update',
-                    existing?.id,
-                    merge(existing?.body ?? null, spec.body, spec.mode ?? 'replace', spec.sectionId),
-                ),
-        };
-        await actions[existing ? 'update' : 'create']();
+        const markerStart = `<!-- ${spec.marker}: START -->`;
+        const markerEnd = `<!-- ${spec.marker}: END -->`;
+        const hasMarker = pr.body?.includes(spec.marker);
+
+        // Inject marker section into PR body if missing (handles bot PRs without template)
+        const bodyWithMarker = hasMarker
+            ? pr.body
+            : `${pr.body ?? ''}\n\n---\n\n${markerStart}\n<!-- Automated reports injected here -->\n${markerEnd}`;
+
+        // Update PR body with section content
+        const updatedBody = merge(bodyWithMarker, spec.body, spec.mode ?? 'replace', spec.sectionId);
+        await call(ctx, 'pull.update', spec.n, { body: updatedBody });
     },
     issue: async (ctx, spec) => {
         const issues = (await call(ctx, 'issue.list', B.api.state.open, spec.label)) as ReadonlyArray<Issue>;

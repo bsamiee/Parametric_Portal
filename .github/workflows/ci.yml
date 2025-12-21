@@ -42,7 +42,10 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-          filter: tree:0
+
+      - name: Fetch main for Nx affected
+        if: github.event_name == 'pull_request'
+        run: git fetch origin main:main --depth=1
 
       - name: Setup Environment
         uses: ./.github/actions/node-env

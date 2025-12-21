@@ -28,8 +28,6 @@ runs:
     steps:
         # Note: Caller must checkout .github before using this action
         - uses: ./.github/actions/node-env
-          with:
-              node-version-file: package.json
 
         - name: Execute Label Behavior
           id: run

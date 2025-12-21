@@ -8,7 +8,12 @@ import { B, type Core, type Ctx, call, createCtx, fn, type RunParams, type User 
 // --- Types -------------------------------------------------------------------
 
 type HygieneSpec = { readonly prNumber: number; readonly ownerLogins: ReadonlyArray<string> };
-type HygieneResult = { readonly resolved: number; readonly replied: number; readonly deleted: number };
+type HygieneResult = {
+    readonly resolved: number;
+    readonly replied: number;
+    readonly deleted: number;
+    readonly minimized: number;
+};
 type Thread = {
     readonly id: string;
     readonly isResolved: boolean;
@@ -69,18 +74,6 @@ const H = Object.freeze({
 
 const isBot = (login: string | undefined): boolean =>
     login ? H.agentBots.some((b) => login.toLowerCase() === b.toLowerCase()) : false;
-
-const isOwner = (login: string | undefined, owners: ReadonlyArray<string>): boolean =>
-    owners.some((o) => o.toLowerCase() === login?.toLowerCase());
-
-const isPrompt = (body: string): boolean => {
-    const lower = body.toLowerCase();
-    return (
-        H.agentMentions.some((m) => lower.includes(m.toLowerCase())) ||
-        H.agentSlashCommands.some((cmd) => lower.includes(cmd)) ||
-        B.hygiene.slashCommands.some((cmd) => lower.includes(`/${cmd}`))
-    );
-};
 
 const isValuable = (body: string): boolean => H.valuablePatterns.some((p) => p.test(body));
 
@@ -148,12 +141,23 @@ const minimizeComment = (ctx: Ctx, nodeId: string): Promise<boolean> =>
         () => false,
     );
 
-const replyToThread = (ctx: Ctx, n: number, commentId: number, body: string): Promise<boolean> =>
+const replyToThread = (
+    ctx: Ctx,
+    n: number,
+    commentId: number,
+    body: string,
+): Promise<{ success: boolean; nodeId: string | null }> =>
     ctx.github.rest.pulls
-        .createReplyForReviewComment({ body, comment_id: commentId, owner: ctx.owner, pull_number: n, repo: ctx.repo })
+        .createReplyForReviewComment({
+            body,
+            comment_id: commentId,
+            owner: ctx.owner,
+            pull_number: n,
+            repo: ctx.repo,
+        })
         .then(
-            () => true,
-            () => false,
+            (result) => ({ nodeId: (result.data as { node_id?: string }).node_id ?? null, success: true }),
+            () => ({ nodeId: null, success: false }),
         );
 
 const deleteComment = (ctx: Ctx, id: number): Promise<boolean> =>
@@ -170,6 +174,9 @@ const reactToComment = (ctx: Ctx, id: number, content: string): Promise<boolean>
 
 // --- Dispatch Tables ---------------------------------------------------------
 
+const minimizeAllComments = (ctx: Ctx, comments: ReadonlyArray<ThreadComment>): Promise<boolean[]> =>
+    Promise.all(comments.filter((c) => c.id).map((c) => minimizeComment(ctx, c.id)));
+
 const threadActions: Record<
     Action,
     (
@@ -177,40 +184,44 @@ const threadActions: Record<
         t: Thread,
         commits: ReadonlyArray<CommitFile>,
         n: number,
-    ) => Promise<{ resolved: number; replied: number }>
+    ) => Promise<{ resolved: number; replied: number; minimized: number }>
 > = {
     reply: async (ctx, t, commits, n) => {
         const match = commits.find((c) => pathMatch(t.path, c.files));
         const first = t.comments.nodes[0];
-        const replied =
+        const reply =
             match && first?.databaseId
                 ? await replyToThread(ctx, n, first.databaseId, H.msg.addressed(match.sha, match.files))
-                : false;
-        const resolved = replied ? await resolveThread(ctx, t.id) : false;
-        await Promise.all([
-            replied && first?.databaseId ? reactToComment(ctx, first.databaseId, '+1') : Promise.resolve(false),
-            resolved && first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false),
+                : { nodeId: null, success: false };
+        const resolved = reply.success ? await resolveThread(ctx, t.id) : false;
+        const [, threadMinimized, replyMinimized] = await Promise.all([
+            reply.success && first?.databaseId ? reactToComment(ctx, first.databaseId, '+1') : Promise.resolve(false),
+            resolved ? minimizeAllComments(ctx, t.comments.nodes) : Promise.resolve([]),
+            resolved && reply.nodeId ? minimizeComment(ctx, reply.nodeId) : Promise.resolve(false),
         ]);
-        return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
+        const minimizedCount = threadMinimized.filter(Boolean).length + (replyMinimized ? 1 : 0);
+        return { minimized: minimizedCount, replied: reply.success ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
     resolve: async (ctx, t, commits, n) => {
         const match = commits.find((c) => pathMatch(t.path, c.files));
         const first = t.comments.nodes[0];
-        const replied = first?.databaseId
+        const reply = first?.databaseId
             ? await replyToThread(ctx, n, first.databaseId, H.msg.outdated(match?.sha ?? null, t.path))
-            : false;
+            : { nodeId: null, success: false };
         const resolved = await resolveThread(ctx, t.id);
-        await Promise.all([
+        const [, threadMinimized, replyMinimized] = await Promise.all([
             resolved && first?.databaseId ? reactToComment(ctx, first.databaseId, '-1') : Promise.resolve(false),
-            first?.id ? minimizeComment(ctx, first.id) : Promise.resolve(false),
+            minimizeAllComments(ctx, t.comments.nodes),
+            reply.nodeId ? minimizeComment(ctx, reply.nodeId) : Promise.resolve(false),
         ]);
-        return { replied: replied ? 1 : 0, resolved: resolved ? 1 : 0 };
+        const minimizedCount = threadMinimized.filter(Boolean).length + (replyMinimized ? 1 : 0);
+        return { minimized: minimizedCount, replied: reply.success ? 1 : 0, resolved: resolved ? 1 : 0 };
     },
-    skip: async () => ({ replied: 0, resolved: 0 }),
+    skip: async () => ({ minimized: 0, replied: 0, resolved: 0 }),
     valuable: async (ctx, t) => {
         const first = t.comments.nodes[0];
         await (first?.databaseId ? reactToComment(ctx, first.databaseId, '+1') : Promise.resolve(false));
-        return { replied: 0, resolved: 0 };
+        return { minimized: 0, replied: 0, resolved: 0 };
     },
 };
 
@@ -221,47 +232,44 @@ const processThreads = async (
     threads: ReadonlyArray<Thread>,
     commits: ReadonlyArray<CommitFile>,
     n: number,
-): Promise<{ resolved: number; replied: number }> =>
+): Promise<{ resolved: number; replied: number; minimized: number }> =>
     (await Promise.all(threads.map((t) => threadActions[classify(t, commits)](ctx, t, commits, n)))).reduce(
-        (acc, r) => ({ replied: acc.replied + r.replied, resolved: acc.resolved + r.resolved }),
-        { replied: 0, resolved: 0 },
+        (acc, r) => ({
+            minimized: acc.minimized + r.minimized,
+            replied: acc.replied + r.replied,
+            resolved: acc.resolved + r.resolved,
+        }),
+        { minimized: 0, replied: 0, resolved: 0 },
     );
 
-const cleanupPrompts = async (
-    ctx: Ctx,
-    comments: ReadonlyArray<IssueComment>,
-    owners: ReadonlyArray<string>,
-): Promise<number> =>
-    (
-        await Promise.all(
-            comments
-                .filter((c) => isPrompt(c.body) && !isBot(c.user?.login) && isOwner(c.user?.login, owners))
-                .map((c) => deleteComment(ctx, c.id)),
-        )
-    ).filter(Boolean).length;
+const cleanupUserComments = async (ctx: Ctx, comments: ReadonlyArray<IssueComment>): Promise<number> =>
+    (await Promise.all(comments.filter((c) => !isBot(c.user?.login)).map((c) => deleteComment(ctx, c.id)))).filter(
+        Boolean,
+    ).length;
 
 // --- Entry Point -------------------------------------------------------------
 
 const noWorkResult = (core: Core, prNumber: number): HygieneResult => {
     core.info(`[PR-HYGIENE] #${prNumber}: no work`);
-    return { deleted: 0, replied: 0, resolved: 0 };
+    return { deleted: 0, minimized: 0, replied: 0, resolved: 0 };
 };
 
 const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<HygieneResult> => {
     const ctx = createCtx(params);
-    const { prNumber, ownerLogins } = params.spec;
+    const { prNumber } = params.spec;
     const [threads, comments] = await Promise.all([fetchThreads(ctx, prNumber), fetchComments(ctx, prNumber)]);
     const unresolved = threads.filter((t) => !t.isResolved);
-    const hasPrompts = comments.some((c) => isPrompt(c.body) && !isBot(c.user?.login));
-    const noWork = unresolved.length === 0 && !hasPrompts;
+    const hasUserComments = comments.some((c) => !isBot(c.user?.login));
+    const hasUnminimizedResolved = threads.some((t) => (t.isResolved || t.isOutdated) && t.comments.nodes.length > 0);
+    const noWork = unresolved.length === 0 && !hasUserComments && !hasUnminimizedResolved;
     return noWork
         ? noWorkResult(params.core, prNumber)
-        : processHygiene(ctx, params, unresolved, comments, prNumber, ownerLogins);
+        : processHygiene(ctx, params, threads, unresolved, comments, prNumber);
 };
 
 const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, core: Core): Promise<HygieneResult> => {
-    const { resolved, replied, deleted } = result;
-    const body = `### [/] PR Hygiene\n| Resolved | Replied | Deleted |\n|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
+    const { resolved, replied, deleted, minimized } = result;
+    const body = `### [/] PR Hygiene\n| Resolved | Replied | Minimized | Deleted |\n|:--:|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${minimized} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
     const { mutate, createCtx: createMutateCtx } = await import('./schema.ts');
     await mutate(
         createMutateCtx({
@@ -287,13 +295,28 @@ const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, co
     return result;
 };
 
+const cleanupResolvedThreads = async (ctx: Ctx, threads: ReadonlyArray<Thread>): Promise<number> => {
+    const resolved = threads.filter((t) => t.isResolved || t.isOutdated);
+    const allComments = resolved.flatMap((t) => t.comments.nodes);
+    const results = await minimizeAllComments(ctx, allComments);
+    return results.filter(Boolean).length;
+};
+
+const cleanupOutdatedIssueComments = async (ctx: Ctx, comments: ReadonlyArray<IssueComment>): Promise<number> => {
+    const ciFailurePattern = /^## CI Failure/;
+    const ciComments = comments.filter((c) => isBot(c.user?.login) && ciFailurePattern.test(c.body));
+    const outdated = ciComments.length > 1 ? ciComments.slice(0, -1) : [];
+    const results = await Promise.all(outdated.map((c) => minimizeComment(ctx, c.node_id)));
+    return results.filter(Boolean).length;
+};
+
 const processHygiene = async (
     ctx: Ctx,
     params: RunParams,
+    allThreads: ReadonlyArray<Thread>,
     unresolved: ReadonlyArray<Thread>,
     comments: ReadonlyArray<IssueComment>,
     prNumber: number,
-    ownerLogins: ReadonlyArray<string>,
 ): Promise<HygieneResult> => {
     const allDates = unresolved.flatMap((t) => t.comments.nodes.map((c) => new Date(c.createdAt).getTime()));
     const since =
@@ -302,14 +325,20 @@ const processHygiene = async (
             : new Date(Date.now() - B.time.day).toISOString();
 
     const commits = await fetchCommitFiles(ctx, prNumber, since);
-    const [{ resolved, replied }, deleted] = await Promise.all([
-        processThreads(ctx, unresolved, commits, prNumber),
-        cleanupPrompts(ctx, comments, ownerLogins),
-    ]);
+    const [{ resolved, replied, minimized: threadMinimized }, deleted, resolvedCleanup, issueCleanup] =
+        await Promise.all([
+            processThreads(ctx, unresolved, commits, prNumber),
+            cleanupUserComments(ctx, comments),
+            cleanupResolvedThreads(ctx, allThreads),
+            cleanupOutdatedIssueComments(ctx, comments),
+        ]);
 
-    const result = { deleted, replied, resolved };
-    params.core.info(`[PR-HYGIENE] #${prNumber}: resolved=${resolved} replied=${replied} deleted=${deleted}`);
-    return resolved + replied + deleted > 0 ? postSummary(ctx, prNumber, result, params.core) : result;
+    const minimized = threadMinimized + resolvedCleanup + issueCleanup;
+    const result = { deleted, minimized, replied, resolved };
+    params.core.info(
+        `[PR-HYGIENE] #${prNumber}: resolved=${resolved} replied=${replied} minimized=${minimized} deleted=${deleted}`,
+    );
+    return resolved + replied + deleted + minimized > 0 ? postSummary(ctx, prNumber, result, params.core) : result;
 };
 
 // --- Export ------------------------------------------------------------------
