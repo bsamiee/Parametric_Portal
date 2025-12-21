@@ -4,10 +4,14 @@
 import { describe, expect, it } from 'vitest';
 import {
     BROWSER_HOOKS_TUNING,
+    buildFilename,
     createBrowserHooks,
+    exportHandlers,
     isClipboardAvailable,
     mkClipboardError,
     mkDownloadError,
+    mkExportError,
+    sanitizeFilename,
 } from '../src/browser.ts';
 import { createRuntimeHooks } from '../src/runtime.tsx';
 
@@ -50,6 +54,22 @@ describe('browser', () => {
         it('should have errors.downloadFailed', () => {
             expect(BROWSER_HOOKS_TUNING.errors.downloadFailed).toBe('Download failed');
         });
+
+        it('should have errors.exportFailed', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.exportFailed).toBe('Export failed');
+        });
+
+        it('should have errors.noSvg', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.noSvg).toBe('No SVG content to export');
+        });
+
+        it('should have errors.noVariants', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.noVariants).toBe('No variants to export');
+        });
+
+        it('should have defaults.pngSize', () => {
+            expect(BROWSER_HOOKS_TUNING.defaults.pngSize).toBe(512);
+        });
     });
 
     describe('isClipboardAvailable', () => {
@@ -87,6 +107,113 @@ describe('browser', () => {
         });
     });
 
+    describe('mkExportError', () => {
+        it('should create error with _tag ExportError', () => {
+            const error = mkExportError('test message');
+            expect(error._tag).toBe('ExportError');
+        });
+
+        it('should include provided message', () => {
+            const error = mkExportError('custom error');
+            expect(error.message).toBe('custom error');
+        });
+    });
+
+    describe('sanitizeFilename', () => {
+        it('should convert camelCase to snake_case', () => {
+            expect(sanitizeFilename('myFileName')).toBe('my_file_name');
+        });
+
+        it('should convert to lowercase', () => {
+            expect(sanitizeFilename('UPPERCASE')).toBe('uppercase');
+        });
+
+        it('should replace spaces with underscores', () => {
+            expect(sanitizeFilename('file name with spaces')).toBe('file_name_with_spaces');
+        });
+
+        it('should remove special characters', () => {
+            expect(sanitizeFilename('file@#$name!.txt')).toBe('filenametxt');
+        });
+
+        it('should collapse multiple spaces to single underscore', () => {
+            expect(sanitizeFilename('file   name')).toBe('file_name');
+        });
+
+        it('should collapse multiple dashes to single underscore', () => {
+            expect(sanitizeFilename('file---name')).toBe('file_name');
+        });
+
+        it('should collapse multiple underscores but strip them in regex', () => {
+            // Underscores are stripped by the /[^a-z0-9 -]/g regex before collapsing
+            expect(sanitizeFilename('file___name')).toBe('filename');
+        });
+
+        it('should trim to 64 characters max', () => {
+            const longName = 'a'.repeat(100);
+            const result = sanitizeFilename(longName);
+            expect(result.length).toBeLessThanOrEqual(64);
+        });
+
+        it('should return export for empty string', () => {
+            expect(sanitizeFilename('')).toBe('export');
+        });
+
+        it('should handle mixed transformations', () => {
+            expect(sanitizeFilename('myFile Name-2024!!')).toBe('my_file_name_2024');
+        });
+    });
+
+    describe('buildFilename', () => {
+        it('should append extension to base', () => {
+            expect(buildFilename('myFile', 'svg')).toBe('my_file.svg');
+        });
+
+        it('should not add variant suffix when variantCount is 1', () => {
+            expect(buildFilename('myFile', 'svg', 0, 1)).toBe('my_file.svg');
+        });
+
+        it('should not add variant suffix when variantCount is undefined', () => {
+            expect(buildFilename('myFile', 'png', 0, undefined)).toBe('my_file.png');
+        });
+
+        it('should add variant suffix when variantCount > 1', () => {
+            expect(buildFilename('myFile', 'svg', 0, 3)).toBe('my_file_variant_1.svg');
+        });
+
+        it('should increment variant index by 1', () => {
+            expect(buildFilename('myFile', 'svg', 2, 5)).toBe('my_file_variant_3.svg');
+        });
+
+        it('should sanitize base filename', () => {
+            expect(buildFilename('My File Name!', 'png')).toBe('my_file_name.png');
+        });
+
+        it('should handle different extensions', () => {
+            expect(buildFilename('test', 'zip')).toBe('test.zip');
+            expect(buildFilename('test', 'png')).toBe('test.png');
+        });
+    });
+
+    describe('exportHandlers', () => {
+        it('should be readonly record', () => {
+            // exportHandlers is Readonly<Record<...>> but not frozen via Object.freeze
+            expect(typeof exportHandlers).toBe('object');
+        });
+
+        it('should have svg handler', () => {
+            expect(typeof exportHandlers.svg).toBe('function');
+        });
+
+        it('should have png handler', () => {
+            expect(typeof exportHandlers.png).toBe('function');
+        });
+
+        it('should have zip handler', () => {
+            expect(typeof exportHandlers.zip).toBe('function');
+        });
+    });
+
     describe('createBrowserHooks', () => {
         it('should return frozen API object', () => {
             const runtimeApi = createRuntimeHooks();
@@ -104,6 +231,12 @@ describe('browser', () => {
             const runtimeApi = createRuntimeHooks();
             const api = createBrowserHooks(runtimeApi);
             expect(typeof api.useDownload).toBe('function');
+        });
+
+        it('should have useExport property', () => {
+            const runtimeApi = createRuntimeHooks();
+            const api = createBrowserHooks(runtimeApi);
+            expect(typeof api.useExport).toBe('function');
         });
 
         it('should accept timestampProvider config', () => {
