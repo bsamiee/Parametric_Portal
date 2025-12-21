@@ -1,3 +1,14 @@
+## 0.6.12 (2025-12-21)
+
+### [BUG_FIXES]
+
+- **biome:** disable formatter for package.json files ([038c3df](https://github.com/bsamiee/Parametric_Portal/commit/038c3df))
+
+### ❤️ Thank You
+
+- bsamiee
+- Claude Opus 4.5
+
 ## 0.6.11 (2025-12-21)
 
 ### [FEATURES]
