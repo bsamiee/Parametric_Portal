@@ -236,8 +236,22 @@ const clientOnly = (plugin: Plugin): Plugin => ({
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const buildAppHandlers: Record<BuildStrategy, (builder: ViteBuilder) => Promise<void>> = {
-    parallel: (builder) => builder.build(builder.environments.client),
-    serial: (builder) => builder.build(builder.environments.client),
+    parallel: (builder) =>
+        pipe(
+            Option.fromNullable(builder.environments['client']),
+            Option.match({
+                onNone: () => Promise.resolve(),
+                onSome: (env) => builder.build(env).then(() => undefined),
+            }),
+        ),
+    serial: (builder) =>
+        pipe(
+            Option.fromNullable(builder.environments['client']),
+            Option.match({
+                onNone: () => Promise.resolve(),
+                onSome: (env) => builder.build(env).then(() => undefined),
+            }),
+        ),
 } as const;
 
 const plugins = {
