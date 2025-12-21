@@ -237,20 +237,9 @@
                 "command": "tsc --project tsconfig.json --noEmit",
                 "cwd": "{projectRoot}"
             }
-        },
-        "validate:compression": {
-            "cache": false,
-            "dependsOn": ["build"],
-            "executor": "nx:run-commands",
-            "options": {
-                "commands": [
-                    "[ -n \"$(ls {projectRoot}/dist/entries/*.js.br 2>/dev/null)\" ] || (echo '[ERROR] Brotli files missing' && exit 1)",
-                    "[ -n \"$(ls {projectRoot}/dist/entries/*.js.gz 2>/dev/null)\" ] || (echo '[ERROR] Gzip files missing' && exit 1)",
-                    "echo '[OK] Compression artifacts verified'"
-                ]
-            }
         }
     },
+    "useDaemonProcess": false,
     "useInferencePlugins": true,
     "workspaceLayout": {
         "appsDir": "apps",

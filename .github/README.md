@@ -20,15 +20,15 @@
 |   [1]   | **active-qc.yml**      | Active  | PR/Issue events     | Event-driven metadata fixes, label sync, duplicate marking |
 |   [2]   | **passive-qc.yml**     | Passive | 6h + daily schedule | Stale management, aging reports, branch/cache cleanup      |
 |   [3]   | **ai-maintenance.yml** | AI      | Weekly Monday 09:00 | Claude-powered PR review, dependency audit, code quality   |
-|   [4]   | ci.yml                 | CI      | Push/PR to main     | Quality gates, Biome auto-fix, Nx release                  |
-|   [5]   | security.yml           | CI      | Push/PR + weekly    | Dependency audit, CodeQL, secrets scan                     |
-|   [6]   | sonarcloud.yml         | CI      | Push/PR             | SonarCloud analysis                                        |
-|   [7]   | dashboard.yml          | Passive | 6h schedule         | Repository metrics dashboard                               |
-|   [8]   | claude.yml             | Agent   | @claude mention     | Interactive Claude Code with 4 specialist agents           |
-|   [9]   | claude-code-review.yml | Agent   | PR opened/sync      | Automated PR review against REQUIREMENTS.md                |
-|  [10]   | gemini-dispatch.yml    | Agent   | @gemini-cli mention | Routes to review or invoke workflows                       |
-|  [11]   | gemini-review.yml      | Agent   | workflow_call       | Gemini CLI PR review with MCP GitHub                       |
-|  [12]   | gemini-invoke.yml      | Agent   | workflow_call       | General Gemini CLI invocation                              |
+|   [4]   | **ci.yml**             | CI      | Push/PR + weekly    | Quality gates, security scans, Biome auto-fix, Nx release  |
+|   [5]   | sonarcloud.yml         | CI      | CI completion       | SonarCloud analysis (triggered by ci.yml workflow_run)     |
+|   [6]   | dashboard.yml          | Passive | 6h schedule         | Repository metrics dashboard                               |
+|   [7]   | claude.yml             | Agent   | @claude mention     | Interactive Claude Code with 4 specialist agents           |
+|   [8]   | claude-code-review.yml | Agent   | PR opened/sync      | Automated PR review against REQUIREMENTS.md                |
+|   [9]   | gemini-dispatch.yml    | Agent   | @gemini-cli mention | Routes to review or invoke workflows                       |
+|  [10]   | gemini-review.yml      | Agent   | workflow_call       | Gemini CLI PR review with MCP GitHub                       |
+|  [11]   | gemini-invoke.yml      | Agent   | workflow_call       | General Gemini CLI invocation                              |
+|  [12]   | n8n-sync.yml           | Infra   | Push to main        | Sync code to VPS for n8n agent operations                  |
 
 ---
 ### [1.2][ACTIONS]
@@ -107,6 +107,47 @@ sync-labels          maintenance-summary
 **Active QC** — Reacts to events (PR opened, issue labeled, comment created).<br>
 **Passive QC** — Runs on schedule (stale detection, cleanup, reports).<br>
 **AI Maintenance** — Uses Claude for complex analysis humans cannot automate.
+
+<br>
+
+### [2.1][WORKFLOW_ORCHESTRATION]
+
+```mermaid
+graph TD
+    PR[Pull Request] --> ActiveQC[active-qc.yml]
+    PR --> CI[ci.yml]
+    PR --> ClaudeReview[claude-code-review.yml]
+    PR --> Gemini[gemini-dispatch.yml]
+
+    CI -->|workflow_run| Sonar[sonarcloud.yml]
+
+    Gemini -->|workflow_call| GeminiReview[gemini-review.yml]
+    Gemini -->|workflow_call| GeminiInvoke[gemini-invoke.yml]
+
+    Schedule6h[6h Schedule] --> PassiveQC[passive-qc.yml]
+    Schedule6h --> Dashboard[dashboard.yml]
+    ScheduleDaily[Daily 03:00] --> PassiveQC
+    ScheduleWeekly[Weekly Mon 09:00] --> AI[ai-maintenance.yml]
+    ScheduleWeekly --> CI
+
+    Push[Push to main] --> ActiveQC
+    Push --> CI
+    Push --> N8N[n8n-sync.yml]
+
+    Comment[@claude/@gemini-cli] --> Claude[claude.yml]
+    Comment --> Gemini
+
+    style CI fill:#e1f5e1
+    style PassiveQC fill:#fff4e1
+    style AI fill:#ffe1f0
+    style Sonar fill:#e1e5ff
+```
+
+**Legend:**<br>
+🟢 **CI (green)** — Quality + Security gates<br>
+🟡 **Passive QC (yellow)** — Scheduled maintenance<br>
+🩷 **AI (pink)** — Agent-powered workflows<br>
+🔵 **Sonar (blue)** — Code analysis
 
 ---
 ## [3][PIPELINE]

@@ -8,6 +8,10 @@ import type { Plugin } from 'vite';
 import { createOklch, toCSS } from './colors.ts';
 import { type OklchColor, type ThemeInput, ThemeInputSchema } from './schemas.ts';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
@@ -152,6 +156,7 @@ const generateAllThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): stri
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const defineThemes = (inputs: ThemeInput | ReadonlyArray<ThemeInput>): Plugin => ({
+    applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
     enforce: 'pre',
     load: (id) =>
         id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllThemes(inputs)}` : undefined,

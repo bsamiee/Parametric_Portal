@@ -26,6 +26,7 @@ type TypesConfig = {
 type TypesApi = {
     readonly brands: typeof brands;
     readonly createIdGenerator: typeof createIdGenerator;
+    readonly generateUuidv7Sync: () => Uuidv7;
     readonly generateUuidv7: Effect.Effect<Uuidv7, never, never>;
     readonly isUuidv7: (u: unknown) => u is Uuidv7;
     readonly match: typeof match;
@@ -108,12 +109,13 @@ const brands = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
+const generateUuidv7Sync = (): Uuidv7 => castToUuidv7(uuidv7());
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect<A, ParseError, never> =>
     pipe(
-        Effect.sync(() => castToUuidv7(uuidv7())),
+        Effect.sync(generateUuidv7Sync),
         Effect.flatMap((uuid) => S.decode(schema)(uuid)),
     );
 
@@ -121,7 +123,8 @@ const types = (_config: TypesConfig = {}): TypesApi =>
     Object.freeze({
         brands,
         createIdGenerator,
-        generateUuidv7: Effect.sync(() => castToUuidv7(uuidv7())),
+        generateUuidv7: Effect.sync(generateUuidv7Sync),
+        generateUuidv7Sync,
         isUuidv7: S.is(Uuidv7Schema),
         match,
         Option,

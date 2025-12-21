@@ -5,11 +5,10 @@
 
 import { sanitizeFilename } from '@parametric-portal/hooks/browser';
 import { types, type Uuidv7 } from '@parametric-portal/types/types';
-import { Effect } from 'effect';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { useClipboard, useExport, useMutation, useStoreActions, useStoreSelector, useStoreSlice } from '../core.ts';
-import { apiFactory, asyncApi, generateIcon, sanitizeSvg } from '../generation.ts';
+import { apiFactory, asyncApi, deriveScope, generateIcon, sanitizeSvg } from '../generation.ts';
 import {
     type ContextState,
     type CustomAsset,
@@ -22,6 +21,7 @@ import {
     type ParametricIntent,
     previewSlice,
     type SidebarTab,
+    STORE_TUNING,
     uiSlice,
 } from '../stores.ts';
 import {
@@ -118,6 +118,8 @@ const derivePreviewState = (isGenerating: boolean, hasSvg: boolean): PreviewStat
     return stateMap[stateKey];
 };
 
+const sanitizeSvgScoped = (svg: string, seed: string): string => sanitizeSvg(svg, { scope: deriveScope(seed) });
+
 const CadReticle = (): ReactNode => (
     <div className='absolute inset-0 pointer-events-none z-10'>
         {B.reticle.map((pos) => (
@@ -129,10 +131,11 @@ const CadReticle = (): ReactNode => (
 type AttachmentThumbProps = {
     readonly name: string;
     readonly onRemove: () => void;
+    readonly scopeSeed: string;
     readonly svg: string;
 };
 
-const AttachmentThumb = ({ name, onRemove, svg }: AttachmentThumbProps): ReactNode =>
+const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProps): ReactNode =>
     createElement(
         Thumb,
         {
@@ -142,7 +145,11 @@ const AttachmentThumb = ({ name, onRemove, svg }: AttachmentThumbProps): ReactNo
             tooltip: name || 'Reference',
             tooltipSide: 'top',
         },
-        createElement(SvgPreview, { className: 'w-full h-full', sanitize: sanitizeSvg, svg }),
+        createElement(SvgPreview, {
+            className: 'w-full h-full',
+            sanitize: (value: string) => sanitizeSvgScoped(value, scopeSeed),
+            svg,
+        }),
     );
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
@@ -193,7 +200,7 @@ const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: Hist
                                     asset.variants[0] ? (
                                         <SvgPreview
                                             svg={asset.variants[0].svg}
-                                            sanitize={sanitizeSvg}
+                                            sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
                                             className='w-full h-full'
                                         />
                                     ) : (
@@ -263,7 +270,7 @@ const LibraryContent = ({
                                         thumbnail={
                                             <SvgPreview
                                                 svg={asset.svg}
-                                                sanitize={sanitizeSvg}
+                                                sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
                                                 className='w-full h-full'
                                             />
                                         }
@@ -303,7 +310,7 @@ const LibraryContent = ({
                                                 asset.variants[0] ? (
                                                     <SvgPreview
                                                         svg={asset.variants[0].svg}
-                                                        sanitize={sanitizeSvg}
+                                                        sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
                                                         className='w-full h-full'
                                                     />
                                                 ) : (
@@ -567,7 +574,7 @@ const Sidebar = (): ReactNode => {
 };
 
 const typesApi = types();
-const generateId = (): Uuidv7 => Effect.runSync(typesApi.generateUuidv7);
+const generateId = (): Uuidv7 => typesApi.generateUuidv7Sync();
 
 const CommandBar = (): ReactNode => {
     const { input } = useStoreSlice(chatSlice);
@@ -581,7 +588,7 @@ const CommandBar = (): ReactNode => {
     const uiActions = useStoreActions(uiSlice);
     const { mutate, state } = useMutation(generateIcon);
     const isGenerating = asyncApi.isLoading(state);
-    const variantCount = output === 'batch' ? 3 : 1;
+    const variantCount = output === 'batch' ? STORE_TUNING.variantCount.batch : STORE_TUNING.variantCount.single;
     const abortControllerRef = useRef<AbortController | null>(null);
 
     const handleOpenLibrary = useCallback(() => {
@@ -729,6 +736,7 @@ const CommandBar = (): ReactNode => {
                             <AttachmentThumb
                                 key={ref.id}
                                 name={ref.name}
+                                scopeSeed={ref.id}
                                 svg={ref.svg}
                                 onRemove={() => contextActions.removeAttachment(ref.id)}
                             />
@@ -913,11 +921,13 @@ const Viewport = ({ isLoading, sanitized, showGrid, showSafeArea, zoom }: Viewpo
 
 const Stage = (): ReactNode => {
     const isGenerating = useStoreSelector(chatSlice, (s) => s.isGenerating);
+    const currentId = useStoreSelector(historySlice, (s) => s.currentId);
     const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
     const zoom = useStoreSelector(previewSlice, (s) => s.zoom);
     const { showGrid, showSafeArea } = useStoreSlice(uiSlice);
     const uiActions = useStoreActions(uiSlice);
-    const sanitized = currentSvg ? sanitizeSvg(currentSvg) : null;
+    const scopeSeed = currentId ?? currentSvg ?? '';
+    const sanitized = currentSvg ? sanitizeSvgScoped(currentSvg, scopeSeed) : null;
 
     return (
         <div className='stage'>

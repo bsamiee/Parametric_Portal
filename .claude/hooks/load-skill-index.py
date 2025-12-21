@@ -42,7 +42,7 @@ class _B:
         ("build", ("build", "dev", "analyze")),
         ("test", ("test", "mutate")),
         ("inspect", ("inspect:build", "inspect:dev")),
-        ("util", ("pwa:icons", "pwa:icons:watch", "validate:compression")),
+        ("util", ("pwa:icons", "pwa:icons:watch")),
     )
 
 

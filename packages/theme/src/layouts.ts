@@ -16,6 +16,7 @@ import {
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
 type LayoutInputRaw = S.Schema.Encoded<typeof LayoutInputSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -174,6 +175,7 @@ const generateAllLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const defineLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): Plugin => ({
+    applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
     enforce: 'pre',
     load: (id) =>
         id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllLayouts(input)}` : undefined,

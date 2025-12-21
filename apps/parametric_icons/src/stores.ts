@@ -4,7 +4,7 @@
 
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { types } from '@parametric-portal/types/types';
-import { Effect, pipe, Schema as S } from 'effect';
+import { pipe, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -251,7 +251,7 @@ const historySlice: StoreSlice<HistoryState, HistoryActions> = storeApi.createSl
 const librarySlice: StoreSlice<LibraryState, LibraryActions> = storeApi.createSlice({
     actions: (set, get) => ({
         addCustomAsset: (name: string, svg: string) => {
-            const id = Effect.runSync(typesApi.generateUuidv7);
+            const id = typesApi.generateUuidv7Sync();
             set({ ...get(), customAssets: [...get().customAssets, { id, name, svg }] });
         },
         getCustomAsset: (id: string) => get().customAssets.find((a) => a.id === id),
@@ -271,12 +271,12 @@ const librarySlice: StoreSlice<LibraryState, LibraryActions> = storeApi.createSl
 });
 
 const appStore = storeApi.combineSlices({
-    chat: chatSlice as unknown as StoreSlice<unknown>,
-    context: contextSlice as unknown as StoreSlice<unknown>,
-    history: historySlice as unknown as StoreSlice<unknown>,
-    library: librarySlice as unknown as StoreSlice<unknown>,
-    preview: previewSlice as unknown as StoreSlice<unknown>,
-    ui: uiSlice as unknown as StoreSlice<unknown>,
+    chat: chatSlice,
+    context: contextSlice,
+    history: historySlice,
+    library: librarySlice,
+    preview: previewSlice,
+    ui: uiSlice,
 });
 
 // --- [EXPORT] ----------------------------------------------------------------

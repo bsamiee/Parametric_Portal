@@ -95,6 +95,12 @@ const B = Object.freeze({
         safeArea: 2,
         viewBox: '0 0 32 32',
     },
+    errors: {
+        invalidInput: {
+            code: 'INVALID_INPUT',
+            message: 'Invalid generation input',
+        },
+    },
     layers: {
         // Thin, professional stroke weights for 32x32 canvas
         context: { dasharray: 'none', fill: 'none', id: 'Context', strokeWidth: 0.5 },
@@ -183,13 +189,33 @@ const B = Object.freeze({
         // biome-ignore lint/style/useNamingConvention: DOMPurify API requires SCREAMING_SNAKE_CASE
         USE_PROFILES: { svg: true },
     },
-    scopeLength: 8,
+    scope: {
+        charIndex: 0,
+        hashMultiplier: 31,
+        hashSeed: 0,
+        length: 8,
+        padChar: '0',
+        radix: 16,
+    },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const scopeModulo = B.scope.radix ** B.scope.length;
+
 const generateScope = (): Scope =>
-    Array.from({ length: B.scopeLength }, () => Math.trunc(Math.random() * 16).toString(16)).join('') as Scope;
+    Array.from({ length: B.scope.length }, () =>
+        Math.trunc(Math.random() * B.scope.radix).toString(B.scope.radix),
+    ).join('') as Scope;
+
+const deriveScope = (seed: string): Scope => {
+    const hash = Array.from(seed).reduce<number>(
+        (acc, char) => (acc * B.scope.hashMultiplier + (char.codePointAt(B.scope.charIndex) ?? 0)) % scopeModulo,
+        B.scope.hashSeed,
+    );
+    const hex = hash.toString(B.scope.radix).padStart(B.scope.length, B.scope.padChar);
+    return hex.slice(-B.scope.length) as Scope;
+};
 
 const escapeRegExp = (str: string): string => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 
@@ -359,18 +385,21 @@ const parseVariantsResponse = (text: string): GenerateOutput => {
     // Prepend the prefill that was used in the API call
     const fullJson = PREFILL + text;
     const json = extractJsonFromText(fullJson);
-    const parsed = JSON.parse(json) as { variants?: Array<{ id?: string; name?: string; svg?: string }> };
-    return {
-        variants: (parsed.variants ?? [])
-            .filter((v): v is { id: string; name: string; svg: string } => Boolean(v.id && v.name && v.svg))
-            .map((v) => ({ id: v.id, name: v.name, svg: v.svg })),
-    };
+    const parsed: unknown = JSON.parse(json);
+    return S.decodeUnknownSync(GenerateOutputSchema)(parsed);
 };
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const apiFactory = api<GenerateOutput>();
 const asyncApi = asyncState<ApiResponse<GenerateOutput>, ApiError>();
+
+const decodeGenerateInput = (input: GenerateInput): Effect.Effect<GenerateInput, ApiError> =>
+    S.decodeUnknown(GenerateInputSchema)(input).pipe(
+        Effect.mapError(() =>
+            apiFactory.error(400 as HttpStatusError, B.errors.invalidInput.code, B.errors.invalidInput.message),
+        ),
+    );
 
 const buildContext = (input: GenerateInput): PromptContext => ({
     ...(input.attachments !== undefined && { attachments: input.attachments }),
@@ -422,7 +451,8 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
 
 const generateIcon = (input: GenerateInput): Effect.Effect<ApiResponse<GenerateOutput>, ApiError, never> =>
     pipe(
-        Effect.sync(() => buildContext(input)),
+        decodeGenerateInput(input),
+        Effect.map(buildContext),
         Effect.flatMap((ctx) => {
             const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
             if (!apiKey?.startsWith('sk-ant-')) {
@@ -495,11 +525,11 @@ const generateIcon = (input: GenerateInput): Effect.Effect<ApiResponse<GenerateO
                                       'No valid SVG variants in response',
                                   ),
                         ),
-                        Effect.catchAll((err) => Effect.succeed(err)),
                     );
                 }),
             );
         }),
+        Effect.catchAll((err) => Effect.succeed(err)),
     );
 
 // --- [EXPORT] ----------------------------------------------------------------
@@ -510,6 +540,7 @@ export {
     B as GENERATION_CONFIG,
     buildLayerManifest,
     buildSystemPrompt,
+    deriveScope,
     generateIcon,
     GenerateInputSchema,
     GenerateOutputSchema,

@@ -8,10 +8,14 @@ import { match, P } from 'ts-pattern';
 
 type SliceName = S.Schema.Type<typeof SliceNameSchema>;
 
+type BivariantFunction<T> = T extends (...args: infer A extends readonly unknown[]) => infer R
+    ? { bivarianceHack: (...args: A) => R }['bivarianceHack']
+    : never;
+
 type StoreActions<T> = {
-    readonly reset: () => T;
-    readonly set: (value: T) => T;
-    readonly update: (updater: (prev: T) => T) => T;
+    readonly reset: BivariantFunction<() => T>;
+    readonly set: BivariantFunction<(value: T) => T>;
+    readonly update: BivariantFunction<(updater: (prev: T) => T) => T>;
 };
 
 type StoreSlice<T, A extends Record<string, unknown> = Record<string, never>> = {
@@ -19,7 +23,7 @@ type StoreSlice<T, A extends Record<string, unknown> = Record<string, never>> = 
     readonly getState: () => T;
     readonly initialState: T;
     readonly name: SliceName;
-    readonly subscribe: (listener: (state: T) => void) => () => void;
+    readonly subscribe: BivariantFunction<(listener: (state: T) => void) => () => void>;
 };
 
 type SliceConfig<T, A extends Record<string, unknown> = Record<string, never>> = {
@@ -28,7 +32,8 @@ type SliceConfig<T, A extends Record<string, unknown> = Record<string, never>> =
     readonly name: string;
 };
 
-type CombinedStore<S extends Record<string, StoreSlice<unknown>>> = {
+// biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
+type CombinedStore<S extends Record<string, StoreSlice<any, Record<string, unknown>>>> = {
     readonly getState: () => { readonly [K in keyof S]: ReturnType<S[K]['getState']> };
     readonly slices: S;
     readonly subscribe: (
@@ -42,7 +47,10 @@ type StoreConfig = {
 };
 
 type StoreApi = {
-    readonly combineSlices: <S extends Record<string, StoreSlice<unknown>>>(slices: S) => CombinedStore<S>;
+    // biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
+    readonly combineSlices: <S extends Record<string, StoreSlice<any, Record<string, unknown>>>>(
+        slices: S,
+    ) => CombinedStore<S>;
     readonly createSlice: <T, A extends Record<string, unknown> = Record<string, never>>(
         config: SliceConfig<T, A>,
     ) => StoreSlice<T, A>;
@@ -128,7 +136,10 @@ const mkSlice = <T, A extends Record<string, unknown> = Record<string, never>>(
     };
 };
 
-const mkCombinedStore = <S extends Record<string, StoreSlice<unknown>>>(slices: S): CombinedStore<S> => {
+// biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
+const mkCombinedStore = <S extends Record<string, StoreSlice<any, Record<string, unknown>>>>(
+    slices: S,
+): CombinedStore<S> => {
     const listeners = new Set<(state: { readonly [K in keyof S]: ReturnType<S[K]['getState']> }) => void>();
 
     const getState = (): { readonly [K in keyof S]: ReturnType<S[K]['getState']> } =>
@@ -163,7 +174,9 @@ const mkCombinedStore = <S extends Record<string, StoreSlice<unknown>>>(slices: 
 
 const store = (_config: StoreConfig = {}): StoreApi =>
     Object.freeze({
-        combineSlices: <S extends Record<string, StoreSlice<unknown>>>(slices: S) => mkCombinedStore(slices),
+        // biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
+        combineSlices: <S extends Record<string, StoreSlice<any, Record<string, unknown>>>>(slices: S) =>
+            mkCombinedStore(slices),
         createSlice: <T, A extends Record<string, unknown> = Record<string, never>>(sliceConfig: SliceConfig<T, A>) =>
             mkSlice(sliceConfig),
         match,

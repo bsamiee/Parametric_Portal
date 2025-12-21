@@ -26,7 +26,7 @@ permissions:
     models: read
 
 jobs:
-    # --- Jobs run in sequence via needs chain for deterministic execution -----
+    # --- Jobs optimized for parallel execution where no dependencies exist -----
     sync-labels:
         name: Sync Labels (backup)
         if: github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
@@ -81,8 +81,8 @@ jobs:
 
     aging-report:
         name: Aging Report
-        needs: stale-management
-        if: always() && (needs.stale-management.result == 'success' || needs.stale-management.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
+        needs: sync-labels
+        if: always() && (needs.sync-labels.result == 'success' || needs.sync-labels.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -113,8 +113,8 @@ jobs:
 
     meta-consistency:
         name: Meta Consistency
-        needs: aging-report
-        if: always() && (needs.aging-report.result == 'success' || needs.aging-report.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
+        needs: sync-labels
+        if: always() && (needs.sync-labels.result == 'success' || needs.sync-labels.result == 'skipped') && github.event.schedule != '0 3 * * *' && github.event.inputs.maintenance != 'true'
         runs-on: ubuntu-latest
         timeout-minutes: 10
         steps:

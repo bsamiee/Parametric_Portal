@@ -9,6 +9,7 @@ import { type FontInput, FontInputSchema, type FontWeight } from './schemas.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
 type FontInputRaw = S.Schema.Encoded<typeof FontInputSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -164,6 +165,7 @@ const generateAllFonts = (inputs: FontInputRaw | ReadonlyArray<FontInputRaw>): s
 
 /** Create Vite plugin exposing virtual font module. Grounding: Resolves virtual:parametric-fonts for runtime CSS injection. */
 const defineFonts = (inputs: FontInputRaw | ReadonlyArray<FontInputRaw>): Plugin => ({
+    applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
     enforce: 'pre',
     load: (id) =>
         id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllFonts(inputs)}` : undefined,

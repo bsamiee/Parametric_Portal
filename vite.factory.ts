@@ -4,6 +4,7 @@
  * Import this in app/package configs. Root vite.config.ts imports and executes.
  */
 
+import { existsSync, readdirSync } from 'node:fs';
 import { dirname, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import typescript from '@rollup/plugin-typescript';
@@ -12,7 +13,7 @@ import react from '@vitejs/plugin-react';
 import browserslist from 'browserslist';
 import { Effect, Option, pipe, Schema as S } from 'effect';
 import { visualizer } from 'rollup-plugin-visualizer';
-import type { UserConfig, ViteBuilder } from 'vite';
+import type { Plugin, UserConfig, ViteBuilder } from 'vite';
 import viteCompression from 'vite-plugin-compression';
 import csp from 'vite-plugin-csp';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
@@ -24,7 +25,9 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
 type Cfg = S.Schema.Type<typeof CfgSchema>;
+type BuildStrategy = 'parallel' | 'serial';
 type Mode = Cfg['mode'];
 type Browsers = { readonly [K in 'chrome' | 'edge' | 'firefox' | 'safari']: number };
 
@@ -33,6 +36,13 @@ type Browsers = { readonly [K in 'chrome' | 'edge' | 'firefox' | 'safari']: numb
 const CfgSchema = S.Union(
     S.Struct({
         assetExts: S.optional(S.Array(S.String)),
+        builder: S.optional(
+            S.Struct({
+                buildStrategy: S.optional(S.Literal('parallel', 'serial')),
+                sharedConfigBuild: S.optional(S.Boolean),
+                sharedPlugins: S.optional(S.Boolean),
+            }),
+        ),
         compressionThreshold: S.optional(pipe(S.Number, S.int(), S.positive())),
         cspPolicy: S.optional(S.Record({ key: S.String, value: S.Array(S.String) })),
         entry: S.optional(S.String),
@@ -57,8 +67,10 @@ const CfgSchema = S.Union(
 const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
 
 const B = Object.freeze({
+    artifacts: { compression: { dir: 'entries', exts: ['.br', '.gz'] } },
     assets: ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'],
     browsers: { chrome: 107, edge: 107, firefox: 104, safari: 16 } as Browsers,
+    builder: { buildStrategy: 'parallel' as BuildStrategy, sharedConfigBuild: true, sharedPlugins: true },
     cache: { api: 300, cdn: 604800, max: 50 },
     chunks: [
         { n: 'vendor-react', p: 'react(?:-dom)?', w: 3 },
@@ -210,7 +222,24 @@ const resolve = (browser = false) => ({
     ...(browser ? { dedupe: ['react', 'react-dom'], extensions: [...B.exts] } : {}),
 });
 
+const clientOnly = (plugin: Plugin): Plugin => ({
+    ...plugin,
+    applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
+});
+
 // --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const buildAppHandlers: Record<BuildStrategy, (builder: ViteBuilder) => Promise<void>> = {
+    parallel: (builder) =>
+        Promise.all(Object.values(builder.environments).map((environment) => builder.build(environment))).then(
+            () => undefined,
+        ),
+    serial: (builder) =>
+        Object.values(builder.environments).reduce(
+            (task, environment) => task.then(() => builder.build(environment)).then(() => undefined),
+            Promise.resolve(),
+        ),
+} as const;
 
 const plugins = {
     app: (c: Extract<Cfg, { mode: 'app' }>, prod: boolean) => [
@@ -218,57 +247,82 @@ const plugins = {
         react({ babel: { plugins: [['babel-plugin-react-compiler', {}]] } }),
         tailwindcss({ optimize: { minify: true } }),
         ...(c.pwa
+            ? VitePWA({
+                  devOptions: { enabled: false },
+                  includeAssets: (c.assetExts ?? B.assets).map((x) => `**/*.${x}`),
+                  manifest: {
+                      background_color: B.pwa.bg,
+                      description: c.pwa.description,
+                      display: 'standalone' as const,
+                      icons: icons(),
+                      name: c.pwa.name,
+                      scope: '/',
+                      short_name: c.pwa.shortName,
+                      start_url: '/',
+                      theme_color: c.pwa.themeColor,
+                  },
+                  registerType: 'autoUpdate',
+                  workbox: {
+                      clientsClaim: true,
+                      globPatterns: [B.glob],
+                      runtimeCaching: [
+                          cache('CacheFirst', 'cdn-cache', B.cache.cdn, /^https:\/\/cdn\./),
+                          cache('NetworkFirst', 'api-cache', B.cache.api, /^https:\/\/api\./),
+                      ],
+                      skipWaiting: true,
+                  },
+              }).map((p) => clientOnly(p))
+            : []),
+        svgr({ exclude: '', include: '**/*.svg?react', svgrOptions: B.svgr }),
+        clientOnly(ViteImageOptimizer(imgOpt(c.imageQuality ?? B.img))),
+        clientOnly(webfontDownload([...(c.webfonts ?? [])])),
+        clientOnly({
+            ...visualizer({ ...B.viz, exclude: [...B.viz.exclude], projectRoot: process.cwd() }),
+            apply: 'build',
+        } as Plugin),
+        ...(prod
             ? [
-                  VitePWA({
-                      devOptions: { enabled: false },
-                      includeAssets: (c.assetExts ?? B.assets).map((x) => `**/*.${x}`),
-                      manifest: {
-                          background_color: B.pwa.bg,
-                          description: c.pwa.description,
-                          display: 'standalone' as const,
-                          icons: icons(),
-                          name: c.pwa.name,
-                          scope: '/',
-                          short_name: c.pwa.shortName,
-                          start_url: '/',
-                          theme_color: c.pwa.themeColor,
+                  clientOnly(compress('brotliCompress', '.br', c.compressionThreshold ?? B.comp.t)),
+                  clientOnly(compress('gzip', '.gz', c.compressionThreshold ?? B.comp.t)),
+                  clientOnly({
+                      apply: 'build',
+                      closeBundle() {
+                          const outDir = pathResolve(
+                              this.environment.config.root,
+                              this.environment.config.build.outDir,
+                          );
+                          const targetDir = pathResolve(outDir, B.artifacts.compression.dir);
+                          const files = existsSync(targetDir)
+                              ? readdirSync(targetDir, { withFileTypes: true })
+                                    .filter((entry) => entry.isFile())
+                                    .map((entry) => entry.name)
+                              : [];
+                          const missing = B.artifacts.compression.exts.filter(
+                              (ext) => !files.some((file) => file.endsWith(ext)),
+                          );
+                          return missing.length === 0
+                              ? undefined
+                              : this.error(
+                                    `[ERROR] Compression artifacts missing: ${missing.join(', ')} in ${targetDir}`,
+                                );
                       },
-                      registerType: 'autoUpdate',
-                      workbox: {
-                          clientsClaim: true,
-                          globPatterns: [B.glob],
-                          runtimeCaching: [
-                              cache('CacheFirst', 'cdn-cache', B.cache.cdn, /^https:\/\/cdn\./),
-                              cache('NetworkFirst', 'api-cache', B.cache.api, /^https:\/\/api\./),
-                          ],
-                          skipWaiting: true,
-                      },
+                      enforce: 'post' as const,
+                      name: 'parametric-build-artifacts',
                   }),
               ]
             : []),
-        svgr({ exclude: '', include: '**/*.svg?react', svgrOptions: B.svgr }),
-        ViteImageOptimizer(imgOpt(c.imageQuality ?? B.img)),
-        webfontDownload([...(c.webfonts ?? [])]),
-        ...(prod
-            ? [
-                  compress('brotliCompress', '.br', c.compressionThreshold ?? B.comp.t),
-                  compress('gzip', '.gz', c.compressionThreshold ?? B.comp.t),
-              ]
-            : []),
-        csp({
-            hashEnabled: { 'script-src': false, 'script-src-attr': false, 'style-src': true, 'style-src-attr': false },
-            hashingMethod: 'sha256',
-            policy: toPolicy(c.cspPolicy),
-        }),
-        {
-            buildApp: async (b: ViteBuilder) => {
-                await Promise.all(Object.values(b.environments).map((e) => b.build(e)));
-            },
-            buildEnd: () => undefined,
-            buildStart: () => undefined,
-            enforce: 'pre' as const,
-            name: 'parametric-build-hooks',
-        },
+        clientOnly(
+            csp({
+                hashEnabled: {
+                    'script-src': false,
+                    'script-src-attr': false,
+                    'style-src': true,
+                    'style-src-attr': false,
+                },
+                hashingMethod: 'sha256',
+                policy: toPolicy(c.cspPolicy),
+            }) as Plugin,
+        ),
         // Inspect disabled in dev due to EEXIST race condition on HMR restart
         ...(prod ? [Inspect({ build: true, dev: false, outputDir: '.vite-inspect' })] : []),
     ],
@@ -300,13 +354,22 @@ const config: {
             reportCompressedSize: false,
             rollupOptions: {
                 output: { ...output(), manualChunks: chunk },
-                plugins: [visualizer({ ...B.viz, exclude: [...B.viz.exclude], projectRoot: process.cwd() })],
                 treeshake: B.treeshake,
             },
             sourcemap: true,
             ssrManifest: true,
             target: 'esnext',
         },
+        builder: pipe(
+            Option.fromNullable(c.builder),
+            Option.map((builder) => ({ ...B.builder, ...builder })),
+            Option.getOrElse(() => B.builder),
+            (builder) => ({
+                buildApp: buildAppHandlers[builder.buildStrategy ?? B.builder.buildStrategy],
+                sharedConfigBuild: builder.sharedConfigBuild ?? B.builder.sharedConfigBuild,
+                sharedPlugins: builder.sharedPlugins ?? B.builder.sharedPlugins,
+            }),
+        ),
         cacheDir: c.root ? pathResolve(c.root, 'node_modules/.vite') : pathResolve(ROOT_DIR, '.nx/cache/vite'),
         css: css(true),
         define: {
