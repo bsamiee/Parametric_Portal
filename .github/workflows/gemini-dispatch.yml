@@ -24,8 +24,7 @@ concurrency:
 
 jobs:
   debugger:
-    if: |-
-     ${{ fromJSON(vars.DEBUG || vars.ACTIONS_STEP_DEBUG || false) }}
+    if: vars.DEBUG == 'true' || vars.ACTIONS_STEP_DEBUG == 'true'
     runs-on: 'ubuntu-latest'
     permissions:
       contents: 'read'
@@ -64,7 +63,7 @@ jobs:
     steps:
       - name: 'Mint identity token'
         id: 'mint_identity_token'
-        if: ${{ vars.APP_ID && secrets.APP_PRIVATE_KEY }}
+        if: vars.APP_ID && secrets.APP_PRIVATE_KEY
         continue-on-error: true
         uses: 'actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b' # ratchet:actions/create-github-app-token@v2
         with:
@@ -159,7 +158,7 @@ jobs:
     steps:
       - name: 'Mint identity token'
         id: 'mint_identity_token'
-        if: ${{ vars.APP_ID && secrets.APP_PRIVATE_KEY }}
+        if: vars.APP_ID && secrets.APP_PRIVATE_KEY
         continue-on-error: true
         uses: 'actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b' # ratchet:actions/create-github-app-token@v2
         with:
