@@ -1,3 +1,13 @@
+## 0.6.10 (2025-12-21)
+
+### [BUG_FIXES]
+
+- **hooks:** replace void operator with explicit .catch() for fire-and-forget ([5f52f99](https://github.com/bsamiee/Parametric_Portal/commit/5f52f99))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.9 (2025-12-21)
 
 ### [REFACTORING]
