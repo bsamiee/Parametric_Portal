@@ -10,7 +10,7 @@ concurrency:
 
 jobs:
   claude-review:
-    if: github.event.pull_request.head.repo.fork == false
+    if: github.event.pull_request.head.repo.fork == false && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -29,6 +29,10 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/node-env
 
+      - name: Setup Claude Code
+        id: claude-setup
+        uses: ./.github/actions/claude-setup
+
       - name: Create review output directory
         run: mkdir -p .github/review-output
 
@@ -36,6 +40,7 @@ jobs:
         id: claude-review
         uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
         with:
+          path_to_claude_code_executable: ${{ steps.claude-setup.outputs.executable }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
@@ -106,8 +111,8 @@ jobs:
 
           claude_args: |
             --model claude-opus-4-5-20251101
-            --max-turns 8
-            --allowedTools Read,Write,Grep,Glob,Bash(nx:*),Bash(pnpm:*),Bash(git diff:*),Bash(gh pr:*)
+            --max-turns 20
+            --allowedTools Read,Write,Grep,Glob,Bash(nx:*),Bash(pnpm:*),Bash(git:*),Bash(gh:*),Bash(cat:*)
 
       - name: Save PR metadata for downstream workflows
         if: always()
