@@ -1,3 +1,19 @@
+## 0.6.11 (2025-12-21)
+
+### [FEATURES]
+
+- **actions:** add claude-setup composite action for CLI caching ([dcc5686](https://github.com/bsamiee/Parametric_Portal/commit/dcc5686))
+
+### [BUG_FIXES]
+
+- **ci:** use pull_request_target to bypass approval requirements ([c1a0502](https://github.com/bsamiee/Parametric_Portal/commit/c1a0502))
+- **ci:** remove broken claude-setup action, fix devtools test issues ([5b48eba](https://github.com/bsamiee/Parametric_Portal/commit/5b48eba))
+
+### ❤️ Thank You
+
+- bsamiee
+- Claude Opus 4.5
+
 ## 0.6.10 (2025-12-21)
 
 ### [BUG_FIXES]
