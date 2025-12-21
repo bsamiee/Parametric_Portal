@@ -20,6 +20,7 @@ public/build/
 *.d.ts
 *.d.ts.map
 *.js.map
+!**/vite-env.d.ts
 
 # --- [PYTHON_ARTIFACTS] -------------------------------------------------------
 __pycache__/
