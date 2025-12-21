@@ -2,7 +2,7 @@ import { it } from '@fast-check/vitest';
 import { Effect, Schema as S } from 'effect';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
-import { createTypes, TYPES_TUNING } from '../src/types.ts';
+import { TYPES_TUNING, types } from '../src/types.ts';
 
 /**
  * Validate type system branded types and schemas.
@@ -10,7 +10,7 @@ import { createTypes, TYPES_TUNING } from '../src/types.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const loadApi = () => Effect.runSync(createTypes());
+const loadApi = () => types();
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -96,15 +96,6 @@ describe('types package', () => {
             expect(api.isUuidv7(a)).toBe(true);
             expect(api.isUuidv7(b)).toBe(true);
             expect(TYPES_TUNING.patterns.uuidv7.test(a)).toBe(true);
-        });
-
-        it('caches validation results', () => {
-            const api = loadApi();
-            const uuid = Effect.runSync(api.generateUuidv7);
-            const cached1 = Effect.runSync(api.isUuidv7Cached(uuid));
-            const cached2 = Effect.runSync(api.isUuidv7Cached('invalid-uuid'));
-            expect(cached1).toBe(true);
-            expect(cached2).toBe(false);
         });
     });
 
