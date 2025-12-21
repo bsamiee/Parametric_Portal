@@ -1,3 +1,22 @@
+## 0.6.13 (2025-12-21)
+
+### [BUG_FIXES]
+
+- -based test suites for types and theme packages ([#108](https://github.com/bsamiee/Parametric_Portal/pull/108))
+- **gemini:** remove is_auto_triggered tracking, simplify acknowledgment ([76e91d2](https://github.com/bsamiee/Parametric_Portal/commit/76e91d2))
+- **workflows:** remove Claude restrictions, add Gemini synchronize trigger ([b04c999](https://github.com/bsamiee/Parametric_Portal/commit/b04c999))
+- **workflows:** remove synchronize trigger from Claude/Gemini reviews ([c20d6a6](https://github.com/bsamiee/Parametric_Portal/commit/c20d6a6))
+
+### [REFACTORING]
+
+- **workflows:** simplify Claude and Gemini review workflows ([bdaa8ea](https://github.com/bsamiee/Parametric_Portal/commit/bdaa8ea))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+- Copilot @Copilot
+
 ## 0.6.12 (2025-12-21)
 
 ### [BUG_FIXES]
