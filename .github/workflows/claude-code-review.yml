@@ -27,9 +27,10 @@ jobs:
           fetch-depth: 0
 
       - name: Run Claude Code Review
-        uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           track_progress: 'true'
           prompt: |
             Review this PR against the project's coding standards in REQUIREMENTS.md.
@@ -44,3 +45,4 @@ jobs:
             Approve if standards are met, request changes if violations found.
           claude_args: |
             --model claude-sonnet-4-20250514
+            --append-system-prompt "Read REQUIREMENTS.md and CLAUDE.md for coding standards. Use 'pnpm exec nx' for all nx commands. Key rules: no any, no let/var, no if/else chains, no for/while, no try/catch, no default exports. Use Effect pipelines, dispatch tables, branded types."

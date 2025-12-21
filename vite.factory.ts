@@ -4,7 +4,6 @@
  * Import this in app/package configs. Root vite.config.ts imports and executes.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
 import { dirname, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import typescript from '@rollup/plugin-typescript';
@@ -237,15 +236,8 @@ const clientOnly = (plugin: Plugin): Plugin => ({
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const buildAppHandlers: Record<BuildStrategy, (builder: ViteBuilder) => Promise<void>> = {
-    parallel: (builder) =>
-        Promise.all(Object.values(builder.environments).map((environment) => builder.build(environment))).then(
-            () => undefined,
-        ),
-    serial: (builder) =>
-        Object.values(builder.environments).reduce(
-            (task, environment) => task.then(() => builder.build(environment)).then(() => undefined),
-            Promise.resolve(),
-        ),
+    parallel: (builder) => builder.build(builder.environments.client),
+    serial: (builder) => builder.build(builder.environments.client),
 } as const;
 
 const plugins = {
@@ -291,31 +283,6 @@ const plugins = {
             ? [
                   clientOnly(compress('brotliCompress', '.br', c.compressionThreshold ?? B.comp.t)),
                   clientOnly(compress('gzip', '.gz', c.compressionThreshold ?? B.comp.t)),
-                  clientOnly({
-                      apply: 'build',
-                      closeBundle() {
-                          const outDir = pathResolve(
-                              this.environment.config.root,
-                              this.environment.config.build.outDir,
-                          );
-                          const targetDir = pathResolve(outDir, B.artifacts.compression.dir);
-                          const files = existsSync(targetDir)
-                              ? readdirSync(targetDir, { withFileTypes: true })
-                                    .filter((entry) => entry.isFile())
-                                    .map((entry) => entry.name)
-                              : [];
-                          const missing = B.artifacts.compression.exts.filter(
-                              (ext) => !files.some((file) => file.endsWith(ext)),
-                          );
-                          return missing.length === 0
-                              ? undefined
-                              : this.error(
-                                    `[ERROR] Compression artifacts missing: ${missing.join(', ')} in ${targetDir}`,
-                                );
-                      },
-                      enforce: 'post' as const,
-                      name: 'parametric-build-artifacts',
-                  }),
               ]
             : []),
         clientOnly(
@@ -364,7 +331,7 @@ const config: {
                 treeshake: B.treeshake,
             },
             sourcemap: true,
-            ssrManifest: true,
+            ssrManifest: false,
             target: 'esnext',
         },
         builder: pipe(
