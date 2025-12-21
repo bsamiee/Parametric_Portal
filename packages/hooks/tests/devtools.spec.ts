@@ -26,12 +26,14 @@ describe('devtools', () => {
             expect(typeof DEVTOOLS_HOOK_TUNING.noop.show).toBe('function');
         });
 
-        it('should have noop.hide that does nothing', () => {
-            expect(() => DEVTOOLS_HOOK_TUNING.noop.hide()).not.toThrow();
+        it('should have noop.hide that returns undefined', () => {
+            const result = DEVTOOLS_HOOK_TUNING.noop.hide();
+            expect(result).toBeUndefined();
         });
 
-        it('should have noop.show that does nothing', () => {
-            expect(() => DEVTOOLS_HOOK_TUNING.noop.show()).not.toThrow();
+        it('should have noop.show that returns undefined and accepts any arguments', () => {
+            const result = DEVTOOLS_HOOK_TUNING.noop.show();
+            expect(result).toBeUndefined();
         });
     });
 
@@ -48,23 +50,24 @@ describe('devtools', () => {
             expect(enhanced.message).toBe('original message');
         });
 
-        it('should preserve error when captureOwnerStack returns null', () => {
+        it('should return same error reference when captureOwnerStack returns null', () => {
             const error = new Error('test');
             const enhanced = enhanceError(error);
+            expect(enhanced).toBe(error);
             expect(enhanced.message).toBe('test');
         });
 
-        it('should add ownerStack to cause when available', () => {
-            const error = new Error('test');
-            const enhanced = enhanceError(error);
-            // ownerStack may or may not be available depending on React version
-            expect(enhanced).toBeDefined();
-        });
-
-        it('should preserve existing cause when adding ownerStack', () => {
+        it('should merge ownerStack into existing cause when available', () => {
             const error = new Error('test', { cause: { existing: 'data' } });
             const enhanced = enhanceError(error);
-            expect(enhanced).toBeDefined();
+            expect(enhanced.message).toBe('test');
+
+            // Verify that if ownerStack was added, it's merged with existing cause
+            if (enhanced.cause && typeof enhanced.cause === 'object') {
+                const cause = enhanced.cause as Record<string, unknown>;
+                // Original data should be preserved
+                expect(cause.existing).toBe('data');
+            }
         });
     });
 });

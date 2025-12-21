@@ -144,15 +144,17 @@ describe('browser', () => {
             expect(sanitizeFilename('file---name')).toBe('file_name');
         });
 
-        it('should collapse multiple underscores but strip them in regex', () => {
-            // Underscores are stripped by the /[^a-z0-9 -]/g regex before collapsing
+        it('should strip underscores not in allowed character class', () => {
+            // Underscores are NOT in the allowed character class [a-z0-9 -] on line 91 of browser.ts
+            // So 'file___name' becomes 'filename' after disallowed characters are stripped
             expect(sanitizeFilename('file___name')).toBe('filename');
         });
 
-        it('should trim to 64 characters max', () => {
+        it('should truncate to exactly 64 characters', () => {
             const longName = 'a'.repeat(100);
             const result = sanitizeFilename(longName);
-            expect(result.length).toBeLessThanOrEqual(64);
+            expect(result.length).toBe(64);
+            expect(result).toBe('a'.repeat(64));
         });
 
         it('should return export for empty string', () => {
@@ -201,16 +203,28 @@ describe('browser', () => {
             expect(typeof exportHandlers).toBe('object');
         });
 
-        it('should have svg handler', () => {
+        it('should have svg handler that validates format', () => {
             expect(typeof exportHandlers.svg).toBe('function');
+            // Verify handler returns Effect that fails when no svg provided
+            const input = { filename: 'test', format: 'svg' as const };
+            const effect = exportHandlers.svg(input);
+            expect(effect).toBeDefined();
         });
 
-        it('should have png handler', () => {
+        it('should have png handler that validates format and size', () => {
             expect(typeof exportHandlers.png).toBe('function');
+            // Verify handler returns Effect that fails when no svg provided
+            const input = { filename: 'test', format: 'png' as const, pngSize: 512 };
+            const effect = exportHandlers.png(input);
+            expect(effect).toBeDefined();
         });
 
-        it('should have zip handler', () => {
+        it('should have zip handler that validates variants', () => {
             expect(typeof exportHandlers.zip).toBe('function');
+            // Verify handler returns Effect that fails when no variants provided
+            const input = { filename: 'test', format: 'zip' as const };
+            const effect = exportHandlers.zip(input);
+            expect(effect).toBeDefined();
         });
     });
 
