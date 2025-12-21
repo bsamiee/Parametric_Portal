@@ -196,6 +196,14 @@
                     "style": { "useComponentExportOnlyModules": "off" }
                 }
             }
+        },
+        {
+            "includes": ["**/vite-env.d.ts"],
+            "linter": {
+                "rules": {
+                    "style": { "useNamingConvention": "off" }
+                }
+            }
         }
     ]
 }

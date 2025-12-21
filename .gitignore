@@ -17,10 +17,9 @@ public/build/
 
 # --- [TYPESCRIPT_ARTIFACTS] ---------------------------------------------------
 *.tsbuildinfo
-*.d.ts
-*.d.ts.map
+**/dist/**/*.d.ts
+**/dist/**/*.d.ts.map
 *.js.map
-!**/vite-env.d.ts
 
 # --- [PYTHON_ARTIFACTS] -------------------------------------------------------
 __pycache__/
