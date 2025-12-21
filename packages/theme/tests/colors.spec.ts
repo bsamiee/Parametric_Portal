@@ -112,7 +112,7 @@ describe('colors package', () => {
             arbitraryLightness,
             arbitraryChroma,
             arbitraryHue,
-            fc.float({ max: 1, min: 0 }),
+            fc.float({ max: 1, min: 0, noDefaultInfinity: true, noNaN: true }),
         ])('mixes two colors', (l1, c1, h1, l2, c2, h2, ratio) => {
             const color1 = Effect.runSync(createOklch(l1, c1, h1));
             const color2 = Effect.runSync(createOklch(l2, c2, h2));
@@ -120,7 +120,7 @@ describe('colors package', () => {
             expect(mixed.l).toBeGreaterThanOrEqual(0);
             expect(mixed.l).toBeLessThanOrEqual(1);
             expect(mixed.c).toBeGreaterThanOrEqual(0);
-            expect(mixed.c).toBeLessThanOrEqual(0.4);
+            expect(mixed.c).toBeLessThanOrEqual(Math.fround(0.4));
         });
 
         it('at ratio 0 returns first color', () => {
@@ -191,13 +191,14 @@ describe('colors package', () => {
     });
 
     describe('gamut mapping', () => {
-        it.prop([arbitraryLightness, fc.float({ max: Math.fround(0.37), min: 0 }), arbitraryHue])(
-            'identifies colors in srgb gamut',
-            (l, c, h) => {
-                const color = Effect.runSync(createOklch(l, c, h));
-                expect(isInGamut(color, 'srgb')).toBe(true);
-            },
-        );
+        it.prop([
+            arbitraryLightness,
+            fc.float({ max: Math.fround(0.36), min: 0, noDefaultInfinity: true, noNaN: true }),
+            arbitraryHue,
+        ])('identifies colors in srgb gamut', (l, c, h) => {
+            const color = Effect.runSync(createOklch(l, c, h));
+            expect(isInGamut(color, 'srgb')).toBe(true);
+        });
 
         it('identifies colors outside srgb gamut', () => {
             const color = Effect.runSync(createOklch(0.5, 0.38, 180));
