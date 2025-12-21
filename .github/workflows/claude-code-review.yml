@@ -114,8 +114,6 @@ jobs:
 
           claude_args: |
             --model claude-opus-4-5-20251101
-            --max-turns 20
-            --allowedTools Read,Write,Grep,Glob,Bash(nx:*),Bash(pnpm:*),Bash(git:*),Bash(gh:*),Bash(cat:*)
 
       - name: Save PR metadata for downstream workflows
         if: always()
