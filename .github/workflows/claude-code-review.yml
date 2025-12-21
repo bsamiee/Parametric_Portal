@@ -21,15 +21,6 @@ jobs:
       actions: read
 
     steps:
-      - name: Mint GitHub App token
-        id: mint_token
-        if: vars.APP_ID && secrets.APP_PRIVATE_KEY
-        continue-on-error: true
-        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2
-        with:
-          app-id: ${{ vars.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-
       - name: Checkout repository
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
@@ -46,7 +37,7 @@ jobs:
         uses: anthropics/claude-code-action@f0c8eb29807907de7f5412d04afceb5e24817127 # v1.0.23
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ steps.mint_token.outputs.token || secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             Review PR #${{ github.event.pull_request.number }} against REQUIREMENTS.md and CLAUDE.md standards.
 
