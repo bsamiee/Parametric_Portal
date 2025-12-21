@@ -1,98 +1,98 @@
 {
-    "dependencies": {
-        "@effect/experimental": "catalog:",
-        "effect": "catalog:",
-        "react": "catalog:",
-        "react-dom": "catalog:",
-        "react-error-boundary": "catalog:",
-        "unplugin-auto-import": "catalog:",
-        "vite": "catalog:"
+  "dependencies": {
+    "@effect/experimental": "catalog:",
+    "effect": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-error-boundary": "catalog:",
+    "unplugin-auto-import": "catalog:",
+    "vite": "catalog:"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "fast-check": "catalog:",
+    "happy-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "exports": {
+    "./bootstrap": {
+      "types": "./src/bootstrap.tsx",
+      "import": "./src/bootstrap.tsx",
+      "default": "./src/bootstrap.tsx"
     },
-    "devDependencies": {
-        "@fast-check/vitest": "catalog:",
-        "@types/react": "catalog:",
-        "@types/react-dom": "catalog:",
-        "fast-check": "catalog:",
-        "happy-dom": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:"
+    "./boundary": {
+      "types": "./src/boundary.tsx",
+      "import": "./src/boundary.tsx",
+      "default": "./src/boundary.tsx"
     },
-    "exports": {
-        "./bootstrap": {
-            "types": "./src/bootstrap.tsx",
-            "import": "./src/bootstrap.tsx",
-            "default": "./src/bootstrap.tsx"
-        },
-        "./boundary": {
-            "types": "./src/boundary.tsx",
-            "import": "./src/boundary.tsx",
-            "default": "./src/boundary.tsx"
-        },
-        "./console": {
-            "types": "./src/console.ts",
-            "import": "./src/console.ts",
-            "default": "./src/console.ts"
-        },
-        "./env": {
-            "types": "./src/env.ts",
-            "import": "./src/env.ts",
-            "default": "./src/env.ts"
-        },
-        "./experimental": {
-            "types": "./src/experimental.ts",
-            "import": "./src/experimental.ts",
-            "default": "./src/experimental.ts"
-        },
-        "./handlers": {
-            "types": "./src/handlers.ts",
-            "import": "./src/handlers.ts",
-            "default": "./src/handlers.ts"
-        },
-        "./logger": {
-            "types": "./src/logger.ts",
-            "import": "./src/logger.ts",
-            "default": "./src/logger.ts"
-        },
-        "./overlay": {
-            "types": "./src/overlay.tsx",
-            "import": "./src/overlay.tsx",
-            "default": "./src/overlay.tsx"
-        },
-        "./performance": {
-            "types": "./src/performance.ts",
-            "import": "./src/performance.ts",
-            "default": "./src/performance.ts"
-        },
-        "./types": {
-            "types": "./src/types.ts",
-            "import": "./src/types.ts",
-            "default": "./src/types.ts"
-        },
-        "./session": {
-            "types": "./src/session.tsx",
-            "import": "./src/session.tsx",
-            "default": "./src/session.tsx"
-        },
-        "./trace": {
-            "types": "./src/trace.ts",
-            "import": "./src/trace.ts",
-            "default": "./src/trace.ts"
-        },
-        "./vite-plugin": {
-            "types": "./src/vite-plugin.ts",
-            "import": "./src/vite-plugin.ts",
-            "default": "./src/vite-plugin.ts"
-        }
+    "./console": {
+      "types": "./src/console.ts",
+      "import": "./src/console.ts",
+      "default": "./src/console.ts"
     },
-    "name": "@parametric-portal/devtools",
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./env": {
+      "types": "./src/env.ts",
+      "import": "./src/env.ts",
+      "default": "./src/env.ts"
     },
-    "type": "module",
-    "version": "0.6.7"
+    "./experimental": {
+      "types": "./src/experimental.ts",
+      "import": "./src/experimental.ts",
+      "default": "./src/experimental.ts"
+    },
+    "./handlers": {
+      "types": "./src/handlers.ts",
+      "import": "./src/handlers.ts",
+      "default": "./src/handlers.ts"
+    },
+    "./logger": {
+      "types": "./src/logger.ts",
+      "import": "./src/logger.ts",
+      "default": "./src/logger.ts"
+    },
+    "./overlay": {
+      "types": "./src/overlay.tsx",
+      "import": "./src/overlay.tsx",
+      "default": "./src/overlay.tsx"
+    },
+    "./performance": {
+      "types": "./src/performance.ts",
+      "import": "./src/performance.ts",
+      "default": "./src/performance.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./session": {
+      "types": "./src/session.tsx",
+      "import": "./src/session.tsx",
+      "default": "./src/session.tsx"
+    },
+    "./trace": {
+      "types": "./src/trace.ts",
+      "import": "./src/trace.ts",
+      "default": "./src/trace.ts"
+    },
+    "./vite-plugin": {
+      "types": "./src/vite-plugin.ts",
+      "import": "./src/vite-plugin.ts",
+      "default": "./src/vite-plugin.ts"
+    }
+  },
+  "name": "@parametric-portal/devtools",
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "dev": "vite dev --host",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "type": "module",
+  "version": "0.6.8"
 }

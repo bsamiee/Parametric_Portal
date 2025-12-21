@@ -1,65 +1,65 @@
 {
-    "dependencies": {
-        "effect": "catalog:"
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "exports": {
+    "./colors": {
+      "types": "./src/colors.ts",
+      "import": "./src/colors.ts",
+      "default": "./src/colors.ts"
     },
-    "devDependencies": {
-        "@fast-check/vitest": "catalog:",
-        "fast-check": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./factories": {
+      "types": "./src/factories.ts",
+      "import": "./src/factories.ts",
+      "default": "./src/factories.ts"
     },
-    "exports": {
-        "./colors": {
-            "types": "./src/colors.ts",
-            "import": "./src/colors.ts",
-            "default": "./src/colors.ts"
-        },
-        "./factories": {
-            "types": "./src/factories.ts",
-            "import": "./src/factories.ts",
-            "default": "./src/factories.ts"
-        },
-        "./fonts": {
-            "types": "./src/fonts.ts",
-            "import": "./src/fonts.ts",
-            "default": "./src/fonts.ts"
-        },
-        "./layouts": {
-            "types": "./src/layouts.ts",
-            "import": "./src/layouts.ts",
-            "default": "./src/layouts.ts"
-        },
-        "./presets": {
-            "types": "./src/presets.ts",
-            "import": "./src/presets.ts",
-            "default": "./src/presets.ts"
-        },
-        "./schemas": {
-            "types": "./src/schemas.ts",
-            "import": "./src/schemas.ts",
-            "default": "./src/schemas.ts"
-        },
-        "./theme": {
-            "types": "./src/theme.ts",
-            "import": "./src/theme.ts",
-            "default": "./src/theme.ts"
-        },
-        "./utils": {
-            "types": "./src/utils.ts",
-            "import": "./src/utils.ts",
-            "default": "./src/utils.ts"
-        }
+    "./fonts": {
+      "types": "./src/fonts.ts",
+      "import": "./src/fonts.ts",
+      "default": "./src/fonts.ts"
     },
-    "name": "@parametric-portal/theme",
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./layouts": {
+      "types": "./src/layouts.ts",
+      "import": "./src/layouts.ts",
+      "default": "./src/layouts.ts"
     },
-    "type": "module",
-    "version": "0.6.7"
+    "./presets": {
+      "types": "./src/presets.ts",
+      "import": "./src/presets.ts",
+      "default": "./src/presets.ts"
+    },
+    "./schemas": {
+      "types": "./src/schemas.ts",
+      "import": "./src/schemas.ts",
+      "default": "./src/schemas.ts"
+    },
+    "./theme": {
+      "types": "./src/theme.ts",
+      "import": "./src/theme.ts",
+      "default": "./src/theme.ts"
+    },
+    "./utils": {
+      "types": "./src/utils.ts",
+      "import": "./src/utils.ts",
+      "default": "./src/utils.ts"
+    }
+  },
+  "name": "@parametric-portal/theme",
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "dev": "vite dev --host",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "type": "module",
+  "version": "0.6.8"
 }

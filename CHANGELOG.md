@@ -1,3 +1,19 @@
+## 0.6.8 (2025-12-21)
+
+### [BUG_FIXES]
+
+- **github:** pr-hygiene minimize all comments, delete all user chatops ([3ee2d98](https://github.com/bsamiee/Parametric_Portal/commit/3ee2d98))
+- **parametric-icons:** track vite-env.d.ts for env type declarations ([7b401b2](https://github.com/bsamiee/Parametric_Portal/commit/7b401b2))
+- **workflows:** add GitHub App token minting, fix if: syntax ([b078a54](https://github.com/bsamiee/Parametric_Portal/commit/b078a54))
+
+### [REFACTORING]
+
+- **workflows:** remove GitHub App token minting, simplify auth ([7280765](https://github.com/bsamiee/Parametric_Portal/commit/7280765))
+
+### ❤️ Thank You
+
+- bsamiee
+
 ## 0.6.7 (2025-12-21)
 
 ### [FEATURES]
