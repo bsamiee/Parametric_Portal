@@ -3,7 +3,7 @@
  */
 import { it } from '@fast-check/vitest';
 import fc from 'fast-check';
-import { describe, expect } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { STORE_TUNING, store } from '../src/stores.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -105,29 +105,26 @@ describe('stores package', () => {
         it('notifies subscribers on state change', () => {
             const api = loadApi();
             const slice = api.createSlice({ initialState: { count: 0 }, name: 'test' });
-            let values: ReadonlyArray<number> = [];
-            const unsubscribe = slice.subscribe((state) => {
-                values = [...values, state.count];
-            });
+            const subscriber = vi.fn();
+            const unsubscribe = slice.subscribe((state) => subscriber(state.count));
             slice.actions.set({ count: 1 });
             slice.actions.set({ count: 2 });
-            expect(values).toContain(1);
-            expect(values).toContain(2);
+            const calledValues = subscriber.mock.calls.map(([v]) => v);
+            expect(calledValues).toContain(1);
+            expect(calledValues).toContain(2);
             unsubscribe();
         });
 
         it('unsubscribe stops notifications', () => {
             const api = loadApi();
             const slice = api.createSlice({ initialState: { count: 0 }, name: 'test' });
-            let callCount = 0;
-            const unsubscribe = slice.subscribe(() => {
-                callCount = callCount + 1;
-            });
+            const subscriber = vi.fn();
+            const unsubscribe = slice.subscribe(subscriber);
             slice.actions.set({ count: 1 });
-            expect(callCount).toBe(1);
+            expect(subscriber).toHaveBeenCalledTimes(1);
             unsubscribe();
             slice.actions.set({ count: 2 });
-            expect(callCount).toBe(1);
+            expect(subscriber).toHaveBeenCalledTimes(1);
         });
     });
 
@@ -157,12 +154,10 @@ describe('stores package', () => {
             const counterSlice = api.createSlice({ initialState: { count: 0 }, name: 'counter' });
             const userSlice = api.createSlice({ initialState: { name: 'John' }, name: 'user' });
             const combined = api.combineSlices({ counter: counterSlice, user: userSlice });
-            let notified = false;
-            combined.subscribe(() => {
-                notified = true;
-            });
+            const subscriber = vi.fn();
+            combined.subscribe(subscriber);
             counterSlice.actions.set({ count: 1 });
-            expect(notified).toBe(true);
+            expect(subscriber).toHaveBeenCalled();
         });
     });
 });
