@@ -1,48 +1,57 @@
 name: Claude Code Review
 
 on:
-  pull_request_target:
-    types: [opened, ready_for_review]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  pull_request:
+    types: [opened, synchronize]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    if: github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
+      pull-requests: read
+      issues: read
       id-token: write
 
     steps:
-      - name: Checkout PR head
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Run Claude Code Review
+        id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          track_progress: 'true'
           prompt: |
-            Review this PR against the project's coding standards in REQUIREMENTS.md.
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Focus on:
-            - Code quality and correctness
-            - Adherence to functional/monadic patterns (Effect, Option, dispatch tables)
-            - No any, let/var, if/else chains, for/while loops, try/catch, default exports
-            - Proper use of branded types and B constants
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage
 
-            Post inline comments on specific lines with issues.
-            Approve if standards are met, request changes if violations found.
-          claude_args: |
-            --model claude-sonnet-4-20250514
-            --append-system-prompt "Read REQUIREMENTS.md and CLAUDE.md for coding standards. Use 'pnpm exec nx' for all nx commands. Key rules: no any, no let/var, no if/else chains, no for/while, no try/catch, no default exports. Use Effect pipelines, dispatch tables, branded types."
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://code.claude.com/docs/en/cli-reference for available options
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+
