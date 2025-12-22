@@ -4,7 +4,7 @@
 import { makeRepositories, type Repositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
-import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
+import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
 import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/types/database';
 import type { Uuidv7 } from '@parametric-portal/types/types';
@@ -137,7 +137,9 @@ const handleLogout = (repos: Repositories) =>
             yield* repos.sessions.delete(session.sessionId);
             return { success: true };
         }),
-        Effect.orDie,
+        Effect.catchAll((cause) =>
+            Effect.fail(new InternalError({ cause: `Session deletion failed: ${String(cause)}` })),
+        ),
     );
 
 const handleMe = (repos: Repositories) =>
@@ -147,11 +149,15 @@ const handleMe = (repos: Repositories) =>
             const userOpt = yield* repos.users.findById(session.userId);
 
             return yield* Option.match(userOpt, {
-                onNone: () => Effect.die(new Error('User not found')),
+                onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
                 onSome: (user) => Effect.succeed({ email: user.email, id: user.id }),
             });
         }),
-        Effect.orDie,
+        Effect.catchTags({
+            NotFoundError: (err) => Effect.fail(err),
+            ParseError: () => Effect.fail(new InternalError({ cause: 'User data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'User lookup failed' })),
+        }),
     );
 
 // --- [LAYER] -----------------------------------------------------------------

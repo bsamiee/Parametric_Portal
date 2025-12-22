@@ -27,13 +27,15 @@ const handleList = (repos: Repositories, params: PaginationQuery) =>
             const { count: total } = yield* repos.assets.countByUserId(session.userId);
 
             return {
-                data: assets.map((a) => ({ id: String(a.id), prompt: String(a.prompt) })),
+                data: assets.map((a) => ({ id: a.id, prompt: a.prompt })),
                 limit: params.limit,
                 offset: params.offset,
                 total,
             };
         }),
-        Effect.orDie,
+        Effect.catchAll((cause) =>
+            Effect.fail(new InternalError({ cause: `Asset list retrieval failed: ${String(cause)}` })),
+        ),
     );
 
 const handleGenerate = (repos: Repositories, iconService: IconGenerationServiceType, input: ServiceInput) =>
@@ -55,7 +57,12 @@ const handleGenerate = (repos: Repositories, iconService: IconGenerationServiceT
 
             return { id: String(asset.id), variants: result.variants };
         }),
-        Effect.orDie,
+        Effect.catchTags({
+            InternalError: (err) => Effect.fail(err),
+            NoSuchElementException: () => Effect.fail(new InternalError({ cause: 'No icon variants generated' })),
+            ParseError: () => Effect.fail(new InternalError({ cause: 'Asset data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'Asset storage failed' })),
+        }),
     );
 
 // --- [LAYER] -----------------------------------------------------------------
