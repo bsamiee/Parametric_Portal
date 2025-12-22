@@ -3,6 +3,7 @@
         "composite": false,
         "outDir": "dist",
         "paths": {
+            "@parametric-portal/api/*": ["../../apps/api/src/*"],
             "@parametric-portal/components/*": ["../../packages/components/src/*"],
             "@parametric-portal/devtools/*": ["../../packages/devtools/src/*"],
             "@parametric-portal/hooks/*": ["../../packages/hooks/src/*"],

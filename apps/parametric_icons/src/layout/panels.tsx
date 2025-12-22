@@ -3,13 +3,16 @@
  * Mirrors Arsenal architecture with rail + drawer sidebar, centered input, and preview viewport.
  */
 
+import type { Intent } from '@parametric-portal/api/contracts/icons';
 import { sanitizeFilename } from '@parametric-portal/hooks/browser';
+import { deriveScope, sanitizeSvg } from '@parametric-portal/types/svg';
 import { types, type Uuidv7 } from '@parametric-portal/types/types';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
+import { apiFactory, asyncApi, generateIcon } from '../api.ts';
 import { useClipboard, useExport, useMutation, useStoreActions, useStoreSelector, useStoreSlice } from '../core.ts';
-import { apiFactory, asyncApi, deriveScope, generateIcon, sanitizeSvg } from '../generation.ts';
 import {
+    type Asset,
     type ContextState,
     type CustomAsset,
     chatSlice,
@@ -17,10 +20,7 @@ import {
     historySlice,
     librarySlice,
     type MessageRole,
-    type ParametricAsset,
-    type ParametricIntent,
     previewSlice,
-    type SavedAsset,
     type SidebarTab,
     STORE_TUNING,
     uiSlice,
@@ -56,7 +56,7 @@ type PreviewState = 'empty' | 'generating' | 'ready';
 
 // Props for history panel
 type HistoryPanelProps = {
-    readonly assets: ReadonlyArray<ParametricAsset>;
+    readonly assets: ReadonlyArray<Asset>;
     readonly currentId: string | null;
     readonly onClear: () => void;
     readonly onDelete: (id: string) => void;
@@ -70,7 +70,7 @@ type LibraryPanelProps = {
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
     readonly onRemoveSaved: (id: string) => void;
-    readonly savedAssets: ReadonlyArray<SavedAsset>;
+    readonly savedAssets: ReadonlyArray<Asset>;
 };
 
 // Union type for dispatch table - all props needed by any panel renderer
@@ -513,16 +513,16 @@ const Sidebar = (): ReactNode => {
         customAssets,
         onAddAttachment: (id, name, svg) => contextActions.addAttachment({ id, name, svg }),
         onClear: () => {
-            libraryActions.clearSavedAssets();
+            libraryActions.clearAssets();
             historyActions.clearAll();
         },
         onDelete: (id) => {
             historyActions.deleteAsset(id);
-            libraryActions.isSaved(id) && libraryActions.removeSavedAsset(id);
+            libraryActions.isSaved(id) && libraryActions.removeAsset(id);
         },
         onOpenUpload: () => setIsUploadOpen(true),
         onRemoveCustomAsset: libraryActions.removeCustomAsset,
-        onRemoveSaved: libraryActions.removeSavedAsset,
+        onRemoveSaved: libraryActions.removeAsset,
         onSelect: handleSelectAsset,
         savedAssets,
     };
@@ -605,7 +605,7 @@ const CommandBar = (): ReactNode => {
     }, [isSidebarOpen, uiActions]);
 
     // Track context at submission time for use when response arrives
-    const submittedRef = useRef<{ prompt: string; intent: ParametricIntent; context: ContextState } | null>(null);
+    const submittedRef = useRef<{ prompt: string; intent: Intent; context: ContextState } | null>(null);
 
     useEffect(() => {
         chatActions.setGenerating(isGenerating);
@@ -707,7 +707,7 @@ const CommandBar = (): ReactNode => {
             });
 
             // Create and save asset to history
-            const asset: ParametricAsset = {
+            const asset: Asset = {
                 context: submitted.context,
                 id: generateId(),
                 intent: submitted.intent,
@@ -773,7 +773,7 @@ const CommandBar = (): ReactNode => {
                         label='Mode'
                         options={modeOptions}
                         value={intent}
-                        onChange={(key) => contextActions.setIntent(key as ParametricIntent)}
+                        onChange={(key) => contextActions.setIntent(key as Intent)}
                     />
                     <div className='context-divider' />
                     <ContextSelector
@@ -872,8 +872,7 @@ const Viewport = ({ isLoading, sanitized, showGrid, showSafeArea, zoom }: Viewpo
     const variantCount = currentAsset?.variants.length ?? 0;
 
     const handleToggleSave = useCallback(() => {
-        currentAsset &&
-            (isSaved ? libraryActions.removeSavedAsset(currentAsset.id) : libraryActions.addSavedAsset(currentAsset));
+        currentAsset && (isSaved ? libraryActions.removeAsset(currentAsset.id) : libraryActions.addAsset(currentAsset));
     }, [currentAsset, isSaved, libraryActions]);
     const handlePrevVariant = useCallback(() => {
         if (!currentAsset || variantIndex <= 0) {

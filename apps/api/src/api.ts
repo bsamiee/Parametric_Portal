@@ -10,6 +10,7 @@ import { SessionAuth } from '@parametric-portal/server/middleware';
 import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
 import { Uuidv7Schema } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
+import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -36,11 +37,6 @@ const PaginatedAssetListSchema = S.Struct({
     limit: S.Int,
     offset: S.Int,
     total: S.Int,
-});
-
-const AssetGeneratedSchema = S.Struct({
-    id: S.String,
-    svg: S.String,
 });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -82,8 +78,8 @@ const IconsGroup = createGroup('icons', { prefix: '/icons' })
     .add(
         HttpApiEndpoint.post('generate', '/')
             .middleware(SessionAuth)
-            .setPayload(S.Struct({ prompt: S.NonEmptyTrimmedString }))
-            .addSuccess(AssetGeneratedSchema),
+            .setPayload(GenerateRequestSchema)
+            .addSuccess(GenerateResponseSchema),
     );
 
 const HealthGroup = createHealthGroup();

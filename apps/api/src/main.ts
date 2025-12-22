@@ -8,6 +8,7 @@ import type { HttpApp } from '@effect/platform';
 import { HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
+import { AnthropicClientLive } from '@parametric-portal/ai/anthropic';
 import { PgLive } from '@parametric-portal/database/client';
 import { sessionToResult } from '@parametric-portal/database/models';
 import { makeRepositories } from '@parametric-portal/database/repositories';
@@ -20,12 +21,11 @@ import {
     createSessionAuthLayer,
 } from '@parametric-portal/server/middleware';
 import { Context, Effect, Layer, Option, pipe } from 'effect';
-
-import { AnthropicServiceLive } from './anthropic.ts';
 import { AppApi } from './api.ts';
 import { OAuthServiceLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
+import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -108,7 +108,8 @@ const ServerLive = pipe(
     Layer.provide(HealthChecksLive),
     Layer.provide(SessionAuthLive),
     Layer.provide(OAuthServiceLive),
-    Layer.provide(AnthropicServiceLive),
+    Layer.provide(IconGenerationServiceLive),
+    Layer.provide(AnthropicClientLive),
     Layer.provide(PgLive),
     HttpServer.withLogAddress,
     Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),

@@ -1,14 +1,13 @@
 {
     "dependencies": {
-        "@anthropic-ai/sdk": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-browser": "catalog:",
+        "@parametric-portal/api": "workspace:*",
         "@parametric-portal/components": "workspace:*",
         "@parametric-portal/devtools": "workspace:*",
         "@parametric-portal/hooks": "workspace:*",
         "@parametric-portal/theme": "workspace:*",
         "@parametric-portal/types": "workspace:*",
-        "dompurify": "catalog:",
         "effect": "catalog:",
         "jszip": "catalog:",
         "react": "catalog:",
