@@ -32,12 +32,12 @@ jobs:
     steps:
       # Checkout PR head ref explicitly (parent workflow uses pull_request_target)
       - name: 'Checkout PR head'
-        uses: 'actions/checkout@v4'
+        uses: 'actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5' # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: 'Run Gemini pull request review'
-        uses: 'google-github-actions/run-gemini-cli@v0'
+        uses: 'google-github-actions/run-gemini-cli@ba709f0578653f8a65869f9b862bd47455cd96d2' # v0
         id: 'gemini_pr_review'
         env:
           GITHUB_TOKEN: '${{ github.token }}'
