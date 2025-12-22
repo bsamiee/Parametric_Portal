@@ -11,7 +11,6 @@ import {
     historySlice,
     type LibraryState,
     librarySlice,
-    type ParametricAsset,
     previewSlice,
     uiSlice,
 } from '../stores.ts';
@@ -56,13 +55,13 @@ const AppContent = (): ReactNode => {
                 const customAssets = Array.isArray(state?.customAssets)
                     ? state.customAssets
                     : initialState.customAssets;
-                const savedAssets = Array.isArray(state?.savedAssets)
-                    ? state.savedAssets
-                    : Array.isArray(state?.savedIds)
-                      ? state.savedIds
-                            .map((id) => historySlice.getState().assets.find((asset) => asset.id === id))
-                            .filter((asset): asset is ParametricAsset => asset !== undefined)
-                      : [];
+                const assetLookup = new Map(historySlice.getState().assets.map((a) => [a.id, a]));
+                const savedAssets =
+                    (Array.isArray(state?.savedAssets) ? state.savedAssets : null) ??
+                    (Array.isArray(state?.savedIds)
+                        ? state.savedIds.map((id) => assetLookup.get(id)).filter(Boolean)
+                        : null) ??
+                    [];
 
                 return state
                     ? { ...initialState, ...rest, customAssets, savedAssets }

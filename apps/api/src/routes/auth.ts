@@ -6,8 +6,7 @@ import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
-import type { Uuidv7 } from '@parametric-portal/types/database';
-import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/types/database';
+import { type OAuthProvider, SCHEMA_TUNING, type Uuidv7 } from '@parametric-portal/types/database';
 import { DateTime, Duration, Effect, Option, pipe } from 'effect';
 
 import { AppApi } from '../api.ts';
