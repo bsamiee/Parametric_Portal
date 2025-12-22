@@ -1,3 +1,18 @@
+## 1.0.2 (2025-12-22)
+
+### [BUG_FIXES]
+
+- consolidation with API contracts pattern ([#113](https://github.com/bsamiee/Parametric_Portal/pull/113))
+
+### [REFACTORING]
+
+- consolidate schemas and reduce duplication ([#116](https://github.com/bsamiee/Parametric_Portal/pull/116))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+
 ## 1.0.1 (2025-12-22)
 
 This was a version bump only, there were no code changes.
