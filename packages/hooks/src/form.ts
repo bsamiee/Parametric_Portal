@@ -5,40 +5,22 @@
  */
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkSuccess } from '@parametric-portal/types/async';
-import { Effect, Fiber, pipe, Schema as S } from 'effect';
+import {
+    createField,
+    type FieldName,
+    FORM_TUNING,
+    type FormField,
+    setFieldErrors,
+    setFieldValue,
+    touchField,
+    type ValidationResult,
+    validateField,
+} from '@parametric-portal/types/forms';
+import { Effect, Fiber, type Schema as S } from 'effect';
 import { useActionState, useCallback, useRef, useState } from 'react';
 import type { RuntimeApi } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
-
-// biome-ignore lint/style/useNamingConvention: _brand is standard Effect branded type convention
-type FieldName = string & { readonly _brand: 'FieldName' };
-
-type FieldState = 'pristine' | 'touched' | 'dirty';
-
-type ValidationError = {
-    // biome-ignore lint/style/useNamingConvention: _tag is standard discriminated union convention
-    readonly _tag: 'ValidationError';
-    readonly field: FieldName;
-    readonly message: string;
-    readonly rule: string;
-};
-
-type ValidationSuccess = {
-    // biome-ignore lint/style/useNamingConvention: _tag is standard discriminated union convention
-    readonly _tag: 'ValidationSuccess';
-    readonly field: FieldName;
-};
-
-type ValidationResult = ValidationError | ValidationSuccess;
-
-type FormField<T> = {
-    readonly errors: ReadonlyArray<ValidationError>;
-    readonly initialValue: T;
-    readonly name: FieldName;
-    readonly state: FieldState;
-    readonly value: T;
-};
 
 type ActionStateResult<S, I> = readonly [S, (input: I) => void, boolean];
 
@@ -66,68 +48,21 @@ const B = Object.freeze({
     defaults: {
         timestamp: ASYNC_TUNING.timestamp,
     },
-    states: {
-        dirty: 'dirty' as FieldState,
-        pristine: 'pristine' as FieldState,
-        touched: 'touched' as FieldState,
-    },
-    tags: {
-        error: 'ValidationError',
-        success: 'ValidationSuccess',
-    },
+    states: FORM_TUNING.states,
+    tags: FORM_TUNING.tags,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const mkFieldName = (name: string): FieldName => name as FieldName;
-
-const mkField = <V>(name: string, initialValue: V): FormField<V> => ({
-    errors: [],
-    initialValue,
-    name: mkFieldName(name),
-    state: B.states.pristine,
-    value: initialValue,
-});
-
-const mkValidationError = (field: FieldName, rule: string, message: string): ValidationError => ({
-    _tag: B.tags.error,
-    field,
-    message,
-    rule,
-});
-
-const mkValidationSuccess = (field: FieldName): ValidationResult => ({
-    _tag: B.tags.success,
-    field,
-});
+const mkFieldName = (name: string): FieldName => name;
 
 const validateWithSchema = <V>(field: FormField<V>, schema: S.Schema<V>): ValidationResult =>
-    pipe(
-        Effect.try(() => S.decodeUnknownSync(schema)(field.value)),
-        Effect.map(() => mkValidationSuccess(field.name)),
-        Effect.catchAll((error: unknown) =>
-            Effect.succeed(
-                mkValidationError(field.name, 'schema', error instanceof Error ? error.message : 'Validation failed'),
-            ),
-        ),
-        Effect.runSync,
-    );
+    Effect.runSync(validateField(field, schema));
 
-const updateFieldValue = <V>(field: FormField<V>, value: V): FormField<V> => ({
-    ...field,
-    state: value === field.initialValue ? B.states.pristine : B.states.dirty,
-    value,
-});
-
-const updateFieldTouched = <V>(field: FormField<V>): FormField<V> => ({
-    ...field,
-    state: field.state === B.states.pristine ? B.states.touched : field.state,
-});
-
-const updateFieldErrors = <V>(field: FormField<V>, result: ValidationResult): FormField<V> => ({
-    ...field,
-    errors: result._tag === B.tags.error ? [result] : [],
-});
+const updateFieldValue = <V>(field: FormField<V>, value: V): FormField<V> =>
+    value === field.initialValue
+        ? { ...setFieldValue(field, value), state: B.states.pristine }
+        : setFieldValue(field, value);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -135,15 +70,15 @@ const updateFieldErrors = <V>(field: FormField<V>, result: ValidationResult): Fo
  * Standalone form field hook (no runtime required - validation is synchronous)
  */
 const useFormField = <V>(name: string, initialValue: V, schema: S.Schema<V>): FormFieldState<V> => {
-    const [field, setField] = useState<FormField<V>>(() => mkField(name, initialValue));
+    const [field, setField] = useState<FormField<V>>(() => createField(mkFieldName(name), initialValue));
 
     const setValue = useCallback((value: V) => setField((prev: FormField<V>) => updateFieldValue(prev, value)), []);
 
-    const setTouched = useCallback(() => setField((prev: FormField<V>) => updateFieldTouched(prev)), []);
+    const setTouched = useCallback(() => setField((prev: FormField<V>) => touchField(prev)), []);
 
     const validate = useCallback(() => {
         const result = validateWithSchema(field, schema);
-        setField((prev: FormField<V>) => updateFieldErrors(prev, result));
+        setField((prev: FormField<V>) => setFieldErrors(prev, result._tag === B.tags.error ? [result] : []));
         return result;
     }, [field, schema]);
 
@@ -172,8 +107,8 @@ const createActionStateHooks = <R, E>(
                 fiberRef.current !== null && (await runtime.runPromise(Fiber.interrupt(fiberRef.current)));
 
                 const eff = action(input).pipe(
-                    Effect.map((data) => mkSuccess(data, ts)),
-                    Effect.catchAll((error: Err) => Effect.succeed(mkFailure(error, ts))),
+                    Effect.map((data) => mkSuccess<A, Err>(data, ts)),
+                    Effect.catchAll((error: Err) => Effect.succeed(mkFailure<A, Err>(error, ts))),
                 );
 
                 return runtime.runPromise(eff);

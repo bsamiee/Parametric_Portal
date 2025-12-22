@@ -4,7 +4,7 @@
  */
 import { Duration, pipe, Schema as S } from 'effect';
 import type { Hex64 } from './types.ts';
-import { Hex64Schema } from './types.ts';
+import { Hex64Schema, Uuidv7Schema } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -41,7 +41,7 @@ const B = Object.freeze({
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const uuidBase = S.UUID;
+const uuidBase = Uuidv7Schema;
 const ApiKeyIdSchema = pipe(uuidBase, S.brand('ApiKeyId'));
 const AssetIdSchema = pipe(uuidBase, S.brand('AssetId'));
 const UserIdSchema = pipe(uuidBase, S.brand('UserId'));
