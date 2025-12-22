@@ -1,0 +1,28 @@
+{
+  "name": "@parametric-portal/ai",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./anthropic": {
+      "types": "./src/anthropic.ts",
+      "import": "./src/anthropic.ts",
+      "default": "./src/anthropic.ts"
+    }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "catalog:",
+    "@parametric-portal/server": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  }
+}

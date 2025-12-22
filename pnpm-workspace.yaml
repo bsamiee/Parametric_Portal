@@ -50,6 +50,7 @@ catalog:
   cmdk: 1.1.1
   date-fns: 4.1.0
   dompurify: 3.3.1
+  isomorphic-dompurify: 2.34.0
   effect: 3.19.13
   fast-check: 4.5.1
   happy-dom: 20.0.11

@@ -4,10 +4,10 @@
 import type { ExportFormat } from '@parametric-portal/hooks/browser';
 import { readFileAsText } from '@parametric-portal/hooks/file';
 import { files } from '@parametric-portal/types/files';
+import { sanitizeSvg } from '@parametric-portal/types/svg';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import { useExport, useRuntime, useStoreActions, useStoreSlice } from '../core.ts';
-import { sanitizeSvg } from '../generation.ts';
 import { historySlice, previewSlice } from '../stores.ts';
 import { Button, Dialog, Icon, Spinner, Stack, SvgPreview, UploadTrigger, UploadZone } from '../ui.ts';
 

@@ -364,7 +364,7 @@ const config: {
             'import.meta.env.APP_VERSION': JSON.stringify(ver),
             'import.meta.env.BUILD_MODE': JSON.stringify(prod ? 'production' : 'development'),
             'import.meta.env.BUILD_TIME': JSON.stringify(time),
-            'import.meta.env.VITE_ANTHROPIC_API_KEY': JSON.stringify(process.env['ANTHROPIC_API_KEY'] ?? ''),
+            'import.meta.env.VITE_API_URL': JSON.stringify(process.env['VITE_API_URL'] ?? 'http://localhost:4000/api'),
         },
         esbuild: esbuild(true, prod),
         json: { namedExports: true, stringify: 'auto' },
