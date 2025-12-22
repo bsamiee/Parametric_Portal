@@ -35,6 +35,8 @@ jobs:
             "Read,Write,Edit,Glob,Grep,Task,TodoWrite,Skill,WebSearch,WebFetch,
             Bash(gh:*),Bash(git:*),Bash(pnpm:*),Bash(node:*),Bash(uv:*)"
           prompt: |
+            [REQUIRED]: Create a single OVERVIEW comment, NEST all findings/suggestions/fixes underneath this comment as individual comments, with proper formatting for PR reviews.
+
             [CONTEXT]
             Repository: ${{ github.repository }} | PR: ${{ github.event.pull_request.number }}
             Base: ${{ github.base_ref }} | Head: ${{ github.head_ref }}

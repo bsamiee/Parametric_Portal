@@ -1,198 +1,150 @@
-# [H1][BACKEND_PLAN]
->**Dictum:** *Effect-native backend with per-app APIs and shared infrastructure.*
+# [H1][BACKEND_INTEGRATION]
+>**Dictum:** *Backend complete. Frontend integration required.*
 
 ---
-## [1][ARCHITECTURE]
+## [1][STATUS]
 
-```
-packages/
-├── database/           # DONE: Client, Models (User, Asset, ApiKey, Session, OAuthAccount, Organization)
-└── server/             # DONE: Middleware (SessionAuth, ApiKeyAuth), Errors, HttpApi factories
+| Component                | State                  | Notes                                                    |
+| ------------------------ | ---------------------- | -------------------------------------------------------- |
+| `packages/database/`     | **DONE**               | 8 models, 3 migrations, repositories, PgLive             |
+| `packages/server/`       | **DONE**               | SessionAuth, ApiKeyAuth, CORS, errors, API factories     |
+| `apps/api/`              | **DONE**               | OAuth (3 providers), sessions, icons CRUD, health checks |
+| `apps/parametric_icons/` | **INTEGRATION NEEDED** | Calls Anthropic directly, localStorage only              |
 
-apps/
-├── parametric_icons/   # Existing frontend (port 3001)
-└── api/                # TO BUILD: Route handlers, migrations, OAuth callbacks
-    └── routes/
-```
+**Problem:** Frontend exposes `VITE_ANTHROPIC_API_KEY` in browser. All data ephemeral.
 
 ---
-## [2][APPS/API]
+## [2][API_ENDPOINTS]
 
-### [2.1][STRUCTURE]
+Base URL: `http://localhost:4000/api`
+
+### [2.1][AUTH]
+
+| Endpoint                         | Method | Auth   | Response                                   |
+| -------------------------------- | ------ | ------ | ------------------------------------------ |
+| `/auth/oauth/:provider`          | GET    | -      | `{ url }` redirect URL                     |
+| `/auth/oauth/:provider/callback` | GET    | -      | `{ accessToken, refreshToken, expiresAt }` |
+| `/auth/refresh`                  | POST   | Bearer | `{ accessToken, refreshToken, expiresAt }` |
+| `/auth/logout`                   | POST   | Bearer | `{ success }`                              |
+| `/auth/me`                       | GET    | Bearer | `{ id, email }`                            |
+
+Providers: `github`, `google`, `microsoft`
+
+### [2.2][ICONS]
+
+| Endpoint | Method | Auth   | Response                                  |
+| -------- | ------ | ------ | ----------------------------------------- |
+| `/icons` | GET    | Bearer | `{ data: Asset[], total, limit, offset }` |
+| `/icons` | POST   | Bearer | `{ id, svg }`                             |
+
+Body for POST: `{ prompt: string }`
+
+### [2.3][HEALTH]
+
+| Endpoint            | Method | Response                                       |
+| ------------------- | ------ | ---------------------------------------------- |
+| `/health/liveness`  | GET    | `{ status: 'ok' }`                             |
+| `/health/readiness` | GET    | `{ status: 'ok', checks: { database: bool } }` |
+
+---
+## [3][FRONTEND_INTEGRATION]
+
+### [3.1][REQUIRED_CHANGES]
+
+1. **Remove** `VITE_ANTHROPIC_API_KEY` from frontend
+2. **Add** auth state management (token storage, refresh logic)
+3. **Replace** direct Anthropic calls with `/api/icons` POST
+4. **Replace** localStorage persistence with API calls
+5. **Add** OAuth login flow (redirect to `/api/auth/oauth/:provider`)
+
+### [3.2][AUTH_FLOW]
 
 ```
-apps/api/
-├── src/
-│   ├── main.ts              # Entry point with Layer composition
-│   ├── api.ts               # HttpApi definition
-│   ├── migrate.ts           # Migration runner
-│   └── routes/
-│       ├── health.ts        # Health endpoints
-│       ├── auth.ts          # OAuth flows (Google, GitHub, Microsoft)
-│       └── icons.ts         # Icon CRUD + generation
-├── migrations/
-│   ├── 0001_users.ts
-│   ├── 0002_sessions.ts
-│   └── 0003_organizations.ts
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
+User clicks "Login with GitHub"
+    ↓
+Frontend redirects to: GET /api/auth/oauth/github
+    ↓
+API redirects to GitHub OAuth consent
+    ↓
+GitHub redirects to: /api/auth/oauth/github/callback?code=X&state=Y
+    ↓
+API creates session, returns: { accessToken, refreshToken, expiresAt }
+    ↓
+Frontend stores tokens, attaches Bearer header to all requests
 ```
 
-### [2.2][IMPORTS FROM PACKAGES]
+### [3.3][API_CLIENT]
 
 ```typescript
-// From @parametric-portal/database
-import { PgLive } from '@parametric-portal/database/client';
-import { Asset, User, Session, OAuthAccount, Organization, OrganizationMember } from '@parametric-portal/database/models';
-import { UserIdSchema, SessionIdSchema, OAuthProviderSchema } from '@parametric-portal/types/database';
+const B = Object.freeze({
+  baseUrl: 'http://localhost:4000/api',
+  endpoints: {
+    oauthStart: (provider: string) => `/auth/oauth/${provider}`,
+    refresh: '/auth/refresh',
+    logout: '/auth/logout',
+    me: '/auth/me',
+    icons: '/icons',
+  },
+} as const);
 
-// From @parametric-portal/server
-import { createApi, createGroup, createHealthGroup, addStandardErrors, SwaggerLayer } from '@parametric-portal/server/api';
-import { SessionAuth, createSessionAuthLayer, OAuthService, createCorsLayer } from '@parametric-portal/server/middleware';
-import { UnauthorizedError, OAuthError, NotFoundError } from '@parametric-portal/server/errors';
-```
+const createApiClient = (getToken: () => string | null) => ({
+  get: <T>(path: string) =>
+    fetch(`${B.baseUrl}${path}`, {
+      headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    }).then((r) => r.json() as Promise<T>),
 
-### [2.3][OAUTH ROUTES]
-
-**Use Arctic for OAuth protocol (already in catalog):**
-
-```typescript
-import { GitHub, Google, MicrosoftEntraId } from 'arctic';
-
-const providers = {
-    github: new GitHub(config.github.clientId, config.github.clientSecret),
-    google: new Google(config.google.clientId, config.google.clientSecret, config.google.redirectUri),
-    microsoft: new MicrosoftEntraId(config.microsoft.tenantId, config.microsoft.clientId, config.microsoft.clientSecret, config.microsoft.redirectUri),
-} as const;
-```
-
-**Route endpoints:**
-
-| Endpoint                         | Method | Purpose                                  |
-| -------------------------------- | ------ | ---------------------------------------- |
-| `/auth/oauth/:provider`          | GET    | Redirect to provider auth URL            |
-| `/auth/oauth/:provider/callback` | GET    | Handle callback, create session          |
-| `/auth/refresh`                  | POST   | Refresh session token                    |
-| `/auth/logout`                   | POST   | Revoke session                           |
-| `/auth/me`                       | GET    | Current user info (requires SessionAuth) |
-
-### [2.4][LAYER COMPOSITION]
-
-```typescript
-import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
-import { createServer } from 'node:http';
-
-const ApiLive = HttpApiBuilder.api(AppApi).pipe(
-    Layer.provide(HealthLive),
-    Layer.provide(AuthLive),
-    Layer.provide(IconsLive),
-);
-
-const ServerLive = HttpApiBuilder.serve().pipe(
-    Layer.provide(ApiLive),
-    Layer.provide(SwaggerLayer),
-    Layer.provide(createCorsLayer()),
-    Layer.provide(PgLive),
-    Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),
-);
-
-Layer.launch(ServerLive).pipe(NodeRuntime.runMain);
-```
-
-### [2.5][SQLRESOLVER PATTERNS]
-
-**[CRITICAL] Define resolvers inside Effect.gen (requires SqlClient in scope):**
-
-```typescript
-Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const findSession = SqlSchema.findOne({
-        Request: S.String,
-        Result: Session,
-        execute: (tokenHash) => sql`SELECT * FROM sessions WHERE token_hash = ${tokenHash} AND expires_at > now()`,
-    });
-    return yield* findSession(tokenHash);
+  post: <T>(path: string, body: unknown) =>
+    fetch(`${B.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+      },
+      body: JSON.stringify(body),
+    }).then((r) => r.json() as Promise<T>),
 });
 ```
 
----
-## [3][MIGRATIONS]
-
-**Create tables for auth entities:**
+### [3.4][TOKEN_REFRESH]
 
 ```typescript
-// 0001_users.ts
-export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
-  CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email TEXT NOT NULL UNIQUE,
-    api_key_hash TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-`);
-
-// 0002_sessions.ts
-export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
-  CREATE TABLE sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    ip_address TEXT,
-    user_agent TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-  CREATE TABLE oauth_accounts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL,
-    provider_account_id TEXT NOT NULL,
-    access_token TEXT NOT NULL,
-    refresh_token TEXT,
-    access_token_expires_at TIMESTAMPTZ,
-    scope TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(provider, provider_account_id)
-  );
-  CREATE TABLE refresh_tokens (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    revoked_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-`);
-
-// 0003_organizations.ts
-export default Effect.flatMap(SqlClient.SqlClient, (sql) => sql`
-  CREATE TABLE organizations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  );
-  CREATE TABLE organization_members (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(organization_id, user_id)
-  );
-`);
+const refreshTokens = async (refreshToken: string) => {
+  const response = await fetch(`${B.baseUrl}/auth/refresh`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${refreshToken}` },
+  });
+  return response.json(); // { accessToken, refreshToken, expiresAt }
+};
 ```
 
 ---
-## [4][DOCKER]
+## [4][SETUP]
 
-**docker-compose.yml:**
+### [4.1][ENVIRONMENT]
+
+Create `.env` at project root:
+
+```env
+# Database
+POSTGRES_PASSWORD=your_secure_password
+
+# OAuth (register apps at each provider)
+OAUTH_GITHUB_CLIENT_ID=
+OAUTH_GITHUB_CLIENT_SECRET=
+OAUTH_GOOGLE_CLIENT_ID=
+OAUTH_GOOGLE_CLIENT_SECRET=
+OAUTH_MICROSOFT_CLIENT_ID=
+OAUTH_MICROSOFT_CLIENT_SECRET=
+OAUTH_MICROSOFT_TENANT_ID=common
+
+# API
+API_BASE_URL=http://localhost:4000
+```
+
+### [4.2][DOCKER]
+
 ```yaml
+# docker-compose.yml
 services:
   postgres:
     image: postgres:17-alpine
@@ -210,34 +162,41 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID}
-      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET}
-      OAUTH_GOOGLE_CLIENT_ID: ${OAUTH_GOOGLE_CLIENT_ID}
-      OAUTH_GOOGLE_CLIENT_SECRET: ${OAUTH_GOOGLE_CLIENT_SECRET}
-    ports:
-      - "4000:4000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   postgres_data:
 ```
 
----
-## [5][IMPLEMENTATION]
+### [4.3][COMMANDS]
 
-| [STEP] | [ACTION]                  | [COMMAND]                                          |
-| ------ | ------------------------- | -------------------------------------------------- |
-| 1      | Create apps/api structure | `mkdir -p apps/api/src/routes apps/api/migrations` |
-| 2      | Install dependencies      | `pnpm install`                                     |
-| 3      | Start PostgreSQL          | `docker compose up postgres -d`                    |
-| 4      | Run migrations            | `pnpm exec nx migrate @parametric-portal/api`      |
-| 5      | Start API                 | `pnpm exec nx dev @parametric-portal/api`          |
+| Step             | Command                                                |
+| ---------------- | ------------------------------------------------------ |
+| Start PostgreSQL | `docker compose up postgres -d`                        |
+| Run migrations   | `pnpm exec nx migrate @parametric-portal/api`          |
+| Start API (dev)  | `pnpm exec nx dev @parametric-portal/api`              |
+| Start frontend   | `pnpm exec nx dev @parametric-portal/parametric_icons` |
+
+---
+## [5][IMPLEMENTATION_CHECKLIST]
+
+### [5.1][BACKEND] (Already Done)
+
+- [x] Database models (User, Asset, Session, OAuthAccount, etc.)
+- [x] Migrations (users, sessions, organizations)
+- [x] Repositories (CRUD operations)
+- [x] OAuth service (GitHub, Google, Microsoft via Arctic)
+- [x] Session management (create, refresh, revoke)
+- [x] Anthropic integration (server-side SVG generation)
+- [x] Health checks (liveness, readiness)
+
+### [5.2][FRONTEND] (Required)
+
+- [ ] Create `authSlice` in stores.ts (tokens, user, isAuthenticated)
+- [ ] Create `apiClient` service with token injection
+- [ ] Add login buttons (GitHub, Google, Microsoft)
+- [ ] Handle OAuth callback redirect (parse tokens from URL or response)
+- [ ] Replace `generateIcon()` Anthropic call with `POST /api/icons`
+- [ ] Replace localStorage history with `GET /api/icons` + cache
+- [ ] Add token refresh interceptor (auto-refresh before expiry)
+- [ ] Remove `VITE_ANTHROPIC_API_KEY` from environment
+- [ ] Add logout button calling `POST /api/auth/logout`
+- [ ] Show user email from `GET /api/auth/me`
