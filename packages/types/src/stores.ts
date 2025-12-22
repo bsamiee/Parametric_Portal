@@ -1,14 +1,18 @@
 /**
- * Provide store slice contracts via typed patterns: StoreSlice, StoreActions, CombinedStore with subscription management.
+ * Reactive store slices with subscription support.
+ * Grounding: Zustand-style pub/sub with typed actions.
  */
-import { Option, pipe, Schema as S } from 'effect';
-import { match, P } from 'ts-pattern';
+import { Schema as S } from 'effect';
 
 import type { BivariantFunction } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type SliceName = S.Schema.Type<typeof SliceNameSchema>;
+// biome-ignore lint/suspicious/noExplicitAny: Required for heterogeneous slice collections
+type AnySlice = StoreSlice<any, Record<string, unknown>>;
+type SliceRecord = Record<string, AnySlice>;
+
+type SliceName = S.Schema.Type<typeof S.NonEmptyTrimmedString>;
 
 type StoreActions<T> = {
     readonly reset: BivariantFunction<() => T>;
@@ -30,8 +34,7 @@ type SliceConfig<T, A extends Record<string, unknown> = Record<string, never>> =
     readonly name: string;
 };
 
-// biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
-type CombinedStore<S extends Record<string, StoreSlice<any, Record<string, unknown>>>> = {
+type CombinedStore<S extends SliceRecord> = {
     readonly getState: () => { readonly [K in keyof S]: ReturnType<S[K]['getState']> };
     readonly slices: S;
     readonly subscribe: (
@@ -45,16 +48,10 @@ type StoreConfig = {
 };
 
 type StoreApi = {
-    // biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
-    readonly combineSlices: <S extends Record<string, StoreSlice<any, Record<string, unknown>>>>(
-        slices: S,
-    ) => CombinedStore<S>;
+    readonly combineSlices: <S extends SliceRecord>(slices: S) => CombinedStore<S>;
     readonly createSlice: <T, A extends Record<string, unknown> = Record<string, never>>(
         config: SliceConfig<T, A>,
     ) => StoreSlice<T, A>;
-    readonly match: typeof match;
-    readonly Option: typeof Option;
-    readonly P: typeof P;
     readonly schemas: typeof schemas;
 };
 
@@ -66,22 +63,17 @@ const B = Object.freeze({
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const SliceNameSchema = pipe(S.String, S.nonEmptyString(), S.brand('SliceName'));
-
 const SliceConfigSchema = <A extends S.Schema.Any>(stateSchema: A) =>
     S.Struct({
         initialState: stateSchema,
-        name: S.String,
+        name: S.NonEmptyTrimmedString,
     });
 
 const schemas = Object.freeze({
     sliceConfig: SliceConfigSchema,
-    sliceName: SliceNameSchema,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const mkSliceName = (name: string): SliceName => name as SliceName;
 
 const mkSlice = <T, A extends Record<string, unknown> = Record<string, never>>(
     config: SliceConfig<T, A>,
@@ -124,7 +116,7 @@ const mkSlice = <T, A extends Record<string, unknown> = Record<string, never>>(
         actions: { ...baseActions, ...customActions } as StoreActions<T> & A,
         getState: get,
         initialState: config.initialState,
-        name: mkSliceName(config.name),
+        name: config.name,
         subscribe: (listener: (state: T) => void) => {
             listeners.add(listener);
             return () => {
@@ -134,10 +126,7 @@ const mkSlice = <T, A extends Record<string, unknown> = Record<string, never>>(
     };
 };
 
-// biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
-const mkCombinedStore = <S extends Record<string, StoreSlice<any, Record<string, unknown>>>>(
-    slices: S,
-): CombinedStore<S> => {
+const mkCombinedStore = <S extends SliceRecord>(slices: S): CombinedStore<S> => {
     const listeners = new Set<(state: { readonly [K in keyof S]: ReturnType<S[K]['getState']> }) => void>();
 
     const getState = (): { readonly [K in keyof S]: ReturnType<S[K]['getState']> } =>
@@ -172,14 +161,9 @@ const mkCombinedStore = <S extends Record<string, StoreSlice<any, Record<string,
 
 const store = (_config: StoreConfig = {}): StoreApi =>
     Object.freeze({
-        // biome-ignore lint/suspicious/noExplicitAny: Covariant constraint requires any to accept typed slices
-        combineSlices: <S extends Record<string, StoreSlice<any, Record<string, unknown>>>>(slices: S) =>
-            mkCombinedStore(slices),
+        combineSlices: <S extends SliceRecord>(slices: S) => mkCombinedStore(slices),
         createSlice: <T, A extends Record<string, unknown> = Record<string, never>>(sliceConfig: SliceConfig<T, A>) =>
             mkSlice(sliceConfig),
-        match,
-        Option,
-        P,
         schemas,
     } as StoreApi);
 

@@ -12,8 +12,7 @@
         "jszip": "catalog:",
         "react": "catalog:",
         "react-aria": "catalog:",
-        "react-dom": "catalog:",
-        "ts-pattern": "catalog:"
+        "react-dom": "catalog:"
     },
     "devDependencies": {
         "@types/react": "catalog:",

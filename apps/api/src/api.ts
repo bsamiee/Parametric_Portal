@@ -5,9 +5,9 @@ import {
     HttpApiEndpoint,
     PaginationQuerySchema,
 } from '@parametric-portal/server/api';
-import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
+import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
-import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
+import { AssetListItemSchema, OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
 import { Uuidv7Schema } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
@@ -25,11 +25,6 @@ const SessionResponseSchema = S.Struct({
 const UserResponseSchema = S.Struct({
     email: S.String,
     id: UserIdSchema,
-});
-
-const AssetListItemSchema = S.Struct({
-    id: S.String,
-    prompt: S.String,
 });
 
 const PaginatedAssetListSchema = S.Struct({
@@ -64,22 +59,31 @@ const AuthGroup = createGroup('auth', { prefix: '/auth' })
     .add(
         HttpApiEndpoint.post('logout', '/logout')
             .middleware(SessionAuth)
-            .addSuccess(S.Struct({ success: S.Boolean })),
+            .addSuccess(S.Struct({ success: S.Boolean }))
+            .addError(InternalError, { status: 500 }),
     )
-    .add(HttpApiEndpoint.get('me', '/me').middleware(SessionAuth).addSuccess(UserResponseSchema));
+    .add(
+        HttpApiEndpoint.get('me', '/me')
+            .middleware(SessionAuth)
+            .addSuccess(UserResponseSchema)
+            .addError(NotFoundError, { status: 404 })
+            .addError(InternalError, { status: 500 }),
+    );
 
 const IconsGroup = createGroup('icons', { prefix: '/icons' })
     .add(
         HttpApiEndpoint.get('list', '/')
             .middleware(SessionAuth)
             .setUrlParams(PaginationQuerySchema)
-            .addSuccess(PaginatedAssetListSchema),
+            .addSuccess(PaginatedAssetListSchema)
+            .addError(InternalError, { status: 500 }),
     )
     .add(
         HttpApiEndpoint.post('generate', '/')
             .middleware(SessionAuth)
             .setPayload(GenerateRequestSchema)
-            .addSuccess(GenerateResponseSchema),
+            .addSuccess(GenerateResponseSchema)
+            .addError(InternalError, { status: 500 }),
     );
 
 const HealthGroup = createHealthGroup();

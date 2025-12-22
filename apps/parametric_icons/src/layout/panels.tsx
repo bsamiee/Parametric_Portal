@@ -5,11 +5,11 @@
 
 import { sanitizeFilename } from '@parametric-portal/hooks/browser';
 import type { Intent } from '@parametric-portal/types/database';
-import { deriveScope, sanitizeSvg } from '@parametric-portal/types/svg';
+import { deriveScope, type SvgAsset, sanitizeSvg } from '@parametric-portal/types/svg';
 import { types, type Uuidv7 } from '@parametric-portal/types/types';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
-import { apiFactory, asyncApi, generateIcon } from '../api.ts';
+import { generateIcon } from '../api.ts';
 import { useClipboard, useExport, useMutation, useStoreActions, useStoreSelector, useStoreSlice } from '../core.ts';
 import {
     type Asset,
@@ -66,7 +66,7 @@ type HistoryPanelProps = {
 // Props for library panel
 type LibraryPanelProps = {
     readonly customAssets: ReadonlyArray<CustomAsset>;
-    readonly onAddAttachment: (id: string, name: string, svg: string) => void;
+    readonly onAddAttachment: (asset: SvgAsset) => void;
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
     readonly onRemoveSaved: (id: string) => void;
@@ -260,7 +260,7 @@ const LibraryContent = ({
                                     <ListItem
                                         key={asset.id}
                                         className='sidebar-item'
-                                        onClick={() => onAddAttachment(asset.id, asset.name, asset.svg)}
+                                        onClick={() => onAddAttachment(asset)}
                                         onAction={() => onRemoveCustomAsset(asset.id)}
                                         thumbnail={
                                             <SvgPreview
@@ -301,7 +301,9 @@ const LibraryContent = ({
                                             key={asset.id}
                                             className='sidebar-item'
                                             onClick={() => onRemoveSaved(asset.id)}
-                                            onAction={() => svg && onAddAttachment(asset.id, asset.prompt, svg)}
+                                            onAction={() =>
+                                                svg && onAddAttachment({ id: asset.id, name: asset.prompt, svg })
+                                            }
                                             thumbnail={
                                                 svg ? (
                                                     <SvgPreview
@@ -511,7 +513,7 @@ const Sidebar = (): ReactNode => {
         assets,
         currentId,
         customAssets,
-        onAddAttachment: (id, name, svg) => contextActions.addAttachment({ id, name, svg }),
+        onAddAttachment: contextActions.addAttachment,
         onClear: () => {
             libraryActions.clearAssets();
             historyActions.clearAll();
@@ -595,7 +597,7 @@ const CommandBar = (): ReactNode => {
     const historyActions = useStoreActions(historySlice);
     const uiActions = useStoreActions(uiSlice);
     const { mutate, state } = useMutation(generateIcon);
-    const isGenerating = asyncApi.isLoading(state);
+    const isGenerating = state._tag === 'Loading';
     const variantCount = output === 'batch' ? STORE_TUNING.variantCount.batch : STORE_TUNING.variantCount.single;
     const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -668,19 +670,17 @@ const CommandBar = (): ReactNode => {
     );
 
     useEffect(() => {
-        if (!asyncApi.isSuccess(state)) {
+        // Only process Success states with ApiSuccess responses
+        if (state._tag !== 'Success') {
             return;
         }
         const apiResponse = state.data;
-        const submitted = submittedRef.current;
-
-        // Handle cancelled requests - don't log error for intentional cancellation
-        if (!apiFactory.isSuccess(apiResponse) && apiResponse.code === 'REQUEST_CANCELLED') {
-            return;
-        }
-
-        // Handle API errors - show feedback to user
-        if (!apiFactory.isSuccess(apiResponse)) {
+        if (apiResponse._tag !== 'ApiSuccess') {
+            // Handle cancelled requests silently
+            if (apiResponse.code === 'REQUEST_CANCELLED') {
+                return;
+            }
+            // Log API errors to chat
             chatActions.addMessage({
                 content: `Error: ${apiResponse.message}`,
                 id: generateId(),
@@ -692,40 +692,34 @@ const CommandBar = (): ReactNode => {
             return;
         }
 
-        const successData = apiResponse.data;
-
-        if (successData && submitted) {
-            const firstVariant = successData.variants[0];
-            firstVariant && previewActions.setSvg(firstVariant.svg);
-
-            // Log assistant response to chat
-            chatActions.addMessage({
-                content: `Generated ${successData.variants.length} variant${successData.variants.length > 1 ? 's' : ''}: ${successData.variants.map((v) => v.name).join(', ')}`,
-                id: generateId(),
-                role: 'assistant',
-                timestamp: Date.now(),
-            });
-
-            // Create and save asset to history
-            const asset: Asset = {
-                context: submitted.context,
-                id: generateId(),
-                intent: submitted.intent,
-                prompt: submitted.prompt,
-                selectedVariantIndex: 0,
-                timestamp: Date.now(),
-                variants: successData.variants.map((v) => ({
-                    id: generateId(),
-                    name: v.name,
-                    svg: v.svg,
-                })),
-            };
-            historyActions.addAsset(asset);
-
-            // Clear refs after processing
-            submittedRef.current = null;
-            abortControllerRef.current = null;
+        const submitted = submittedRef.current;
+        if (!submitted) {
+            return;
         }
+
+        const { variants } = apiResponse.data;
+        const firstVariant = variants[0];
+        firstVariant && previewActions.setSvg(firstVariant.svg);
+
+        chatActions.addMessage({
+            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v) => v.name).join(', ')}`,
+            id: generateId(),
+            role: 'assistant',
+            timestamp: Date.now(),
+        });
+
+        historyActions.addAsset({
+            context: submitted.context,
+            id: generateId(),
+            intent: submitted.intent,
+            prompt: submitted.prompt,
+            selectedVariantIndex: 0,
+            timestamp: Date.now(),
+            variants: variants.map((v) => ({ id: generateId(), name: v.name, svg: v.svg })),
+        });
+
+        submittedRef.current = null;
+        abortControllerRef.current = null;
     }, [state, previewActions, chatActions, historyActions]);
 
     return (

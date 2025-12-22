@@ -57,13 +57,15 @@ describe('types package', () => {
             expect(api.patterns).toBeDefined();
         });
 
-        it('exposes all 11 branded types', () => {
+        it('exposes all 13 branded types', () => {
             const api = loadApi();
             const expectedBrands = [
                 'email',
+                'hex8',
+                'hex64',
                 'hexColor',
+                'htmlId',
                 'isoDate',
-                'nonEmptyString',
                 'nonNegativeInt',
                 'percentage',
                 'positiveInt',

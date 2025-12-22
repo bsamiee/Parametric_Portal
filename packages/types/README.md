@@ -3,7 +3,7 @@
 
 <br>
 
-Ultra-strong type primitives with Effect pipelines: branded types via @effect/schema, ts-pattern matching, Option monads, immer immutability, UUID v7.
+Ultra-strong type primitives with Effect pipelines: branded types via @effect/schema, Effect.Match pattern matching, immer immutability, UUID v7.
 
 ---
 ## [1][INSTALLATION]
@@ -71,39 +71,36 @@ types.isUuidv7(someValue);
 |   [5]   | `brands`            | frozen object                       | 11 branded schemas                |
 |   [6]   | `schemas`           | frozen object                       | Unbranded validation schemas      |
 |   [7]   | `patterns`          | frozen object                       | 6 regex patterns                  |
-|   [8]   | `match`             | function                            | ts-pattern match (exhaustive)     |
-|   [9]   | `P`                 | object                              | ts-pattern predicates             |
-|  [10]   | `Option`            | module                              | Effect Option monad               |
 
 ---
 ### [2.4][PATTERN_MATCHING]
 
 ```typescript
-// Exhaustive matching via ts-pattern
-const result = types.match(value)
-  .with({ _tag: 'loading' }, () => 'Loading...')
-  .with({ _tag: 'success' }, (v) => v.data)
-  .exhaustive();
+import { Match } from 'effect';
 
-// Pattern predicates
-types.P.string  // String pattern
-types.P.number  // Number pattern
-types.P.when((x) => x > 0)  // Custom predicate
+// Exhaustive matching via Effect.Match
+const result = Match.value(value).pipe(
+  Match.tag('loading', () => 'Loading...'),
+  Match.tag('success', (v) => v.data),
+  Match.exhaustive,
+);
 ```
 
 ---
 ### [2.5][OPTION_MONAD]
 
 ```typescript
-const maybeValue = types.Option.fromNullable(input);
+import { Option } from 'effect';
 
-types.Option.match(maybeValue, {
+const maybeValue = Option.fromNullable(input);
+
+Option.match(maybeValue, {
   onNone: () => 'fallback',
   onSome: (v) => v.toString(),
 });
 
-types.Option.isSome(maybeValue);
-types.Option.isNone(maybeValue);
+Option.isSome(maybeValue);
+Option.isNone(maybeValue);
 ```
 
 ---
@@ -365,7 +362,6 @@ combined.subscribe((state) => console.log(state));
 | :-----: | -------------- | --------: |
 |   [1]   | effect         |     3.19+ |
 |   [2]   | @effect/schema |     0.75+ |
-|   [3]   | ts-pattern     |      5.9+ |
-|   [4]   | immer          |     11.0+ |
-|   [5]   | date-fns       |      4.1+ |
-|   [6]   | zustand        |      5.0+ |
+|   [3]   | immer          |     11.0+ |
+|   [4]   | date-fns       |      4.1+ |
+|   [5]   | zustand        |      5.0+ |

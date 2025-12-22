@@ -1,13 +1,14 @@
 /**
  * Auth group handlers for OAuth flows and session management.
  */
-import { makeRepositories } from '@parametric-portal/database/repositories';
+import { makeRepositories, type Repositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
-import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
+import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
-import { type OAuthProvider, SCHEMA_TUNING, type Uuidv7 } from '@parametric-portal/types/database';
-import { DateTime, Duration, Effect, Option, pipe } from 'effect';
+import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/types/database';
+import type { Uuidv7 } from '@parametric-portal/types/types';
+import { type Context, DateTime, Duration, Effect, Option, pipe } from 'effect';
 
 import { AppApi } from '../api.ts';
 
@@ -34,19 +35,24 @@ const createAuthTokenPairs = () =>
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const handleOAuthStart = (provider: OAuthProvider) =>
+type OAuthServiceType = Context.Tag.Service<typeof OAuthService>;
+
+const handleOAuthStart = (oauth: OAuthServiceType, provider: OAuthProvider) =>
     Effect.gen(function* () {
-        const oauth = yield* OAuthService;
         const state = crypto.randomUUID();
         const url = yield* oauth.createAuthorizationUrl(provider, state);
         return { url: url.toString() };
     });
 
-const handleOAuthCallback = (provider: OAuthProvider, code: string, state: string) =>
+const handleOAuthCallback = (
+    oauth: OAuthServiceType,
+    repos: Repositories,
+    provider: OAuthProvider,
+    code: string,
+    state: string,
+) =>
     pipe(
         Effect.gen(function* () {
-            const oauth = yield* OAuthService;
-            const repos = yield* makeRepositories;
             const tokens = yield* oauth.validateCallback(provider, code, state);
             const userInfo = yield* oauth.getUserInfo(provider, tokens.accessToken);
             const email = yield* Option.match(userInfo.email, {
@@ -89,10 +95,9 @@ const handleOAuthCallback = (provider: OAuthProvider, code: string, state: strin
         ),
     );
 
-const handleRefresh = (refreshTokenInput: string) =>
+const handleRefresh = (repos: Repositories, refreshTokenInput: string) =>
     pipe(
         Effect.gen(function* () {
-            const repos = yield* makeRepositories;
             const hashInput = yield* hashString(refreshTokenInput);
             const tokenOpt = yield* repos.refreshTokens.findValidByTokenHash(hashInput);
             const token = yield* Option.match(tokenOpt, {
@@ -125,43 +130,51 @@ const handleRefresh = (refreshTokenInput: string) =>
         }),
     );
 
-const handleLogout = () =>
+const handleLogout = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
-            const repos = yield* makeRepositories;
             yield* repos.sessions.delete(session.sessionId);
             return { success: true };
         }),
-        Effect.orDie,
+        Effect.catchAll((cause) =>
+            Effect.fail(new InternalError({ cause: `Session deletion failed: ${String(cause)}` })),
+        ),
     );
 
-const handleMe = () =>
+const handleMe = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
-            const repos = yield* makeRepositories;
             const userOpt = yield* repos.users.findById(session.userId);
 
             return yield* Option.match(userOpt, {
-                onNone: () => Effect.die(new Error('User not found')),
+                onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
                 onSome: (user) => Effect.succeed({ email: user.email, id: user.id }),
             });
         }),
-        Effect.orDie,
+        Effect.catchTags({
+            NotFoundError: (err) => Effect.fail(err),
+            ParseError: () => Effect.fail(new InternalError({ cause: 'User data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'User lookup failed' })),
+        }),
     );
 
 // --- [LAYER] -----------------------------------------------------------------
 
 const AuthLive = HttpApiBuilder.group(AppApi, 'auth', (handlers) =>
-    handlers
-        .handle('oauthStart', ({ path: { provider } }) => handleOAuthStart(provider))
-        .handle('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) =>
-            handleOAuthCallback(provider, code, state),
-        )
-        .handle('refresh', ({ payload: { refreshToken } }) => handleRefresh(refreshToken))
-        .handle('logout', () => handleLogout())
-        .handle('me', () => handleMe()),
+    Effect.gen(function* () {
+        const repos = yield* makeRepositories;
+        const oauth = yield* OAuthService;
+        return handlers
+            .handle('oauthStart', ({ path: { provider } }) => handleOAuthStart(oauth, provider))
+            .handle('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) =>
+                handleOAuthCallback(oauth, repos, provider, code, state),
+            )
+            .handle('refresh', ({ payload: { refreshToken } }) => handleRefresh(repos, refreshToken))
+            .handle('logout', () => handleLogout(repos))
+            .handle('me', () => handleMe(repos));
+    }),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

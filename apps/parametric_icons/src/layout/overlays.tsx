@@ -197,7 +197,7 @@ const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNo
                 .runPromise(readFileAsText(file))
                 .then((content) =>
                     runtime
-                        .runPromise(filesApi.validateSvgContent(content))
+                        .runPromise(filesApi.validateContent('image/svg+xml', content))
                         .then((validContent) => {
                             setPreviewSvg(sanitizeSvg(validContent));
                             setUploadState('preview');

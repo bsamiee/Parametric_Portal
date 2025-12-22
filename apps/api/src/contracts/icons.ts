@@ -1,8 +1,10 @@
 /**
  * Icon generation domain contracts.
- * Single source of truth for all icon-related types across apps.
+ * App-specific request/response schemas for icon generation.
  */
+
 import { type ColorMode, ColorModeSchema, IntentSchema } from '@parametric-portal/types/database';
+import { SvgAssetSchema } from '@parametric-portal/types/svg';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -29,31 +31,21 @@ type LayerSpec = {
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const ReferenceAttachmentSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
-
-const SvgVariantSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
-
 const GenerateRequestSchema = S.Struct({
-    attachments: S.optional(S.Array(ReferenceAttachmentSchema)),
+    attachments: S.optional(S.Array(SvgAssetSchema)),
     colorMode: S.optional(ColorModeSchema),
     intent: S.optional(IntentSchema),
     prompt: S.NonEmptyTrimmedString,
     referenceSvg: S.optional(S.String),
     variantCount: S.optional(S.Int.pipe(S.between(1, 3))),
 });
+type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
 
 const GenerateResponseSchema = S.Struct({
     id: S.String,
-    variants: S.Array(SvgVariantSchema),
+    variants: S.Array(SvgAssetSchema),
 });
+type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -83,15 +75,7 @@ const ICON_DESIGN = Object.freeze({
     } satisfies Record<ColorMode, Palette>,
 } as const);
 
-// --- [TYPES] -----------------------------------------------------------------
-
-type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
-type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
-type ReferenceAttachment = S.Schema.Type<typeof ReferenceAttachmentSchema>;
-type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { GenerateRequestSchema, GenerateResponseSchema, ICON_DESIGN, ReferenceAttachmentSchema, SvgVariantSchema };
-
-export type { GenerateRequest, GenerateResponse, LayerSpec, Palette, ReferenceAttachment, SvgVariant };
+export { GenerateRequestSchema, GenerateResponseSchema, ICON_DESIGN };
+export type { GenerateRequest, GenerateResponse, LayerSpec, Palette };

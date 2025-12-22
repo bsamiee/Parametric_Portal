@@ -1,18 +1,16 @@
 /**
- * Provide database-specific branded types with unified ID schemas.
- * Single source of truth for all database entity IDs and domain primitives.
+ * Database entity identifiers and domain schemas.
+ * Grounding: Branded UUIDs with domain-specific durations.
  */
 import { Duration, pipe, Schema as S } from 'effect';
-
-import type { Email, Slug, Uuidv7 } from './types.ts';
-import { EmailSchema, SlugSchema } from './types.ts';
+import type { Hex64 } from './types.ts';
+import { Hex64Schema } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type ApiKeyId = S.Schema.Type<typeof ApiKeyIdSchema>;
 type AssetId = S.Schema.Type<typeof AssetIdSchema>;
 type UserId = S.Schema.Type<typeof UserIdSchema>;
-type AssetMetadata = S.Schema.Type<typeof AssetMetadataSchema>;
 type SessionId = S.Schema.Type<typeof SessionIdSchema>;
 type OAuthAccountId = S.Schema.Type<typeof OAuthAccountIdSchema>;
 type RefreshTokenId = S.Schema.Type<typeof RefreshTokenIdSchema>;
@@ -22,11 +20,12 @@ type OAuthProvider = S.Schema.Type<typeof OAuthProviderSchema>;
 type OrganizationRole = S.Schema.Type<typeof OrganizationRoleSchema>;
 type SessionResult = S.Schema.Type<typeof SessionResultSchema>;
 type ApiKeyResult = S.Schema.Type<typeof ApiKeyResultSchema>;
-type TokenHash = S.Schema.Type<typeof TokenHashSchema>;
+type TokenHash = Hex64;
 type Version = S.Schema.Type<typeof VersionSchema>;
-type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
 type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
 type Intent = S.Schema.Type<typeof IntentSchema>;
+type OutputMode = S.Schema.Type<typeof OutputModeSchema>;
+type AssetMetadata = S.Schema.Type<typeof AssetMetadataSchema>;
 type AssetListItem = S.Schema.Type<typeof AssetListItemSchema>;
 type AssetCountResult = S.Schema.Type<typeof AssetCountResultSchema>;
 
@@ -37,13 +36,6 @@ const B = Object.freeze({
         apiKey: Duration.days(365),
         refreshToken: Duration.days(30),
         session: Duration.days(7),
-    },
-    limits: {
-        defaultPageSize: 20,
-        maxPageSize: 100,
-    },
-    patterns: {
-        hexHash: /^[0-9a-f]{64}$/i,
     },
 } as const);
 
@@ -58,24 +50,11 @@ const OAuthAccountIdSchema = pipe(uuidBase, S.brand('OAuthAccountId'));
 const RefreshTokenIdSchema = pipe(uuidBase, S.brand('RefreshTokenId'));
 const OrganizationIdSchema = pipe(uuidBase, S.brand('OrganizationId'));
 const OrganizationMemberIdSchema = pipe(uuidBase, S.brand('OrganizationMemberId'));
-const TokenHashSchema = pipe(S.String, S.pattern(B.patterns.hexHash), S.brand('TokenHash'));
+const TokenHashSchema = Hex64Schema;
 const VersionSchema = pipe(S.Int, S.nonNegative(), S.brand('Version'));
-
-const PaginationParamsSchema = S.Struct({
-    limit: pipe(S.Int, S.between(1, B.limits.maxPageSize)),
-    offset: pipe(S.Int, S.nonNegative()),
-});
 
 const OAuthProviderSchema = S.Union(S.Literal('google'), S.Literal('github'), S.Literal('microsoft'));
 const OrganizationRoleSchema = S.Union(S.Literal('owner'), S.Literal('admin'), S.Literal('member'));
-
-const ColorModeSchema = S.Literal('dark', 'light');
-const IntentSchema = S.Literal('create', 'refine');
-
-const AssetMetadataSchema = S.Struct({
-    colorMode: ColorModeSchema,
-    intent: IntentSchema,
-});
 
 const SessionResultSchema = S.Struct({
     expiresAt: S.DateFromSelf,
@@ -89,14 +68,12 @@ const ApiKeyResultSchema = S.Struct({
     userId: UserIdSchema,
 });
 
-const AssetListItemSchema = S.Struct({
-    id: AssetIdSchema,
-    prompt: S.NonEmptyTrimmedString,
-});
-
-const AssetCountResultSchema = S.Struct({
-    count: S.NumberFromString,
-});
+const ColorModeSchema = S.Literal('dark', 'light');
+const IntentSchema = S.Literal('create', 'refine');
+const OutputModeSchema = S.Literal('single', 'batch');
+const AssetMetadataSchema = S.Struct({ colorMode: ColorModeSchema, intent: IntentSchema });
+const AssetListItemSchema = S.Struct({ id: AssetIdSchema, prompt: S.NonEmptyTrimmedString });
+const AssetCountResultSchema = S.Struct({ count: S.NumberFromString });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
@@ -109,18 +86,16 @@ export {
     AssetMetadataSchema,
     B as SCHEMA_TUNING,
     ColorModeSchema,
-    EmailSchema,
     IntentSchema,
     OAuthAccountIdSchema,
     OAuthProviderSchema,
     OrganizationIdSchema,
     OrganizationMemberIdSchema,
     OrganizationRoleSchema,
-    PaginationParamsSchema,
+    OutputModeSchema,
     RefreshTokenIdSchema,
     SessionIdSchema,
     SessionResultSchema,
-    SlugSchema,
     TokenHashSchema,
     UserIdSchema,
     VersionSchema,
@@ -133,20 +108,17 @@ export type {
     AssetListItem,
     AssetMetadata,
     ColorMode,
-    Email,
     Intent,
     OAuthAccountId,
     OAuthProvider,
     OrganizationId,
     OrganizationMemberId,
     OrganizationRole,
-    PaginationParams,
+    OutputMode,
     RefreshTokenId,
     SessionId,
     SessionResult,
-    Slug,
     TokenHash,
     UserId,
-    Uuidv7,
     Version,
 };

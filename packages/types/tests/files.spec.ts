@@ -34,14 +34,13 @@ describe('files package', () => {
             const api = loadApi();
             expect(Object.isFrozen(api)).toBe(true);
             expect(api.validateFile).toBeDefined();
-            expect(api.validateSvgContent).toBeDefined();
+            expect(api.validateContent).toBeDefined();
             expect(api.mkFileError).toBeDefined();
         });
 
         it('exposes tuning constants', () => {
             expect(Object.isFrozen(FILES_TUNING)).toBe(true);
             expect(FILES_TUNING.limits.maxSizeBytes).toBe(512 * 1024);
-            expect(FILES_TUNING.mimeTypes).toContain('image/svg+xml');
         });
     });
 
@@ -74,7 +73,7 @@ describe('files package', () => {
 
         it('rejects invalid mime type', () => {
             const api = loadApi();
-            const file = createMockFile({ type: 'image/png' });
+            const file = createMockFile({ type: 'application/x-invalid' });
             const result = Effect.runSyncExit(api.validateFile(file));
             expect(result._tag).toBe('Failure');
         });
@@ -87,17 +86,33 @@ describe('files package', () => {
         });
     });
 
-    describe('svg content validation', () => {
-        it.prop([fc.string()])('validates content with svg tag', (content) => {
+    describe('content validation', () => {
+        it('validates valid svg content', () => {
             const api = loadApi();
-            const svgContent = `${content}<svg>${content}</svg>${content}`;
-            const result = Effect.runSync(api.validateSvgContent(svgContent));
+            const svgContent = '<svg viewBox="0 0 100 100"><rect width="100" height="100"/></svg>';
+            const result = Effect.runSync(api.validateContent('image/svg+xml', svgContent));
             expect(result).toBe(svgContent);
         });
 
-        it.prop([fc.string().filter((s) => !s.includes('<svg'))])('rejects content without svg tag', (content) => {
+        it.prop([fc.string().filter((s) => !s.includes('<svg') && !s.includes('</svg>'))])(
+            'rejects content without svg tag',
+            (content) => {
+                const api = loadApi();
+                const result = Effect.runSyncExit(api.validateContent('image/svg+xml', content));
+                expect(result._tag).toBe('Failure');
+            },
+        );
+
+        it('validates json content', () => {
             const api = loadApi();
-            const result = Effect.runSyncExit(api.validateSvgContent(content));
+            const jsonContent = '{"key": "value"}';
+            const result = Effect.runSync(api.validateContent('application/json', jsonContent));
+            expect(result).toBe(jsonContent);
+        });
+
+        it('rejects invalid json content', () => {
+            const api = loadApi();
+            const result = Effect.runSyncExit(api.validateContent('application/json', 'not json'));
             expect(result._tag).toBe('Failure');
         });
     });
@@ -113,11 +128,11 @@ describe('files package', () => {
     });
 
     describe('schema validation', () => {
-        it('exposes metadata schema', () => {
+        it('exposes schemas', () => {
             const api = loadApi();
             expect(api.schemas.fileMetadata).toBeDefined();
-            expect(api.schemas.svgContent).toBeDefined();
-            expect(api.schemas.svgFile).toBeDefined();
+            expect(api.schemas.mimeType).toBeDefined();
+            expect(api.schemas.mimeCategory).toBeDefined();
         });
     });
 

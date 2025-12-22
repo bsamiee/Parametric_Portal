@@ -20,17 +20,12 @@ import {
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
 } from '@parametric-portal/server/middleware';
-import { Context, Effect, Layer, Option, pipe } from 'effect';
+import { Effect, Layer, Option, pipe } from 'effect';
 import { AppApi } from './api.ts';
 import { OAuthServiceLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
 import { IconGenerationServiceLive } from './services/icons.ts';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type HealthCheckFn = Effect.Effect<boolean, never, SqlClient.SqlClient>;
-type HealthCheckRegistry = Record<string, HealthCheckFn>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -39,10 +34,6 @@ const B = Object.freeze({
     port: 4000,
 } as const);
 
-// --- [CONTEXT] ---------------------------------------------------------------
-
-class HealthChecks extends Context.Tag('HealthChecks')<HealthChecks, HealthCheckRegistry>() {}
-
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const composeMiddleware = (app: HttpApp.Default): HttpApp.Default<never, never> =>
@@ -50,54 +41,53 @@ const composeMiddleware = (app: HttpApp.Default): HttpApp.Default<never, never> 
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const SessionAuthLive = Layer.unwrapEffect(
-    Effect.map(makeRepositories, (repos) =>
-        createSessionAuthLayer((tokenHash: string) =>
-            pipe(
-                repos.sessions.findByTokenHash(tokenHash),
-                Effect.map((session) => Option.map(session, sessionToResult)),
-                Effect.catchAll(() => Effect.fail(new UnauthorizedError({ reason: 'Session lookup failed' }))),
+const SessionAuthLive = pipe(
+    Layer.unwrapEffect(
+        Effect.map(makeRepositories, (repos) =>
+            createSessionAuthLayer((tokenHash: string) =>
+                pipe(
+                    repos.sessions.findByTokenHash(tokenHash),
+                    Effect.map((session) => Option.map(session, sessionToResult)),
+                    Effect.catchAll(() => Effect.fail(new UnauthorizedError({ reason: 'Session lookup failed' }))),
+                ),
             ),
         ),
     ),
+    Layer.provide(PgLive),
 );
 
-const HealthChecksLive = Layer.succeed(HealthChecks, {
-    database: pipe(
-        Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
-            yield* sql`SELECT 1`;
-            return true;
-        }),
-        Effect.catchAll(() => Effect.succeed(false)),
-    ),
-});
-
 const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
-    handlers
-        .handle('liveness', () => Effect.succeed({ status: 'ok' as const }))
-        .handle('readiness', () =>
-            pipe(
-                Effect.gen(function* () {
-                    const checks = yield* HealthChecks;
-                    const results = yield* Effect.all(checks);
-                    const allPassed = Object.values(results).every(Boolean);
+    Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
 
-                    return allPassed
-                        ? { checks: results, status: 'ok' as const }
-                        : yield* Effect.fail(
-                              new ServiceUnavailableError({ reason: 'One or more health checks failed' }),
-                          );
-                }),
-                Effect.orDie,
-            ),
-        ),
+        const checkDatabase = () =>
+            pipe(
+                sql`SELECT 1`,
+                Effect.as(true),
+                Effect.catchAll(() => Effect.succeed(false)),
+            );
+
+        return handlers
+            .handle('liveness', () => Effect.succeed({ status: 'ok' as const }))
+            .handle('readiness', () =>
+                pipe(
+                    checkDatabase(),
+                    Effect.flatMap((dbOk) =>
+                        dbOk
+                            ? Effect.succeed({ checks: { database: true }, status: 'ok' as const })
+                            : Effect.fail(new ServiceUnavailableError({ reason: 'Database check failed' })),
+                    ),
+                ),
+            );
+    }),
 );
 
 const ApiLive = HttpApiBuilder.api(AppApi).pipe(
-    Layer.provide(HealthLive),
-    Layer.provide(AuthLive),
-    Layer.provide(IconsLive),
+    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive)),
+    Layer.provide(PgLive),
+    Layer.provide(OAuthServiceLive),
+    Layer.provide(IconGenerationServiceLive),
+    Layer.provide(AnthropicClientLive),
 );
 
 const ServerLive = pipe(
@@ -105,12 +95,7 @@ const ServerLive = pipe(
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(createCorsLayer({ allowedOrigins: B.cors.allowedOrigins })),
-    Layer.provide(HealthChecksLive),
     Layer.provide(SessionAuthLive),
-    Layer.provide(OAuthServiceLive),
-    Layer.provide(IconGenerationServiceLive),
-    Layer.provide(AnthropicClientLive),
-    Layer.provide(PgLive),
     HttpServer.withLogAddress,
     Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),
 );

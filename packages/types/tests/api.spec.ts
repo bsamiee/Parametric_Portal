@@ -5,15 +5,29 @@ import { it } from '@fast-check/vitest';
 import { Schema as S } from 'effect';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
-import { API_TUNING, api } from '../src/api.ts';
+import {
+    API_TUNING,
+    ApiResponseSchema,
+    api,
+    error,
+    fold,
+    type HttpStatusError,
+    type HttpStatusSuccess,
+    hasNextPage,
+    hasPrevPage,
+    map,
+    PaginatedResponseSchema,
+    type PaginationMeta,
+    paginated,
+    success,
+} from '../src/api.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const loadApi = () => api<{ readonly value: number }>();
-
-const arbitraryHttpStatusSuccess = fc.integer({ max: 299, min: 200 });
-const arbitraryHttpStatusError = fc.integer({ max: 599, min: 400 });
-const arbitraryApiData = fc.record({ value: fc.integer() });
+const loadApi = () => api();
+const arbitraryHttpStatusSuccess = fc.integer({ max: 299, min: 200 }) as fc.Arbitrary<HttpStatusSuccess>;
+const arbitraryHttpStatusError = fc.integer({ max: 599, min: 400 }) as fc.Arbitrary<HttpStatusError>;
+const arbitraryData = fc.record({ value: fc.integer() });
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -27,29 +41,30 @@ describe('api package', () => {
             expect(apiInstance.paginated).toBeDefined();
             expect(apiInstance.map).toBeDefined();
             expect(apiInstance.fold).toBeDefined();
+            expect(apiInstance.hasNextPage).toBeDefined();
+            expect(apiInstance.hasPrevPage).toBeDefined();
         });
 
         it('exposes tuning constants', () => {
             expect(Object.isFrozen(API_TUNING)).toBe(true);
             expect(API_TUNING.defaults.status).toBe(200);
-            expect(API_TUNING.defaults.pageSize).toBe(20);
+            expect(API_TUNING.pagination.defaultPageSize).toBe(20);
+            expect(API_TUNING.pagination.maxPageSize).toBe(100);
             expect(API_TUNING.tags.success).toBe('ApiSuccess');
             expect(API_TUNING.tags.error).toBe('ApiError');
         });
     });
 
     describe('success creation', () => {
-        it.prop([arbitraryApiData, arbitraryHttpStatusSuccess])('creates success response', (data, status) => {
-            const apiInstance = loadApi();
-            const response = apiInstance.success(data, status as never);
-            expect(response._tag).toBe(API_TUNING.tags.success);
+        it.prop([arbitraryData, arbitraryHttpStatusSuccess])('creates success response', (data, status) => {
+            const response = success(data, status);
+            expect(response._tag).toBe('ApiSuccess');
             expect(response.data).toEqual(data);
             expect(response.status).toBe(status);
         });
 
-        it.prop([arbitraryApiData])('uses default status when omitted', (data) => {
-            const apiInstance = loadApi();
-            const response = apiInstance.success(data);
+        it.prop([arbitraryData])('uses default status when omitted', (data) => {
+            const response = success(data);
             expect(response.status).toBe(API_TUNING.defaults.status);
         });
     });
@@ -58,9 +73,8 @@ describe('api package', () => {
         it.prop([arbitraryHttpStatusError, fc.string(), fc.string()])(
             'creates error response',
             (status, code, message) => {
-                const apiInstance = loadApi();
-                const response = apiInstance.error(status as never, code, message);
-                expect(response._tag).toBe(API_TUNING.tags.error);
+                const response = error(status, code, message);
+                expect(response._tag).toBe('ApiError');
                 expect(response.status).toBe(status);
                 expect(response.code).toBe(code);
                 expect(response.message).toBe(message);
@@ -69,71 +83,48 @@ describe('api package', () => {
     });
 
     describe('paginated creation', () => {
-        it.prop([
-            fc.array(arbitraryApiData),
-            fc.integer({ max: 100, min: 1 }),
-            fc.integer({ max: 100, min: 1 }),
-            fc.integer({ max: 1000, min: 0 }),
-        ])('creates paginated response', (data, currentPage, pageSize, totalItems) => {
-            const apiInstance = loadApi();
-            const totalPages = Math.ceil(totalItems / pageSize);
-            const pagination = { currentPage, pageSize, totalItems, totalPages };
-            const response = apiInstance.paginated(data, pagination);
-            expect(response._tag).toBe(API_TUNING.tags.success);
+        it('creates paginated response', () => {
+            const data = [{ value: 1 }, { value: 2 }];
+            const pagination: PaginationMeta = { currentPage: 1, pageSize: 20, totalItems: 100, totalPages: 5 };
+            const response = paginated(data, pagination);
+            expect(response._tag).toBe('PaginatedSuccess');
             expect(response.data).toEqual(data);
             expect(response.pagination).toEqual(pagination);
         });
     });
 
-    describe('type guards', () => {
-        it.prop([arbitraryApiData])('identifies success responses', (data) => {
-            const apiInstance = loadApi();
-            const response = apiInstance.success(data);
-            expect(apiInstance.isSuccess(response)).toBe(true);
-            expect(apiInstance.isError(response)).toBe(false);
+    describe('pagination helpers', () => {
+        it('hasNextPage returns true when more pages exist', () => {
+            const pagination: PaginationMeta = { currentPage: 1, pageSize: 20, totalItems: 100, totalPages: 5 };
+            const response = paginated([], pagination);
+            expect(hasNextPage(response)).toBe(true);
         });
 
-        it.prop([arbitraryHttpStatusError, fc.string(), fc.string()])(
-            'identifies error responses',
-            (status, code, message) => {
-                const apiInstance = loadApi();
-                const response = apiInstance.error(status as never, code, message);
-                expect(apiInstance.isError(response)).toBe(true);
-                expect(apiInstance.isSuccess(response)).toBe(false);
-            },
-        );
-    });
-
-    describe('map transformation', () => {
-        it.prop([arbitraryApiData])('transforms success data', (data) => {
-            const apiInstance = loadApi();
-            const response = apiInstance.success(data);
-            const mapped = apiInstance.map(response, (d) => ({ doubled: d.value * 2 }));
-            expect(mapped._tag).toBe(API_TUNING.tags.success);
-            expect((mapped as { readonly data: { doubled: number } }).data).toEqual({ doubled: data.value * 2 });
+        it('hasNextPage returns false on last page', () => {
+            const pagination: PaginationMeta = { currentPage: 5, pageSize: 20, totalItems: 100, totalPages: 5 };
+            const response = paginated([], pagination);
+            expect(hasNextPage(response)).toBe(false);
         });
 
-        it.prop([arbitraryHttpStatusError, fc.string(), fc.string()])(
-            'preserves error unchanged',
-            (status, code, message) => {
-                const apiInstance = loadApi();
-                const response = apiInstance.error(status as never, code, message);
-                const mapped = apiInstance.map(response, (d) => ({ doubled: d.value * 2 }));
-                expect(mapped._tag).toBe(API_TUNING.tags.error);
-                const errorResponse = mapped as { readonly code: string; readonly message: string };
-                expect(errorResponse.code).toBe(code);
-                expect(errorResponse.message).toBe(message);
-            },
-        );
+        it('hasPrevPage returns false on first page', () => {
+            const pagination: PaginationMeta = { currentPage: 1, pageSize: 20, totalItems: 100, totalPages: 5 };
+            const response = paginated([], pagination);
+            expect(hasPrevPage(response)).toBe(false);
+        });
+
+        it('hasPrevPage returns true when previous pages exist', () => {
+            const pagination: PaginationMeta = { currentPage: 2, pageSize: 20, totalItems: 100, totalPages: 5 };
+            const response = paginated([], pagination);
+            expect(hasPrevPage(response)).toBe(true);
+        });
     });
 
-    describe('fold handler', () => {
-        it.prop([arbitraryApiData])('folds success to value', (data) => {
-            const apiInstance = loadApi();
-            const response = apiInstance.success(data);
-            const result = apiInstance.fold(response, {
-                onError: () => 'error' as const,
-                onSuccess: (d) => `success:${d.value}` as const,
+    describe('fold', () => {
+        it.prop([arbitraryData])('folds success to value', (data) => {
+            const response = success(data);
+            const result = fold(response, {
+                ApiError: () => 'error',
+                ApiSuccess: (d) => `success:${d.value}`,
             });
             expect(result).toBe(`success:${data.value}`);
         });
@@ -141,32 +132,58 @@ describe('api package', () => {
         it.prop([arbitraryHttpStatusError, fc.string(), fc.string()])(
             'folds error to value',
             (status, code, message) => {
-                const apiInstance = loadApi();
-                const response = apiInstance.error(status as never, code, message);
-                const result = apiInstance.fold(response, {
-                    onError: (e) => `error:${e.code}`,
-                    onSuccess: () => 'success',
+                const response = error(status, code, message);
+                const result = fold(response, {
+                    ApiError: (e) => `error:${e.code}`,
+                    ApiSuccess: () => 'success',
                 });
                 expect(result).toBe(`error:${code}`);
             },
         );
     });
 
-    describe('schema validation', () => {
-        it('validates success status range', () => {
-            const schema = api().schemas.httpStatusSuccess;
-            expect(S.is(schema)(200)).toBe(true);
-            expect(S.is(schema)(299)).toBe(true);
-            expect(S.is(schema)(199)).toBe(false);
-            expect(S.is(schema)(300)).toBe(false);
+    describe('map', () => {
+        it.prop([arbitraryData])('transforms success data', (data) => {
+            const response = success(data);
+            const mapped = map(response, (d) => ({ doubled: d.value * 2 }));
+            expect(mapped._tag).toBe('ApiSuccess');
+            expect((mapped as { readonly data: { doubled: number } }).data).toEqual({ doubled: data.value * 2 });
         });
 
-        it('validates error status range', () => {
-            const schema = api().schemas.httpStatusError;
-            expect(S.is(schema)(400)).toBe(true);
-            expect(S.is(schema)(599)).toBe(true);
-            expect(S.is(schema)(399)).toBe(false);
-            expect(S.is(schema)(600)).toBe(false);
+        it.prop([arbitraryHttpStatusError, fc.string(), fc.string()])(
+            'preserves error unchanged',
+            (status, code, message) => {
+                const response = error(status, code, message);
+                const mapped = map(response, (d: { value: number }) => ({ doubled: d.value * 2 }));
+                expect(mapped._tag).toBe('ApiError');
+                expect((mapped as { readonly code: string }).code).toBe(code);
+            },
+        );
+    });
+
+    describe('schema', () => {
+        it('validates success via ApiResponseSchema', () => {
+            const schema = ApiResponseSchema(S.Struct({ value: S.Number }));
+            expect(S.is(schema)({ _tag: 'ApiSuccess', data: { value: 42 }, status: 200 })).toBe(true);
+            expect(S.is(schema)({ _tag: 'ApiError', code: 'ERR', message: 'fail', status: 400 })).toBe(true);
+            expect(S.is(schema)({ _tag: 'Invalid' })).toBe(false);
+        });
+
+        it('validates paginated via PaginatedResponseSchema', () => {
+            const schema = PaginatedResponseSchema(S.Struct({ value: S.Number }));
+            const valid = {
+                _tag: 'PaginatedSuccess',
+                data: [{ value: 1 }],
+                pagination: { currentPage: 1, pageSize: 20, totalItems: 100, totalPages: 5 },
+                status: 200,
+            };
+            expect(S.is(schema)(valid)).toBe(true);
+        });
+
+        it('exposes schemas via factory', () => {
+            const apiInstance = loadApi();
+            expect(apiInstance.schema.response).toBeDefined();
+            expect(apiInstance.schema.paginated).toBeDefined();
         });
     });
 });

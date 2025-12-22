@@ -2,15 +2,21 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
-import { type ReferenceAttachment, SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
-import type { ColorMode, Intent } from '@parametric-portal/types/database';
+import {
+    type ColorMode,
+    ColorModeSchema,
+    type Intent,
+    IntentSchema,
+    type OutputMode,
+    OutputModeSchema,
+} from '@parametric-portal/types/database';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
+import { type Svg, type SvgAsset, SvgAssetSchema, sanitizeSvg } from '@parametric-portal/types/svg';
 import { types } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type OutputMode = 'single' | 'batch';
 type MessageRole = 'user' | 'assistant';
 type SidebarTab = 'history' | 'inspector' | 'library' | 'session';
 type Message = S.Schema.Type<typeof MessageSchema>;
@@ -19,7 +25,6 @@ type PreviewState = S.Schema.Type<typeof PreviewStateSchema>;
 type ContextState = S.Schema.Type<typeof ContextStateSchema>;
 type UiState = S.Schema.Type<typeof UiStateSchema>;
 type Asset = S.Schema.Type<typeof AssetSchema>;
-type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
 type HistoryState = S.Schema.Type<typeof HistoryStateSchema>;
 type LibraryState = S.Schema.Type<typeof LibraryStateSchema>;
 
@@ -46,10 +51,10 @@ const PreviewStateSchema = S.Struct({
 });
 
 const ContextStateSchema = S.Struct({
-    attachments: S.Array(S.Struct({ id: S.String, name: S.String, svg: S.String })),
-    colorMode: S.Literal('dark', 'light'),
-    intent: S.Literal('create', 'refine'),
-    output: S.Literal('single', 'batch'),
+    attachments: S.Array(SvgAssetSchema),
+    colorMode: ColorModeSchema,
+    intent: IntentSchema,
+    output: OutputModeSchema,
 });
 
 const UiStateSchema = S.Struct({
@@ -62,11 +67,11 @@ const UiStateSchema = S.Struct({
 const AssetSchema = S.Struct({
     context: ContextStateSchema,
     id: S.typeSchema(typesApi.brands.uuidv7),
-    intent: S.Literal('create', 'refine'),
+    intent: IntentSchema,
     prompt: S.String,
     selectedVariantIndex: S.optional(pipe(S.Number, S.int(), S.greaterThanOrEqualTo(0))),
     timestamp: S.Number,
-    variants: S.Array(SvgVariantSchema),
+    variants: S.Array(SvgAssetSchema),
 });
 
 const HistoryStateSchema = S.Struct({
@@ -74,11 +79,7 @@ const HistoryStateSchema = S.Struct({
     currentId: S.NullOr(S.String),
 });
 
-const CustomAssetSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
+const CustomAssetSchema = SvgAssetSchema;
 
 type CustomAsset = S.Schema.Type<typeof CustomAssetSchema>;
 
@@ -125,7 +126,7 @@ type PreviewActions = {
 };
 
 type ContextActions = {
-    readonly addAttachment: (ref: ReferenceAttachment) => void;
+    readonly addAttachment: (ref: SvgAsset) => void;
     readonly clearAttachments: () => void;
     readonly removeAttachment: (id: string) => void;
     readonly setColorMode: (mode: ColorMode) => void;
@@ -186,7 +187,7 @@ const previewSlice: StoreSlice<PreviewState, PreviewActions> = storeApi.createSl
 
 const contextSlice: StoreSlice<ContextState, ContextActions> = storeApi.createSlice({
     actions: (set, get) => ({
-        addAttachment: (ref: ReferenceAttachment) => set({ ...get(), attachments: [...get().attachments, ref] }),
+        addAttachment: (ref: SvgAsset) => set({ ...get(), attachments: [...get().attachments, ref] }),
         clearAttachments: () => set({ ...get(), attachments: [] }),
         removeAttachment: (id: string) => set({ ...get(), attachments: get().attachments.filter((a) => a.id !== id) }),
         setColorMode: (mode: ColorMode) => set({ ...get(), colorMode: mode }),
@@ -248,7 +249,7 @@ const librarySlice: StoreSlice<LibraryState, LibraryActions> = storeApi.createSl
             }),
         addCustomAsset: (name: string, svg: string) => {
             const id = typesApi.generateUuidv7Sync();
-            set({ ...get(), customAssets: [...get().customAssets, { id, name, svg }] });
+            set({ ...get(), customAssets: [...get().customAssets, { id, name, svg: sanitizeSvg(svg) as Svg }] });
         },
         clearAssets: () => set({ ...get(), savedAssets: [] }),
         getCustomAsset: (id: string) => get().customAssets.find((a) => a.id === id),
@@ -297,11 +298,9 @@ export type {
     LibraryState,
     Message,
     MessageRole,
-    OutputMode,
     PreviewActions,
     PreviewState,
     SidebarTab,
-    SvgVariant,
     UiActions,
     UiState,
 };
