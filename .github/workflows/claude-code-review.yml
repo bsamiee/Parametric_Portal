@@ -33,14 +33,9 @@ jobs:
           claude_args: >-
             --model claude-opus-4-5-20251101
             --allowedTools
-            "Read,Write,Edit,Glob,Grep,Task,TodoWrite,WebFetch,
-            Bash(gh pr diff:*),
-            Bash(gh pr view:*),
-            Bash(gh pr comment:*),
-            Bash(gh pr files:*),
-            Bash(git diff:*),
-            Bash(git log:*),
-            mcp__github_inline_comment__create_inline_comment"
+            "Read,Write,Edit,Glob,Grep,Task,TodoWrite,Skill,WebSearch,WebFetch,
+            Bash(gh:*),Bash(git:*),Bash(pnpm:*),Bash(node:*),Bash(uv:*),
+            mcp__github*,mcp__github_inline_comment__create_inline_comment"
           prompt: |
             [CONTEXT]
             Repository: ${{ github.repository }} | PR: ${{ github.event.pull_request.number }}
@@ -51,6 +46,7 @@ jobs:
             2. Read REQUIREMENTS.md — technical specification, code standards
             3. Read .claude/skills/style-standards/SKILL.md — formatting rules
             4. Read .claude/skills/typescript-effect/SKILL.md — TypeScript patterns
+            5. Read .claude/skills/parallel-dispatch/SKILL.md - parallel dispatching rules
 
             [PHASE_2] Get Changes
             1. gh pr diff ${{ github.event.pull_request.number }} --name-only
@@ -58,13 +54,16 @@ jobs:
             3. Read each changed file for full context
 
             [PHASE_3] Analysis
-            - >5 files: Use Task tool to spawn parallel agents (3-5 files per batch)
+            - >5 files: Use parallel-dispatch skill — each agent reviews assigned files + relevant context
             - ≤5 files: Analyze sequentially
-            - Apply loaded standards; identify code smells, anti-patterns, improvements
-            - Reject workarounds/band-aids — find proper solutions
+            - Context per file: imports/dependencies, sibling files in folder, root configs (tsconfig, vite, nx)
+            - CI status: gh pr checks ${{ github.event.pull_request.number }} — if failures, gh run view <run-id> --log-failed
+            - Apply standards; flag violations, anti-patterns, improvements
+            - Reject band-aids — require proper solutions
 
             [PHASE_4] Output
-            For each issue: mcp__github_inline_comment__create_inline_comment
+            1. For each issue: mcp__github_inline_comment__create_inline_comment
+            2. Submit review: gh pr review ${{ github.event.pull_request.number }} --comment --body "summary"
 
             [COMMENT_FORMAT]
             **Issue:** Concise problem statement
