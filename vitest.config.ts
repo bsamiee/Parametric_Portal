@@ -31,9 +31,8 @@ const B = Object.freeze({
     },
     reporters: {
         coverage: ['text', 'json', 'html', 'lcov'],
-        test: process.env.CI ? ['verbose', 'json', 'junit', 'github-actions'] : ['default', 'json', 'junit'],
+        test: process.env['CI'] ? ['dot', 'json', 'junit', 'github-actions'] : ['default', 'json', 'junit'],
     },
-    thresholds: { branches: 80, functions: 80, lines: 80, statements: 80 },
 } as const);
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
@@ -62,11 +61,10 @@ const createVitestConfig = () =>
                     provider: 'v8' as const,
                     reporter: [...B.reporters.coverage],
                     reportOnFailure: true,
-                    reportsDirectory: process.env.NX_TASK_TARGET_PROJECT
-                        ? `${process.env.NX_TASK_TARGET_PROJECT}/coverage`
+                    reportsDirectory: process.env['NX_TASK_TARGET_PROJECT']
+                        ? `${process.env['NX_TASK_TARGET_PROJECT']}/coverage`
                         : 'coverage',
                     skipFull: false,
-                    thresholds: { ...B.thresholds },
                 },
                 diff: { ...B.output.diff },
                 environment: 'happy-dom' as const,

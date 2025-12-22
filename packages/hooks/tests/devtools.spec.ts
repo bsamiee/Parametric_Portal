@@ -66,7 +66,7 @@ describe('devtools', () => {
             if (enhanced.cause && typeof enhanced.cause === 'object') {
                 const cause = enhanced.cause as Record<string, unknown>;
                 // Original data should be preserved
-                expect(cause.existing).toBe('data');
+                expect(cause['existing']).toBe('data');
             }
         });
     });

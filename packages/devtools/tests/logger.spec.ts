@@ -36,7 +36,7 @@ describe('logger', () => {
             Effect.runSync(Effect[method]('test message').pipe(Effect.provide(layer)));
 
             const expectedLevel = method.replace('log', '');
-            expect(logs[0].level).toBe(expectedLevel);
+            expect(logs[0]?.level).toBe(expectedLevel);
         });
 
         it.prop([fc.dictionary(fc.string({ minLength: 1 }), fc.string(), { maxKeys: 3, minKeys: 1 })])(
@@ -52,7 +52,7 @@ describe('logger', () => {
                     ),
                 );
 
-                expect(Object.entries(annotations).every(([k, v]) => logs[0].annotations[k] === v)).toBe(true);
+                expect(Object.entries(annotations).every(([k, v]) => logs[0]?.annotations[k] === v)).toBe(true);
             },
         );
 
@@ -65,7 +65,7 @@ describe('logger', () => {
                 Effect.runSync(Effect.logInfo(`msg-${i}`).pipe(Effect.provide(layer))),
             );
 
-            expect([logs.length, logs[0].message, logs[maxLogs - 1].message]).toEqual([
+            expect([logs.length, logs[0]?.message, logs[maxLogs - 1]?.message]).toEqual([
                 maxLogs,
                 `msg-${overflow - maxLogs}`,
                 `msg-${overflow - 1}`,
