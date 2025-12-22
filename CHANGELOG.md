@@ -1,3 +1,14 @@
+## 1.0.3 (2025-12-22)
+
+### [BUG_FIXES]
+
+- consolidate types package and align tests with API ([#117](https://github.com/bsamiee/Parametric_Portal/pull/117))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+
 ## 1.0.2 (2025-12-22)
 
 ### [BUG_FIXES]
