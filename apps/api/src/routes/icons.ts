@@ -5,9 +5,8 @@ import { makeRepositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder, type PaginationQuery } from '@parametric-portal/server/api';
 import { SessionContext } from '@parametric-portal/server/middleware';
 import { Effect, pipe, Schema as S } from 'effect';
-
-import { AnthropicService } from '../anthropic.ts';
 import { AppApi } from '../api.ts';
+import { IconGenerationService, type ServiceInput } from '../services/icons.ts';
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -33,20 +32,20 @@ const handleList = (params: PaginationQuery) =>
         Effect.orDie,
     );
 
-const handleGenerate = (prompt: string) =>
+const handleGenerate = (input: ServiceInput) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
             const repos = yield* makeRepositories;
-            const anthropic = yield* AnthropicService;
-            const svg = yield* anthropic.generateSvg(prompt);
+            const iconService = yield* IconGenerationService;
+            const result = yield* iconService.generate(input);
             const asset = yield* repos.assets.insert({
-                prompt: S.decodeSync(S.NonEmptyTrimmedString)(prompt),
-                svg,
+                prompt: S.decodeSync(S.NonEmptyTrimmedString)(input.prompt),
+                svg: result.variants[0]?.svg ?? '',
                 userId: session.userId,
             });
 
-            return { id: String(asset.id), svg: asset.svg };
+            return { id: String(asset.id), variants: result.variants };
         }),
         Effect.orDie,
     );
@@ -56,7 +55,7 @@ const handleGenerate = (prompt: string) =>
 const IconsLive = HttpApiBuilder.group(AppApi, 'icons', (handlers) =>
     handlers
         .handle('list', ({ urlParams }) => handleList(urlParams))
-        .handle('generate', ({ payload: { prompt } }) => handleGenerate(prompt)),
+        .handle('generate', ({ payload }) => handleGenerate(payload)),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

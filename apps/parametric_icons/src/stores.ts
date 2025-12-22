@@ -2,15 +2,19 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
+import type {
+    ColorMode,
+    ParametricIntent,
+    ReferenceAttachment,
+    SvgVariant,
+} from '@parametric-portal/api/contracts/icons';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { types } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ParametricIntent = 'create' | 'refine';
 type OutputMode = 'single' | 'batch';
-type ColorMode = 'dark' | 'light';
 type MessageRole = 'user' | 'assistant';
 type SidebarTab = 'history' | 'inspector' | 'library' | 'session';
 type Message = S.Schema.Type<typeof MessageSchema>;
@@ -18,10 +22,8 @@ type ChatState = S.Schema.Type<typeof ChatStateSchema>;
 type PreviewState = S.Schema.Type<typeof PreviewStateSchema>;
 type ContextState = S.Schema.Type<typeof ContextStateSchema>;
 type UiState = S.Schema.Type<typeof UiStateSchema>;
-type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
 type ParametricAsset = S.Schema.Type<typeof ParametricAssetSchema>;
 type SavedAsset = ParametricAsset;
-type ReferenceAttachment = S.Schema.Type<typeof ReferenceSchema>;
 type HistoryState = S.Schema.Type<typeof HistoryStateSchema>;
 type LibraryState = S.Schema.Type<typeof LibraryStateSchema>;
 

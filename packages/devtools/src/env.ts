@@ -38,7 +38,7 @@ const EnvSchema = S.Struct({
     MODE: S.String,
     PROD: S.Boolean,
     SSR: S.optional(S.Boolean),
-    VITE_ANTHROPIC_API_KEY: S.optional(S.String),
+    VITE_API_URL: S.optional(S.String),
     VITE_DEVTOOLS_CONSOLE: S.optional(BooleanString),
     VITE_DEVTOOLS_EXPERIMENTAL: S.optional(BooleanString),
     VITE_DEVTOOLS_LOG_LEVEL: S.optional(LogLevelLiteral),
@@ -71,7 +71,7 @@ const B = Object.freeze({
         mode: 'MODE',
         prod: 'PROD',
         ssr: 'SSR',
-        viteAnthropicApiKey: 'VITE_ANTHROPIC_API_KEY',
+        viteApiUrl: 'VITE_API_URL',
     } as const,
     required: ['MODE', 'BASE_URL', 'DEV', 'PROD'],
 } as const);
@@ -95,7 +95,7 @@ const normalizeEnv = (raw: RawEnv): Record<string, unknown> => {
         [k.mode]: raw[k.mode], // Required: no default
         [k.prod]: Boolean(raw[k.prod]),
         [k.ssr]: raw[k.ssr] === undefined ? undefined : Boolean(raw[k.ssr]),
-        [k.viteAnthropicApiKey]: raw[k.viteAnthropicApiKey],
+        [k.viteApiUrl]: raw[k.viteApiUrl],
     };
 };
 

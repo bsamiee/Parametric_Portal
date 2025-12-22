@@ -3,6 +3,13 @@
     "version": "0.1.0",
     "type": "module",
     "private": true,
+    "exports": {
+        "./contracts/icons": {
+            "types": "./src/contracts/icons.ts",
+            "import": "./src/contracts/icons.ts",
+            "default": "./src/contracts/icons.ts"
+        }
+    },
     "scripts": {
         "build": "vite build",
         "check": "biome check .",
@@ -12,15 +19,16 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
-        "@anthropic-ai/sdk": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
         "@effect/sql": "catalog:",
+        "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "arctic": "catalog:",
-        "effect": "catalog:"
+        "effect": "catalog:",
+        "isomorphic-dompurify": "catalog:"
     },
     "devDependencies": {
         "@types/node": "catalog:",
