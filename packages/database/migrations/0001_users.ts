@@ -17,6 +17,7 @@ export default Effect.flatMap(
         version INTEGER NOT NULL DEFAULT 0,
         deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        -- Defense-in-depth: simple @ check; full RFC validation via EmailSchema at app layer
         CONSTRAINT email_format CHECK (position('@' in email) > 1)
     );
 

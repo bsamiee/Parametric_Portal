@@ -12,7 +12,7 @@ import { PgLive } from './client.ts';
 // --- [LAYERS] ----------------------------------------------------------------
 
 const MigratorLive = PgMigrator.layer({
-    loader: PgMigrator.fromFileSystem(fileURLToPath(new URL('../migrations', import.meta.url))),
+    loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))),
 }).pipe(Layer.provide(PgLive));
 
 // --- [EXPORT] ----------------------------------------------------------------

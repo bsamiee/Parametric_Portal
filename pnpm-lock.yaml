@@ -509,6 +509,9 @@ importers:
       '@parametric-portal/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@parametric-portal/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       arctic:
         specifier: 'catalog:'
         version: 3.7.0

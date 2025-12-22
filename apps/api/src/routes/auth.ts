@@ -7,6 +7,7 @@ import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
+import type { Uuidv7 } from '@parametric-portal/types/database';
 import { DateTime, Duration, Effect, Option, pipe } from 'effect';
 
 import { AppApi } from '../api.ts';
@@ -14,10 +15,10 @@ import { AppApi } from '../api.ts';
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const computeExpiry = (duration: Duration.Duration) => new Date(Date.now() + Duration.toMillis(duration));
-const toSessionResponse = (sessionToken: string, expiresAt: Date, refreshToken: string) => ({
-    accessToken: sessionToken,
+const toSessionResponse = (sessionToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) => ({
+    accessToken: sessionToken as string,
     expiresAt: DateTime.unsafeFromDate(expiresAt),
-    refreshToken,
+    refreshToken: refreshToken as string,
 });
 
 const createAuthTokenPairs = () =>

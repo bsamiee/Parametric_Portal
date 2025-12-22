@@ -13,7 +13,7 @@ export default defineConfig(
                 repositories: './src/repositories.ts',
                 schema: './src/schema.ts',
             },
-            external: ['effect', '@effect/experimental', '@effect/sql', '@effect/sql-pg'],
+            external: ['effect', '@effect/experimental', '@effect/platform', '@effect/sql', '@effect/sql-pg'],
             mode: 'library',
             name: 'ParametricDatabase',
         }),
