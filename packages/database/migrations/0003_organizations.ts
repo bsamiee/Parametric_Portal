@@ -1,5 +1,6 @@
 /**
- * Migration: Create organizations and organization_members tables with PG17 optimizations.
+ * Migration: Create organizations and organization_members tables.
+ * PostgreSQL 17 features: NULLS NOT DISTINCT, covering indexes with INCLUDE.
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -13,16 +14,17 @@ export default Effect.flatMap(
     CREATE TABLE organizations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name TEXT NOT NULL,
-        slug TEXT NOT NULL UNIQUE,
+        slug TEXT NOT NULL,
         version INTEGER NOT NULL DEFAULT 0,
         deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT name_not_empty CHECK (length(trim(name)) > 0),
-        CONSTRAINT slug_format CHECK (slug ~* '^[a-z0-9-]+$')
+        CONSTRAINT slug_format CHECK (slug ~* '^[a-z0-9-]+$'),
+        CONSTRAINT organizations_slug_unique UNIQUE NULLS NOT DISTINCT (slug)
     );
 
-    CREATE INDEX idx_organizations_slug ON organizations(slug) WHERE deleted_at IS NULL;
+    CREATE INDEX idx_organizations_slug ON organizations USING HASH (slug) WHERE deleted_at IS NULL;
 
     CREATE TABLE organization_members (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -32,10 +34,10 @@ export default Effect.flatMap(
         version INTEGER NOT NULL DEFAULT 0,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE(organization_id, user_id)
+        CONSTRAINT org_members_org_user_unique UNIQUE NULLS NOT DISTINCT (organization_id, user_id)
     );
 
-    CREATE INDEX idx_organization_members_org_id ON organization_members(organization_id);
-    CREATE INDEX idx_organization_members_user_id ON organization_members(user_id);
+    CREATE INDEX idx_organization_members_org_id ON organization_members(organization_id) INCLUDE (user_id, role);
+    CREATE INDEX idx_organization_members_user_id ON organization_members(user_id) INCLUDE (organization_id, role);
 `,
 );

@@ -12,7 +12,7 @@ import {
     HttpServerResponse,
 } from '@effect/platform';
 import type { ApiKeyResult, OAuthProvider, SessionResult } from '@parametric-portal/types/database';
-import { Context, Effect, Layer, Match, Option, pipe, Redacted } from 'effect';
+import { Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 
 import { hashString } from './crypto.ts';
 import {
@@ -66,6 +66,9 @@ type OAuthUserInfo = {
     readonly providerAccountId: string;
 };
 
+type SqlErrorInput = { readonly code?: string; readonly constraint?: string; readonly message?: string };
+type SqlErrorCode = keyof typeof B.sqlCodes;
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
@@ -76,7 +79,6 @@ const B = Object.freeze({
         credentials: false,
         maxAge: 86400,
     },
-    hash: { multiplier: 31, seed: 0 },
     requestId: { headerName: 'x-request-id' },
     security: { apiKeyHeader: 'x-api-key' },
     securityHeaders: {
@@ -84,6 +86,19 @@ const B = Object.freeze({
         frameOptions: 'DENY' as const,
         hsts: { includeSubDomains: true, maxAge: 31536000 },
         referrerPolicy: 'strict-origin-when-cross-origin',
+    },
+    sqlCodes: {
+        '40P01': 'deadlock',
+        '55P03': 'lockTimeout',
+        '08001': 'connectionLost',
+        '08006': 'connectionLost',
+        '23502': 'notNull',
+        '23503': 'foreignKey',
+        '23505': 'unique',
+        '23514': 'check',
+        '40001': 'deadlock',
+        '53300': 'poolExhausted',
+        '57014': 'statementTimeout',
     },
 } as const);
 
@@ -141,33 +156,33 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
 const isExpired = (expiresAt: Date | undefined): boolean => expiresAt !== undefined && expiresAt.getTime() < Date.now();
 const validateNotExpired = <E>(expiresAt: Date | undefined, errorFactory: () => E): Effect.Effect<void, E> =>
     isExpired(expiresAt) ? Effect.fail(errorFactory()) : Effect.succeed(undefined);
-const mapSqlError = (error: { readonly code?: string; readonly constraint?: string; readonly message?: string }) =>
+
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const sqlErrorHandlers = {
+    check: (e: SqlErrorInput) =>
+        new DatabaseConstraintError({ code: 'check', constraint: e.constraint ?? '', table: '' }),
+    connectionLost: () => new DatabaseConnectionError({ reason: 'connection_lost' }),
+    deadlock: (e: SqlErrorInput) => new DatabaseDeadlockError({ sqlState: e.code ?? '' }),
+    foreignKey: (e: SqlErrorInput) =>
+        new DatabaseConstraintError({ code: 'foreign_key', constraint: e.constraint ?? '', table: '' }),
+    lockTimeout: () => new DatabaseTimeoutError({ durationMs: 0, timeoutType: 'lock' }),
+    notNull: (e: SqlErrorInput) =>
+        new DatabaseConstraintError({ code: 'not_null', constraint: e.constraint ?? '', table: '' }),
+    poolExhausted: () => new DatabaseConnectionError({ reason: 'pool_exhausted' }),
+    statementTimeout: () => new DatabaseTimeoutError({ durationMs: 0, timeoutType: 'statement' }),
+    unique: (e: SqlErrorInput) =>
+        new DatabaseConstraintError({ code: 'unique', constraint: e.constraint ?? '', table: '' }),
+} as const satisfies Record<(typeof B.sqlCodes)[SqlErrorCode], (e: SqlErrorInput) => unknown>;
+
+const mapSqlError = (error: SqlErrorInput) =>
     pipe(
-        Match.value(error.code ?? ''),
-        Match.when(
-            '23505',
-            () => new DatabaseConstraintError({ code: 'unique', constraint: error.constraint ?? '', table: '' }),
-        ),
-        Match.when(
-            '23503',
-            () => new DatabaseConstraintError({ code: 'foreign_key', constraint: error.constraint ?? '', table: '' }),
-        ),
-        Match.when(
-            '23502',
-            () => new DatabaseConstraintError({ code: 'not_null', constraint: error.constraint ?? '', table: '' }),
-        ),
-        Match.when(
-            '23514',
-            () => new DatabaseConstraintError({ code: 'check', constraint: error.constraint ?? '', table: '' }),
-        ),
-        Match.when('40P01', () => new DatabaseDeadlockError({ sqlState: error.code ?? '' })),
-        Match.when('40001', () => new DatabaseDeadlockError({ sqlState: error.code ?? '' })),
-        Match.when('57014', () => new DatabaseTimeoutError({ durationMs: 0, timeoutType: 'statement' })),
-        Match.when('55P03', () => new DatabaseTimeoutError({ durationMs: 0, timeoutType: 'lock' })),
-        Match.when('08006', () => new DatabaseConnectionError({ reason: 'connection_lost' })),
-        Match.when('08001', () => new DatabaseConnectionError({ reason: 'connection_lost' })),
-        Match.when('53300', () => new DatabaseConnectionError({ reason: 'pool_exhausted' })),
-        Match.orElse(() => new InternalError({ cause: error.message })),
+        Option.fromNullable(error.code),
+        Option.flatMap((code) => Option.fromNullable(B.sqlCodes[code as SqlErrorCode])),
+        Option.match({
+            onNone: () => new InternalError({ cause: error.message }),
+            onSome: (errorType) => sqlErrorHandlers[errorType](error),
+        }),
     );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
