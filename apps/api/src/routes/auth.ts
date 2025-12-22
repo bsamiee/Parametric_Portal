@@ -16,9 +16,9 @@ import { AppApi } from '../api.ts';
 
 const computeExpiry = (duration: Duration.Duration) => new Date(Date.now() + Duration.toMillis(duration));
 const toSessionResponse = (sessionToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) => ({
-    accessToken: sessionToken as string,
+    accessToken: sessionToken,
     expiresAt: DateTime.unsafeFromDate(expiresAt),
-    refreshToken: refreshToken as string,
+    refreshToken: refreshToken,
 });
 
 const createAuthTokenPairs = () =>
@@ -120,6 +120,7 @@ const handleRefresh = (refreshTokenInput: string) =>
             return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
         Effect.catchTags({
+            HashingError: () => Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),
             ParseError: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid token format' })),
             SqlError: () => Effect.fail(new UnauthorizedError({ reason: 'Database error' })),
         }),

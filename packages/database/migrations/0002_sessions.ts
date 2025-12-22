@@ -19,13 +19,13 @@ export default Effect.flatMap(
         user_agent TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         last_activity_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CONSTRAINT token_hash_format CHECK (token_hash ~* '^[0-9a-f]+$'),
+        CONSTRAINT token_hash_format CHECK (token_hash ~* '^[0-9a-f]{64}$'),
         CONSTRAINT expires_at_future CHECK (expires_at > created_at)
     );
 
-    CREATE INDEX idx_sessions_token_hash ON sessions(token_hash) WHERE expires_at > now();
+    CREATE INDEX idx_sessions_token_hash ON sessions(token_hash);
     CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-    CREATE INDEX idx_sessions_expires_at ON sessions(expires_at) WHERE expires_at > now();
+    CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
 
     CREATE TABLE oauth_accounts (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -51,10 +51,10 @@ export default Effect.flatMap(
         expires_at TIMESTAMPTZ NOT NULL,
         revoked_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CONSTRAINT token_hash_format_refresh CHECK (token_hash ~* '^[0-9a-f]+$')
+        CONSTRAINT token_hash_format_refresh CHECK (token_hash ~* '^[0-9a-f]{64}$')
     );
 
-    CREATE INDEX idx_refresh_tokens_token_hash ON refresh_tokens(token_hash) WHERE expires_at > now() AND revoked_at IS NULL;
+    CREATE INDEX idx_refresh_tokens_token_hash ON refresh_tokens(token_hash) WHERE revoked_at IS NULL;
     CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 
     CREATE TABLE api_keys (
@@ -65,11 +65,11 @@ export default Effect.flatMap(
         expires_at TIMESTAMPTZ,
         last_used_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CONSTRAINT key_hash_format CHECK (key_hash ~* '^[0-9a-f]+$'),
+        CONSTRAINT key_hash_format CHECK (key_hash ~* '^[0-9a-f]{64}$'),
         CONSTRAINT name_not_empty CHECK (length(trim(name)) > 0)
     );
 
-    CREATE INDEX idx_api_keys_key_hash ON api_keys(key_hash) WHERE expires_at IS NULL OR expires_at > now();
+    CREATE INDEX idx_api_keys_key_hash ON api_keys(key_hash);
     CREATE INDEX idx_api_keys_user_id ON api_keys(user_id);
 `,
 );

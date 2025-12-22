@@ -71,7 +71,7 @@ const UpdateOrgMemberWithVersion = S.Struct({
     id: OrganizationMemberIdSchema,
     role: OrganizationRoleSchema,
 });
-const OAuthAccountIdSchema = S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String });
+const DeleteOAuthAccountParams = S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String });
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -178,7 +178,7 @@ const makeRepositories = Effect.gen(function* () {
             delete: SqlSchema.void({
                 execute: ({ provider, providerAccountId }) =>
                     sql`DELETE FROM ${sql(B.tables.oauthAccounts)} WHERE provider = ${provider} AND provider_account_id = ${providerAccountId}`,
-                Request: OAuthAccountIdSchema,
+                Request: DeleteOAuthAccountParams,
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: (userId) => sql`SELECT * FROM ${sql(B.tables.oauthAccounts)} WHERE user_id = ${userId}`,

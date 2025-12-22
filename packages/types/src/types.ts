@@ -135,7 +135,7 @@ const types = (_config: TypesConfig = {}): TypesApi =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TYPES_TUNING, EmailSchema, generateUuidv7Sync, SlugSchema, types };
+export { B as TYPES_TUNING, EmailSchema, generateUuidv7Sync, SlugSchema, types, Uuidv7Schema };
 export type {
     Email,
     HexColor,

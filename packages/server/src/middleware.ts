@@ -190,6 +190,9 @@ const createApiKeyAuthLayer = (
             apiKey: (redactedKey: Redacted.Redacted<string>) =>
                 pipe(
                     hashString(Redacted.value(redactedKey)),
+                    Effect.catchTag('HashingError', () =>
+                        Effect.fail(new UnauthorizedError({ reason: 'Key hashing failed' })),
+                    ),
                     Effect.flatMap(lookup),
                     Effect.flatMap(
                         Option.match({
@@ -245,6 +248,9 @@ const createSessionAuthLayer = (
             bearer: (token: Redacted.Redacted<string>) =>
                 pipe(
                     hashString(Redacted.value(token)),
+                    Effect.catchTag('HashingError', () =>
+                        Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),
+                    ),
                     Effect.flatMap(validate),
                     Effect.flatMap(
                         Option.match({
