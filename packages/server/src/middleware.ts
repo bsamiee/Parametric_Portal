@@ -49,7 +49,8 @@ type OAuthProviderConfig = {
     readonly clientId: string;
     readonly clientSecret: Redacted.Redacted<string>;
     readonly redirectUri: string;
-    readonly scopes: ReadonlyArray<string>;
+    readonly scopes?: ReadonlyArray<string>;
+    readonly tenantId?: string;
 };
 
 type OAuthTokens = {

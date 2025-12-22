@@ -3,76 +3,69 @@
  * Single Effect.gen yields SqlClient once; all resolvers defined inline.
  */
 import { SqlClient, SqlSchema } from '@effect/sql';
-import {
-    ApiKeyIdSchema,
-    AssetIdSchema,
-    OAuthProviderSchema,
-    OrganizationIdSchema,
-    OrganizationMemberIdSchema,
-    OrganizationRoleSchema,
-    RefreshTokenIdSchema,
-    SessionIdSchema,
-    TokenHashSchema,
-    UserIdSchema,
-} from '@parametric-portal/types/database';
+import { schemas } from '@parametric-portal/types/database';
 import { Effect, Schema as S } from 'effect';
 import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User } from './models';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
-const InsertRefreshToken = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
+const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: schemas.TokenHash, userId: schemas.UserId });
+const InsertRefreshToken = S.Struct({
+    expiresAt: S.DateFromSelf,
+    tokenHash: schemas.TokenHash,
+    userId: schemas.UserId,
+});
 const InsertApiKey = S.Struct({
     expiresAt: S.NullOr(S.DateFromSelf),
     keyHash: S.String,
     name: S.NonEmptyTrimmedString,
-    userId: UserIdSchema,
+    userId: schemas.UserId,
 });
-const InsertAsset = S.Struct({ prompt: S.NonEmptyTrimmedString, svg: S.String, userId: UserIdSchema });
+const InsertAsset = S.Struct({ prompt: S.NonEmptyTrimmedString, svg: S.String, userId: schemas.UserId });
 const InsertOrganization = S.Struct({ name: S.NonEmptyTrimmedString, slug: S.NonEmptyTrimmedString });
 const InsertOrganizationMember = S.Struct({
-    organizationId: OrganizationIdSchema,
-    role: OrganizationRoleSchema,
-    userId: UserIdSchema,
+    organizationId: schemas.OrganizationId,
+    role: schemas.OrganizationRole,
+    userId: schemas.UserId,
 });
 const UpsertOAuthAccount = S.Struct({
     accessToken: S.String,
     expiresAt: S.NullOr(S.DateFromSelf),
-    provider: OAuthProviderSchema,
+    provider: schemas.OAuthProvider,
     providerAccountId: S.String,
     refreshToken: S.NullOr(S.String),
-    userId: UserIdSchema,
+    userId: schemas.UserId,
 });
-const AssetListItem = S.Struct({ id: AssetIdSchema, prompt: S.NonEmptyTrimmedString });
+const AssetListItem = S.Struct({ id: schemas.AssetId, prompt: S.NonEmptyTrimmedString });
 const AssetCountResult = S.Struct({ count: S.NumberFromString });
 const FindAssetsByUserIdParams = S.Struct({
     limit: S.Int,
     offset: S.Int,
-    userId: UserIdSchema,
+    userId: schemas.UserId,
 });
 const UpdateAssetWithVersion = S.Struct({
     expectedVersion: S.Int,
-    id: AssetIdSchema,
+    id: schemas.AssetId,
     prompt: S.NonEmptyTrimmedString,
     svg: S.String,
 });
 const UpdateUserWithVersion = S.Struct({
     email: S.NonEmptyTrimmedString,
     expectedVersion: S.Int,
-    id: UserIdSchema,
+    id: schemas.UserId,
 });
 const UpdateOrganization = S.Struct({
     expectedVersion: S.Int,
-    id: OrganizationIdSchema,
+    id: schemas.OrganizationId,
     name: S.NonEmptyTrimmedString,
     slug: S.NonEmptyTrimmedString,
 });
 const UpdateOrgMemberWithVersion = S.Struct({
     expectedVersion: S.Int,
-    id: OrganizationMemberIdSchema,
-    role: OrganizationRoleSchema,
+    id: schemas.OrganizationMemberId,
+    role: schemas.OrganizationRole,
 });
-const DeleteOAuthAccountParams = S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String });
+const DeleteOAuthAccountParams = S.Struct({ provider: schemas.OAuthProvider, providerAccountId: S.String });
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -98,12 +91,12 @@ const makeRepositories = Effect.gen(function* () {
         apiKeys: {
             delete: SqlSchema.void({
                 execute: (id) => sql`DELETE FROM ${sql(B.tables.apiKeys)} WHERE id = ${id}`,
-                Request: ApiKeyIdSchema,
+                Request: schemas.ApiKeyId,
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: (userId) =>
                     sql`SELECT * FROM ${sql(B.tables.apiKeys)} WHERE user_id = ${userId} ORDER BY created_at DESC`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: ApiKey,
             }),
             findValidByKeyHash: SqlSchema.findOne({
@@ -120,20 +113,20 @@ const makeRepositories = Effect.gen(function* () {
             }),
             updateLastUsed: SqlSchema.void({
                 execute: (id) => sql`UPDATE ${sql(B.tables.apiKeys)} SET last_used_at = now() WHERE id = ${id}`,
-                Request: ApiKeyIdSchema,
+                Request: schemas.ApiKeyId,
             }),
         },
         assets: {
             countActiveByUserId: SqlSchema.single({
                 execute: (userId) =>
                     sql`SELECT COUNT(*)::text as count FROM ${sql(B.tables.assets)} WHERE user_id = ${userId} AND deleted_at IS NULL`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: AssetCountResult,
             }),
             countByUserId: SqlSchema.single({
                 execute: (userId) =>
                     sql`SELECT COUNT(*)::text as count FROM ${sql(B.tables.assets)} WHERE user_id = ${userId}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: AssetCountResult,
             }),
             findAllActiveByUserId: SqlSchema.findAll({
@@ -150,7 +143,7 @@ const makeRepositories = Effect.gen(function* () {
             }),
             findById: SqlSchema.findOne({
                 execute: (id) => sql`SELECT * FROM ${sql(B.tables.assets)} WHERE id = ${id}`,
-                Request: AssetIdSchema,
+                Request: schemas.AssetId,
                 Result: Asset,
             }),
             insert: SqlSchema.single({
@@ -162,12 +155,12 @@ const makeRepositories = Effect.gen(function* () {
             restore: SqlSchema.void({
                 execute: (id) =>
                     sql`UPDATE ${sql(B.tables.assets)} SET deleted_at = NULL, updated_at = now() WHERE id = ${id}`,
-                Request: AssetIdSchema,
+                Request: schemas.AssetId,
             }),
             softDelete: SqlSchema.void({
                 execute: (id) =>
                     sql`UPDATE ${sql(B.tables.assets)} SET deleted_at = now(), updated_at = now() WHERE id = ${id}`,
-                Request: AssetIdSchema,
+                Request: schemas.AssetId,
             }),
             updateWithVersion: SqlSchema.void({
                 execute: ({ prompt, svg, id, expectedVersion }) =>
@@ -183,13 +176,13 @@ const makeRepositories = Effect.gen(function* () {
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: (userId) => sql`SELECT * FROM ${sql(B.tables.oauthAccounts)} WHERE user_id = ${userId}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: OAuthAccount,
             }),
             findByProviderAccountId: SqlSchema.findOne({
                 execute: ({ provider, providerAccountId }) =>
                     sql`SELECT * FROM ${sql(B.tables.oauthAccounts)} WHERE provider = ${provider} AND provider_account_id = ${providerAccountId}`,
-                Request: S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String }),
+                Request: S.Struct({ provider: schemas.OAuthProvider, providerAccountId: S.String }),
                 Result: OAuthAccount,
             }),
             upsert: SqlSchema.void({
@@ -204,23 +197,23 @@ const makeRepositories = Effect.gen(function* () {
         organizationMembers: {
             delete: SqlSchema.void({
                 execute: (id) => sql`DELETE FROM ${sql(B.tables.organizationMembers)} WHERE id = ${id}`,
-                Request: OrganizationMemberIdSchema,
+                Request: schemas.OrganizationMemberId,
             }),
             findAllByOrganizationId: SqlSchema.findAll({
                 execute: (orgId) =>
                     sql`SELECT * FROM ${sql(B.tables.organizationMembers)} WHERE organization_id = ${orgId}`,
-                Request: OrganizationIdSchema,
+                Request: schemas.OrganizationId,
                 Result: OrganizationMember,
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: (userId) => sql`SELECT * FROM ${sql(B.tables.organizationMembers)} WHERE user_id = ${userId}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: OrganizationMember,
             }),
             findByOrgAndUser: SqlSchema.findOne({
                 execute: ({ organizationId, userId }) =>
                     sql`SELECT * FROM ${sql(B.tables.organizationMembers)} WHERE organization_id = ${organizationId} AND user_id = ${userId}`,
-                Request: S.Struct({ organizationId: OrganizationIdSchema, userId: UserIdSchema }),
+                Request: S.Struct({ organizationId: schemas.OrganizationId, userId: schemas.UserId }),
                 Result: OrganizationMember,
             }),
             insert: SqlSchema.single({
@@ -232,7 +225,7 @@ const makeRepositories = Effect.gen(function* () {
             updateRole: SqlSchema.void({
                 execute: ({ role, id }) =>
                     sql`UPDATE ${sql(B.tables.organizationMembers)} SET role = ${role}, updated_at = now() WHERE id = ${id}`,
-                Request: S.Struct({ id: OrganizationMemberIdSchema, role: OrganizationRoleSchema }),
+                Request: S.Struct({ id: schemas.OrganizationMemberId, role: schemas.OrganizationRole }),
             }),
             updateWithVersion: SqlSchema.void({
                 execute: ({ role, id, expectedVersion }) =>
@@ -246,12 +239,12 @@ const makeRepositories = Effect.gen(function* () {
                     sql`SELECT o.* FROM ${sql(B.tables.organizations)} o
                         JOIN ${sql(B.tables.organizationMembers)} m ON o.id = m.organization_id
                         WHERE m.user_id = ${userId} AND o.deleted_at IS NULL`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: Organization,
             }),
             findById: SqlSchema.findOne({
                 execute: (id) => sql`SELECT * FROM ${sql(B.tables.organizations)} WHERE id = ${id}`,
-                Request: OrganizationIdSchema,
+                Request: schemas.OrganizationId,
                 Result: Organization,
             }),
             findBySlug: SqlSchema.findOne({
@@ -268,12 +261,12 @@ const makeRepositories = Effect.gen(function* () {
             restore: SqlSchema.void({
                 execute: (id) =>
                     sql`UPDATE ${sql(B.tables.organizations)} SET deleted_at = NULL, updated_at = now() WHERE id = ${id}`,
-                Request: OrganizationIdSchema,
+                Request: schemas.OrganizationId,
             }),
             softDelete: SqlSchema.void({
                 execute: (id) =>
                     sql`UPDATE ${sql(B.tables.organizations)} SET deleted_at = now(), updated_at = now() WHERE id = ${id}`,
-                Request: OrganizationIdSchema,
+                Request: schemas.OrganizationId,
             }),
             updateWithVersion: SqlSchema.void({
                 execute: ({ name, slug, id, expectedVersion }) =>
@@ -295,22 +288,22 @@ const makeRepositories = Effect.gen(function* () {
             }),
             revoke: SqlSchema.void({
                 execute: (id) => sql`UPDATE ${sql(B.tables.refreshTokens)} SET revoked_at = now() WHERE id = ${id}`,
-                Request: RefreshTokenIdSchema,
+                Request: schemas.RefreshTokenId,
             }),
             revokeAllByUserId: SqlSchema.void({
                 execute: (userId) =>
                     sql`UPDATE ${sql(B.tables.refreshTokens)} SET revoked_at = now() WHERE user_id = ${userId} AND revoked_at IS NULL`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
             }),
         },
         sessions: {
             delete: SqlSchema.void({
                 execute: (id) => sql`DELETE FROM ${sql(B.tables.sessions)} WHERE id = ${id}`,
-                Request: SessionIdSchema,
+                Request: schemas.SessionId,
             }),
             deleteAllByUserId: SqlSchema.void({
                 execute: (userId) => sql`DELETE FROM ${sql(B.tables.sessions)} WHERE user_id = ${userId}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
             }),
             findByTokenHash: SqlSchema.findOne({
                 execute: (tokenHash) =>
@@ -338,7 +331,7 @@ const makeRepositories = Effect.gen(function* () {
             }),
             findById: SqlSchema.findOne({
                 execute: (id) => sql`SELECT * FROM ${sql(B.tables.users)} WHERE id = ${id}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
                 Result: User,
             }),
             insert: SqlSchema.single({
@@ -348,11 +341,11 @@ const makeRepositories = Effect.gen(function* () {
             }),
             restore: SqlSchema.void({
                 execute: (id) => sql`UPDATE ${sql(B.tables.users)} SET deleted_at = NULL WHERE id = ${id}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
             }),
             softDelete: SqlSchema.void({
                 execute: (id) => sql`UPDATE ${sql(B.tables.users)} SET deleted_at = now() WHERE id = ${id}`,
-                Request: UserIdSchema,
+                Request: schemas.UserId,
             }),
             updateWithVersion: SqlSchema.void({
                 execute: (data) =>

@@ -7,9 +7,9 @@ import {
 } from '@parametric-portal/server/api';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
-import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
-import { Uuidv7Schema } from '@parametric-portal/types/types';
-import { Schema as S } from 'effect';
+import { schemas } from '@parametric-portal/types/database';
+import { type Uuidv7, Uuidv7Schema } from '@parametric-portal/types/types';
+import { DateTime, Schema as S } from 'effect';
 import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -24,7 +24,7 @@ const SessionResponseSchema = S.Struct({
 
 const UserResponseSchema = S.Struct({
     email: S.String,
-    id: UserIdSchema,
+    id: schemas.UserId,
 });
 
 const AssetListItemSchema = S.Struct({
@@ -39,18 +39,26 @@ const PaginatedAssetListSchema = S.Struct({
     total: S.Int,
 });
 
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const mkSessionResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) => ({
+    accessToken,
+    expiresAt: DateTime.unsafeFromDate(expiresAt),
+    refreshToken,
+});
+
 // --- [GROUPS] ----------------------------------------------------------------
 
 const AuthGroup = createGroup('auth', { prefix: '/auth' })
     .add(
         HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
-            .setPath(S.Struct({ provider: OAuthProviderSchema }))
+            .setPath(S.Struct({ provider: schemas.OAuthProvider }))
             .addSuccess(OAuthStartResponseSchema)
             .addError(OAuthError, { status: 400 }),
     )
     .add(
         HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
-            .setPath(S.Struct({ provider: OAuthProviderSchema }))
+            .setPath(S.Struct({ provider: schemas.OAuthProvider }))
             .setUrlParams(S.Struct({ code: S.String, state: S.String }))
             .addSuccess(SessionResponseSchema)
             .addError(OAuthError, { status: 400 }),
@@ -97,4 +105,4 @@ const AppApi = createApi('ParametricPortalApi', {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AppApi, AuthGroup, HealthGroup, IconsGroup };
+export { AppApi, AuthGroup, HealthGroup, IconsGroup, mkSessionResponse };

@@ -6,19 +6,14 @@ import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
-import { type OAuthProvider, SCHEMA_TUNING, type Uuidv7 } from '@parametric-portal/types/database';
-import { DateTime, Duration, Effect, Option, pipe } from 'effect';
+import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/types/database';
+import { Duration, Effect, Option, pipe } from 'effect';
 
-import { AppApi } from '../api.ts';
+import { AppApi, mkSessionResponse } from '../api.ts';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const computeExpiry = (duration: Duration.Duration) => new Date(Date.now() + Duration.toMillis(duration));
-const toSessionResponse = (sessionToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) => ({
-    accessToken: sessionToken,
-    expiresAt: DateTime.unsafeFromDate(expiresAt),
-    refreshToken: refreshToken,
-});
 
 const createAuthTokenPairs = () =>
     Effect.gen(function* () {
@@ -82,7 +77,7 @@ const handleOAuthCallback = (provider: OAuthProvider, code: string, state: strin
                 tokenHash: refreshHash,
                 userId: user.id,
             });
-            return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
+            return mkSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
         Effect.catchAll((cause) =>
             Effect.fail(new OAuthError({ provider, reason: `Database error: ${String(cause)}` })),
@@ -116,7 +111,7 @@ const handleRefresh = (refreshTokenInput: string) =>
                 tokenHash: refreshHash,
                 userId: token.userId,
             });
-            return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
+            return mkSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
         Effect.catchTags({
             HashingError: () => Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),

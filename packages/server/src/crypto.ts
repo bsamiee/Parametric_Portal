@@ -2,7 +2,7 @@
  * Shared cryptographic utilities for token hashing and generation.
  * Eliminates duplication between middleware and route handlers.
  */
-import { type TokenHash, TokenHashSchema, type Uuidv7 } from '@parametric-portal/types/database';
+import { schemas, type TokenHash, type Uuidv7 } from '@parametric-portal/types/database';
 import { generateUuidv7Sync } from '@parametric-portal/types/types';
 import { Data, Effect, Schema as S } from 'effect';
 
@@ -27,7 +27,7 @@ const hashString = (input: string): Effect.Effect<TokenHash, HashingError> =>
             const data = encoder.encode(input);
             const hashBuffer = await crypto.subtle.digest('SHA-256', data);
             const hex = [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
-            return S.decodeSync(TokenHashSchema)(hex);
+            return S.decodeSync(schemas.TokenHash)(hex);
         },
     });
 

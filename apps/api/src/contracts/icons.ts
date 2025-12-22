@@ -30,9 +30,11 @@ type LayerSpec = {
 
 const ColorModeSchema = S.Literal('dark', 'light');
 const IntentSchema = S.Literal('create', 'refine');
+const OutputModeSchema = S.Literal('single', 'batch');
 
 type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
 type Intent = S.Schema.Type<typeof IntentSchema>;
+type OutputMode = S.Schema.Type<typeof OutputModeSchema>;
 
 const ReferenceAttachmentSchema = S.Struct({
     id: S.String,
@@ -103,6 +105,7 @@ export {
     GenerateResponseSchema,
     ICON_DESIGN,
     IntentSchema,
+    OutputModeSchema,
     ReferenceAttachmentSchema,
     SvgVariantSchema,
 };
@@ -113,6 +116,7 @@ export type {
     GenerateResponse,
     Intent,
     LayerSpec,
+    OutputMode,
     Palette,
     ReferenceAttachment,
     SvgVariant,

@@ -2,15 +2,19 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
-import type { ColorMode, Intent, ReferenceAttachment } from '@parametric-portal/api/contracts/icons';
-import { SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
+import type { ColorMode, Intent, OutputMode, ReferenceAttachment } from '@parametric-portal/api/contracts/icons';
+import {
+    ColorModeSchema,
+    IntentSchema,
+    OutputModeSchema,
+    SvgVariantSchema,
+} from '@parametric-portal/api/contracts/icons';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { types } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type OutputMode = 'single' | 'batch';
 type MessageRole = 'user' | 'assistant';
 type SidebarTab = 'history' | 'inspector' | 'library' | 'session';
 type Message = S.Schema.Type<typeof MessageSchema>;
@@ -47,9 +51,9 @@ const PreviewStateSchema = S.Struct({
 
 const ContextStateSchema = S.Struct({
     attachments: S.Array(S.Struct({ id: S.String, name: S.String, svg: S.String })),
-    colorMode: S.Literal('dark', 'light'),
-    intent: S.Literal('create', 'refine'),
-    output: S.Literal('single', 'batch'),
+    colorMode: ColorModeSchema,
+    intent: IntentSchema,
+    output: OutputModeSchema,
 });
 
 const UiStateSchema = S.Struct({
@@ -62,7 +66,7 @@ const UiStateSchema = S.Struct({
 const AssetSchema = S.Struct({
     context: ContextStateSchema,
     id: S.typeSchema(typesApi.brands.uuidv7),
-    intent: S.Literal('create', 'refine'),
+    intent: IntentSchema,
     prompt: S.String,
     selectedVariantIndex: S.optional(pipe(S.Number, S.int(), S.greaterThanOrEqualTo(0))),
     timestamp: S.Number,
@@ -297,7 +301,6 @@ export type {
     LibraryState,
     Message,
     MessageRole,
-    OutputMode,
     PreviewActions,
     PreviewState,
     SidebarTab,
@@ -305,3 +308,6 @@ export type {
     UiActions,
     UiState,
 };
+
+// Re-export domain types from contracts for convenience
+export type { ColorMode, Intent, OutputMode } from '@parametric-portal/api/contracts/icons';

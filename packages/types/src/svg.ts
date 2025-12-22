@@ -168,5 +168,11 @@ const isSvgValid = (svg: string): boolean => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as SVG_TUNING, deriveScope, generateScope, isSvgValid, sanitizeSvg, ScopeSchema, SvgIdSchema, SvgSchema };
+const schemas = Object.freeze({
+    Scope: ScopeSchema,
+    Svg: SvgSchema,
+    SvgId: SvgIdSchema,
+} as const);
+
+export { B as SVG_TUNING, deriveScope, generateScope, isSvgValid, sanitizeSvg, schemas };
 export type { SanitizeOptions, Scope, Svg, SvgId };

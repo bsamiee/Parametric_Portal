@@ -4,19 +4,15 @@
  */
 
 import { OAuthError } from '@parametric-portal/server/errors';
-import { OAuthService, type OAuthTokens, type OAuthUserInfo } from '@parametric-portal/server/middleware';
+import {
+    type OAuthProviderConfig,
+    OAuthService,
+    type OAuthTokens,
+    type OAuthUserInfo,
+} from '@parametric-portal/server/middleware';
 import type { OAuthProvider } from '@parametric-portal/types/database';
 import { GitHub, Google, MicrosoftEntraId } from 'arctic';
 import { Config, Effect, Layer, Option, Redacted } from 'effect';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type ProviderConfig = {
-    readonly clientId: string;
-    readonly clientSecret: Redacted.Redacted<string>;
-    readonly redirectUri: string;
-    readonly tenantId?: string;
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -74,17 +70,17 @@ const OAuthServiceLive = Layer.effect(
             Config.withDefault(Redacted.make('')),
         );
         const microsoftTenantId = yield* Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common'));
-        const githubConfig: ProviderConfig = {
+        const githubConfig: OAuthProviderConfig = {
             clientId: githubClientId,
             clientSecret: githubClientSecret,
             redirectUri: `${baseUrl}/api/auth/oauth/github/callback`,
         };
-        const googleConfig: ProviderConfig = {
+        const googleConfig: OAuthProviderConfig = {
             clientId: googleClientId,
             clientSecret: googleClientSecret,
             redirectUri: `${baseUrl}/api/auth/oauth/google/callback`,
         };
-        const microsoftConfig: ProviderConfig = {
+        const microsoftConfig: OAuthProviderConfig = {
             clientId: microsoftClientId,
             clientSecret: microsoftClientSecret,
             redirectUri: `${baseUrl}/api/auth/oauth/microsoft/callback`,

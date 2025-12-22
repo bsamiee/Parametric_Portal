@@ -84,27 +84,28 @@ const ApiKeyResultSchema = S.Struct({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    ApiKeyIdSchema,
-    ApiKeyResultSchema,
-    AssetIdSchema,
-    AssetMetadataSchema,
-    B as SCHEMA_TUNING,
-    EmailSchema,
-    OAuthAccountIdSchema,
-    OAuthProviderSchema,
-    OrganizationIdSchema,
-    OrganizationMemberIdSchema,
-    OrganizationRoleSchema,
-    PaginationParamsSchema,
-    RefreshTokenIdSchema,
-    SessionIdSchema,
-    SessionResultSchema,
-    SlugSchema,
-    TokenHashSchema,
-    UserIdSchema,
-    VersionSchema,
-};
+const schemas = Object.freeze({
+    ApiKeyId: ApiKeyIdSchema,
+    ApiKeyResult: ApiKeyResultSchema,
+    AssetId: AssetIdSchema,
+    AssetMetadata: AssetMetadataSchema,
+    Email: EmailSchema,
+    OAuthAccountId: OAuthAccountIdSchema,
+    OAuthProvider: OAuthProviderSchema,
+    OrganizationId: OrganizationIdSchema,
+    OrganizationMemberId: OrganizationMemberIdSchema,
+    OrganizationRole: OrganizationRoleSchema,
+    PaginationParams: PaginationParamsSchema,
+    RefreshTokenId: RefreshTokenIdSchema,
+    SessionId: SessionIdSchema,
+    SessionResult: SessionResultSchema,
+    Slug: SlugSchema,
+    TokenHash: TokenHashSchema,
+    UserId: UserIdSchema,
+    Version: VersionSchema,
+} as const);
+
+export { B as SCHEMA_TUNING, schemas };
 export type {
     ApiKeyId,
     ApiKeyResult,
