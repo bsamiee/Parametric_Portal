@@ -88,7 +88,7 @@ const ICON_DESIGN = Object.freeze({
     } satisfies Record<ColorMode, Palette>,
 } as const);
 
-// --- [DERIVED_TYPES] ---------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
 type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
