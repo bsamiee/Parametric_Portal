@@ -5,7 +5,9 @@
 import { SqlClient, SqlSchema } from '@effect/sql';
 import {
     ApiKeyIdSchema,
+    AssetCountResultSchema,
     AssetIdSchema,
+    AssetListItemSchema,
     OAuthProviderSchema,
     OrganizationIdSchema,
     OrganizationMemberIdSchema,
@@ -43,8 +45,6 @@ const UpsertOAuthAccount = S.Struct({
     refreshToken: S.NullOr(S.String),
     userId: UserIdSchema,
 });
-const AssetListItem = S.Struct({ id: AssetIdSchema, prompt: S.NonEmptyTrimmedString });
-const AssetCountResult = S.Struct({ count: S.NumberFromString });
 const FindAssetsByUserIdParams = S.Struct({
     limit: S.Int,
     offset: S.Int,
@@ -128,25 +128,25 @@ const makeRepositories = Effect.gen(function* () {
                 execute: (userId) =>
                     sql`SELECT COUNT(*)::text as count FROM ${sql(B.tables.assets)} WHERE user_id = ${userId} AND deleted_at IS NULL`,
                 Request: UserIdSchema,
-                Result: AssetCountResult,
+                Result: AssetCountResultSchema,
             }),
             countByUserId: SqlSchema.single({
                 execute: (userId) =>
                     sql`SELECT COUNT(*)::text as count FROM ${sql(B.tables.assets)} WHERE user_id = ${userId}`,
                 Request: UserIdSchema,
-                Result: AssetCountResult,
+                Result: AssetCountResultSchema,
             }),
             findAllActiveByUserId: SqlSchema.findAll({
                 execute: ({ userId, limit, offset }) =>
                     sql`SELECT id, prompt FROM ${sql(B.tables.assets)} WHERE user_id = ${userId} AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
                 Request: FindAssetsByUserIdParams,
-                Result: AssetListItem,
+                Result: AssetListItemSchema,
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: ({ userId, limit, offset }) =>
                     sql`SELECT id, prompt FROM ${sql(B.tables.assets)} WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
                 Request: FindAssetsByUserIdParams,
-                Result: AssetListItem,
+                Result: AssetListItemSchema,
             }),
             findById: SqlSchema.findOne({
                 execute: (id) => sql`SELECT * FROM ${sql(B.tables.assets)} WHERE id = ${id}`,
@@ -366,4 +366,4 @@ const makeRepositories = Effect.gen(function* () {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AssetListItem, B as REPOSITORY_TUNING, makeRepositories };
+export { B as REPOSITORY_TUNING, makeRepositories };

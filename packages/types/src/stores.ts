@@ -4,13 +4,11 @@
 import { Option, pipe, Schema as S } from 'effect';
 import { match, P } from 'ts-pattern';
 
+import type { BivariantFunction } from './types.ts';
+
 // --- [TYPES] -----------------------------------------------------------------
 
 type SliceName = S.Schema.Type<typeof SliceNameSchema>;
-
-type BivariantFunction<T> = T extends (...args: infer A extends readonly unknown[]) => infer R
-    ? { bivarianceHack: (...args: A) => R }['bivarianceHack']
-    : never;
 
 type StoreActions<T> = {
     readonly reset: BivariantFunction<() => T>;

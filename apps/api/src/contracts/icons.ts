@@ -2,6 +2,7 @@
  * Icon generation domain contracts.
  * Single source of truth for all icon-related types across apps.
  */
+import { type ColorMode, ColorModeSchema, type Intent, IntentSchema } from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -27,12 +28,6 @@ type LayerSpec = {
 };
 
 // --- [SCHEMA] ----------------------------------------------------------------
-
-const ColorModeSchema = S.Literal('dark', 'light');
-const IntentSchema = S.Literal('create', 'refine');
-
-type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
-type Intent = S.Schema.Type<typeof IntentSchema>;
 
 const ReferenceAttachmentSchema = S.Struct({
     id: S.String,

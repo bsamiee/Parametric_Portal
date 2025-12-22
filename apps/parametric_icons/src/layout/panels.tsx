@@ -52,7 +52,7 @@ type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTermin
 // --- [TYPES] -----------------------------------------------------------------
 
 type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: number };
-type PreviewState = 'empty' | 'generating' | 'ready';
+type PreviewRenderState = 'empty' | 'generating' | 'ready';
 
 // Props for history panel
 type HistoryPanelProps = {
@@ -109,7 +109,7 @@ const styleOptions = [
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const derivePreviewState = (isGenerating: boolean, hasSvg: boolean): PreviewState => {
+const derivePreviewRenderState = (isGenerating: boolean, hasSvg: boolean): PreviewRenderState => {
     const stateKey = `${isGenerating ? 1 : 0}${hasSvg ? 1 : 0}` as const;
     const stateMap = { '00': 'empty', '01': 'ready', '10': 'generating', '11': 'generating' } as const;
     return stateMap[stateKey];
@@ -175,7 +175,7 @@ const previewRenderers = {
                 <SvgPreview svg={sanitized} className='w-full h-full' />
             </div>
         ) : null,
-} as const satisfies Record<PreviewState, (props: PreviewRenderProps) => ReactNode>;
+} as const satisfies Record<PreviewRenderState, (props: PreviewRenderProps) => ReactNode>;
 
 const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: HistoryPanelProps): ReactNode =>
     assets.length === 0 ? (
@@ -858,7 +858,7 @@ const ViewportHUD = ({ currentId, currentSvg, filename, isSaved, onToggleSave }:
 };
 
 const Viewport = ({ isLoading, sanitized, showGrid, showSafeArea, zoom }: ViewportProps): ReactNode => {
-    const state = derivePreviewState(isLoading, Boolean(sanitized));
+    const state = derivePreviewRenderState(isLoading, Boolean(sanitized));
     const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
     const { assets, currentId } = useStoreSlice(historySlice);
     const { savedAssets } = useStoreSlice(librarySlice);
