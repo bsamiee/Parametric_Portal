@@ -84,11 +84,12 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const hasCallableToString = (value: unknown): boolean =>
-    value !== null && value !== undefined && typeof (value as { toString?: unknown }).toString === 'function';
-
 const safeString = (value: unknown): string =>
-    hasCallableToString(value) ? String(value) : Object.prototype.toString.call(value);
+    typeof value === 'string'
+        ? value
+        : typeof value !== 'object' || value === null
+          ? String(value)
+          : Object.prototype.toString.call(value);
 
 const toError = (value: unknown): Error => (value instanceof Error ? value : new Error(safeString(value)));
 

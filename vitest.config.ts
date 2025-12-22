@@ -10,6 +10,11 @@ import { createConfig } from './vite.factory.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    output: {
+        chaiConfig: { includeStack: true, showDiff: true, truncateThreshold: 0 },
+        diff: { expand: true, truncateThreshold: 0 },
+        outputFile: { json: 'test-results/results.json', junit: 'test-results/junit.xml' },
+    },
     patterns: {
         benchInclude: ['**/*.bench.{ts,tsx}'],
         coverageExclude: [
@@ -26,7 +31,7 @@ const B = Object.freeze({
     },
     reporters: {
         coverage: ['text', 'json', 'html', 'lcov'],
-        test: ['default', 'json', 'junit'],
+        test: process.env.CI ? ['verbose', 'json', 'junit', 'github-actions'] : ['default', 'json', 'junit'],
     },
     thresholds: { branches: 80, functions: 80, lines: 80, statements: 80 },
 } as const);
@@ -46,6 +51,7 @@ const createVitestConfig = () =>
                     headless: true,
                     name: 'chromium' as const,
                 },
+                chaiConfig: { ...B.output.chaiConfig },
                 coverage: {
                     clean: true,
                     cleanOnRerun: true,
@@ -62,11 +68,13 @@ const createVitestConfig = () =>
                     skipFull: false,
                     thresholds: { ...B.thresholds },
                 },
+                diff: { ...B.output.diff },
                 environment: 'happy-dom' as const,
                 exclude: [...B.patterns.testExclude],
                 globals: true,
                 include: [...B.patterns.testInclude],
                 mockReset: true,
+                outputFile: { ...B.output.outputFile },
                 pool: 'threads' as const,
                 poolOptions: {
                     threads: {

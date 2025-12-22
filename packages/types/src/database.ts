@@ -89,7 +89,7 @@ export {
     ApiKeyResultSchema,
     AssetIdSchema,
     AssetMetadataSchema,
-    B as DATABASE_TYPES_TUNING,
+    B as SCHEMA_TUNING,
     EmailSchema,
     OAuthAccountIdSchema,
     OAuthProviderSchema,

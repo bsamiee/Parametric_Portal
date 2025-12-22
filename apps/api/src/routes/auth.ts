@@ -7,7 +7,7 @@ import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
 import type { Uuidv7 } from '@parametric-portal/types/database';
-import { DATABASE_TYPES_TUNING, type OAuthProvider } from '@parametric-portal/types/database';
+import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/types/database';
 import { DateTime, Duration, Effect, Option, pipe } from 'effect';
 
 import { AppApi } from '../api.ts';
@@ -74,8 +74,8 @@ const handleOAuthCallback = (provider: OAuthProvider, code: string, state: strin
             });
 
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = computeExpiry(DATABASE_TYPES_TUNING.durations.session);
-            const refreshExpiresAt = computeExpiry(DATABASE_TYPES_TUNING.durations.refreshToken);
+            const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
+            const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
 
             yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: user.id });
             yield* repos.refreshTokens.insert({
@@ -104,8 +104,8 @@ const handleRefresh = (refreshTokenInput: string) =>
             yield* repos.refreshTokens.revoke(token.id);
 
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = computeExpiry(DATABASE_TYPES_TUNING.durations.session);
-            const refreshExpiresAt = computeExpiry(DATABASE_TYPES_TUNING.durations.refreshToken);
+            const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
+            const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
 
             yield* repos.sessions.insert({
                 expiresAt: sessionExpiresAt,

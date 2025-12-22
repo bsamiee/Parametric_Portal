@@ -12,6 +12,7 @@ import {
     OrganizationRoleSchema,
     RefreshTokenIdSchema,
     SessionIdSchema,
+    TokenHashSchema,
     UserIdSchema,
 } from '@parametric-portal/types/database';
 import { Effect, Schema as S } from 'effect';
@@ -19,8 +20,8 @@ import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshT
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: S.String, userId: UserIdSchema });
-const InsertRefreshToken = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: S.String, userId: UserIdSchema });
+const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
+const InsertRefreshToken = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
 const InsertApiKey = S.Struct({
     expiresAt: S.NullOr(S.DateFromSelf),
     keyHash: S.String,
