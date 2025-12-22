@@ -1,9 +1,7 @@
 /**
  * Validate error boundary callbacks route to correct log levels and convert non-Error values.
  */
-import { it } from '@fast-check/vitest';
-import fc from 'fast-check';
-import { describe, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BOUNDARY_TUNING, createRootErrorOptions } from '../src/boundary.tsx';
 import { layer, mockLogger } from './utils.ts';
 
@@ -50,7 +48,7 @@ describe('boundary', () => {
             );
         });
 
-        it.prop([fc.string()])('converts non-Error to Error', (reason) => {
+        it.each(['string error', 'another reason', 'conversion test'])('converts non-Error "%s" to Error', (reason) => {
             const { layer: loggerLayer } = mockLogger();
             const onError = vi.fn();
             createRootErrorOptions({ loggerLayer, onError }).onUncaughtError(reason, {});

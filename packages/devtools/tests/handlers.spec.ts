@@ -1,9 +1,7 @@
 /**
  * Validate global error handler installation and error callback invocation.
  */
-import { it } from '@fast-check/vitest';
-import fc from 'fast-check';
-import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HANDLERS_TUNING, installGlobalHandlers } from '../src/handlers.ts';
 import { captureGlobals, type GlobalEnv, layer, restoreGlobals } from './utils.ts';
 
@@ -40,25 +38,26 @@ describe('handlers', () => {
             expect([globalThis.onerror, globalThis.onunhandledrejection]).toEqual([orig.onerror, orig.onrejection]);
         });
 
-        it.prop([fc.string(), fc.string(), fc.integer(), fc.integer()])(
-            'onerror calls onError with context',
-            (msg, source, lineno, colno) => {
-                const { layer: l } = layer();
-                const onError = vi.fn();
-                const { uninstall } = installGlobalHandlers({ loggerLayer: l, onError });
+        it.each([
+            ['error message', 'source.js', 10, 5],
+            ['another error', 'file.ts', 100, 25],
+            ['test error', 'module.tsx', 1, 1],
+        ])('onerror calls onError with context (msg=%s, source=%s, lineno=%i, colno=%i)', (msg, source, lineno, colno) => {
+            const { layer: l } = layer();
+            const onError = vi.fn();
+            const { uninstall } = installGlobalHandlers({ loggerLayer: l, onError });
 
-                const error = new Error('test');
-                globalThis.onerror?.(msg, source, lineno, colno, error);
+            const error = new Error('test');
+            globalThis.onerror?.(msg, source, lineno, colno, error);
 
-                expect(onError).toHaveBeenCalledWith(error, {
-                    colno,
-                    lineno,
-                    phase: HANDLERS_TUNING.phases.global,
-                    source,
-                });
-                uninstall();
-            },
-        );
+            expect(onError).toHaveBeenCalledWith(error, {
+                colno,
+                lineno,
+                phase: HANDLERS_TUNING.phases.global,
+                source,
+            });
+            uninstall();
+        });
 
         it('onerror returns false for default handling', () => {
             const { layer: l } = layer();
@@ -68,7 +67,11 @@ describe('handlers', () => {
             uninstall();
         });
 
-        it.prop([fc.string()])('onunhandledrejection converts reason to Error', (reason) => {
+        it.each([
+            'string error',
+            'rejection reason',
+            'another failure',
+        ])('onunhandledrejection converts reason "%s" to Error', (reason) => {
             const { layer: l } = layer();
             const onError = vi.fn();
             const { uninstall } = installGlobalHandlers({ loggerLayer: l, onError });

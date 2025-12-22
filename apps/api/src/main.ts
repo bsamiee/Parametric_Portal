@@ -9,6 +9,7 @@ import { HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
 import { PgLive } from '@parametric-portal/database/client';
+import { sessionToResult } from '@parametric-portal/database/models';
 import { makeRepositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { ServiceUnavailableError, UnauthorizedError } from '@parametric-portal/server/errors';
@@ -18,7 +19,6 @@ import {
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
 } from '@parametric-portal/server/middleware';
-import type { SessionResult } from '@parametric-portal/types/database';
 import { Context, Effect, Layer, Option, pipe } from 'effect';
 
 import { AnthropicServiceLive } from './anthropic.ts';
@@ -45,12 +45,6 @@ class HealthChecks extends Context.Tag('HealthChecks')<HealthChecks, HealthCheck
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const toSessionResult = (session: typeof import('@parametric-portal/database/models').Session.Type): SessionResult => ({
-    expiresAt: new Date(session.expiresAt.epochMillis),
-    sessionId: session.id,
-    userId: session.userId,
-});
-
 const composeMiddleware = (app: HttpApp.Default): HttpApp.Default<never, never> =>
     pipe(app, createSecurityHeadersMiddleware(), createRequestIdMiddleware(), HttpMiddleware.logger);
 
@@ -61,7 +55,7 @@ const SessionAuthLive = Layer.unwrapEffect(
         createSessionAuthLayer((tokenHash: string) =>
             pipe(
                 repos.sessions.findByTokenHash(tokenHash),
-                Effect.map((session) => Option.map(session, toSessionResult)),
+                Effect.map((session) => Option.map(session, sessionToResult)),
                 Effect.catchAll(() => Effect.fail(new UnauthorizedError({ reason: 'Session lookup failed' }))),
             ),
         ),

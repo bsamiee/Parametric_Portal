@@ -15,9 +15,10 @@ import {
     OrganizationRoleSchema,
     RefreshTokenIdSchema,
     SessionIdSchema,
+    type SessionResult,
     UserIdSchema,
 } from '@parametric-portal/types/database';
-import { Schema as S } from 'effect';
+import { DateTime, Schema as S } from 'effect';
 
 // --- [MODELS] ----------------------------------------------------------------
 
@@ -104,6 +105,14 @@ class OrganizationMember extends Model.Class<OrganizationMember>('OrganizationMe
     version: S.Int.pipe(S.nonNegative()),
 }) {}
 
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const sessionToResult = (session: typeof Session.Type): SessionResult => ({
+    expiresAt: DateTime.toDateUtc(session.expiresAt),
+    sessionId: session.id,
+    userId: session.userId,
+});
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User };
+export { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, sessionToResult, User };

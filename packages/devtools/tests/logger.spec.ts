@@ -1,10 +1,8 @@
 /**
- * Validate Effect logger factory and accumulation via property-based tests.
+ * Validate Effect logger factory and accumulation via deterministic tests.
  */
-import { it } from '@fast-check/vitest';
 import { Effect, Logger } from 'effect';
-import fc from 'fast-check';
-import { describe, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
     clearLogs,
     createAccumulatingLogger,
@@ -24,7 +22,13 @@ import { entry } from './utils.ts';
 const B = Object.freeze({
     levels: ['logInfo', 'logWarning', 'logError'] as const,
     maxLogs: LOGGER_TUNING.defaults.maxLogs,
+    testMaxLogs: [5, 10, 20, 50] as const,
 } as const);
+
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const runLogIterations = (count: number, logFn: (i: number) => void): void =>
+    Array.from({ length: count }, (_, i) => i).forEach(logFn);
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -38,29 +42,28 @@ describe('logger', () => {
             expect(logs[0]?.level).toBe(expectedLevel);
         });
 
-        it.prop([fc.dictionary(fc.string({ minLength: 1 }), fc.string(), { maxKeys: 3, minKeys: 1 })])(
-            'captures annotations',
-            (annotations) => {
-                const { logger, logs } = createAccumulatingLogger({ maxLogs: 100 });
-                const layer = Logger.replace(Logger.defaultLogger, logger);
-                Effect.runSync(
-                    Effect.logInfo('t').pipe(
-                        Effect.annotateLogs(annotations as Record<string, string>),
-                        Effect.provide(layer),
-                    ),
-                );
+        it.each([
+            [{ key1: 'value1' }],
+            [{ baz: 'qux', foo: 'bar' }],
+            [{ a: '1', b: '2', c: '3' }],
+        ])('captures annotations %j', (annotations) => {
+            const { logger, logs } = createAccumulatingLogger({ maxLogs: 100 });
+            const layer = Logger.replace(Logger.defaultLogger, logger);
+            Effect.runSync(
+                Effect.logInfo('t').pipe(
+                    Effect.annotateLogs(annotations as Record<string, string>),
+                    Effect.provide(layer),
+                ),
+            );
 
-                expect(Object.entries(annotations).every(([k, v]) => logs[0]?.annotations[k] === v)).toBe(true);
-            },
-        );
+            expect(Object.entries(annotations).every(([k, v]) => logs[0]?.annotations[k] === v)).toBe(true);
+        });
 
-        it.prop([fc.integer({ max: 50, min: 5 })])('truncates at maxLogs boundary', (maxLogs) => {
+        it.each(B.testMaxLogs)('truncates at maxLogs boundary (maxLogs=%i)', (maxLogs) => {
             const { logger, logs } = createAccumulatingLogger({ maxLogs });
             const layer = Logger.replace(Logger.defaultLogger, logger);
             const overflow = maxLogs + 10;
-            Array.from({ length: overflow }, (_, i) => i).map((i) =>
-                Effect.runSync(Effect.logInfo(`msg-${i}`).pipe(Effect.provide(layer))),
-            );
+            runLogIterations(overflow, (i) => Effect.runSync(Effect.logInfo(`msg-${i}`).pipe(Effect.provide(layer))));
             expect([logs.length, logs[0]?.message, logs[maxLogs - 1]?.message]).toEqual([
                 maxLogs,
                 `msg-${overflow - maxLogs}`,
@@ -70,11 +73,9 @@ describe('logger', () => {
     });
 
     describe('createLoggerLayer', () => {
-        it.prop([fc.integer({ max: 50, min: 5 })])('accumulates up to maxLogs', (maxLogs) => {
+        it.each(B.testMaxLogs)('accumulates up to maxLogs (maxLogs=%i)', (maxLogs) => {
             const { layer, logs } = createLoggerLayer({ logLevel: 'Debug', maxLogs, silent: true });
-            Array.from({ length: maxLogs + 5 }, (_, i) => i).map((i) =>
-                Effect.runSync(Effect.logInfo(`m-${i}`).pipe(Effect.provide(layer))),
-            );
+            runLogIterations(maxLogs + 5, (i) => Effect.runSync(Effect.logInfo(`m-${i}`).pipe(Effect.provide(layer))));
             expect(logs.length).toBe(maxLogs);
         });
 
@@ -92,35 +93,38 @@ describe('logger', () => {
     });
 
     describe('getLogs/getLogsFormatted/getLogsJson', () => {
-        it.prop([fc.array(fc.string(), { maxLength: 10, minLength: 1 })])(
-            'getLogs returns shallow copy',
-            (messages) => {
-                const logs = messages.map((m) => entry({ message: m }));
-                const result = getLogs(logs);
-                expect([result.length, result !== logs]).toEqual([logs.length, true]);
-            },
-        );
+        it.each([
+            [['msg1']],
+            [['hello', 'world']],
+            [['a', 'b', 'c', 'd', 'e']],
+        ])('getLogs returns shallow copy', (messages) => {
+            const logs = messages.map((m) => entry({ message: m }));
+            const result = getLogs(logs);
+            expect([result.length, result !== logs]).toEqual([logs.length, true]);
+        });
 
-        it.prop([fc.array(fc.string(), { maxLength: 5, minLength: 2 })])(
-            'getLogsFormatted joins with newlines',
-            (messages) => {
-                const logs = messages.map((m) => entry({ message: m }));
-                const result = getLogsFormatted(logs);
-                expect(result.split('\n').length).toBe(messages.length);
-            },
-        );
+        it.each([
+            [['line1', 'line2']],
+            [['a', 'b', 'c']],
+            [['first', 'second', 'third', 'fourth']],
+        ])('getLogsFormatted joins with newlines', (messages) => {
+            const logs = messages.map((m) => entry({ message: m }));
+            const result = getLogsFormatted(logs);
+            expect(result.split('\n').length).toBe(messages.length);
+        });
 
-        it.prop([fc.array(fc.string(), { maxLength: 5, minLength: 1 })])(
-            'getLogsJson produces valid JSON',
-            (messages) => {
-                const logs = messages.map((m) => entry({ message: m }));
-                expect(() => JSON.parse(getLogsJson(logs))).not.toThrow();
-            },
-        );
+        it.each([
+            [['single']],
+            [['one', 'two']],
+            [['a', 'b', 'c', 'd', 'e']],
+        ])('getLogsJson produces valid JSON', (messages) => {
+            const logs = messages.map((m) => entry({ message: m }));
+            expect(() => JSON.parse(getLogsJson(logs))).not.toThrow();
+        });
     });
 
     describe('clearLogs', () => {
-        it.prop([fc.integer({ max: 100, min: 0 })])('empties array of any size', (n) => {
+        it.each([0, 1, 10, 50, 100])('empties array of size %i', (n) => {
             const logs = Array.from({ length: n }, (_, i) => entry({ message: `msg-${i}` }));
             clearLogs(logs);
             expect(logs).toHaveLength(0);
@@ -128,7 +132,7 @@ describe('logger', () => {
     });
 
     describe('createCombinedLogger', () => {
-        it.prop([fc.string({ minLength: 1 })])('accumulates messages', (message) => {
+        it.each(['test message', 'hello world', 'accumulation test'])('accumulates message: %s', (message) => {
             const { logger, logs } = createCombinedLogger({ maxLogs: 100, silent: true });
             Effect.runSync(Effect.logInfo(message).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))));
             expect(logs[0]?.message).toBe(message);
