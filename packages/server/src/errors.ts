@@ -2,6 +2,7 @@
  * Typed API error hierarchy using Schema.TaggedError for Effect-native HTTP error handling.
  * HTTP status codes are set via endpoint.addError(Error, { status: N }), not in schema.
  */
+import { OAuthProviderSchema } from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -160,19 +161,19 @@ class OptimisticLockError extends S.TaggedError<OptimisticLockError>()('Optimist
     resourceType: S.String,
 }) {}
 
-// Enhanced OAuth errors
+// Enhanced OAuth errors - use shared OAuthProviderSchema
 class OAuthInvalidGrantError extends S.TaggedError<OAuthInvalidGrantError>()('OAuthInvalidGrantError', {
-    provider: S.Literal('google', 'github', 'microsoft'),
+    provider: OAuthProviderSchema,
     reason: S.Literal('clock_skew', 'expired', 'revoked', 'inactive', 'rate_limited'),
 }) {}
 
 class OAuthConsentError extends S.TaggedError<OAuthConsentError>()('OAuthConsentError', {
-    provider: S.Literal('google', 'github', 'microsoft'),
+    provider: OAuthProviderSchema,
     scopes: S.Array(S.String),
 }) {}
 
 class OAuthTokenRefreshError extends S.TaggedError<OAuthTokenRefreshError>()('OAuthTokenRefreshError', {
-    provider: S.Literal('google', 'github', 'microsoft'),
+    provider: OAuthProviderSchema,
     userId: S.String,
 }) {}
 

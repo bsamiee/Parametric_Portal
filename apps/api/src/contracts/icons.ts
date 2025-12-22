@@ -1,7 +1,15 @@
 /**
  * Icon generation domain contracts.
- * Single source of truth for all icon-related types across apps.
+ * Extends shared schemas from @parametric-portal/types/icons.
  */
+import {
+    type ColorMode,
+    ColorModeSchema,
+    type Intent,
+    IntentSchema,
+    type SvgAsset,
+    SvgAssetSchema,
+} from '@parametric-portal/types/icons';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -28,23 +36,9 @@ type LayerSpec = {
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const ColorModeSchema = S.Literal('dark', 'light');
-const IntentSchema = S.Literal('create', 'refine');
-
-type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
-type Intent = S.Schema.Type<typeof IntentSchema>;
-
-const ReferenceAttachmentSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
-
-const SvgVariantSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
+// Re-export base SvgAsset as ReferenceAttachment and SvgVariant (identical structures)
+const ReferenceAttachmentSchema = SvgAssetSchema;
+const SvgVariantSchema = SvgAssetSchema;
 
 const GenerateRequestSchema = S.Struct({
     attachments: S.optional(S.Array(ReferenceAttachmentSchema)),
@@ -92,8 +86,8 @@ const ICON_DESIGN = Object.freeze({
 
 type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
 type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
-type ReferenceAttachment = S.Schema.Type<typeof ReferenceAttachmentSchema>;
-type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
+type ReferenceAttachment = SvgAsset;
+type SvgVariant = SvgAsset;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
@@ -104,6 +98,7 @@ export {
     ICON_DESIGN,
     IntentSchema,
     ReferenceAttachmentSchema,
+    SvgAssetSchema,
     SvgVariantSchema,
 };
 
@@ -115,5 +110,6 @@ export type {
     LayerSpec,
     Palette,
     ReferenceAttachment,
+    SvgAsset,
     SvgVariant,
 };

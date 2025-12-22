@@ -4,6 +4,7 @@
  */
 import { Duration, pipe, Schema as S } from 'effect';
 
+import { ColorModeSchema, IntentSchema } from './icons.ts';
 import type { Email, Slug, Uuidv7 } from './types.ts';
 import { EmailSchema, SlugSchema } from './types.ts';
 
@@ -66,8 +67,8 @@ const OAuthProviderSchema = S.Union(S.Literal('google'), S.Literal('github'), S.
 const OrganizationRoleSchema = S.Union(S.Literal('owner'), S.Literal('admin'), S.Literal('member'));
 
 const AssetMetadataSchema = S.Struct({
-    colorMode: S.Literal('light', 'dark'),
-    intent: S.Literal('create', 'refine'),
+    colorMode: ColorModeSchema,
+    intent: IntentSchema,
 });
 
 const SessionResultSchema = S.Struct({

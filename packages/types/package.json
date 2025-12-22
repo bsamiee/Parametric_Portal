@@ -61,6 +61,11 @@
       "types": "./src/svg.ts",
       "import": "./src/svg.ts",
       "default": "./src/svg.ts"
+    },
+    "./icons": {
+      "types": "./src/icons.ts",
+      "import": "./src/icons.ts",
+      "default": "./src/icons.ts"
     }
   },
   "name": "@parametric-portal/types",

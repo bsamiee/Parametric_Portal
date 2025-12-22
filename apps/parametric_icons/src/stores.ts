@@ -2,8 +2,9 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
-import type { ColorMode, Intent, ReferenceAttachment } from '@parametric-portal/api/contracts/icons';
-import { SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
+import type { ColorMode, Intent, ReferenceAttachment, SvgAsset } from '@parametric-portal/api/contracts/icons';
+import { SvgAssetSchema, SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
+import { ColorModeSchema, IntentSchema } from '@parametric-portal/types/icons';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { types } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
@@ -46,9 +47,9 @@ const PreviewStateSchema = S.Struct({
 });
 
 const ContextStateSchema = S.Struct({
-    attachments: S.Array(S.Struct({ id: S.String, name: S.String, svg: S.String })),
-    colorMode: S.Literal('dark', 'light'),
-    intent: S.Literal('create', 'refine'),
+    attachments: S.Array(SvgAssetSchema),
+    colorMode: ColorModeSchema,
+    intent: IntentSchema,
     output: S.Literal('single', 'batch'),
 });
 
@@ -62,7 +63,7 @@ const UiStateSchema = S.Struct({
 const AssetSchema = S.Struct({
     context: ContextStateSchema,
     id: S.typeSchema(typesApi.brands.uuidv7),
-    intent: S.Literal('create', 'refine'),
+    intent: IntentSchema,
     prompt: S.String,
     selectedVariantIndex: S.optional(pipe(S.Number, S.int(), S.greaterThanOrEqualTo(0))),
     timestamp: S.Number,
@@ -74,13 +75,9 @@ const HistoryStateSchema = S.Struct({
     currentId: S.NullOr(S.String),
 });
 
-const CustomAssetSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
-
-type CustomAsset = S.Schema.Type<typeof CustomAssetSchema>;
+// CustomAsset is now an alias to SvgAsset
+const CustomAssetSchema = SvgAssetSchema;
+type CustomAsset = SvgAsset;
 
 const LibraryStateSchema = S.Struct({
     customAssets: S.Array(CustomAssetSchema),
