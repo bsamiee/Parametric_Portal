@@ -3,55 +3,88 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
+      actions: read
       id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          track_progress: true
+          settings: ".claude/settings.json"
+          additional_permissions: |
+            actions: read
+          claude_args: >-
+            --model claude-opus-4-5-20251101
+            --allowedTools
+            "Read,Write,Edit,Glob,Grep,Task,TodoWrite,WebFetch,
+            Bash(gh pr diff:*),
+            Bash(gh pr view:*),
+            Bash(gh pr comment:*),
+            Bash(gh pr files:*),
+            Bash(git diff:*),
+            Bash(git log:*),
+            mcp__github__create_pending_pull_request_review,
+            mcp__github__get_pull_request_diff,
+            mcp__github__add_pull_request_review_comment_to_pending_review,
+            mcp__github__submit_pending_pull_request_review"
           prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            [CONTEXT]
+            Repository: ${{ github.repository }}
+            PR Number: ${{ github.event.pull_request.number }}
+            Base: ${{ github.base_ref }}
+            Head: ${{ github.head_ref }}
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            [PHASE_1_LOAD_STANDARDS]
+            1. Read CLAUDE.md — Agent behavior manifest, philosophy, constraints
+            2. Read REQUIREMENTS.md — Technical specification, code standards
+            3. Read .claude/skills/style-standards/SKILL.md — Formatting rules
+            4. Read .claude/skills/typescript-effect/SKILL.md — TypeScript patterns
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            [PHASE_2_GET_FILES]
+            Run: gh pr diff ${{ github.event.pull_request.number }} --name-only
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            [PHASE_3_ANALYSIS]
+            For >5 files: Use Task tool to spawn parallel agents (3-5 files per batch).
+            For <=5 files: Analyze sequentially.
 
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+            Enforce REQUIREMENTS.md [3][CODE_STANDARDS] and [4][FILE_ARCHITECTURE].
+            Enforce CLAUDE.md [3][CONSTRAINTS].
 
+            [PHASE_4_OUTPUT]
+            Sticky comment tracks progress automatically via use_sticky_comment.
+
+            For inline comments, execute in order:
+            1. mcp__github__create_pending_pull_request_review — Start pending review
+            2. mcp__github__get_pull_request_diff — Get diff with line numbers
+            3. mcp__github__add_pull_request_review_comment_to_pending_review — Add each comment
+            4. mcp__github__submit_pending_pull_request_review — Submit with event "COMMENT"
+
+            [INLINE_COMMENT_FORMAT]
+            **[SEVERITY]** Issue description
+            > Why this violates standards
+            ```suggestion
+            corrected code
+            ```
+            **Rule:** REQUIREMENTS.md [section] reference
+
+            [CONSTRAINTS]
+            - Max 15 inline comments (prioritize: CRITICAL > MAJOR > MINOR)
+            - One suggestion block per comment
+            - Submit with event "COMMENT" (not "APPROVE" or "REQUEST_CHANGES")
