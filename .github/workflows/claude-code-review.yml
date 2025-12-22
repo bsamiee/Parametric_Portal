@@ -40,51 +40,40 @@ jobs:
             Bash(gh pr files:*),
             Bash(git diff:*),
             Bash(git log:*),
-            mcp__github__create_pending_pull_request_review,
-            mcp__github__get_pull_request_diff,
-            mcp__github__add_pull_request_review_comment_to_pending_review,
-            mcp__github__submit_pending_pull_request_review"
+            mcp__github_inline_comment__create_inline_comment"
           prompt: |
             [CONTEXT]
-            Repository: ${{ github.repository }}
-            PR Number: ${{ github.event.pull_request.number }}
-            Base: ${{ github.base_ref }}
-            Head: ${{ github.head_ref }}
+            Repository: ${{ github.repository }} | PR: ${{ github.event.pull_request.number }}
+            Base: ${{ github.base_ref }} | Head: ${{ github.head_ref }}
 
-            [PHASE_1_LOAD_STANDARDS]
-            1. Read CLAUDE.md — Agent behavior manifest, philosophy, constraints
-            2. Read REQUIREMENTS.md — Technical specification, code standards
-            3. Read .claude/skills/style-standards/SKILL.md — Formatting rules
+            [PHASE_1] Load Standards
+            1. Read CLAUDE.md — agent behavior, philosophy, constraints
+            2. Read REQUIREMENTS.md — technical specification, code standards
+            3. Read .claude/skills/style-standards/SKILL.md — formatting rules
             4. Read .claude/skills/typescript-effect/SKILL.md — TypeScript patterns
 
-            [PHASE_2_GET_FILES]
-            Run: gh pr diff ${{ github.event.pull_request.number }} --name-only
+            [PHASE_2] Get Changes
+            1. gh pr diff ${{ github.event.pull_request.number }} --name-only
+            2. gh pr diff ${{ github.event.pull_request.number }}
+            3. Read each changed file for full context
 
-            [PHASE_3_ANALYSIS]
-            For >5 files: Use Task tool to spawn parallel agents (3-5 files per batch).
-            For <=5 files: Analyze sequentially.
+            [PHASE_3] Analysis
+            - >5 files: Use Task tool to spawn parallel agents (3-5 files per batch)
+            - ≤5 files: Analyze sequentially
+            - Apply loaded standards; identify code smells, anti-patterns, improvements
+            - Reject workarounds/band-aids — find proper solutions
 
-            Enforce REQUIREMENTS.md [3][CODE_STANDARDS] and [4][FILE_ARCHITECTURE].
-            Enforce CLAUDE.md [3][CONSTRAINTS].
+            [PHASE_4] Output
+            For each issue: mcp__github_inline_comment__create_inline_comment
 
-            [PHASE_4_OUTPUT]
-            Sticky comment tracks progress automatically via use_sticky_comment.
+            [COMMENT_FORMAT]
+            **Issue:** Concise problem statement
+            > Rationale and how the fix addresses it
 
-            For inline comments, execute in order:
-            1. mcp__github__create_pending_pull_request_review — Start pending review
-            2. mcp__github__get_pull_request_diff — Get diff with line numbers
-            3. mcp__github__add_pull_request_review_comment_to_pending_review — Add each comment
-            4. mcp__github__submit_pending_pull_request_review — Submit with event "COMMENT"
-
-            [INLINE_COMMENT_FORMAT]
-            **[SEVERITY]** Issue description
-            > Why this violates standards
             ```suggestion
-            corrected code
+            complete replacement code
             ```
-            **Rule:** REQUIREMENTS.md [section] reference
 
             [CONSTRAINTS]
-            - Max 15 inline comments (prioritize: CRITICAL > MAJOR > MINOR)
-            - One suggestion block per comment
-            - Submit with event "COMMENT" (not "APPROVE" or "REQUEST_CHANGES")
+            - One ```suggestion block per comment — triggers GitHub's "Commit suggestion" button
+            - Suggestion must contain COMPLETE replacement code for the line(s)
