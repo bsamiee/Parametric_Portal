@@ -121,7 +121,7 @@ const deriveScope = (seed: string): Scope => {
         B.scope.hashSeed,
     );
     const hex = hash.toString(B.scope.radix).padStart(B.scope.length, B.scope.padChar);
-    return hex.slice(-B.scope.length) as Scope;
+    return S.decodeSync(ScopeSchema)(hex.slice(-B.scope.length));
 };
 
 const escapeRegExp = (str: string): string => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
