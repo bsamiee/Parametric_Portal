@@ -4,12 +4,12 @@
 ---
 ## [1][STATUS]
 
-| Component | State | Notes |
-|-----------|-------|-------|
-| `packages/database/` | **DONE** | 8 models, 3 migrations, repositories, PgLive |
-| `packages/server/` | **DONE** | SessionAuth, ApiKeyAuth, CORS, errors, API factories |
-| `apps/api/` | **DONE** | OAuth (3 providers), sessions, icons CRUD, health checks |
-| `apps/parametric_icons/` | **INTEGRATION NEEDED** | Calls Anthropic directly, localStorage only |
+| Component                | State                  | Notes                                                    |
+| ------------------------ | ---------------------- | -------------------------------------------------------- |
+| `packages/database/`     | **DONE**               | 8 models, 3 migrations, repositories, PgLive             |
+| `packages/server/`       | **DONE**               | SessionAuth, ApiKeyAuth, CORS, errors, API factories     |
+| `apps/api/`              | **DONE**               | OAuth (3 providers), sessions, icons CRUD, health checks |
+| `apps/parametric_icons/` | **INTEGRATION NEEDED** | Calls Anthropic directly, localStorage only              |
 
 **Problem:** Frontend exposes `VITE_ANTHROPIC_API_KEY` in browser. All data ephemeral.
 
@@ -20,31 +20,31 @@ Base URL: `http://localhost:4000/api`
 
 ### [2.1][AUTH]
 
-| Endpoint | Method | Auth | Response |
-|----------|--------|------|----------|
-| `/auth/oauth/:provider` | GET | - | `{ url }` redirect URL |
-| `/auth/oauth/:provider/callback` | GET | - | `{ accessToken, refreshToken, expiresAt }` |
-| `/auth/refresh` | POST | Bearer | `{ accessToken, refreshToken, expiresAt }` |
-| `/auth/logout` | POST | Bearer | `{ success }` |
-| `/auth/me` | GET | Bearer | `{ id, email }` |
+| Endpoint                         | Method | Auth   | Response                                   |
+| -------------------------------- | ------ | ------ | ------------------------------------------ |
+| `/auth/oauth/:provider`          | GET    | -      | `{ url }` redirect URL                     |
+| `/auth/oauth/:provider/callback` | GET    | -      | `{ accessToken, refreshToken, expiresAt }` |
+| `/auth/refresh`                  | POST   | Bearer | `{ accessToken, refreshToken, expiresAt }` |
+| `/auth/logout`                   | POST   | Bearer | `{ success }`                              |
+| `/auth/me`                       | GET    | Bearer | `{ id, email }`                            |
 
 Providers: `github`, `google`, `microsoft`
 
 ### [2.2][ICONS]
 
-| Endpoint | Method | Auth | Response |
-|----------|--------|------|----------|
-| `/icons` | GET | Bearer | `{ data: Asset[], total, limit, offset }` |
-| `/icons` | POST | Bearer | `{ id, svg }` |
+| Endpoint | Method | Auth   | Response                                  |
+| -------- | ------ | ------ | ----------------------------------------- |
+| `/icons` | GET    | Bearer | `{ data: Asset[], total, limit, offset }` |
+| `/icons` | POST   | Bearer | `{ id, svg }`                             |
 
 Body for POST: `{ prompt: string }`
 
 ### [2.3][HEALTH]
 
-| Endpoint | Method | Response |
-|----------|--------|----------|
-| `/health/liveness` | GET | `{ status: 'ok' }` |
-| `/health/readiness` | GET | `{ status: 'ok', checks: { database: bool } }` |
+| Endpoint            | Method | Response                                       |
+| ------------------- | ------ | ---------------------------------------------- |
+| `/health/liveness`  | GET    | `{ status: 'ok' }`                             |
+| `/health/readiness` | GET    | `{ status: 'ok', checks: { database: bool } }` |
 
 ---
 ## [3][FRONTEND_INTEGRATION]
@@ -168,12 +168,12 @@ volumes:
 
 ### [4.3][COMMANDS]
 
-| Step | Command |
-|------|---------|
-| Start PostgreSQL | `docker compose up postgres -d` |
-| Run migrations | `pnpm exec nx migrate @parametric-portal/api` |
-| Start API (dev) | `pnpm exec nx dev @parametric-portal/api` |
-| Start frontend | `pnpm exec nx dev @parametric-portal/parametric_icons` |
+| Step             | Command                                                |
+| ---------------- | ------------------------------------------------------ |
+| Start PostgreSQL | `docker compose up postgres -d`                        |
+| Run migrations   | `pnpm exec nx migrate @parametric-portal/api`          |
+| Start API (dev)  | `pnpm exec nx dev @parametric-portal/api`              |
+| Start frontend   | `pnpm exec nx dev @parametric-portal/parametric_icons` |
 
 ---
 ## [5][IMPLEMENTATION_CHECKLIST]
