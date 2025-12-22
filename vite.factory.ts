@@ -409,23 +409,25 @@ const config: {
                 name: c.name,
             },
             rollupOptions: {
-                external: [...(c.external ?? [])],
+                external: [/^node:/, ...(c.external ?? [])],
                 output: { exports: 'named', preserveModules: false },
                 plugins: [
                     typescript({
                         compilerOptions: { rewriteRelativeImportExtensions: true },
                         declaration: true,
                         declarationDir: 'dist',
+                        outputToFilesystem: true,
                     }),
                 ],
             },
             sourcemap: true,
-            target: 'esnext',
+            target: 'node22',
         },
         css: css(),
         esbuild: esbuild(false),
         plugins: plugins.library(),
         resolve: resolve(),
+        ssr: { target: 'node' as const },
     }),
     server: (c, _b) => ({
         build: {

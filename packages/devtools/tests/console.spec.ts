@@ -116,8 +116,8 @@ describe('console', () => {
             console.log('t');
             const after = Date.now() + delay;
 
-            expect(logs[0].timestamp.getTime()).toBeGreaterThanOrEqual(before);
-            expect(logs[0].timestamp.getTime()).toBeLessThanOrEqual(after);
+            expect(logs[0]?.timestamp.getTime()).toBeGreaterThanOrEqual(before);
+            expect(logs[0]?.timestamp.getTime()).toBeLessThanOrEqual(after);
             restore();
         });
     });

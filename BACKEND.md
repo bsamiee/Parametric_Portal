@@ -45,7 +45,7 @@ apps/api/
 // From @parametric-portal/database
 import { PgLive } from '@parametric-portal/database/client';
 import { Asset, User, Session, OAuthAccount, Organization, OrganizationMember } from '@parametric-portal/database/models';
-import { UserIdSchema, SessionIdSchema, OAuthProviderSchema } from '@parametric-portal/database/schema';
+import { UserIdSchema, SessionIdSchema, OAuthProviderSchema } from '@parametric-portal/types/database';
 
 // From @parametric-portal/server
 import { createApi, createGroup, createHealthGroup, addStandardErrors, SwaggerLayer } from '@parametric-portal/server/api';

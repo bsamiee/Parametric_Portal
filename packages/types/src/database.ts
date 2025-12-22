@@ -1,8 +1,11 @@
 /**
- * Provide branded domain types for database entities.
- * Single source of truth for all ID schemas and result schemas.
+ * Provide database-specific branded types with unified ID schemas.
+ * Single source of truth for all database entity IDs and domain primitives.
  */
 import { Duration, pipe, Schema as S } from 'effect';
+
+import type { Email, Slug, Uuidv7 } from './types.ts';
+import { EmailSchema, SlugSchema } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -20,8 +23,6 @@ type OrganizationRole = S.Schema.Type<typeof OrganizationRoleSchema>;
 type SessionResult = S.Schema.Type<typeof SessionResultSchema>;
 type ApiKeyResult = S.Schema.Type<typeof ApiKeyResultSchema>;
 type TokenHash = S.Schema.Type<typeof TokenHashSchema>;
-type Email = S.Schema.Type<typeof EmailSchema>;
-type Slug = S.Schema.Type<typeof SlugSchema>;
 type Version = S.Schema.Type<typeof VersionSchema>;
 type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
 
@@ -38,16 +39,13 @@ const B = Object.freeze({
         maxPageSize: 100,
     },
     patterns: {
-        email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-        hexHash: /^[0-9a-f]+$/i,
-        slug: /^[a-z0-9-]+$/,
-        uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        hexHash: /^[0-9a-f]{64}$/i,
     },
 } as const);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const uuidBase = pipe(S.String, S.pattern(B.patterns.uuid));
+const uuidBase = S.UUID;
 const ApiKeyIdSchema = pipe(uuidBase, S.brand('ApiKeyId'));
 const AssetIdSchema = pipe(uuidBase, S.brand('AssetId'));
 const UserIdSchema = pipe(uuidBase, S.brand('UserId'));
@@ -57,27 +55,21 @@ const RefreshTokenIdSchema = pipe(uuidBase, S.brand('RefreshTokenId'));
 const OrganizationIdSchema = pipe(uuidBase, S.brand('OrganizationId'));
 const OrganizationMemberIdSchema = pipe(uuidBase, S.brand('OrganizationMemberId'));
 const TokenHashSchema = pipe(S.String, S.pattern(B.patterns.hexHash), S.brand('TokenHash'));
-const EmailSchema = pipe(S.NonEmptyTrimmedString, S.pattern(B.patterns.email), S.brand('Email'));
-const SlugSchema = pipe(S.NonEmptyTrimmedString, S.pattern(B.patterns.slug), S.brand('Slug'));
 const VersionSchema = pipe(S.Int, S.nonNegative(), S.brand('Version'));
 
-// Pagination schema (reusable)
 const PaginationParamsSchema = S.Struct({
     limit: pipe(S.Int, S.between(1, B.limits.maxPageSize)),
     offset: pipe(S.Int, S.nonNegative()),
 });
 
-// Enum schemas (discriminated values)
 const OAuthProviderSchema = S.Union(S.Literal('google'), S.Literal('github'), S.Literal('microsoft'));
 const OrganizationRoleSchema = S.Union(S.Literal('owner'), S.Literal('admin'), S.Literal('member'));
 
-// Composite schemas (structured data)
 const AssetMetadataSchema = S.Struct({
     colorMode: S.Literal('light', 'dark'),
     intent: S.Literal('create', 'refine'),
 });
 
-// Result schemas for middleware/API boundaries (fully typed)
 const SessionResultSchema = S.Struct({
     expiresAt: S.DateFromSelf,
     sessionId: SessionIdSchema,
@@ -97,6 +89,7 @@ export {
     ApiKeyResultSchema,
     AssetIdSchema,
     AssetMetadataSchema,
+    B as SCHEMA_TUNING,
     EmailSchema,
     OAuthAccountIdSchema,
     OAuthProviderSchema,
@@ -105,7 +98,6 @@ export {
     OrganizationRoleSchema,
     PaginationParamsSchema,
     RefreshTokenIdSchema,
-    B as SCHEMA_TUNING,
     SessionIdSchema,
     SessionResultSchema,
     SlugSchema,
@@ -131,5 +123,6 @@ export type {
     Slug,
     TokenHash,
     UserId,
+    Uuidv7,
     Version,
 };

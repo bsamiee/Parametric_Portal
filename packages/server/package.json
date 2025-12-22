@@ -17,6 +17,11 @@
             "types": "./src/middleware.ts",
             "import": "./src/middleware.ts",
             "default": "./src/middleware.ts"
+        },
+        "./crypto": {
+            "types": "./src/crypto.ts",
+            "import": "./src/crypto.ts",
+            "default": "./src/crypto.ts"
         }
     },
     "dependencies": {

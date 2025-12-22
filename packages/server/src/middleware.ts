@@ -11,9 +11,10 @@ import {
     HttpServerRequest,
     HttpServerResponse,
 } from '@effect/platform';
-import type { ApiKeyResult, OAuthProvider, SessionResult } from '@parametric-portal/database/schema';
+import type { ApiKeyResult, OAuthProvider, SessionResult } from '@parametric-portal/types/database';
 import { Context, Effect, Layer, Match, Option, pipe, Redacted } from 'effect';
 
+import { hashString } from './crypto.ts';
 import {
     DatabaseConnectionError,
     DatabaseConstraintError,
@@ -137,17 +138,6 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const hashString = (input: string): Effect.Effect<string, never> =>
-    Effect.promise(async () => {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(input);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        return Array.from(new Uint8Array(hashBuffer))
-            .map((b) => b.toString(16).padStart(2, '0'))
-            .join('');
-    });
-const hashApiKey = hashString;
-const hashToken = hashString;
 const isExpired = (expiresAt: Date | undefined): boolean => expiresAt !== undefined && expiresAt.getTime() < Date.now();
 const validateNotExpired = <E>(expiresAt: Date | undefined, errorFactory: () => E): Effect.Effect<void, E> =>
     isExpired(expiresAt) ? Effect.fail(errorFactory()) : Effect.succeed(undefined);
@@ -199,7 +189,10 @@ const createApiKeyAuthLayer = (
         ApiKeyAuth.of({
             apiKey: (redactedKey: Redacted.Redacted<string>) =>
                 pipe(
-                    hashApiKey(Redacted.value(redactedKey)),
+                    hashString(Redacted.value(redactedKey)),
+                    Effect.catchTag('HashingError', () =>
+                        Effect.fail(new UnauthorizedError({ reason: 'Key hashing failed' })),
+                    ),
                     Effect.flatMap(lookup),
                     Effect.flatMap(
                         Option.match({
@@ -254,7 +247,10 @@ const createSessionAuthLayer = (
         SessionAuth.of({
             bearer: (token: Redacted.Redacted<string>) =>
                 pipe(
-                    hashToken(Redacted.value(token)),
+                    hashString(Redacted.value(token)),
+                    Effect.catchTag('HashingError', () =>
+                        Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),
+                    ),
                     Effect.flatMap(validate),
                     Effect.flatMap(
                         Option.match({
@@ -337,8 +333,6 @@ export {
     createRequestIdMiddleware,
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
-    hashApiKey,
-    hashToken,
     isExpired,
     mapSqlError,
     OAuthService,

@@ -226,7 +226,7 @@
         "test": {
             "cache": true,
             "inputs": ["testing", "^production"],
-            "outputs": ["{projectRoot}/coverage"]
+            "outputs": ["{projectRoot}/coverage", "{projectRoot}/test-results"]
         },
         "typecheck": {
             "cache": true,

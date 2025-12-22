@@ -100,7 +100,7 @@ describe('handlers', () => {
             } as PromiseRejectionEvent;
             (globalThis.onunhandledrejection as ((e: PromiseRejectionEvent) => void) | null)?.(event);
 
-            expect(onError.mock.calls[0][0]).toBe(error);
+            expect(onError.mock.calls[0]?.[0]).toBe(error);
             uninstall();
         });
     });

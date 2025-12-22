@@ -10,7 +10,6 @@ import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
 import { PgLive } from '@parametric-portal/database/client';
 import { makeRepositories } from '@parametric-portal/database/repositories';
-import type { SessionResult } from '@parametric-portal/database/schema';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { ServiceUnavailableError, UnauthorizedError } from '@parametric-portal/server/errors';
 import {
@@ -19,6 +18,7 @@ import {
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
 } from '@parametric-portal/server/middleware';
+import type { SessionResult } from '@parametric-portal/types/database';
 import { Context, Effect, Layer, Option, pipe } from 'effect';
 
 import { AnthropicServiceLive } from './anthropic.ts';

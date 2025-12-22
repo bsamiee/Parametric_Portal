@@ -3,9 +3,6 @@
  * Single Effect.gen yields SqlClient once; all resolvers defined inline.
  */
 import { SqlClient, SqlSchema } from '@effect/sql';
-import { Effect, Schema as S } from 'effect';
-
-import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User } from './models';
 import {
     ApiKeyIdSchema,
     AssetIdSchema,
@@ -15,13 +12,16 @@ import {
     OrganizationRoleSchema,
     RefreshTokenIdSchema,
     SessionIdSchema,
+    TokenHashSchema,
     UserIdSchema,
-} from './schema';
+} from '@parametric-portal/types/database';
+import { Effect, Schema as S } from 'effect';
+import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User } from './models';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: S.String, userId: UserIdSchema });
-const InsertRefreshToken = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: S.String, userId: UserIdSchema });
+const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
+const InsertRefreshToken = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
 const InsertApiKey = S.Struct({
     expiresAt: S.NullOr(S.DateFromSelf),
     keyHash: S.String,
@@ -72,7 +72,7 @@ const UpdateOrgMemberWithVersion = S.Struct({
     id: OrganizationMemberIdSchema,
     role: OrganizationRoleSchema,
 });
-const OAuthAccountIdSchema = S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String });
+const DeleteOAuthAccountParams = S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String });
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -113,8 +113,8 @@ const makeRepositories = Effect.gen(function* () {
                 Result: ApiKey,
             }),
             insert: SqlSchema.single({
-                execute: (data) =>
-                    sql`INSERT INTO ${sql(B.tables.apiKeys)} (user_id, name, key_hash, expires_at) VALUES (${data.userId}, ${data.name}, ${data.keyHash}, ${data.expiresAt}) RETURNING *`,
+                execute: ({ userId, name, keyHash, expiresAt }) =>
+                    sql`INSERT INTO ${sql(B.tables.apiKeys)} (user_id, name, key_hash, expires_at) VALUES (${userId}, ${name}, ${keyHash}, ${expiresAt}) RETURNING *`,
                 Request: InsertApiKey,
                 Result: ApiKey,
             }),
@@ -137,14 +137,14 @@ const makeRepositories = Effect.gen(function* () {
                 Result: AssetCountResult,
             }),
             findAllActiveByUserId: SqlSchema.findAll({
-                execute: (params) =>
-                    sql`SELECT id, prompt FROM ${sql(B.tables.assets)} WHERE user_id = ${params.userId} AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ${params.limit} OFFSET ${params.offset}`,
+                execute: ({ userId, limit, offset }) =>
+                    sql`SELECT id, prompt FROM ${sql(B.tables.assets)} WHERE user_id = ${userId} AND deleted_at IS NULL ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
                 Request: FindAssetsByUserIdParams,
                 Result: AssetListItem,
             }),
             findAllByUserId: SqlSchema.findAll({
-                execute: (params) =>
-                    sql`SELECT id, prompt FROM ${sql(B.tables.assets)} WHERE user_id = ${params.userId} ORDER BY created_at DESC LIMIT ${params.limit} OFFSET ${params.offset}`,
+                execute: ({ userId, limit, offset }) =>
+                    sql`SELECT id, prompt FROM ${sql(B.tables.assets)} WHERE user_id = ${userId} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
                 Request: FindAssetsByUserIdParams,
                 Result: AssetListItem,
             }),
@@ -154,8 +154,8 @@ const makeRepositories = Effect.gen(function* () {
                 Result: Asset,
             }),
             insert: SqlSchema.single({
-                execute: (data) =>
-                    sql`INSERT INTO ${sql(B.tables.assets)} (user_id, prompt, svg) VALUES (${data.userId}, ${data.prompt}, ${data.svg}) RETURNING *`,
+                execute: ({ userId, prompt, svg }) =>
+                    sql`INSERT INTO ${sql(B.tables.assets)} (user_id, prompt, svg) VALUES (${userId}, ${prompt}, ${svg}) RETURNING *`,
                 Request: InsertAsset,
                 Result: Asset,
             }),
@@ -170,16 +170,16 @@ const makeRepositories = Effect.gen(function* () {
                 Request: AssetIdSchema,
             }),
             updateWithVersion: SqlSchema.void({
-                execute: (data) =>
-                    sql`UPDATE ${sql(B.tables.assets)} SET prompt = ${data.prompt}, svg = ${data.svg}, version = version + 1, updated_at = now() WHERE id = ${data.id} AND version = ${data.expectedVersion}`,
+                execute: ({ prompt, svg, id, expectedVersion }) =>
+                    sql`UPDATE ${sql(B.tables.assets)} SET prompt = ${prompt}, svg = ${svg}, version = version + 1, updated_at = now() WHERE id = ${id} AND version = ${expectedVersion}`,
                 Request: UpdateAssetWithVersion,
             }),
         },
         oauthAccounts: {
             delete: SqlSchema.void({
-                execute: (data) =>
-                    sql`DELETE FROM ${sql(B.tables.oauthAccounts)} WHERE provider = ${data.provider} AND provider_account_id = ${data.providerAccountId}`,
-                Request: OAuthAccountIdSchema,
+                execute: ({ provider, providerAccountId }) =>
+                    sql`DELETE FROM ${sql(B.tables.oauthAccounts)} WHERE provider = ${provider} AND provider_account_id = ${providerAccountId}`,
+                Request: DeleteOAuthAccountParams,
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: (userId) => sql`SELECT * FROM ${sql(B.tables.oauthAccounts)} WHERE user_id = ${userId}`,
@@ -187,15 +187,15 @@ const makeRepositories = Effect.gen(function* () {
                 Result: OAuthAccount,
             }),
             findByProviderAccountId: SqlSchema.findOne({
-                execute: (data) =>
-                    sql`SELECT * FROM ${sql(B.tables.oauthAccounts)} WHERE provider = ${data.provider} AND provider_account_id = ${data.providerAccountId}`,
+                execute: ({ provider, providerAccountId }) =>
+                    sql`SELECT * FROM ${sql(B.tables.oauthAccounts)} WHERE provider = ${provider} AND provider_account_id = ${providerAccountId}`,
                 Request: S.Struct({ provider: OAuthProviderSchema, providerAccountId: S.String }),
                 Result: OAuthAccount,
             }),
             upsert: SqlSchema.void({
-                execute: (data) =>
+                execute: ({ userId, provider, providerAccountId, accessToken, refreshToken, expiresAt }) =>
                     sql`INSERT INTO ${sql(B.tables.oauthAccounts)} (user_id, provider, provider_account_id, access_token, refresh_token, access_token_expires_at)
-                        VALUES (${data.userId}, ${data.provider}, ${data.providerAccountId}, ${data.accessToken}, ${data.refreshToken}, ${data.expiresAt})
+                        VALUES (${userId}, ${provider}, ${providerAccountId}, ${accessToken}, ${refreshToken}, ${expiresAt})
                         ON CONFLICT (provider, provider_account_id)
                         DO UPDATE SET access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token, updated_at = now()`,
                 Request: UpsertOAuthAccount,
@@ -218,25 +218,25 @@ const makeRepositories = Effect.gen(function* () {
                 Result: OrganizationMember,
             }),
             findByOrgAndUser: SqlSchema.findOne({
-                execute: (data) =>
-                    sql`SELECT * FROM ${sql(B.tables.organizationMembers)} WHERE organization_id = ${data.organizationId} AND user_id = ${data.userId}`,
+                execute: ({ organizationId, userId }) =>
+                    sql`SELECT * FROM ${sql(B.tables.organizationMembers)} WHERE organization_id = ${organizationId} AND user_id = ${userId}`,
                 Request: S.Struct({ organizationId: OrganizationIdSchema, userId: UserIdSchema }),
                 Result: OrganizationMember,
             }),
             insert: SqlSchema.single({
-                execute: (data) =>
-                    sql`INSERT INTO ${sql(B.tables.organizationMembers)} (organization_id, user_id, role) VALUES (${data.organizationId}, ${data.userId}, ${data.role}) RETURNING *`,
+                execute: ({ organizationId, userId, role }) =>
+                    sql`INSERT INTO ${sql(B.tables.organizationMembers)} (organization_id, user_id, role) VALUES (${organizationId}, ${userId}, ${role}) RETURNING *`,
                 Request: InsertOrganizationMember,
                 Result: OrganizationMember,
             }),
             updateRole: SqlSchema.void({
-                execute: (data) =>
-                    sql`UPDATE ${sql(B.tables.organizationMembers)} SET role = ${data.role}, updated_at = now() WHERE id = ${data.id}`,
+                execute: ({ role, id }) =>
+                    sql`UPDATE ${sql(B.tables.organizationMembers)} SET role = ${role}, updated_at = now() WHERE id = ${id}`,
                 Request: S.Struct({ id: OrganizationMemberIdSchema, role: OrganizationRoleSchema }),
             }),
             updateWithVersion: SqlSchema.void({
-                execute: (data) =>
-                    sql`UPDATE ${sql(B.tables.organizationMembers)} SET role = ${data.role}, version = version + 1, updated_at = now() WHERE id = ${data.id} AND version = ${data.expectedVersion}`,
+                execute: ({ role, id, expectedVersion }) =>
+                    sql`UPDATE ${sql(B.tables.organizationMembers)} SET role = ${role}, version = version + 1, updated_at = now() WHERE id = ${id} AND version = ${expectedVersion}`,
                 Request: UpdateOrgMemberWithVersion,
             }),
         },
@@ -276,8 +276,8 @@ const makeRepositories = Effect.gen(function* () {
                 Request: OrganizationIdSchema,
             }),
             updateWithVersion: SqlSchema.void({
-                execute: (data) =>
-                    sql`UPDATE ${sql(B.tables.organizations)} SET name = ${data.name}, slug = ${data.slug}, version = version + 1, updated_at = now() WHERE id = ${data.id} AND version = ${data.expectedVersion}`,
+                execute: ({ name, slug, id, expectedVersion }) =>
+                    sql`UPDATE ${sql(B.tables.organizations)} SET name = ${name}, slug = ${slug}, version = version + 1, updated_at = now() WHERE id = ${id} AND version = ${expectedVersion}`,
                 Request: UpdateOrganization,
             }),
         },
@@ -289,8 +289,8 @@ const makeRepositories = Effect.gen(function* () {
                 Result: RefreshToken,
             }),
             insert: SqlSchema.void({
-                execute: (data) =>
-                    sql`INSERT INTO ${sql(B.tables.refreshTokens)} (user_id, token_hash, expires_at) VALUES (${data.userId}, ${data.tokenHash}, ${data.expiresAt})`,
+                execute: ({ userId, tokenHash, expiresAt }) =>
+                    sql`INSERT INTO ${sql(B.tables.refreshTokens)} (user_id, token_hash, expires_at) VALUES (${userId}, ${tokenHash}, ${expiresAt})`,
                 Request: InsertRefreshToken,
             }),
             revoke: SqlSchema.void({
@@ -319,8 +319,8 @@ const makeRepositories = Effect.gen(function* () {
                 Result: Session,
             }),
             insert: SqlSchema.void({
-                execute: (data) =>
-                    sql`INSERT INTO ${sql(B.tables.sessions)} (user_id, token_hash, expires_at) VALUES (${data.userId}, ${data.tokenHash}, ${data.expiresAt})`,
+                execute: ({ userId, tokenHash, expiresAt }) =>
+                    sql`INSERT INTO ${sql(B.tables.sessions)} (user_id, token_hash, expires_at) VALUES (${userId}, ${tokenHash}, ${expiresAt})`,
                 Request: InsertSession,
             }),
         },

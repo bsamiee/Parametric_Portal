@@ -13,11 +13,6 @@
             "import": "./src/models.ts",
             "default": "./src/models.ts"
         },
-        "./schema": {
-            "types": "./src/schema.ts",
-            "import": "./src/schema.ts",
-            "default": "./src/schema.ts"
-        },
         "./migrator": {
             "types": "./src/migrator.ts",
             "import": "./src/migrator.ts",
@@ -34,6 +29,7 @@
         "@effect/platform": "catalog:",
         "@effect/sql": "catalog:",
         "@effect/sql-pg": "catalog:",
+        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {
