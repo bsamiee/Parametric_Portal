@@ -4,10 +4,10 @@
  */
 import { AnthropicClient } from '@parametric-portal/ai/anthropic';
 import { InternalError } from '@parametric-portal/server/errors';
+import type { ColorMode } from '@parametric-portal/types/database';
 import { sanitizeSvg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
 import {
-    type ColorMode,
     type GenerateRequest,
     GenerateRequestSchema,
     ICON_DESIGN,

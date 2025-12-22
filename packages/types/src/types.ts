@@ -8,6 +8,10 @@ import { v7 as uuidv7 } from 'uuid';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type BivariantFunction<T> = T extends (...args: infer A extends readonly unknown[]) => infer R
+    ? { bivarianceHack: (...args: A) => R }['bivarianceHack']
+    : never;
+
 type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>;
 type Email = S.Schema.Type<typeof EmailSchema>;
 type HexColor = S.Schema.Type<typeof HexColorSchema>;
@@ -137,6 +141,7 @@ const types = (_config: TypesConfig = {}): TypesApi =>
 
 export { B as TYPES_TUNING, EmailSchema, generateUuidv7Sync, SlugSchema, types, Uuidv7Schema };
 export type {
+    BivariantFunction,
     Email,
     HexColor,
     IsoDate,

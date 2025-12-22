@@ -4,7 +4,6 @@
  */
 
 import {
-    type ColorMode,
     type GenerateRequest,
     type GenerateResponse,
     ICON_DESIGN,
@@ -12,6 +11,7 @@ import {
 } from '@parametric-portal/api/contracts/icons';
 import { type ApiError, type ApiResponse, api, type HttpStatusError } from '@parametric-portal/types/api';
 import { asyncState } from '@parametric-portal/types/async';
+import type { ColorMode } from '@parametric-portal/types/database';
 import { Effect, pipe } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------

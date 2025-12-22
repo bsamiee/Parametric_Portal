@@ -25,6 +25,10 @@ type ApiKeyResult = S.Schema.Type<typeof ApiKeyResultSchema>;
 type TokenHash = S.Schema.Type<typeof TokenHashSchema>;
 type Version = S.Schema.Type<typeof VersionSchema>;
 type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
+type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
+type Intent = S.Schema.Type<typeof IntentSchema>;
+type AssetListItem = S.Schema.Type<typeof AssetListItemSchema>;
+type AssetCountResult = S.Schema.Type<typeof AssetCountResultSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -65,9 +69,12 @@ const PaginationParamsSchema = S.Struct({
 const OAuthProviderSchema = S.Union(S.Literal('google'), S.Literal('github'), S.Literal('microsoft'));
 const OrganizationRoleSchema = S.Union(S.Literal('owner'), S.Literal('admin'), S.Literal('member'));
 
+const ColorModeSchema = S.Literal('dark', 'light');
+const IntentSchema = S.Literal('create', 'refine');
+
 const AssetMetadataSchema = S.Struct({
-    colorMode: S.Literal('light', 'dark'),
-    intent: S.Literal('create', 'refine'),
+    colorMode: ColorModeSchema,
+    intent: IntentSchema,
 });
 
 const SessionResultSchema = S.Struct({
@@ -82,15 +89,28 @@ const ApiKeyResultSchema = S.Struct({
     userId: UserIdSchema,
 });
 
+const AssetListItemSchema = S.Struct({
+    id: AssetIdSchema,
+    prompt: S.NonEmptyTrimmedString,
+});
+
+const AssetCountResultSchema = S.Struct({
+    count: S.NumberFromString,
+});
+
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
     ApiKeyIdSchema,
     ApiKeyResultSchema,
+    AssetCountResultSchema,
     AssetIdSchema,
+    AssetListItemSchema,
     AssetMetadataSchema,
     B as SCHEMA_TUNING,
+    ColorModeSchema,
     EmailSchema,
+    IntentSchema,
     OAuthAccountIdSchema,
     OAuthProviderSchema,
     OrganizationIdSchema,
@@ -108,9 +128,13 @@ export {
 export type {
     ApiKeyId,
     ApiKeyResult,
+    AssetCountResult,
     AssetId,
+    AssetListItem,
     AssetMetadata,
+    ColorMode,
     Email,
+    Intent,
     OAuthAccountId,
     OAuthProvider,
     OrganizationId,

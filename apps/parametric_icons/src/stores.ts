@@ -2,8 +2,8 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
-import type { ColorMode, Intent, ReferenceAttachment } from '@parametric-portal/api/contracts/icons';
-import { SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
+import { type ReferenceAttachment, SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
+import type { ColorMode, Intent } from '@parametric-portal/types/database';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { types } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
