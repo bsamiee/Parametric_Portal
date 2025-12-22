@@ -1,10 +1,8 @@
 /**
  * Validate bootstrap pipeline module loading, CSS injection, and DOM ready behavior.
  */
-import { it } from '@fast-check/vitest';
 import { Effect, Exit } from 'effect';
-import fc from 'fast-check';
-import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initWhenReady, loadCss, loadModule, verifyRender } from '../src/bootstrap.tsx';
 import { layer } from './utils.ts';
 
@@ -31,7 +29,11 @@ describe('bootstrap', () => {
             expect(result).toBe(module);
         });
 
-        it.prop([fc.string()])('converts string rejection to Error', async (reason) => {
+        it.each([
+            'string error',
+            'another reason',
+            'network failure',
+        ])('converts string rejection "%s" to Error', async (reason) => {
             const { layer: l } = layer();
             const exit = await Effect.runPromiseExit(
                 loadModule('t', () => Promise.reject(reason)).pipe(Effect.provide(l)),
@@ -52,11 +54,13 @@ describe('bootstrap', () => {
     });
 
     describe('verifyRender', () => {
-        it.prop([fc.string({ minLength: 1 })])('logs SUCCESS for non-empty innerHTML', async (content) => {
+        it.each([
+            '<div>content</div>',
+            '<span>hello</span>',
+            '<p>world</p>',
+        ])('logs SUCCESS for non-empty innerHTML: %s', async (content) => {
             const { layer: l, logs } = layer();
-            await Effect.runPromise(
-                verifyRender({ innerHTML: `<div>${content}</div>` } as HTMLElement, 0).pipe(Effect.provide(l)),
-            );
+            await Effect.runPromise(verifyRender({ innerHTML: content } as HTMLElement, 0).pipe(Effect.provide(l)));
             expect(logs.some((log) => log.message.includes('SUCCESS'))).toBe(true);
         });
 

@@ -87,6 +87,9 @@ const B = Object.freeze({
         hsts: { includeSubDomains: true, maxAge: 31536000 },
         referrerPolicy: 'strict-origin-when-cross-origin',
     },
+    // PostgreSQL error codes mapped to handler types. Multiple codes can map to same handler:
+    // - 40P01 (serialization_failure) and 40001 (deadlock_detected) both indicate deadlock
+    // - 08001 and 08006 both indicate connection issues
     sqlCodes: {
         '40P01': 'deadlock',
         '55P03': 'lockTimeout',
