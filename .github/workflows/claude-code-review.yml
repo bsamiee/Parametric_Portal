@@ -34,8 +34,7 @@ jobs:
             --model claude-opus-4-5-20251101
             --allowedTools
             "Read,Write,Edit,Glob,Grep,Task,TodoWrite,Skill,WebSearch,WebFetch,
-            Bash(gh:*),Bash(git:*),Bash(pnpm:*),Bash(node:*),Bash(uv:*),
-            mcp__github*,mcp__github_inline_comment__create_inline_comment"
+            Bash(gh:*),Bash(git:*),Bash(pnpm:*),Bash(node:*),Bash(uv:*)"
           prompt: |
             [CONTEXT]
             Repository: ${{ github.repository }} | PR: ${{ github.event.pull_request.number }}
@@ -62,8 +61,10 @@ jobs:
             - Reject band-aids — require proper solutions
 
             [PHASE_4] Output
-            1. For each issue: mcp__github_inline_comment__create_inline_comment
-            2. Submit review: gh pr review ${{ github.event.pull_request.number }} --comment --body "summary"
+            Collect all issues, then submit ONE review via gh api:
+            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
+              --method POST -f body="SUMMARY" -f event="COMMENT" \
+              -f comments='[{"path":"file","line":N,"body":"COMMENT"}]'
 
             [COMMENT_FORMAT]
             **Issue:** Concise problem statement
