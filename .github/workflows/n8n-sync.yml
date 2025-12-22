@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Sync n8n Server
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@823bd89e131d8d508129f9443cad5855e9ba96f0 # v1.2.4
         with:
           host: ${{ secrets.N8N_HOST }}
           username: ${{ secrets.N8N_USER }}
