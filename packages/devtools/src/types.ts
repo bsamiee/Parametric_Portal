@@ -85,11 +85,9 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const safeString = (value: unknown): string =>
-    typeof value === 'string'
-        ? value
-        : typeof value !== 'object' || value === null
-          ? String(value)
-          : Object.prototype.toString.call(value);
+    (typeof value === 'string' ? value : null) ??
+    (typeof value !== 'object' || value === null ? String(value) : null) ??
+    Object.prototype.toString.call(value);
 
 const toError = (value: unknown): Error => (value instanceof Error ? value : new Error(safeString(value)));
 
