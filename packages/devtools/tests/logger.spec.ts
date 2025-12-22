@@ -27,11 +27,8 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const runLogIterations = (count: number, logFn: (i: number) => void): void => {
-    for (let i = 0; i < count; i += 1) {
-        logFn(i);
-    }
-};
+const runLogIterations = (count: number, logFn: (i: number) => void): void =>
+    Array.from({ length: count }, (_, i) => i).forEach(logFn);
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -97,10 +94,10 @@ describe('logger', () => {
 
     describe('getLogs/getLogsFormatted/getLogsJson', () => {
         it.each([
-            ['msg1'],
-            ['hello', 'world'],
-            ['a', 'b', 'c', 'd', 'e'],
-        ])('getLogs returns shallow copy', (...messages) => {
+            [['msg1']],
+            [['hello', 'world']],
+            [['a', 'b', 'c', 'd', 'e']],
+        ])('getLogs returns shallow copy', (messages) => {
             const logs = messages.map((m) => entry({ message: m }));
             const result = getLogs(logs);
             expect([result.length, result !== logs]).toEqual([logs.length, true]);

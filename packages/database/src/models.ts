@@ -18,7 +18,7 @@ import {
     type SessionResult,
     UserIdSchema,
 } from '@parametric-portal/types/database';
-import { Schema as S } from 'effect';
+import { DateTime, Schema as S } from 'effect';
 
 // --- [MODELS] ----------------------------------------------------------------
 
@@ -108,7 +108,7 @@ class OrganizationMember extends Model.Class<OrganizationMember>('OrganizationMe
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const sessionToResult = (session: typeof Session.Type): SessionResult => ({
-    expiresAt: new Date(session.expiresAt.epochMillis),
+    expiresAt: DateTime.toDateUtc(session.expiresAt),
     sessionId: session.id,
     userId: session.userId,
 });

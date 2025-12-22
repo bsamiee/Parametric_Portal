@@ -25,7 +25,6 @@ export default Effect.flatMap(
         CONSTRAINT sessions_token_hash_unique UNIQUE NULLS NOT DISTINCT (token_hash)
     );
 
-    CREATE INDEX idx_sessions_token_hash ON sessions USING HASH (token_hash);
     CREATE INDEX idx_sessions_user_id ON sessions(user_id) INCLUDE (token_hash, expires_at);
     CREATE INDEX idx_sessions_expires_at ON sessions(expires_at) WHERE expires_at > now();
 
@@ -57,7 +56,6 @@ export default Effect.flatMap(
         CONSTRAINT refresh_tokens_token_hash_unique UNIQUE NULLS NOT DISTINCT (token_hash)
     );
 
-    CREATE INDEX idx_refresh_tokens_token_hash ON refresh_tokens USING HASH (token_hash) WHERE revoked_at IS NULL;
     CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id) INCLUDE (expires_at, revoked_at);
 
     CREATE TABLE api_keys (
@@ -73,7 +71,6 @@ export default Effect.flatMap(
         CONSTRAINT api_keys_key_hash_unique UNIQUE NULLS NOT DISTINCT (key_hash)
     );
 
-    CREATE INDEX idx_api_keys_key_hash ON api_keys USING HASH (key_hash);
     CREATE INDEX idx_api_keys_user_id ON api_keys(user_id) INCLUDE (name, expires_at);
 `,
 );

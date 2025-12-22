@@ -24,8 +24,6 @@ export default Effect.flatMap(
         CONSTRAINT organizations_slug_unique UNIQUE NULLS NOT DISTINCT (slug)
     );
 
-    CREATE INDEX idx_organizations_slug ON organizations USING HASH (slug) WHERE deleted_at IS NULL;
-
     CREATE TABLE organization_members (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
