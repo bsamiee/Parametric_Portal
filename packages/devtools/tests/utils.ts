@@ -77,8 +77,12 @@ const perfEntry = (entryType: string, overrides: Partial<PerformanceEntry> = {})
         ...overrides,
     }) as PerformanceEntry;
 
-const layer = (opts: { logLevel?: LogLevelKey; maxLogs?: number } = {}) =>
-    createLoggerLayer({ logLevel: opts.logLevel ?? B.defaultLogLevel, maxLogs: opts.maxLogs ?? B.defaultMaxLogs });
+const layer = (opts: { logLevel?: LogLevelKey; maxLogs?: number; silent?: boolean } = {}) =>
+    createLoggerLayer({
+        logLevel: opts.logLevel ?? B.defaultLogLevel,
+        maxLogs: opts.maxLogs ?? B.defaultMaxLogs,
+        silent: opts.silent ?? true,
+    });
 
 /**
  * Dispatch table for test logger: lowercase keys for case-insensitive lookup.

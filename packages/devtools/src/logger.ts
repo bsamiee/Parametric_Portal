@@ -78,7 +78,6 @@ const truncateLogs = (logs: LogEntry[], maxLogs: number): void => {
 
 const createAccumulatingLogger = (config: { maxLogs: number }): AccumulatingLoggerResult => {
     const logs: LogEntry[] = [];
-
     const logger = Logger.make<unknown, void>(({ annotations, date, fiberId, logLevel, message, spans }) => {
         const spanEntries = List.toArray(
             List.map(spans, (span): [string, number] => [span.label, Date.now() - span.startTime]),
@@ -98,18 +97,20 @@ const createAccumulatingLogger = (config: { maxLogs: number }): AccumulatingLogg
     return { logger, logs };
 };
 
-const createCombinedLogger = (config: { maxLogs: number }): CombinedLoggerResult => {
+const createCombinedLogger = (config: { maxLogs: number; silent?: boolean | undefined }): CombinedLoggerResult => {
     const { logger: accumulating, logs } = createAccumulatingLogger(config);
     return {
-        logger: Logger.zip(Logger.prettyLogger(), accumulating),
+        logger: config.silent ? accumulating : Logger.zip(Logger.prettyLogger(), accumulating),
         logs,
     };
 };
 
-const createLoggerLayer = (config: Partial<LoggerConfig> = {}): LoggerLayerResult => {
-    const { logger, logs } = createCombinedLogger({ maxLogs: config.maxLogs ?? B.defaults.maxLogs });
+const createLoggerLayer = (config: Partial<LoggerConfig & { silent?: boolean }> = {}): LoggerLayerResult => {
+    const { logger, logs } = createCombinedLogger({
+        maxLogs: config.maxLogs ?? B.defaults.maxLogs,
+        silent: config.silent,
+    });
     const level = parseLogLevel(config.logLevel);
-
     const layer = Layer.mergeAll(
         Logger.replace(Logger.defaultLogger, Logger.map(logger, B.noop)),
         Logger.minimumLogLevel(level),
@@ -119,10 +120,8 @@ const createLoggerLayer = (config: Partial<LoggerConfig> = {}): LoggerLayerResul
 };
 
 const getLogs = (logs: ReadonlyArray<LogEntry>): ReadonlyArray<LogEntry> => [...logs];
-
 const getLogsFormatted = (logs: ReadonlyArray<LogEntry>): string =>
     logs.map((entry) => formatLogEntry(entry)).join('\n');
-
 const getLogsJson = (logs: ReadonlyArray<LogEntry>): string => JSON.stringify(logs, null, 2);
 
 // --- [HMR_SUPPORT] -----------------------------------------------------------

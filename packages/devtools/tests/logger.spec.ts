@@ -34,7 +34,6 @@ describe('logger', () => {
             const { logger, logs } = createAccumulatingLogger({ maxLogs: 100 });
             const layer = Logger.replace(Logger.defaultLogger, logger);
             Effect.runSync(Effect[method]('test message').pipe(Effect.provide(layer)));
-
             const expectedLevel = method.replace('log', '');
             expect(logs[0]?.level).toBe(expectedLevel);
         });
@@ -44,7 +43,6 @@ describe('logger', () => {
             (annotations) => {
                 const { logger, logs } = createAccumulatingLogger({ maxLogs: 100 });
                 const layer = Logger.replace(Logger.defaultLogger, logger);
-
                 Effect.runSync(
                     Effect.logInfo('t').pipe(
                         Effect.annotateLogs(annotations as Record<string, string>),
@@ -60,11 +58,9 @@ describe('logger', () => {
             const { logger, logs } = createAccumulatingLogger({ maxLogs });
             const layer = Logger.replace(Logger.defaultLogger, logger);
             const overflow = maxLogs + 10;
-
             Array.from({ length: overflow }, (_, i) => i).map((i) =>
                 Effect.runSync(Effect.logInfo(`msg-${i}`).pipe(Effect.provide(layer))),
             );
-
             expect([logs.length, logs[0]?.message, logs[maxLogs - 1]?.message]).toEqual([
                 maxLogs,
                 `msg-${overflow - maxLogs}`,
@@ -75,12 +71,10 @@ describe('logger', () => {
 
     describe('createLoggerLayer', () => {
         it.prop([fc.integer({ max: 50, min: 5 })])('accumulates up to maxLogs', (maxLogs) => {
-            const { layer, logs } = createLoggerLayer({ logLevel: 'Debug', maxLogs });
-
+            const { layer, logs } = createLoggerLayer({ logLevel: 'Debug', maxLogs, silent: true });
             Array.from({ length: maxLogs + 5 }, (_, i) => i).map((i) =>
                 Effect.runSync(Effect.logInfo(`m-${i}`).pipe(Effect.provide(layer))),
             );
-
             expect(logs.length).toBe(maxLogs);
         });
 
@@ -89,12 +83,10 @@ describe('logger', () => {
             ['Info', ['Info', 'Warning']],
             ['Warning', ['Warning']],
         ] as const)('logLevel=%s filters correctly', (level, expectedLevels) => {
-            const { layer, logs } = createLoggerLayer({ logLevel: level, maxLogs: 100 });
-
+            const { layer, logs } = createLoggerLayer({ logLevel: level, maxLogs: 100, silent: true });
             Effect.runSync(Effect.logDebug('d').pipe(Effect.provide(layer)));
             Effect.runSync(Effect.logInfo('i').pipe(Effect.provide(layer)));
             Effect.runSync(Effect.logWarning('w').pipe(Effect.provide(layer)));
-
             expect(logs.map((l) => l.level)).toEqual(expectedLevels);
         });
     });
@@ -137,7 +129,7 @@ describe('logger', () => {
 
     describe('createCombinedLogger', () => {
         it.prop([fc.string({ minLength: 1 })])('accumulates messages', (message) => {
-            const { logger, logs } = createCombinedLogger({ maxLogs: 100 });
+            const { logger, logs } = createCombinedLogger({ maxLogs: 100, silent: true });
             Effect.runSync(Effect.logInfo(message).pipe(Effect.provide(Logger.replace(Logger.defaultLogger, logger))));
             expect(logs[0]?.message).toBe(message);
         });
@@ -145,23 +137,19 @@ describe('logger', () => {
 
     describe('createHmrHandler', () => {
         it('clears logs and adds HMR message', () => {
-            const { layer, logs } = createLoggerLayer();
+            const { layer, logs } = createLoggerLayer({ silent: true });
             logs.push(entry({ message: 'existing' }));
-
             const handler = createHmrHandler(logs, layer);
             handler();
-
             expect([logs.length, logs[0]?.message?.includes('HMR')]).toEqual([1, true]);
         });
     });
 
     describe('installDevTools', () => {
         it('returns functional devtools object', () => {
-            const { layer, logs } = createLoggerLayer();
+            const { layer, logs } = createLoggerLayer({ silent: true });
             Effect.runSync(Effect.logInfo('devtools test').pipe(Effect.provide(layer)));
-
             const dt = installDevTools({ env: 'test', loggerLayer: layer, logs, renderDebug: () => {}, startTime: 0 });
-
             expect([
                 dt.appDebug.env,
                 typeof dt.appGetLogs,
@@ -171,7 +159,7 @@ describe('logger', () => {
         });
 
         it('appGetLogsJson returns parseable JSON', () => {
-            const { layer, logs } = createLoggerLayer();
+            const { layer, logs } = createLoggerLayer({ silent: true });
             const dt = installDevTools({ env: 'test', loggerLayer: layer, logs, renderDebug: () => {}, startTime: 0 });
             expect(() => JSON.parse(dt.appGetLogsJson())).not.toThrow();
         });
