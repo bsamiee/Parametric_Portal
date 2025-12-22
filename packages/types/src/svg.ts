@@ -128,8 +128,9 @@ const scopeIds = (svg: string, scope: Scope): string => {
     const idMap = new Map<SvgId, SvgId>();
 
     const withScopedIds = svg.replaceAll(B.patterns.idAttr, (_match, oldId: string) => {
-        const newId = `${oldId}_${scope}` as SvgId;
-        idMap.set(oldId as SvgId, newId);
+        const validatedId = S.decodeSync(SvgIdSchema)(oldId);
+        const newId = `${validatedId}_${scope}` as SvgId;
+        idMap.set(validatedId, newId);
         return `id="${newId}"`;
     });
 

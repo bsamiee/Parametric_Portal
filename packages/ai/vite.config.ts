@@ -7,7 +7,7 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
-                client: './src/client.ts',
+                anthropic: './src/anthropic.ts',
             },
             external: ['effect', '@effect/platform', '@anthropic-ai/sdk', '@parametric-portal/server'],
             mode: 'library',

@@ -8,7 +8,7 @@ import { deriveScope, sanitizeSvg } from '@parametric-portal/types/svg';
 import { types, type Uuidv7 } from '@parametric-portal/types/types';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
-import { apiFactory, asyncApi, generateIcon, type SvgVariant } from '../api.ts';
+import { apiFactory, asyncApi, generateIcon } from '../api.ts';
 import { useClipboard, useExport, useMutation, useStoreActions, useStoreSelector, useStoreSlice } from '../core.ts';
 import {
     type ContextState,
@@ -701,7 +701,7 @@ const CommandBar = (): ReactNode => {
 
             // Log assistant response to chat
             chatActions.addMessage({
-                content: `Generated ${successData.variants.length} variant${successData.variants.length > 1 ? 's' : ''}: ${successData.variants.map((v: SvgVariant) => v.name).join(', ')}`,
+                content: `Generated ${successData.variants.length} variant${successData.variants.length > 1 ? 's' : ''}: ${successData.variants.map((v) => v.name).join(', ')}`,
                 id: generateId(),
                 role: 'assistant',
                 timestamp: Date.now(),
@@ -715,7 +715,7 @@ const CommandBar = (): ReactNode => {
                 prompt: submitted.prompt,
                 selectedVariantIndex: 0,
                 timestamp: Date.now(),
-                variants: successData.variants.map((v: SvgVariant) => ({
+                variants: successData.variants.map((v) => ({
                     id: generateId(),
                     name: v.name,
                     svg: v.svg,

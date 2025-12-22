@@ -45,7 +45,7 @@ const ServiceInputSchema = S.extend(
 );
 
 const AiVariantsResponseSchema = S.Struct({
-    variants: S.Array(SvgVariantSchema),
+    variants: S.Array(SvgVariantSchema).pipe(S.minItems(1)),
 });
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -73,12 +73,7 @@ const PREFILL = '{"variants":[';
 const getPalette = (mode: ColorMode): Palette => ICON_DESIGN.palettes[mode];
 
 const minifySvgForPrompt = (svg: string): string =>
-    svg
-        .replaceAll(/<!--[\s\S]*?-->/g, '')
-        .replaceAll(/<(metadata|desc|title)>[\s\S]*?<\/\1>/gi, '')
-        .replaceAll(/\s+/g, ' ')
-        .replaceAll(/>\s+</g, '><')
-        .trim();
+    sanitizeSvg(svg).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
 
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
@@ -213,12 +208,18 @@ const extractJsonFromText = (text: string): string => {
     return start !== -1 && end !== -1 ? text.slice(start, end + 1) : text;
 };
 
-const parseVariantsResponse = (text: string): ServiceOutput => {
-    const fullJson = PREFILL + text;
-    const json = extractJsonFromText(fullJson);
-    const parsed: unknown = JSON.parse(json);
-    return S.decodeUnknownSync(AiVariantsResponseSchema)(parsed);
-};
+const parseVariantsResponse = (text: string): Effect.Effect<ServiceOutput, InternalError> =>
+    pipe(
+        Effect.try({
+            catch: () => new InternalError({ cause: B.errors.parseFailure.cause }),
+            try: () => JSON.parse(extractJsonFromText(PREFILL + text)) as unknown,
+        }),
+        Effect.flatMap((parsed) =>
+            S.decodeUnknown(AiVariantsResponseSchema)(parsed).pipe(
+                Effect.mapError(() => new InternalError({ cause: B.errors.parseFailure.cause })),
+            ),
+        ),
+    );
 
 const buildContext = (input: ServiceInput): PromptContext => ({
     ...(input.attachments !== undefined && { attachments: input.attachments }),
@@ -229,14 +230,12 @@ const buildContext = (input: ServiceInput): PromptContext => ({
     variantCount: input.variantCount ?? B.ai.defaults.variantCount,
 });
 
-// --- [CONTEXT] ---------------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 class IconGenerationService extends Context.Tag('IconGenerationService')<
     IconGenerationService,
     IconGenerationServiceInterface
 >() {}
-
-// --- [LAYER] -----------------------------------------------------------------
 
 const IconGenerationServiceLive = Layer.effect(
     IconGenerationService,
@@ -246,10 +245,8 @@ const IconGenerationServiceLive = Layer.effect(
         return IconGenerationService.of({
             generate: (input) =>
                 pipe(
-                    Effect.try({
-                        catch: () => new InternalError({ cause: B.errors.invalidInput.message }),
-                        try: () => S.decodeUnknownSync(ServiceInputSchema)(input),
-                    }),
+                    S.decodeUnknown(ServiceInputSchema)(input),
+                    Effect.mapError(() => new InternalError({ cause: B.errors.invalidInput.message })),
                     Effect.map(buildContext),
                     Effect.flatMap((ctx) =>
                         anthropic.send(buildSystemPrompt(ctx), [{ content: buildUserMessage(ctx), role: 'user' }], {
@@ -259,12 +256,7 @@ const IconGenerationServiceLive = Layer.effect(
                             ...(input.signal && { signal: input.signal }),
                         }),
                     ),
-                    Effect.flatMap((text) =>
-                        Effect.try({
-                            catch: () => new InternalError({ cause: B.errors.parseFailure.cause }),
-                            try: () => parseVariantsResponse(text),
-                        }),
-                    ),
+                    Effect.flatMap(parseVariantsResponse),
                     Effect.map((output) => ({
                         variants: output.variants.map((v) => ({
                             ...v,

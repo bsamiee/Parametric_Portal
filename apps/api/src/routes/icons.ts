@@ -3,6 +3,7 @@
  */
 import { makeRepositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder, type PaginationQuery } from '@parametric-portal/server/api';
+import { InternalError } from '@parametric-portal/server/errors';
 import { SessionContext } from '@parametric-portal/server/middleware';
 import { Effect, pipe, Schema as S } from 'effect';
 import { AppApi } from '../api.ts';
@@ -39,6 +40,8 @@ const handleGenerate = (input: ServiceInput) =>
             const repos = yield* makeRepositories;
             const iconService = yield* IconGenerationService;
             const result = yield* iconService.generate(input);
+            result.variants.length === 0 &&
+                (yield* Effect.fail(new InternalError({ cause: 'No icon variants generated' })));
             const asset = yield* repos.assets.insert({
                 prompt: S.decodeSync(S.NonEmptyTrimmedString)(input.prompt),
                 svg: result.variants[0]?.svg ?? '',

@@ -5,7 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { MessageParam } from '@anthropic-ai/sdk/resources/messages';
 import { InternalError } from '@parametric-portal/server/errors';
-import { Config, Context, Effect, Layer, pipe } from 'effect';
+import { Config, Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -32,17 +32,15 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- [CONTEXT] ---------------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 class AnthropicClient extends Context.Tag('AnthropicClient')<AnthropicClient, AnthropicClientInterface>() {}
-
-// --- [LAYER] -----------------------------------------------------------------
 
 const AnthropicClientLive = Layer.effect(
     AnthropicClient,
     Effect.gen(function* () {
         const apiKey = yield* Config.redacted('ANTHROPIC_API_KEY');
-        const client = new Anthropic({ apiKey: String(apiKey) });
+        const client = new Anthropic({ apiKey: Redacted.value(apiKey) });
 
         return AnthropicClient.of({
             send: (system, messages, options) =>
@@ -69,13 +67,17 @@ const AnthropicClientLive = Layer.effect(
                                 { signal: options.signal },
                             ),
                     }),
-                    Effect.flatMap((response) => {
-                        const content = response.content[0];
-                        const text = (content?.type === 'text' ? content.text : null) ?? '';
-                        return text
-                            ? Effect.succeed((options.prefill ?? '') + text)
-                            : Effect.fail(new InternalError({ cause: 'No text in response' }));
-                    }),
+                    Effect.flatMap((response) =>
+                        pipe(
+                            Option.fromNullable(response.content[0]),
+                            Option.flatMap((c) => (c.type === 'text' ? Option.some(c.text) : Option.none())),
+                            Option.map((text) => (options.prefill ?? '') + text),
+                            Option.match({
+                                onNone: () => Effect.fail(new InternalError({ cause: 'No text in response' })),
+                                onSome: Effect.succeed,
+                            }),
+                        ),
+                    ),
                 ),
         });
     }),
