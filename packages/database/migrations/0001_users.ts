@@ -29,7 +29,7 @@ export default Effect.flatMap(
         user_id UUID REFERENCES users(id) ON DELETE SET NULL,
         prompt TEXT NOT NULL,
         svg TEXT NOT NULL,
-        metadata JSONB DEFAULT '{}' NOT NULL,
+        metadata JSONB,
         version INTEGER NOT NULL DEFAULT 0,
         deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
