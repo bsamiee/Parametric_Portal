@@ -1,6 +1,6 @@
 /**
  * Migration: Create users and assets tables with PostgreSQL 17 optimizations.
- * Uses gen_random_uuid() (PostgreSQL native, time-ordered UUIDs added in PG17).
+ * Uses gen_random_uuid() (PostgreSQL native RFC 4122 v4 random UUIDs).
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -17,7 +17,7 @@ export default Effect.flatMap(
         version INTEGER NOT NULL DEFAULT 0,
         deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CONSTRAINT email_format CHECK (email ~* '^[^\s@]+@[^\s@]+\.[^\s@]+$')
+        CONSTRAINT email_format CHECK (position('@' in email) > 1)
     );
 
     CREATE INDEX idx_users_email ON users(email) WHERE deleted_at IS NULL;

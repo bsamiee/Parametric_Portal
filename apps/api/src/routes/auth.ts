@@ -20,15 +20,15 @@ const toSessionResponse = (sessionToken: string, expiresAt: Date, refreshToken: 
     refreshToken,
 });
 
-const createSessionTokenPairs = () =>
+const createAuthTokenPairs = () =>
     Effect.gen(function* () {
         const session = yield* createTokenPair();
         const refresh = yield* createTokenPair();
         return {
             refreshHash: refresh.hash,
-            refreshToken: String(refresh.token),
+            refreshToken: refresh.token,
             sessionHash: session.hash,
-            sessionToken: String(session.token),
+            sessionToken: session.token,
         };
     });
 
@@ -69,15 +69,19 @@ const handleOAuthCallback = (provider: OAuthProvider, code: string, state: strin
                 provider,
                 providerAccountId: userInfo.providerAccountId,
                 refreshToken: Option.getOrNull(tokens.refreshToken),
-                userId: user.id,
+                userId: user['id'],
             });
 
-            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createSessionTokenPairs();
+            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
             const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
             const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
 
-            yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: user.id });
-            yield* repos.refreshTokens.insert({ expiresAt: refreshExpiresAt, tokenHash: refreshHash, userId: user.id });
+            yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: user['id'] });
+            yield* repos.refreshTokens.insert({
+                expiresAt: refreshExpiresAt,
+                tokenHash: refreshHash,
+                userId: user['id'],
+            });
             return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
         Effect.catchAll((cause) =>
@@ -96,17 +100,21 @@ const handleRefresh = (refreshTokenInput: string) =>
                 onSome: Effect.succeed,
             });
 
-            yield* repos.refreshTokens.revoke(token.id);
+            yield* repos.refreshTokens.revoke(token['id']);
 
-            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createSessionTokenPairs();
+            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
             const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
             const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
 
-            yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: token.userId });
+            yield* repos.sessions.insert({
+                expiresAt: sessionExpiresAt,
+                tokenHash: sessionHash,
+                userId: token['userId'],
+            });
             yield* repos.refreshTokens.insert({
                 expiresAt: refreshExpiresAt,
                 tokenHash: refreshHash,
-                userId: token.userId,
+                userId: token['userId'],
             });
             return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
@@ -136,7 +144,7 @@ const handleMe = () =>
 
             return yield* Option.match(userOpt, {
                 onNone: () => Effect.die(new Error('User not found')),
-                onSome: (user) => Effect.succeed({ email: user.email, id: user.id }),
+                onSome: (user) => Effect.succeed({ email: user['email'], id: user['id'] }),
             });
         }),
         Effect.orDie,

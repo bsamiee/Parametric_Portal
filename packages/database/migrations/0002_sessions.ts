@@ -51,8 +51,7 @@ export default Effect.flatMap(
         expires_at TIMESTAMPTZ NOT NULL,
         revoked_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        CONSTRAINT token_hash_format_refresh CHECK (token_hash ~* '^[0-9a-f]+$'),
-        CONSTRAINT not_expired_when_revoked CHECK (revoked_at IS NULL OR revoked_at < expires_at)
+        CONSTRAINT token_hash_format_refresh CHECK (token_hash ~* '^[0-9a-f]+$')
     );
 
     CREATE INDEX idx_refresh_tokens_token_hash ON refresh_tokens(token_hash) WHERE expires_at > now() AND revoked_at IS NULL;
