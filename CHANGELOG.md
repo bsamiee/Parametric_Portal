@@ -1,3 +1,78 @@
+# 1.0.0 (2025-12-22)
+
+### [BUG_FIXES]
+
+- ⚠️  types and modernize PostgreSQL schema ([#109](https://github.com/bsamiee/Parametric_Portal/pull/109))
+- **ci:** resolve Vite 7 SSR build and AI workflow authentication ([e2a6a6a](https://github.com/bsamiee/Parametric_Portal/commit/e2a6a6a))
+- **vite:** correct TypeScript types in buildAppHandlers ([a56fb68](https://github.com/bsamiee/Parametric_Portal/commit/a56fb68))
+
+### ⚠️  Breaking Changes
+
+- types and modernize PostgreSQL schema  ([#109](https://github.com/bsamiee/Parametric_Portal/pull/109))
+  Removed @parametric-portal/database/schema barrel file.
+  Consumers must import from @parametric-portal/types/database directly.
+  Major fixes:
+  - Remove bracket notation workarounds in auth.ts - use proper dot notation
+  - Return branded TokenHash type from hashString instead of string
+  - Enforce SHA-256 output length in hex pattern: /^[0-9a-f]{64}$/i
+  - Eliminate type alias indirection (Email, Slug imported directly)
+  Migration:
+  - Migrate all 5 consumers from @parametric-portal/database/schema
+    to @parametric-portal/types/database
+  - Delete packages/database/src/schema.ts barrel file entirely
+  - Update package.json exports and vite.config.ts entries
+  - Rename SCHEMA_TUNING to DATABASE_TYPES_TUNING at import sites
+  This eliminates the biome-ignore suppression comment and resolves
+  all issues raised in Claude's PR review properly at the root.
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * fix(backend): address Claude review comments with proper root fixes
+  BREAKING CHANGE: Migration 0002_sessions.ts updated
+  Changes:
+  - Fix CHECK constraints: ^[0-9a-f]+$ → ^[0-9a-f]{64}$ (enforce SHA-256 length)
+  - Fix partial indexes: remove volatile now() from WHERE clauses
+  - Rename OAuthAccountIdSchema → DeleteOAuthAccountParams (clarity)
+  - Fix type cast: use Uuidv7Schema in SessionResponseSchema (type safety)
+  - Fix hashString: use Effect.tryPromise with HashingError (proper errors)
+  - Update middleware: handle HashingError → UnauthorizedError mapping
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * fix(devtools): resolve safeString edge case and address PR review comments
+  - Fix safeString to handle nested objects with non-callable toString
+    (e.g., [[{"toString":false}]]) using expression-centric type dispatch
+  - Rename DATABASE_TYPES_TUNING to SCHEMA_TUNING for naming consistency
+  - Replace Array.from() with spread [...] in crypto.ts
+  - Add partial index for active sessions in migrations
+  - Use TokenHashSchema for InsertSession/InsertRefreshToken
+  - Configure vitest for CI: truncateThreshold=0, verbose reporter,
+    github-actions reporter, JSON/JUnit output files
+  - Add test-results to nx.json outputs
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * fix: resolve TypeScript errors and CI test flakiness
+  - Change vitest CI reporter from 'verbose' to 'dot' to reduce stdout buffering
+  - Remove coverage thresholds that weren't being enforced consistently
+  - Fix index signature access: use bracket notation for process.env properties
+  - Add optional chaining for potentially undefined array accesses in tests
+  - Add explicit type annotation for mockPerformanceObserver return type
+  - Fix exactOptionalPropertyTypes compliance in test utilities
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * fix(devtools): add silent option to logger to prevent stdout in CI
+  - Add `silent` option to createLoggerLayer and createCombinedLogger
+  - When silent=true, skip Logger.prettyLogger() to prevent console output
+  - Update test utilities to use silent=true by default
+  - Update logger.spec.ts tests to use silent option
+  - Fixes CI flakiness caused by massive stdout from property-based tests
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+- Copilot @Copilot
+
 ## 0.6.13 (2025-12-21)
 
 ### [BUG_FIXES]

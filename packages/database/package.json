@@ -1,46 +1,46 @@
 {
-    "name": "@parametric-portal/database",
-    "version": "0.1.0",
-    "type": "module",
-    "exports": {
-        "./client": {
-            "types": "./src/client.ts",
-            "import": "./src/client.ts",
-            "default": "./src/client.ts"
-        },
-        "./models": {
-            "types": "./src/models.ts",
-            "import": "./src/models.ts",
-            "default": "./src/models.ts"
-        },
-        "./migrator": {
-            "types": "./src/migrator.ts",
-            "import": "./src/migrator.ts",
-            "default": "./src/migrator.ts"
-        },
-        "./repositories": {
-            "types": "./src/repositories.ts",
-            "import": "./src/repositories.ts",
-            "default": "./src/repositories.ts"
-        }
+  "name": "@parametric-portal/database",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
     },
-    "dependencies": {
-        "@effect/experimental": "catalog:",
-        "@effect/platform": "catalog:",
-        "@effect/sql": "catalog:",
-        "@effect/sql-pg": "catalog:",
-        "@parametric-portal/types": "workspace:*",
-        "effect": "catalog:"
+    "./models": {
+      "types": "./src/models.ts",
+      "import": "./src/models.ts",
+      "default": "./src/models.ts"
     },
-    "devDependencies": {
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./migrator": {
+      "types": "./src/migrator.ts",
+      "import": "./src/migrator.ts",
+      "default": "./src/migrator.ts"
     },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./repositories": {
+      "types": "./src/repositories.ts",
+      "import": "./src/repositories.ts",
+      "default": "./src/repositories.ts"
     }
+  },
+  "dependencies": {
+    "@effect/experimental": "catalog:",
+    "@effect/platform": "catalog:",
+    "@effect/sql": "catalog:",
+    "@effect/sql-pg": "catalog:",
+    "@parametric-portal/types": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  }
 }
