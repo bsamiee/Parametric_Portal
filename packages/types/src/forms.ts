@@ -1,232 +1,218 @@
 /**
- * Provide form validation types via Effect Schema.
+ * Form state management and validation.
+ * Grounding: Immutable field state with Effect-based validation.
  */
-import { Effect, Option, pipe, Schema as S } from 'effect';
+import { Effect, Match, pipe, Schema as S } from 'effect';
 import type { ParseError } from 'effect/ParseResult';
-import { match, P } from 'ts-pattern';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type FieldName = S.Schema.Type<typeof FieldNameSchema>;
-
-type ValidationError = {
-    readonly _tag: 'ValidationError';
-    readonly field: FieldName;
-    readonly message: string;
-    readonly rule: string;
-};
-
-type ValidationSuccess = {
-    readonly _tag: 'ValidationSuccess';
-    readonly field: FieldName;
-};
-
-type ValidationResult = ValidationError | ValidationSuccess;
-
+type FieldName = S.Schema.Type<typeof S.NonEmptyTrimmedString>;
 type FieldState = 'pristine' | 'touched' | 'dirty';
-
-type FormField<T> = {
+type FormConfig = { readonly validateOnBlur?: boolean; readonly validateOnChange?: boolean };
+type FormField<T = unknown> = {
     readonly errors: ReadonlyArray<ValidationError>;
     readonly initialValue: T;
     readonly name: FieldName;
     readonly state: FieldState;
     readonly value: T;
 };
-
-type FormState<T extends Record<string, unknown>> = {
-    readonly _tag: 'FormState';
-    readonly fields: { readonly [K in keyof T]: FormField<T[K]> };
+type FormState = {
+    readonly fields: Readonly<Record<string, FormField>>;
     readonly isSubmitting: boolean;
-    readonly isValid: boolean;
     readonly submitCount: number;
 };
-
-type FormConfig = {
-    readonly validateOnBlur?: boolean;
-    readonly validateOnChange?: boolean;
+type ValidationResult = ValidationSuccess | ValidationError;
+type ValidationSuccess = { readonly _tag: 'ValidationSuccess'; readonly field: FieldName };
+type ValidationError = {
+    readonly _tag: 'ValidationError';
+    readonly field: FieldName;
+    readonly message: string;
+    readonly rule: string;
 };
-
-type FormApi<T extends Record<string, unknown>> = {
-    readonly createField: <V>(name: string, initialValue: V) => FormField<V>;
-    readonly error: (field: FieldName, rule: string, message: string) => ValidationError;
-    readonly fold: <R>(result: ValidationResult, handlers: FoldHandlers<R>) => R;
-    readonly getFieldErrors: (state: FormState<T>, name: keyof T) => ReadonlyArray<ValidationError>;
-    readonly isError: (result: ValidationResult) => result is ValidationError;
-    readonly isFormValid: (state: FormState<T>) => boolean;
-    readonly isSuccess: (result: ValidationResult) => result is ValidationSuccess;
-    readonly match: typeof match;
-    readonly Option: typeof Option;
-    readonly P: typeof P;
-    readonly schemas: typeof schemas;
-    readonly setFieldValue: <K extends keyof T>(state: FormState<T>, name: K, value: T[K]) => FormState<T>;
-    readonly success: (field: FieldName) => ValidationSuccess;
-    readonly tags: typeof B.tags;
-    readonly touchField: <K extends keyof T>(state: FormState<T>, name: K) => FormState<T>;
-    readonly validateField: <V>(
-        field: FormField<V>,
-        schema: S.Schema<V>,
-    ) => Effect.Effect<ValidationResult, never, never>;
-};
-
-type FoldHandlers<R> = {
-    readonly onError: (error: ValidationError) => R;
-    readonly onSuccess: (field: FieldName) => R;
+type ValidationFold<R> = {
+    readonly ValidationError: (error: ValidationError) => R;
+    readonly ValidationSuccess: (field: FieldName) => R;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     defaults: { validateOnBlur: true, validateOnChange: false },
-    states: {
-        dirty: 'dirty',
-        pristine: 'pristine',
-        touched: 'touched',
-    },
-    tags: {
-        error: 'ValidationError',
-        formState: 'FormState',
-        success: 'ValidationSuccess',
-    },
+    states: { dirty: 'dirty', pristine: 'pristine', touched: 'touched' },
+    tags: { error: 'ValidationError', success: 'ValidationSuccess' },
 } as const);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const FieldNameSchema = pipe(S.String, S.nonEmptyString(), S.brand('FieldName'));
-
-const FieldStateSchema = S.Union(S.Literal('pristine'), S.Literal('touched'), S.Literal('dirty'));
-
+const FieldStateSchema = S.Literal(B.states.pristine, B.states.touched, B.states.dirty);
+const ValidationSuccessSchema = S.Struct({ _tag: S.Literal(B.tags.success), field: S.NonEmptyTrimmedString });
 const ValidationErrorSchema = S.Struct({
-    _tag: S.Literal('ValidationError'),
-    field: FieldNameSchema,
+    _tag: S.Literal(B.tags.error),
+    field: S.NonEmptyTrimmedString,
     message: S.String,
     rule: S.String,
 });
-
-const ValidationSuccessSchema = S.Struct({
-    _tag: S.Literal('ValidationSuccess'),
-    field: FieldNameSchema,
+const ValidationResultSchema = S.Union(ValidationSuccessSchema, ValidationErrorSchema);
+const FormFieldSchema = S.Struct({
+    errors: S.Array(ValidationErrorSchema),
+    initialValue: S.Unknown,
+    name: S.NonEmptyTrimmedString,
+    state: FieldStateSchema,
+    value: S.Unknown,
 });
-
-const ValidationResultSchema = S.Union(ValidationErrorSchema, ValidationSuccessSchema);
-
-const FormFieldSchema = <A extends S.Schema.Any>(valueSchema: A) =>
-    S.Struct({
-        errors: S.Array(ValidationErrorSchema),
-        initialValue: valueSchema,
-        name: FieldNameSchema,
-        state: FieldStateSchema,
-        value: valueSchema,
-    });
-
-const schemas = Object.freeze({
-    fieldName: FieldNameSchema,
-    fieldState: FieldStateSchema,
-    formField: FormFieldSchema,
-    validationError: ValidationErrorSchema,
-    validationResult: ValidationResultSchema,
-    validationSuccess: ValidationSuccessSchema,
-} as const);
+const FormStateSchema = S.Struct({
+    fields: S.Record({ key: S.String, value: FormFieldSchema }),
+    isSubmitting: S.Boolean,
+    submitCount: pipe(S.Number, S.int(), S.nonNegative()),
+});
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const mkFieldName = (name: string): FieldName => name as FieldName;
-
-const mkField = <V>(name: string, initialValue: V): FormField<V> => ({
-    errors: [],
-    initialValue,
-    name: mkFieldName(name),
-    state: B.states.pristine,
-    value: initialValue,
-});
-
-const mkError = (field: FieldName, rule: string, message: string): ValidationError => ({
+const validationSuccess = (field: FieldName): ValidationSuccess => ({ _tag: B.tags.success, field });
+const validationError = (field: FieldName, rule: string, message: string): ValidationError => ({
     _tag: B.tags.error,
     field,
     message,
     rule,
 });
-
-const mkSuccess = (field: FieldName): ValidationSuccess => ({
-    _tag: B.tags.success,
-    field,
+const createField = <T>(name: FieldName, initialValue: T): FormField<T> => ({
+    errors: [],
+    initialValue,
+    name,
+    state: B.states.pristine,
+    value: initialValue,
 });
-
-const updateField = <T extends Record<string, unknown>, K extends keyof T>(
-    state: FormState<T>,
-    name: K,
-    updater: (field: FormField<T[K]>) => FormField<T[K]>,
-): FormState<T> => ({
-    ...state,
-    fields: { ...state.fields, [name]: updater(state.fields[name]) },
+const createFormState = (fields: Record<string, FormField>): FormState => ({
+    fields,
+    isSubmitting: false,
+    submitCount: 0,
 });
-
-const computeIsValid = <T extends Record<string, unknown>>(fields: FormState<T>['fields']): boolean =>
-    Object.values(fields).every((f) => (f as FormField<unknown>).errors.length === 0);
+const touchTransitions = {
+    [B.states.dirty]: B.states.dirty,
+    [B.states.pristine]: B.states.touched,
+    [B.states.touched]: B.states.touched,
+} as const satisfies Record<FieldState, FieldState>;
+const touchField = <T>(field: FormField<T>): FormField<T> => ({
+    ...field,
+    state: touchTransitions[field.state],
+});
+const setFieldValue = <T>(field: FormField<T>, value: T): FormField<T> => ({
+    ...field,
+    state: B.states.dirty,
+    value,
+});
+const setFieldErrors = <T>(field: FormField<T>, errors: ReadonlyArray<ValidationError>): FormField<T> => ({
+    ...field,
+    errors,
+});
+const resetField = <T>(field: FormField<T>): FormField<T> => ({
+    ...field,
+    errors: [],
+    state: B.states.pristine,
+    value: field.initialValue,
+});
+const hasFieldErrors = <T>(field: FormField<T>): boolean => field.errors.length > 0;
+const isFormValid = (form: FormState): boolean => Object.values(form.fields).every((f) => f.errors.length === 0);
+const getField = <T>(form: FormState, name: string): FormField<T> => form.fields[name] as FormField<T>;
+const updateField = <T>(form: FormState, name: string, updater: (f: FormField<T>) => FormField<T>): FormState => ({
+    ...form,
+    fields: { ...form.fields, [name]: updater(getField(form, name)) },
+});
+const setSubmitting = (form: FormState, isSubmitting: boolean): FormState => ({
+    ...form,
+    isSubmitting,
+    submitCount: isSubmitting ? form.submitCount + 1 : form.submitCount,
+});
+const resetForm = (form: FormState): FormState => ({
+    fields: Object.fromEntries(Object.entries(form.fields).map(([k, v]) => [k, resetField(v)])),
+    isSubmitting: false,
+    submitCount: 0,
+});
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const foldHandlers = <R>(result: ValidationResult, h: FoldHandlers<R>): R =>
-    match(result)
-        .with({ _tag: B.tags.success }, (r) => h.onSuccess(r.field))
-        .with({ _tag: B.tags.error }, (r) => h.onError(r))
-        .exhaustive();
+const fold = <R>(result: ValidationResult, handlers: ValidationFold<R>): R =>
+    Match.value(result).pipe(
+        Match.tag(B.tags.success, (r) => handlers.ValidationSuccess(r.field)),
+        Match.tag(B.tags.error, (r) => handlers.ValidationError(r)),
+        Match.exhaustive,
+    ) as R;
 
-const validateHandlers = <V>(field: FormField<V>, schema: S.Schema<V>): Effect.Effect<ValidationResult, never, never> =>
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
+
+const validateField = <T>(field: FormField<T>, schema: S.Schema<T>): Effect.Effect<ValidationResult, never, never> =>
     pipe(
         S.decode(schema)(field.value),
-        Effect.map(() => mkSuccess(field.name)),
-        Effect.catchAll((error: ParseError) => Effect.succeed(mkError(field.name, 'schema', error.message))),
+        Effect.map(() => validationSuccess(field.name)),
+        Effect.catchAll((error: ParseError) => Effect.succeed(validationError(field.name, 'schema', error.message))),
     );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createForm = <T extends Record<string, unknown>>(
-    config: FormConfig = {},
-): Effect.Effect<FormApi<T>, never, never> =>
-    pipe(
-        Effect.sync(() => ({
-            validateOnBlur: config.validateOnBlur ?? B.defaults.validateOnBlur,
-            validateOnChange: config.validateOnChange ?? B.defaults.validateOnChange,
-        })),
-        Effect.map((_cfg) =>
-            Object.freeze({
-                createField: <V>(name: string, initialValue: V) => mkField(name, initialValue),
-                error: mkError,
-                fold: <R>(result: ValidationResult, handlers: FoldHandlers<R>) => foldHandlers(result, handlers),
-                getFieldErrors: (state: FormState<T>, name: keyof T) => state.fields[name].errors,
-                isError: (result: ValidationResult): result is ValidationError => result._tag === B.tags.error,
-                isFormValid: (state: FormState<T>) => computeIsValid(state.fields),
-                isSuccess: (result: ValidationResult): result is ValidationSuccess => result._tag === B.tags.success,
-                match,
-                Option,
-                P,
-                schemas,
-                setFieldValue: <K extends keyof T>(state: FormState<T>, name: K, value: T[K]) =>
-                    updateField(state, name, (f) => ({ ...f, state: B.states.dirty, value })),
-                success: mkSuccess,
-                tags: B.tags,
-                touchField: <K extends keyof T>(state: FormState<T>, name: K) =>
-                    updateField(state, name, (f) => ({
-                        ...f,
-                        state: f.state === B.states.pristine ? B.states.touched : f.state,
-                    })),
-                validateField: <V>(field: FormField<V>, schema: S.Schema<V>) => validateHandlers(field, schema),
-            } as FormApi<T>),
-        ),
-    );
+const createForms = (config: FormConfig = B.defaults) =>
+    Object.freeze({
+        config,
+        createField,
+        createFormState,
+        fold,
+        getField,
+        hasFieldErrors,
+        isFormValid,
+        resetField,
+        resetForm,
+        schema: {
+            field: FormFieldSchema,
+            fieldState: FieldStateSchema,
+            result: ValidationResultSchema,
+            state: FormStateSchema,
+        },
+        setFieldErrors,
+        setFieldValue,
+        setSubmitting,
+        touchField,
+        updateField,
+        validateField,
+        validationError,
+        validationSuccess,
+    });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as FORM_TUNING, createForm };
+export {
+    B as FORM_TUNING,
+    createField,
+    createForms,
+    createFormState,
+    FieldStateSchema,
+    fold,
+    FormFieldSchema,
+    FormStateSchema,
+    getField,
+    hasFieldErrors,
+    isFormValid,
+    resetField,
+    resetForm,
+    setFieldErrors,
+    setFieldValue,
+    setSubmitting,
+    touchField,
+    updateField,
+    validateField,
+    validationError,
+    ValidationErrorSchema,
+    ValidationResultSchema,
+    validationSuccess,
+    ValidationSuccessSchema,
+};
 export type {
     FieldName,
     FieldState,
-    FoldHandlers,
-    FormApi,
     FormConfig,
     FormField,
     FormState,
     ValidationError,
+    ValidationFold,
     ValidationResult,
     ValidationSuccess,
 };

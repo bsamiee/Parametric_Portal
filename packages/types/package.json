@@ -5,7 +5,6 @@
     "effect": "catalog:",
     "immer": "catalog:",
     "isomorphic-dompurify": "catalog:",
-    "ts-pattern": "catalog:",
     "uuid": "catalog:",
     "zustand": "catalog:"
   },

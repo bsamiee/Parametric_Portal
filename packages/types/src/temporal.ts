@@ -1,10 +1,9 @@
 /**
- * Define temporal operations via Effect-wrapped date-fns: parse, format, addDays, daysBetween with Immer brand registry.
+ * Temporal operations and brand registry.
+ * Grounding: date-fns wrappers with Immer-powered Zustand store.
  */
-
 import { addDays, differenceInDays, format, parseISO } from 'date-fns';
 import { Effect, pipe, Schema as S } from 'effect';
-import type { ParseError } from 'effect/ParseResult';
 import { castDraft, enableMapSet, produce } from 'immer';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
@@ -28,8 +27,8 @@ type TemporalApi = {
     readonly addDays: (numDays: number) => (date: Date) => Effect.Effect<Date, never>;
     readonly createRegistry: () => BrandRegistry;
     readonly daysBetween: (start: Date, end: Date) => Effect.Effect<number, never>;
-    readonly formatDate: (formatStr?: string) => (date: Date) => Effect.Effect<string, ParseError>;
-    readonly parse: (input: string) => Effect.Effect<Date, ParseError>;
+    readonly formatDate: (formatStr?: string) => (date: Date) => Effect.Effect<string, TemporalError>;
+    readonly parse: (input: string) => Effect.Effect<Date, TemporalError>;
     readonly produce: typeof produce;
 };
 
@@ -39,6 +38,13 @@ const BrandMetadataSchema = S.Struct({
     brandName: S.String,
     createdAt: S.Number,
 });
+
+// --- [CLASSES] ---------------------------------------------------------------
+
+class TemporalError extends S.TaggedClass<TemporalError>()('TemporalError', {
+    message: S.String,
+    operation: S.Literal('format', 'parse'),
+}) {}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -58,13 +64,17 @@ const updateBrands = (set: ImmerSetter, brand: BrandMetadata): void =>
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, ParseError, never> =>
+const createBrandEntry = (name: string): Effect.Effect<BrandMetadata, TemporalError, never> =>
     pipe(
         Effect.sync(() => ({ brandName: name, createdAt: Date.now() })),
         Effect.flatMap(S.decode(BrandMetadataSchema)),
+        Effect.mapError((e) => new TemporalError({ message: e.message, operation: 'parse' })),
     );
 
-const registerBrandEffect = (name: string, updateFn: (brand: BrandMetadata) => void): Effect.Effect<void, ParseError> =>
+const registerBrandEffect = (
+    name: string,
+    updateFn: (brand: BrandMetadata) => void,
+): Effect.Effect<void, TemporalError> =>
     pipe(
         createBrandEntry(name),
         Effect.tap((brand) => Effect.sync(() => updateFn(brand))),
@@ -82,20 +92,21 @@ const temporalHandlers = {
         Effect.sync(() => differenceInDays(end, start)),
     formatDate:
         (formatStr: string) =>
-        (date: Date): Effect.Effect<string, ParseError> =>
+        (date: Date): Effect.Effect<string, TemporalError> =>
             Effect.try({
-                catch: (error) => new Error(`Format failed: ${String(error)}`) as ParseError,
+                catch: (error) =>
+                    new TemporalError({ message: `Format failed: ${String(error)}`, operation: 'format' }),
                 try: () => format(date, formatStr),
             }),
-    parse: (input: string): Effect.Effect<Date, ParseError> =>
+    parse: (input: string): Effect.Effect<Date, TemporalError> =>
         pipe(
             Effect.try({
-                catch: (error) => new Error(`Parse failed: ${String(error)}`) as ParseError,
+                catch: (error) => new TemporalError({ message: `Parse failed: ${String(error)}`, operation: 'parse' }),
                 try: () => parseISO(input),
             }),
             Effect.filterOrFail(
                 (parsedDate) => !Number.isNaN(parsedDate.getTime()),
-                () => new Error(`Invalid date: ${input}`) as ParseError,
+                () => new TemporalError({ message: `Invalid date: ${input}`, operation: 'parse' }),
             ),
         ),
 };
@@ -135,5 +146,5 @@ const createTemporal = (config: TemporalConfig = {}): TemporalApi =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TEMPORAL_TUNING, createTemporal };
+export { B as TEMPORAL_TUNING, createTemporal, TemporalError };
 export type { BrandMetadata, BrandRegistry, TemporalApi, TemporalConfig };

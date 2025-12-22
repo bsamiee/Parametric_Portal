@@ -5,25 +5,17 @@
 import { AnthropicClient } from '@parametric-portal/ai/anthropic';
 import { InternalError } from '@parametric-portal/server/errors';
 import type { ColorMode } from '@parametric-portal/types/database';
-import { sanitizeSvg } from '@parametric-portal/types/svg';
+import { createSvgAsset, type SvgAsset, SvgAssetInputSchema, sanitizeSvg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
-import {
-    type GenerateRequest,
-    GenerateRequestSchema,
-    ICON_DESIGN,
-    type Palette,
-    type ReferenceAttachment,
-    type SvgVariant,
-    SvgVariantSchema,
-} from '../contracts/icons.ts';
+import { type GenerateRequest, GenerateRequestSchema, ICON_DESIGN, type Palette } from '../contracts/icons.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type ServiceInput = GenerateRequest & { readonly signal?: AbortSignal | undefined };
-type ServiceOutput = { readonly variants: ReadonlyArray<SvgVariant> };
+type ServiceOutput = { readonly variants: ReadonlyArray<SvgAsset> };
 
 type PromptContext = {
-    readonly attachments?: ReadonlyArray<ReferenceAttachment>;
+    readonly attachments?: ReadonlyArray<SvgAsset>;
     readonly colorMode: ColorMode;
     readonly intent: 'create' | 'refine';
     readonly prompt: string;
@@ -44,8 +36,9 @@ const ServiceInputSchema = S.extend(
     }),
 );
 
-const AiVariantsResponseSchema = S.Struct({
-    variants: S.Array(SvgVariantSchema).pipe(S.minItems(1)),
+/** AI response wrapper: validates array of SvgAssetInput before transformation. */
+const AiResponseSchema = S.Struct({
+    variants: S.Array(SvgAssetInputSchema).pipe(S.minItems(1)),
 });
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -203,14 +196,14 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
 
 const extractJsonFromText = (text: string): string => /\{[\s\S]*"variants"[\s\S]*\}/.exec(text)?.[0] ?? text;
 
-const parseVariantsResponse = (text: string): Effect.Effect<ServiceOutput, InternalError> =>
+const parseAiResponse = (text: string): Effect.Effect<S.Schema.Type<typeof AiResponseSchema>, InternalError> =>
     pipe(
         Effect.try({
             catch: () => new InternalError({ cause: B.errors.parseFailure.cause }),
             try: () => JSON.parse(extractJsonFromText(B.ai.prefill + text)) as unknown,
         }),
         Effect.flatMap((parsed) =>
-            S.decodeUnknown(AiVariantsResponseSchema)(parsed).pipe(
+            S.decodeUnknown(AiResponseSchema)(parsed).pipe(
                 Effect.mapError(() => new InternalError({ cause: B.errors.parseFailure.cause })),
             ),
         ),
@@ -251,13 +244,12 @@ const IconGenerationServiceLive = Layer.effect(
                             ...(input.signal && { signal: input.signal }),
                         }),
                     ),
-                    Effect.flatMap(parseVariantsResponse),
-                    Effect.map((output) => ({
-                        variants: output.variants.map((v) => ({
-                            ...v,
-                            svg: sanitizeSvg(v.svg),
-                        })),
-                    })),
+                    Effect.flatMap(parseAiResponse),
+                    Effect.map(
+                        (response): ServiceOutput => ({
+                            variants: response.variants.map(createSvgAsset),
+                        }),
+                    ),
                 ),
         });
     }),

@@ -5,21 +5,33 @@ import { it } from '@fast-check/vitest';
 import { Effect, Schema as S } from 'effect';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
-import { createForm, FORM_TUNING } from '../src/forms.ts';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type TestFormData = {
-    readonly email: string;
-    readonly name: string;
-};
+import {
+    createField,
+    createFormState,
+    createForms,
+    type FieldName,
+    FORM_TUNING,
+    type FormField,
+    fold,
+    hasFieldErrors,
+    isFormValid,
+    resetField,
+    resetForm,
+    setFieldErrors,
+    setFieldValue,
+    setSubmitting,
+    touchField,
+    updateField,
+    validateField,
+    validationError,
+    validationSuccess,
+} from '../src/forms.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const loadApi = () => Effect.runSync(createForm<TestFormData>());
-
-const arbitraryFieldName = fc.string({ maxLength: 20, minLength: 1 });
-const arbitraryFieldValue = fc.oneof(fc.string(), fc.integer(), fc.boolean());
+const loadApi = () => createForms();
+const arbitraryFieldName = fc.string({ maxLength: 20, minLength: 1 }).filter((s) => s.trim().length > 0);
+const arbitraryFieldValue = fc.oneof(fc.string(), fc.integer());
 
 // --- [TESTS] -----------------------------------------------------------------
 
@@ -29,11 +41,11 @@ describe('forms package', () => {
             const api = loadApi();
             expect(Object.isFrozen(api)).toBe(true);
             expect(api.createField).toBeDefined();
+            expect(api.createFormState).toBeDefined();
             expect(api.validateField).toBeDefined();
             expect(api.setFieldValue).toBeDefined();
             expect(api.touchField).toBeDefined();
-            expect(api.error).toBeDefined();
-            expect(api.success).toBeDefined();
+            expect(api.fold).toBeDefined();
         });
 
         it('exposes tuning constants', () => {
@@ -47,8 +59,7 @@ describe('forms package', () => {
 
     describe('field creation', () => {
         it.prop([arbitraryFieldName, arbitraryFieldValue])('creates pristine field', (name, value) => {
-            const api = loadApi();
-            const field = api.createField(name, value);
+            const field = createField(name as FieldName, value);
             expect(field.name).toBe(name);
             expect(field.value).toBe(value);
             expect(field.initialValue).toBe(value);
@@ -59,174 +70,172 @@ describe('forms package', () => {
 
     describe('validation result creation', () => {
         it.prop([arbitraryFieldName])('creates success result', (name) => {
-            const api = loadApi();
-            const result = api.success(name as never);
-            expect(result._tag).toBe(FORM_TUNING.tags.success);
+            const result = validationSuccess(name as FieldName);
+            expect(result._tag).toBe('ValidationSuccess');
             expect(result.field).toBe(name);
-            expect(api.isSuccess(result)).toBe(true);
-            expect(api.isError(result)).toBe(false);
         });
 
         it.prop([arbitraryFieldName, fc.string(), fc.string()])('creates error result', (name, rule, message) => {
-            const api = loadApi();
-            const result = api.error(name as never, rule, message);
-            expect(result._tag).toBe(FORM_TUNING.tags.error);
+            const result = validationError(name as FieldName, rule, message);
+            expect(result._tag).toBe('ValidationError');
             expect(result.field).toBe(name);
             expect(result.rule).toBe(rule);
             expect(result.message).toBe(message);
-            expect(api.isError(result)).toBe(true);
-            expect(api.isSuccess(result)).toBe(false);
         });
     });
 
-    describe('field validation', () => {
-        it('validates field against schema - success', () => {
-            const api = loadApi();
-            const field = api.createField('email', 'test@example.com');
-            const schema = S.String;
-            const result = Effect.runSync(api.validateField(field, schema));
-            expect(api.isSuccess(result)).toBe(true);
-        });
-
-        it('validates field against schema - failure', () => {
-            const api = loadApi();
-            const field = api.createField('email', '');
-            const schema = S.NonEmptyString;
-            const result = Effect.runSync(api.validateField(field, schema));
-            expect(api.isError(result)).toBe(true);
-        });
-    });
-
-    describe('form state management', () => {
-        it('creates initial form state', () => {
-            const api = loadApi();
-            const nameField = api.createField('name', 'John');
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: nameField },
-                isSubmitting: false,
-                isValid: true,
-                submitCount: 0,
-            };
-            expect(formState.fields.name.value).toBe('John');
-            expect(formState.fields.email.value).toBe('john@example.com');
-        });
-
-        it.prop([fc.string()])('sets field value to dirty', (newValue) => {
-            const api = loadApi();
-            const nameField = api.createField('name', 'John');
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: nameField },
-                isSubmitting: false,
-                isValid: true,
-                submitCount: 0,
-            };
-            const updated = api.setFieldValue(formState, 'name', newValue);
-            expect(updated.fields.name.value).toBe(newValue);
-            expect(updated.fields.name.state).toBe('dirty');
-        });
-
-        it('touches pristine field', () => {
-            const api = loadApi();
-            const nameField = api.createField('name', 'John');
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: nameField },
-                isSubmitting: false,
-                isValid: true,
-                submitCount: 0,
-            };
-            const updated = api.touchField(formState, 'name');
-            expect(updated.fields.name.state).toBe('touched');
-        });
-
-        it('preserves dirty state on touch', () => {
-            const api = loadApi();
-            const dirtyField = { ...api.createField('name', 'John'), state: 'dirty' as const };
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: dirtyField },
-                isSubmitting: false,
-                isValid: true,
-                submitCount: 0,
-            };
-            const updated = api.touchField(formState, 'name');
-            expect(updated.fields.name.state).toBe('dirty');
-        });
-    });
-
-    describe('fold handler', () => {
+    describe('fold', () => {
         it.prop([arbitraryFieldName])('folds success to value', (name) => {
-            const api = loadApi();
-            const result = api.success(name as never);
-            const folded = api.fold(result, {
-                onError: () => 'error',
-                onSuccess: (field) => `success:${field}`,
+            const result = validationSuccess(name as FieldName);
+            const folded = fold(result, {
+                ValidationError: () => 'error',
+                ValidationSuccess: (field) => `success:${field}`,
             });
             expect(folded).toBe(`success:${name}`);
         });
 
         it.prop([arbitraryFieldName, fc.string(), fc.string()])('folds error to value', (name, rule, message) => {
-            const api = loadApi();
-            const result = api.error(name as never, rule, message);
-            const folded = api.fold(result, {
-                onError: (err) => `error:${err.rule}`,
-                onSuccess: () => 'success',
+            const result = validationError(name as FieldName, rule, message);
+            const folded = fold(result, {
+                ValidationError: (err) => `error:${err.rule}`,
+                ValidationSuccess: () => 'success',
             });
             expect(folded).toBe(`error:${rule}`);
         });
     });
 
-    describe('form validation', () => {
-        it('checks form validity with no errors', () => {
-            const api = loadApi();
-            const nameField = api.createField('name', 'John');
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: nameField },
-                isSubmitting: false,
-                isValid: true,
-                submitCount: 0,
-            };
-            expect(api.isFormValid(formState)).toBe(true);
+    describe('field state transitions', () => {
+        it('touchField transitions pristine to touched', () => {
+            const field = createField('test' as FieldName, 'value');
+            const touched = touchField(field);
+            expect(touched.state).toBe('touched');
         });
 
-        it('checks form validity with errors', () => {
-            const api = loadApi();
-            const nameError = api.error('name' as never, 'required', 'Name is required');
-            const nameField = { ...api.createField('name', ''), errors: [nameError] };
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: nameField },
-                isSubmitting: false,
-                isValid: false,
-                submitCount: 0,
-            };
-            expect(api.isFormValid(formState)).toBe(false);
+        it('touchField preserves touched state', () => {
+            const field = { ...createField('test' as FieldName, 'value'), state: 'touched' as const };
+            const touched = touchField(field);
+            expect(touched.state).toBe('touched');
         });
 
-        it('retrieves field errors', () => {
+        it('touchField preserves dirty state', () => {
+            const field = { ...createField('test' as FieldName, 'value'), state: 'dirty' as const };
+            const touched = touchField(field);
+            expect(touched.state).toBe('dirty');
+        });
+
+        it.prop([fc.string()])('setFieldValue transitions to dirty', (newValue) => {
+            const field = createField('test' as FieldName, 'initial');
+            const updated = setFieldValue(field, newValue);
+            expect(updated.value).toBe(newValue);
+            expect(updated.state).toBe('dirty');
+        });
+    });
+
+    describe('field error management', () => {
+        it('setFieldErrors sets errors on field', () => {
+            const field = createField('test' as FieldName, 'value');
+            const err = validationError('test' as FieldName, 'required', 'Field required');
+            const withErrors = setFieldErrors(field, [err]);
+            expect(withErrors.errors).toHaveLength(1);
+            expect(withErrors.errors[0]?.message).toBe('Field required');
+        });
+
+        it('hasFieldErrors detects field with errors', () => {
+            const err = validationError('test' as FieldName, 'required', 'Required');
+            const fieldWithErrors = { ...createField('test' as FieldName, ''), errors: [err] };
+            expect(hasFieldErrors(fieldWithErrors)).toBe(true);
+        });
+
+        it('hasFieldErrors returns false for clean field', () => {
+            const field = createField('test' as FieldName, 'value');
+            expect(hasFieldErrors(field)).toBe(false);
+        });
+    });
+
+    describe('field reset', () => {
+        it('resetField restores initial value and pristine state', () => {
+            const field = createField('test' as FieldName, 'initial');
+            const modified = setFieldValue(field, 'changed');
+            const err = validationError('test' as FieldName, 'rule', 'msg');
+            const withErrors = setFieldErrors(modified, [err]);
+            const reset = resetField(withErrors);
+            expect(reset.value).toBe('initial');
+            expect(reset.state).toBe('pristine');
+            expect(reset.errors).toEqual([]);
+        });
+    });
+
+    describe('form state', () => {
+        it('createFormState creates form with fields', () => {
+            const nameField = createField('name' as FieldName, 'John');
+            const emailField = createField('email' as FieldName, 'john@example.com');
+            const form = createFormState({ email: emailField, name: nameField });
+            expect(form.fields.name.value).toBe('John');
+            expect(form.fields.email.value).toBe('john@example.com');
+            expect(form.isSubmitting).toBe(false);
+            expect(form.submitCount).toBe(0);
+        });
+
+        it('isFormValid returns true when no field has errors', () => {
+            const nameField = createField('name' as FieldName, 'John');
+            const form = createFormState({ name: nameField });
+            expect(isFormValid(form)).toBe(true);
+        });
+
+        it('isFormValid returns false when any field has errors', () => {
+            const err = validationError('name' as FieldName, 'required', 'Required');
+            const nameField = { ...createField('name' as FieldName, ''), errors: [err] };
+            const form = createFormState({ name: nameField as FormField });
+            expect(isFormValid(form)).toBe(false);
+        });
+
+        it('updateField updates specific field in form', () => {
+            const nameField = createField('name' as FieldName, 'John');
+            const form = createFormState({ name: nameField });
+            const updated = updateField(form, 'name', (f) => setFieldValue(f, 'Jane'));
+            expect(updated.fields.name.value).toBe('Jane');
+        });
+
+        it('setSubmitting increments submit count', () => {
+            const form = createFormState({ name: createField('name' as FieldName, 'John') });
+            const submitting = setSubmitting(form, true);
+            expect(submitting.isSubmitting).toBe(true);
+            expect(submitting.submitCount).toBe(1);
+        });
+
+        it('resetForm resets all fields', () => {
+            const nameField = setFieldValue(createField('name' as FieldName, 'John'), 'Jane');
+            const form = { ...createFormState({ name: nameField }), submitCount: 5 };
+            const reset = resetForm(form);
+            expect(reset.fields.name.value).toBe('John');
+            expect(reset.fields.name.state).toBe('pristine');
+            expect(reset.submitCount).toBe(0);
+        });
+    });
+
+    describe('field validation', () => {
+        it('validateField succeeds for valid value', () => {
+            const field = createField('email' as FieldName, 'test@example.com');
+            const schema = S.String;
+            const result = Effect.runSync(validateField(field, schema));
+            expect(result._tag).toBe('ValidationSuccess');
+        });
+
+        it('validateField fails for invalid value', () => {
+            const field = createField('email' as FieldName, '');
+            const schema = S.NonEmptyString;
+            const result = Effect.runSync(validateField(field, schema));
+            expect(result._tag).toBe('ValidationError');
+        });
+    });
+
+    describe('schema', () => {
+        it('exposes schemas via factory', () => {
             const api = loadApi();
-            const nameError = api.error('name' as never, 'required', 'Name is required');
-            const nameField = { ...api.createField('name', ''), errors: [nameError] };
-            const emailField = api.createField('email', 'john@example.com');
-            const formState = {
-                _tag: 'FormState' as const,
-                fields: { email: emailField, name: nameField },
-                isSubmitting: false,
-                isValid: false,
-                submitCount: 0,
-            };
-            const errors = api.getFieldErrors(formState, 'name');
-            expect(errors).toHaveLength(1);
-            expect(errors[0]?.message).toBe('Name is required');
+            expect(api.schema.field).toBeDefined();
+            expect(api.schema.fieldState).toBeDefined();
+            expect(api.schema.result).toBeDefined();
+            expect(api.schema.state).toBeDefined();
         });
     });
 });

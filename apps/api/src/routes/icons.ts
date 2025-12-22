@@ -1,21 +1,24 @@
 /**
  * Icons group handlers for listing and generating icons via Anthropic API.
  */
-import { makeRepositories } from '@parametric-portal/database/repositories';
+import { makeRepositories, type Repositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder, type PaginationQuery } from '@parametric-portal/server/api';
 import { InternalError } from '@parametric-portal/server/errors';
 import { SessionContext } from '@parametric-portal/server/middleware';
-import { Effect, pipe } from 'effect';
+import { type Context, Effect, pipe } from 'effect';
 import { AppApi } from '../api.ts';
 import { IconGenerationService, type ServiceInput } from '../services/icons.ts';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type IconGenerationServiceType = Context.Tag.Service<typeof IconGenerationService>;
+
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const handleList = (params: PaginationQuery) =>
+const handleList = (repos: Repositories, params: PaginationQuery) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
-            const repos = yield* makeRepositories;
             const assets = yield* repos.assets.findAllByUserId({
                 limit: params.limit,
                 offset: params.offset,
@@ -33,12 +36,10 @@ const handleList = (params: PaginationQuery) =>
         Effect.orDie,
     );
 
-const handleGenerate = (input: ServiceInput) =>
+const handleGenerate = (repos: Repositories, iconService: IconGenerationServiceType, input: ServiceInput) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
-            const repos = yield* makeRepositories;
-            const iconService = yield* IconGenerationService;
             const result = yield* pipe(
                 iconService.generate(input),
                 Effect.filterOrFail(
@@ -60,9 +61,13 @@ const handleGenerate = (input: ServiceInput) =>
 // --- [LAYER] -----------------------------------------------------------------
 
 const IconsLive = HttpApiBuilder.group(AppApi, 'icons', (handlers) =>
-    handlers
-        .handle('list', ({ urlParams }) => handleList(urlParams))
-        .handle('generate', ({ payload }) => handleGenerate(payload)),
+    Effect.gen(function* () {
+        const repos = yield* makeRepositories;
+        const iconService = yield* IconGenerationService;
+        return handlers
+            .handle('list', ({ urlParams }) => handleList(repos, urlParams))
+            .handle('generate', ({ payload }) => handleGenerate(repos, iconService, payload));
+    }),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

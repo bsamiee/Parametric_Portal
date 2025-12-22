@@ -2,7 +2,7 @@
  * HttpApi factories, OpenAPI layer, and HttpApiBuilder re-exports for downstream apps.
  */
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpApiSwagger, OpenApi } from '@effect/platform';
-import { SCHEMA_TUNING } from '@parametric-portal/types/database';
+import { TYPES_TUNING } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
 
 import {
@@ -43,8 +43,8 @@ const B = Object.freeze({
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const PaginationQuerySchema = S.Struct({
-    limit: S.optionalWith(pipe(S.NumberFromString, S.int(), S.between(1, SCHEMA_TUNING.limits.maxPageSize)), {
-        default: () => SCHEMA_TUNING.limits.defaultPageSize,
+    limit: S.optionalWith(pipe(S.NumberFromString, S.int(), S.between(1, TYPES_TUNING.pagination.maxPageSize)), {
+        default: () => TYPES_TUNING.pagination.defaultPageSize,
     }),
     offset: S.optionalWith(pipe(S.NumberFromString, S.int(), S.nonNegative()), {
         default: () => 0,

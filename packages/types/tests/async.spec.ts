@@ -5,13 +5,23 @@ import { it } from '@fast-check/vitest';
 import { Schema as S } from 'effect';
 import fc from 'fast-check';
 import { describe, expect } from 'vitest';
-import { ASYNC_TUNING, asyncState } from '../src/async.ts';
+import {
+    ASYNC_TUNING,
+    AsyncStateSchema,
+    createAsync,
+    fold,
+    map,
+    mkFailure,
+    mkIdle,
+    mkLoading,
+    mkSuccess,
+} from '../src/async.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const loadApi = () => asyncState<{ readonly value: number }, Error>();
-
-const arbitraryData = fc.record({ value: fc.integer() });
+const FIXED_TIME = 1000;
+const loadApi = () => createAsync({ timestampProvider: () => FIXED_TIME });
+const arbitraryData = fc.integer();
 const arbitraryError = fc.string().map((msg) => new Error(msg));
 
 // --- [TESTS] -----------------------------------------------------------------
@@ -31,184 +41,158 @@ describe('async package', () => {
 
         it('exposes tuning constants', () => {
             expect(Object.isFrozen(ASYNC_TUNING)).toBe(true);
-            expect(ASYNC_TUNING.tags.idle).toBe('Idle');
-            expect(ASYNC_TUNING.tags.loading).toBe('Loading');
-            expect(ASYNC_TUNING.tags.success).toBe('Success');
-            expect(ASYNC_TUNING.tags.failure).toBe('Failure');
+            expect(ASYNC_TUNING.tags).toEqual({
+                failure: 'Failure',
+                idle: 'Idle',
+                loading: 'Loading',
+                success: 'Success',
+            });
         });
     });
 
-    describe('idle state', () => {
-        it('creates idle state', () => {
-            const api = loadApi();
-            const state = api.idle;
-            expect(state._tag).toBe(ASYNC_TUNING.tags.idle);
-            expect(api.isIdle(state)).toBe(true);
-            expect(api.isLoading(state)).toBe(false);
-            expect(api.isSuccess(state)).toBe(false);
-            expect(api.isFailure(state)).toBe(false);
-        });
-    });
-
-    describe('loading state', () => {
-        it('creates loading state with timestamp', () => {
-            const api = loadApi();
-            const state = api.loading();
-            expect(state._tag).toBe(ASYNC_TUNING.tags.loading);
-            expect(state.startedAt).toBeGreaterThan(0);
-            expect(api.isLoading(state)).toBe(true);
-            expect(api.isIdle(state)).toBe(false);
+    describe('state constructors', () => {
+        it('mkIdle creates idle state', () => {
+            const state = mkIdle<number, Error>();
+            expect(state._tag).toBe('Idle');
         });
 
-        it('uses custom timestamp provider', () => {
-            const customTime = 12345;
-            const api = asyncState({ timestampProvider: () => customTime });
-            const state = api.loading();
-            expect(state.startedAt).toBe(customTime);
-        });
-    });
-
-    describe('success state', () => {
-        it.prop([arbitraryData])('creates success state', (data) => {
-            const api = loadApi();
-            const state = api.success(data);
-            expect(state._tag).toBe(ASYNC_TUNING.tags.success);
-            expect(state.data).toEqual(data);
-            expect(state.timestamp).toBeGreaterThan(0);
-            expect(api.isSuccess(state)).toBe(true);
+        it('mkLoading creates loading state with timestamp', () => {
+            const state = mkLoading<number, Error>(() => FIXED_TIME);
+            expect(state._tag).toBe('Loading');
+            expect(state.startedAt).toBe(FIXED_TIME);
         });
 
-        it('uses custom timestamp provider', () => {
-            const customTime = 67890;
-            const api = asyncState({ timestampProvider: () => customTime });
-            const state = api.success({ value: 42 });
-            expect(state.timestamp).toBe(customTime);
+        it.prop([arbitraryData])('mkSuccess creates success state', (data) => {
+            const state = mkSuccess<number, Error>(data, () => FIXED_TIME);
+            expect(state._tag).toBe('Success');
+            expect(state.data).toBe(data);
+            expect(state.timestamp).toBe(FIXED_TIME);
         });
-    });
 
-    describe('failure state', () => {
-        it.prop([arbitraryError])('creates failure state', (error) => {
-            const api = loadApi();
-            const state = api.failure(error);
-            expect(state._tag).toBe(ASYNC_TUNING.tags.failure);
+        it.prop([arbitraryError])('mkFailure creates failure state', (error) => {
+            const state = mkFailure<number, Error>(error, () => FIXED_TIME);
+            expect(state._tag).toBe('Failure');
             expect(state.error).toBe(error);
-            expect(state.timestamp).toBeGreaterThan(0);
-            expect(api.isFailure(state)).toBe(true);
+            expect(state.timestamp).toBe(FIXED_TIME);
         });
     });
 
-    describe('type guards', () => {
-        it('identifies all state types', () => {
+    describe('factory api', () => {
+        it('factory.idle creates idle state', () => {
             const api = loadApi();
-            const idle = api.idle;
-            const loading = api.loading();
-            const success = api.success({ value: 1 });
-            const failure = api.failure(new Error('test error'));
-
-            expect(api.isIdle(idle)).toBe(true);
-            expect(api.isLoading(loading)).toBe(true);
-            expect(api.isSuccess(success)).toBe(true);
-            expect(api.isFailure(failure)).toBe(true);
-
-            expect(api.isIdle(loading)).toBe(false);
-            expect(api.isLoading(success)).toBe(false);
-            expect(api.isSuccess(failure)).toBe(false);
-            expect(api.isFailure(idle)).toBe(false);
-        });
-    });
-
-    describe('map transformation', () => {
-        it.prop([arbitraryData])('transforms success data', (data) => {
-            const api = loadApi();
-            const state = api.success(data);
-            const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(mapped._tag).toBe(ASYNC_TUNING.tags.success);
-            expect((mapped as { readonly data: { doubled: number } }).data).toEqual({ doubled: data.value * 2 });
+            const state = api.idle();
+            expect(state._tag).toBe('Idle');
         });
 
-        it('preserves idle state', () => {
-            const api = loadApi();
-            const state = api.idle;
-            const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(mapped._tag).toBe(ASYNC_TUNING.tags.idle);
-        });
-
-        it('preserves loading state', () => {
+        it('factory.loading uses injected timestamp', () => {
             const api = loadApi();
             const state = api.loading();
-            const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(mapped._tag).toBe(ASYNC_TUNING.tags.loading);
+            expect(state._tag).toBe('Loading');
+            expect(state.startedAt).toBe(FIXED_TIME);
         });
 
-        it.prop([arbitraryError])('preserves failure state', (error) => {
+        it.prop([arbitraryData])('factory.success uses injected timestamp', (data) => {
+            const api = loadApi();
+            const state = api.success(data);
+            expect(state._tag).toBe('Success');
+            expect(state.data).toBe(data);
+            expect(state.timestamp).toBe(FIXED_TIME);
+        });
+
+        it.prop([arbitraryError])('factory.failure uses injected timestamp', (error) => {
             const api = loadApi();
             const state = api.failure(error);
-            const mapped = api.map(state, (d) => ({ doubled: d.value * 2 }));
-            expect(mapped._tag).toBe(ASYNC_TUNING.tags.failure);
+            expect(state._tag).toBe('Failure');
+            expect(state.error).toBe(error);
+            expect(state.timestamp).toBe(FIXED_TIME);
         });
     });
 
-    describe('fold handler', () => {
-        it('folds idle to value', () => {
-            const api = loadApi();
-            const state = api.idle;
-            const result = api.fold(state, {
-                onFailure: () => 'failure',
-                onIdle: () => 'idle',
-                onLoading: () => 'loading',
-                onSuccess: () => 'success',
+    describe('fold', () => {
+        it('folds idle state', () => {
+            const state = mkIdle<number, Error>();
+            const result = fold(state, {
+                Failure: () => 'failure',
+                Idle: () => 'idle',
+                Loading: () => 'loading',
+                Success: () => 'success',
             });
             expect(result).toBe('idle');
         });
 
-        it('folds loading to value with timestamp', () => {
-            const api = loadApi();
-            const state = api.loading();
-            const result = api.fold(state, {
-                onFailure: () => 0,
-                onIdle: () => 0,
-                onLoading: (startedAt) => startedAt,
-                onSuccess: () => 0,
+        it('folds loading state with startedAt', () => {
+            const state = mkLoading<number, Error>(() => FIXED_TIME);
+            const result = fold(state, {
+                Failure: () => 0,
+                Idle: () => 0,
+                Loading: (startedAt) => startedAt,
+                Success: () => 0,
             });
-            expect(result).toBeGreaterThan(0);
+            expect(result).toBe(FIXED_TIME);
         });
 
-        it.prop([arbitraryData])('folds success to value', (data) => {
-            const api = loadApi();
-            const state = api.success(data);
-            const result = api.fold(state, {
-                onFailure: () => 'failure',
-                onIdle: () => 'idle',
-                onLoading: () => 'loading',
-                onSuccess: (d) => `success:${d.value}`,
+        it.prop([arbitraryData])('folds success state with data', (data) => {
+            const state = mkSuccess<number, Error>(data, () => FIXED_TIME);
+            const result = fold(state, {
+                Failure: () => -1,
+                Idle: () => -1,
+                Loading: () => -1,
+                Success: (d) => d,
             });
-            expect(result).toBe(`success:${data.value}`);
+            expect(result).toBe(data);
         });
 
-        it.prop([arbitraryError])('folds failure to value', (error) => {
-            const api = loadApi();
-            const state = api.failure(error);
-            const result = api.fold(state, {
-                onFailure: (e) => `failure:${(e as Error).message}`,
-                onIdle: () => 'idle',
-                onLoading: () => 'loading',
-                onSuccess: () => 'success',
+        it.prop([arbitraryError])('folds failure state with error', (error) => {
+            const state = mkFailure<number, Error>(error, () => FIXED_TIME);
+            const result = fold(state, {
+                Failure: (e) => e.message,
+                Idle: () => '',
+                Loading: () => '',
+                Success: () => '',
             });
-            expect(result).toBe(`failure:${error.message}`);
+            expect(result).toBe(error.message);
         });
     });
 
-    describe('schema validation', () => {
-        it('validates idle schema', () => {
-            const schema = asyncState().schemas.idle;
-            expect(S.is(schema)({ _tag: 'Idle' })).toBe(true);
-            expect(S.is(schema)({ _tag: 'Loading' })).toBe(false);
+    describe('map', () => {
+        it.prop([arbitraryData])('transforms success data', (data) => {
+            const state = mkSuccess<number, Error>(data, () => FIXED_TIME);
+            const mapped = map(
+                state,
+                (d) => d * 2,
+                () => FIXED_TIME,
+            );
+            expect(mapped._tag).toBe('Success');
+            expect((mapped as { readonly data: number }).data).toBe(data * 2);
         });
 
-        it('validates loading schema', () => {
-            const schema = asyncState().schemas.loading;
+        it('preserves idle state', () => {
+            const state = mkIdle<number, Error>();
+            const mapped = map(state, (d) => d * 2);
+            expect(mapped._tag).toBe('Idle');
+        });
+
+        it('preserves loading state', () => {
+            const state = mkLoading<number, Error>(() => FIXED_TIME);
+            const mapped = map(state, (d) => d * 2);
+            expect(mapped._tag).toBe('Loading');
+        });
+
+        it.prop([arbitraryError])('preserves failure state', (error) => {
+            const state = mkFailure<number, Error>(error, () => FIXED_TIME);
+            const mapped = map(state, (d) => d * 2);
+            expect(mapped._tag).toBe('Failure');
+            expect((mapped as { readonly error: Error }).error).toBe(error);
+        });
+    });
+
+    describe('schema', () => {
+        it('validates state union via AsyncStateSchema', () => {
+            const schema = AsyncStateSchema(S.Number, S.instanceOf(Error));
+            expect(S.is(schema)({ _tag: 'Idle' })).toBe(true);
             expect(S.is(schema)({ _tag: 'Loading', startedAt: 123 })).toBe(true);
-            expect(S.is(schema)({ _tag: 'Idle' })).toBe(false);
+            expect(S.is(schema)({ _tag: 'Success', data: 42, timestamp: 123 })).toBe(true);
+            expect(S.is(schema)({ _tag: 'Invalid' })).toBe(false);
         });
     });
 });

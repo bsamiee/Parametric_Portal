@@ -1,16 +1,19 @@
 /**
- * Generic SVG infrastructure: branded types, sanitization, and ID scoping.
- * Reusable by ANY app that works with SVG content.
+ * SVG sanitization, scoping, and asset creation.
+ * Grounding: DOMPurify whitelist with ID collision prevention.
  */
-
 import { pipe, Schema as S } from 'effect';
 import DOMPurify from 'isomorphic-dompurify';
+import type { Hex8, HtmlId } from './types.ts';
+import { deriveHex8, generateHex8, generateUuidv7Sync, Hex8Schema, HtmlIdSchema, Uuidv7Schema } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type Scope = S.Schema.Type<typeof ScopeSchema>;
+type Scope = Hex8;
+type SvgId = HtmlId;
 type Svg = S.Schema.Type<typeof SvgSchema>;
-type SvgId = S.Schema.Type<typeof SvgIdSchema>;
+type SvgAssetInput = S.Schema.Type<typeof SvgAssetInputSchema>;
+type SvgAsset = S.Schema.Type<typeof SvgAssetSchema>;
 type SanitizeOptions = { readonly scope?: Scope };
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -82,19 +85,12 @@ const B = Object.freeze({
         ],
         USE_PROFILES: { svg: true },
     },
-    scope: {
-        charIndex: 0,
-        hashMultiplier: 31,
-        hashSeed: 0,
-        length: 8,
-        padChar: '0',
-        radix: 16,
-    },
 } as const);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const ScopeSchema = pipe(S.String, S.pattern(/^[0-9a-f]{8}$/), S.brand('Scope'));
+const ScopeSchema = Hex8Schema;
+const SvgIdSchema = HtmlIdSchema;
 
 const SvgSchema = pipe(
     S.String,
@@ -102,27 +98,21 @@ const SvgSchema = pipe(
     S.brand('Svg'),
 );
 
-const SvgIdSchema = pipe(S.String, S.pattern(/^[a-zA-Z_][a-zA-Z0-9_-]*$/), S.brand('SvgId'));
+const SvgAssetInputSchema = S.Struct({
+    name: S.NonEmptyTrimmedString,
+    svg: S.String,
+});
+
+const SvgAssetSchema = S.Struct({
+    id: Uuidv7Schema,
+    name: S.NonEmptyTrimmedString,
+    svg: SvgSchema,
+});
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const scopeModulo = B.scope.radix ** B.scope.length;
-
-const generateScope = (): Scope =>
-    S.decodeSync(ScopeSchema)(
-        Array.from({ length: B.scope.length }, () =>
-            Math.trunc(Math.random() * B.scope.radix).toString(B.scope.radix),
-        ).join(''),
-    );
-
-const deriveScope = (seed: string): Scope => {
-    const hash = Array.from(seed).reduce<number>(
-        (acc, char) => (acc * B.scope.hashMultiplier + (char.codePointAt(B.scope.charIndex) ?? 0)) % scopeModulo,
-        B.scope.hashSeed,
-    );
-    const hex = hash.toString(B.scope.radix).padStart(B.scope.length, B.scope.padChar);
-    return S.decodeSync(ScopeSchema)(hex.slice(-B.scope.length));
-};
+const generateScope = (): Scope => generateHex8();
+const deriveScope = (seed: string): Scope => deriveHex8(seed);
 
 const escapeRegExp = (str: string): string => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 
@@ -130,7 +120,6 @@ const scopeIds = (svg: string, scope: Scope): string => {
     const idMap = new Map<SvgId, SvgId>();
 
     const withScopedIds = svg.replaceAll(B.patterns.idAttr, (_match, oldId: string) => {
-        // Sync decode: pure function context; throws on malformed SVG IDs (expected for invalid input)
         const validatedId = S.decodeSync(SvgIdSchema)(oldId);
         const newId = `${validatedId}_${scope}` as SvgId;
         idMap.set(validatedId, newId);
@@ -166,7 +155,25 @@ const isSvgValid = (svg: string): boolean => {
     return B.patterns.svgTag.test(sanitized) && sanitized.includes('</svg>');
 };
 
+const createSvgAsset = (input: SvgAssetInput): SvgAsset => ({
+    id: generateUuidv7Sync(),
+    name: input.name.trim(),
+    svg: sanitizeSvg(input.svg) as Svg,
+});
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as SVG_TUNING, deriveScope, generateScope, isSvgValid, sanitizeSvg, ScopeSchema, SvgIdSchema, SvgSchema };
-export type { SanitizeOptions, Scope, Svg, SvgId };
+export {
+    B as SVG_TUNING,
+    createSvgAsset,
+    deriveScope,
+    generateScope,
+    isSvgValid,
+    sanitizeSvg,
+    ScopeSchema,
+    SvgAssetInputSchema,
+    SvgAssetSchema,
+    SvgIdSchema,
+    SvgSchema,
+};
+export type { SanitizeOptions, Scope, Svg, SvgAsset, SvgAssetInput, SvgId };

@@ -7,7 +7,7 @@ import {
 } from '@parametric-portal/server/api';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
-import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
+import { AssetListItemSchema, OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
 import { Uuidv7Schema } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
@@ -25,11 +25,6 @@ const SessionResponseSchema = S.Struct({
 const UserResponseSchema = S.Struct({
     email: S.String,
     id: UserIdSchema,
-});
-
-const AssetListItemSchema = S.Struct({
-    id: S.String,
-    prompt: S.String,
 });
 
 const PaginatedAssetListSchema = S.Struct({

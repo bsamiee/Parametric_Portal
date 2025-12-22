@@ -14,7 +14,7 @@ export default defineConfig(
                 temporal: './src/temporal.ts',
                 types: './src/types.ts',
             },
-            external: ['effect', '@effect/schema', 'date-fns', 'immer', 'ts-pattern', 'uuid', 'zustand'],
+            external: ['effect', '@effect/schema', 'date-fns', 'immer', 'uuid', 'zustand'],
             mode: 'library',
             name: 'ParametricTypes',
         }),

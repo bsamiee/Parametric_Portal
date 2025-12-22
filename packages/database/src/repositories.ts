@@ -364,6 +364,11 @@ const makeRepositories = Effect.gen(function* () {
     };
 });
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type Repositories = Effect.Effect.Success<typeof makeRepositories>;
+
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as REPOSITORY_TUNING, makeRepositories };
+export type { Repositories };

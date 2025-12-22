@@ -10,13 +10,14 @@ import {
     type Palette,
 } from '@parametric-portal/api/contracts/icons';
 import { type ApiError, type ApiResponse, api, type HttpStatusError } from '@parametric-portal/types/api';
-import { asyncState } from '@parametric-portal/types/async';
+import { type AsyncState, createAsync } from '@parametric-portal/types/async';
 import type { ColorMode } from '@parametric-portal/types/database';
 import { Effect, pipe } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type GenerateInput = GenerateRequest & { readonly signal?: AbortSignal };
+type IconAsyncState = AsyncState<ApiResponse<GenerateResponse>, ApiError>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -32,8 +33,8 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const apiFactory = api<GenerateResponse>();
-const asyncApi = asyncState<ApiResponse<GenerateResponse>, ApiError>();
+const apiFactory = api();
+const asyncApi = createAsync();
 
 const buildHeaders = (): HeadersInit => {
     const token = localStorage.getItem('accessToken');
@@ -119,4 +120,4 @@ const generateIcon = (input: GenerateInput): Effect.Effect<ApiResponse<GenerateR
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { apiFactory, asyncApi, B as API_CONFIG, buildLayerManifest, generateIcon, getPalette };
-export type { GenerateInput };
+export type { GenerateInput, IconAsyncState };
