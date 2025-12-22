@@ -72,7 +72,7 @@ const fetchGenerate = (
                     : apiFactory.error(
                           500 as HttpStatusError,
                           'NETWORK_ERROR',
-                          e instanceof Error ? e.message : String(e),
+                          (e as { message?: string }).message ?? String(e),
                       ),
             try: () =>
                 fetch(`${B.baseUrl}/icons`, {
@@ -112,7 +112,7 @@ const generateIcon = (input: GenerateInput): Effect.Effect<ApiResponse<GenerateR
         Effect.map((response) =>
             response._tag === 'ApiSuccess'
                 ? apiFactory.success({ id: response.data.id, variants: response.data.variants })
-                : (response as ApiError),
+                : response,
         ),
     );
 

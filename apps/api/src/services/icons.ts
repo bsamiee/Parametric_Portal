@@ -201,10 +201,7 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
     return parts.join('\n\n');
 };
 
-const extractJsonFromText = (text: string): string => {
-    const match = text.match(/\{[\s\S]*"variants"[\s\S]*\}/);
-    return match?.[0] ?? text;
-};
+const extractJsonFromText = (text: string): string => /\{[\s\S]*"variants"[\s\S]*\}/.exec(text)?.[0] ?? text;
 
 const parseVariantsResponse = (text: string): Effect.Effect<ServiceOutput, InternalError> =>
     pipe(
