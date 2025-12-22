@@ -1,8 +1,9 @@
 /**
  * Provide Model.Class entities with auto-generated schema variants.
+ * Import @effect/experimental for VariantSchema types required by Model.Class declarations.
  */
+import '@effect/experimental';
 import { Model } from '@effect/sql';
-import { Schema as S } from 'effect';
 import {
     ApiKeyIdSchema,
     AssetIdSchema,
@@ -15,7 +16,8 @@ import {
     RefreshTokenIdSchema,
     SessionIdSchema,
     UserIdSchema,
-} from './schema.ts';
+} from '@parametric-portal/types/database';
+import { Schema as S } from 'effect';
 
 // --- [MODELS] ----------------------------------------------------------------
 

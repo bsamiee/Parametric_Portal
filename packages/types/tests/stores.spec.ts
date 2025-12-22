@@ -135,8 +135,8 @@ describe('stores package', () => {
             const userSlice = api.createSlice({ initialState: { name: 'John' }, name: 'user' });
             const combined = api.combineSlices(asSliceRecord({ counter: counterSlice, user: userSlice }));
             const state = combined.getState();
-            expect((state.counter as { count: number }).count).toBe(0);
-            expect((state.user as { name: string }).name).toBe('John');
+            expect((state['counter'] as { count: number }).count).toBe(0);
+            expect((state['user'] as { name: string }).name).toBe('John');
         });
 
         it('propagates slice updates to combined state', () => {
@@ -146,7 +146,7 @@ describe('stores package', () => {
             const combined = api.combineSlices(asSliceRecord({ counter: counterSlice, user: userSlice }));
             counterSlice.actions.set({ count: 42 });
             const state = combined.getState();
-            expect((state.counter as { count: number }).count).toBe(42);
+            expect((state['counter'] as { count: number }).count).toBe(42);
         });
 
         it('notifies subscribers on any slice change', () => {

@@ -1,4 +1,3 @@
-import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/database/schema';
 import {
     createApi,
     createGroup,
@@ -8,6 +7,8 @@ import {
 } from '@parametric-portal/server/api';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
+import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
+import { Uuidv7Schema } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -15,9 +16,9 @@ import { Schema as S } from 'effect';
 const OAuthStartResponseSchema = S.Struct({ url: S.String });
 
 const SessionResponseSchema = S.Struct({
-    accessToken: S.String,
+    accessToken: Uuidv7Schema,
     expiresAt: S.DateTimeUtc,
-    refreshToken: S.String,
+    refreshToken: Uuidv7Schema,
 });
 
 const UserResponseSchema = S.Struct({

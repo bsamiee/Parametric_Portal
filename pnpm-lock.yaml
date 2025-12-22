@@ -509,6 +509,9 @@ importers:
       '@parametric-portal/server':
         specifier: workspace:*
         version: link:../../packages/server
+      '@parametric-portal/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       arctic:
         specifier: 'catalog:'
         version: 3.7.0
@@ -671,6 +674,9 @@ importers:
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 0.50.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
+      '@parametric-portal/types':
+        specifier: workspace:*
+        version: link:../types
       effect:
         specifier: 'catalog:'
         version: 3.19.13

@@ -18,6 +18,7 @@
         "@effect/sql": "catalog:",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
         "arctic": "catalog:",
         "effect": "catalog:"
     },

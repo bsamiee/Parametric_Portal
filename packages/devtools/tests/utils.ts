@@ -77,8 +77,12 @@ const perfEntry = (entryType: string, overrides: Partial<PerformanceEntry> = {})
         ...overrides,
     }) as PerformanceEntry;
 
-const layer = (opts: { logLevel?: LogLevelKey; maxLogs?: number } = {}) =>
-    createLoggerLayer({ logLevel: opts.logLevel ?? B.defaultLogLevel, maxLogs: opts.maxLogs ?? B.defaultMaxLogs });
+const layer = (opts: { logLevel?: LogLevelKey; maxLogs?: number; silent?: boolean } = {}) =>
+    createLoggerLayer({
+        logLevel: opts.logLevel ?? B.defaultLogLevel,
+        maxLogs: opts.maxLogs ?? B.defaultMaxLogs,
+        silent: opts.silent ?? true,
+    });
 
 /**
  * Dispatch table for test logger: lowercase keys for case-insensitive lookup.
@@ -108,7 +112,15 @@ const mockLogger = () => {
  * Create mock PerformanceObserver for testing.
  * Uses function syntax (not arrow) to support `new` constructor invocation.
  */
-const mockPerformanceObserver = (supportedTypes: ReadonlyArray<string> = ['longtask']) => {
+type MockPerformanceObserverResult = {
+    disconnect: ReturnType<typeof vi.fn>;
+    Mock: typeof PerformanceObserver;
+    observe: ReturnType<typeof vi.fn>;
+};
+
+const mockPerformanceObserver = (
+    supportedTypes: ReadonlyArray<string> = ['longtask'],
+): MockPerformanceObserverResult => {
     const disconnect = vi.fn();
     const observe = vi.fn();
     const Mock = vi.fn(function (this: { disconnect: typeof disconnect; observe: typeof observe }) {
@@ -151,8 +163,9 @@ const expectFailure = async <A, E>(
 const setupBrowser = (opts: { window?: boolean; ws?: boolean; po?: ReadonlyArray<string> } = {}): void => {
     (globalThis as { window?: unknown }).window = opts.window === false ? undefined : {};
     (globalThis as { WebSocket?: unknown }).WebSocket = opts.ws ? vi.fn() : undefined;
-    (globalThis as { PerformanceObserver?: { supportedEntryTypes: ReadonlyArray<string> } }).PerformanceObserver =
-        opts.po ? { supportedEntryTypes: opts.po } : undefined;
+    (
+        globalThis as { PerformanceObserver?: { supportedEntryTypes: ReadonlyArray<string> } | undefined }
+    ).PerformanceObserver = opts.po ? { supportedEntryTypes: opts.po } : undefined;
 };
 
 const setupNoBrowser = () => {

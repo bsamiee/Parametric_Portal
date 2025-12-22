@@ -63,7 +63,7 @@ describe('boundary', () => {
             const onError = vi.fn();
             const original = new Error('original');
             createRootErrorOptions({ loggerLayer: l, onError }).onUncaughtError(original, {});
-            expect(onError.mock.calls[0][0]).toBe(original);
+            expect(onError.mock.calls[0]?.[0]).toBe(original);
         });
 
         it('passes errorInfo to onError context', () => {
@@ -71,7 +71,7 @@ describe('boundary', () => {
             const onError = vi.fn();
             const errorInfo = { componentStack: 'test stack' };
             createRootErrorOptions({ loggerLayer: l, onError }).onUncaughtError(new Error('e'), errorInfo);
-            expect(onError.mock.calls[0][1]).toMatchObject({ errorInfo });
+            expect(onError.mock.calls[0]?.[1]).toMatchObject({ errorInfo });
         });
     });
 });
