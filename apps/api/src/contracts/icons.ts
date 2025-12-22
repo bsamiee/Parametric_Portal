@@ -2,7 +2,7 @@
  * Icon generation domain contracts.
  * Single source of truth for all icon-related types across apps.
  */
-import { type ColorMode, ColorModeSchema, type Intent, IntentSchema } from '@parametric-portal/types/database';
+import { type ColorMode, ColorModeSchema, IntentSchema } from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -92,23 +92,6 @@ type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    ColorModeSchema,
-    GenerateRequestSchema,
-    GenerateResponseSchema,
-    ICON_DESIGN,
-    IntentSchema,
-    ReferenceAttachmentSchema,
-    SvgVariantSchema,
-};
+export { GenerateRequestSchema, GenerateResponseSchema, ICON_DESIGN, ReferenceAttachmentSchema, SvgVariantSchema };
 
-export type {
-    ColorMode,
-    GenerateRequest,
-    GenerateResponse,
-    Intent,
-    LayerSpec,
-    Palette,
-    ReferenceAttachment,
-    SvgVariant,
-};
+export type { GenerateRequest, GenerateResponse, LayerSpec, Palette, ReferenceAttachment, SvgVariant };

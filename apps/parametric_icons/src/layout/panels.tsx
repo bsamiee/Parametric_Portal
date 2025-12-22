@@ -3,8 +3,8 @@
  * Mirrors Arsenal architecture with rail + drawer sidebar, centered input, and preview viewport.
  */
 
-import type { Intent } from '@parametric-portal/api/contracts/icons';
 import { sanitizeFilename } from '@parametric-portal/hooks/browser';
+import type { Intent } from '@parametric-portal/types/database';
 import { deriveScope, sanitizeSvg } from '@parametric-portal/types/svg';
 import { types, type Uuidv7 } from '@parametric-portal/types/types';
 import type { ReactNode } from 'react';

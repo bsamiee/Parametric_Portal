@@ -69,7 +69,7 @@ const PaginationParamsSchema = S.Struct({
 const OAuthProviderSchema = S.Union(S.Literal('google'), S.Literal('github'), S.Literal('microsoft'));
 const OrganizationRoleSchema = S.Union(S.Literal('owner'), S.Literal('admin'), S.Literal('member'));
 
-const ColorModeSchema = S.Literal('light', 'dark');
+const ColorModeSchema = S.Literal('dark', 'light');
 const IntentSchema = S.Literal('create', 'refine');
 
 const AssetMetadataSchema = S.Struct({
