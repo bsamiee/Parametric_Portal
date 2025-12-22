@@ -33,7 +33,11 @@ jobs:
             --model claude-opus-4-5-20251101
             --allowedTools
             "Read,Write,Edit,Glob,Grep,Task,TodoWrite,Skill,WebSearch,WebFetch,
-            Bash(gh:*),Bash(git:*),Bash(pnpm:*),Bash(node:*),Bash(uv:*)"
+            Bash(gh:*),Bash(git:*),Bash(pnpm:*),Bash(node:*),Bash(uv:*),
+            mcp__github__create_pending_pull_request_review,
+            mcp__github__get_pull_request_diff,
+            mcp__github__add_comment_to_pending_review,
+            mcp__github__submit_pending_pull_request_review"
           prompt: |
             [REQUIRED]: Create a single OVERVIEW comment, NEST all findings/suggestions/fixes underneath this comment as individual comments, with proper formatting for PR reviews.
 
@@ -62,10 +66,11 @@ jobs:
             - Reject band-aids — require proper solutions
 
             [PHASE_4] Output
-            Collect all issues, then submit ONE review via gh api:
-            gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews \
-              --method POST -f body="SUMMARY" -f event="COMMENT" \
-              -f comments='[{"path":"file","line":N,"body":"COMMENT"}]'
+            Use the pending review workflow for inline comments:
+            1. mcp__github__create_pending_pull_request_review — start pending review
+            2. mcp__github__get_pull_request_diff — get line numbers for targeting
+            3. mcp__github__add_comment_to_pending_review — add each inline comment
+            4. mcp__github__submit_pending_pull_request_review — submit with event "COMMENT"
 
             [COMMENT_FORMAT]
             **Issue:** Concise problem statement
