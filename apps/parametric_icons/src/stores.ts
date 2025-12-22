@@ -2,12 +2,8 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
-import type {
-    ColorMode,
-    ParametricIntent,
-    ReferenceAttachment,
-    SvgVariant,
-} from '@parametric-portal/api/contracts/icons';
+import type { ColorMode, Intent, ReferenceAttachment } from '@parametric-portal/api/contracts/icons';
+import { SvgVariantSchema } from '@parametric-portal/api/contracts/icons';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { types } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
@@ -22,8 +18,8 @@ type ChatState = S.Schema.Type<typeof ChatStateSchema>;
 type PreviewState = S.Schema.Type<typeof PreviewStateSchema>;
 type ContextState = S.Schema.Type<typeof ContextStateSchema>;
 type UiState = S.Schema.Type<typeof UiStateSchema>;
-type ParametricAsset = S.Schema.Type<typeof ParametricAssetSchema>;
-type SavedAsset = ParametricAsset;
+type Asset = S.Schema.Type<typeof AssetSchema>;
+type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
 type HistoryState = S.Schema.Type<typeof HistoryStateSchema>;
 type LibraryState = S.Schema.Type<typeof LibraryStateSchema>;
 
@@ -49,14 +45,8 @@ const PreviewStateSchema = S.Struct({
     zoom: pipe(S.Number, S.between(0.1, 10)),
 });
 
-const ReferenceSchema = S.Struct({
-    id: S.String,
-    name: S.String,
-    svg: S.String,
-});
-
 const ContextStateSchema = S.Struct({
-    attachments: S.Array(ReferenceSchema),
+    attachments: S.Array(S.Struct({ id: S.String, name: S.String, svg: S.String })),
     colorMode: S.Literal('dark', 'light'),
     intent: S.Literal('create', 'refine'),
     output: S.Literal('single', 'batch'),
@@ -69,13 +59,7 @@ const UiStateSchema = S.Struct({
     showSafeArea: S.Boolean,
 });
 
-const SvgVariantSchema = S.Struct({
-    id: S.typeSchema(typesApi.brands.uuidv7),
-    name: S.String,
-    svg: S.String,
-});
-
-const ParametricAssetSchema = S.Struct({
+const AssetSchema = S.Struct({
     context: ContextStateSchema,
     id: S.typeSchema(typesApi.brands.uuidv7),
     intent: S.Literal('create', 'refine'),
@@ -86,7 +70,7 @@ const ParametricAssetSchema = S.Struct({
 });
 
 const HistoryStateSchema = S.Struct({
-    assets: S.Array(ParametricAssetSchema),
+    assets: S.Array(AssetSchema),
     currentId: S.NullOr(S.String),
 });
 
@@ -100,7 +84,7 @@ type CustomAsset = S.Schema.Type<typeof CustomAssetSchema>;
 
 const LibraryStateSchema = S.Struct({
     customAssets: S.Array(CustomAssetSchema),
-    savedAssets: S.Array(ParametricAssetSchema),
+    savedAssets: S.Array(AssetSchema),
 });
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -145,29 +129,29 @@ type ContextActions = {
     readonly clearAttachments: () => void;
     readonly removeAttachment: (id: string) => void;
     readonly setColorMode: (mode: ColorMode) => void;
-    readonly setIntent: (intent: ParametricIntent) => void;
+    readonly setIntent: (intent: Intent) => void;
     readonly setOutput: (mode: OutputMode) => void;
     readonly toggleColorMode: () => void;
 };
 
 type HistoryActions = {
-    readonly addAsset: (asset: ParametricAsset) => void;
+    readonly addAsset: (asset: Asset) => void;
     readonly clearAll: () => void;
     readonly deleteAsset: (id: string) => void;
-    readonly findAsset: (id: string) => ParametricAsset | undefined;
-    readonly getCurrentAsset: () => ParametricAsset | undefined;
+    readonly findAsset: (id: string) => Asset | undefined;
+    readonly getCurrentAsset: () => Asset | undefined;
     readonly selectAsset: (id: string | null) => void;
     readonly setSelectedVariantIndex: (assetId: string, index: number) => void;
 };
 
 type LibraryActions = {
-    readonly addSavedAsset: (asset: SavedAsset) => void;
+    readonly addAsset: (asset: Asset) => void;
     readonly addCustomAsset: (name: string, svg: string) => void;
-    readonly clearSavedAssets: () => void;
+    readonly clearAssets: () => void;
     readonly getCustomAsset: (id: string) => CustomAsset | undefined;
     readonly isSaved: (id: string) => boolean;
     readonly removeCustomAsset: (id: string) => void;
-    readonly removeSavedAsset: (id: string) => void;
+    readonly removeAsset: (id: string) => void;
 };
 
 type UiActions = {
@@ -206,7 +190,7 @@ const contextSlice: StoreSlice<ContextState, ContextActions> = storeApi.createSl
         clearAttachments: () => set({ ...get(), attachments: [] }),
         removeAttachment: (id: string) => set({ ...get(), attachments: get().attachments.filter((a) => a.id !== id) }),
         setColorMode: (mode: ColorMode) => set({ ...get(), colorMode: mode }),
-        setIntent: (intent: ParametricIntent) => set({ ...get(), intent }),
+        setIntent: (intent: Intent) => set({ ...get(), intent }),
         setOutput: (mode: OutputMode) => set({ ...get(), output: mode }),
         toggleColorMode: () => set({ ...get(), colorMode: get().colorMode === 'dark' ? 'light' : 'dark' }),
     }),
@@ -227,7 +211,7 @@ const uiSlice: StoreSlice<UiState, UiActions> = storeApi.createSlice({
 
 const historySlice: StoreSlice<HistoryState, HistoryActions> = storeApi.createSlice({
     actions: (set, get) => ({
-        addAsset: (asset: ParametricAsset) =>
+        addAsset: (asset: Asset) =>
             set({
                 ...get(),
                 assets: [{ ...asset, selectedVariantIndex: 0 }, ...get().assets].slice(0, B.history.maxItems),
@@ -249,30 +233,30 @@ const historySlice: StoreSlice<HistoryState, HistoryActions> = storeApi.createSl
                 assets: get().assets.map((a) => (a.id === assetId ? { ...a, selectedVariantIndex: index } : a)),
             }),
     }),
-    initialState: { assets: [] as ReadonlyArray<ParametricAsset>, currentId: null as string | null },
+    initialState: { assets: [] as ReadonlyArray<Asset>, currentId: null as string | null },
     name: 'history',
 });
 
 const librarySlice: StoreSlice<LibraryState, LibraryActions> = storeApi.createSlice({
     actions: (set, get) => ({
-        addCustomAsset: (name: string, svg: string) => {
-            const id = typesApi.generateUuidv7Sync();
-            set({ ...get(), customAssets: [...get().customAssets, { id, name, svg }] });
-        },
-        addSavedAsset: (asset: SavedAsset) =>
+        addAsset: (asset: Asset) =>
             set({
                 ...get(),
                 savedAssets: get().savedAssets.some((a) => a.id === asset.id)
                     ? get().savedAssets
                     : [...get().savedAssets, asset],
             }),
-        clearSavedAssets: () => set({ ...get(), savedAssets: [] }),
+        addCustomAsset: (name: string, svg: string) => {
+            const id = typesApi.generateUuidv7Sync();
+            set({ ...get(), customAssets: [...get().customAssets, { id, name, svg }] });
+        },
+        clearAssets: () => set({ ...get(), savedAssets: [] }),
         getCustomAsset: (id: string) => get().customAssets.find((a) => a.id === id),
         isSaved: (id: string) => get().savedAssets.some((asset) => asset.id === id),
+        removeAsset: (id: string) =>
+            set({ ...get(), savedAssets: get().savedAssets.filter((asset) => asset.id !== id) }),
         removeCustomAsset: (id: string) =>
             set({ ...get(), customAssets: get().customAssets.filter((a) => a.id !== id) }),
-        removeSavedAsset: (id: string) =>
-            set({ ...get(), savedAssets: get().savedAssets.filter((asset) => asset.id !== id) }),
     }),
     initialState: B.library,
     name: 'library',
@@ -301,9 +285,9 @@ export {
     uiSlice,
 };
 export type {
+    Asset,
     ChatActions,
     ChatState,
-    ColorMode,
     ContextActions,
     ContextState,
     CustomAsset,
@@ -314,12 +298,8 @@ export type {
     Message,
     MessageRole,
     OutputMode,
-    ParametricAsset,
-    ParametricIntent,
     PreviewActions,
     PreviewState,
-    ReferenceAttachment,
-    SavedAsset,
     SidebarTab,
     SvgVariant,
     UiActions,

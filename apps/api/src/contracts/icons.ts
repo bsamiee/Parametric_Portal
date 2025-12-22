@@ -6,9 +6,6 @@ import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ColorMode = 'dark' | 'light';
-type ParametricIntent = 'create' | 'refine';
-
 type Palette = {
     readonly structural: {
         readonly guide: string;
@@ -33,6 +30,9 @@ type LayerSpec = {
 
 const ColorModeSchema = S.Literal('dark', 'light');
 const IntentSchema = S.Literal('create', 'refine');
+
+type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
+type Intent = S.Schema.Type<typeof IntentSchema>;
 
 const ReferenceAttachmentSchema = S.Struct({
     id: S.String,
@@ -88,6 +88,13 @@ const ICON_DESIGN = Object.freeze({
     } satisfies Record<ColorMode, Palette>,
 } as const);
 
+// --- [DERIVED_TYPES] ---------------------------------------------------------
+
+type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
+type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
+type ReferenceAttachment = S.Schema.Type<typeof ReferenceAttachmentSchema>;
+type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
+
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
@@ -100,11 +107,13 @@ export {
     SvgVariantSchema,
 };
 
-export type { ColorMode, LayerSpec, Palette, ParametricIntent };
-
-type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
-type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
-type ReferenceAttachment = S.Schema.Type<typeof ReferenceAttachmentSchema>;
-type SvgVariant = S.Schema.Type<typeof SvgVariantSchema>;
-
-export type { GenerateRequest, GenerateResponse, ReferenceAttachment, SvgVariant };
+export type {
+    ColorMode,
+    GenerateRequest,
+    GenerateResponse,
+    Intent,
+    LayerSpec,
+    Palette,
+    ReferenceAttachment,
+    SvgVariant,
+};

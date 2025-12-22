@@ -59,14 +59,13 @@ const B = Object.freeze({
         },
         maxTokens: 6000,
         model: 'claude-sonnet-4-20250514',
+        prefill: '{"variants":[',
     },
     errors: {
         invalidInput: { code: 'INVALID_INPUT', message: 'Invalid generation input' },
         parseFailure: { cause: 'Failed to parse response' },
     },
 } as const);
-
-const PREFILL = '{"variants":[';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -203,16 +202,15 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
 };
 
 const extractJsonFromText = (text: string): string => {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    return start !== -1 && end !== -1 ? text.slice(start, end + 1) : text;
+    const match = text.match(/\{[\s\S]*"variants"[\s\S]*\}/);
+    return match?.[0] ?? text;
 };
 
 const parseVariantsResponse = (text: string): Effect.Effect<ServiceOutput, InternalError> =>
     pipe(
         Effect.try({
             catch: () => new InternalError({ cause: B.errors.parseFailure.cause }),
-            try: () => JSON.parse(extractJsonFromText(PREFILL + text)) as unknown,
+            try: () => JSON.parse(extractJsonFromText(B.ai.prefill + text)) as unknown,
         }),
         Effect.flatMap((parsed) =>
             S.decodeUnknown(AiVariantsResponseSchema)(parsed).pipe(
@@ -252,7 +250,7 @@ const IconGenerationServiceLive = Layer.effect(
                         anthropic.send(buildSystemPrompt(ctx), [{ content: buildUserMessage(ctx), role: 'user' }], {
                             maxTokens: B.ai.maxTokens,
                             model: B.ai.model,
-                            prefill: PREFILL,
+                            prefill: B.ai.prefill,
                             ...(input.signal && { signal: input.signal }),
                         }),
                     ),

@@ -9,9 +9,6 @@ import {
     type GenerateResponse,
     ICON_DESIGN,
     type Palette,
-    type ParametricIntent,
-    type ReferenceAttachment,
-    type SvgVariant,
 } from '@parametric-portal/api/contracts/icons';
 import { type ApiError, type ApiResponse, api, type HttpStatusError } from '@parametric-portal/types/api';
 import { asyncState } from '@parametric-portal/types/async';
@@ -109,16 +106,8 @@ const generateIcon = (input: GenerateInput): Effect.Effect<ApiResponse<GenerateR
     pipe(
         Effect.succeed(input),
         Effect.flatMap((validInput) => {
-            const apiRequest: GenerateRequest = {
-                ...(validInput.attachments && { attachments: validInput.attachments }),
-                ...(validInput.colorMode && { colorMode: validInput.colorMode }),
-                ...(validInput.intent && { intent: validInput.intent }),
-                prompt: validInput.prompt,
-                ...(validInput.referenceSvg && { referenceSvg: validInput.referenceSvg }),
-                ...(validInput.variantCount && { variantCount: validInput.variantCount }),
-            };
-
-            return fetchGenerate(apiRequest, validInput.signal);
+            const { signal, ...apiRequest } = validInput;
+            return fetchGenerate(apiRequest, signal);
         }),
         Effect.map((response) =>
             response._tag === 'ApiSuccess'
@@ -130,13 +119,4 @@ const generateIcon = (input: GenerateInput): Effect.Effect<ApiResponse<GenerateR
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { apiFactory, asyncApi, B as API_CONFIG, buildLayerManifest, generateIcon, getPalette };
-export type {
-    ColorMode,
-    GenerateInput,
-    GenerateRequest,
-    GenerateResponse,
-    Palette,
-    ParametricIntent,
-    ReferenceAttachment,
-    SvgVariant,
-};
+export type { GenerateInput };

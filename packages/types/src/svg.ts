@@ -109,9 +109,11 @@ const SvgIdSchema = pipe(S.String, S.pattern(/^[a-zA-Z_][a-zA-Z0-9_-]*$/), S.bra
 const scopeModulo = B.scope.radix ** B.scope.length;
 
 const generateScope = (): Scope =>
-    Array.from({ length: B.scope.length }, () =>
-        Math.trunc(Math.random() * B.scope.radix).toString(B.scope.radix),
-    ).join('') as Scope;
+    S.decodeSync(ScopeSchema)(
+        Array.from({ length: B.scope.length }, () =>
+            Math.trunc(Math.random() * B.scope.radix).toString(B.scope.radix),
+        ).join(''),
+    );
 
 const deriveScope = (seed: string): Scope => {
     const hash = Array.from(seed).reduce<number>(
@@ -128,6 +130,7 @@ const scopeIds = (svg: string, scope: Scope): string => {
     const idMap = new Map<SvgId, SvgId>();
 
     const withScopedIds = svg.replaceAll(B.patterns.idAttr, (_match, oldId: string) => {
+        // Sync decode: pure function context; throws on malformed SVG IDs (expected for invalid input)
         const validatedId = S.decodeSync(SvgIdSchema)(oldId);
         const newId = `${validatedId}_${scope}` as SvgId;
         idMap.set(validatedId, newId);
