@@ -4,7 +4,6 @@
  */
 import '@effect/experimental';
 import { Model } from '@effect/sql';
-import { Schema as S } from 'effect';
 import {
     ApiKeyIdSchema,
     AssetIdSchema,
@@ -17,7 +16,8 @@ import {
     RefreshTokenIdSchema,
     SessionIdSchema,
     UserIdSchema,
-} from './schema.ts';
+} from '@parametric-portal/types/database';
+import { Schema as S } from 'effect';
 
 // --- [MODELS] ----------------------------------------------------------------
 

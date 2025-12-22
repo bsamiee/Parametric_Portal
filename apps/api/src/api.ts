@@ -1,4 +1,3 @@
-import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/database/schema';
 import {
     createApi,
     createGroup,
@@ -8,6 +7,7 @@ import {
 } from '@parametric-portal/server/api';
 import { OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
+import { OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------

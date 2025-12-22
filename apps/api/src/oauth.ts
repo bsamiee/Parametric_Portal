@@ -3,9 +3,9 @@
  * Implements the OAuthService interface from @parametric-portal/server/middleware.
  */
 
-import type { OAuthProvider } from '@parametric-portal/database/schema';
 import { OAuthError } from '@parametric-portal/server/errors';
 import { OAuthService, type OAuthTokens, type OAuthUserInfo } from '@parametric-portal/server/middleware';
+import type { OAuthProvider } from '@parametric-portal/types/database';
 import { GitHub, Google, MicrosoftEntraId } from 'arctic';
 import { Config, Effect, Layer, Option, Redacted } from 'effect';
 

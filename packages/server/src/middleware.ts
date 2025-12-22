@@ -11,7 +11,7 @@ import {
     HttpServerRequest,
     HttpServerResponse,
 } from '@effect/platform';
-import type { ApiKeyResult, OAuthProvider, SessionResult } from '@parametric-portal/database/schema';
+import type { ApiKeyResult, OAuthProvider, SessionResult } from '@parametric-portal/types/database';
 import { Context, Effect, Layer, Match, Option, pipe, Redacted } from 'effect';
 
 import { hashString } from './crypto.ts';

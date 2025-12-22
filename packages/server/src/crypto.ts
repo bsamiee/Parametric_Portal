@@ -2,27 +2,28 @@
  * Shared cryptographic utilities for token hashing and generation.
  * Eliminates duplication between middleware and route handlers.
  */
-import type { Uuidv7 } from '@parametric-portal/types/database';
+import { type TokenHash, TokenHashSchema, type Uuidv7 } from '@parametric-portal/types/database';
 import { generateUuidv7Sync } from '@parametric-portal/types/types';
-import { Effect } from 'effect';
+import { Effect, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type TokenPair = {
-    readonly hash: string;
+    readonly hash: TokenHash;
     readonly token: Uuidv7;
 };
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const hashString = (input: string): Effect.Effect<string, never> =>
+const hashString = (input: string): Effect.Effect<TokenHash, never> =>
     Effect.promise(async () => {
         const encoder = new TextEncoder();
         const data = encoder.encode(input);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        return Array.from(new Uint8Array(hashBuffer))
+        const hex = Array.from(new Uint8Array(hashBuffer))
             .map((b) => b.toString(16).padStart(2, '0'))
             .join('');
+        return S.decodeSync(TokenHashSchema)(hex);
     });
 
 const generateToken = (): Uuidv7 => generateUuidv7Sync();

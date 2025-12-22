@@ -3,9 +3,6 @@
  * Single Effect.gen yields SqlClient once; all resolvers defined inline.
  */
 import { SqlClient, SqlSchema } from '@effect/sql';
-import { Effect, Schema as S } from 'effect';
-
-import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User } from './models';
 import {
     ApiKeyIdSchema,
     AssetIdSchema,
@@ -16,7 +13,9 @@ import {
     RefreshTokenIdSchema,
     SessionIdSchema,
     UserIdSchema,
-} from './schema';
+} from '@parametric-portal/types/database';
+import { Effect, Schema as S } from 'effect';
+import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User } from './models';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 

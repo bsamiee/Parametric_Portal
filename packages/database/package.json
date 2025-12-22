@@ -13,11 +13,6 @@
             "import": "./src/models.ts",
             "default": "./src/models.ts"
         },
-        "./schema": {
-            "types": "./src/schema.ts",
-            "import": "./src/schema.ts",
-            "default": "./src/schema.ts"
-        },
         "./migrator": {
             "types": "./src/migrator.ts",
             "import": "./src/migrator.ts",

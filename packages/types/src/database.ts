@@ -4,7 +4,7 @@
  */
 import { Duration, pipe, Schema as S } from 'effect';
 
-import type { Email as EmailType, Slug as SlugType, Uuidv7 } from './types.ts';
+import type { Email, Slug, Uuidv7 } from './types.ts';
 import { EmailSchema, SlugSchema } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -25,8 +25,6 @@ type ApiKeyResult = S.Schema.Type<typeof ApiKeyResultSchema>;
 type TokenHash = S.Schema.Type<typeof TokenHashSchema>;
 type Version = S.Schema.Type<typeof VersionSchema>;
 type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
-type Email = EmailType;
-type Slug = SlugType;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -41,7 +39,7 @@ const B = Object.freeze({
         maxPageSize: 100,
     },
     patterns: {
-        hexHash: /^[0-9a-f]+$/i,
+        hexHash: /^[0-9a-f]{64}$/i,
     },
 } as const);
 

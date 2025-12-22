@@ -11,7 +11,6 @@ export default defineConfig(
                 migrator: './src/migrator.ts',
                 models: './src/models.ts',
                 repositories: './src/repositories.ts',
-                schema: './src/schema.ts',
             },
             external: ['effect', '@effect/experimental', '@effect/platform', '@effect/sql', '@effect/sql-pg'],
             mode: 'library',
