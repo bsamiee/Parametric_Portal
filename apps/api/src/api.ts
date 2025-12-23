@@ -7,25 +7,21 @@ import {
 } from '@parametric-portal/server/api';
 import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
-import { AssetListItemSchema, OAuthProviderSchema, UserIdSchema } from '@parametric-portal/types/database';
-import { Uuidv7Schema } from '@parametric-portal/types/types';
+import {
+    AiProviderSchema,
+    ApiKeyIdSchema,
+    ApiKeyListItemSchema,
+    AssetListItemSchema,
+    LogoutResponseSchema,
+    OAuthProviderSchema,
+    OAuthStartResponseSchema,
+    SessionResponseSchema,
+    UserResponseSchema,
+} from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
 import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
-
-const OAuthStartResponseSchema = S.Struct({ url: S.String });
-
-const SessionResponseSchema = S.Struct({
-    accessToken: Uuidv7Schema,
-    expiresAt: S.DateTimeUtc,
-    refreshToken: Uuidv7Schema,
-});
-
-const UserResponseSchema = S.Struct({
-    email: S.String,
-    id: UserIdSchema,
-});
 
 const PaginatedAssetListSchema = S.Struct({
     data: S.Array(AssetListItemSchema),
@@ -33,6 +29,15 @@ const PaginatedAssetListSchema = S.Struct({
     offset: S.Int,
     total: S.Int,
 });
+
+const CreateApiKeyRequestSchema = S.Struct({
+    key: S.NonEmptyTrimmedString,
+    name: S.NonEmptyTrimmedString,
+    provider: AiProviderSchema,
+});
+const CreateApiKeyResponseSchema = ApiKeyListItemSchema;
+const ListApiKeysResponseSchema = S.Struct({ data: S.Array(ApiKeyListItemSchema) });
+const DeleteApiKeyResponseSchema = S.Struct({ success: S.Boolean });
 
 // --- [GROUPS] ----------------------------------------------------------------
 
@@ -52,20 +57,40 @@ const AuthGroup = createGroup('auth', { prefix: '/auth' })
     )
     .add(
         HttpApiEndpoint.post('refresh', '/refresh')
-            .setPayload(S.Struct({ refreshToken: S.String }))
             .addSuccess(SessionResponseSchema)
             .addError(UnauthorizedError, { status: 401 }),
     )
     .add(
         HttpApiEndpoint.post('logout', '/logout')
             .middleware(SessionAuth)
-            .addSuccess(S.Struct({ success: S.Boolean }))
+            .addSuccess(LogoutResponseSchema)
             .addError(InternalError, { status: 500 }),
     )
     .add(
         HttpApiEndpoint.get('me', '/me')
             .middleware(SessionAuth)
             .addSuccess(UserResponseSchema)
+            .addError(NotFoundError, { status: 404 })
+            .addError(InternalError, { status: 500 }),
+    )
+    .add(
+        HttpApiEndpoint.get('listApiKeys', '/apikeys')
+            .middleware(SessionAuth)
+            .addSuccess(ListApiKeysResponseSchema)
+            .addError(InternalError, { status: 500 }),
+    )
+    .add(
+        HttpApiEndpoint.post('createApiKey', '/apikeys')
+            .middleware(SessionAuth)
+            .setPayload(CreateApiKeyRequestSchema)
+            .addSuccess(CreateApiKeyResponseSchema)
+            .addError(InternalError, { status: 500 }),
+    )
+    .add(
+        HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
+            .middleware(SessionAuth)
+            .setPath(S.Struct({ id: ApiKeyIdSchema }))
+            .addSuccess(DeleteApiKeyResponseSchema)
             .addError(NotFoundError, { status: 404 })
             .addError(InternalError, { status: 500 }),
     );
@@ -101,4 +126,13 @@ const AppApi = createApi('ParametricPortalApi', {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AppApi, AuthGroup, HealthGroup, IconsGroup };
+export {
+    AppApi,
+    AuthGroup,
+    CreateApiKeyRequestSchema,
+    CreateApiKeyResponseSchema,
+    DeleteApiKeyResponseSchema,
+    HealthGroup,
+    IconsGroup,
+    ListApiKeysResponseSchema,
+};

@@ -28,7 +28,7 @@ describe('temporal package', () => {
             expect(api.formatDate).toBeDefined();
             expect(api.addDays).toBeDefined();
             expect(api.daysBetween).toBeDefined();
-            expect(api.createRegistry).toBeDefined();
+            expect(api.produce).toBeDefined();
         });
 
         it('exposes tuning constants', () => {
@@ -104,57 +104,6 @@ describe('temporal package', () => {
             const diff = Effect.runSync(api.daysBetween(start, end));
             expect(diff).toBeLessThan(0);
         });
-    });
-
-    describe('brand registry', () => {
-        it('creates empty registry', () => {
-            const api = loadApi();
-            const registry = api.createRegistry();
-            expect(registry.getBrandNames()).toEqual([]);
-            expect(registry.hasBrand('test')).toBe(false);
-        });
-
-        it.prop([fc.string({ maxLength: 20, minLength: 1 })])('registers brand', (brandName) => {
-            const api = loadApi();
-            const registry = api.createRegistry();
-            registry.register(brandName);
-            expect(registry.hasBrand(brandName)).toBe(true);
-            expect(registry.getBrandNames()).toContain(brandName);
-        });
-
-        it.prop([fc.string({ maxLength: 20, minLength: 1 })])('unregisters brand', (brandName) => {
-            const api = loadApi();
-            const registry = api.createRegistry();
-            registry.register(brandName);
-            expect(registry.hasBrand(brandName)).toBe(true);
-            registry.unregister(brandName);
-            expect(registry.hasBrand(brandName)).toBe(false);
-        });
-
-        it('clears all brands', () => {
-            const api = loadApi();
-            const registry = api.createRegistry();
-            registry.register('brand1');
-            registry.register('brand2');
-            expect(registry.getBrandNames()).toHaveLength(2);
-            registry.clear();
-            expect(registry.getBrandNames()).toEqual([]);
-        });
-
-        it.prop([fc.array(fc.string({ maxLength: 20, minLength: 1 }), { maxLength: 10 })])(
-            'manages multiple brands',
-            (brandNames) => {
-                const api = loadApi();
-                const registry = api.createRegistry();
-                for (const name of brandNames) {
-                    registry.register(name);
-                }
-                const registered = registry.getBrandNames();
-                for (const name of brandNames) {
-                    expect(registered).toContain(name);
-                }
-            },
-        );
     });
 
     describe('immer integration', () => {

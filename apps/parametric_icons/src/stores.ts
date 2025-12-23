@@ -2,18 +2,23 @@
  * Application state slices via store factory from @parametric-portal/types.
  */
 
+import type { ExportFormat } from '@parametric-portal/hooks/browser';
 import {
+    type ApiKeyListItem,
+    ApiKeyListItemSchema,
     type ColorMode,
     ColorModeSchema,
     type Intent,
     IntentSchema,
     type OutputMode,
     OutputModeSchema,
+    type UserResponse,
+    UserResponseSchema,
 } from '@parametric-portal/types/database';
 import { type StoreSlice, store } from '@parametric-portal/types/stores';
 import { type Svg, type SvgAsset, SvgAssetSchema, sanitizeSvg } from '@parametric-portal/types/svg';
-import { types } from '@parametric-portal/types/types';
-import { pipe, Schema as S } from 'effect';
+import { type Index, IndexSchema, types, type ZoomFactor, ZoomFactorSchema } from '@parametric-portal/types/types';
+import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -27,6 +32,9 @@ type UiState = S.Schema.Type<typeof UiStateSchema>;
 type Asset = S.Schema.Type<typeof AssetSchema>;
 type HistoryState = S.Schema.Type<typeof HistoryStateSchema>;
 type LibraryState = S.Schema.Type<typeof LibraryStateSchema>;
+type AuthState = S.Schema.Type<typeof AuthStateSchema>;
+type UploadState = 'error' | 'idle' | 'preview' | 'validating';
+type SubmittedContext = { readonly prompt: string; readonly intent: Intent; readonly context: ContextState } | null;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -47,7 +55,7 @@ const ChatStateSchema = S.Struct({
 
 const PreviewStateSchema = S.Struct({
     currentSvg: S.NullOr(S.String),
-    zoom: pipe(S.Number, S.between(0.1, 10)),
+    zoom: ZoomFactorSchema,
 });
 
 const ContextStateSchema = S.Struct({
@@ -57,11 +65,26 @@ const ContextStateSchema = S.Struct({
     output: OutputModeSchema,
 });
 
+const SubmittedContextSchema = S.NullOr(
+    S.Struct({ context: ContextStateSchema, intent: IntentSchema, prompt: S.String }),
+);
+
 const UiStateSchema = S.Struct({
     activeTab: S.Literal('history', 'inspector', 'library', 'session'),
+    exportFormat: S.Literal('png', 'svg', 'zip'),
+    // Export dialog state
+    isExportOpen: S.Boolean,
     isSidebarOpen: S.Boolean,
+    // Upload dialog state
+    isUploadOpen: S.Boolean,
     showGrid: S.Boolean,
     showSafeArea: S.Boolean,
+    // Request lifecycle state
+    submittedContext: SubmittedContextSchema,
+    uploadErrorMessage: S.NullOr(S.String),
+    uploadFileName: S.String,
+    uploadPreviewSvg: S.NullOr(S.String),
+    uploadState: S.Literal('error', 'idle', 'preview', 'validating'),
 });
 
 const AssetSchema = S.Struct({
@@ -69,7 +92,7 @@ const AssetSchema = S.Struct({
     id: S.typeSchema(typesApi.brands.uuidv7),
     intent: IntentSchema,
     prompt: S.String,
-    selectedVariantIndex: S.optional(pipe(S.Number, S.int(), S.greaterThanOrEqualTo(0))),
+    selectedVariantIndex: S.optional(IndexSchema),
     timestamp: S.Number,
     variants: S.Array(SvgAssetSchema),
 });
@@ -88,9 +111,28 @@ const LibraryStateSchema = S.Struct({
     savedAssets: S.Array(AssetSchema),
 });
 
+const AuthStateSchema = S.Struct({
+    accessToken: S.NullOr(S.String),
+    apiKeys: S.Array(ApiKeyListItemSchema),
+    expiresAt: S.NullOr(S.DateFromSelf),
+    isAccountOverlayOpen: S.Boolean,
+    isAuthOverlayOpen: S.Boolean,
+    isLoading: S.Boolean,
+    user: S.NullOr(UserResponseSchema),
+});
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    auth: {
+        accessToken: null,
+        apiKeys: [],
+        expiresAt: null,
+        isAccountOverlayOpen: false,
+        isAuthOverlayOpen: false,
+        isLoading: false,
+        user: null,
+    } as AuthState,
     chat: { input: '', isGenerating: false, messages: [] } as ChatState,
     context: {
         attachments: [],
@@ -100,8 +142,21 @@ const B = Object.freeze({
     } as ContextState,
     history: { assets: [], currentId: null, maxItems: 64 },
     library: { customAssets: [], savedAssets: [] } as LibraryState,
-    preview: { currentSvg: null, zoom: 1 } as PreviewState,
-    ui: { activeTab: 'history', isSidebarOpen: false, showGrid: false, showSafeArea: false } as UiState,
+    preview: { currentSvg: null, zoom: 1 as ZoomFactor } as PreviewState,
+    ui: {
+        activeTab: 'history',
+        exportFormat: 'svg',
+        isExportOpen: false,
+        isSidebarOpen: false,
+        isUploadOpen: false,
+        showGrid: false,
+        showSafeArea: false,
+        submittedContext: null,
+        uploadErrorMessage: null,
+        uploadFileName: '',
+        uploadPreviewSvg: null,
+        uploadState: 'idle',
+    } as UiState,
     variantCount: { batch: 3, single: 1 },
     zoom: { factor: 1.25, max: 10, min: 0.1 },
 } as const);
@@ -160,7 +215,50 @@ type UiActions = {
     readonly toggleGrid: () => void;
     readonly toggleSafeArea: () => void;
     readonly toggleSidebar: () => void;
+    // Upload dialog actions
+    readonly openUploadDialog: () => void;
+    readonly closeUploadDialog: () => void;
+    readonly setUploadState: (state: UploadState) => void;
+    readonly setUploadFile: (name: string, svg: string | null, error: string | null) => void;
+    readonly resetUploadDialog: () => void;
+    // Export dialog actions
+    readonly openExportDialog: () => void;
+    readonly closeExportDialog: () => void;
+    readonly setExportFormat: (format: ExportFormat) => void;
+    // Request lifecycle actions
+    readonly setSubmittedContext: (ctx: SubmittedContext) => void;
 };
+
+type AuthActions = {
+    readonly addApiKey: (key: ApiKeyListItem) => void;
+    readonly clearAuth: () => void;
+    readonly closeAccountOverlay: () => void;
+    readonly closeAuthOverlay: () => void;
+    readonly openAccountOverlay: () => void;
+    readonly openAuthOverlay: () => void;
+    readonly removeApiKey: (id: string) => void;
+    readonly setApiKeys: (keys: ReadonlyArray<ApiKeyListItem>) => void;
+    readonly setAuth: (accessToken: string, expiresAt: Date, user: UserResponse) => void;
+    readonly setLoading: (flag: boolean) => void;
+};
+
+const authSlice: StoreSlice<AuthState, AuthActions> = storeApi.createSlice({
+    actions: (set, get) => ({
+        addApiKey: (key: ApiKeyListItem) => set({ ...get(), apiKeys: [...get().apiKeys, key] }),
+        clearAuth: () => set(B.auth),
+        closeAccountOverlay: () => set({ ...get(), isAccountOverlayOpen: false }),
+        closeAuthOverlay: () => set({ ...get(), isAuthOverlayOpen: false }),
+        openAccountOverlay: () => set({ ...get(), isAccountOverlayOpen: true }),
+        openAuthOverlay: () => set({ ...get(), isAuthOverlayOpen: true }),
+        removeApiKey: (id: string) => set({ ...get(), apiKeys: get().apiKeys.filter((k) => k.id !== id) }),
+        setApiKeys: (keys: ReadonlyArray<ApiKeyListItem>) => set({ ...get(), apiKeys: [...keys] }),
+        setAuth: (accessToken: string, expiresAt: Date, user: UserResponse) =>
+            set({ ...get(), accessToken, expiresAt, isLoading: false, user }),
+        setLoading: (flag: boolean) => set({ ...get(), isLoading: flag }),
+    }),
+    initialState: B.auth,
+    name: 'auth',
+});
 
 const chatSlice: StoreSlice<ChatState, ChatActions> = storeApi.createSlice({
     actions: (set, get) => ({
@@ -175,11 +273,12 @@ const chatSlice: StoreSlice<ChatState, ChatActions> = storeApi.createSlice({
 
 const previewSlice: StoreSlice<PreviewState, PreviewActions> = storeApi.createSlice({
     actions: (set, get) => ({
-        resetZoom: () => set({ ...get(), zoom: 1 }),
+        resetZoom: () => set({ ...get(), zoom: 1 as ZoomFactor }),
         setSvg: (svg: string | null) => set({ ...get(), currentSvg: svg }),
-        setZoom: (value: number) => set({ ...get(), zoom: Math.max(B.zoom.min, Math.min(B.zoom.max, value)) }),
-        zoomIn: () => set({ ...get(), zoom: Math.min(B.zoom.max, get().zoom * B.zoom.factor) }),
-        zoomOut: () => set({ ...get(), zoom: Math.max(B.zoom.min, get().zoom / B.zoom.factor) }),
+        setZoom: (value: number) =>
+            set({ ...get(), zoom: Math.max(B.zoom.min, Math.min(B.zoom.max, value)) as ZoomFactor }),
+        zoomIn: () => set({ ...get(), zoom: Math.min(B.zoom.max, get().zoom * B.zoom.factor) as ZoomFactor }),
+        zoomOut: () => set({ ...get(), zoom: Math.max(B.zoom.min, get().zoom / B.zoom.factor) as ZoomFactor }),
     }),
     initialState: B.preview,
     name: 'preview',
@@ -201,7 +300,28 @@ const contextSlice: StoreSlice<ContextState, ContextActions> = storeApi.createSl
 
 const uiSlice: StoreSlice<UiState, UiActions> = storeApi.createSlice({
     actions: (set, get) => ({
+        closeExportDialog: () => set({ ...get(), isExportOpen: false }),
+        closeUploadDialog: () => set({ ...get(), isUploadOpen: false }),
+        // Export dialog actions
+        openExportDialog: () => set({ ...get(), isExportOpen: true }),
+        // Upload dialog actions
+        openUploadDialog: () => set({ ...get(), isUploadOpen: true }),
+        resetUploadDialog: () =>
+            set({
+                ...get(),
+                isUploadOpen: false,
+                uploadErrorMessage: null,
+                uploadFileName: '',
+                uploadPreviewSvg: null,
+                uploadState: 'idle',
+            }),
+        setExportFormat: (format: ExportFormat) => set({ ...get(), exportFormat: format }),
         setSidebarTab: (tab: SidebarTab) => set({ ...get(), activeTab: tab }),
+        // Request lifecycle actions
+        setSubmittedContext: (ctx: SubmittedContext) => set({ ...get(), submittedContext: ctx }),
+        setUploadFile: (name: string, svg: string | null, error: string | null) =>
+            set({ ...get(), uploadErrorMessage: error, uploadFileName: name, uploadPreviewSvg: svg }),
+        setUploadState: (state: UploadState) => set({ ...get(), uploadState: state }),
         toggleGrid: () => set({ ...get(), showGrid: !get().showGrid }),
         toggleSafeArea: () => set({ ...get(), showSafeArea: !get().showSafeArea }),
         toggleSidebar: () => set({ ...get(), isSidebarOpen: !get().isSidebarOpen }),
@@ -215,7 +335,7 @@ const historySlice: StoreSlice<HistoryState, HistoryActions> = storeApi.createSl
         addAsset: (asset: Asset) =>
             set({
                 ...get(),
-                assets: [{ ...asset, selectedVariantIndex: 0 }, ...get().assets].slice(0, B.history.maxItems),
+                assets: [{ ...asset, selectedVariantIndex: 0 as Index }, ...get().assets].slice(0, B.history.maxItems),
                 currentId: asset.id,
             }),
         clearAll: () => set({ ...get(), assets: [], currentId: null }),
@@ -231,7 +351,9 @@ const historySlice: StoreSlice<HistoryState, HistoryActions> = storeApi.createSl
         setSelectedVariantIndex: (assetId: string, index: number) =>
             set({
                 ...get(),
-                assets: get().assets.map((a) => (a.id === assetId ? { ...a, selectedVariantIndex: index } : a)),
+                assets: get().assets.map((a) =>
+                    a.id === assetId ? { ...a, selectedVariantIndex: index as Index } : a,
+                ),
             }),
     }),
     initialState: { assets: [] as ReadonlyArray<Asset>, currentId: null as string | null },
@@ -264,6 +386,7 @@ const librarySlice: StoreSlice<LibraryState, LibraryActions> = storeApi.createSl
 });
 
 const appStore = storeApi.combineSlices({
+    auth: authSlice,
     chat: chatSlice,
     context: contextSlice,
     history: historySlice,
@@ -276,6 +399,7 @@ const appStore = storeApi.combineSlices({
 
 export {
     appStore,
+    authSlice,
     B as STORE_TUNING,
     chatSlice,
     contextSlice,
@@ -287,6 +411,8 @@ export {
 };
 export type {
     Asset,
+    AuthActions,
+    AuthState,
     ChatActions,
     ChatState,
     ContextActions,
@@ -301,6 +427,8 @@ export type {
     PreviewActions,
     PreviewState,
     SidebarTab,
+    SubmittedContext,
     UiActions,
     UiState,
+    UploadState,
 };

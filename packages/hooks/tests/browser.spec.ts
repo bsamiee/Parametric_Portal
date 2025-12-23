@@ -39,32 +39,39 @@ describe('browser', () => {
             expect(ts).toBeLessThanOrEqual(after);
         });
 
-        it('should have errors.clipboardUnavailable', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.clipboardUnavailable).toBe('Clipboard API not available');
+        it('should have errors.clipboardUnavailable with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.clipboardUnavailable.code).toBe('CLIPBOARD_UNAVAILABLE');
+            expect(BROWSER_HOOKS_TUNING.errors.clipboardUnavailable.message).toBe('Clipboard API not available');
         });
 
-        it('should have errors.clipboardWrite', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.clipboardWrite).toBe('Failed to write to clipboard');
+        it('should have errors.clipboardWrite with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.clipboardWrite.code).toBe('CLIPBOARD_WRITE');
+            expect(BROWSER_HOOKS_TUNING.errors.clipboardWrite.message).toBe('Failed to write to clipboard');
         });
 
-        it('should have errors.clipboardRead', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.clipboardRead).toBe('Failed to read from clipboard');
+        it('should have errors.clipboardRead with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.clipboardRead.code).toBe('CLIPBOARD_READ');
+            expect(BROWSER_HOOKS_TUNING.errors.clipboardRead.message).toBe('Failed to read from clipboard');
         });
 
-        it('should have errors.downloadFailed', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.downloadFailed).toBe('Download failed');
+        it('should have errors.downloadFailed with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.downloadFailed.code).toBe('DOWNLOAD_FAILED');
+            expect(BROWSER_HOOKS_TUNING.errors.downloadFailed.message).toBe('Download failed');
         });
 
-        it('should have errors.exportFailed', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.exportFailed).toBe('Export failed');
+        it('should have errors.exportFailed with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.exportFailed.code).toBe('EXPORT_FAILED');
+            expect(BROWSER_HOOKS_TUNING.errors.exportFailed.message).toBe('Export failed');
         });
 
-        it('should have errors.noSvg', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.noSvg).toBe('No SVG content to export');
+        it('should have errors.noSvg with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.noSvg.code).toBe('NO_SVG');
+            expect(BROWSER_HOOKS_TUNING.errors.noSvg.message).toBe('No SVG content to export');
         });
 
-        it('should have errors.noVariants', () => {
-            expect(BROWSER_HOOKS_TUNING.errors.noVariants).toBe('No variants to export');
+        it('should have errors.noVariants with code and message', () => {
+            expect(BROWSER_HOOKS_TUNING.errors.noVariants.code).toBe('NO_VARIANTS');
+            expect(BROWSER_HOOKS_TUNING.errors.noVariants.message).toBe('No variants to export');
         });
 
         it('should have defaults.pngSize', () => {
@@ -85,36 +92,39 @@ describe('browser', () => {
 
     describe('mkClipboardError', () => {
         it('should create error with _tag ClipboardError', () => {
-            const error = mkClipboardError('test message');
+            const error = mkClipboardError({ code: 'TEST_CODE', message: 'test message' });
             expect(error._tag).toBe('ClipboardError');
         });
 
-        it('should include provided message', () => {
-            const error = mkClipboardError('custom error');
+        it('should include provided code and message', () => {
+            const error = mkClipboardError({ code: 'CUSTOM_CODE', message: 'custom error' });
+            expect(error.code).toBe('CUSTOM_CODE');
             expect(error.message).toBe('custom error');
         });
     });
 
     describe('mkDownloadError', () => {
         it('should create error with _tag DownloadError', () => {
-            const error = mkDownloadError('test message');
+            const error = mkDownloadError({ code: 'TEST_CODE', message: 'test message' });
             expect(error._tag).toBe('DownloadError');
         });
 
-        it('should include provided message', () => {
-            const error = mkDownloadError('custom error');
+        it('should include provided code and message', () => {
+            const error = mkDownloadError({ code: 'CUSTOM_CODE', message: 'custom error' });
+            expect(error.code).toBe('CUSTOM_CODE');
             expect(error.message).toBe('custom error');
         });
     });
 
     describe('mkExportError', () => {
         it('should create error with _tag ExportError', () => {
-            const error = mkExportError('test message');
+            const error = mkExportError({ code: 'TEST_CODE', message: 'test message' });
             expect(error._tag).toBe('ExportError');
         });
 
-        it('should include provided message', () => {
-            const error = mkExportError('custom error');
+        it('should include provided code and message', () => {
+            const error = mkExportError({ code: 'CUSTOM_CODE', message: 'custom error' });
+            expect(error.code).toBe('CUSTOM_CODE');
             expect(error.message).toBe('custom error');
         });
     });

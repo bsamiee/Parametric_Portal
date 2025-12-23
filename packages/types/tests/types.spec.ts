@@ -43,6 +43,17 @@ const BRAND_TEST_CASES = [
     ['percentage', 100, true],
     ['percentage', -1, false],
     ['percentage', 101, false],
+    ['index', 0, true],
+    ['index', 100, true],
+    ['index', -1, false],
+    ['variantCount', 1, true],
+    ['variantCount', 10, true],
+    ['variantCount', 0, false],
+    ['variantCount', 11, false],
+    ['zoomFactor', 0.1, true],
+    ['zoomFactor', 10, true],
+    ['zoomFactor', 0.05, false],
+    ['zoomFactor', 11, false],
 ] as const;
 
 // --- [TESTS] -----------------------------------------------------------------
@@ -57,7 +68,7 @@ describe('types package', () => {
             expect(api.patterns).toBeDefined();
         });
 
-        it('exposes all 13 branded types', () => {
+        it('exposes all 16 branded types', () => {
             const api = loadApi();
             const expectedBrands = [
                 'email',
@@ -65,6 +76,7 @@ describe('types package', () => {
                 'hex64',
                 'hexColor',
                 'htmlId',
+                'index',
                 'isoDate',
                 'nonNegativeInt',
                 'percentage',
@@ -73,6 +85,8 @@ describe('types package', () => {
                 'slug',
                 'url',
                 'uuidv7',
+                'variantCount',
+                'zoomFactor',
             ] as const;
             for (const brand of expectedBrands) {
                 expect(api.brands[brand]).toBeDefined();

@@ -3,15 +3,44 @@
  */
 import { makeRepositories, type Repositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder, type PaginationQuery } from '@parametric-portal/server/api';
-import { InternalError } from '@parametric-portal/server/errors';
+import { Crypto } from '@parametric-portal/server/crypto';
+import { InternalError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionContext } from '@parametric-portal/server/middleware';
-import { type Context, Effect, pipe } from 'effect';
+import type { AiProvider, UserId } from '@parametric-portal/types/database';
+import { type Context, Effect, Option, pipe } from 'effect';
 import { AppApi } from '../api.ts';
 import { IconGenerationService, type ServiceInput } from '../services/icons.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type IconGenerationServiceType = Context.Tag.Service<typeof IconGenerationService>;
+
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const getUserApiKey = (repos: Repositories, userId: UserId, provider: AiProvider) =>
+    pipe(
+        repos.apiKeys.findByUserIdAndProvider({ provider, userId }),
+        Effect.flatMap(
+            Option.match({
+                onNone: () => Effect.succeed(Option.none<string>()),
+                onSome: (apiKey) =>
+                    pipe(
+                        apiKey.keyEncrypted,
+                        Option.match({
+                            onNone: () => Effect.succeed(Option.none<string>()),
+                            onSome: (encrypted) =>
+                                pipe(
+                                    Crypto.decryptFromBytes(encrypted),
+                                    Effect.map(Option.some),
+                                    Effect.mapError(
+                                        (e) => new InternalError({ cause: `Key decryption failed: ${String(e)}` }),
+                                    ),
+                                ),
+                        }),
+                    ),
+            }),
+        ),
+    );
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -33,17 +62,24 @@ const handleList = (repos: Repositories, params: PaginationQuery) =>
                 total,
             };
         }),
-        Effect.catchAll((cause) =>
-            Effect.fail(new InternalError({ cause: `Asset list retrieval failed: ${String(cause)}` })),
-        ),
+        Effect.catchTags({
+            NoSuchElementException: () => Effect.fail(new UnauthorizedError({ reason: 'Session required' })),
+            ParseError: () => Effect.fail(new InternalError({ cause: 'Asset data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'Asset list retrieval failed' })),
+        }),
     );
 
 const handleGenerate = (repos: Repositories, iconService: IconGenerationServiceType, input: ServiceInput) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
+            const userApiKeyOpt = yield* getUserApiKey(repos, session.userId, 'anthropic');
+            const generateInput = Option.match(userApiKeyOpt, {
+                onNone: () => input,
+                onSome: (apiKey) => ({ ...input, apiKey }),
+            });
             const result = yield* pipe(
-                iconService.generate(input),
+                iconService.generate(generateInput),
                 Effect.filterOrFail(
                     (r) => r.variants.length > 0,
                     () => new InternalError({ cause: 'No icon variants generated' }),

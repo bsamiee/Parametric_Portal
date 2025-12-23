@@ -4,19 +4,41 @@
  */
 
 import { OAuthError } from '@parametric-portal/server/errors';
-import { OAuthService, type OAuthTokens, type OAuthUserInfo } from '@parametric-portal/server/middleware';
-import type { OAuthProvider } from '@parametric-portal/types/database';
+import { OAuthService } from '@parametric-portal/server/middleware';
+import type { OAuthProvider, OAuthTokens, OAuthUserInfo } from '@parametric-portal/types/database';
 import { GitHub, Google, MicrosoftEntraId } from 'arctic';
-import { Config, Effect, Layer, Option, Redacted } from 'effect';
+import { Config, Effect, Layer, Option, pipe, Redacted, Schema as S } from 'effect';
+import type { ParseError } from 'effect/ParseResult';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ProviderConfig = {
+/** Arctic-library-specific provider config (internal to OAuthServiceLive) */
+type ArcticProviderConfig = {
     readonly clientId: string;
     readonly clientSecret: Redacted.Redacted<string>;
     readonly redirectUri: string;
     readonly tenantId?: string;
 };
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const GitHubUserInfoSchema = S.Struct({
+    // biome-ignore lint/style/useNamingConvention: Matches GitHub API response shape
+    avatar_url: S.optional(S.String),
+    email: S.optional(S.NullOr(S.String)),
+    id: S.Number,
+    name: S.optional(S.NullOr(S.String)),
+});
+
+const OIDCUserInfoSchema = S.Struct({
+    email: S.optional(S.String),
+    name: S.optional(S.String),
+    picture: S.optional(S.String),
+    sub: S.String,
+});
+
+type GitHubUserInfo = S.Schema.Type<typeof GitHubUserInfoSchema>;
+type OIDCUserInfo = S.Schema.Type<typeof OIDCUserInfoSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -33,27 +55,55 @@ const B = Object.freeze({
     },
 } as const);
 
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const normalizeUserInfo = {
+    github: (data: GitHubUserInfo): OAuthUserInfo => ({
+        avatarUrl: Option.fromNullable(data.avatar_url),
+        email: Option.fromNullable(data.email),
+        name: Option.fromNullable(data.name),
+        providerAccountId: String(data.id),
+    }),
+    google: (data: OIDCUserInfo): OAuthUserInfo => ({
+        avatarUrl: Option.fromNullable(data.picture),
+        email: Option.fromNullable(data.email),
+        name: Option.fromNullable(data.name),
+        providerAccountId: data.sub,
+    }),
+    microsoft: (data: OIDCUserInfo): OAuthUserInfo => ({
+        avatarUrl: Option.fromNullable(data.picture),
+        email: Option.fromNullable(data.email),
+        name: Option.fromNullable(data.name),
+        providerAccountId: data.sub,
+    }),
+} as const satisfies Record<OAuthProvider, (data: never) => OAuthUserInfo>;
+
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const decodeAndNormalize = {
+    github: (response: unknown) =>
+        S.decodeUnknown(GitHubUserInfoSchema)(response).pipe(Effect.map(normalizeUserInfo.github)),
+    google: (response: unknown) =>
+        S.decodeUnknown(OIDCUserInfoSchema)(response).pipe(Effect.map(normalizeUserInfo.google)),
+    microsoft: (response: unknown) =>
+        S.decodeUnknown(OIDCUserInfoSchema)(response).pipe(Effect.map(normalizeUserInfo.microsoft)),
+} as const satisfies Record<OAuthProvider, (response: unknown) => Effect.Effect<OAuthUserInfo, ParseError>>;
+
 const fetchUserInfo = (provider: OAuthProvider, accessToken: string): Effect.Effect<OAuthUserInfo, OAuthError> =>
-    Effect.gen(function* () {
-        const url = B.userInfoUrls[provider];
-        const response = yield* Effect.tryPromise({
+    pipe(
+        Effect.tryPromise({
             catch: (e) => new OAuthError({ provider, reason: `Failed to fetch user info: ${String(e)}` }),
             try: () =>
-                fetch(url, {
+                fetch(B.userInfoUrls[provider], {
                     headers: { Authorization: `Bearer ${accessToken}`, 'User-Agent': 'ParametricPortal/1.0' },
                 }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
-        });
-
-        const data = response as Record<string, unknown>;
-        return {
-            avatarUrl: Option.fromNullable((data['avatar_url'] ?? data['picture']) as string | undefined),
-            email: Option.fromNullable(data['email'] as string | undefined),
-            name: Option.fromNullable(data['name'] as string | undefined),
-            providerAccountId: String(data['id'] ?? data['sub']),
-        };
-    });
+        }),
+        Effect.flatMap((response) =>
+            decodeAndNormalize[provider](response).pipe(
+                Effect.mapError(() => new OAuthError({ provider, reason: 'Invalid userinfo response shape' })),
+            ),
+        ),
+    );
 
 // --- [LAYER] -----------------------------------------------------------------
 
@@ -74,17 +124,17 @@ const OAuthServiceLive = Layer.effect(
             Config.withDefault(Redacted.make('')),
         );
         const microsoftTenantId = yield* Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common'));
-        const githubConfig: ProviderConfig = {
+        const githubConfig: ArcticProviderConfig = {
             clientId: githubClientId,
             clientSecret: githubClientSecret,
             redirectUri: `${baseUrl}/api/auth/oauth/github/callback`,
         };
-        const googleConfig: ProviderConfig = {
+        const googleConfig: ArcticProviderConfig = {
             clientId: googleClientId,
             clientSecret: googleClientSecret,
             redirectUri: `${baseUrl}/api/auth/oauth/google/callback`,
         };
-        const microsoftConfig: ProviderConfig = {
+        const microsoftConfig: ArcticProviderConfig = {
             clientId: microsoftClientId,
             clientSecret: microsoftClientSecret,
             redirectUri: `${baseUrl}/api/auth/oauth/microsoft/callback`,
@@ -133,7 +183,6 @@ const OAuthServiceLive = Layer.effect(
                 return microsoft.validateAuthorizationCode(code, verifier);
             },
         } as const satisfies Record<OAuthProvider, (code: string, state: string) => Promise<unknown>>;
-
         return OAuthService.of({
             createAuthorizationUrl: (provider, state) =>
                 Effect.sync(() => createAuthUrl[provider](state, B.scopes[provider])),
@@ -144,7 +193,6 @@ const OAuthServiceLive = Layer.effect(
                         catch: (e) => new OAuthError({ provider, reason: `Token exchange failed: ${String(e)}` }),
                         try: () => validateToken[provider](code, state),
                     });
-
                     const t = tokens as {
                         accessToken: () => string;
                         accessTokenExpiresAt?: () => Date;

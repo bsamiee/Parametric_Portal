@@ -21,6 +21,15 @@
             "{projectRoot}/**/*.json",
             "{workspaceRoot}/biome.json"
         ],
+        "mutation": [
+            "{projectRoot}/src/**/*.ts",
+            "!{projectRoot}/src/**/*.d.ts",
+            "!{projectRoot}/src/**/*.spec.ts",
+            "!{projectRoot}/src/**/*.bench.ts",
+            "{projectRoot}/tests/**/*",
+            "{workspaceRoot}/stryker.config.js",
+            "{workspaceRoot}/vitest.config.ts"
+        ],
         "production": [
             "default",
             "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
@@ -200,12 +209,14 @@
             }
         },
         "mutate": {
-            "cache": false,
+            "cache": true,
             "dependsOn": ["build"],
             "executor": "nx:run-commands",
+            "inputs": ["mutation", "^production"],
             "options": {
-                "command": "stryker run --incremental --testRunner vitest --coverageAnalysis perTest --reporters html,clear-text,progress --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts'"
-            }
+                "command": "stryker run --incremental --testRunner vitest --coverageAnalysis perTest --reporters html,json,clear-text,progress --concurrency 4 --ignorePatterns 'dist,coverage,.nx,.vite,*.log,html,docs,test-results,stryker-tmp,**/*.png,**/*.jpg,**/*.svg,**/*.ico' --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts' --mutate '!packages/*/src/**/*.bench.ts'"
+            },
+            "outputs": ["{workspaceRoot}/reports/stryker", "{workspaceRoot}/.nx/cache/stryker-incremental.json"]
         },
         "pwa:icons": {
             "cache": false,

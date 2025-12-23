@@ -20,6 +20,7 @@ import {
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
 } from '@parametric-portal/server/middleware';
+import type { TokenHash } from '@parametric-portal/types/database';
 import { Effect, Layer, Option, pipe } from 'effect';
 import { AppApi } from './api.ts';
 import { OAuthServiceLive } from './oauth.ts';
@@ -44,7 +45,7 @@ const composeMiddleware = (app: HttpApp.Default): HttpApp.Default<never, never> 
 const SessionAuthLive = pipe(
     Layer.unwrapEffect(
         Effect.map(makeRepositories, (repos) =>
-            createSessionAuthLayer((tokenHash: string) =>
+            createSessionAuthLayer((tokenHash: TokenHash) =>
                 pipe(
                     repos.sessions.findByTokenHash(tokenHash),
                     Effect.map((session) => Option.map(session, sessionToResult)),
@@ -59,14 +60,12 @@ const SessionAuthLive = pipe(
 const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-
         const checkDatabase = () =>
             pipe(
                 sql`SELECT 1`,
                 Effect.as(true),
                 Effect.catchAll(() => Effect.succeed(false)),
             );
-
         return handlers
             .handle('liveness', () => Effect.succeed({ status: 'ok' as const }))
             .handle('readiness', () =>

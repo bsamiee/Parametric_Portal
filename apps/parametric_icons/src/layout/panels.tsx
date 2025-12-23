@@ -6,9 +6,9 @@
 import { sanitizeFilename } from '@parametric-portal/hooks/browser';
 import type { Intent } from '@parametric-portal/types/database';
 import { deriveScope, type SvgAsset, sanitizeSvg } from '@parametric-portal/types/svg';
-import { types, type Uuidv7 } from '@parametric-portal/types/types';
+import { type Index, types, type Uuidv7, type VariantCount } from '@parametric-portal/types/types';
 import type { ReactNode } from 'react';
-import { createElement, useCallback, useEffect, useRef, useState } from 'react';
+import { createElement, useCallback, useEffect, useRef } from 'react';
 import { generateIcon } from '../api.ts';
 import { useClipboard, useExport, useMutation, useStoreActions, useStoreSelector, useStoreSlice } from '../core.ts';
 import {
@@ -43,18 +43,14 @@ import {
     SvgPreview,
     Thumb,
 } from '../ui.ts';
+import { UserAvatar } from './auth.tsx';
 import { UploadDialog } from './overlays.tsx';
-
-// --- [ICON_NAMES] ------------------------------------------------------------
-
-type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTerminal' | 'PanelLeft';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTerminal' | 'PanelLeft';
 type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: number };
 type PreviewRenderState = 'empty' | 'generating' | 'ready';
-
-// Props for history panel
 type HistoryPanelProps = {
     readonly assets: ReadonlyArray<Asset>;
     readonly currentId: string | null;
@@ -62,8 +58,6 @@ type HistoryPanelProps = {
     readonly onDelete: (id: string) => void;
     readonly onSelect: (id: string) => void;
 };
-
-// Props for library panel
 type LibraryPanelProps = {
     readonly customAssets: ReadonlyArray<CustomAsset>;
     readonly onAddAttachment: (asset: SvgAsset) => void;
@@ -72,8 +66,6 @@ type LibraryPanelProps = {
     readonly onRemoveSaved: (id: string) => void;
     readonly savedAssets: ReadonlyArray<Asset>;
 };
-
-// Union type for dispatch table - all props needed by any panel renderer
 type PanelContentProps = HistoryPanelProps & LibraryPanelProps;
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -114,9 +106,7 @@ const derivePreviewRenderState = (isGenerating: boolean, hasSvg: boolean): Previ
     const stateMap = { '00': 'empty', '01': 'ready', '10': 'generating', '11': 'generating' } as const;
     return stateMap[stateKey];
 };
-
 const sanitizeSvgScoped = (svg: string, seed: string): string => sanitizeSvg(svg, { scope: deriveScope(seed) });
-
 const CadReticle = (): ReactNode => (
     <div className='absolute inset-0 pointer-events-none z-10'>
         {B.reticle.map((pos) => (
@@ -124,14 +114,6 @@ const CadReticle = (): ReactNode => (
         ))}
     </div>
 );
-
-type AttachmentThumbProps = {
-    readonly name: string;
-    readonly onRemove: () => void;
-    readonly scopeSeed: string;
-    readonly svg: string;
-};
-
 const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProps): ReactNode =>
     createElement(
         Thumb,
@@ -149,32 +131,28 @@ const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProp
         }),
     );
 
+type AttachmentThumbProps = {
+    readonly name: string;
+    readonly onRemove: () => void;
+    readonly scopeSeed: string;
+    readonly svg: string;
+};
+
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const previewRenderers = {
     empty: () => <Icon name='Scan' className='text-(--panel-icon-muted) w-6 h-6' />,
     generating: () => (
         <div className='absolute inset-0 z-50 flex items-center justify-center bg-black/5 backdrop-blur-[1px]'>
-            <svg
-                className='w-12 h-12 text-(--panel-icon-default) animate-spin'
-                fill='none'
-                stroke='currentColor'
-                strokeLinecap='round'
-                strokeLinejoin='round'
-                strokeWidth={2}
-                viewBox='0 0 24 24'
-                aria-hidden='true'
-            >
-                <path d='M21 12a9 9 0 11-6.219-8.56' />
-            </svg>
+            <Spinner className='w-12 h-12 text-(--panel-icon-default)' />
         </div>
     ),
     ready: ({ sanitized, zoom }: PreviewRenderProps) =>
-        sanitized ? (
+        sanitized && (
             <div className='w-full h-full' style={{ transform: `scale(${zoom})` }}>
                 <SvgPreview svg={sanitized} className='w-full h-full' />
             </div>
-        ) : null,
+        ),
 } as const satisfies Record<PreviewRenderState, (props: PreviewRenderProps) => ReactNode>;
 
 const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: HistoryPanelProps): ReactNode =>
@@ -465,7 +443,7 @@ const panelRenderers = {
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Sidebar = (): ReactNode => {
-    const { isSidebarOpen, activeTab } = useStoreSlice(uiSlice);
+    const { isSidebarOpen, activeTab, isUploadOpen } = useStoreSlice(uiSlice);
     const { assets, currentId } = useStoreSlice(historySlice);
     const { customAssets, savedAssets } = useStoreSlice(librarySlice);
     const uiActions = useStoreActions(uiSlice);
@@ -473,7 +451,6 @@ const Sidebar = (): ReactNode => {
     const libraryActions = useStoreActions(librarySlice);
     const previewActions = useStoreActions(previewSlice);
     const contextActions = useStoreActions(contextSlice);
-    const [isUploadOpen, setIsUploadOpen] = useState(false);
 
     const handleTabClick = useCallback(
         (tab: SidebarTab) => {
@@ -522,7 +499,7 @@ const Sidebar = (): ReactNode => {
             historyActions.deleteAsset(id);
             libraryActions.isSaved(id) && libraryActions.removeAsset(id);
         },
-        onOpenUpload: () => setIsUploadOpen(true),
+        onOpenUpload: uiActions.openUploadDialog,
         onRemoveCustomAsset: libraryActions.removeCustomAsset,
         onRemoveSaved: libraryActions.removeAsset,
         onSelect: handleSelectAsset,
@@ -531,7 +508,7 @@ const Sidebar = (): ReactNode => {
 
     return (
         <>
-            <UploadDialog isOpen={isUploadOpen} onClose={() => setIsUploadOpen(false)} onUpload={handleUpload} />
+            <UploadDialog isOpen={isUploadOpen} onClose={uiActions.closeUploadDialog} onUpload={handleUpload} />
             <div className='sidebar'>
                 <div className='sidebar-rail'>
                     <IconButton
@@ -562,6 +539,7 @@ const Sidebar = (): ReactNode => {
                         ))}
                     </div>
                     <div className='flex-1' />
+                    <UserAvatar />
                 </div>
                 <div
                     className='sidebar-drawer'
@@ -589,7 +567,7 @@ const generateId = (): Uuidv7 => typesApi.generateUuidv7Sync();
 const CommandBar = (): ReactNode => {
     const { input } = useStoreSlice(chatSlice);
     const { intent, output, colorMode, attachments } = useStoreSlice(contextSlice);
-    const { isSidebarOpen } = useStoreSlice(uiSlice);
+    const { isSidebarOpen, submittedContext } = useStoreSlice(uiSlice);
     const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
     const chatActions = useStoreActions(chatSlice);
     const contextActions = useStoreActions(contextSlice);
@@ -605,9 +583,6 @@ const CommandBar = (): ReactNode => {
         uiActions.setSidebarTab('library');
         !isSidebarOpen && uiActions.toggleSidebar();
     }, [isSidebarOpen, uiActions]);
-
-    // Track context at submission time for use when response arrives
-    const submittedRef = useRef<{ prompt: string; intent: Intent; context: ContextState } | null>(null);
 
     useEffect(() => {
         chatActions.setGenerating(isGenerating);
@@ -644,7 +619,11 @@ const CommandBar = (): ReactNode => {
             abortControllerRef.current = controller;
 
             // Capture context at submission time
-            submittedRef.current = { context: { attachments, colorMode, intent, output }, intent, prompt: trimmed };
+            uiActions.setSubmittedContext({
+                context: { attachments, colorMode, intent, output },
+                intent,
+                prompt: trimmed,
+            });
 
             // Log user message to chat
             chatActions.addMessage({
@@ -660,13 +639,23 @@ const CommandBar = (): ReactNode => {
                 prompt: trimmed,
                 referenceSvg: intent === 'refine' ? (currentSvg ?? undefined) : undefined,
                 signal: controller.signal,
-                variantCount,
+                variantCount: variantCount as VariantCount,
             });
 
             // Clear input after submission (controlled mode requires explicit clear)
             chatActions.setInput('');
         },
-        [attachments, colorMode, intent, currentSvg, mutate, variantCount, chatActions, output],
+        [
+            attachments,
+            colorMode,
+            intent,
+            currentSvg,
+            mutate,
+            variantCount,
+            chatActions,
+            output, // Capture context at submission time
+            uiActions.setSubmittedContext,
+        ],
     );
 
     useEffect(() => {
@@ -687,13 +676,12 @@ const CommandBar = (): ReactNode => {
                 role: 'assistant',
                 timestamp: Date.now(),
             });
-            submittedRef.current = null;
+            uiActions.setSubmittedContext(null);
             abortControllerRef.current = null;
             return;
         }
 
-        const submitted = submittedRef.current;
-        if (!submitted) {
+        if (!submittedContext) {
             return;
         }
 
@@ -709,18 +697,18 @@ const CommandBar = (): ReactNode => {
         });
 
         historyActions.addAsset({
-            context: submitted.context,
+            context: submittedContext.context,
             id: generateId(),
-            intent: submitted.intent,
-            prompt: submitted.prompt,
-            selectedVariantIndex: 0,
+            intent: submittedContext.intent,
+            prompt: submittedContext.prompt,
+            selectedVariantIndex: 0 as Index,
             timestamp: Date.now(),
             variants: variants.map((v) => ({ id: generateId(), name: v.name, svg: v.svg })),
         });
 
-        submittedRef.current = null;
+        uiActions.setSubmittedContext(null);
         abortControllerRef.current = null;
-    }, [state, previewActions, chatActions, historyActions]);
+    }, [state, previewActions, chatActions, historyActions, submittedContext, uiActions]);
 
     return (
         <div className='command-bar'>

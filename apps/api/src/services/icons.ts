@@ -7,13 +7,22 @@ import { InternalError } from '@parametric-portal/server/errors';
 import type { ColorMode } from '@parametric-portal/types/database';
 import { createSvgAsset, type SvgAsset, SvgAssetInputSchema, sanitizeSvg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
-import { type GenerateRequest, GenerateRequestSchema, ICON_DESIGN, type Palette } from '../contracts/icons.ts';
+import { GenerateRequestSchema, ICON_DESIGN, type Palette } from '../contracts/icons.ts';
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const ServiceInputSchema = S.extend(
+    GenerateRequestSchema,
+    S.Struct({
+        apiKey: S.optional(S.String),
+        signal: S.optional(S.instanceOf(AbortSignal)),
+    }),
+);
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ServiceInput = GenerateRequest & { readonly signal?: AbortSignal | undefined };
+type ServiceInput = S.Schema.Type<typeof ServiceInputSchema>;
 type ServiceOutput = { readonly variants: ReadonlyArray<SvgAsset> };
-
 type PromptContext = {
     readonly attachments?: ReadonlyArray<SvgAsset>;
     readonly colorMode: ColorMode;
@@ -22,19 +31,9 @@ type PromptContext = {
     readonly referenceSvg?: string;
     readonly variantCount: number;
 };
-
 type IconGenerationServiceInterface = {
     readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InternalError>;
 };
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const ServiceInputSchema = S.extend(
-    GenerateRequestSchema,
-    S.Struct({
-        signal: S.optional(S.instanceOf(AbortSignal)),
-    }),
-);
 
 /** AI response wrapper: validates array of SvgAssetInput before transformation. */
 const AiResponseSchema = S.Struct({
@@ -238,6 +237,7 @@ const IconGenerationServiceLive = Layer.effect(
                     Effect.map(buildContext),
                     Effect.flatMap((ctx) =>
                         anthropic.send(buildSystemPrompt(ctx), [{ content: buildUserMessage(ctx), role: 'user' }], {
+                            ...(input.apiKey && { apiKey: input.apiKey }),
                             maxTokens: B.ai.maxTokens,
                             model: B.ai.model,
                             prefill: B.ai.prefill,
