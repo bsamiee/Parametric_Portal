@@ -16,8 +16,10 @@ type ApiError =
     | DatabaseConstraintError
     | DatabaseDeadlockError
     | DatabaseTimeoutError
+    | EncryptionError
     | ForbiddenError
     | GoneError
+    | HashingError
     | InternalError
     | NotFoundError
     | OAuthConsentError
@@ -160,6 +162,15 @@ class OptimisticLockError extends S.TaggedError<OptimisticLockError>()('Optimist
     resourceType: S.String,
 }) {}
 
+// Crypto errors
+class HashingError extends S.TaggedError<HashingError>()('HashingError', {
+    cause: S.Unknown,
+}) {}
+
+class EncryptionError extends S.TaggedError<EncryptionError>()('EncryptionError', {
+    cause: S.Unknown,
+}) {}
+
 // Enhanced OAuth errors
 class OAuthInvalidGrantError extends S.TaggedError<OAuthInvalidGrantError>()('OAuthInvalidGrantError', {
     provider: S.Literal('google', 'github', 'microsoft'),
@@ -188,9 +199,11 @@ export {
     DatabaseConstraintError,
     DatabaseDeadlockError,
     DatabaseTimeoutError,
+    EncryptionError,
     B as ERROR_TUNING,
     ForbiddenError,
     GoneError,
+    HashingError,
     InternalError,
     NotFoundError,
     OAuthConsentError,

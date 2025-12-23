@@ -11,7 +11,7 @@ import { createFileHooks } from '@parametric-portal/hooks/file';
 import { createAppRuntime, createRuntimeHooks } from '@parametric-portal/hooks/runtime';
 import { createStoreHooks } from '@parametric-portal/hooks/store';
 import { createTransitionHooks } from '@parametric-portal/hooks/transition';
-import { DateTime, Duration, Effect, Layer, Option, pipe } from 'effect';
+import { DateTime, Duration, Effect, Fiber, Layer, Option, pipe } from 'effect';
 import { useEffect } from 'react';
 import { auth } from './api.ts';
 import { type AuthState, authSlice } from './stores.ts';
@@ -94,7 +94,7 @@ const useAuthInit = (): void => {
             ),
         );
         return () => {
-            runtime.runFork(Effect.sync(() => fiber.unsafeInterruptAsFork(fiber.id())));
+            runtime.runFork(Fiber.interrupt(fiber));
         };
     }, [runtime, authActions]);
 
@@ -121,7 +121,7 @@ const useAuthInit = (): void => {
                   )
                 : null;
         return () => {
-            fiber !== null && runtime.runFork(Effect.sync(() => fiber.unsafeInterruptAsFork(fiber.id())));
+            fiber !== null && runtime.runFork(Fiber.interrupt(fiber));
         };
     }, [runtime, authActions]);
 };

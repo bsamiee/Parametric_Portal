@@ -2,7 +2,7 @@
  * Database entity identifiers, domain schemas, and auth response types.
  * Single import point for all domain primitives: @parametric-portal/types/database
  */
-import { Duration, type Option, pipe, type Redacted, Schema as S } from 'effect';
+import { Duration, pipe, type Redacted, Schema as S } from 'effect';
 import type { Hex64 } from './types.ts';
 import { Hex64Schema, Uuidv7Schema } from './types.ts';
 
@@ -40,18 +40,8 @@ type OAuthProviderConfig = {
     readonly redirectUri: string;
     readonly scopes: ReadonlyArray<string>;
 };
-type OAuthTokens = {
-    readonly accessToken: string;
-    readonly expiresAt: Option.Option<Date>;
-    readonly refreshToken: Option.Option<string>;
-    readonly scope: Option.Option<string>;
-};
-type OAuthUserInfo = {
-    readonly avatarUrl: Option.Option<string>;
-    readonly email: Option.Option<string>;
-    readonly name: Option.Option<string>;
-    readonly providerAccountId: string;
-};
+type OAuthTokens = S.Schema.Type<typeof OAuthTokensSchema>;
+type OAuthUserInfo = S.Schema.Type<typeof OAuthUserInfoSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -107,6 +97,18 @@ const ApiKeyListItemSchema = S.Struct({
     name: S.NonEmptyTrimmedString,
     provider: AiProviderSchema,
 });
+const OAuthTokensSchema = S.Struct({
+    accessToken: S.String,
+    expiresAt: S.OptionFromSelf(S.DateFromSelf),
+    refreshToken: S.OptionFromSelf(S.String),
+    scope: S.OptionFromSelf(S.String),
+});
+const OAuthUserInfoSchema = S.Struct({
+    avatarUrl: S.OptionFromSelf(S.String),
+    email: S.OptionFromSelf(S.String),
+    name: S.OptionFromSelf(S.String),
+    providerAccountId: S.String,
+});
 
 // --- [API_RESPONSES] ---------------------------------------------------------
 
@@ -148,6 +150,8 @@ export {
     OAuthAccountIdSchema,
     OAuthProviderSchema,
     OAuthStartResponseSchema,
+    OAuthTokensSchema,
+    OAuthUserInfoSchema,
     OrganizationIdSchema,
     OrganizationMemberIdSchema,
     OrganizationRoleSchema,

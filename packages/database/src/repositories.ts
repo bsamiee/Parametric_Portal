@@ -121,7 +121,7 @@ const makeRepositories = Effect.gen(function* () {
             findValidByKeyHash: SqlSchema.findOne({
                 execute: (keyHash) =>
                     sql`SELECT * FROM ${sql(B.tables.apiKeys)} WHERE key_hash = ${keyHash} AND (expires_at IS NULL OR expires_at > now())`,
-                Request: S.String,
+                Request: TokenHashSchema,
                 Result: ApiKey,
             }),
             insert: SqlSchema.single({
@@ -297,7 +297,7 @@ const makeRepositories = Effect.gen(function* () {
             findValidByTokenHash: SqlSchema.findOne({
                 execute: (tokenHash) =>
                     sql`SELECT * FROM ${sql(B.tables.refreshTokens)} WHERE token_hash = ${tokenHash} AND expires_at > now() AND revoked_at IS NULL`,
-                Request: S.String,
+                Request: TokenHashSchema,
                 Result: RefreshToken,
             }),
             insert: SqlSchema.void({
@@ -327,7 +327,7 @@ const makeRepositories = Effect.gen(function* () {
             findByTokenHash: SqlSchema.findOne({
                 execute: (tokenHash) =>
                     sql`SELECT * FROM ${sql(B.tables.sessions)} WHERE token_hash = ${tokenHash} AND expires_at > now()`,
-                Request: S.String,
+                Request: TokenHashSchema,
                 Result: Session,
             }),
             insert: SqlSchema.void({
