@@ -1,25 +1,50 @@
 /**
  * Auth group handlers for OAuth flows and session management.
+ * Uses HttpOnly cookies for refresh tokens (XSS-safe) and JSON for access tokens.
  */
+import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { makeRepositories, type Repositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
-import { createTokenPair, hashString } from '@parametric-portal/server/crypto';
+import { createTokenPair, encryptApiKey, hashString } from '@parametric-portal/server/crypto';
 import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
-import { type OAuthProvider, SCHEMA_TUNING } from '@parametric-portal/types/database';
+import {
+    type AiProvider,
+    type ApiKeyId,
+    Expiry,
+    type OAuthProvider,
+    SCHEMA_TUNING,
+} from '@parametric-portal/types/database';
 import type { Uuidv7 } from '@parametric-portal/types/types';
 import { type Context, DateTime, Duration, Effect, Option, pipe } from 'effect';
 
 import { AppApi } from '../api.ts';
 
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const B = Object.freeze({
+    cookie: {
+        maxAge: Duration.toSeconds(SCHEMA_TUNING.durations.refreshToken),
+        name: 'refreshToken',
+        path: '/api/auth',
+    },
+} as const);
+
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const computeExpiry = (duration: Duration.Duration) => new Date(Date.now() + Duration.toMillis(duration));
-const toSessionResponse = (sessionToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) => ({
-    accessToken: sessionToken,
-    expiresAt: DateTime.unsafeFromDate(expiresAt),
-    refreshToken: refreshToken,
-});
+const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) =>
+    pipe(
+        HttpServerResponse.json({ accessToken, expiresAt: DateTime.unsafeFromDate(expiresAt) }),
+        Effect.flatMap((response) =>
+            HttpServerResponse.setCookie(response, B.cookie.name, refreshToken, {
+                httpOnly: true,
+                maxAge: `${B.cookie.maxAge} seconds`,
+                path: B.cookie.path,
+                sameSite: 'lax',
+                secure: true,
+            }),
+        ),
+    );
 
 const createAuthTokenPairs = () =>
     Effect.gen(function* () {
@@ -68,7 +93,6 @@ const handleOAuthCallback = (
                     ),
                 onSome: Effect.succeed,
             });
-
             yield* repos.oauthAccounts.upsert({
                 accessToken: tokens.accessToken,
                 expiresAt: Option.getOrNull(tokens.expiresAt),
@@ -77,40 +101,48 @@ const handleOAuthCallback = (
                 refreshToken: Option.getOrNull(tokens.refreshToken),
                 userId: user.id,
             });
-
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
-            const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
-
+            const sessionExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.session);
+            const refreshExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.refreshToken);
             yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: user.id });
             yield* repos.refreshTokens.insert({
                 expiresAt: refreshExpiresAt,
                 tokenHash: refreshHash,
                 userId: user.id,
             });
-            return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
+            return yield* buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
-        Effect.catchAll((cause) =>
-            Effect.fail(new OAuthError({ provider, reason: `Database error: ${String(cause)}` })),
-        ),
+        Effect.catchTags({
+            CookieError: () => Effect.fail(new OAuthError({ provider, reason: 'Cookie setting failed' })),
+            HashingError: () => Effect.fail(new OAuthError({ provider, reason: 'Token hashing failed' })),
+            HttpBodyError: () => Effect.fail(new OAuthError({ provider, reason: 'Response body error' })),
+            OAuthError: (err) => Effect.fail(err),
+            ParseError: () => Effect.fail(new OAuthError({ provider, reason: 'Data parse failed' })),
+            SqlError: () => Effect.fail(new OAuthError({ provider, reason: 'Database error' })),
+        }),
     );
 
-const handleRefresh = (repos: Repositories, refreshTokenInput: string) =>
+const handleRefresh = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
+            const request = yield* HttpServerRequest.HttpServerRequest;
+            const refreshTokenInput = yield* pipe(
+                Option.fromNullable(request.cookies[B.cookie.name]),
+                Option.match({
+                    onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Missing refresh token cookie' })),
+                    onSome: Effect.succeed,
+                }),
+            );
             const hashInput = yield* hashString(refreshTokenInput);
             const tokenOpt = yield* repos.refreshTokens.findValidByTokenHash(hashInput);
             const token = yield* Option.match(tokenOpt, {
                 onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
                 onSome: Effect.succeed,
             });
-
             yield* repos.refreshTokens.revoke(token.id);
-
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = computeExpiry(SCHEMA_TUNING.durations.session);
-            const refreshExpiresAt = computeExpiry(SCHEMA_TUNING.durations.refreshToken);
-
+            const sessionExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.session);
+            const refreshExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.refreshToken);
             yield* repos.sessions.insert({
                 expiresAt: sessionExpiresAt,
                 tokenHash: sessionHash,
@@ -121,12 +153,15 @@ const handleRefresh = (repos: Repositories, refreshTokenInput: string) =>
                 tokenHash: refreshHash,
                 userId: token.userId,
             });
-            return toSessionResponse(sessionToken, sessionExpiresAt, refreshToken);
+            return yield* buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
         Effect.catchTags({
+            CookieError: () => Effect.fail(new UnauthorizedError({ reason: 'Cookie setting failed' })),
             HashingError: () => Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),
-            ParseError: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid token format' })),
-            SqlError: () => Effect.fail(new UnauthorizedError({ reason: 'Database error' })),
+            HttpBodyError: () => Effect.fail(new UnauthorizedError({ reason: 'Response body error' })),
+            ParseError: () => Effect.fail(new UnauthorizedError({ reason: 'Token parse failed' })),
+            SqlError: () => Effect.fail(new UnauthorizedError({ reason: 'Token refresh failed' })),
+            UnauthorizedError: (err) => Effect.fail(err),
         }),
     );
 
@@ -137,9 +172,10 @@ const handleLogout = (repos: Repositories) =>
             yield* repos.sessions.delete(session.sessionId);
             return { success: true };
         }),
-        Effect.catchAll((cause) =>
-            Effect.fail(new InternalError({ cause: `Session deletion failed: ${String(cause)}` })),
-        ),
+        Effect.catchTags({
+            ParseError: () => Effect.fail(new InternalError({ cause: 'Session context parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'Session deletion failed' })),
+        }),
     );
 
 const handleMe = (repos: Repositories) =>
@@ -147,7 +183,6 @@ const handleMe = (repos: Repositories) =>
         Effect.gen(function* () {
             const session = yield* SessionContext;
             const userOpt = yield* repos.users.findById(session.userId);
-
             return yield* Option.match(userOpt, {
                 onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
                 onSome: (user) => Effect.succeed({ email: user.email, id: user.id }),
@@ -160,6 +195,58 @@ const handleMe = (repos: Repositories) =>
         }),
     );
 
+const handleListApiKeys = (repos: Repositories) =>
+    pipe(
+        Effect.gen(function* () {
+            const session = yield* SessionContext;
+            const keys = yield* repos.apiKeys.findAllByUserId(session.userId);
+            return { data: keys };
+        }),
+        Effect.catchTags({
+            ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'API key list failed' })),
+        }),
+    );
+
+const handleCreateApiKey = (repos: Repositories, input: { key: string; name: string; provider: AiProvider }) =>
+    pipe(
+        Effect.gen(function* () {
+            const session = yield* SessionContext;
+            const keyHash = yield* hashString(input.key);
+            const encrypted = yield* encryptApiKey(input.key);
+            const keyEncrypted = new Uint8Array([...encrypted.iv, ...encrypted.ciphertext]);
+            const apiKey = yield* repos.apiKeys.insert({
+                expiresAt: null,
+                keyEncrypted,
+                keyHash,
+                name: input.name,
+                provider: input.provider,
+                userId: session.userId,
+            });
+            return { id: apiKey.id };
+        }),
+        Effect.catchTags({
+            EncryptionError: () => Effect.fail(new InternalError({ cause: 'API key encryption failed' })),
+            HashingError: () => Effect.fail(new InternalError({ cause: 'API key hashing failed' })),
+            NoSuchElementException: () => Effect.fail(new InternalError({ cause: 'Session context unavailable' })),
+            ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'API key insert failed' })),
+        }),
+    );
+
+const handleDeleteApiKey = (repos: Repositories, id: ApiKeyId) =>
+    pipe(
+        Effect.gen(function* () {
+            yield* SessionContext;
+            yield* repos.apiKeys.delete(id);
+            return { success: true };
+        }),
+        Effect.catchTags({
+            ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'API key deletion failed' })),
+        }),
+    );
+
 // --- [LAYER] -----------------------------------------------------------------
 
 const AuthLive = HttpApiBuilder.group(AppApi, 'auth', (handlers) =>
@@ -168,12 +255,15 @@ const AuthLive = HttpApiBuilder.group(AppApi, 'auth', (handlers) =>
         const oauth = yield* OAuthService;
         return handlers
             .handle('oauthStart', ({ path: { provider } }) => handleOAuthStart(oauth, provider))
-            .handle('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) =>
+            .handleRaw('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) =>
                 handleOAuthCallback(oauth, repos, provider, code, state),
             )
-            .handle('refresh', ({ payload: { refreshToken } }) => handleRefresh(repos, refreshToken))
+            .handleRaw('refresh', () => handleRefresh(repos))
             .handle('logout', () => handleLogout(repos))
-            .handle('me', () => handleMe(repos));
+            .handle('me', () => handleMe(repos))
+            .handle('listApiKeys', () => handleListApiKeys(repos))
+            .handle('createApiKey', ({ payload }) => handleCreateApiKey(repos, payload))
+            .handle('deleteApiKey', ({ path: { id } }) => handleDeleteApiKey(repos, id));
     }),
 );
 

@@ -52,6 +52,8 @@ playwright-report/
 playwright/.cache/
 .pytest_cache/
 .hypothesis/
+reports/stryker/
+stryker-tmp/
 
 # --- [CACHES] -----------------------------------------------------------------
 .cache/

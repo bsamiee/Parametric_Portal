@@ -59,14 +59,12 @@ const SessionAuthLive = pipe(
 const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
-
         const checkDatabase = () =>
             pipe(
                 sql`SELECT 1`,
                 Effect.as(true),
                 Effect.catchAll(() => Effect.succeed(false)),
             );
-
         return handlers
             .handle('liveness', () => Effect.succeed({ status: 'ok' as const }))
             .handle('readiness', () =>

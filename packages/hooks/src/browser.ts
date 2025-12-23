@@ -11,11 +11,10 @@ import type { RuntimeApi } from './runtime';
 // --- [TYPES] -----------------------------------------------------------------
 
 // biome-ignore lint/style/useNamingConvention: _tag is standard Effect discriminated union convention
-type ClipboardError = { readonly _tag: 'ClipboardError'; readonly message: string };
-// biome-ignore lint/style/useNamingConvention: _tag is standard Effect discriminated union convention
-type DownloadError = { readonly _tag: 'DownloadError'; readonly message: string };
-// biome-ignore lint/style/useNamingConvention: _tag is standard Effect discriminated union convention
-type ExportError = { readonly _tag: 'ExportError'; readonly message: string };
+type BrowserError<Tag extends string> = { readonly _tag: Tag; readonly code: string; readonly message: string };
+type ClipboardError = BrowserError<'ClipboardError'>;
+type DownloadError = BrowserError<'DownloadError'>;
+type ExportError = BrowserError<'ExportError'>;
 type ExportFormat = 'png' | 'svg' | 'zip';
 type ExportVariant = { readonly id: string; readonly svg: string };
 type ExportInput = {
@@ -54,7 +53,6 @@ type BrowserHooksApi<_R> = {
 type BrowserHooksConfig = {
     readonly timestampProvider?: () => number;
 };
-type StateSetter<A, E> = React.Dispatch<React.SetStateAction<AsyncState<A, E>>>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -65,31 +63,27 @@ const B = Object.freeze({
         timestamp: ASYNC_TUNING.timestamp,
     },
     errors: {
-        canvasContext: 'Failed to get canvas 2D context',
-        clipboardRead: 'Failed to read from clipboard',
-        clipboardUnavailable: 'Clipboard API not available',
-        clipboardWrite: 'Failed to write to clipboard',
-        downloadFailed: 'Download failed',
-        exportFailed: 'Export failed',
-        noSvg: 'No SVG content to export',
-        noVariants: 'No variants to export',
+        canvasContext: { code: 'CANVAS_CONTEXT', message: 'Failed to get canvas 2D context' },
+        clipboardRead: { code: 'CLIPBOARD_READ', message: 'Failed to read from clipboard' },
+        clipboardUnavailable: { code: 'CLIPBOARD_UNAVAILABLE', message: 'Clipboard API not available' },
+        clipboardWrite: { code: 'CLIPBOARD_WRITE', message: 'Failed to write to clipboard' },
+        downloadFailed: { code: 'DOWNLOAD_FAILED', message: 'Download failed' },
+        exportFailed: { code: 'EXPORT_FAILED', message: 'Export failed' },
+        noSvg: { code: 'NO_SVG', message: 'No SVG content to export' },
+        noVariants: { code: 'NO_VARIANTS', message: 'No variants to export' },
     },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+type ErrorDef = { readonly code: string; readonly message: string };
 const isClipboardAvailable = (): boolean => globalThis.navigator?.clipboard !== undefined;
-const mkClipboardError = (message: string): ClipboardError => ({ _tag: 'ClipboardError', message });
-const mkDownloadError = (message: string): DownloadError => ({ _tag: 'DownloadError', message });
-const mkExportError = (message: string): ExportError => ({ _tag: 'ExportError', message });
-
-const interruptFiber =
-    <A, E, R>(
-        runtime: { runPromise: (effect: Effect.Effect<unknown, unknown, R>) => Promise<unknown> },
-        fiber: Fiber.RuntimeFiber<A, E>,
-    ) =>
-    () =>
-        void runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
+const mkBrowserError =
+    <Tag extends string>(tag: Tag) =>
+    (err: ErrorDef): BrowserError<Tag> => ({ _tag: tag, code: err.code, message: err.message });
+const mkClipboardError = mkBrowserError('ClipboardError');
+const mkDownloadError = mkBrowserError('DownloadError');
+const mkExportError = mkBrowserError('ExportError');
 
 const sanitizeFilename = (text: string): string =>
     text
@@ -119,151 +113,93 @@ const downloadBlob = (blob: Blob, filename: string): void => {
     URL.revokeObjectURL(url);
 };
 
-const onSuccess =
-    <A, E>(setState: StateSetter<A, E>, ts: () => number) =>
-    (data: A) =>
-        Effect.sync(() => setState(mkSuccess(data, ts)));
-
-const onFailure =
-    <A, E>(setState: StateSetter<A, E>, ts: () => number) =>
-    (error: E) =>
-        Effect.sync(() => setState(mkFailure(error, ts)));
-
-const createCopyEffect = <V>(
-    value: V,
-    serializer: (v: V) => string,
-    setState: StateSetter<V, ClipboardError>,
-    ts: () => number,
-) =>
+const clipboardWrite = (text: string): Effect.Effect<void, ClipboardError, never> =>
     Effect.tryPromise({
         catch: () => mkClipboardError(B.errors.clipboardWrite),
-        try: () => globalThis.navigator.clipboard.writeText(serializer(value)),
-    }).pipe(
-        Effect.flatMap(() => onSuccess<V, ClipboardError>(setState, ts)(value)),
-        Effect.catchAll(onFailure<V, ClipboardError>(setState, ts)),
-    );
+        try: () => globalThis.navigator.clipboard.writeText(text),
+    });
 
-const createPasteEffect = <V>(
-    deserializer: (text: string) => V,
-    setState: StateSetter<V, ClipboardError>,
-    ts: () => number,
-) =>
+const clipboardRead = (): Effect.Effect<string, ClipboardError, never> =>
     Effect.tryPromise({
         catch: () => mkClipboardError(B.errors.clipboardRead),
         try: () => globalThis.navigator.clipboard.readText(),
-    }).pipe(
-        Effect.flatMap((text) => {
-            const value = deserializer(text);
-            return onSuccess<V, ClipboardError>(setState, ts)(value);
-        }),
-        Effect.catchAll(onFailure<V, ClipboardError>(setState, ts)),
-    );
+    });
 
-const createDownloadEffect = (
-    data: string | Blob,
-    filename: string,
-    mimeType: string,
-    setState: StateSetter<void, DownloadError>,
-    ts: () => number,
-) =>
-    Effect.try({
-        catch: () => mkDownloadError(B.errors.downloadFailed),
-        try: () => {
-            const blob = typeof data === 'string' ? new Blob([data], { type: mimeType }) : data;
-            const url = URL.createObjectURL(blob);
-            const link = globalThis.document.createElement('a');
-            link.href = url;
-            link.download = filename;
-            link.click();
-            URL.revokeObjectURL(url);
-        },
-    }).pipe(Effect.flatMap(() => onSuccess<void, DownloadError>(setState, ts)(undefined)));
+const downloadEffect = (blob: Blob, filename: string): Effect.Effect<void, DownloadError, never> =>
+    Effect.try({ catch: () => mkDownloadError(B.errors.downloadFailed), try: () => downloadBlob(blob, filename) });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
-
-const exportSvg = (svg: string, filename: string): Effect.Effect<void, ExportError, never> =>
-    Effect.try({
-        catch: () => mkExportError(B.errors.exportFailed),
-        try: () => {
-            const blob = new Blob([svg], { type: 'image/svg+xml' });
-            downloadBlob(blob, filename);
-        },
-    });
-
-const exportPng = (svg: string, size: number, filename: string): Effect.Effect<void, ExportError, never> =>
-    Effect.async<void, ExportError>((resume) => {
-        const canvas = globalThis.document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            resume(Effect.fail(mkExportError(B.errors.canvasContext)));
-            return;
-        }
-        const img = new Image();
-        const blob = new Blob([svg], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(blob);
-        img.onload = () => {
-            ctx.drawImage(img, 0, 0, size, size);
-            const pngUrl = canvas.toDataURL('image/png');
-            const a = globalThis.document.createElement('a');
-            a.href = pngUrl;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
-            resume(Effect.succeed(undefined));
-        };
-        img.onerror = () => {
-            URL.revokeObjectURL(url);
-            resume(Effect.fail(mkExportError(B.errors.exportFailed)));
-        };
-        img.src = url;
-    });
-
-const exportZip = (
-    variants: ReadonlyArray<ExportVariant>,
-    baseFilename: string,
-): Effect.Effect<void, ExportError, never> =>
-    Effect.tryPromise({
-        catch: () => mkExportError(B.errors.exportFailed),
-        try: async () => {
-            const { default: JSZip } = await import('jszip');
-            const zip = new JSZip();
-            const base = sanitizeFilename(baseFilename);
-            variants.forEach((v, i) => {
-                zip.file(`${base}_variant_${i + 1}.svg`, v.svg);
-            });
-            const blob = await zip.generateAsync({ type: 'blob' });
-            downloadBlob(blob, `${base}.zip`);
-        },
-    });
 
 type ExportHandler = (input: ExportInput) => Effect.Effect<void, ExportError, never>;
 
 const exportHandlers: Readonly<Record<ExportFormat, ExportHandler>> = {
     png: (input) =>
         input.svg
-            ? exportPng(
-                  input.svg,
-                  input.pngSize ?? B.defaults.pngSize,
-                  buildFilename(input.filename ?? '', 'png', input.variantIndex, input.variantCount),
-              )
+            ? Effect.async<void, ExportError>((resume) => {
+                  const size = input.pngSize ?? B.defaults.pngSize;
+                  const canvas = globalThis.document.createElement('canvas');
+                  canvas.width = size;
+                  canvas.height = size;
+                  const ctx = canvas.getContext('2d');
+                  ctx === null
+                      ? resume(Effect.fail(mkExportError(B.errors.canvasContext)))
+                      : ((img: HTMLImageElement, url: string) => {
+                            img.onload = () => {
+                                ctx.drawImage(img, 0, 0, size, size);
+                                const pngUrl = canvas.toDataURL('image/png');
+                                const a = globalThis.document.createElement('a');
+                                a.href = pngUrl;
+                                a.download = buildFilename(
+                                    input.filename ?? '',
+                                    'png',
+                                    input.variantIndex,
+                                    input.variantCount,
+                                );
+                                a.click();
+                                URL.revokeObjectURL(url);
+                                resume(Effect.succeed(undefined));
+                            };
+                            img.onerror = () => {
+                                URL.revokeObjectURL(url);
+                                resume(Effect.fail(mkExportError(B.errors.exportFailed)));
+                            };
+                            img.src = url;
+                        })(
+                            new Image(),
+                            URL.createObjectURL(new Blob([input.svg as string], { type: 'image/svg+xml' })),
+                        );
+              })
             : Effect.fail(mkExportError(B.errors.noSvg)),
     svg: (input) =>
         input.svg
-            ? exportSvg(input.svg, buildFilename(input.filename ?? '', 'svg', input.variantIndex, input.variantCount))
+            ? Effect.try({
+                  catch: () => mkExportError(B.errors.exportFailed),
+                  try: () => {
+                      const blob = new Blob([input.svg as string], { type: 'image/svg+xml' });
+                      downloadBlob(
+                          blob,
+                          buildFilename(input.filename ?? '', 'svg', input.variantIndex, input.variantCount),
+                      );
+                  },
+              })
             : Effect.fail(mkExportError(B.errors.noSvg)),
     zip: (input) =>
         input.variants && input.variants.length > 0
-            ? exportZip(input.variants, input.filename ?? '')
+            ? Effect.tryPromise({
+                  catch: () => mkExportError(B.errors.exportFailed),
+                  try: async () => {
+                      const { default: JSZip } = await import('jszip');
+                      const zip = new JSZip();
+                      const base = sanitizeFilename(input.filename ?? '');
+                      (input.variants as ReadonlyArray<ExportVariant>).map((v, i) =>
+                          zip.file(`${base}_variant_${i + 1}.svg`, v.svg),
+                      );
+                      const blob = await zip.generateAsync({ type: 'blob' });
+                      downloadBlob(blob, `${base}.zip`);
+                  },
+              })
             : Effect.fail(mkExportError(B.errors.noVariants)),
 };
-
-const createExportEffect = (input: ExportInput, setState: StateSetter<void, ExportError>, ts: () => number) =>
-    exportHandlers[input.format](input).pipe(
-        Effect.flatMap(() => onSuccess<void, ExportError>(setState, ts)(undefined)),
-        Effect.catchAll(onFailure<void, ExportError>(setState, ts)),
-    );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -289,7 +225,18 @@ const createBrowserHooks = <R, E>(
                     return;
                 }
                 setState(mkLoading(ts));
-                fiberRef.current = runtime.runFork(createCopyEffect(value, serializer, setState, ts));
+                fiberRef.current = runtime.runFork(
+                    Effect.gen(function* () {
+                        yield* clipboardWrite(serializer(value));
+                        setState(mkSuccess(value, ts));
+                        return value;
+                    }).pipe(
+                        Effect.catchAll((error: ClipboardError) => {
+                            setState(mkFailure(error, ts));
+                            return Effect.void;
+                        }),
+                    ),
+                );
             },
             [runtime, serializer],
         );
@@ -300,20 +247,36 @@ const createBrowserHooks = <R, E>(
                 return;
             }
             setState(mkLoading(ts));
-            fiberRef.current = runtime.runFork(createPasteEffect(deserializer, setState, ts));
+            fiberRef.current = runtime.runFork(
+                Effect.gen(function* () {
+                    const text = yield* clipboardRead();
+                    const data = deserializer(text);
+                    setState(mkSuccess(data, ts));
+                    return data;
+                }).pipe(
+                    Effect.catchAll((error: ClipboardError) => {
+                        setState(mkFailure(error, ts));
+                        return Effect.void;
+                    }),
+                ),
+            );
         }, [runtime, deserializer]);
 
         const reset = useCallback(() => {
-            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
+            fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(() => {
-            const fiber = fiberRef.current;
-            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
-            return cleanup;
-        }, [runtime]);
+        useEffect(
+            () =>
+                fiberRef.current === null
+                    ? undefined
+                    : () => {
+                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
+                      },
+            [runtime],
+        );
 
         return { copy, paste, reset, state };
     };
@@ -325,28 +288,42 @@ const createBrowserHooks = <R, E>(
 
         const download = useCallback(
             (data: string | Blob, filename: string, mimeType: string = B.defaults.mimeType) => {
-                // SSR guard
                 if (globalThis.document === undefined) {
                     setState(mkFailure(mkDownloadError(B.errors.downloadFailed), ts));
                     return;
                 }
                 setState(mkLoading(ts));
-                fiberRef.current = runtime.runFork(createDownloadEffect(data, filename, mimeType, setState, ts));
+                const blob = data instanceof Blob ? data : new Blob([data], { type: mimeType });
+                fiberRef.current = runtime.runFork(
+                    Effect.gen(function* () {
+                        yield* downloadEffect(blob, filename);
+                        setState(mkSuccess(undefined, ts));
+                    }).pipe(
+                        Effect.catchAll((error: DownloadError) => {
+                            setState(mkFailure(error, ts));
+                            return Effect.void;
+                        }),
+                    ),
+                );
             },
             [runtime],
         );
 
         const reset = useCallback(() => {
-            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
+            fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(() => {
-            const fiber = fiberRef.current;
-            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
-            return cleanup;
-        }, [runtime]);
+        useEffect(
+            () =>
+                fiberRef.current === null
+                    ? undefined
+                    : () => {
+                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
+                      },
+            [runtime],
+        );
 
         return { download, reset, state };
     };
@@ -358,28 +335,41 @@ const createBrowserHooks = <R, E>(
 
         const exportAs = useCallback(
             (input: ExportInput) => {
-                // SSR guard
                 if (globalThis.document === undefined) {
                     setState(mkFailure(mkExportError(B.errors.exportFailed), ts));
                     return;
                 }
                 setState(mkLoading(ts));
-                fiberRef.current = runtime.runFork(createExportEffect(input, setState, ts));
+                fiberRef.current = runtime.runFork(
+                    Effect.gen(function* () {
+                        yield* exportHandlers[input.format](input);
+                        setState(mkSuccess(undefined, ts));
+                    }).pipe(
+                        Effect.catchAll((error: ExportError) => {
+                            setState(mkFailure(error, ts));
+                            return Effect.void;
+                        }),
+                    ),
+                );
             },
             [runtime],
         );
 
         const reset = useCallback(() => {
-            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
+            fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(() => {
-            const fiber = fiberRef.current;
-            const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
-            return cleanup;
-        }, [runtime]);
+        useEffect(
+            () =>
+                fiberRef.current === null
+                    ? undefined
+                    : () => {
+                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
+                      },
+            [runtime],
+        );
 
         return { exportAs, reset, state };
     };
@@ -394,6 +384,7 @@ const createBrowserHooks = <R, E>(
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type {
+    BrowserError,
     BrowserHooksApi,
     BrowserHooksConfig,
     ClipboardError,

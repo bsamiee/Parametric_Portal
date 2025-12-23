@@ -4,7 +4,7 @@
  */
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess } from '@parametric-portal/types/async';
-import type { ManagedRuntime, Schedule } from 'effect';
+import type { Schedule } from 'effect';
 import { Duration, Effect, Fiber } from 'effect';
 import { type DependencyList, useCallback, useEffect, useRef, useState } from 'react';
 import type { RuntimeApi } from './runtime';
@@ -63,25 +63,6 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const onSuccess =
-    <A, E>(setState: StateSetter<A, E>, ts: () => number) =>
-    (data: A) =>
-        Effect.sync(() => setState(mkSuccess(data, ts)));
-
-const onFailure =
-    <A, E>(setState: StateSetter<A, E>, ts: () => number) =>
-    (error: E) =>
-        Effect.sync(() => setState(mkFailure(error, ts)));
-
-const wrapEffect = <A, E, R>(effect: Effect.Effect<A, E, R>, setState: StateSetter<A, E>, ts: () => number) =>
-    effect.pipe(Effect.tap(onSuccess(setState, ts)), Effect.catchAll(onFailure<A, E>(setState, ts)));
-
-const interruptFiber =
-    <A, E, R>(runtime: ManagedRuntime.ManagedRuntime<R, E>, fiber: Fiber.RuntimeFiber<A, E>) =>
-    () => {
-        runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
-    };
-
 const isCacheValid = <A>(entry: CacheEntry<A> | null, now: number): entry is CacheEntry<A> =>
     entry !== null && now < entry.expiresAt;
 
@@ -90,33 +71,10 @@ const createCacheEntry = <A>(value: A, ttlMs: number, now: number): CacheEntry<A
     value,
 });
 
-const incrementAttempts = (setAttempts: React.Dispatch<React.SetStateAction<number>>) => () =>
-    Effect.sync(() => setAttempts((prev) => prev + 1));
-
-const onCacheSuccess =
-    <A, E>(setState: StateSetter<A, E>, cacheRef: { current: CacheEntry<A> | null }, ttlMs: number, ts: () => number) =>
-    (data: A) =>
-        Effect.sync(() => {
-            cacheRef.current = createCacheEntry(data, ttlMs, ts());
-            setState(mkSuccess(data, ts));
-        });
-
-const executeCachedEffect = <A, E, R, RuntimeE>(
-    runtime: ManagedRuntime.ManagedRuntime<R, RuntimeE>,
-    effect: Effect.Effect<A, E, R>,
-    setState: StateSetter<A, E>,
-    cacheRef: { current: CacheEntry<A> | null },
-    ttlMs: number,
-    ts: () => number,
-): (() => void) => {
-    setState(mkLoading(ts));
-    const cachedEffect = effect.pipe(
-        Effect.tap(onCacheSuccess(setState, cacheRef, ttlMs, ts)),
-        Effect.catchAll(onFailure<A, E>(setState, ts)),
-    );
-    const fiber = runtime.runFork(cachedEffect);
-    return interruptFiber(runtime, fiber);
-};
+const incrementBy =
+    (n: number) =>
+    (prev: number): number =>
+        prev + n;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -130,8 +88,21 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
 
         useEffect(() => {
             setState(mkLoading(ts));
-            const fiber = runtime.runFork(wrapEffect(effect, setState, ts));
-            return interruptFiber(runtime, fiber);
+            const fiber = runtime.runFork(
+                Effect.gen(function* () {
+                    const data = yield* effect;
+                    setState(mkSuccess(data, ts));
+                    return data;
+                }).pipe(
+                    Effect.catchAll((error: Err) => {
+                        setState(mkFailure(error, ts));
+                        return Effect.void;
+                    }),
+                ),
+            );
+            return () => {
+                runtime.runFork(Fiber.interrupt(fiber));
+            };
             // biome-ignore lint/correctness/useExhaustiveDependencies: deps is intentionally dynamic for caller control
         }, deps);
 
@@ -146,18 +117,37 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
         const mutate = useCallback(
             (input: I) => {
                 setState(mkLoading(ts));
-                fiberRef.current = runtime.runFork(wrapEffect(fn(input), setState, ts));
+                fiberRef.current = runtime.runFork(
+                    Effect.gen(function* () {
+                        const data = yield* fn(input);
+                        setState(mkSuccess(data, ts));
+                        return data;
+                    }).pipe(
+                        Effect.catchAll((error: Err) => {
+                            setState(mkFailure(error, ts));
+                            return Effect.void;
+                        }),
+                    ),
+                );
             },
             [runtime, fn],
         );
 
         const reset = useCallback(() => {
-            fiberRef.current && runtime.runPromise(Fiber.interrupt(fiberRef.current)).catch(() => {});
+            fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
             fiberRef.current = null;
             setState(mkIdle());
         }, [runtime]);
 
-        useEffect(() => (fiberRef.current === null ? undefined : interruptFiber(runtime, fiberRef.current)), [runtime]);
+        useEffect(
+            () =>
+                fiberRef.current === null
+                    ? undefined
+                    : () => {
+                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
+                      },
+            [runtime],
+        );
 
         return { mutate, reset, state };
     };
@@ -175,15 +165,22 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
             setState(mkLoading(ts));
             setAttempts(0);
 
-            const retryEffect = effect.pipe(
-                Effect.tap(incrementAttempts(setAttempts)),
-                Effect.retry(schedule),
-                Effect.tap(onSuccess(setState, ts)),
-                Effect.catchAll(onFailure<A, Err>(setState, ts)),
+            const incrementAttempt = Effect.sync(() => setAttempts(incrementBy(1)));
+            const retryEffect = Effect.gen(function* () {
+                const data = yield* effect.pipe(Effect.zipLeft(incrementAttempt), Effect.retry(schedule));
+                setState(mkSuccess(data, ts));
+                return data;
+            }).pipe(
+                Effect.catchAll((error: Err) => {
+                    setState(mkFailure(error, ts));
+                    return Effect.void;
+                }),
             );
 
             const fiber = runtime.runFork(retryEffect);
-            return interruptFiber(runtime, fiber);
+            return () => {
+                runtime.runFork(Fiber.interrupt(fiber));
+            };
             // biome-ignore lint/correctness/useExhaustiveDependencies: deps is intentionally dynamic for caller control
         }, deps);
 
@@ -208,11 +205,27 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
         useEffect(() => {
             const now = ts();
             const cached = cacheRef.current;
-            return isCacheValid(cached, now)
-                ? (() => {
-                      setState(mkSuccess(cached.value, ts));
-                  })()
-                : executeCachedEffect(runtime, effect, setState, cacheRef, ttlMs, ts);
+            if (isCacheValid(cached, now)) {
+                setState(mkSuccess(cached.value, ts));
+                return undefined;
+            }
+            setState(mkLoading(ts));
+            const fiber = runtime.runFork(
+                Effect.gen(function* () {
+                    const data = yield* effect;
+                    cacheRef.current = createCacheEntry(data, ttlMs, ts());
+                    setState(mkSuccess(data, ts));
+                    return data;
+                }).pipe(
+                    Effect.catchAll((error: Err) => {
+                        setState(mkFailure(error, ts));
+                        return Effect.void;
+                    }),
+                ),
+            );
+            return () => {
+                runtime.runFork(Fiber.interrupt(fiber));
+            };
             // biome-ignore lint/correctness/useExhaustiveDependencies: deps is intentionally dynamic for caller control
         }, deps);
 
@@ -230,13 +243,4 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { AsyncHooksApi, AsyncHooksConfig, CachedState, CacheEntry, MutationState, RetryState, StateSetter };
-export {
-    B as ASYNC_HOOKS_TUNING,
-    createAsyncHooks,
-    createCacheEntry,
-    interruptFiber,
-    isCacheValid,
-    onFailure,
-    onSuccess,
-    wrapEffect,
-};
+export { B as ASYNC_HOOKS_TUNING, createAsyncHooks, createCacheEntry, isCacheValid };

@@ -463,8 +463,7 @@ const B = Object.freeze({
             iconOpacity: 'opacity-(--fb-empty-icon-opacity)',
         },
         spinner: {
-            bgOpacity: 'opacity-(--fb-spinner-bg-opacity)',
-            fgOpacity: 'opacity-(--fb-spinner-fg-opacity)',
+            anim: 'animate-(--fb-spinner-animation)',
         },
         toast: {
             shadow: 'shadow-(--fb-toast-shadow)',

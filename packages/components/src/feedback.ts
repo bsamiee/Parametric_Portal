@@ -2,6 +2,8 @@
  * Feedback components: render alert, progress, skeleton, spinner, toast states.
  * Uses B, utilities, animStyle, resolve from schema.ts with CSS animation support.
  */
+import type { LucideIcon } from 'lucide-react';
+import { icons } from 'lucide-react';
 import type {
     CSSProperties,
     ForwardedRef,
@@ -24,7 +26,8 @@ type AlertProps = HTMLAttributes<HTMLDivElement> & {
     readonly variant?: string;
 };
 type ProgressProps = HTMLAttributes<HTMLDivElement> & { readonly value?: number };
-type SpinnerProps = HTMLAttributes<SVGElement>;
+type IconName = keyof typeof icons;
+type SpinnerProps = HTMLAttributes<HTMLDivElement> & { readonly icon?: IconName };
 type SkeletonProps = HTMLAttributes<HTMLDivElement> & { readonly lines?: number };
 type ToastProps = AlertProps & { readonly title?: string };
 type EmptyStateProps = HTMLAttributes<HTMLDivElement> & {
@@ -45,7 +48,7 @@ type FeedbackComponentMap = {
     readonly empty: ForwardRefExoticComponent<EmptyStateProps & RefAttributes<HTMLDivElement>>;
     readonly progress: ForwardRefExoticComponent<ProgressProps & RefAttributes<HTMLDivElement>>;
     readonly skeleton: ForwardRefExoticComponent<SkeletonProps & RefAttributes<HTMLDivElement>>;
-    readonly spinner: ForwardRefExoticComponent<SpinnerProps & RefAttributes<SVGSVGElement>>;
+    readonly spinner: ForwardRefExoticComponent<SpinnerProps & RefAttributes<HTMLDivElement>>;
     readonly toast: ForwardRefExoticComponent<ToastProps & RefAttributes<HTMLDivElement>>;
 };
 
@@ -178,31 +181,29 @@ const createSkeletonComponent = (input: FBInput<'skeleton'>, computed: Computed,
         );
     });
 
+const getSpinnerIcon = (name: IconName): LucideIcon => icons[name];
+
 const createSpinnerComponent = (input: FBInput<'spinner'>, computed: Computed) =>
-    forwardRef((props: SpinnerProps, fRef: ForwardedRef<SVGSVGElement>) => {
-        const { className, style, ...rest } = props;
+    forwardRef((props: SpinnerProps, fRef: ForwardedRef<HTMLDivElement>) => {
+        const { className, icon = 'LoaderCircle', style, ...rest } = props;
         const ref = useForwardedRef(fRef);
+        const Icon = getSpinnerIcon(icon);
         return createElement(
-            'svg',
+            'div',
             {
                 ...rest,
                 'aria-label': 'Loading',
-                className: utilities.cls('animate-spin', input.className, className),
-                fill: 'none',
-                height: computed.iconSize,
+                className: utilities.cls('inline-flex', input.className, className),
                 ref,
                 role: 'status',
+                style,
+            },
+            createElement(Icon, {
+                className: B.fb.spinner.anim,
+                height: computed.iconSize,
                 stroke: 'currentColor',
                 strokeWidth: 2,
-                style,
-                viewBox: '0 0 24 24',
                 width: computed.iconSize,
-            },
-            createElement('circle', { className: B.fb.spinner.bgOpacity, cx: 12, cy: 12, r: 10 }),
-            createElement('path', {
-                className: B.fb.spinner.fgOpacity,
-                d: 'M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z',
-                fill: 'currentColor',
             }),
         );
     });

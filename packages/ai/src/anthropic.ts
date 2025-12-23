@@ -10,6 +10,7 @@ import { Config, Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 // --- [TYPES] -----------------------------------------------------------------
 
 type SendOptions = {
+    readonly apiKey?: string;
     readonly maxTokens?: number;
     readonly model: string;
     readonly prefill?: string;
@@ -36,49 +37,56 @@ const B = Object.freeze({
 
 class AnthropicClient extends Context.Tag('AnthropicClient')<AnthropicClient, AnthropicClientInterface>() {}
 
+const sendRequest = (
+    apiKey: string,
+    system: string,
+    messages: ReadonlyArray<MessageParam>,
+    options: SendOptions,
+): Effect.Effect<string, InternalError> => {
+    const client = new Anthropic({ apiKey });
+    return pipe(
+        Effect.tryPromise({
+            catch: (e) =>
+                e instanceof Error && e.name === 'AbortError'
+                    ? new InternalError({ cause: 'Request cancelled' })
+                    : new InternalError({ cause: `Anthropic API: ${String(e)}` }),
+            try: () =>
+                client.messages.create(
+                    {
+                        // biome-ignore lint/style/useNamingConvention: Anthropic SDK uses snake_case
+                        max_tokens: options.maxTokens ?? B.defaults.maxTokens,
+                        messages: [
+                            ...messages,
+                            ...(options.prefill ? [{ content: options.prefill, role: 'assistant' as const }] : []),
+                        ],
+                        model: options.model,
+                        system,
+                    },
+                    { signal: options.signal },
+                ),
+        }),
+        Effect.flatMap((response) =>
+            pipe(
+                Option.fromNullable(response.content[0]),
+                Option.flatMap((c) => (c.type === 'text' ? Option.some(c.text) : Option.none())),
+                Option.map((text) => (options.prefill ?? '') + text),
+                Option.match({
+                    onNone: () => Effect.fail(new InternalError({ cause: 'No text in response' })),
+                    onSome: Effect.succeed,
+                }),
+            ),
+        ),
+    );
+};
+
 const AnthropicClientLive = Layer.effect(
     AnthropicClient,
     Effect.gen(function* () {
-        const apiKey = yield* Config.redacted('ANTHROPIC_API_KEY');
-        const client = new Anthropic({ apiKey: Redacted.value(apiKey) });
+        const envApiKey = yield* Config.redacted('ANTHROPIC_API_KEY');
+        const defaultKey = Redacted.value(envApiKey);
 
         return AnthropicClient.of({
-            send: (system, messages, options) =>
-                pipe(
-                    Effect.tryPromise({
-                        catch: (e) =>
-                            e instanceof Error && e.name === 'AbortError'
-                                ? new InternalError({ cause: 'Request cancelled' })
-                                : new InternalError({ cause: `Anthropic API: ${String(e)}` }),
-                        try: () =>
-                            client.messages.create(
-                                {
-                                    // biome-ignore lint/style/useNamingConvention: Anthropic SDK uses snake_case
-                                    max_tokens: options.maxTokens ?? B.defaults.maxTokens,
-                                    messages: [
-                                        ...messages,
-                                        ...(options.prefill
-                                            ? [{ content: options.prefill, role: 'assistant' as const }]
-                                            : []),
-                                    ],
-                                    model: options.model,
-                                    system,
-                                },
-                                { signal: options.signal },
-                            ),
-                    }),
-                    Effect.flatMap((response) =>
-                        pipe(
-                            Option.fromNullable(response.content[0]),
-                            Option.flatMap((c) => (c.type === 'text' ? Option.some(c.text) : Option.none())),
-                            Option.map((text) => (options.prefill ?? '') + text),
-                            Option.match({
-                                onNone: () => Effect.fail(new InternalError({ cause: 'No text in response' })),
-                                onSome: Effect.succeed,
-                            }),
-                        ),
-                    ),
-                ),
+            send: (system, messages, options) => sendRequest(options.apiKey ?? defaultKey, system, messages, options),
         });
     }),
 );

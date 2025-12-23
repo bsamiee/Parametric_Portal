@@ -4,7 +4,9 @@
  */
 import { SqlClient, SqlSchema } from '@effect/sql';
 import {
+    AiProviderSchema,
     ApiKeyIdSchema,
+    ApiKeyListItemSchema,
     AssetCountResultSchema,
     AssetIdSchema,
     AssetListItemSchema,
@@ -16,6 +18,7 @@ import {
     SessionIdSchema,
     TokenHashSchema,
     UserIdSchema,
+    VersionSchema,
 } from '@parametric-portal/types/database';
 import { Effect, Schema as S } from 'effect';
 import { ApiKey, Asset, OAuthAccount, Organization, OrganizationMember, RefreshToken, Session, User } from './models';
@@ -26,10 +29,13 @@ const InsertSession = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHash
 const InsertRefreshToken = S.Struct({ expiresAt: S.DateFromSelf, tokenHash: TokenHashSchema, userId: UserIdSchema });
 const InsertApiKey = S.Struct({
     expiresAt: S.NullOr(S.DateFromSelf),
-    keyHash: S.String,
+    keyEncrypted: S.Uint8ArrayFromSelf,
+    keyHash: TokenHashSchema,
     name: S.NonEmptyTrimmedString,
+    provider: AiProviderSchema,
     userId: UserIdSchema,
 });
+const FindApiKeyByUserProvider = S.Struct({ provider: AiProviderSchema, userId: UserIdSchema });
 const InsertAsset = S.Struct({ prompt: S.NonEmptyTrimmedString, svg: S.String, userId: UserIdSchema });
 const InsertOrganization = S.Struct({ name: S.NonEmptyTrimmedString, slug: S.NonEmptyTrimmedString });
 const InsertOrganizationMember = S.Struct({
@@ -51,24 +57,24 @@ const FindAssetsByUserIdParams = S.Struct({
     userId: UserIdSchema,
 });
 const UpdateAssetWithVersion = S.Struct({
-    expectedVersion: S.Int,
+    expectedVersion: VersionSchema,
     id: AssetIdSchema,
     prompt: S.NonEmptyTrimmedString,
     svg: S.String,
 });
 const UpdateUserWithVersion = S.Struct({
     email: S.NonEmptyTrimmedString,
-    expectedVersion: S.Int,
+    expectedVersion: VersionSchema,
     id: UserIdSchema,
 });
 const UpdateOrganization = S.Struct({
-    expectedVersion: S.Int,
+    expectedVersion: VersionSchema,
     id: OrganizationIdSchema,
     name: S.NonEmptyTrimmedString,
     slug: S.NonEmptyTrimmedString,
 });
 const UpdateOrgMemberWithVersion = S.Struct({
-    expectedVersion: S.Int,
+    expectedVersion: VersionSchema,
     id: OrganizationMemberIdSchema,
     role: OrganizationRoleSchema,
 });
@@ -102,8 +108,14 @@ const makeRepositories = Effect.gen(function* () {
             }),
             findAllByUserId: SqlSchema.findAll({
                 execute: (userId) =>
-                    sql`SELECT * FROM ${sql(B.tables.apiKeys)} WHERE user_id = ${userId} ORDER BY created_at DESC`,
+                    sql`SELECT id, name, provider, last_used_at, created_at FROM ${sql(B.tables.apiKeys)} WHERE user_id = ${userId} ORDER BY created_at DESC`,
                 Request: UserIdSchema,
+                Result: ApiKeyListItemSchema,
+            }),
+            findByUserIdAndProvider: SqlSchema.findOne({
+                execute: ({ userId, provider }) =>
+                    sql`SELECT * FROM ${sql(B.tables.apiKeys)} WHERE user_id = ${userId} AND provider = ${provider} AND (expires_at IS NULL OR expires_at > now())`,
+                Request: FindApiKeyByUserProvider,
                 Result: ApiKey,
             }),
             findValidByKeyHash: SqlSchema.findOne({
@@ -113,8 +125,8 @@ const makeRepositories = Effect.gen(function* () {
                 Result: ApiKey,
             }),
             insert: SqlSchema.single({
-                execute: ({ userId, name, keyHash, expiresAt }) =>
-                    sql`INSERT INTO ${sql(B.tables.apiKeys)} (user_id, name, key_hash, expires_at) VALUES (${userId}, ${name}, ${keyHash}, ${expiresAt}) RETURNING *`,
+                execute: ({ userId, name, keyHash, expiresAt, provider, keyEncrypted }) =>
+                    sql`INSERT INTO ${sql(B.tables.apiKeys)} (user_id, name, key_hash, expires_at, provider, key_encrypted) VALUES (${userId}, ${name}, ${keyHash}, ${expiresAt}, ${provider}, ${keyEncrypted}) RETURNING *`,
                 Request: InsertApiKey,
                 Result: ApiKey,
             }),

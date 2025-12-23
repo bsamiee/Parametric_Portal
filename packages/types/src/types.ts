@@ -25,10 +25,9 @@ type SafeInteger = S.Schema.Type<typeof SafeIntegerSchema>;
 type Slug = S.Schema.Type<typeof SlugSchema>;
 type Url = S.Schema.Type<typeof UrlSchema>;
 type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
-type TypesConfig = {
-    readonly cacheCapacity?: number;
-    readonly cacheTtlMinutes?: number;
-};
+type Index = S.Schema.Type<typeof IndexSchema>;
+type VariantCount = S.Schema.Type<typeof VariantCountSchema>;
+type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>;
 type TypesApi = {
     readonly brands: typeof brands;
     readonly createIdGenerator: typeof createIdGenerator;
@@ -43,7 +42,11 @@ type TypesApi = {
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    cache: { capacity: 1000, ttlMinutes: 5 },
+    bounds: {
+        index: { max: Number.MAX_SAFE_INTEGER, min: 0 },
+        variantCount: { max: 10, min: 1 },
+        zoomFactor: { max: 10, min: 0.1 },
+    },
     hex: { length: 8, radix: 16 },
     pagination: { defaultPageSize: 20, maxPageSize: 100 },
     patterns: {
@@ -95,6 +98,13 @@ const SafeIntegerSchema = pipe(baseSchemas.safeInteger, S.brand('SafeInteger'));
 const SlugSchema = pipe(baseSchemas.slug, S.brand('Slug'));
 const UrlSchema = pipe(baseSchemas.url, S.brand('Url'));
 const Uuidv7Schema = pipe(baseSchemas.uuidv7, S.brand('Uuidv7'));
+const boundedInt = <T extends string>(label: T, min: number, max: number) =>
+    pipe(S.Number, S.int(), S.between(min, max), S.brand(label));
+const boundedNumber = <T extends string>(label: T, min: number, max: number) =>
+    pipe(S.Number, S.between(min, max), S.brand(label));
+const IndexSchema = boundedInt('Index', B.bounds.index.min, B.bounds.index.max);
+const VariantCountSchema = boundedInt('VariantCount', B.bounds.variantCount.min, B.bounds.variantCount.max);
+const ZoomFactorSchema = boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
 const patterns = Object.freeze(B.patterns);
 
 // --- [DOMAIN_PRIMITIVES] -----------------------------------------------------
@@ -119,6 +129,7 @@ const brands = Object.freeze({
     hex64: Hex64Schema,
     hexColor: HexColorSchema,
     htmlId: HtmlIdSchema,
+    index: IndexSchema,
     isoDate: IsoDateSchema,
     nonNegativeInt: NonNegativeIntSchema,
     percentage: PercentageSchema,
@@ -127,12 +138,13 @@ const brands = Object.freeze({
     slug: SlugSchema,
     url: UrlSchema,
     uuidv7: Uuidv7Schema,
+    variantCount: VariantCountSchema,
+    zoomFactor: ZoomFactorSchema,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const castToUuidv7 = (uuid: string): Uuidv7 => uuid as Uuidv7;
-const generateUuidv7Sync = (): Uuidv7 => castToUuidv7(uuidv7());
+const generateUuidv7Sync = (): Uuidv7 => S.decodeSync(Uuidv7Schema)(uuidv7());
 const generateHex8 = (): Hex8 =>
     Array.from({ length: B.hex.length }, () => Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix)).join(
         '',
@@ -151,7 +163,7 @@ const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect
         Effect.flatMap((uuid) => S.decode(schema)(uuid)),
     );
 
-const types = (_config: TypesConfig = {}): TypesApi =>
+const types = (): TypesApi =>
     Object.freeze({
         brands,
         createIdGenerator,
@@ -161,7 +173,7 @@ const types = (_config: TypesConfig = {}): TypesApi =>
         isUuidv7: S.is(Uuidv7Schema),
         patterns,
         schemas,
-    } as TypesApi);
+    });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
@@ -174,10 +186,13 @@ export {
     Hex64Schema,
     Hex8Schema,
     HtmlIdSchema,
+    IndexSchema,
     PaginationParamsSchema,
     SlugSchema,
     types,
     Uuidv7Schema,
+    VariantCountSchema,
+    ZoomFactorSchema,
 };
 export type {
     BivariantFunction,
@@ -186,6 +201,7 @@ export type {
     Hex8,
     HexColor,
     HtmlId,
+    Index,
     IsoDate,
     NonNegativeInt,
     PaginationParams,
@@ -194,7 +210,8 @@ export type {
     SafeInteger,
     Slug,
     TypesApi,
-    TypesConfig,
     Url,
     Uuidv7,
+    VariantCount,
+    ZoomFactor,
 };

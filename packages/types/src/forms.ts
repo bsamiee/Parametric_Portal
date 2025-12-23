@@ -67,70 +67,95 @@ const FormStateSchema = S.Struct({
     submitCount: pipe(S.Number, S.int(), S.nonNegative()),
 });
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const validationSuccess = (field: FieldName): ValidationSuccess => ({ _tag: B.tags.success, field });
-const validationError = (field: FieldName, rule: string, message: string): ValidationError => ({
-    _tag: B.tags.error,
-    field,
-    message,
-    rule,
-});
-const createField = <T>(name: FieldName, initialValue: T): FormField<T> => ({
-    errors: [],
-    initialValue,
-    name,
-    state: B.states.pristine,
-    value: initialValue,
-});
-const createFormState = (fields: Record<string, FormField>): FormState => ({
-    fields,
-    isSubmitting: false,
-    submitCount: 0,
-});
 const touchTransitions = {
     [B.states.dirty]: B.states.dirty,
     [B.states.pristine]: B.states.touched,
     [B.states.touched]: B.states.touched,
 } as const satisfies Record<FieldState, FieldState>;
-const touchField = <T>(field: FormField<T>): FormField<T> => ({
-    ...field,
-    state: touchTransitions[field.state],
-});
-const setFieldValue = <T>(field: FormField<T>, value: T): FormField<T> => ({
-    ...field,
-    state: B.states.dirty,
-    value,
-});
-const setFieldErrors = <T>(field: FormField<T>, errors: ReadonlyArray<ValidationError>): FormField<T> => ({
-    ...field,
-    errors,
-});
-const resetField = <T>(field: FormField<T>): FormField<T> => ({
-    ...field,
-    errors: [],
-    state: B.states.pristine,
-    value: field.initialValue,
-});
-const hasFieldErrors = <T>(field: FormField<T>): boolean => field.errors.length > 0;
-const isFormValid = (form: FormState): boolean => Object.values(form.fields).every((f) => f.errors.length === 0);
-const getField = <T>(form: FormState, name: string): FormField<T> => form.fields[name] as FormField<T>;
-const updateField = <T>(form: FormState, name: string, updater: (f: FormField<T>) => FormField<T>): FormState => ({
-    ...form,
-    fields: { ...form.fields, [name]: updater(getField(form, name)) },
-});
-const setSubmitting = (form: FormState, isSubmitting: boolean): FormState => ({
-    ...form,
-    isSubmitting,
-    submitCount: isSubmitting ? form.submitCount + 1 : form.submitCount,
-});
-const resetForm = (form: FormState): FormState => ({
-    fields: Object.fromEntries(Object.entries(form.fields).map(([k, v]) => [k, resetField(v)])),
-    isSubmitting: false,
-    submitCount: 0,
+
+const Field = Object.freeze({
+    check: <T>(field: FormField<T>) => ({
+        errorCount: field.errors.length,
+        hasErrors: field.errors.length > 0,
+        isDirty: field.state === B.states.dirty,
+        isPristine: field.state === B.states.pristine,
+        isTouched: field.state === B.states.touched,
+    }),
+    create: <T>(name: FieldName, initialValue: T): FormField<T> => ({
+        errors: [],
+        initialValue,
+        name,
+        state: B.states.pristine,
+        value: initialValue,
+    }),
+    reset: <T>(field: FormField<T>): FormField<T> => ({
+        ...field,
+        errors: [],
+        state: B.states.pristine,
+        value: field.initialValue,
+    }),
+    setErrors: <T>(field: FormField<T>, errors: ReadonlyArray<ValidationError>): FormField<T> => ({
+        ...field,
+        errors,
+    }),
+    setValue: <T>(field: FormField<T>, value: T): FormField<T> => ({
+        ...field,
+        state: B.states.dirty,
+        value,
+    }),
+    touch: <T>(field: FormField<T>): FormField<T> => ({
+        ...field,
+        state: touchTransitions[field.state],
+    }),
 });
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+const Form = Object.freeze({
+    check: (form: FormState) => {
+        const fields = Object.values(form.fields);
+        const dirtyFields = fields.filter((f) => f.state === B.states.dirty);
+        const errorFields = fields.filter((f) => f.errors.length > 0);
+        return {
+            dirtyCount: dirtyFields.length,
+            errorCount: errorFields.reduce((sum, f) => sum + f.errors.length, 0),
+            fieldCount: fields.length,
+            isSubmitting: form.isSubmitting,
+            isValid: errorFields.length === 0,
+            submitCount: form.submitCount,
+        };
+    },
+    create: (fields: Record<string, FormField>): FormState => ({
+        fields,
+        isSubmitting: false,
+        submitCount: 0,
+    }),
+    getField: <T>(form: FormState, name: string): FormField<T> => form.fields[name] as FormField<T>,
+    reset: (form: FormState): FormState => ({
+        fields: Object.fromEntries(Object.entries(form.fields).map(([k, v]) => [k, Field.reset(v)])),
+        isSubmitting: false,
+        submitCount: 0,
+    }),
+    setSubmitting: (form: FormState, isSubmitting: boolean): FormState => ({
+        ...form,
+        isSubmitting,
+        submitCount: isSubmitting ? form.submitCount + 1 : form.submitCount,
+    }),
+    updateField: <T>(form: FormState, name: string, updater: (f: FormField<T>) => FormField<T>): FormState => ({
+        ...form,
+        fields: { ...form.fields, [name]: updater(Form.getField(form, name)) },
+    }),
+});
+
+const Validation = Object.freeze({
+    error: (field: FieldName, rule: string, message: string): ValidationError => ({
+        _tag: B.tags.error,
+        field,
+        message,
+        rule,
+    }),
+    success: (field: FieldName): ValidationSuccess => ({ _tag: B.tags.success, field }),
+});
 
 const fold = <R>(result: ValidationResult, handlers: ValidationFold<R>): R =>
     Match.value(result).pipe(
@@ -144,8 +169,8 @@ const fold = <R>(result: ValidationResult, handlers: ValidationFold<R>): R =>
 const validateField = <T>(field: FormField<T>, schema: S.Schema<T>): Effect.Effect<ValidationResult, never, never> =>
     pipe(
         S.decode(schema)(field.value),
-        Effect.map(() => validationSuccess(field.name)),
-        Effect.catchAll((error: ParseError) => Effect.succeed(validationError(field.name, 'schema', error.message))),
+        Effect.map(() => Validation.success(field.name)),
+        Effect.catchAll((error: ParseError) => Effect.succeed(Validation.error(field.name, 'schema', error.message))),
     );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -153,56 +178,34 @@ const validateField = <T>(field: FormField<T>, schema: S.Schema<T>): Effect.Effe
 const createForms = (config: FormConfig = B.defaults) =>
     Object.freeze({
         config,
-        createField,
-        createFormState,
+        Field,
+        Form,
         fold,
-        getField,
-        hasFieldErrors,
-        isFormValid,
-        resetField,
-        resetForm,
         schema: {
             field: FormFieldSchema,
             fieldState: FieldStateSchema,
             result: ValidationResultSchema,
             state: FormStateSchema,
         },
-        setFieldErrors,
-        setFieldValue,
-        setSubmitting,
-        touchField,
-        updateField,
+        Validation,
         validateField,
-        validationError,
-        validationSuccess,
     });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
     B as FORM_TUNING,
-    createField,
     createForms,
-    createFormState,
+    Field,
     FieldStateSchema,
     fold,
+    Form,
     FormFieldSchema,
     FormStateSchema,
-    getField,
-    hasFieldErrors,
-    isFormValid,
-    resetField,
-    resetForm,
-    setFieldErrors,
-    setFieldValue,
-    setSubmitting,
-    touchField,
-    updateField,
     validateField,
-    validationError,
+    Validation,
     ValidationErrorSchema,
     ValidationResultSchema,
-    validationSuccess,
     ValidationSuccessSchema,
 };
 export type {

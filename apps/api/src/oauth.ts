@@ -4,8 +4,8 @@
  */
 
 import { OAuthError } from '@parametric-portal/server/errors';
-import { OAuthService, type OAuthTokens, type OAuthUserInfo } from '@parametric-portal/server/middleware';
-import type { OAuthProvider } from '@parametric-portal/types/database';
+import { OAuthService } from '@parametric-portal/server/middleware';
+import type { OAuthProvider, OAuthTokens, OAuthUserInfo } from '@parametric-portal/types/database';
 import { GitHub, Google, MicrosoftEntraId } from 'arctic';
 import { Config, Effect, Layer, Option, Redacted } from 'effect';
 
@@ -45,7 +45,6 @@ const fetchUserInfo = (provider: OAuthProvider, accessToken: string): Effect.Eff
                     headers: { Authorization: `Bearer ${accessToken}`, 'User-Agent': 'ParametricPortal/1.0' },
                 }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
         });
-
         const data = response as Record<string, unknown>;
         return {
             avatarUrl: Option.fromNullable((data['avatar_url'] ?? data['picture']) as string | undefined),
@@ -133,7 +132,6 @@ const OAuthServiceLive = Layer.effect(
                 return microsoft.validateAuthorizationCode(code, verifier);
             },
         } as const satisfies Record<OAuthProvider, (code: string, state: string) => Promise<unknown>>;
-
         return OAuthService.of({
             createAuthorizationUrl: (provider, state) =>
                 Effect.sync(() => createAuthUrl[provider](state, B.scopes[provider])),
@@ -144,7 +142,6 @@ const OAuthServiceLive = Layer.effect(
                         catch: (e) => new OAuthError({ provider, reason: `Token exchange failed: ${String(e)}` }),
                         try: () => validateToken[provider](code, state),
                     });
-
                     const t = tokens as {
                         accessToken: () => string;
                         accessTokenExpiresAt?: () => Date;

@@ -4,7 +4,7 @@
  */
 import { type ReactNode, useMemo } from 'react';
 import { OverlayProvider } from 'react-aria';
-import { appRuntime, RuntimeProvider, usePersist } from '../core.ts';
+import { appRuntime, RuntimeProvider, useAuthInit, usePersist } from '../core.ts';
 import {
     chatSlice,
     contextSlice,
@@ -15,6 +15,8 @@ import {
     uiSlice,
 } from '../stores.ts';
 import { Flex } from '../ui.ts';
+import { AccountOverlay } from './account.tsx';
+import { AuthOverlay } from './auth.tsx';
 import { ExportDialog, useExportDialog } from './overlays.tsx';
 import { CommandBar, Sidebar, Stage } from './panels.tsx';
 
@@ -39,6 +41,8 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const AppContent = (): ReactNode => {
+    useAuthInit();
+
     const libraryPersist = useMemo(
         () => ({
             migrate: (stored: unknown, initialState: LibraryState): LibraryState => {
@@ -81,6 +85,8 @@ const AppContent = (): ReactNode => {
 
     return (
         <>
+            <AccountOverlay />
+            <AuthOverlay />
             <ExportDialog {...exportDialog} />
 
             <Flex className={B.styles.root}>
