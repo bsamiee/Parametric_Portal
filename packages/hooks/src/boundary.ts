@@ -3,7 +3,6 @@
  */
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkIdle, mkLoading, mkSuccess } from '@parametric-portal/types/async';
-import type { ManagedRuntime } from 'effect';
 import { Cause, Effect, Exit, Fiber } from 'effect';
 import { type ComponentType, type DependencyList, type ReactNode, useCallback, useEffect, useState } from 'react';
 import type { RuntimeApi } from './runtime';
@@ -45,30 +44,18 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const handleExit = <A, E>(
+const matchExit = <A, E>(
     exit: Exit.Exit<A, E>,
-    setState: React.Dispatch<React.SetStateAction<AsyncState<A, E>>>,
-    setError: React.Dispatch<React.SetStateAction<Cause.Cause<E> | null>>,
-    ts: () => number,
-    onError?: (error: Cause.Cause<E>) => void,
-): void =>
-    Exit.match(exit, {
-        onFailure: (cause) => {
-            setError(cause);
-            setState(mkFailure(Cause.squash(cause) as E, ts));
-            onError?.(cause);
-        },
-        onSuccess: (data) => {
-            setError(null);
-            setState(mkSuccess(data, ts));
-        },
-    });
+    onFailure: (cause: Cause.Cause<E>) => void,
+    onSuccess: (data: A) => void,
+): void => Exit.match(exit, { onFailure, onSuccess });
 
-const interruptFiber =
-    <A, E, R>(runtime: ManagedRuntime.ManagedRuntime<R, E>, fiber: Fiber.RuntimeFiber<A, E>): (() => void) =>
-    () => {
-        runtime.runPromise(Fiber.interrupt(fiber)).catch(() => {});
-    };
+const awaitAndMatch = <A, E>(
+    fiber: Fiber.RuntimeFiber<A, E>,
+    onFailure: (cause: Cause.Cause<E>) => void,
+    onSuccess: (data: A) => void,
+): Effect.Effect<void, never, never> =>
+    Effect.flatMap(Fiber.await(fiber), (exit) => Effect.sync(() => matchExit(exit, onFailure, onSuccess)));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -98,13 +85,22 @@ const createBoundaryHooks = <R, E>(
             const fiber = runtime.runFork(effect);
 
             runtime.runFork(
-                Effect.gen(function* () {
-                    const exit = yield* Fiber.await(fiber);
-                    handleExit(exit as Exit.Exit<A, Err>, setState, setError, ts);
-                }),
+                awaitAndMatch(
+                    fiber as Fiber.RuntimeFiber<A, Err>,
+                    (cause) => {
+                        setError(cause);
+                        setState(mkFailure(Cause.squash(cause) as Err, ts));
+                    },
+                    (data) => {
+                        setError(null);
+                        setState(mkSuccess(data, ts));
+                    },
+                ),
             );
 
-            return interruptFiber(runtime, fiber);
+            return () => {
+                runtime.runFork(Fiber.interrupt(fiber));
+            };
             // biome-ignore lint/correctness/useExhaustiveDependencies: deps is intentionally dynamic for caller control
         }, deps);
 

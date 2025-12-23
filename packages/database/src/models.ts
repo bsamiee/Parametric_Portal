@@ -5,6 +5,7 @@
 import '@effect/experimental';
 import { Model } from '@effect/sql';
 import {
+    AiProviderSchema,
     ApiKeyIdSchema,
     AssetIdSchema,
     AssetMetadataSchema,
@@ -17,6 +18,7 @@ import {
     SessionIdSchema,
     type SessionResult,
     UserIdSchema,
+    VersionSchema,
 } from '@parametric-portal/types/database';
 import { DateTime, Schema as S } from 'effect';
 
@@ -31,7 +33,7 @@ class Asset extends Model.Class<Asset>('Asset')({
     svg: S.String,
     updatedAt: Model.DateTimeUpdateFromDate,
     userId: Model.FieldOption(UserIdSchema),
-    version: S.Int.pipe(S.nonNegative()),
+    version: VersionSchema,
 }) {}
 
 class User extends Model.Class<User>('User')({
@@ -39,16 +41,18 @@ class User extends Model.Class<User>('User')({
     deletedAt: S.OptionFromNullOr(S.DateTimeUtc),
     email: S.NonEmptyTrimmedString,
     id: Model.Generated(UserIdSchema),
-    version: S.Int.pipe(S.nonNegative()),
+    version: VersionSchema,
 }) {}
 
 class ApiKey extends Model.Class<ApiKey>('ApiKey')({
     createdAt: Model.DateTimeInsertFromDate,
     expiresAt: S.OptionFromNullOr(S.DateTimeUtc),
     id: Model.Generated(ApiKeyIdSchema),
+    keyEncrypted: Model.Sensitive(S.OptionFromNullOr(S.Uint8ArrayFromSelf)),
     keyHash: Model.Sensitive(S.String),
     lastUsedAt: S.OptionFromNullOr(S.DateTimeUtc),
     name: S.NonEmptyTrimmedString,
+    provider: AiProviderSchema,
     userId: UserIdSchema,
 }) {}
 
@@ -92,7 +96,7 @@ class Organization extends Model.Class<Organization>('Organization')({
     name: S.NonEmptyTrimmedString,
     slug: S.NonEmptyTrimmedString,
     updatedAt: Model.DateTimeUpdateFromDate,
-    version: S.Int.pipe(S.nonNegative()),
+    version: VersionSchema,
 }) {}
 
 class OrganizationMember extends Model.Class<OrganizationMember>('OrganizationMember')({
@@ -102,7 +106,7 @@ class OrganizationMember extends Model.Class<OrganizationMember>('OrganizationMe
     role: OrganizationRoleSchema,
     updatedAt: Model.DateTimeUpdateFromDate,
     userId: UserIdSchema,
-    version: S.Int.pipe(S.nonNegative()),
+    version: VersionSchema,
 }) {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------

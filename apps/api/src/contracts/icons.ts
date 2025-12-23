@@ -5,6 +5,7 @@
 
 import { type ColorMode, ColorModeSchema, IntentSchema } from '@parametric-portal/types/database';
 import { SvgAssetSchema } from '@parametric-portal/types/svg';
+import { VariantCountSchema } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -37,7 +38,7 @@ const GenerateRequestSchema = S.Struct({
     intent: S.optional(IntentSchema),
     prompt: S.NonEmptyTrimmedString,
     referenceSvg: S.optional(S.String),
-    variantCount: S.optional(S.Int.pipe(S.between(1, 3))),
+    variantCount: S.optional(VariantCountSchema),
 });
 type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
 

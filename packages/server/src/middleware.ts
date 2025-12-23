@@ -11,10 +11,17 @@ import {
     HttpServerRequest,
     HttpServerResponse,
 } from '@effect/platform';
-import type { ApiKeyResult, OAuthProvider, SessionResult } from '@parametric-portal/types/database';
+import {
+    type ApiKeyResult,
+    Expiry,
+    type OAuthProvider,
+    type OAuthTokens,
+    type OAuthUserInfo,
+    type SessionResult,
+} from '@parametric-portal/types/database';
 import { Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 
-import { hashString } from './crypto.ts';
+import { hashString, validateTokenHash } from './crypto.ts';
 import {
     DatabaseConnectionError,
     DatabaseConstraintError,
@@ -45,27 +52,6 @@ type RequestIdConfig = {
     readonly headerName?: string;
 };
 
-type OAuthProviderConfig = {
-    readonly clientId: string;
-    readonly clientSecret: Redacted.Redacted<string>;
-    readonly redirectUri: string;
-    readonly scopes: ReadonlyArray<string>;
-};
-
-type OAuthTokens = {
-    readonly accessToken: string;
-    readonly expiresAt: Option.Option<Date>;
-    readonly refreshToken: Option.Option<string>;
-    readonly scope: Option.Option<string>;
-};
-
-type OAuthUserInfo = {
-    readonly avatarUrl: Option.Option<string>;
-    readonly email: Option.Option<string>;
-    readonly name: Option.Option<string>;
-    readonly providerAccountId: string;
-};
-
 type SqlErrorInput = { readonly code?: string; readonly constraint?: string; readonly message?: string };
 type SqlErrorCode = keyof typeof B.sqlCodes;
 
@@ -76,7 +62,7 @@ const B = Object.freeze({
         allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'] as ReadonlyArray<string>,
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] as ReadonlyArray<string>,
         allowedOrigins: ['*'] as ReadonlyArray<string>,
-        credentials: false,
+        credentials: true,
         maxAge: 86400,
     },
     requestId: { headerName: 'x-request-id' },
@@ -156,9 +142,8 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const isExpired = (expiresAt: Date | undefined): boolean => expiresAt !== undefined && expiresAt.getTime() < Date.now();
 const validateNotExpired = <E>(expiresAt: Date | undefined, errorFactory: () => E): Effect.Effect<void, E> =>
-    isExpired(expiresAt) ? Effect.fail(errorFactory()) : Effect.succeed(undefined);
+    Expiry.check(expiresAt).expired ? Effect.fail(errorFactory()) : Effect.succeed(undefined);
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -177,7 +162,6 @@ const sqlErrorHandlers = {
     unique: (e: SqlErrorInput) =>
         new DatabaseConstraintError({ code: 'unique', constraint: e.constraint ?? '', table: '' }),
 } as const satisfies Record<(typeof B.sqlCodes)[SqlErrorCode], (e: SqlErrorInput) => unknown>;
-
 const mapSqlError = (error: SqlErrorInput) =>
     pipe(
         Option.fromNullable(error.code),
@@ -211,18 +195,11 @@ const createApiKeyAuthLayer = (
                     Effect.catchTag('HashingError', () =>
                         Effect.fail(new UnauthorizedError({ reason: 'Key hashing failed' })),
                     ),
-                    Effect.flatMap(lookup),
                     Effect.flatMap(
-                        Option.match({
-                            onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid API key' })),
-                            onSome: (result) =>
-                                pipe(
-                                    validateNotExpired(
-                                        Option.getOrUndefined(result.expiresAt),
-                                        () => new UnauthorizedError({ reason: 'API key expired' }),
-                                    ),
-                                    Effect.as(result),
-                                ),
+                        validateTokenHash(lookup, {
+                            expired: 'API key expired',
+                            hashingFailed: 'Key hashing failed',
+                            notFound: 'Invalid API key',
                         }),
                     ),
                 ),
@@ -269,18 +246,11 @@ const createSessionAuthLayer = (
                     Effect.catchTag('HashingError', () =>
                         Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),
                     ),
-                    Effect.flatMap(validate),
                     Effect.flatMap(
-                        Option.match({
-                            onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid session' })),
-                            onSome: (session) =>
-                                pipe(
-                                    validateNotExpired(
-                                        session.expiresAt,
-                                        () => new UnauthorizedError({ reason: 'Session expired' }),
-                                    ),
-                                    Effect.as(session),
-                                ),
+                        validateTokenHash(validate, {
+                            expired: 'Session expired',
+                            hashingFailed: 'Token hashing failed',
+                            notFound: 'Invalid session',
                         }),
                     ),
                 ),
@@ -351,7 +321,6 @@ export {
     createRequestIdMiddleware,
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
-    isExpired,
     mapSqlError,
     OAuthService,
     RequestIdContext,
@@ -359,12 +328,4 @@ export {
     SessionContext,
     validateNotExpired,
 };
-export type {
-    BasicCredentials,
-    CorsConfig,
-    OAuthProviderConfig,
-    OAuthTokens,
-    OAuthUserInfo,
-    RequestIdConfig,
-    SecurityHeadersConfig,
-};
+export type { BasicCredentials, CorsConfig, RequestIdConfig, SecurityHeadersConfig };

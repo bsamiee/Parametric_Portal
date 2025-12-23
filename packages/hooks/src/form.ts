@@ -6,13 +6,10 @@
 
 import { ASYNC_TUNING, type AsyncState, mkFailure, mkSuccess } from '@parametric-portal/types/async';
 import {
-    createField,
+    Field,
     type FieldName,
     FORM_TUNING,
     type FormField,
-    setFieldErrors,
-    setFieldValue,
-    touchField,
     type ValidationResult,
     validateField,
 } from '@parametric-portal/types/forms';
@@ -61,8 +58,8 @@ const validateWithSchema = <V>(field: FormField<V>, schema: S.Schema<V>): Valida
 
 const updateFieldValue = <V>(field: FormField<V>, value: V): FormField<V> =>
     value === field.initialValue
-        ? { ...setFieldValue(field, value), state: B.states.pristine }
-        : setFieldValue(field, value);
+        ? { ...Field.setValue(field, value), state: B.states.pristine }
+        : Field.setValue(field, value);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -70,15 +67,15 @@ const updateFieldValue = <V>(field: FormField<V>, value: V): FormField<V> =>
  * Standalone form field hook (no runtime required - validation is synchronous)
  */
 const useFormField = <V>(name: string, initialValue: V, schema: S.Schema<V>): FormFieldState<V> => {
-    const [field, setField] = useState<FormField<V>>(() => createField(mkFieldName(name), initialValue));
+    const [field, setField] = useState<FormField<V>>(() => Field.create(mkFieldName(name), initialValue));
 
     const setValue = useCallback((value: V) => setField((prev: FormField<V>) => updateFieldValue(prev, value)), []);
 
-    const setTouched = useCallback(() => setField((prev: FormField<V>) => touchField(prev)), []);
+    const setTouched = useCallback(() => setField((prev: FormField<V>) => Field.touch(prev)), []);
 
     const validate = useCallback(() => {
         const result = validateWithSchema(field, schema);
-        setField((prev: FormField<V>) => setFieldErrors(prev, result._tag === B.tags.error ? [result] : []));
+        setField((prev: FormField<V>) => Field.setErrors(prev, result._tag === B.tags.error ? [result] : []));
         return result;
     }, [field, schema]);
 
