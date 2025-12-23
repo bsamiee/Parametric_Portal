@@ -1,3 +1,15 @@
+## 1.0.4 (2025-12-23)
+
+### [BUG_FIXES]
+
+- address PR #118 review comments - IDOR fix, token ordering, server timestamps ([#119](https://github.com/bsamiee/Parametric_Portal/pull/119), [#118](https://github.com/bsamiee/Parametric_Portal/issues/118))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+- Copilot @Copilot
+
 ## 1.0.3 (2025-12-22)
 
 ### [BUG_FIXES]
