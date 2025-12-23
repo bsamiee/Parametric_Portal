@@ -122,10 +122,12 @@ const decryptApiKey = (encrypted: EncryptedKey): Effect.Effect<string, Encryptio
             Effect.tryPromise({
                 catch: (cause) => new EncryptionError({ cause }),
                 try: async () => {
+                    const ivBuffer = new Uint8Array(encrypted.iv).buffer;
+                    const ciphertextBuffer = new Uint8Array(encrypted.ciphertext).buffer;
                     const decrypted = await crypto.subtle.decrypt(
-                        { iv: encrypted.iv.buffer as ArrayBuffer, name: 'AES-GCM' },
+                        { iv: ivBuffer, name: 'AES-GCM' },
                         key,
-                        encrypted.ciphertext.buffer as ArrayBuffer,
+                        ciphertextBuffer,
                     );
                     return new TextDecoder().decode(decrypted);
                 },
