@@ -46,6 +46,20 @@ const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: U
         ),
     );
 
+const buildLogoutResponse = () =>
+    pipe(
+        HttpServerResponse.json({ success: true }),
+        Effect.flatMap((response) =>
+            HttpServerResponse.setCookie(response, B.cookie.name, '', {
+                httpOnly: true,
+                maxAge: '0 seconds',
+                path: B.cookie.path,
+                sameSite: 'lax',
+                secure: true,
+            }),
+        ),
+    );
+
 const createAuthTokenPairs = () =>
     Effect.gen(function* () {
         const session = yield* createTokenPair();
@@ -170,9 +184,12 @@ const handleLogout = (repos: Repositories) =>
         Effect.gen(function* () {
             const session = yield* SessionContext;
             yield* repos.sessions.delete(session.sessionId);
-            return { success: true };
+            yield* repos.refreshTokens.revokeAllByUserId(session.userId);
+            return yield* buildLogoutResponse();
         }),
         Effect.catchTags({
+            CookieError: () => Effect.fail(new InternalError({ cause: 'Cookie clearing failed' })),
+            HttpBodyError: () => Effect.fail(new InternalError({ cause: 'Response body error' })),
             ParseError: () => Effect.fail(new InternalError({ cause: 'Session context parse failed' })),
             SqlError: () => Effect.fail(new InternalError({ cause: 'Session deletion failed' })),
         }),
@@ -228,7 +245,7 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
         Effect.catchTags({
             EncryptionError: () => Effect.fail(new InternalError({ cause: 'API key encryption failed' })),
             HashingError: () => Effect.fail(new InternalError({ cause: 'API key hashing failed' })),
-            NoSuchElementException: () => Effect.fail(new InternalError({ cause: 'Session context unavailable' })),
+            NoSuchElementException: () => Effect.fail(new InternalError({ cause: 'API key insert returned no row' })),
             ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
             SqlError: () => Effect.fail(new InternalError({ cause: 'API key insert failed' })),
         }),
@@ -259,7 +276,7 @@ const AuthLive = HttpApiBuilder.group(AppApi, 'auth', (handlers) =>
                 handleOAuthCallback(oauth, repos, provider, code, state),
             )
             .handleRaw('refresh', () => handleRefresh(repos))
-            .handle('logout', () => handleLogout(repos))
+            .handleRaw('logout', () => handleLogout(repos))
             .handle('me', () => handleMe(repos))
             .handle('listApiKeys', () => handleListApiKeys(repos))
             .handle('createApiKey', ({ payload }) => handleCreateApiKey(repos, payload))

@@ -17,6 +17,7 @@ import {
     RefreshTokenIdSchema,
     SessionIdSchema,
     type SessionResult,
+    TokenHashSchema,
     UserIdSchema,
     VersionSchema,
 } from '@parametric-portal/types/database';
@@ -49,7 +50,7 @@ class ApiKey extends Model.Class<ApiKey>('ApiKey')({
     expiresAt: S.OptionFromNullOr(S.DateTimeUtc),
     id: Model.Generated(ApiKeyIdSchema),
     keyEncrypted: Model.Sensitive(S.OptionFromNullOr(S.Uint8ArrayFromSelf)),
-    keyHash: Model.Sensitive(S.String),
+    keyHash: Model.Sensitive(TokenHashSchema),
     lastUsedAt: S.OptionFromNullOr(S.DateTimeUtc),
     name: S.NonEmptyTrimmedString,
     provider: AiProviderSchema,
@@ -62,7 +63,7 @@ class Session extends Model.Class<Session>('Session')({
     id: Model.Generated(SessionIdSchema),
     ipAddress: S.OptionFromNullOr(S.String),
     lastActivityAt: Model.DateTimeUpdateFromDate,
-    tokenHash: Model.Sensitive(S.String),
+    tokenHash: Model.Sensitive(TokenHashSchema),
     userAgent: S.OptionFromNullOr(S.String),
     userId: UserIdSchema,
 }) {}
@@ -85,7 +86,7 @@ class RefreshToken extends Model.Class<RefreshToken>('RefreshToken')({
     expiresAt: S.DateTimeUtc,
     id: Model.Generated(RefreshTokenIdSchema),
     revokedAt: S.OptionFromNullOr(S.DateTimeUtc),
-    tokenHash: Model.Sensitive(S.String),
+    tokenHash: Model.Sensitive(TokenHashSchema),
     userId: UserIdSchema,
 }) {}
 

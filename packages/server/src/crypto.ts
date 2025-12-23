@@ -4,8 +4,8 @@
  */
 import { Expiry, type TokenHash, TokenHashSchema } from '@parametric-portal/types/database';
 import { generateUuidv7Sync, type Uuidv7 } from '@parametric-portal/types/types';
-import { Effect, Option, pipe, Schema as S } from 'effect';
-import { UnauthorizedError } from './errors.ts';
+import { Config, Effect, Option, pipe, Redacted, Schema as S } from 'effect';
+import { EncryptionError, HashingError, UnauthorizedError } from './errors.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -17,13 +17,6 @@ type EncryptedKey = {
     readonly ciphertext: Uint8Array;
     readonly iv: Uint8Array;
 };
-
-class HashingError extends S.TaggedError<HashingError>()('HashingError', {
-    cause: S.Unknown,
-}) {}
-class EncryptionError extends S.TaggedError<EncryptionError>()('EncryptionError', {
-    cause: S.Unknown,
-}) {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -84,20 +77,23 @@ const validateTokenHash =
         );
 
 const getEncryptionKey = (): Effect.Effect<CryptoKey, EncryptionError> =>
-    Effect.tryPromise({
-        catch: (cause) => new EncryptionError({ cause }),
-        try: async () => {
-            const keyBase64 = process.env['ENCRYPTION_KEY'];
-            if (!keyBase64) {
-                throw new Error('ENCRYPTION_KEY environment variable not set');
-            }
-            const keyBytes = Uint8Array.from(atob(keyBase64), (c) => c.codePointAt(0) ?? 0);
-            return crypto.subtle.importKey('raw', keyBytes, { length: 256, name: 'AES-GCM' }, false, [
-                'encrypt',
-                'decrypt',
-            ]);
-        },
-    });
+    pipe(
+        Config.redacted('ENCRYPTION_KEY'),
+        Effect.mapError((cause) => new EncryptionError({ cause })),
+        Effect.flatMap((keyBase64Redacted) =>
+            Effect.tryPromise({
+                catch: (cause) => new EncryptionError({ cause }),
+                try: async () => {
+                    const keyBase64 = Redacted.value(keyBase64Redacted);
+                    const keyBytes = Buffer.from(keyBase64, 'base64');
+                    return crypto.subtle.importKey('raw', keyBytes, { length: 256, name: 'AES-GCM' }, false, [
+                        'encrypt',
+                        'decrypt',
+                    ]);
+                },
+            }),
+        ),
+    );
 
 const encryptApiKey = (plaintext: string): Effect.Effect<EncryptedKey, EncryptionError> =>
     pipe(
@@ -137,7 +133,7 @@ const decryptApiKey = (encrypted: EncryptedKey): Effect.Effect<string, Encryptio
 const decryptFromBytes = (keyEncrypted: Uint8Array): Effect.Effect<string, EncryptionError> =>
     decryptApiKey({ ciphertext: keyEncrypted.slice(12), iv: keyEncrypted.slice(0, 12) });
 
-// --- [UTILITY_OBJECTS] -------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const Token = Object.freeze({
     createPair: createTokenPair,
@@ -153,16 +149,5 @@ const Crypto = Object.freeze({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    Crypto,
-    createTokenPair,
-    decryptApiKey,
-    encryptApiKey,
-    EncryptionError,
-    generateToken,
-    hashString,
-    HashingError,
-    Token,
-    validateTokenHash,
-};
+export { Crypto, createTokenPair, decryptApiKey, encryptApiKey, generateToken, hashString, Token, validateTokenHash };
 export type { EncryptedKey, TokenPair, TokenValidationMessages };

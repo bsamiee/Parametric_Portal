@@ -18,6 +18,7 @@ import {
     type OAuthTokens,
     type OAuthUserInfo,
     type SessionResult,
+    type TokenHash,
 } from '@parametric-portal/types/database';
 import { Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 
@@ -184,7 +185,7 @@ const createCorsLayer = (config: CorsConfig = {}) =>
     });
 const createLoggingMiddleware = () => HttpMiddleware.logger;
 const createApiKeyAuthLayer = (
-    lookup: (keyHash: string) => Effect.Effect<Option.Option<ApiKeyResult>, UnauthorizedError>,
+    lookup: (keyHash: TokenHash) => Effect.Effect<Option.Option<ApiKeyResult>, UnauthorizedError>,
 ) =>
     Layer.succeed(
         ApiKeyAuth,
@@ -235,7 +236,7 @@ const createBasicAuthLayer = (
         }),
     );
 const createSessionAuthLayer = (
-    validate: (tokenHash: string) => Effect.Effect<Option.Option<SessionResult>, UnauthorizedError>,
+    validate: (tokenHash: TokenHash) => Effect.Effect<Option.Option<SessionResult>, UnauthorizedError>,
 ) =>
     Layer.succeed(
         SessionAuth,
@@ -274,7 +275,7 @@ const createRequestIdMiddleware = (config: RequestIdConfig = {}) => {
 const createSecurityHeadersMiddleware = (config: Partial<SecurityHeadersConfig> = {}) =>
     HttpMiddleware.make((app) =>
         Effect.map(app, (response) => {
-            const hsts = config.hsts as { maxAge?: number; includeSubDomains?: boolean } | undefined;
+            const hsts = config.hsts === false ? undefined : config.hsts;
             const maxAge = hsts?.maxAge ?? B.securityHeaders.hsts.maxAge;
             const subDomainsSuffix =
                 (hsts?.includeSubDomains ?? B.securityHeaders.hsts.includeSubDomains) ? '; includeSubDomains' : '';
