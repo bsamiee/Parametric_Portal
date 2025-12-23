@@ -17,6 +17,11 @@ type EncryptedKey = {
     readonly ciphertext: Uint8Array;
     readonly iv: Uint8Array;
 };
+type TokenValidationMessages = {
+    readonly hashingFailed: string;
+    readonly notFound: string;
+    readonly expired: string;
+};
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -42,12 +47,6 @@ const createTokenPair = (): Effect.Effect<TokenPair, HashingError> =>
             ),
         ),
     );
-
-type TokenValidationMessages = {
-    readonly hashingFailed: string;
-    readonly notFound: string;
-    readonly expired: string;
-};
 
 const validateTokenHash =
     <T extends { readonly expiresAt?: Date | Option.Option<Date> }>(
@@ -76,24 +75,27 @@ const validateTokenHash =
             ),
         );
 
+const importEncryptionKey = pipe(
+    Config.redacted('ENCRYPTION_KEY'),
+    Effect.mapError((cause) => new EncryptionError({ cause })),
+    Effect.flatMap((keyBase64Redacted) =>
+        Effect.tryPromise({
+            catch: (cause) => new EncryptionError({ cause }),
+            try: async () => {
+                const keyBase64 = Redacted.value(keyBase64Redacted);
+                const keyBytes = Buffer.from(keyBase64, 'base64');
+                return crypto.subtle.importKey('raw', keyBytes, { length: 256, name: 'AES-GCM' }, false, [
+                    'encrypt',
+                    'decrypt',
+                ]);
+            },
+        }),
+    ),
+    Effect.cached,
+);
+
 const getEncryptionKey = (): Effect.Effect<CryptoKey, EncryptionError> =>
-    pipe(
-        Config.redacted('ENCRYPTION_KEY'),
-        Effect.mapError((cause) => new EncryptionError({ cause })),
-        Effect.flatMap((keyBase64Redacted) =>
-            Effect.tryPromise({
-                catch: (cause) => new EncryptionError({ cause }),
-                try: async () => {
-                    const keyBase64 = Redacted.value(keyBase64Redacted);
-                    const keyBytes = Buffer.from(keyBase64, 'base64');
-                    return crypto.subtle.importKey('raw', keyBytes, { length: 256, name: 'AES-GCM' }, false, [
-                        'encrypt',
-                        'decrypt',
-                    ]);
-                },
-            }),
-        ),
-    );
+    Effect.flatMap(importEncryptionKey, (cached) => cached);
 
 const encryptApiKey = (plaintext: string): Effect.Effect<EncryptedKey, EncryptionError> =>
     pipe(
@@ -133,7 +135,7 @@ const decryptApiKey = (encrypted: EncryptedKey): Effect.Effect<string, Encryptio
 const decryptFromBytes = (keyEncrypted: Uint8Array): Effect.Effect<string, EncryptionError> =>
     decryptApiKey({ ciphertext: keyEncrypted.slice(12), iv: keyEncrypted.slice(0, 12) });
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const Token = Object.freeze({
     createPair: createTokenPair,

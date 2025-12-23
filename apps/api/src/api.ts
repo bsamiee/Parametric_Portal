@@ -35,7 +35,7 @@ const CreateApiKeyRequestSchema = S.Struct({
     name: S.NonEmptyTrimmedString,
     provider: AiProviderSchema,
 });
-const CreateApiKeyResponseSchema = S.Struct({ id: ApiKeyIdSchema });
+const CreateApiKeyResponseSchema = ApiKeyListItemSchema;
 const ListApiKeysResponseSchema = S.Struct({ data: S.Array(ApiKeyListItemSchema) });
 const DeleteApiKeyResponseSchema = S.Struct({ success: S.Boolean });
 

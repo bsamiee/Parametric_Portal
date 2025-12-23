@@ -14,7 +14,7 @@ import { Button, Icon, Input, Modal, Select, Spinner, Stack } from '../ui.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type CreateKeyHandlers = ApiResponseFold<{ id: ApiKeyId }, Effect.Effect<void, never, never>>;
+type CreateKeyHandlers = ApiResponseFold<ApiKeyListItem, Effect.Effect<void, never, never>>;
 type DeleteKeyHandlers = ApiResponseFold<{ success: boolean }, Effect.Effect<void, never, never>>;
 type ListKeysHandlers = ApiResponseFold<{ data: ReadonlyArray<ApiKeyListItem> }, Effect.Effect<void, never, never>>;
 type LogoutHandlers = ApiResponseFold<{ success: boolean }, Effect.Effect<void, never, never>>;
@@ -33,9 +33,9 @@ const B = Object.freeze({
 
 const formatDate = (dt: DateTime.Utc): string => DateTime.formatLocal(dt, { dateStyle: 'medium' });
 
-const mkCreateHandlers = (onSuccess: (id: ApiKeyId) => void, onError: () => void): CreateKeyHandlers => ({
+const createApiKeyHandlers = (onSuccess: (apiKey: ApiKeyListItem) => void, onError: () => void): CreateKeyHandlers => ({
     ApiError: () => Effect.sync(onError),
-    ApiSuccess: (data) => Effect.sync(() => onSuccess(data.id)),
+    ApiSuccess: (data) => Effect.sync(() => onSuccess(data)),
 });
 
 const mkDeleteHandlers = (onSuccess: () => void, onError: () => void): DeleteKeyHandlers => ({
@@ -73,24 +73,17 @@ const ApiKeyForm = (): ReactNode => {
     const [error, setError] = useState<string | null>(null);
 
     const handleSubmit = useCallback(() => {
-        if (!accessToken || !name.trim() || !key.trim()) {
-            return;
-        }
-        setIsSubmitting(true);
-        setError(null);
-        runtime.runFork(
-            Effect.flatMap(auth.createApiKey(accessToken, { key: key.trim(), name: name.trim(), provider }), (r) =>
-                fold(
-                    r,
-                    mkCreateHandlers(
-                        (id) => {
-                            authActions.addApiKey({
-                                createdAt: DateTime.unsafeNow(),
-                                id,
-                                lastUsedAt: Option.none(),
-                                name: name.trim(),
-                                provider,
-                            } as ApiKeyListItem);
+        const canSubmit = accessToken && name.trim() && key.trim();
+        canSubmit &&
+            Effect.gen(function* () {
+                setIsSubmitting(true);
+                setError(null);
+                const result = yield* auth.createApiKey(accessToken, { key: key.trim(), name: name.trim(), provider });
+                yield* fold(
+                    result,
+                    createApiKeyHandlers(
+                        (apiKey) => {
+                            authActions.addApiKey(apiKey);
                             setName('');
                             setKey('');
                             setIsSubmitting(false);
@@ -100,9 +93,8 @@ const ApiKeyForm = (): ReactNode => {
                             setIsSubmitting(false);
                         },
                     ),
-                ),
-            ),
-        );
+                );
+            }).pipe((eff) => runtime.runFork(eff));
     }, [runtime, accessToken, name, key, provider, authActions]);
 
     return (

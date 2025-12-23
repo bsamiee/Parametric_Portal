@@ -153,7 +153,6 @@ const handleRefresh = (repos: Repositories) =>
                 onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
                 onSome: Effect.succeed,
             });
-            yield* repos.refreshTokens.revoke(token.id);
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
             const sessionExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.session);
             const refreshExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.refreshToken);
@@ -167,6 +166,7 @@ const handleRefresh = (repos: Repositories) =>
                 tokenHash: refreshHash,
                 userId: token.userId,
             });
+            yield* repos.refreshTokens.revoke(token.id);
             return yield* buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken);
         }),
         Effect.catchTags({
@@ -240,7 +240,13 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
                 provider: input.provider,
                 userId: session.userId,
             });
-            return { id: apiKey.id };
+            return {
+                createdAt: apiKey.createdAt,
+                id: apiKey.id,
+                lastUsedAt: apiKey.lastUsedAt,
+                name: apiKey.name,
+                provider: apiKey.provider,
+            };
         }),
         Effect.catchTags({
             EncryptionError: () => Effect.fail(new InternalError({ cause: 'API key encryption failed' })),
@@ -254,11 +260,16 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
 const handleDeleteApiKey = (repos: Repositories, id: ApiKeyId) =>
     pipe(
         Effect.gen(function* () {
-            yield* SessionContext;
-            yield* repos.apiKeys.delete(id);
+            const session = yield* SessionContext;
+            const userKeys = yield* repos.apiKeys.findAllByUserId(session.userId);
+            const keyBelongsToUser = userKeys.some((k) => k.id === id);
+            yield* keyBelongsToUser
+                ? repos.apiKeys.delete(id)
+                : Effect.fail(new NotFoundError({ id, resource: 'apikey' }));
             return { success: true };
         }),
         Effect.catchTags({
+            NotFoundError: (err) => Effect.fail(err),
             ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
             SqlError: () => Effect.fail(new InternalError({ cause: 'API key deletion failed' })),
         }),

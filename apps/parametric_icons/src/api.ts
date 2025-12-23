@@ -28,7 +28,7 @@ import { Effect, pipe } from 'effect';
 
 type RecoveryConfig = FetchConfig & { readonly onTokenRefresh?: (token: string, expiresAt: Date) => void };
 type CreateApiKeyRequest = { readonly key: string; readonly name: string; readonly provider: AiProvider };
-type CreateApiKeyResponse = { readonly id: ApiKeyId };
+type CreateApiKeyResponse = ApiKeyListItem;
 type ListApiKeysResponse = { readonly data: ReadonlyArray<ApiKeyListItem> };
 type DeleteApiKeyResponse = { readonly success: boolean };
 type GenerateInput = GenerateRequest & { readonly signal?: AbortSignal };
@@ -151,27 +151,27 @@ const auth = {
             body,
             method: 'POST',
             token,
-            ...(onTokenRefresh && { onTokenRefresh }),
+            ...(onTokenRefresh ? { onTokenRefresh } : {}),
         }),
     deleteApiKey: (token: string, id: ApiKeyId, onTokenRefresh?: (token: string, expiresAt: Date) => void) =>
         fetchApiWithRecovery<DeleteApiKeyResponse>(B.endpoints.apiKeysDelete(id), {
             method: 'DELETE',
             token,
-            ...(onTokenRefresh && { onTokenRefresh }),
+            ...(onTokenRefresh ? { onTokenRefresh } : {}),
         }),
     getCurrentUser: (token: string, onTokenRefresh?: (token: string, expiresAt: Date) => void) =>
-        fetchApiWithRecovery<UserResponse>(B.endpoints.me, { token, ...(onTokenRefresh && { onTokenRefresh }) }),
+        fetchApiWithRecovery<UserResponse>(B.endpoints.me, { token, ...(onTokenRefresh ? { onTokenRefresh } : {}) }),
     initiateOAuth: (provider: OAuthProvider) => fetchApi<OAuthStartResponse>(B.endpoints.oauth(provider)),
     listApiKeys: (token: string, onTokenRefresh?: (token: string, expiresAt: Date) => void) =>
         fetchApiWithRecovery<ListApiKeysResponse>(B.endpoints.apiKeys, {
             token,
-            ...(onTokenRefresh && { onTokenRefresh }),
+            ...(onTokenRefresh ? { onTokenRefresh } : {}),
         }),
     logout: (token: string, onTokenRefresh?: (token: string, expiresAt: Date) => void) =>
         fetchApiWithRecovery<LogoutResponse>(B.endpoints.logout, {
             method: 'POST',
             token,
-            ...(onTokenRefresh && { onTokenRefresh }),
+            ...(onTokenRefresh ? { onTokenRefresh } : {}),
         }),
     refreshSession: () => fetchApi<SessionResponse>(B.endpoints.refresh, { method: 'POST' }),
 };

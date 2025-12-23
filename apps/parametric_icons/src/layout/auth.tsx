@@ -49,7 +49,7 @@ const getInitials = (email: string): string => {
         .map((s) => s.charAt(0).toUpperCase())
         .join('');
 };
-const mkOAuthHandlers = (setLoading: (flag: boolean) => void): OAuthHandlers => ({
+const createOAuthHandlers = (setLoading: (flag: boolean) => void): OAuthHandlers => ({
     ApiError: () => Effect.sync(() => setLoading(false)),
     ApiSuccess: (data) =>
         Effect.sync(() => {
@@ -66,7 +66,7 @@ const OAuthButton = ({ provider }: { readonly provider: OAuthProvider }): ReactN
     const handlePress = useCallback(() => {
         authActions.setLoading(true);
         runtime.runFork(
-            Effect.flatMap(auth.initiateOAuth(provider), (r) => fold(r, mkOAuthHandlers(authActions.setLoading))),
+            Effect.flatMap(auth.initiateOAuth(provider), (r) => fold(r, createOAuthHandlers(authActions.setLoading))),
         );
     }, [runtime, authActions, provider]);
     return (

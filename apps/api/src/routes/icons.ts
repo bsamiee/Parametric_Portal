@@ -22,15 +22,16 @@ const getUserApiKey = (repos: Repositories, userId: UserId, provider: AiProvider
         repos.apiKeys.findByUserIdAndProvider({ provider, userId }),
         Effect.flatMap(
             Option.match({
-                onNone: () => Effect.succeed(undefined as string | undefined),
+                onNone: () => Effect.succeed(Option.none<string>()),
                 onSome: (apiKey) =>
                     pipe(
-                        Option.fromNullable(Option.getOrUndefined(apiKey.keyEncrypted)),
+                        apiKey.keyEncrypted,
                         Option.match({
-                            onNone: () => Effect.succeed(undefined as string | undefined),
+                            onNone: () => Effect.succeed(Option.none<string>()),
                             onSome: (encrypted) =>
                                 pipe(
                                     Crypto.decryptFromBytes(encrypted),
+                                    Effect.map(Option.some),
                                     Effect.mapError(
                                         (e) => new InternalError({ cause: `Key decryption failed: ${String(e)}` }),
                                     ),
@@ -72,9 +73,13 @@ const handleGenerate = (repos: Repositories, iconService: IconGenerationServiceT
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
-            const userApiKey = yield* getUserApiKey(repos, session.userId, 'anthropic');
+            const userApiKeyOpt = yield* getUserApiKey(repos, session.userId, 'anthropic');
+            const generateInput = Option.match(userApiKeyOpt, {
+                onNone: () => input,
+                onSome: (apiKey) => ({ ...input, apiKey }),
+            });
             const result = yield* pipe(
-                iconService.generate({ ...input, ...(userApiKey && { apiKey: userApiKey }) }),
+                iconService.generate(generateInput),
                 Effect.filterOrFail(
                     (r) => r.variants.length > 0,
                     () => new InternalError({ cause: 'No icon variants generated' }),

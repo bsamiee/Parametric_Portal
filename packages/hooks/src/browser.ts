@@ -269,12 +269,9 @@ const createBrowserHooks = <R, E>(
         }, [runtime]);
 
         useEffect(
-            () =>
-                fiberRef.current === null
-                    ? undefined
-                    : () => {
-                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
-                      },
+            () => () => {
+                fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
+            },
             [runtime],
         );
 
@@ -316,12 +313,9 @@ const createBrowserHooks = <R, E>(
         }, [runtime]);
 
         useEffect(
-            () =>
-                fiberRef.current === null
-                    ? undefined
-                    : () => {
-                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
-                      },
+            () => () => {
+                fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
+            },
             [runtime],
         );
 
@@ -362,12 +356,9 @@ const createBrowserHooks = <R, E>(
         }, [runtime]);
 
         useEffect(
-            () =>
-                fiberRef.current === null
-                    ? undefined
-                    : () => {
-                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
-                      },
+            () => () => {
+                fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
+            },
             [runtime],
         );
 

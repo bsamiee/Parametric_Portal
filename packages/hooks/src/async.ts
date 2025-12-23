@@ -140,12 +140,9 @@ const createAsyncHooks = <R, E>(runtimeApi: RuntimeApi<R, E>, config: AsyncHooks
         }, [runtime]);
 
         useEffect(
-            () =>
-                fiberRef.current === null
-                    ? undefined
-                    : () => {
-                          runtime.runFork(Fiber.interrupt(fiberRef.current as Fiber.RuntimeFiber<unknown, unknown>));
-                      },
+            () => () => {
+                fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
+            },
             [runtime],
         );
 

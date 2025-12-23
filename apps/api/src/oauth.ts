@@ -60,8 +60,8 @@ const B = Object.freeze({
 const normalizeUserInfo = {
     github: (data: GitHubUserInfo): OAuthUserInfo => ({
         avatarUrl: Option.fromNullable(data.avatar_url),
-        email: Option.fromNullable(data.email ?? undefined),
-        name: Option.fromNullable(data.name ?? undefined),
+        email: Option.fromNullable(data.email),
+        name: Option.fromNullable(data.name),
         providerAccountId: String(data.id),
     }),
     google: (data: OIDCUserInfo): OAuthUserInfo => ({
