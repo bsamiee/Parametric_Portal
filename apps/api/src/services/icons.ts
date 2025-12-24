@@ -5,9 +5,12 @@
 import { AnthropicClient } from '@parametric-portal/ai/anthropic';
 import { InternalError } from '@parametric-portal/server/errors';
 import type { ColorMode } from '@parametric-portal/types/database';
-import { createSvgAsset, type SvgAsset, SvgAssetInputSchema, sanitizeSvg } from '@parametric-portal/types/svg';
+import { type SvgAsset, svg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
+
 import { GenerateRequestSchema, ICON_DESIGN, type Palette } from '../contracts/icons.ts';
+
+const svgApi = svg();
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -37,7 +40,7 @@ type IconGenerationServiceInterface = {
 
 /** AI response wrapper: validates array of SvgAssetInput before transformation. */
 const AiResponseSchema = S.Struct({
-    variants: S.Array(SvgAssetInputSchema).pipe(S.minItems(1)),
+    variants: S.Array(svgApi.schemas.SvgAssetInput).pipe(S.minItems(1)),
 });
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -63,8 +66,8 @@ const B = Object.freeze({
 
 const getPalette = (mode: ColorMode): Palette => ICON_DESIGN.palettes[mode];
 
-const minifySvgForPrompt = (svg: string): string =>
-    sanitizeSvg(svg).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
+const minifySvgForPrompt = (svgContent: string): string =>
+    svgApi.sanitizeSvg(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
 
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
@@ -247,7 +250,7 @@ const IconGenerationServiceLive = Layer.effect(
                     Effect.flatMap(parseAiResponse),
                     Effect.map(
                         (response): ServiceOutput => ({
-                            variants: response.variants.map(createSvgAsset),
+                            variants: response.variants.map(svgApi.createSvgAsset),
                         }),
                     ),
                 ),

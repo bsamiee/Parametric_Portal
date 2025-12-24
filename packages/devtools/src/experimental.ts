@@ -11,7 +11,6 @@ type DevToolsConfig = {
     readonly timeoutMs?: number | undefined;
     readonly url?: string | undefined;
 };
-
 type DevToolsResult = {
     readonly layer: Layer.Layer<never>;
     readonly isEnabled: boolean;
@@ -36,9 +35,7 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const isBrowser = (): boolean => globalThis.window !== undefined && typeof WebSocket !== 'undefined';
-
 const shouldEnable = (config: DevToolsConfig): boolean => (config.enabled ?? B.defaults.enabled) && isBrowser();
-
 const testConnection = (url: string, timeoutMs: number): Promise<boolean> =>
     new Promise((resolve) => {
         const ws = new WebSocket(url);
@@ -67,12 +64,10 @@ const createDevToolsLayer = (config: Partial<DevToolsConfig> = {}): DevToolsResu
     const layer: Layer.Layer<never> = enabled ? DevTools.layer(url) : Layer.empty;
     return { isEnabled: enabled, layer };
 };
-
 const createDevToolsLayerSafe = (config: Partial<DevToolsConfig> = {}): DevToolsResult => {
     const enabled = shouldEnable(config);
     const url = config.url ?? B.defaults.url;
     const timeoutMs = config.timeoutMs ?? B.defaults.timeoutMs;
-
     const layer: Layer.Layer<never> = enabled
         ? Layer.unwrapEffect(
               pipe(
@@ -85,7 +80,6 @@ const createDevToolsLayerSafe = (config: Partial<DevToolsConfig> = {}): DevTools
               ),
           )
         : Layer.empty;
-
     return { isEnabled: enabled, layer };
 };
 

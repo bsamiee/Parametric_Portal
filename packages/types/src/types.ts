@@ -1,6 +1,6 @@
 /**
- * Primitive types and branded schemas.
- * Grounding: Effect Schema validation with runtime branding.
+ * Define primitive types and branded schemas with runtime validation.
+ * Effect Schema validation with runtime branding for domain primitives.
  */
 import { Effect, pipe, Schema as S } from 'effect';
 import type { ParseError } from 'effect/ParseResult';
@@ -31,12 +31,51 @@ type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>;
 type TypesApi = {
     readonly brands: typeof brands;
     readonly createIdGenerator: typeof createIdGenerator;
-    readonly generateHex8: () => Hex8;
-    readonly generateUuidv7Sync: () => Uuidv7;
-    readonly generateUuidv7: Effect.Effect<Uuidv7, never, never>;
+    readonly derive: { readonly hex8: typeof deriveHex8 };
+    readonly generate: {
+        readonly hex8: () => Hex8;
+        readonly uuidv7: Effect.Effect<Uuidv7, never, never>;
+        readonly uuidv7Sync: () => Uuidv7;
+    };
+    readonly guards: {
+        readonly email: (u: unknown) => u is Email;
+        readonly hex8: (u: unknown) => u is Hex8;
+        readonly hex64: (u: unknown) => u is Hex64;
+        readonly hexColor: (u: unknown) => u is HexColor;
+        readonly htmlId: (u: unknown) => u is HtmlId;
+        readonly index: (u: unknown) => u is Index;
+        readonly isoDate: (u: unknown) => u is IsoDate;
+        readonly nonNegativeInt: (u: unknown) => u is NonNegativeInt;
+        readonly percentage: (u: unknown) => u is Percentage;
+        readonly positiveInt: (u: unknown) => u is PositiveInt;
+        readonly safeInteger: (u: unknown) => u is SafeInteger;
+        readonly slug: (u: unknown) => u is Slug;
+        readonly url: (u: unknown) => u is Url;
+        readonly uuidv7: (u: unknown) => u is Uuidv7;
+        readonly variantCount: (u: unknown) => u is VariantCount;
+        readonly zoomFactor: (u: unknown) => u is ZoomFactor;
+    };
     readonly isUuidv7: (u: unknown) => u is Uuidv7;
     readonly patterns: typeof patterns;
-    readonly schemas: typeof schemas;
+    readonly schemas: typeof schemas & {
+        readonly Email: typeof EmailSchema;
+        readonly Hex8: typeof Hex8Schema;
+        readonly Hex64: typeof Hex64Schema;
+        readonly HexColor: typeof HexColorSchema;
+        readonly HtmlId: typeof HtmlIdSchema;
+        readonly Index: typeof IndexSchema;
+        readonly IsoDate: typeof IsoDateSchema;
+        readonly NonNegativeInt: typeof NonNegativeIntSchema;
+        readonly Pagination: typeof PaginationParamsSchema;
+        readonly Percentage: typeof PercentageSchema;
+        readonly PositiveInt: typeof PositiveIntSchema;
+        readonly SafeInteger: typeof SafeIntegerSchema;
+        readonly Slug: typeof SlugSchema;
+        readonly Url: typeof UrlSchema;
+        readonly Uuidv7: typeof Uuidv7Schema;
+        readonly VariantCount: typeof VariantCountSchema;
+        readonly ZoomFactor: typeof ZoomFactorSchema;
+    };
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -84,7 +123,6 @@ const baseSchemas = {
     url: pipe(S.String, S.pattern(B.patterns.url)),
     uuidv7: pipe(S.String, S.pattern(B.patterns.uuidv7)),
 } as const;
-
 const EmailSchema = pipe(baseSchemas.email, S.brand('Email'));
 const Hex8Schema = pipe(baseSchemas.hex8, S.brand('Hex8'));
 const Hex64Schema = pipe(baseSchemas.hex64, S.brand('Hex64'));
@@ -106,14 +144,10 @@ const IndexSchema = boundedInt('Index', B.bounds.index.min, B.bounds.index.max);
 const VariantCountSchema = boundedInt('VariantCount', B.bounds.variantCount.min, B.bounds.variantCount.max);
 const ZoomFactorSchema = boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
 const patterns = Object.freeze(B.patterns);
-
-// --- [DOMAIN_PRIMITIVES] -----------------------------------------------------
-
 const PaginationParamsSchema = S.Struct({
     limit: pipe(S.Int, S.between(1, B.pagination.maxPageSize)),
     offset: pipe(S.Int, S.nonNegative()),
 });
-
 const schemas = Object.freeze({
     ...baseSchemas,
     nonEmptyTrimmedString: S.NonEmptyTrimmedString,
@@ -122,7 +156,6 @@ const schemas = Object.freeze({
     string: S.String,
     uuid: S.UUID,
 } as const);
-
 const brands = Object.freeze({
     email: EmailSchema,
     hex8: Hex8Schema,
@@ -162,38 +195,61 @@ const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect
         Effect.sync(generateUuidv7Sync),
         Effect.flatMap((uuid) => S.decode(schema)(uuid)),
     );
-
 const types = (): TypesApi =>
     Object.freeze({
         brands,
         createIdGenerator,
-        generateHex8,
-        generateUuidv7: Effect.sync(generateUuidv7Sync),
-        generateUuidv7Sync,
+        derive: Object.freeze({ hex8: deriveHex8 }),
+        generate: Object.freeze({
+            hex8: generateHex8,
+            uuidv7: Effect.sync(generateUuidv7Sync),
+            uuidv7Sync: generateUuidv7Sync,
+        }),
+        guards: Object.freeze({
+            email: S.is(EmailSchema),
+            hex8: S.is(Hex8Schema),
+            hex64: S.is(Hex64Schema),
+            hexColor: S.is(HexColorSchema),
+            htmlId: S.is(HtmlIdSchema),
+            index: S.is(IndexSchema),
+            isoDate: S.is(IsoDateSchema),
+            nonNegativeInt: S.is(NonNegativeIntSchema),
+            percentage: S.is(PercentageSchema),
+            positiveInt: S.is(PositiveIntSchema),
+            safeInteger: S.is(SafeIntegerSchema),
+            slug: S.is(SlugSchema),
+            url: S.is(UrlSchema),
+            uuidv7: S.is(Uuidv7Schema),
+            variantCount: S.is(VariantCountSchema),
+            zoomFactor: S.is(ZoomFactorSchema),
+        }),
         isUuidv7: S.is(Uuidv7Schema),
         patterns,
-        schemas,
+        schemas: Object.freeze({
+            ...schemas,
+            Email: EmailSchema,
+            Hex8: Hex8Schema,
+            Hex64: Hex64Schema,
+            HexColor: HexColorSchema,
+            HtmlId: HtmlIdSchema,
+            Index: IndexSchema,
+            IsoDate: IsoDateSchema,
+            NonNegativeInt: NonNegativeIntSchema,
+            Pagination: PaginationParamsSchema,
+            Percentage: PercentageSchema,
+            PositiveInt: PositiveIntSchema,
+            SafeInteger: SafeIntegerSchema,
+            Slug: SlugSchema,
+            Url: UrlSchema,
+            Uuidv7: Uuidv7Schema,
+            VariantCount: VariantCountSchema,
+            ZoomFactor: ZoomFactorSchema,
+        }),
     });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    B as TYPES_TUNING,
-    deriveHex8,
-    EmailSchema,
-    generateHex8,
-    generateUuidv7Sync,
-    Hex64Schema,
-    Hex8Schema,
-    HtmlIdSchema,
-    IndexSchema,
-    PaginationParamsSchema,
-    SlugSchema,
-    types,
-    Uuidv7Schema,
-    VariantCountSchema,
-    ZoomFactorSchema,
-};
+export { B as TYPES_TUNING, types };
 export type {
     BivariantFunction,
     Email,

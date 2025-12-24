@@ -8,8 +8,9 @@
         { "path": "./packages/components" },
         { "path": "./packages/database" },
         { "path": "./packages/devtools" },
-        { "path": "./packages/hooks" },
+        { "path": "./packages/runtime" },
         { "path": "./packages/server" },
+        { "path": "./packages/test-utils" },
         { "path": "./packages/theme" },
         { "path": "./packages/types" },
         { "path": "./tools" }

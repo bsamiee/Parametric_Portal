@@ -2,14 +2,15 @@
  * Auth components: overlay, OAuth buttons, user avatar.
  * Uses existing Modal/Button/Avatar/Icon from ui.ts with auth dispatch from api.ts.
  */
-import { type ApiResponseFold, fold } from '@parametric-portal/types/api';
+
+import { useMutation } from '@parametric-portal/runtime/hooks/async';
+import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
+import type { ApiError } from '@parametric-portal/types/api';
 import type { OAuthProvider, OAuthStartResponse } from '@parametric-portal/types/database';
-import { Effect } from 'effect';
+import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
-import { auth } from '../api.ts';
-import { useRuntime, useStoreActions, useStoreSlice } from '../core.ts';
-import { authSlice } from '../stores.ts';
+import { apiFactory, auth } from '../infrastructure.ts';
 import { Avatar, Button, Icon, Modal, Spinner, Stack } from '../ui.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -23,11 +24,13 @@ type OAuthConfig = {
 type UserAvatarProps = {
     readonly className?: string;
 };
-type OAuthHandlers = ApiResponseFold<OAuthStartResponse, Effect.Effect<void, never, never>>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    oauth: {
+        allowedDomains: ['accounts.google.com', 'github.com', 'login.microsoftonline.com'],
+    },
     overlay: {
         size: 'sm' as const,
         title: 'Sign in to continue',
@@ -49,26 +52,32 @@ const getInitials = (email: string): string => {
         .map((s) => s.charAt(0).toUpperCase())
         .join('');
 };
-const createOAuthHandlers = (setLoading: (flag: boolean) => void): OAuthHandlers => ({
-    ApiError: () => Effect.sync(() => setLoading(false)),
-    ApiSuccess: (data) =>
-        Effect.sync(() => {
-            globalThis.location.href = data.url;
-        }),
-});
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const OAuthButton = ({ provider }: { readonly provider: OAuthProvider }): ReactNode => {
-    const runtime = useRuntime();
-    const authActions = useStoreActions(authSlice);
+    const setLoading = useAuthStore((s) => s.setLoading);
     const config = B.providers[provider];
+    const oauthMutation = useMutation<OAuthStartResponse, OAuthProvider, ApiError, never>(
+        (p) => pipe(auth.initiateOAuth(p), Effect.flatMap(apiFactory.toEffectM<OAuthStartResponse>())),
+        {
+            onError: () => setLoading(false),
+            onSuccess: (data) =>
+                pipe(
+                    Option.liftThrowable(() => new URL(data.url))(),
+                    Option.filter((url) => B.oauth.allowedDomains.some((domain) => url.hostname.endsWith(domain))),
+                    Option.match({
+                        onNone: () => setLoading(false),
+                        // biome-ignore lint/suspicious/noAssignInExpressions: Expression-centric redirect
+                        onSome: () => (globalThis.location.href = data.url),
+                    }),
+                ),
+        },
+    );
     const handlePress = useCallback(() => {
-        authActions.setLoading(true);
-        runtime.runFork(
-            Effect.flatMap(auth.initiateOAuth(provider), (r) => fold(r, createOAuthHandlers(authActions.setLoading))),
-        );
-    }, [runtime, authActions, provider]);
+        setLoading(true);
+        oauthMutation.mutate(provider);
+    }, [setLoading, provider, oauthMutation]);
     return (
         <Button
             onPress={handlePress}
@@ -79,17 +88,12 @@ const OAuthButton = ({ provider }: { readonly provider: OAuthProvider }): ReactN
         </Button>
     );
 };
-
 const AuthOverlay = (): ReactNode => {
-    const { isAuthOverlayOpen, isLoading } = useStoreSlice(authSlice);
-    const authActions = useStoreActions(authSlice);
+    const isAuthOverlayOpen = useAuthStore((s) => s.isAuthOverlayOpen);
+    const isLoading = useAuthStore((s) => s.isLoading);
+    const closeAuthOverlay = useAuthStore((s) => s.closeAuthOverlay);
     return (
-        <Modal
-            isOpen={isAuthOverlayOpen}
-            onClose={authActions.closeAuthOverlay}
-            title={B.overlay.title}
-            size={B.overlay.size}
-        >
+        <Modal isOpen={isAuthOverlayOpen} onClose={closeAuthOverlay} title={B.overlay.title} size={B.overlay.size}>
             {isLoading ? (
                 <Stack gap align='center' className='py-8'>
                     <Spinner />
@@ -105,15 +109,15 @@ const AuthOverlay = (): ReactNode => {
         </Modal>
     );
 };
-
 const UserAvatar = ({ className }: UserAvatarProps): ReactNode => {
-    const { accessToken, user } = useStoreSlice(authSlice);
-    const authActions = useStoreActions(authSlice);
+    const accessToken = useAuthStore((s) => s.accessToken);
+    const user = useAuthStore((s) => s.user);
+    const openAccountOverlay = useAuthStore((s) => s.openAccountOverlay);
+    const openAuthOverlay = useAuthStore((s) => s.openAuthOverlay);
     const isAuthenticated = accessToken !== null && user !== null;
     const handlePress = useCallback(() => {
-        isAuthenticated ? authActions.openAccountOverlay() : authActions.openAuthOverlay();
-    }, [authActions, isAuthenticated]);
-
+        isAuthenticated ? openAccountOverlay() : openAuthOverlay();
+    }, [openAccountOverlay, openAuthOverlay, isAuthenticated]);
     return (
         <Button
             variant='ghost'
@@ -132,4 +136,4 @@ const UserAvatar = ({ className }: UserAvatarProps): ReactNode => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AuthOverlay, B as AUTH_CONFIG, UserAvatar };
+export { AuthOverlay, UserAvatar };

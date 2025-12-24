@@ -1,10 +1,11 @@
 /**
- * Database entity identifiers, domain schemas, and auth response types.
- * Single import point for all domain primitives: @parametric-portal/types/database
+ * Define database entity identifiers, domain schemas, and auth response types.
+ * Single import point for all domain primitives via @parametric-portal/types/database.
  */
 import { Duration, pipe, type Redacted, Schema as S } from 'effect';
-import type { Hex64 } from './types.ts';
-import { Hex64Schema, Uuidv7Schema } from './types.ts';
+import { type Hex64, types } from './types.ts';
+
+const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -34,14 +35,57 @@ type OAuthStartResponse = S.Schema.Type<typeof OAuthStartResponseSchema>;
 type SessionResponse = S.Schema.Type<typeof SessionResponseSchema>;
 type UserResponse = S.Schema.Type<typeof UserResponseSchema>;
 type LogoutResponse = S.Schema.Type<typeof LogoutResponseSchema>;
+type OAuthTokens = S.Schema.Type<typeof OAuthTokensSchema>;
+type OAuthUserInfo = S.Schema.Type<typeof OAuthUserInfoSchema>;
 type OAuthProviderConfig = {
     readonly clientId: string;
     readonly clientSecret: Redacted.Redacted<string>;
     readonly redirectUri: string;
     readonly scopes: ReadonlyArray<string>;
 };
-type OAuthTokens = S.Schema.Type<typeof OAuthTokensSchema>;
-type OAuthUserInfo = S.Schema.Type<typeof OAuthUserInfoSchema>;
+type DatabaseConfig = {
+    readonly refreshBuffer?: Duration.Duration;
+};
+type DatabaseApi = {
+    readonly expiry: typeof Expiry;
+    readonly providers: typeof B.providers;
+    readonly schemas: {
+        readonly ids: {
+            readonly ApiKeyId: typeof ApiKeyIdSchema;
+            readonly AssetId: typeof AssetIdSchema;
+            readonly OAuthAccountId: typeof OAuthAccountIdSchema;
+            readonly OrganizationId: typeof OrganizationIdSchema;
+            readonly OrganizationMemberId: typeof OrganizationMemberIdSchema;
+            readonly RefreshTokenId: typeof RefreshTokenIdSchema;
+            readonly SessionId: typeof SessionIdSchema;
+            readonly UserId: typeof UserIdSchema;
+        };
+        readonly entities: {
+            readonly AiProvider: typeof AiProviderSchema;
+            readonly ApiKeyListItem: typeof ApiKeyListItemSchema;
+            readonly ApiKeyResult: typeof ApiKeyResultSchema;
+            readonly AssetCountResult: typeof AssetCountResultSchema;
+            readonly AssetListItem: typeof AssetListItemSchema;
+            readonly AssetMetadata: typeof AssetMetadataSchema;
+            readonly ColorMode: typeof ColorModeSchema;
+            readonly Intent: typeof IntentSchema;
+            readonly OAuthProvider: typeof OAuthProviderSchema;
+            readonly OAuthTokens: typeof OAuthTokensSchema;
+            readonly OAuthUserInfo: typeof OAuthUserInfoSchema;
+            readonly OrganizationRole: typeof OrganizationRoleSchema;
+            readonly OutputMode: typeof OutputModeSchema;
+            readonly SessionResult: typeof SessionResultSchema;
+            readonly TokenHash: typeof TokenHashSchema;
+            readonly Version: typeof VersionSchema;
+        };
+        readonly responses: {
+            readonly LogoutResponse: typeof LogoutResponseSchema;
+            readonly OAuthStartResponse: typeof OAuthStartResponseSchema;
+            readonly SessionResponse: typeof SessionResponseSchema;
+            readonly UserResponse: typeof UserResponseSchema;
+        };
+    };
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -59,8 +103,7 @@ const B = Object.freeze({
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const brandedId = <T extends string>(label: T) => pipe(Uuidv7Schema, S.brand(label));
-
+const brandedId = <T extends string>(label: T) => pipe(typesApi.schemas.Uuidv7, S.brand(label));
 const ApiKeyIdSchema = brandedId('ApiKeyId');
 const AssetIdSchema = brandedId('AssetId');
 const UserIdSchema = brandedId('UserId');
@@ -69,7 +112,7 @@ const OAuthAccountIdSchema = brandedId('OAuthAccountId');
 const RefreshTokenIdSchema = brandedId('RefreshTokenId');
 const OrganizationIdSchema = brandedId('OrganizationId');
 const OrganizationMemberIdSchema = brandedId('OrganizationMemberId');
-const TokenHashSchema = Hex64Schema;
+const TokenHashSchema = typesApi.schemas.Hex64;
 const VersionSchema = pipe(S.Int, S.nonNegative(), S.brand('Version'));
 const OAuthProviderSchema = S.Literal(...B.providers);
 const OrganizationRoleSchema = S.Literal('owner', 'admin', 'member');
@@ -109,11 +152,8 @@ const OAuthUserInfoSchema = S.Struct({
     name: S.OptionFromSelf(S.String),
     providerAccountId: S.String,
 });
-
-// --- [API_RESPONSES] ---------------------------------------------------------
-
 const OAuthStartResponseSchema = S.Struct({ url: S.String });
-const SessionResponseSchema = S.Struct({ accessToken: Uuidv7Schema, expiresAt: S.DateTimeUtc });
+const SessionResponseSchema = S.Struct({ accessToken: typesApi.schemas.Uuidv7, expiresAt: S.DateTimeUtc });
 const UserResponseSchema = S.Struct({ email: S.String, id: UserIdSchema });
 const LogoutResponseSchema = S.Struct({ success: S.Boolean });
 
@@ -131,40 +171,57 @@ const Expiry = Object.freeze({
     computeFrom: (duration: Duration.Duration): Date => new Date(Date.now() + Duration.toMillis(duration)),
 });
 
+// --- [ENTRY_POINT] -----------------------------------------------------------
+
+const database = (config: DatabaseConfig = {}): DatabaseApi =>
+    Object.freeze({
+        expiry: Object.freeze({
+            check: (date: Date | null | undefined, bufferMs?: number) =>
+                Expiry.check(date, bufferMs ?? Duration.toMillis(config.refreshBuffer ?? B.durations.refreshBuffer)),
+            computeFrom: Expiry.computeFrom,
+        }),
+        providers: B.providers,
+        schemas: Object.freeze({
+            entities: Object.freeze({
+                AiProvider: AiProviderSchema,
+                ApiKeyListItem: ApiKeyListItemSchema,
+                ApiKeyResult: ApiKeyResultSchema,
+                AssetCountResult: AssetCountResultSchema,
+                AssetListItem: AssetListItemSchema,
+                AssetMetadata: AssetMetadataSchema,
+                ColorMode: ColorModeSchema,
+                Intent: IntentSchema,
+                OAuthProvider: OAuthProviderSchema,
+                OAuthTokens: OAuthTokensSchema,
+                OAuthUserInfo: OAuthUserInfoSchema,
+                OrganizationRole: OrganizationRoleSchema,
+                OutputMode: OutputModeSchema,
+                SessionResult: SessionResultSchema,
+                TokenHash: TokenHashSchema,
+                Version: VersionSchema,
+            }),
+            ids: Object.freeze({
+                ApiKeyId: ApiKeyIdSchema,
+                AssetId: AssetIdSchema,
+                OAuthAccountId: OAuthAccountIdSchema,
+                OrganizationId: OrganizationIdSchema,
+                OrganizationMemberId: OrganizationMemberIdSchema,
+                RefreshTokenId: RefreshTokenIdSchema,
+                SessionId: SessionIdSchema,
+                UserId: UserIdSchema,
+            }),
+            responses: Object.freeze({
+                LogoutResponse: LogoutResponseSchema,
+                OAuthStartResponse: OAuthStartResponseSchema,
+                SessionResponse: SessionResponseSchema,
+                UserResponse: UserResponseSchema,
+            }),
+        }),
+    });
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    AiProviderSchema,
-    ApiKeyIdSchema,
-    ApiKeyListItemSchema,
-    ApiKeyResultSchema,
-    AssetCountResultSchema,
-    AssetIdSchema,
-    AssetListItemSchema,
-    AssetMetadataSchema,
-    B as SCHEMA_TUNING,
-    ColorModeSchema,
-    Expiry,
-    IntentSchema,
-    LogoutResponseSchema,
-    OAuthAccountIdSchema,
-    OAuthProviderSchema,
-    OAuthStartResponseSchema,
-    OAuthTokensSchema,
-    OAuthUserInfoSchema,
-    OrganizationIdSchema,
-    OrganizationMemberIdSchema,
-    OrganizationRoleSchema,
-    OutputModeSchema,
-    RefreshTokenIdSchema,
-    SessionIdSchema,
-    SessionResponseSchema,
-    SessionResultSchema,
-    TokenHashSchema,
-    UserIdSchema,
-    UserResponseSchema,
-    VersionSchema,
-};
+export { B as DATABASE_TUNING, database };
 export type {
     AiProvider,
     ApiKeyId,
@@ -175,6 +232,8 @@ export type {
     AssetListItem,
     AssetMetadata,
     ColorMode,
+    DatabaseApi,
+    DatabaseConfig,
     Intent,
     LogoutResponse,
     OAuthAccountId,

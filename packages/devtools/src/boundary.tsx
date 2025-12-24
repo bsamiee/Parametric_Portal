@@ -9,18 +9,15 @@ import { toError } from './types.ts';
 // --- [TYPES] -----------------------------------------------------------------
 
 type ErrorCallback = (error: Error, context: Readonly<Record<string, unknown>>) => void;
-
 type RootErrorConfig = {
     readonly loggerLayer: Layer.Layer<never, never, never>;
     readonly onError: ErrorCallback;
 };
-
 type RootOptions = {
     readonly onCaughtError: (error: unknown, errorInfo: unknown) => void;
     readonly onRecoverableError: (error: unknown, errorInfo: unknown) => void;
     readonly onUncaughtError: (error: unknown, errorInfo: unknown) => void;
 };
-
 type EffectErrorBoundaryProps = {
     readonly children: ReactNode;
     readonly fallback?: ReactNode;
@@ -78,7 +75,6 @@ const createRootErrorOptions = (config: RootErrorConfig): RootOptions => ({
         config.onError(toError(error), { errorInfo, phase: B.phases.uncaught });
     },
 });
-
 const EffectErrorBoundary = ({ children, fallback, loggerLayer, onError }: EffectErrorBoundaryProps): ReactNode => (
     <ErrorBoundary
         fallback={fallback ?? <div>{B.fallback.text}</div>}

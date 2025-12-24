@@ -3,27 +3,29 @@
  * Mirrors Arsenal architecture with rail + drawer sidebar, centered input, and preview viewport.
  */
 
-import { sanitizeFilename } from '@parametric-portal/hooks/browser';
+import type { GenerateResponse } from '@parametric-portal/api/contracts/icons';
+import { useMutation } from '@parametric-portal/runtime/hooks/async';
+import { sanitizeFilename, useClipboard, useExport } from '@parametric-portal/runtime/hooks/browser';
+import type { ApiError } from '@parametric-portal/types/api';
 import type { Intent } from '@parametric-portal/types/database';
-import { deriveScope, type SvgAsset, sanitizeSvg } from '@parametric-portal/types/svg';
+import { type SvgAsset, svg } from '@parametric-portal/types/svg';
 import { type Index, types, type Uuidv7, type VariantCount } from '@parametric-portal/types/types';
+import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef } from 'react';
-import { generateIcon } from '../api.ts';
-import { useClipboard, useExport, useMutation, useStoreActions, useStoreSelector, useStoreSlice } from '../core.ts';
+import { apiFactory, asyncApi, type GenerateInput, generateIcon } from '../infrastructure.ts';
 import {
     type Asset,
     type ContextState,
-    type CustomAsset,
-    chatSlice,
-    contextSlice,
-    historySlice,
-    librarySlice,
     type MessageRole,
-    previewSlice,
     type SidebarTab,
     STORE_TUNING,
-    uiSlice,
+    useChatStore,
+    useContextStore,
+    useHistoryStore,
+    useLibraryStore,
+    usePreviewStore,
+    useUiStore,
 } from '../stores.ts';
 import {
     Box,
@@ -46,11 +48,15 @@ import {
 import { UserAvatar } from './auth.tsx';
 import { UploadDialog } from './overlays.tsx';
 
+const svgApi = svg();
+const typesApi = types();
+
 // --- [TYPES] -----------------------------------------------------------------
 
 type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTerminal' | 'PanelLeft';
-type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: number };
 type PreviewRenderState = 'empty' | 'generating' | 'ready';
+type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: number };
+type PanelContentProps = HistoryPanelProps & LibraryPanelProps;
 type HistoryPanelProps = {
     readonly assets: ReadonlyArray<Asset>;
     readonly currentId: string | null;
@@ -59,14 +65,38 @@ type HistoryPanelProps = {
     readonly onSelect: (id: string) => void;
 };
 type LibraryPanelProps = {
-    readonly customAssets: ReadonlyArray<CustomAsset>;
+    readonly customAssets: ReadonlyArray<SvgAsset>;
     readonly onAddAttachment: (asset: SvgAsset) => void;
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
     readonly onRemoveSaved: (id: string) => void;
     readonly savedAssets: ReadonlyArray<Asset>;
 };
-type PanelContentProps = HistoryPanelProps & LibraryPanelProps;
+type AttachmentThumbProps = {
+    readonly name: string;
+    readonly onRemove: () => void;
+    readonly scopeSeed: string;
+    readonly svg: string;
+};
+type MessageCardProps = {
+    readonly content: string;
+    readonly role: MessageRole;
+    readonly timestamp: number;
+};
+type ViewportProps = {
+    readonly isLoading: boolean;
+    readonly sanitized: string | null;
+    readonly showGrid: boolean;
+    readonly showSafeArea: boolean;
+    readonly zoom: number;
+};
+type ViewportHUDProps = {
+    readonly currentId: string | null;
+    readonly currentSvg: string | null;
+    readonly filename: string;
+    readonly isSaved: boolean;
+    readonly onToggleSave: () => void;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -83,17 +113,14 @@ const B = Object.freeze({
         { icon: 'SquareTerminal', key: 'session', tooltip: 'Session' },
     ] as ReadonlyArray<{ readonly icon: SidebarIconName; readonly key: SidebarTab; readonly tooltip: string }>,
 } as const);
-
 const modeOptions = [
     { icon: <Icon name='Sparkles' className='w-4 h-4' />, key: 'create', label: 'Create' },
     { icon: <Icon name='Pencil' className='w-4 h-4' />, key: 'refine', label: 'Refine' },
 ] as const;
-
 const outputOptions = [
     { icon: <Icon name='Box' className='w-4 h-4' />, key: 'single', label: 'Single' },
     { icon: <Icon name='Layers' className='w-4 h-4' />, key: 'batch', label: 'Batch' },
 ] as const;
-
 const styleOptions = [
     { icon: <Icon name='Moon' className='w-4 h-4' />, key: 'dark', label: 'Dark' },
     { icon: <Icon name='Sun' className='w-4 h-4' />, key: 'light', label: 'Light' },
@@ -106,7 +133,9 @@ const derivePreviewRenderState = (isGenerating: boolean, hasSvg: boolean): Previ
     const stateMap = { '00': 'empty', '01': 'ready', '10': 'generating', '11': 'generating' } as const;
     return stateMap[stateKey];
 };
-const sanitizeSvgScoped = (svg: string, seed: string): string => sanitizeSvg(svg, { scope: deriveScope(seed) });
+const sanitizeSvgScoped = (svgContent: string, seed: string): string =>
+    svgApi.sanitizeSvg(svgContent, { scope: svgApi.deriveScope(seed) });
+const generateId = (): Uuidv7 => typesApi.generate.uuidv7Sync();
 const CadReticle = (): ReactNode => (
     <div className='absolute inset-0 pointer-events-none z-10'>
         {B.reticle.map((pos) => (
@@ -131,13 +160,6 @@ const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProp
         }),
     );
 
-type AttachmentThumbProps = {
-    readonly name: string;
-    readonly onRemove: () => void;
-    readonly scopeSeed: string;
-    readonly svg: string;
-};
-
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const previewRenderers = {
@@ -154,7 +176,6 @@ const previewRenderers = {
             </div>
         ),
 } as const satisfies Record<PreviewRenderState, (props: PreviewRenderProps) => ReactNode>;
-
 const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: HistoryPanelProps): ReactNode =>
     assets.length === 0 ? (
         <Empty icon={<Icon name='History' className='w-8 h-8 opacity-50' />} title='No History' />
@@ -213,7 +234,6 @@ const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: Hist
             </div>
         </div>
     );
-
 const LibraryContent = ({
     customAssets,
     savedAssets,
@@ -223,7 +243,6 @@ const LibraryContent = ({
     onRemoveSaved,
 }: LibraryPanelProps): ReactNode => {
     const hasContent = customAssets.length > 0 || savedAssets.length > 0;
-
     return (
         <div className='flex flex-col h-full'>
             {hasContent ? (
@@ -331,13 +350,6 @@ const LibraryContent = ({
         </div>
     );
 };
-
-type MessageCardProps = {
-    readonly content: string;
-    readonly role: MessageRole;
-    readonly timestamp: number;
-};
-
 const MessageCard = ({ content, role, timestamp }: MessageCardProps): ReactNode => (
     <div className='session-message' data-role={role}>
         <div className='session-message-icon' data-role={role}>
@@ -352,10 +364,9 @@ const MessageCard = ({ content, role, timestamp }: MessageCardProps): ReactNode 
         </div>
     </div>
 );
-
 const SessionContent = (): ReactNode => {
-    const { messages, isGenerating } = useStoreSlice(chatSlice);
-
+    const messages = useChatStore((s) => s.messages);
+    const isGenerating = useChatStore((s) => s.isGenerating);
     return messages.length === 0 && !isGenerating ? (
         <Empty icon={<Icon name='SquareTerminal' className='w-8 h-8 opacity-50' />} title='Session Log Empty' />
     ) : (
@@ -382,12 +393,9 @@ const SessionContent = (): ReactNode => {
         </ScrollArea>
     );
 };
-
 const InspectorContent = (): ReactNode => {
-    const historyActions = useStoreActions(historySlice);
-    const { currentSvg } = useStoreSlice(previewSlice);
-    const currentAsset = historyActions.getCurrentAsset();
-
+    const currentSvg = usePreviewStore((s) => s.currentSvg);
+    const currentAsset = useHistoryStore((s) => s.currentAsset);
     return currentSvg ? (
         <ScrollArea className='h-full'>
             <Stack gap className='divide-y divide-(--panel-border-dark)'>
@@ -432,7 +440,6 @@ const InspectorContent = (): ReactNode => {
         <Empty icon={<Icon name='SlidersHorizontal' className='w-8 h-8 opacity-50' />} title='No Selection' />
     );
 };
-
 const panelRenderers = {
     history: (props: PanelContentProps) => <HistoryContent {...props} />,
     inspector: () => <InspectorContent />,
@@ -443,72 +450,82 @@ const panelRenderers = {
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Sidebar = (): ReactNode => {
-    const { isSidebarOpen, activeTab, isUploadOpen } = useStoreSlice(uiSlice);
-    const { assets, currentId } = useStoreSlice(historySlice);
-    const { customAssets, savedAssets } = useStoreSlice(librarySlice);
-    const uiActions = useStoreActions(uiSlice);
-    const historyActions = useStoreActions(historySlice);
-    const libraryActions = useStoreActions(librarySlice);
-    const previewActions = useStoreActions(previewSlice);
-    const contextActions = useStoreActions(contextSlice);
-
+    const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
+    const activeTab = useUiStore((s) => s.activeTab);
+    const isUploadOpen = useUiStore((s) => s.isUploadOpen);
+    const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+    const setSidebarTab = useUiStore((s) => s.setSidebarTab);
+    const openUploadDialog = useUiStore((s) => s.openUploadDialog);
+    const closeUploadDialog = useUiStore((s) => s.closeUploadDialog);
+    const assets = useHistoryStore((s) => s.assets);
+    const currentId = useHistoryStore((s) => s.currentId);
+    const selectAsset = useHistoryStore((s) => s.selectAsset);
+    const clearAll = useHistoryStore((s) => s.clearAll);
+    const deleteAsset = useHistoryStore((s) => s.deleteAsset);
+    const customAssets = useLibraryStore((s) => s.customAssets);
+    const savedAssets = useLibraryStore((s) => s.savedAssets);
+    const addCustomAsset = useLibraryStore((s) => s.addCustomAsset);
+    const clearAssets = useLibraryStore((s) => s.clearAssets);
+    const removeAsset = useLibraryStore((s) => s.removeAsset);
+    const removeCustomAsset = useLibraryStore((s) => s.removeCustomAsset);
+    const isSaved = useLibraryStore((s) => s.isSaved);
+    const setSvg = usePreviewStore((s) => s.setSvg);
+    const setContext = useContextStore((s) => s.setContext);
+    const addAttachment = useContextStore((s) => s.addAttachment);
     const handleTabClick = useCallback(
         (tab: SidebarTab) => {
-            if (isSidebarOpen && activeTab === tab) {
-                uiActions.toggleSidebar();
-            } else {
-                uiActions.setSidebarTab(tab);
-                if (!isSidebarOpen) {
-                    uiActions.toggleSidebar();
-                }
-            }
+            const action = isSidebarOpen && activeTab === tab ? 'close' : 'open';
+            const tabHandlers = {
+                close: () => toggleSidebar(),
+                open: () => {
+                    setSidebarTab(tab);
+                    !isSidebarOpen && toggleSidebar();
+                },
+            } as const satisfies Record<'close' | 'open', () => void>;
+            tabHandlers[action]();
         },
-        [isSidebarOpen, activeTab, uiActions],
+        [isSidebarOpen, activeTab, toggleSidebar, setSidebarTab],
     );
-
     // Sync history selection with preview pane
     const handleSelectAsset = useCallback(
         (id: string) => {
-            historyActions.selectAsset(id);
+            selectAsset(id);
             const asset = assets.find((a) => a.id === id);
-            asset && contextActions.set(asset.context);
+            asset && setContext(asset.context);
             const variantIndex = asset?.selectedVariantIndex ?? 0;
             const svg = asset?.variants[variantIndex]?.svg;
-            svg && previewActions.setSvg(svg);
+            svg && setSvg(svg);
         },
-        [assets, historyActions, previewActions, contextActions],
+        [assets, selectAsset, setSvg, setContext],
     );
-
     const handleUpload = useCallback(
         (name: string, svg: string) => {
-            libraryActions.addCustomAsset(name, svg);
+            addCustomAsset(name, svg);
         },
-        [libraryActions],
+        [addCustomAsset],
     );
-
     const panelProps: PanelContentProps = {
         assets,
         currentId,
         customAssets,
-        onAddAttachment: contextActions.addAttachment,
+        onAddAttachment: addAttachment,
         onClear: () => {
-            libraryActions.clearAssets();
-            historyActions.clearAll();
+            clearAssets();
+            clearAll();
         },
         onDelete: (id) => {
-            historyActions.deleteAsset(id);
-            libraryActions.isSaved(id) && libraryActions.removeAsset(id);
+            deleteAsset(id);
+            isSaved(id) && removeAsset(id);
         },
-        onOpenUpload: uiActions.openUploadDialog,
-        onRemoveCustomAsset: libraryActions.removeCustomAsset,
-        onRemoveSaved: libraryActions.removeAsset,
+        onOpenUpload: openUploadDialog,
+        onRemoveCustomAsset: removeCustomAsset,
+        onRemoveSaved: removeAsset,
         onSelect: handleSelectAsset,
         savedAssets,
     };
-
     return (
         <>
-            <UploadDialog isOpen={isUploadOpen} onClose={uiActions.closeUploadDialog} onUpload={handleUpload} />
+            <UploadDialog isOpen={isUploadOpen} onClose={closeUploadDialog} onUpload={handleUpload} />
             <div className='sidebar'>
                 <div className='sidebar-rail'>
                     <IconButton
@@ -516,7 +533,7 @@ const Sidebar = (): ReactNode => {
                         className='rail-btn'
                         tooltip={isSidebarOpen ? 'Collapse' : 'Expand'}
                         tooltipSide='right'
-                        onPress={uiActions.toggleSidebar}
+                        onPress={toggleSidebar}
                         aria-label={isSidebarOpen ? 'Collapse' : 'Expand'}
                     >
                         <Icon name='PanelLeft' className='w-5 h-5' />
@@ -560,91 +577,134 @@ const Sidebar = (): ReactNode => {
         </>
     );
 };
-
-const typesApi = types();
-const generateId = (): Uuidv7 => typesApi.generateUuidv7Sync();
-
 const CommandBar = (): ReactNode => {
-    const { input } = useStoreSlice(chatSlice);
-    const { intent, output, colorMode, attachments } = useStoreSlice(contextSlice);
-    const { isSidebarOpen, submittedContext } = useStoreSlice(uiSlice);
-    const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
-    const chatActions = useStoreActions(chatSlice);
-    const contextActions = useStoreActions(contextSlice);
-    const previewActions = useStoreActions(previewSlice);
-    const historyActions = useStoreActions(historySlice);
-    const uiActions = useStoreActions(uiSlice);
-    const { mutate, state } = useMutation(generateIcon);
-    const isGenerating = state._tag === 'Loading';
+    const input = useChatStore((s) => s.input);
+    const setInput = useChatStore((s) => s.setInput);
+    const addMessage = useChatStore((s) => s.addMessage);
+    const setGenerating = useChatStore((s) => s.setGenerating);
+    const intent = useContextStore((s) => s.intent);
+    const output = useContextStore((s) => s.output);
+    const colorMode = useContextStore((s) => s.colorMode);
+    const attachments = useContextStore((s) => s.attachments);
+    const setIntent = useContextStore((s) => s.setIntent);
+    const setOutput = useContextStore((s) => s.setOutput);
+    const setColorMode = useContextStore((s) => s.setColorMode);
+    const removeAttachment = useContextStore((s) => s.removeAttachment);
+    const isSidebarOpen = useUiStore((s) => s.isSidebarOpen);
+    const submittedContext = useUiStore((s) => s.submittedContext);
+    const setSidebarTab = useUiStore((s) => s.setSidebarTab);
+    const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+    const setSubmittedContext = useUiStore((s) => s.setSubmittedContext);
+    const currentSvg = usePreviewStore((s) => s.currentSvg);
+    const setSvg = usePreviewStore((s) => s.setSvg);
+    const addAsset = useHistoryStore((s) => s.addAsset);
+    const submittedContextRef = useRef(submittedContext);
+    submittedContextRef.current = submittedContext;
+    const { mutate, state } = useMutation<GenerateResponse, GenerateInput, ApiError, never>(
+        (input) => pipe(generateIcon(input), Effect.flatMap(apiFactory.toEffectM<GenerateResponse>())),
+        {
+            onError: (error) => {
+                error.code !== 'CANCELLED' &&
+                    addMessage({
+                        content: `Error: ${error.message}`,
+                        id: generateId(),
+                        role: 'assistant',
+                        timestamp: Date.now(),
+                    });
+                setSubmittedContext(null);
+                abortControllerRef.current = null;
+            },
+            onSuccess: (response) => {
+                const ctx = submittedContextRef.current;
+                ctx === null ||
+                    (() => {
+                        const { variants } = response;
+                        const firstVariant = variants[0];
+                        firstVariant && setSvg(firstVariant.svg);
+                        addMessage({
+                            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v) => v.name).join(', ')}`,
+                            id: generateId(),
+                            role: 'assistant',
+                            timestamp: Date.now(),
+                        });
+                        addAsset({
+                            context: ctx.context,
+                            id: generateId(),
+                            intent: ctx.intent,
+                            prompt: ctx.prompt,
+                            selectedVariantIndex: 0 as Index,
+                            timestamp: Date.now(),
+                            variants: variants.map((v) => ({ id: generateId(), name: v.name, svg: v.svg })),
+                        });
+                        setSubmittedContext(null);
+                        abortControllerRef.current = null;
+                    })();
+            },
+        },
+    );
+    const isGenerating = asyncApi.isLoading(state);
     const variantCount = output === 'batch' ? STORE_TUNING.variantCount.batch : STORE_TUNING.variantCount.single;
     const abortControllerRef = useRef<AbortController | null>(null);
-
     const handleOpenLibrary = useCallback(() => {
-        uiActions.setSidebarTab('library');
-        !isSidebarOpen && uiActions.toggleSidebar();
-    }, [isSidebarOpen, uiActions]);
-
+        setSidebarTab('library');
+        !isSidebarOpen && toggleSidebar();
+    }, [isSidebarOpen, setSidebarTab, toggleSidebar]);
     useEffect(() => {
-        chatActions.setGenerating(isGenerating);
-    }, [isGenerating, chatActions]);
-
-    // Cleanup abort controller on unmount
+        setGenerating(isGenerating);
+    }, [isGenerating, setGenerating]);
     useEffect(
+        // Cleanup abort controller on unmount
         () => () => {
             abortControllerRef.current?.abort();
         },
         [],
     );
-
     const handleGenerate = useCallback(
-        (prompt: string): void => {
-            const trimmed = prompt.trim();
-            if (!trimmed) {
-                return;
-            }
-            // Validate refine intent has reference SVG
-            if (intent === 'refine' && !currentSvg) {
-                chatActions.addMessage({
-                    content: 'Cannot refine: No asset selected. Switch to Create mode or select an asset first.',
-                    id: generateId(),
-                    role: 'assistant',
-                    timestamp: Date.now(),
-                });
-                return;
-            }
-
-            // Abort any pending request before starting new one
-            abortControllerRef.current?.abort();
-            const controller = new AbortController();
-            abortControllerRef.current = controller;
-
-            // Capture context at submission time
-            uiActions.setSubmittedContext({
-                context: { attachments, colorMode, intent, output },
-                intent,
-                prompt: trimmed,
-            });
-
-            // Log user message to chat
-            chatActions.addMessage({
-                content: trimmed,
-                id: generateId(),
-                role: 'user',
-                timestamp: Date.now(),
-            });
-            mutate({
-                attachments: attachments.length > 0 ? attachments : undefined,
-                colorMode,
-                intent,
-                prompt: trimmed,
-                referenceSvg: intent === 'refine' ? (currentSvg ?? undefined) : undefined,
-                signal: controller.signal,
-                variantCount: variantCount as VariantCount,
-            });
-
-            // Clear input after submission (controlled mode requires explicit clear)
-            chatActions.setInput('');
-        },
+        (prompt: string): void =>
+            pipe(
+                Option.fromNullable(prompt.trim() || null),
+                Option.flatMap((trimmed) => {
+                    const isRefineWithoutSvg = intent === 'refine' && !currentSvg;
+                    isRefineWithoutSvg &&
+                        addMessage({
+                            content:
+                                'Cannot refine: No asset selected. Switch to Create mode or select an asset first.',
+                            id: generateId(),
+                            role: 'assistant',
+                            timestamp: Date.now(),
+                        });
+                    return isRefineWithoutSvg ? Option.none() : Option.some(trimmed);
+                }),
+                Option.match({
+                    onNone: () => undefined,
+                    onSome: (trimmed) => {
+                        abortControllerRef.current?.abort();
+                        const controller = new AbortController();
+                        abortControllerRef.current = controller;
+                        setSubmittedContext({
+                            context: { attachments, colorMode, intent, output },
+                            intent,
+                            prompt: trimmed,
+                        });
+                        addMessage({
+                            content: trimmed,
+                            id: generateId(),
+                            role: 'user',
+                            timestamp: Date.now(),
+                        });
+                        mutate({
+                            attachments: attachments.length > 0 ? attachments : undefined,
+                            colorMode,
+                            intent,
+                            prompt: trimmed,
+                            referenceSvg: intent === 'refine' ? (currentSvg ?? undefined) : undefined,
+                            signal: controller.signal,
+                            variantCount: variantCount as VariantCount,
+                        });
+                        setInput('');
+                    },
+                }),
+            ),
         [
             attachments,
             colorMode,
@@ -652,64 +712,12 @@ const CommandBar = (): ReactNode => {
             currentSvg,
             mutate,
             variantCount,
-            chatActions,
-            output, // Capture context at submission time
-            uiActions.setSubmittedContext,
+            addMessage,
+            setInput,
+            output,
+            setSubmittedContext,
         ],
     );
-
-    useEffect(() => {
-        // Only process Success states with ApiSuccess responses
-        if (state._tag !== 'Success') {
-            return;
-        }
-        const apiResponse = state.data;
-        if (apiResponse._tag !== 'ApiSuccess') {
-            // Handle cancelled requests silently
-            if (apiResponse.code === 'REQUEST_CANCELLED') {
-                return;
-            }
-            // Log API errors to chat
-            chatActions.addMessage({
-                content: `Error: ${apiResponse.message}`,
-                id: generateId(),
-                role: 'assistant',
-                timestamp: Date.now(),
-            });
-            uiActions.setSubmittedContext(null);
-            abortControllerRef.current = null;
-            return;
-        }
-
-        if (!submittedContext) {
-            return;
-        }
-
-        const { variants } = apiResponse.data;
-        const firstVariant = variants[0];
-        firstVariant && previewActions.setSvg(firstVariant.svg);
-
-        chatActions.addMessage({
-            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v) => v.name).join(', ')}`,
-            id: generateId(),
-            role: 'assistant',
-            timestamp: Date.now(),
-        });
-
-        historyActions.addAsset({
-            context: submittedContext.context,
-            id: generateId(),
-            intent: submittedContext.intent,
-            prompt: submittedContext.prompt,
-            selectedVariantIndex: 0 as Index,
-            timestamp: Date.now(),
-            variants: variants.map((v) => ({ id: generateId(), name: v.name, svg: v.svg })),
-        });
-
-        uiActions.setSubmittedContext(null);
-        abortControllerRef.current = null;
-    }, [state, previewActions, chatActions, historyActions, submittedContext, uiActions]);
-
     return (
         <div className='command-bar'>
             <div className='command-header'>
@@ -726,7 +734,7 @@ const CommandBar = (): ReactNode => {
                                 name={ref.name}
                                 scopeSeed={ref.id}
                                 svg={ref.svg}
-                                onRemove={() => contextActions.removeAttachment(ref.id)}
+                                onRemove={() => removeAttachment(ref.id)}
                             />
                         ))}
                     </div>
@@ -740,7 +748,7 @@ const CommandBar = (): ReactNode => {
                         loading={isGenerating}
                         onLeftIconClick={handleOpenLibrary}
                         onSubmit={handleGenerate}
-                        onValueChange={chatActions.setInput}
+                        onValueChange={setInput}
                         placeholder={
                             intent === 'create' ? 'Describe a geometric task...' : 'Refinement instructions...'
                         }
@@ -755,14 +763,14 @@ const CommandBar = (): ReactNode => {
                         label='Mode'
                         options={modeOptions}
                         value={intent}
-                        onChange={(key) => contextActions.setIntent(key as Intent)}
+                        onChange={(key) => setIntent(key as Intent)}
                     />
                     <div className='context-divider' />
                     <ContextSelector
                         label='Output'
                         options={outputOptions}
                         value={output}
-                        onChange={(key) => contextActions.setOutput(key as ContextState['output'])}
+                        onChange={(key) => setOutput(key as ContextState['output'])}
                     />
                 </div>
                 <div className='flex-1' />
@@ -770,31 +778,14 @@ const CommandBar = (): ReactNode => {
                     label='Output Style'
                     options={styleOptions}
                     value={colorMode}
-                    onChange={(key) => contextActions.setColorMode(key as ContextState['colorMode'])}
+                    onChange={(key) => setColorMode(key as ContextState['colorMode'])}
                 />
             </div>
         </div>
     );
 };
-
-type ViewportProps = {
-    readonly isLoading: boolean;
-    readonly sanitized: string | null;
-    readonly showGrid: boolean;
-    readonly showSafeArea: boolean;
-    readonly zoom: number;
-};
-
-type ViewportHUDProps = {
-    readonly currentId: string | null;
-    readonly currentSvg: string | null;
-    readonly filename: string;
-    readonly isSaved: boolean;
-    readonly onToggleSave: () => void;
-};
-
 const ViewportHUD = ({ currentId, currentSvg, filename, isSaved, onToggleSave }: ViewportHUDProps): ReactNode => {
-    const { copy } = useClipboard<string>();
+    const { copy } = useClipboard<string, never>();
     const { exportAs } = useExport();
     const handleCopy = useCallback(() => {
         currentSvg && copy(currentSvg);
@@ -802,7 +793,6 @@ const ViewportHUD = ({ currentId, currentSvg, filename, isSaved, onToggleSave }:
     const handleDownload = useCallback(() => {
         currentSvg && exportAs({ filename, format: 'svg', svg: currentSvg });
     }, [currentSvg, exportAs, filename]);
-
     return currentSvg && currentId ? (
         <div className='viewport-hud'>
             <div className='viewport-hud-inner'>
@@ -838,44 +828,43 @@ const ViewportHUD = ({ currentId, currentSvg, filename, isSaved, onToggleSave }:
         </div>
     ) : null;
 };
-
 const Viewport = ({ isLoading, sanitized, showGrid, showSafeArea, zoom }: ViewportProps): ReactNode => {
     const state = derivePreviewRenderState(isLoading, Boolean(sanitized));
-    const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
-    const { assets, currentId } = useStoreSlice(historySlice);
-    const { savedAssets } = useStoreSlice(librarySlice);
-    const historyActions = useStoreActions(historySlice);
-    const libraryActions = useStoreActions(librarySlice);
-    const previewActions = useStoreActions(previewSlice);
-
+    const currentSvg = usePreviewStore((s) => s.currentSvg);
+    const setSvg = usePreviewStore((s) => s.setSvg);
+    const assets = useHistoryStore((s) => s.assets);
+    const currentId = useHistoryStore((s) => s.currentId);
+    const setSelectedVariantIndex = useHistoryStore((s) => s.setSelectedVariantIndex);
+    const savedAssets = useLibraryStore((s) => s.savedAssets);
+    const addAssetToLibrary = useLibraryStore((s) => s.addAsset);
+    const removeAssetFromLibrary = useLibraryStore((s) => s.removeAsset);
     const isSaved = currentId ? savedAssets.some((asset) => asset.id === currentId) : false;
     const currentAsset = currentId ? assets.find((a) => a.id === currentId) : null;
     const variantIndex = currentAsset?.selectedVariantIndex ?? 0;
     const variantCount = currentAsset?.variants.length ?? 0;
-
     const handleToggleSave = useCallback(() => {
-        currentAsset && (isSaved ? libraryActions.removeAsset(currentAsset.id) : libraryActions.addAsset(currentAsset));
-    }, [currentAsset, isSaved, libraryActions]);
+        currentAsset && (isSaved ? removeAssetFromLibrary(currentAsset.id) : addAssetToLibrary(currentAsset));
+    }, [currentAsset, isSaved, removeAssetFromLibrary, addAssetToLibrary]);
     const handlePrevVariant = useCallback(() => {
-        if (!currentAsset || variantIndex <= 0) {
-            return;
-        }
-        const newIndex = variantIndex - 1;
-        historyActions.setSelectedVariantIndex(currentAsset.id, newIndex);
-        const svg = currentAsset.variants[newIndex]?.svg;
-        svg && previewActions.setSvg(svg);
-    }, [currentAsset, variantIndex, historyActions, previewActions]);
-
+        currentAsset &&
+            variantIndex > 0 &&
+            (() => {
+                const newIndex = variantIndex - 1;
+                setSelectedVariantIndex(currentAsset.id, newIndex);
+                const svg = currentAsset.variants[newIndex]?.svg;
+                svg && setSvg(svg);
+            })();
+    }, [currentAsset, variantIndex, setSelectedVariantIndex, setSvg]);
     const handleNextVariant = useCallback(() => {
-        if (!currentAsset || variantIndex >= variantCount - 1) {
-            return;
-        }
-        const newIndex = variantIndex + 1;
-        historyActions.setSelectedVariantIndex(currentAsset.id, newIndex);
-        const svg = currentAsset.variants[newIndex]?.svg;
-        svg && previewActions.setSvg(svg);
-    }, [currentAsset, variantIndex, variantCount, historyActions, previewActions]);
-
+        currentAsset &&
+            variantIndex < variantCount - 1 &&
+            (() => {
+                const newIndex = variantIndex + 1;
+                setSelectedVariantIndex(currentAsset.id, newIndex);
+                const svg = currentAsset.variants[newIndex]?.svg;
+                svg && setSvg(svg);
+            })();
+    }, [currentAsset, variantIndex, variantCount, setSelectedVariantIndex, setSvg]);
     return (
         <div className='relative w-full aspect-square group'>
             <ViewportHUD
@@ -906,17 +895,17 @@ const Viewport = ({ isLoading, sanitized, showGrid, showSafeArea, zoom }: Viewpo
         </div>
     );
 };
-
 const Stage = (): ReactNode => {
-    const isGenerating = useStoreSelector(chatSlice, (s) => s.isGenerating);
-    const currentId = useStoreSelector(historySlice, (s) => s.currentId);
-    const currentSvg = useStoreSelector(previewSlice, (s) => s.currentSvg);
-    const zoom = useStoreSelector(previewSlice, (s) => s.zoom);
-    const { showGrid, showSafeArea } = useStoreSlice(uiSlice);
-    const uiActions = useStoreActions(uiSlice);
+    const isGenerating = useChatStore((s) => s.isGenerating);
+    const currentId = useHistoryStore((s) => s.currentId);
+    const currentSvg = usePreviewStore((s) => s.currentSvg);
+    const zoom = usePreviewStore((s) => s.zoom);
+    const showGrid = useUiStore((s) => s.showGrid);
+    const showSafeArea = useUiStore((s) => s.showSafeArea);
+    const toggleGrid = useUiStore((s) => s.toggleGrid);
+    const toggleSafeArea = useUiStore((s) => s.toggleSafeArea);
     const scopeSeed = currentId ?? currentSvg ?? '';
     const sanitized = currentSvg ? sanitizeSvgScoped(currentSvg, scopeSeed) : null;
-
     return (
         <div className='stage'>
             <Box className='preview-box'>
@@ -934,7 +923,7 @@ const Stage = (): ReactNode => {
                     className='hud-btn'
                     tooltip='Toggle Grid'
                     tooltipSide='top'
-                    onPress={uiActions.toggleGrid}
+                    onPress={toggleGrid}
                     aria-label='Toggle Grid'
                     aria-pressed={showGrid}
                 >
@@ -945,7 +934,7 @@ const Stage = (): ReactNode => {
                     className='hud-btn'
                     tooltip='Toggle Bounds'
                     tooltipSide='top'
-                    onPress={uiActions.toggleSafeArea}
+                    onPress={toggleSafeArea}
                     aria-label='Toggle Bounds'
                     aria-pressed={showSafeArea}
                 >

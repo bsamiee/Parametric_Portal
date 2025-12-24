@@ -1,0 +1,33 @@
+{
+    "name": "@parametric-portal/test-utils",
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "check": "biome check .",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "sideEffects": ["./src/setup.ts", "./src/matchers/effect.ts"],
+    "exports": {
+        "./constants": { "types": "./src/constants.ts", "import": "./src/constants.ts" },
+        "./harness": { "types": "./src/harness.ts", "import": "./src/harness.ts" },
+        "./setup": { "types": "./src/setup.ts", "import": "./src/setup.ts" },
+        "./matchers/effect": { "types": "./src/matchers/effect.ts", "import": "./src/matchers/effect.ts" },
+        "./mocks/fetch": { "types": "./src/mocks/fetch.ts", "import": "./src/mocks/fetch.ts" },
+        "./mocks/msw": { "types": "./src/mocks/msw.ts", "import": "./src/mocks/msw.ts" }
+    },
+    "dependencies": {
+        "@effect/vitest": "catalog:",
+        "effect": "catalog:",
+        "fast-check": "catalog:",
+        "msw": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vitest": "catalog:"
+    },
+    "peerDependencies": {
+        "@effect/vitest": ">=0.27.0",
+        "effect": ">=3.0.0",
+        "vitest": ">=4.0.0"
+    }
+}

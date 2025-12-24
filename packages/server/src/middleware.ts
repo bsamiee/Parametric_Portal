@@ -11,17 +11,16 @@ import {
     HttpServerRequest,
     HttpServerResponse,
 } from '@effect/platform';
-import {
-    type ApiKeyResult,
-    Expiry,
-    type OAuthProvider,
-    type OAuthTokens,
-    type OAuthUserInfo,
-    type SessionResult,
-    type TokenHash,
+import type {
+    ApiKeyResult,
+    OAuthProvider,
+    OAuthTokens,
+    OAuthUserInfo,
+    SessionResult,
+    TokenHash,
 } from '@parametric-portal/types/database';
-import { Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 
+import { Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 import { hashString, validateTokenHash } from './crypto.ts';
 import {
     DatabaseConnectionError,
@@ -140,11 +139,6 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
     provides: SessionContext,
     security: { bearer: HttpApiSecurity.bearer },
 }) {}
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const validateNotExpired = <E>(expiresAt: Date | undefined, errorFactory: () => E): Effect.Effect<void, E> =>
-    Expiry.check(expiresAt).expired ? Effect.fail(errorFactory()) : Effect.succeed(undefined);
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -327,6 +321,5 @@ export {
     RequestIdContext,
     SessionAuth,
     SessionContext,
-    validateNotExpired,
 };
 export type { BasicCredentials, CorsConfig, RequestIdConfig, SecurityHeadersConfig };

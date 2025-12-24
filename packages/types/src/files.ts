@@ -1,10 +1,11 @@
 /**
- * File validation and MIME type handling.
- * Grounding: Content-type dispatch with size/format validation.
+ * Define file validation and MIME type handling with content dispatch.
+ * Content-type dispatch with size/format validation via Effect pipelines.
  */
-import { Effect, Option, pipe, Schema as S } from 'effect';
+import { Effect, Exit, Option, pipe, Schema as S } from 'effect';
+import { svg } from './svg.ts';
 
-import { isSvgValid } from './svg.ts';
+const svgApi = svg();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -50,9 +51,7 @@ const B = Object.freeze({
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const MimeCategorySchema = S.Literal('image', 'document', 'model', 'code', 'archive');
-
 const MimeTypeSchema = S.Literal(
-    // Images
     'image/svg+xml',
     'image/png',
     'image/jpeg',
@@ -62,7 +61,6 @@ const MimeTypeSchema = S.Literal(
     'image/tiff',
     'image/bmp',
     'image/x-icon',
-    // Documents
     'application/json',
     'application/pdf',
     'text/plain',
@@ -70,31 +68,45 @@ const MimeTypeSchema = S.Literal(
     'text/markdown',
     'text/html',
     'text/xml',
-    // 3D Models
     'model/gltf+json',
     'model/gltf-binary',
-    'application/octet-stream', // .glb, .bin, .wasm
-    // Code
+    'application/octet-stream',
     'text/javascript',
     'text/typescript',
     'text/css',
-    // Archives
     'application/zip',
     'application/gzip',
 );
-
 const FileMetadataSchema = S.Struct({
     lastModified: S.Number,
     mimeType: MimeTypeSchema,
     name: S.NonEmptyTrimmedString,
     size: pipe(S.Number, S.nonNegative()),
 });
-
 const schemas = Object.freeze({
     fileMetadata: FileMetadataSchema,
     mimeCategory: MimeCategorySchema,
     mimeType: MimeTypeSchema,
 } as const);
+
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const mkFileError = (code: string, message: string): FileError => ({
+    _tag: 'FileError',
+    code,
+    message,
+});
+const extractMetadata = (file: File): Effect.Effect<FileMetadata, FileError> =>
+    pipe(
+        S.decodeUnknown(FileMetadataSchema)({
+            lastModified: file.lastModified,
+            mimeType: file.type,
+            name: file.name,
+            size: file.size,
+        }),
+        Effect.mapError((e) => mkFileError(B.errors.invalidType.code, e.message)),
+    );
+const getCategory = (mimeType: MimeType): MimeCategory => categoryByMime[mimeType];
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -123,18 +135,16 @@ const mimesByCategory: Record<MimeCategory, ReadonlyArray<MimeType>> = {
     ],
     model: ['model/gltf+json', 'model/gltf-binary', 'application/octet-stream'],
 } as const;
-
 const categoryByMime: Record<MimeType, MimeCategory> = Object.fromEntries(
     (Object.entries(mimesByCategory) as ReadonlyArray<[MimeCategory, ReadonlyArray<MimeType>]>).flatMap(
         ([cat, mimes]) => mimes.map((m) => [m, cat]),
     ),
 ) as Record<MimeType, MimeCategory>;
-
-const safeJsonParse = (str: string): unknown | null => {
-    const exit = Effect.runSyncExit(Effect.try(() => JSON.parse(str) as unknown));
-    return exit._tag === 'Success' ? exit.value : null;
-};
-
+const safeJsonParse = (str: string): unknown =>
+    Exit.match(Effect.runSyncExit(Effect.try(() => JSON.parse(str) as unknown)), {
+        onFailure: () => null,
+        onSuccess: (v) => v,
+    });
 const contentValidators: Record<MimeType, ContentValidator> = {
     'application/gzip': () => true,
     'application/json': (c) => safeJsonParse(c) !== null,
@@ -146,7 +156,7 @@ const contentValidators: Record<MimeType, ContentValidator> = {
     'image/gif': () => true,
     'image/jpeg': () => true,
     'image/png': () => true,
-    'image/svg+xml': isSvgValid,
+    'image/svg+xml': svgApi.validate.isSvgValid,
     'image/tiff': () => true,
     'image/webp': () => true,
     'image/x-icon': () => true,
@@ -164,7 +174,6 @@ const contentValidators: Record<MimeType, ContentValidator> = {
     'text/typescript': () => true,
     'text/xml': (c) => c.includes('<?xml') || c.includes('<'),
 } as const;
-
 const validationChecks = {
     empty: (file: File): Option.Option<FileError> =>
         file.size === 0 ? Option.some(mkFileError(B.errors.empty.code, B.errors.empty.message)) : Option.none(),
@@ -177,23 +186,6 @@ const validationChecks = {
             ? Option.some(mkFileError(B.errors.tooLarge.code, `${B.errors.tooLarge.message}: ${maxSize} bytes`))
             : Option.none(),
 } as const;
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const mkFileError = (code: string, message: string): FileError => ({
-    _tag: 'FileError',
-    code,
-    message,
-});
-
-const extractMetadata = (file: File): FileMetadata => ({
-    lastModified: file.lastModified,
-    mimeType: file.type as MimeType,
-    name: file.name,
-    size: file.size,
-});
-
-const getCategory = (mimeType: MimeType): MimeCategory => categoryByMime[mimeType];
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -227,9 +219,8 @@ const validateFile = (file: File, maxSize: number = B.limits.maxSizeBytes): Effe
                 }),
             ),
         ),
-        Effect.map(extractMetadata),
+        Effect.flatMap(extractMetadata),
     );
-
 const validateContent = (mimeType: MimeType, content: string): Effect.Effect<string, FileError> =>
     contentValidators[mimeType](content)
         ? Effect.succeed(content)
@@ -254,5 +245,5 @@ const files = (config: FilesConfig = {}): FilesApi => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as FILES_TUNING, files, getCategory, mimesByCategory, mkFileError, validateContent, validateFile };
+export { B as FILES_TUNING, files };
 export type { FileError, FileMetadata, FilesApi, FilesConfig, MimeCategory, MimeType };

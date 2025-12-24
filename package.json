@@ -40,6 +40,7 @@
         "@types/react": "catalog:",
         "@types/react-dom": "catalog:",
         "@vitejs/plugin-react": "catalog:",
+        "@vitest/browser-playwright": "catalog:",
         "@vitest/coverage-v8": "catalog:",
         "@vitest/ui": "catalog:",
         "babel-plugin-react-compiler": "catalog:",
@@ -84,7 +85,7 @@
         "node": "25.2.1"
     },
     "name": "parametric-portal",
-    "packageManager": "pnpm@10.26.0",
+    "packageManager": "pnpm@10.26.1",
     "pnpm": {
         "overrides": {
             "jiti": "2.6.1",
@@ -93,32 +94,25 @@
         },
         "peerDependencyRules": {
             "allowedVersions": {
+                "puppeteer": "24.34.0",
                 "typescript": "6.0.0-dev.20251125",
-                "vitest": "4.0.16",
-                "puppeteer": "24.34.0"
+                "vitest": "4.0.16"
             }
-        },
-        "onlyBuiltDependencies": [
-            "core-js",
-            "esbuild",
-            "lefthook",
-            "msgpackr-extract",
-            "nx",
-            "puppeteer",
-            "sharp"
-        ]
+        }
     },
     "private": true,
     "scripts": {
         "affected": "nx affected -t build,test,typecheck,check",
         "build:all": "nx run-many -t build",
-        "build:libs": "nx run-many -t build --projects=@parametric-portal/types,@parametric-portal/theme,@parametric-portal/hooks,@parametric-portal/components,@parametric-portal/devtools",
+        "build:libs": "nx run-many -t build --projects=@parametric-portal/types,@parametric-portal/theme,@parametric-portal/runtime,@parametric-portal/components,@parametric-portal/devtools",
         "check:all": "nx run-many -t check",
         "clean": "rm -rf .nx/cache node_modules/.cache packages/*/dist apps/*/dist packages/*/.vite-inspect apps/*/.vite-inspect",
         "dev:icons": "nx dev @parametric-portal/parametric-icons",
         "fix:all": "nx run-many -t fix",
         "graph": "nx graph",
         "prepare": "lefthook install",
+        "quality": "pnpm exec nx run-many -t typecheck,check --parallel=4",
+        "quality:affected": "pnpm exec nx affected -t typecheck,check --base=origin/main",
         "reset": "pnpm clean && pnpm install && pnpm build:libs",
         "sonar": "npx @sonar/scan",
         "test:all": "nx run-many -t test",

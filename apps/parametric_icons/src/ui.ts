@@ -70,34 +70,27 @@ const utility = createUtility({ scale: B.scale });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-const { Button, Input, Textarea } = controls;
+const { Button, Input } = controls;
 const { Button: IconButton } = iconControls;
-const { Avatar, Card, ListItem, Thumb } = data;
-const { Grid, Stack, Flex, Box, Divider } = elements;
-const { Empty, Spinner, Skeleton, Alert, Progress, Toast } = feedback;
+const { Avatar, ListItem, Thumb } = data;
+const { Stack, Flex, Box } = elements;
+const { Empty, Spinner } = feedback;
 const { Icon } = icons;
 const { Bar: InputBar } = inputBars;
-const { Breadcrumb, Carousel, Stepper, Tabs } = navigation;
-const { Dialog, Drawer, Modal } = overlays;
-const { ContextSelector, Menu, Select } = selection;
+const { Stepper } = navigation;
+const { Dialog, Modal } = overlays;
+const { ContextSelector, Select } = selection;
 const { Trigger: UploadTrigger, Zone: UploadZone } = upload;
 const { GridOverlay, SafeAreaOverlay, ScrollArea, SvgPreview } = utility;
 
 export {
-    Alert,
     Avatar,
     Box,
-    Breadcrumb,
     Button,
-    Card,
-    Carousel,
     ContextSelector,
     Dialog,
-    Divider,
-    Drawer,
     Empty,
     Flex,
-    Grid,
     GridOverlay,
     Icon,
     IconButton,
@@ -105,21 +98,15 @@ export {
     Input,
     InputBar,
     ListItem,
-    Menu,
     Modal,
-    Progress,
     SafeAreaOverlay,
     ScrollArea,
     Select,
-    Skeleton,
     Spinner,
     Stack,
     Stepper,
     SvgPreview,
-    Tabs,
-    Textarea,
     Thumb,
-    Toast,
     UploadTrigger,
     UploadZone,
 };

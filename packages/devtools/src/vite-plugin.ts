@@ -8,7 +8,6 @@ import type { Plugin } from 'vite';
 // --- [TYPES] -----------------------------------------------------------------
 
 type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
-
 type DevtoolsPluginConfig = {
     readonly app?: string | undefined;
 };
@@ -29,7 +28,6 @@ const B = Object.freeze({
 
 const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
     const app = config.app ?? B.defaults.app;
-
     const virtualModule: Plugin = {
         apply: 'serve',
         applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
@@ -43,7 +41,6 @@ const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
             return id === B.virtualModule.id ? B.virtualModule.resolvedId : undefined;
         },
     };
-
     const autoImport = AutoImport({
         dts: false,
         imports: [
@@ -52,7 +49,6 @@ const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
             },
         ],
     });
-
     const autoImportPlugins = (Array.isArray(autoImport) ? autoImport : [autoImport]) as unknown as Plugin[];
     const clientAutoImportPlugins = autoImportPlugins.map((plugin) => ({
         ...plugin,

@@ -7,7 +7,6 @@
 
 /* Scan component library packages for Tailwind class detection */
 @source '../../../packages/components/src';
-@source '../../../packages/hooks/src';
 @source '../../../packages/theme/src';
 
 /* --- [KEYFRAMES] ----------------------------------------------------------- */
@@ -87,7 +86,6 @@
     --panel-bg-medium: oklch(18% 0.04 275);
     --panel-bg-light: oklch(22% 0.04 275);
     --panel-bg-lighter: oklch(26% 0.04 275);
-    --panel-bg-lightest: oklch(28% 0.04 275);
 
     /* Borders — subtle separation */
     --panel-border-dark: oklch(20% 0.03 275);

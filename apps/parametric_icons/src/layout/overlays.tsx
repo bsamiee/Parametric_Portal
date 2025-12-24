@@ -1,16 +1,19 @@
 /**
  * Overlay system: export and upload dialog components with hooks.
  */
-import type { ExportFormat } from '@parametric-portal/hooks/browser';
-import { readFileAsText } from '@parametric-portal/hooks/file';
+import { useMutation } from '@parametric-portal/runtime/hooks/async';
+import { type ExportFormat, useExport } from '@parametric-portal/runtime/hooks/browser';
+import { FileOps } from '@parametric-portal/runtime/hooks/file';
 import { files } from '@parametric-portal/types/files';
-import { sanitizeSvg } from '@parametric-portal/types/svg';
-import { Effect, pipe } from 'effect';
+import { svg } from '@parametric-portal/types/svg';
+import { Effect } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
-import { useExport, useRuntime, useStoreActions, useStoreSlice } from '../core.ts';
-import { historySlice, previewSlice, type UploadState, uiSlice } from '../stores.ts';
+import { type UploadState, useHistoryStore, usePreviewStore, useUiStore } from '../stores.ts';
 import { Button, Dialog, Icon, Spinner, Stack, SvgPreview, UploadTrigger, UploadZone } from '../ui.ts';
+
+const svgApi = svg();
+const filesApi = files();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -22,13 +25,11 @@ type ExportDialogProps = {
     readonly open: () => void;
     readonly setFormat: (f: ExportFormat) => void;
 };
-
 type UploadDialogProps = {
     readonly isOpen: boolean;
     readonly onClose: () => void;
     readonly onUpload: (name: string, svg: string) => void;
 };
-
 type StateRendererProps = {
     readonly errorMessage: string | null;
     readonly fileName: string;
@@ -55,8 +56,6 @@ const B = Object.freeze({
         title: 'Upload SVG',
     },
 } as const);
-
-const filesApi = files();
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -92,7 +91,7 @@ const uploadStateRenderers = {
     preview: ({ fileName, previewSvg, reset }: StateRendererProps): ReactNode => (
         <Stack gap>
             <div className='w-full aspect-square max-h-64 bg-(--panel-bg-light) rounded-lg overflow-hidden border border-(--panel-border-dark)'>
-                {previewSvg && <SvgPreview svg={previewSvg} sanitize={sanitizeSvg} className='w-full h-full' />}
+                {previewSvg && <SvgPreview svg={previewSvg} sanitize={svgApi.sanitizeSvg} className='w-full h-full' />}
             </div>
             <Stack direction='row' justify='between' align='center'>
                 <span className='text-sm opacity-70'>{fileName}.svg</span>
@@ -114,16 +113,18 @@ const uploadStateRenderers = {
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const useExportDialog = (): ExportDialogProps => {
-    const { isExportOpen: isOpen, exportFormat: format } = useStoreSlice(uiSlice);
-    const uiActions = useStoreActions(uiSlice);
-    const { currentSvg } = useStoreSlice(previewSlice);
-    const historyActions = useStoreActions(historySlice);
+    const isOpen = useUiStore((s) => s.isExportOpen);
+    const format = useUiStore((s) => s.exportFormat);
+    const openExportDialog = useUiStore((s) => s.openExportDialog);
+    const closeExportDialog = useUiStore((s) => s.closeExportDialog);
+    const setExportFormat = useUiStore((s) => s.setExportFormat);
+    const currentSvg = usePreviewStore((s) => s.currentSvg);
+    const currentAsset = useHistoryStore((s) => s.currentAsset);
     const { exportAs } = useExport();
-    const open = () => uiActions.openExportDialog();
-    const close = () => uiActions.closeExportDialog();
-    const setFormat = (f: ExportFormat) => uiActions.setExportFormat(f);
+    const open = openExportDialog;
+    const close = closeExportDialog;
+    const setFormat = setExportFormat;
     const handleExport = () => {
-        const currentAsset = historyActions.getCurrentAsset();
         const variants = currentAsset?.variants ?? [];
         const variantCount = variants.length;
         const variantIndex = currentAsset?.selectedVariantIndex ?? 0;
@@ -138,10 +139,8 @@ const useExportDialog = (): ExportDialogProps => {
         });
         close();
     };
-
     return { close, format, handleExport, isOpen, open, setFormat };
 };
-
 const ExportDialog = ({
     close,
     format,
@@ -166,51 +165,48 @@ const ExportDialog = ({
         </Stack>
     </Dialog>
 );
-
 const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNode => {
-    const runtime = useRuntime();
-    const {
-        uploadState,
-        uploadFileName: fileName,
-        uploadPreviewSvg: previewSvg,
-        uploadErrorMessage: errorMessage,
-    } = useStoreSlice(uiSlice);
-    const uiActions = useStoreActions(uiSlice);
-    const reset = useCallback(() => uiActions.resetUploadDialog(), [uiActions]);
+    const uploadState = useUiStore((s) => s.uploadState);
+    const fileName = useUiStore((s) => s.uploadFileName);
+    const previewSvg = useUiStore((s) => s.uploadPreviewSvg);
+    const errorMessage = useUiStore((s) => s.uploadErrorMessage);
+    const setUploadState = useUiStore((s) => s.setUploadState);
+    const setUploadFile = useUiStore((s) => s.setUploadFile);
+    const resetUploadDialog = useUiStore((s) => s.resetUploadDialog);
+    const reset = useCallback(() => resetUploadDialog(), [resetUploadDialog]);
     const handleClose = useCallback(() => {
         reset();
         onClose();
     }, [reset, onClose]);
+    const validateMutation = useMutation<string, File, { message: string }, never>(
+        (file) =>
+            Effect.gen(function* () {
+                const content = yield* FileOps.text(file);
+                const validContent = yield* filesApi.validateContent('image/svg+xml', content);
+                return svgApi.sanitizeSvg(validContent);
+            }),
+        {
+            onError: (err, file) => {
+                const name = file.name.replace(/\.svg$/i, '');
+                setUploadFile(name, null, err.message);
+                setUploadState('error');
+            },
+            onSuccess: (svg, file) => {
+                const name = file.name.replace(/\.svg$/i, '');
+                setUploadFile(name, svg, null);
+                setUploadState('preview');
+            },
+        },
+    );
     const processFile = useCallback(
         (file: File) => {
             const name = file.name.replace(/\.svg$/i, '');
-            uiActions.setUploadState('validating');
-            uiActions.setUploadFile(name, null, null);
-            runtime.runFork(
-                pipe(
-                    Effect.gen(function* () {
-                        const content = yield* readFileAsText(file);
-                        const validContent = yield* filesApi.validateContent('image/svg+xml', content);
-                        return sanitizeSvg(validContent);
-                    }),
-                    Effect.tap((svg) =>
-                        Effect.sync(() => {
-                            uiActions.setUploadFile(name, svg, null);
-                            uiActions.setUploadState('preview');
-                        }),
-                    ),
-                    Effect.catchAll((err: { message: string }) =>
-                        Effect.sync(() => {
-                            uiActions.setUploadFile(name, null, err.message);
-                            uiActions.setUploadState('error');
-                        }),
-                    ),
-                ),
-            );
+            setUploadState('validating');
+            setUploadFile(name, null, null);
+            validateMutation.mutate(file);
         },
-        [runtime, uiActions],
+        [setUploadState, setUploadFile, validateMutation],
     );
-
     const handleFiles = useCallback(
         (fileList: FileList | null) => {
             const file = fileList?.[0];
@@ -218,12 +214,10 @@ const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNo
         },
         [processFile],
     );
-
     const handleConfirm = useCallback(() => {
         previewSvg && onUpload(fileName || 'Untitled', previewSvg);
         handleClose();
     }, [previewSvg, fileName, onUpload, handleClose]);
-
     return (
         <Dialog
             isOpen={isOpen}
@@ -240,5 +234,4 @@ const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNo
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as OVERLAY_CONFIG, ExportDialog, UploadDialog, useExportDialog };
-export type { ExportDialogProps, UploadDialogProps };
+export { ExportDialog, UploadDialog, useExportDialog };

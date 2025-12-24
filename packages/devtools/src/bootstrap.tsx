@@ -10,7 +10,6 @@ import { toError } from './types.ts';
 // --- [TYPES] -----------------------------------------------------------------
 
 type ModuleLoader<T> = () => Promise<T>;
-
 type BootstrapConfig<T extends { App: ComponentType }> = {
     readonly appModule: ModuleLoader<T>;
     readonly cssModule?: ModuleLoader<unknown>;
@@ -20,18 +19,15 @@ type BootstrapConfig<T extends { App: ComponentType }> = {
     readonly rootId?: string;
     readonly verifyDelayMs?: number;
 };
-
 type MainConfig<T extends { App: ComponentType }> = BootstrapConfig<T> & {
     readonly appName: string;
     readonly appVersion?: string;
     readonly onFatal: (error: Error) => void;
     readonly startTime: number;
 };
-
 type BootstrapResult = {
     readonly bootstrap: () => Effect.Effect<void, Error>;
 };
-
 type MainResult = {
     readonly init: () => void;
     readonly main: Effect.Effect<void, never>;
@@ -62,7 +58,6 @@ const loadModule = <T,>(name: string, loader: ModuleLoader<T>): Effect.Effect<T,
         Effect.withLogSpan(name),
         Effect.annotateLogs({ module: name, phase: 'load' }),
     );
-
 const loadCss = (loader: ModuleLoader<unknown>): Effect.Effect<void, Error> =>
     pipe(
         Effect.logDebug('Importing stylesheet'),
@@ -78,7 +73,6 @@ const loadCss = (loader: ModuleLoader<unknown>): Effect.Effect<void, Error> =>
         Effect.annotateLogs({ phase: 'assets' }),
         Effect.asVoid,
     );
-
 const verifyRender = (root: HTMLElement, delayMs: number): Effect.Effect<void> =>
     pipe(
         Effect.sleep(`${delayMs} millis`),
@@ -97,18 +91,15 @@ const verifyRender = (root: HTMLElement, delayMs: number): Effect.Effect<void> =
 const createBootstrap = <T extends { App: ComponentType }>(config: BootstrapConfig<T>): BootstrapResult => {
     const rootId = config.rootId ?? B.defaults.rootId;
     const verifyDelayMs = config.verifyDelayMs ?? B.defaults.verifyDelayMs;
-
     const bootstrap = (): Effect.Effect<void, Error> =>
         Effect.gen(function* () {
             yield* Effect.logInfo('Bootstrap sequence starting');
             yield* Effect.logDebug('Environment details', { isDev: config.isDev });
-
             const root = yield* pipe(
                 Effect.fromNullable(document.getElementById(rootId)),
                 Effect.mapError(() => new Error(`Root element #${rootId} not found in DOM`)),
                 Effect.tap(() => Effect.logDebug('Root element located', { id: rootId })),
             );
-
             config.cssModule &&
                 (yield* pipe(
                     loadCss(config.cssModule),
@@ -116,10 +107,8 @@ const createBootstrap = <T extends { App: ComponentType }>(config: BootstrapConf
                         Effect.logWarning('CSS load failed, continuing without styles', { error }).pipe(Effect.asVoid),
                     ),
                 ));
-
             yield* Effect.logInfo('Loading application module');
             const { App } = yield* loadModule('app', config.appModule);
-
             yield* Effect.logInfo('Creating React root');
             const reactRoot = createRoot(
                 root,
@@ -128,14 +117,12 @@ const createBootstrap = <T extends { App: ComponentType }>(config: BootstrapConf
                     onError: config.onError,
                 }),
             );
-
             yield* Effect.logInfo('Rendering application');
             reactRoot.render(
                 <StrictMode>
                     <App />
                 </StrictMode>,
             );
-
             yield* Effect.logInfo('Application rendered successfully');
             config.isDev && (yield* verifyRender(root, verifyDelayMs));
         }).pipe(
@@ -143,13 +130,10 @@ const createBootstrap = <T extends { App: ComponentType }>(config: BootstrapConf
             Effect.annotateLogs({ component: 'main' }),
             Effect.provide(config.loggerLayer),
         );
-
     return { bootstrap };
 };
-
 const createMain = <T extends { App: ComponentType }>(config: MainConfig<T>): MainResult => {
     const { bootstrap } = createBootstrap(config);
-
     const main: Effect.Effect<void, never> = pipe(
         Effect.logInfo('Application initialization starting'),
         Effect.tap(() => Effect.logDebug(`Document readyState: ${document.readyState}`)),
@@ -165,14 +149,11 @@ const createMain = <T extends { App: ComponentType }>(config: MainConfig<T>): Ma
         Effect.annotateLogs({ app: config.appName, startTime: config.startTime, version: config.appVersion }),
         Effect.provide(config.loggerLayer),
     );
-
     const init = (): void => {
         Effect.runFork(main);
     };
-
     return { init, main };
 };
-
 const initWhenReady = (init: () => void, loggerLayer: Layer.Layer<never, never, never>): void => {
     document.readyState === 'loading'
         ? document.addEventListener('DOMContentLoaded', () => {

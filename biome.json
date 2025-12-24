@@ -20,16 +20,16 @@
             },
             "style": {
                 "noDefaultExport": "error",
-                "noParameterAssign": "error",
-                "useBlockStatements": "error",
+                "noParameterAssign": { "level": "error", "options": { "propertyAssignment": "deny" } },
+                "useBlockStatements": "off",
                 "useConst": "error",
                 "useTemplate": "error",
                 "useImportType": "error",
                 "noNegationElse": "error",
                 "noUselessElse": "error",
-                "useShorthandAssign": "off",
+                "useShorthandAssign": "error",
                 "useConsistentBuiltinInstantiation": "error",
-                "useForOf": "error",
+                "useForOf": "off",
                 "useNamingConvention": {
                     "level": "error",
                     "options": {
@@ -59,9 +59,10 @@
                 }
             },
             "complexity": {
+                "noCommaOperator": "error",
                 "noBannedTypes": "error",
                 "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 25 } },
-                "noForEach": "error",
+                "noForEach": "off",
                 "noStaticOnlyClass": "error",
                 "noUselessStringRaw": "off",
                 "useArrowFunction": "error",

@@ -1,6 +1,6 @@
 /**
- * Async state machine types.
- * Grounding: Idle → Loading → Success/Failure lifecycle.
+ * Define async state machine types with lifecycle transitions.
+ * Idle → Loading → Success/Failure lifecycle with Match-based dispatch.
  */
 import { Match, Schema as S } from 'effect';
 
@@ -17,6 +17,21 @@ type AsyncStateFold<A, E, R> = {
     readonly Idle: () => R;
     readonly Loading: (startedAt: number) => R;
     readonly Success: (data: A, timestamp: number) => R;
+};
+type AsyncApi = {
+    readonly age: typeof age;
+    readonly elapsed: typeof elapsed;
+    readonly failure: <A, E>(error: E) => AsyncState<A, E>;
+    readonly fold: typeof fold;
+    readonly idle: <A, E = Error>() => AsyncState<A, E>;
+    readonly isFailure: typeof isFailure;
+    readonly isIdle: typeof isIdle;
+    readonly isLoading: typeof isLoading;
+    readonly isSuccess: typeof isSuccess;
+    readonly loading: <A, E = Error>() => AsyncState<A, E>;
+    readonly map: <A, E, R>(state: AsyncState<A, E>, f: (a: A) => R) => AsyncState<R, E>;
+    readonly schema: typeof AsyncStateSchema;
+    readonly success: <A, E = Error>(data: A) => AsyncState<A, E>;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -63,6 +78,14 @@ const age = <A, E>(state: AsyncState<A, E>, now: number = Date.now()): number =>
         Match.tags({ [B.tags.success]: (s) => now - s.timestamp, [B.tags.failure]: (s) => now - s.timestamp }),
         Match.orElse(() => 0),
     );
+const isIdle = <A, E>(state: AsyncState<A, E>): state is Extract<AsyncState<A, E>, { _tag: 'Idle' }> =>
+    state._tag === B.tags.idle;
+const isLoading = <A, E>(state: AsyncState<A, E>): state is Extract<AsyncState<A, E>, { _tag: 'Loading' }> =>
+    state._tag === B.tags.loading;
+const isSuccess = <A, E>(state: AsyncState<A, E>): state is Extract<AsyncState<A, E>, { _tag: 'Success' }> =>
+    state._tag === B.tags.success;
+const isFailure = <A, E>(state: AsyncState<A, E>): state is Extract<AsyncState<A, E>, { _tag: 'Failure' }> =>
+    state._tag === B.tags.failure;
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -74,7 +97,6 @@ const fold = <A, E, R>(state: AsyncState<A, E>, handlers: AsyncStateFold<A, E, R
         Match.tag(B.tags.failure, (s) => handlers.Failure(s.error, s.timestamp)),
         Match.exhaustive,
     ) as R;
-
 const map = <A, E, R>(state: AsyncState<A, E>, f: (a: A) => R, ts: () => number = B.timestamp): AsyncState<R, E> =>
     Match.value(state).pipe(
         Match.tag(B.tags.success, (s) => mkSuccess<R, E>(f(s.data), ts)),
@@ -83,7 +105,7 @@ const map = <A, E, R>(state: AsyncState<A, E>, f: (a: A) => R, ts: () => number 
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createAsync = (config: AsyncConfig = {}) => {
+const async = (config: AsyncConfig = {}): AsyncApi => {
     const ts = config.timestampProvider ?? B.timestamp;
     return Object.freeze({
         age,
@@ -91,6 +113,10 @@ const createAsync = (config: AsyncConfig = {}) => {
         failure: <A, E>(error: E) => mkFailure<A, E>(error, ts),
         fold,
         idle: <A, E = Error>() => mkIdle<A, E>(),
+        isFailure,
+        isIdle,
+        isLoading,
+        isSuccess,
         loading: <A, E = Error>() => mkLoading<A, E>(ts),
         map: <A, E, R>(state: AsyncState<A, E>, f: (a: A) => R) => map(state, f, ts),
         schema: AsyncStateSchema,
@@ -100,17 +126,5 @@ const createAsync = (config: AsyncConfig = {}) => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    age,
-    AsyncStateSchema,
-    B as ASYNC_TUNING,
-    createAsync,
-    elapsed,
-    fold,
-    map,
-    mkFailure,
-    mkIdle,
-    mkLoading,
-    mkSuccess,
-};
-export type { AsyncConfig, AsyncState, AsyncStateFold };
+export { async, B as ASYNC_TUNING };
+export type { AsyncApi, AsyncConfig, AsyncState, AsyncStateFold };

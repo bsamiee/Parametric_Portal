@@ -20,10 +20,8 @@ const B = Object.freeze({
 const trace = (msg: string, ctx?: TraceContext): void => {
     import.meta.env.DEV ? Effect.runSync(Effect.logDebug(msg).pipe(Effect.annotateLogs(ctx ?? {}))) : B.noop();
 };
-
 const span = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     import.meta.env.DEV ? Effect.withSpan(name)(effect) : B.noopEffect(effect);
-
 const measure =
     (label: string) =>
     <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>

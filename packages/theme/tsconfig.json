@@ -1,11 +1,12 @@
 {
     "compilerOptions": {
         "outDir": "dist",
-        "rootDir": "src",
-        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/theme.tsbuildinfo"
+        "rootDir": ".",
+        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/theme.tsbuildinfo",
+        "types": ["vitest/globals"]
     },
     "exclude": ["dist", "node_modules"],
     "extends": "../../tsconfig.base.json",
-    "include": ["src/**/*"],
+    "include": ["src/**/*", "tests/**/*"],
     "references": []
 }

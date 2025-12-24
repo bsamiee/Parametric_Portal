@@ -21,6 +21,7 @@ import type { Inputs, TooltipSide, TuningFor } from './schema.ts';
 import {
     B,
     computeOffsetPx,
+    createBuilderContext,
     merged,
     pick,
     renderTooltipPortal,
@@ -78,15 +79,10 @@ type ControlsApi = Readonly<{
 
 const { base, h, px, py, fs, r, g, wFull, wAuto } = B.ctrl.var;
 const baseCls = (fw?: boolean): string => utilities.cls(base, h, px, py, fs, r, g, fw ? wFull : wAuto);
-
 const createButtonControl = (input: ControlInput<'button'>) => {
-    const behavior = resolve('behavior', input.behavior);
-    const scale = resolve('scale', input.scale);
-    const computed = utilities.computeScale(scale);
-    const vars = utilities.cssVars(computed, 'ctrl');
-    const base = utilities.cls(baseCls(input.fullWidth), stateCls.ctrl(behavior), input.className);
-    const tooltipOffsetPx = computeOffsetPx(scale, B.algo.tooltipOffMul);
-
+    const ctx = createBuilderContext('ctrl', ['behavior', 'scale'], input);
+    const base = utilities.cls(baseCls(input.fullWidth), stateCls.ctrl(ctx.behavior), input.className);
+    const tooltipOffsetPx = computeOffsetPx(ctx.scale, B.algo.tooltipOffMul);
     const Component = forwardRef((props: ButtonProps, fRef: ForwardedRef<HTMLButtonElement>) => {
         const {
             asChild,
@@ -101,19 +97,16 @@ const createButtonControl = (input: ControlInput<'button'>) => {
         } = props;
         const ref = useForwardedRef(fRef);
         const triggerRef = useRef<HTMLButtonElement>(null);
-        const isDisabled = behavior.disabled || behavior.loading;
-
+        const isDisabled = ctx.behavior.disabled || ctx.behavior.loading;
         const { buttonProps, isPressed } = useButton({ ...aria, isDisabled }, ref);
         const { hoverProps, isHovered } = useHover({ isDisabled });
         const { focusProps, isFocusVisible } = useFocusRing();
-
         const tooltipState = useTooltipState(triggerRef, {
             ...(tooltip !== undefined && { content: tooltip }),
             isDisabled,
             offsetPx: tooltipOffsetPx,
             side: tooltipSide,
         });
-
         const mergedProps = mergeProps(buttonProps, hoverProps, focusProps, tooltip ? tooltipState.triggerProps : {}, {
             className: utilities.cls(base, B.ctrl.variant[variant], className),
             'data-focus': isFocusVisible || undefined,
@@ -125,9 +118,8 @@ const createButtonControl = (input: ControlInput<'button'>) => {
                 (triggerRef as { current: HTMLButtonElement | null }).current = node;
                 tooltipState.refs.setReference(node);
             },
-            style: vars as CSSProperties,
+            style: ctx.vars as CSSProperties,
         });
-
         const content = createElement(
             'span',
             { className: utilities.cls('inline-flex items-center', B.ctrl.var.g) },
@@ -135,12 +127,10 @@ const createButtonControl = (input: ControlInput<'button'>) => {
             children,
             rightIcon,
         );
-
         const buttonEl =
             (asChild ?? input.asChild)
                 ? createElement(Slot, mergedProps, content)
                 : createElement('button', { ...mergedProps, type: 'button' }, content);
-
         return createElement(
             'span',
             { className: 'relative inline-flex' },
@@ -148,11 +138,9 @@ const createButtonControl = (input: ControlInput<'button'>) => {
             renderTooltipPortal(tooltipState),
         );
     });
-
     Component.displayName = 'Ctrl(button)';
     return Component;
 };
-
 type InputHtmlType = 'checkbox' | 'radio' | 'text';
 const inputTypeMap = {
     button: 'text',
@@ -162,7 +150,6 @@ const inputTypeMap = {
     switch: 'text',
     textarea: 'text',
 } as const satisfies Readonly<Record<ControlType, InputHtmlType>>;
-
 const createInputControl = <T extends ControlType>(input: ControlInput<T>) => {
     const controlType = input.type ?? 'input';
     const isTextarea = controlType === 'textarea';
@@ -208,10 +195,8 @@ const createInputControl = <T extends ControlType>(input: ControlInput<T>) => {
     Component.displayName = `Ctrl(${input.type ?? 'input'})`;
     return Component;
 };
-
 const createSwitchControl = (input: ControlInput<'switch'>) => {
-    const behavior = resolve('behavior', input.behavior);
-    const vars = utilities.cssVars(utilities.computeScale(resolve('scale', input.scale)), 'ctrl');
+    const ctx = createBuilderContext('ctrl', ['behavior', 'scale'], input);
     const Component = forwardRef((props: SwitchProps, fRef: ForwardedRef<HTMLInputElement>) => {
         const { className, ...aria } = props;
         const ref = useForwardedRef(fRef);
@@ -225,13 +210,13 @@ const createSwitchControl = (input: ControlInput<'switch'>) => {
                     B.ctrl.switch.track,
                     B.ctrl.var.h,
                     state.isSelected ? B.ctrl.switch.trackOn : undefined,
-                    stateCls.ctrl(behavior),
+                    stateCls.ctrl(ctx.behavior),
                     input.className,
                     className,
                 ),
                 'data-focus': isFocusVisible || undefined,
                 'data-selected': state.isSelected || undefined,
-                style: { ...vars, width: `calc(var(--ctrl-height) * ${B.algo.switchWidthRatio})` } as CSSProperties,
+                style: { ...ctx.vars, width: `calc(var(--ctrl-height) * ${B.algo.switchWidthRatio})` } as CSSProperties,
             },
             createElement('input', mergeProps(inputProps, focusProps, { className: 'sr-only', ref })),
             createElement('span', {
@@ -257,7 +242,6 @@ const builderHandlers = {
     switch: createSwitchControl,
     textarea: createInputControl<'textarea'>,
 } as const;
-
 const create = <T extends ControlType>(input: ControlInput<T>) =>
     (builderHandlers[input.type ?? 'button'] as (input: ControlInput<T>) => ReturnType<typeof forwardRef>)(input);
 

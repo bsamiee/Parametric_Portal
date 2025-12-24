@@ -48,12 +48,16 @@ coverage/
 coverage.xml
 htmlcov/
 test-results/
+.vitest-reports/
+lost-pixel/
 playwright-report/
 playwright/.cache/
 .pytest_cache/
 .hypothesis/
 reports/stryker/
 stryker-tmp/
+**/__screenshots__/
+.vitest-attachments
 
 # --- [CACHES] -----------------------------------------------------------------
 .cache/

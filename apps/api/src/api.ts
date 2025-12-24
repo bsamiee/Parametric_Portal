@@ -7,24 +7,17 @@ import {
 } from '@parametric-portal/server/api';
 import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
 import { SessionAuth } from '@parametric-portal/server/middleware';
-import {
-    AiProviderSchema,
-    ApiKeyIdSchema,
-    ApiKeyListItemSchema,
-    AssetListItemSchema,
-    LogoutResponseSchema,
-    OAuthProviderSchema,
-    OAuthStartResponseSchema,
-    SessionResponseSchema,
-    UserResponseSchema,
-} from '@parametric-portal/types/database';
+import { database } from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
+
 import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
+
+const db = database();
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const PaginatedAssetListSchema = S.Struct({
-    data: S.Array(AssetListItemSchema),
+    data: S.Array(db.schemas.entities.AssetListItem),
     limit: S.Int,
     offset: S.Int,
     total: S.Int,
@@ -33,10 +26,10 @@ const PaginatedAssetListSchema = S.Struct({
 const CreateApiKeyRequestSchema = S.Struct({
     key: S.NonEmptyTrimmedString,
     name: S.NonEmptyTrimmedString,
-    provider: AiProviderSchema,
+    provider: db.schemas.entities.AiProvider,
 });
-const CreateApiKeyResponseSchema = ApiKeyListItemSchema;
-const ListApiKeysResponseSchema = S.Struct({ data: S.Array(ApiKeyListItemSchema) });
+const CreateApiKeyResponseSchema = db.schemas.entities.ApiKeyListItem;
+const ListApiKeysResponseSchema = S.Struct({ data: S.Array(db.schemas.entities.ApiKeyListItem) });
 const DeleteApiKeyResponseSchema = S.Struct({ success: S.Boolean });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -44,32 +37,32 @@ const DeleteApiKeyResponseSchema = S.Struct({ success: S.Boolean });
 const AuthGroup = createGroup('auth', { prefix: '/auth' })
     .add(
         HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
-            .setPath(S.Struct({ provider: OAuthProviderSchema }))
-            .addSuccess(OAuthStartResponseSchema)
+            .setPath(S.Struct({ provider: db.schemas.entities.OAuthProvider }))
+            .addSuccess(db.schemas.responses.OAuthStartResponse)
             .addError(OAuthError, { status: 400 }),
     )
     .add(
         HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
-            .setPath(S.Struct({ provider: OAuthProviderSchema }))
+            .setPath(S.Struct({ provider: db.schemas.entities.OAuthProvider }))
             .setUrlParams(S.Struct({ code: S.String, state: S.String }))
-            .addSuccess(SessionResponseSchema)
+            .addSuccess(db.schemas.responses.SessionResponse)
             .addError(OAuthError, { status: 400 }),
     )
     .add(
         HttpApiEndpoint.post('refresh', '/refresh')
-            .addSuccess(SessionResponseSchema)
+            .addSuccess(db.schemas.responses.SessionResponse)
             .addError(UnauthorizedError, { status: 401 }),
     )
     .add(
         HttpApiEndpoint.post('logout', '/logout')
             .middleware(SessionAuth)
-            .addSuccess(LogoutResponseSchema)
+            .addSuccess(db.schemas.responses.LogoutResponse)
             .addError(InternalError, { status: 500 }),
     )
     .add(
         HttpApiEndpoint.get('me', '/me')
             .middleware(SessionAuth)
-            .addSuccess(UserResponseSchema)
+            .addSuccess(db.schemas.responses.UserResponse)
             .addError(NotFoundError, { status: 404 })
             .addError(InternalError, { status: 500 }),
     )
@@ -89,7 +82,7 @@ const AuthGroup = createGroup('auth', { prefix: '/auth' })
     .add(
         HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
             .middleware(SessionAuth)
-            .setPath(S.Struct({ id: ApiKeyIdSchema }))
+            .setPath(S.Struct({ id: db.schemas.ids.ApiKeyId }))
             .addSuccess(DeleteApiKeyResponseSchema)
             .addError(NotFoundError, { status: 404 })
             .addError(InternalError, { status: 500 }),

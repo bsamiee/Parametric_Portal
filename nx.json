@@ -236,8 +236,20 @@
         },
         "test": {
             "cache": true,
+            "executor": "@nx/vite:test",
             "inputs": ["testing", "^production"],
-            "outputs": ["{projectRoot}/coverage", "{projectRoot}/test-results"]
+            "options": {
+                "configFile": "vitest.config.ts"
+            },
+            "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"]
+        },
+        "test:ui": {
+            "cache": false,
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "vitest --ui",
+                "cwd": "{workspaceRoot}"
+            }
         },
         "typecheck": {
             "cache": true,

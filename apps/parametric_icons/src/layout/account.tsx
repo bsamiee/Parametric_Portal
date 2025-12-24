@@ -1,23 +1,26 @@
 /**
  * Account components: overlay, API key management, logout.
- * Uses existing Modal/Button/Input from ui.ts with auth dispatch from api.ts.
+ * Uses useMutation/useQuery hooks with toEffectM for ApiResponse bridging.
  */
-import { type ApiResponseFold, fold } from '@parametric-portal/types/api';
-import { type AiProvider, type ApiKeyId, type ApiKeyListItem, SCHEMA_TUNING } from '@parametric-portal/types/database';
-import { DateTime, Effect, Option } from 'effect';
+
+import { useMutation, useQuery } from '@parametric-portal/runtime/hooks/async';
+import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
+import type { ApiError } from '@parametric-portal/types/api';
+import {
+    type AiProvider,
+    type ApiKeyId,
+    type ApiKeyListItem,
+    DATABASE_TUNING,
+} from '@parametric-portal/types/database';
+import { DateTime, Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
-import { auth } from '../api.ts';
-import { useRuntime, useStoreActions, useStoreSlice } from '../core.ts';
-import { authSlice } from '../stores.ts';
+import { useCallback, useState } from 'react';
+import { apiFactory, asyncApi, auth } from '../infrastructure.ts';
 import { Button, Icon, Input, Modal, Select, Spinner, Stack } from '../ui.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type CreateKeyHandlers = ApiResponseFold<ApiKeyListItem, Effect.Effect<void, never, never>>;
-type DeleteKeyHandlers = ApiResponseFold<{ success: boolean }, Effect.Effect<void, never, never>>;
-type ListKeysHandlers = ApiResponseFold<{ data: ReadonlyArray<ApiKeyListItem> }, Effect.Effect<void, never, never>>;
-type LogoutHandlers = ApiResponseFold<{ success: boolean }, Effect.Effect<void, never, never>>;
+type CreateKeyInput = { readonly key: string; readonly name: string; readonly provider: AiProvider };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -26,77 +29,42 @@ const B = Object.freeze({
         size: 'md' as const,
         title: 'Account Settings',
     },
-    providers: SCHEMA_TUNING.aiProviders,
+    providers: DATABASE_TUNING.aiProviders,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const formatDate = (dt: DateTime.Utc): string => DateTime.formatLocal(dt, { dateStyle: 'medium' });
 
-const createApiKeyHandlers = (onSuccess: (apiKey: ApiKeyListItem) => void, onError: () => void): CreateKeyHandlers => ({
-    ApiError: () => Effect.sync(onError),
-    ApiSuccess: (data) => Effect.sync(() => onSuccess(data)),
-});
-
-const mkDeleteHandlers = (onSuccess: () => void, onError: () => void): DeleteKeyHandlers => ({
-    ApiError: () => Effect.sync(onError),
-    ApiSuccess: () => Effect.sync(onSuccess),
-});
-
-const mkListHandlers = (
-    setKeys: (keys: ReadonlyArray<ApiKeyListItem>) => void,
-    setLoading: (flag: boolean) => void,
-): ListKeysHandlers => ({
-    ApiError: () => Effect.sync(() => setLoading(false)),
-    ApiSuccess: (data) =>
-        Effect.sync(() => {
-            setKeys(data.data);
-            setLoading(false);
-        }),
-});
-
-const mkLogoutHandlers = (onSuccess: () => void): LogoutHandlers => ({
-    ApiError: () => Effect.succeed(undefined),
-    ApiSuccess: () => Effect.sync(onSuccess),
-});
-
 // --- [COMPONENTS] ------------------------------------------------------------
 
 const ApiKeyForm = (): ReactNode => {
-    const runtime = useRuntime();
-    const { accessToken } = useStoreSlice(authSlice);
-    const authActions = useStoreActions(authSlice);
+    const accessToken = useAuthStore((s) => s.accessToken);
+    const addApiKey = useAuthStore((s) => s.addApiKey);
     const [name, setName] = useState('');
     const [key, setKey] = useState('');
     const [provider, setProvider] = useState<AiProvider>(B.providers[0] as AiProvider);
-    const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    const handleSubmit = useCallback(() => {
-        const canSubmit = accessToken && name.trim() && key.trim();
-        canSubmit &&
-            Effect.gen(function* () {
-                setIsSubmitting(true);
+    const createMutation = useMutation<ApiKeyListItem, CreateKeyInput, ApiError, never>(
+        (input) =>
+            pipe(auth.createApiKey(accessToken ?? '', input), Effect.flatMap(apiFactory.toEffectM<ApiKeyListItem>())),
+        {
+            onError: () => setError('Failed to save API key'),
+            onSuccess: (apiKey) => {
+                addApiKey(apiKey);
+                setName('');
+                setKey('');
                 setError(null);
-                const result = yield* auth.createApiKey(accessToken, { key: key.trim(), name: name.trim(), provider });
-                yield* fold(
-                    result,
-                    createApiKeyHandlers(
-                        (apiKey) => {
-                            authActions.addApiKey(apiKey);
-                            setName('');
-                            setKey('');
-                            setIsSubmitting(false);
-                        },
-                        () => {
-                            setError('Failed to save API key');
-                            setIsSubmitting(false);
-                        },
-                    ),
-                );
-            }).pipe((eff) => runtime.runFork(eff));
-    }, [runtime, accessToken, name, key, provider, authActions]);
-
+            },
+        },
+    );
+    const handleSubmit = useCallback(() => {
+        accessToken &&
+            name.trim() &&
+            key.trim() &&
+            createMutation.mutate({ key: key.trim(), name: name.trim(), provider });
+    }, [accessToken, name, key, provider, createMutation]);
+    const isSubmitting = asyncApi.isLoading(createMutation.state);
     return (
         <Stack gap className='p-4 bg-neutral-800/50 rounded-lg'>
             <span className='text-sm font-medium opacity-70'>Add API Key</span>
@@ -132,37 +100,36 @@ const ApiKeyForm = (): ReactNode => {
         </Stack>
     );
 };
-
 const ApiKeyList = (): ReactNode => {
-    const runtime = useRuntime();
-    const { accessToken, apiKeys } = useStoreSlice(authSlice);
-    const authActions = useStoreActions(authSlice);
+    const accessToken = useAuthStore((s) => s.accessToken);
+    const apiKeys = useAuthStore((s) => s.apiKeys);
+    const removeApiKey = useAuthStore((s) => s.removeApiKey);
     const [deletingId, setDeletingId] = useState<string | null>(null);
-
-    const handleDelete = useCallback(
-        (id: ApiKeyId) => {
-            if (!accessToken) {
-                return;
-            }
-            setDeletingId(id);
-            runtime.runFork(
-                Effect.flatMap(auth.deleteApiKey(accessToken, id), (r) =>
-                    fold(
-                        r,
-                        mkDeleteHandlers(
-                            () => {
-                                authActions.removeApiKey(id);
-                                setDeletingId(null);
-                            },
-                            () => setDeletingId(null),
-                        ),
-                    ),
-                ),
-            );
+    const deleteMutation = useMutation<{ success: boolean }, ApiKeyId, ApiError, never>(
+        (id) =>
+            pipe(
+                auth.deleteApiKey(accessToken ?? '', id),
+                Effect.flatMap(apiFactory.toEffectM<{ success: boolean }>()),
+            ),
+        {
+            onSettled: () => setDeletingId(null),
+            onSuccess: (_, id: ApiKeyId) => removeApiKey(id),
         },
-        [runtime, accessToken, authActions],
     );
-
+    const handleDelete = useCallback(
+        (id: ApiKeyId) =>
+            pipe(
+                Option.fromNullable(accessToken),
+                Option.match({
+                    onNone: () => undefined,
+                    onSome: () => {
+                        setDeletingId(id);
+                        deleteMutation.mutate(id);
+                    },
+                }),
+            ),
+        [accessToken, deleteMutation],
+    );
     return apiKeys.length === 0 ? (
         <Stack align='center' className='py-6 opacity-50'>
             <Icon name='Key' className='w-8 h-8' />
@@ -192,31 +159,23 @@ const ApiKeyList = (): ReactNode => {
         </Stack>
     );
 };
-
 const LogoutButton = (): ReactNode => {
-    const runtime = useRuntime();
-    const { accessToken } = useStoreSlice(authSlice);
-    const authActions = useStoreActions(authSlice);
-    const [isLoggingOut, setIsLoggingOut] = useState(false);
-
+    const accessToken = useAuthStore((s) => s.accessToken);
+    const clearAuth = useAuthStore((s) => s.clearAuth);
+    const closeAccountOverlay = useAuthStore((s) => s.closeAccountOverlay);
+    const logoutMutation = useMutation<{ success: boolean }, void, ApiError, never>(
+        () => pipe(auth.logout(accessToken ?? ''), Effect.flatMap(apiFactory.toEffectM<{ success: boolean }>())),
+        {
+            onSuccess: () => {
+                clearAuth();
+                closeAccountOverlay();
+            },
+        },
+    );
     const handleLogout = useCallback(() => {
-        if (!accessToken) {
-            return;
-        }
-        setIsLoggingOut(true);
-        runtime.runFork(
-            Effect.flatMap(auth.logout(accessToken), (r) =>
-                fold(
-                    r,
-                    mkLogoutHandlers(() => {
-                        authActions.clearAuth();
-                        authActions.closeAccountOverlay();
-                    }),
-                ),
-            ),
-        );
-    }, [runtime, accessToken, authActions]);
-
+        accessToken && logoutMutation.mutate(undefined);
+    }, [accessToken, logoutMutation]);
+    const isLoggingOut = asyncApi.isLoading(logoutMutation.state);
     return (
         <Button
             onPress={handleLogout}
@@ -233,27 +192,27 @@ const LogoutButton = (): ReactNode => {
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const AccountOverlay = (): ReactNode => {
-    const runtime = useRuntime();
-    const { isAccountOverlayOpen, accessToken, user } = useStoreSlice(authSlice);
-    const authActions = useStoreActions(authSlice);
-    const [isLoadingKeys, setIsLoadingKeys] = useState(false);
-
-    useEffect(() => {
-        if (!isAccountOverlayOpen || !accessToken) {
-            return;
-        }
-        setIsLoadingKeys(true);
-        runtime.runFork(
-            Effect.flatMap(auth.listApiKeys(accessToken), (r) =>
-                fold(r, mkListHandlers(authActions.setApiKeys, setIsLoadingKeys)),
-            ),
-        );
-    }, [isAccountOverlayOpen, runtime, accessToken, authActions]);
-
+    const isAccountOverlayOpen = useAuthStore((s) => s.isAccountOverlayOpen);
+    const accessToken = useAuthStore((s) => s.accessToken);
+    const user = useAuthStore((s) => s.user);
+    const closeAccountOverlay = useAuthStore((s) => s.closeAccountOverlay);
+    const setApiKeys = useAuthStore((s) => s.setApiKeys);
+    const keysQuery = useQuery<{ data: ReadonlyArray<ApiKeyListItem> }, ApiError, never>(
+        pipe(
+            auth.listApiKeys(accessToken ?? ''),
+            Effect.flatMap(apiFactory.toEffectM<{ data: ReadonlyArray<ApiKeyListItem> }>()),
+        ),
+        [accessToken],
+        {
+            enabled: isAccountOverlayOpen && !!accessToken,
+            onSuccess: (result) => setApiKeys(result.data),
+        },
+    );
+    const isLoadingKeys = asyncApi.isLoading(keysQuery);
     return (
         <Modal
             isOpen={isAccountOverlayOpen}
-            onClose={authActions.closeAccountOverlay}
+            onClose={closeAccountOverlay}
             title={B.overlay.title}
             size={B.overlay.size}
         >
@@ -264,7 +223,6 @@ const AccountOverlay = (): ReactNode => {
                         <span className='text-sm'>{user.email}</span>
                     </div>
                 )}
-
                 <div className='border-t border-neutral-700 pt-4 mt-2'>
                     <span className='text-sm font-medium opacity-70 mb-3 block'>API Keys</span>
                     {isLoadingKeys ? (
@@ -275,9 +233,7 @@ const AccountOverlay = (): ReactNode => {
                         <ApiKeyList />
                     )}
                 </div>
-
                 <ApiKeyForm />
-
                 <div className='border-t border-neutral-700 pt-4 mt-2'>
                     <LogoutButton />
                 </div>
@@ -288,4 +244,4 @@ const AccountOverlay = (): ReactNode => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AccountOverlay, B as ACCOUNT_CONFIG };
+export { AccountOverlay };

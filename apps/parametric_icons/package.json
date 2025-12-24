@@ -5,7 +5,7 @@
         "@parametric-portal/api": "workspace:*",
         "@parametric-portal/components": "workspace:*",
         "@parametric-portal/devtools": "workspace:*",
-        "@parametric-portal/hooks": "workspace:*",
+        "@parametric-portal/runtime": "workspace:*",
         "@parametric-portal/theme": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "effect": "catalog:",

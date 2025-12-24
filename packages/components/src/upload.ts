@@ -56,9 +56,9 @@ const extractFilesFromDrop = async (event: DropEvent): Promise<FileList> => {
     const fileItems = event.items.filter((item): item is FileDropItem => item.kind === 'file');
     const files = await Promise.all(fileItems.map((item) => item.getFile()));
     const dataTransfer = new DataTransfer();
-    for (const file of files) {
+    files.forEach((file) => {
         dataTransfer.items.add(file);
-    }
+    });
     return dataTransfer.files;
 };
 

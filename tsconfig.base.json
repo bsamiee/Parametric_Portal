@@ -9,6 +9,7 @@
         "declaration": true,
         "declarationMap": true,
         "emitDeclarationOnly": false,
+        "erasableSyntaxOnly": true,
         "exactOptionalPropertyTypes": true,
         "forceConsistentCasingInFileNames": true,
         "incremental": true,
@@ -26,11 +27,6 @@
         "noPropertyAccessFromIndexSignature": true,
         "noUncheckedIndexedAccess": true,
         "noUncheckedSideEffectImports": true,
-        "paths": {
-            "@/*": ["./packages/*"],
-            "@theme/*": ["./packages/theme/src/*"],
-            "@types/*": ["./packages/types/src/*"]
-        },
         "resolveJsonModule": true,
         "resolvePackageJsonExports": true,
         "resolvePackageJsonImports": true,
@@ -38,6 +34,7 @@
         "skipLibCheck": true,
         "sourceMap": true,
         "strict": true,
+        "strictBuiltinIteratorReturn": true,
         "target": "esnext",
         "tsBuildInfoFile": ".nx/cache/tsbuildinfo/tsconfig.tsbuildinfo",
         "verbatimModuleSyntax": true

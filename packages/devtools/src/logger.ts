@@ -11,17 +11,14 @@ type LoggerConfig = {
     readonly logLevel?: string | undefined;
     readonly maxLogs?: number | undefined;
 };
-
 type AccumulatingLoggerResult = {
     readonly logger: Logger.Logger<unknown, void>;
     readonly logs: LogEntry[];
 };
-
 type CombinedLoggerResult = {
     readonly logger: Logger.Logger<unknown, void>;
     readonly logs: LogEntry[];
 };
-
 type LoggerLayerResult = {
     readonly layer: Layer.Layer<never, never, never>;
     readonly logs: LogEntry[];
@@ -51,23 +48,12 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const mapEffectLevel = (effectLabel: string): LogEntry['level'] => B.levelMap[effectLabel.toLowerCase()] ?? 'Info';
-
-const extractMessage = (message: unknown): string => {
-    const handlers = {
-        array: (m: unknown[]) => m.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(' '),
-        other: (m: unknown) => JSON.stringify(m),
-        string: (m: string) => m,
-    } as const;
-
-    if (Array.isArray(message)) {
-        return handlers.array(message);
-    }
-    if (typeof message === 'string') {
-        return handlers.string(message);
-    }
-    return handlers.other(message);
-};
-
+const extractMessage = (message: unknown): string =>
+    Array.isArray(message)
+        ? message.map((v) => (typeof v === 'string' ? v : JSON.stringify(v))).join(' ')
+        : typeof message === 'string'
+          ? message
+          : JSON.stringify(message);
 // Circular buffer: O(n) splice amortized across many insertions
 const truncateLogs = (logs: LogEntry[], maxLogs: number): void => {
     const excess = logs.length - maxLogs + 1;
@@ -82,7 +68,6 @@ const createAccumulatingLogger = (config: { maxLogs: number }): AccumulatingLogg
         const spanEntries = List.toArray(
             List.map(spans, (span): [string, number] => [span.label, Date.now() - span.startTime]),
         );
-
         truncateLogs(logs, config.maxLogs);
         logs.push({
             annotations: Object.fromEntries(annotations),
@@ -93,10 +78,8 @@ const createAccumulatingLogger = (config: { maxLogs: number }): AccumulatingLogg
             timestamp: date,
         });
     });
-
     return { logger, logs };
 };
-
 const createCombinedLogger = (config: { maxLogs: number; silent?: boolean | undefined }): CombinedLoggerResult => {
     const { logger: accumulating, logs } = createAccumulatingLogger(config);
     return {
@@ -104,7 +87,6 @@ const createCombinedLogger = (config: { maxLogs: number; silent?: boolean | unde
         logs,
     };
 };
-
 const createLoggerLayer = (config: Partial<LoggerConfig & { silent?: boolean }> = {}): LoggerLayerResult => {
     const { logger, logs } = createCombinedLogger({
         maxLogs: config.maxLogs ?? B.defaults.maxLogs,
@@ -115,10 +97,8 @@ const createLoggerLayer = (config: Partial<LoggerConfig & { silent?: boolean }> 
         Logger.replace(Logger.defaultLogger, Logger.map(logger, B.noop)),
         Logger.minimumLogLevel(level),
     );
-
     return { layer, logs };
 };
-
 const getLogs = (logs: ReadonlyArray<LogEntry>): ReadonlyArray<LogEntry> => [...logs];
 const getLogsFormatted = (logs: ReadonlyArray<LogEntry>): string =>
     logs.map((entry) => formatLogEntry(entry)).join('\n');
@@ -127,9 +107,9 @@ const getLogsJson = (logs: ReadonlyArray<LogEntry>): string => JSON.stringify(lo
 // --- [HMR_SUPPORT] -----------------------------------------------------------
 
 const clearLogs = (logs: LogEntry[]): void => {
+    // biome-ignore lint/style/noParameterAssign: HMR requires in-place clearing to preserve array reference across module reloads
     logs.length = 0;
 };
-
 const createHmrHandler = (logs: LogEntry[], loggerLayer: Layer.Layer<never, never, never>): (() => void) => {
     const handler = (): void => {
         clearLogs(logs);
@@ -140,9 +120,7 @@ const createHmrHandler = (logs: LogEntry[], loggerLayer: Layer.Layer<never, neve
             ),
         );
     };
-
     import.meta.hot?.on('vite:beforeUpdate', handler);
-
     return handler;
 };
 
@@ -155,7 +133,6 @@ type DevToolsInstallConfig = {
     readonly renderDebug: (error: Error, context?: Record<string, unknown>) => void;
     readonly startTime: number;
 };
-
 type DevToolsGlobal = {
     readonly appDebug: {
         readonly env: string;
@@ -168,7 +145,6 @@ type DevToolsGlobal = {
     readonly appLogTest: () => void;
     readonly appRenderDebug: () => void;
 };
-
 const installDevTools = (config: DevToolsInstallConfig): DevToolsGlobal => {
     const devTools: DevToolsGlobal = {
         appDebug: {
@@ -193,7 +169,6 @@ const installDevTools = (config: DevToolsInstallConfig): DevToolsGlobal => {
             ),
         appRenderDebug: () => config.renderDebug(new Error('Manual debug render'), { source: 'devtools' }),
     };
-
     Object.assign(globalThis, devTools);
     return devTools;
 };

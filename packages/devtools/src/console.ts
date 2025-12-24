@@ -6,16 +6,13 @@ import type { LogEntry } from './types.ts';
 // --- [TYPES] -----------------------------------------------------------------
 
 type ConsoleMethod = 'debug' | 'error' | 'info' | 'log' | 'warn';
-
 type ConsoleInterceptConfig = {
     readonly logs: LogEntry[];
     readonly methods?: ReadonlyArray<ConsoleMethod> | undefined;
 };
-
 type ConsoleInterceptResult = {
     readonly restore: () => void;
 };
-
 type OriginalConsole = {
     [K in ConsoleMethod]: typeof console.log;
 };
@@ -39,7 +36,6 @@ const B = Object.freeze({
 
 const formatArgs = (args: ReadonlyArray<unknown>): string =>
     args.map((arg) => (typeof arg === 'object' && arg !== null ? JSON.stringify(arg) : String(arg))).join(' ');
-
 const createLogEntry = (method: ConsoleMethod, args: ReadonlyArray<unknown>): LogEntry => ({
     annotations: { source: 'console' },
     fiberId: 'console',
@@ -55,24 +51,20 @@ const interceptConsole = (config: ConsoleInterceptConfig): ConsoleInterceptResul
     const methods = config.methods ?? B.defaults.methods;
     const original: Partial<OriginalConsole> = {};
     const mutableConsole = console as { -readonly [K in ConsoleMethod]: typeof console.log };
-
-    for (const method of methods) {
+    methods.forEach((method) => {
         // biome-ignore lint/suspicious/noConsole: Intentional console interception
         original[method] = console[method].bind(console);
-
         mutableConsole[method] = (...args: unknown[]): void => {
             config.logs.push(createLogEntry(method, args));
             original[method]?.(...args);
         };
-    }
-
+    });
     const restore = (): void => {
-        for (const method of methods) {
+        methods.forEach((method) => {
             const orig = original[method];
             orig !== undefined && Object.assign(mutableConsole, { [method]: orig });
-        }
+        });
     };
-
     return { restore };
 };
 

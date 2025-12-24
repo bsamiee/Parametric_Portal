@@ -31,7 +31,7 @@ import { IconGenerationServiceLive } from './services/icons.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    cors: { allowedOrigins: ['http://localhost:3000', 'http://localhost:3001'] },
+    cors: { allowedOrigins: ['*'] },
     port: 4000,
 } as const);
 

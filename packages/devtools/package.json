@@ -18,6 +18,11 @@
     "vitest": "catalog:"
   },
   "exports": {
+    "./hooks": {
+      "types": "./src/hooks.ts",
+      "import": "./src/hooks.ts",
+      "default": "./src/hooks.ts"
+    },
     "./bootstrap": {
       "types": "./src/bootstrap.tsx",
       "import": "./src/bootstrap.tsx",

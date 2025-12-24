@@ -7,23 +7,30 @@ pre-commit:
       run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
       stage_fixed: true
       skip: false
-    effect-check:
+    imperatives:
       glob: "*.{ts,tsx}"
+      exclude:
+        - "*.d.ts"
+        - "**/node_modules/**"
+        - ".github/scripts/**"
+        - "tools/scripts/**"
+        - "**/suspense.ts"
       run: |
         violation=0
         for file in {staged_files}; do
-          if grep -qE "\btry\s*\{" "$file"; then
-            # Check if matches are in actual code (not comments)
-            matches=$(grep -nE "\btry\s*\{" "$file" | grep -vE "^\s*[0-9]+:\s*(/\*|//|\*)")
-            if [ -n "$matches" ]; then
-              echo "[ERROR] try/catch detected in $file"
-              echo "$matches"
-              violation=1
-            fi
+          matches=$(grep -nE '\b(try\s*\{|throw\s+|let\s+|var\s+|for\s*\(|while\s*\(|if\s*\()' "$file" 2>/dev/null | grep -vE '^[0-9]+:\s*(//|\*|/\*)' || true)
+          if [ -n "$matches" ]; then
+            echo "[ERROR] Imperative pattern in $file"
+            echo "$matches"
+            violation=1
           fi
         done
-        if [ "$violation" -eq 1 ]; then
-          echo "Use Effect.try, Effect.tryPromise, or Effect.gen instead"
-          exit 1
-        fi
+        [ "$violation" -eq 0 ] || { echo "Use: Effect.try/fail, const, .map/.filter, ternary/dispatch"; exit 1; }
       skip: false
+
+# --- [PRE_PUSH_HOOKS] ---------------------------------------------------------
+pre-push:
+  parallel: false
+  commands:
+    quality:
+      run: pnpm exec nx affected -t typecheck,check --base=origin/main

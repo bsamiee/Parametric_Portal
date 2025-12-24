@@ -6,7 +6,7 @@
             "@parametric-portal/api/*": ["../../apps/api/src/*"],
             "@parametric-portal/components/*": ["../../packages/components/src/*"],
             "@parametric-portal/devtools/*": ["../../packages/devtools/src/*"],
-            "@parametric-portal/hooks/*": ["../../packages/hooks/src/*"],
+            "@parametric-portal/runtime/*": ["../../packages/runtime/src/*"],
             "@parametric-portal/theme/*": ["../../packages/theme/src/*"],
             "@parametric-portal/types/*": ["../../packages/types/src/*"]
         },
@@ -15,6 +15,6 @@
     },
     "exclude": ["dist", "node_modules"],
     "extends": "../../tsconfig.base.json",
-    "include": ["src/**/*", "*.config.ts"],
+    "include": ["src/**/*", "*.config.ts", "../../packages/types/src/env.d.ts"],
     "references": []
 }

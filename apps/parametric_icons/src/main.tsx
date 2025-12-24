@@ -11,7 +11,7 @@ const session = createDevSession({
 });
 
 const { init } = createMain({
-    appModule: () => import('./app.tsx'),
+    appModule: () => import('./layout/shell.tsx'),
     appName: 'parametric-icons',
     appVersion: (import.meta.env['APP_VERSION'] as string | undefined) ?? '0.0.0',
     cssModule: () => import('./main.css'),

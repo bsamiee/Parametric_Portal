@@ -11,20 +11,22 @@ import { OAuthService, SessionContext } from '@parametric-portal/server/middlewa
 import {
     type AiProvider,
     type ApiKeyId,
-    Expiry,
+    DATABASE_TUNING,
+    database,
     type OAuthProvider,
-    SCHEMA_TUNING,
 } from '@parametric-portal/types/database';
+
 import type { Uuidv7 } from '@parametric-portal/types/types';
 import { type Context, DateTime, Duration, Effect, Option, pipe } from 'effect';
-
 import { AppApi } from '../api.ts';
+
+const db = database();
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
     cookie: {
-        maxAge: Duration.toSeconds(SCHEMA_TUNING.durations.refreshToken),
+        maxAge: Duration.toSeconds(DATABASE_TUNING.durations.refreshToken),
         name: 'refreshToken',
         path: '/api/auth',
     },
@@ -116,8 +118,8 @@ const handleOAuthCallback = (
                 userId: user.id,
             });
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.session);
-            const refreshExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.refreshToken);
+            const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
+            const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
             yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: user.id });
             yield* repos.refreshTokens.insert({
                 expiresAt: refreshExpiresAt,
@@ -154,8 +156,8 @@ const handleRefresh = (repos: Repositories) =>
                 onSome: Effect.succeed,
             });
             const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.session);
-            const refreshExpiresAt = Expiry.computeFrom(SCHEMA_TUNING.durations.refreshToken);
+            const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
+            const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
             yield* repos.sessions.insert({
                 expiresAt: sessionExpiresAt,
                 tokenHash: sessionHash,
@@ -183,7 +185,7 @@ const handleLogout = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
             const session = yield* SessionContext;
-            yield* repos.sessions.delete(session.sessionId);
+            yield* repos.sessions.revoke(session.sessionId);
             yield* repos.refreshTokens.revokeAllByUserId(session.userId);
             return yield* buildLogoutResponse();
         }),
@@ -191,7 +193,7 @@ const handleLogout = (repos: Repositories) =>
             CookieError: () => Effect.fail(new InternalError({ cause: 'Cookie clearing failed' })),
             HttpBodyError: () => Effect.fail(new InternalError({ cause: 'Response body error' })),
             ParseError: () => Effect.fail(new InternalError({ cause: 'Session context parse failed' })),
-            SqlError: () => Effect.fail(new InternalError({ cause: 'Session deletion failed' })),
+            SqlError: () => Effect.fail(new InternalError({ cause: 'Session revocation failed' })),
         }),
     );
 

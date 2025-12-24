@@ -7,7 +7,6 @@ import { Effect, pipe, Schema as S } from 'effect';
 
 type Env = S.Schema.Type<typeof EnvSchema>;
 type RawEnv = Readonly<Record<string, unknown>>;
-
 class EnvValidationError extends Error {
     readonly _tag = 'EnvValidationError';
     constructor(cause: unknown) {
@@ -19,16 +18,13 @@ class EnvValidationError extends Error {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const LogLevelLiteral = S.Union(S.Literal('Debug'), S.Literal('Error'), S.Literal('Info'), S.Literal('Warning'));
-
 const BooleanString = S.Union(S.Literal('true'), S.Literal('false'));
-
 const DevToolsEnvSchema = S.Struct({
     VITE_DEVTOOLS_CONSOLE: S.optional(BooleanString),
     VITE_DEVTOOLS_EXPERIMENTAL: S.optional(BooleanString),
     VITE_DEVTOOLS_LOG_LEVEL: S.optional(LogLevelLiteral),
     VITE_DEVTOOLS_PERFORMANCE: S.optional(BooleanString),
 });
-
 const EnvSchema = S.Struct({
     APP_VERSION: S.optional(S.String),
     BASE_URL: S.String,
@@ -111,7 +107,6 @@ const createEnv = (raw: RawEnv): Effect.Effect<Env, EnvValidationError> =>
             },
         }),
     );
-
 const createEnvSync = (raw: RawEnv): Env => {
     const normalized = normalizeEnv(raw);
     return S.decodeUnknownSync(EnvSchema)(normalized);

@@ -21,13 +21,13 @@ import {
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type PaginationQuery = S.Schema.Type<typeof PaginationQuerySchema>;
 type ApiOptions = {
     readonly description?: string;
     readonly prefix?: `/${string}`;
     readonly title?: string;
     readonly version?: string;
 };
-
 type GroupOptions = {
     readonly prefix?: `/${string}`;
 };
@@ -50,9 +50,6 @@ const PaginationQuerySchema = S.Struct({
         default: () => 0,
     }),
 });
-
-type PaginationQuery = S.Schema.Type<typeof PaginationQuerySchema>;
-
 const LivenessResponseSchema = S.Struct({ status: S.Literal('ok') });
 const ReadinessResponseSchema = S.Struct({
     checks: S.Record({ key: S.String, value: S.Boolean }),
@@ -84,10 +81,8 @@ const createApi = <const Name extends string>(name: Name, options: ApiOptions = 
         (api) => api.annotate(OpenApi.Version, options.version ?? '1.0.0'),
         (api) => (options.description ? api.annotate(OpenApi.Description, options.description) : api),
     );
-
 const createGroup = <const Name extends string>(name: Name, options: GroupOptions = {}) =>
     pipe(HttpApiGroup.make(name), (group) => (options.prefix ? group.prefix(options.prefix) : group));
-
 const createHealthGroup = () =>
     pipe(
         HttpApiGroup.make('health'),
@@ -99,7 +94,6 @@ const createHealthGroup = () =>
                     .addError(ServiceUnavailableError, { status: ERROR_TUNING.status.serviceUnavailable }),
             ),
     );
-
 const SwaggerLayer = HttpApiSwagger.layer({ path: B.swagger.path });
 const OpenApiJsonLayer = HttpApiBuilder.middlewareOpenApi({ path: B.openapi.path });
 

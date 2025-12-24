@@ -1,12 +1,9 @@
 {
   "dependencies": {
     "@effect/experimental": "catalog:",
-    "date-fns": "catalog:",
     "effect": "catalog:",
-    "immer": "catalog:",
     "isomorphic-dompurify": "catalog:",
-    "uuid": "catalog:",
-    "zustand": "catalog:"
+    "uuid": "catalog:"
   },
   "devDependencies": {
     "@fast-check/vitest": "catalog:",
@@ -25,16 +22,6 @@
       "types": "./src/async.ts",
       "import": "./src/async.ts",
       "default": "./src/async.ts"
-    },
-    "./stores": {
-      "types": "./src/stores.ts",
-      "import": "./src/stores.ts",
-      "default": "./src/stores.ts"
-    },
-    "./temporal": {
-      "types": "./src/temporal.ts",
-      "import": "./src/temporal.ts",
-      "default": "./src/temporal.ts"
     },
     "./forms": {
       "types": "./src/forms.ts",

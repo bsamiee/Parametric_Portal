@@ -15,16 +15,13 @@ type PoolConfig = {
     readonly max: number;
     readonly min: number;
 };
-
 type SslConfig = {
     readonly enabled: boolean;
     readonly rejectUnauthorized: boolean;
 };
-
 type TransformConfig = {
     readonly enabled: boolean;
 };
-
 type PgClientLayer = Layer.Layer<SqlClient | PgClient.PgClient, SqlError | ConfigError.ConfigError, never>;
 
 // --- [CONSTANTS] -------------------------------------------------------------

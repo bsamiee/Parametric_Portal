@@ -34,23 +34,21 @@ const getLayout = (name: string, prop: LayoutProperty): string => getVar(`--layo
 /** Apply multiple CSS properties in batch. Grounding: Single reflow vs per-property updates. */
 const applyThemeStyles = (styles: Record<string, string>, scope?: HTMLElement): void => {
     const target = scope ?? (typeof document === 'undefined' ? null : document.documentElement);
-    for (const [name, value] of Object.entries(styles)) {
-        target?.style?.setProperty(name, value);
-    }
+    Object.entries(styles).forEach(([name, value]) => target?.style?.setProperty(name, value));
 };
 
 /** Validate CSS property availability in DOM. Grounding: Runtime check for missing theme tokens. */
 const validateDOMVariables = (names: ReadonlyArray<string>): ValidationResult => {
     const root = typeof document === 'undefined' ? null : document.documentElement;
     const styles = root ? getComputedStyle(root) : null;
-    const found: string[] = [];
-    const missing: string[] = [];
-
-    for (const name of names) {
-        const value = styles?.getPropertyValue(name).trim();
-        (value ? found : missing).push(name);
-    }
-
+    const { found, missing } = names.reduce<{ found: string[]; missing: string[] }>(
+        (acc, name) => {
+            const value = styles?.getPropertyValue(name).trim();
+            (value ? acc.found : acc.missing).push(name);
+            return acc;
+        },
+        { found: [], missing: [] },
+    );
     return { found, missing };
 };
 

@@ -14,7 +14,7 @@ import type {
 } from 'react';
 import { createElement, forwardRef } from 'react';
 import type { Computed, Inputs, Resolved, TuningFor } from './schema.ts';
-import { animStyle, B, merged, pick, resolve, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
+import { animStyle, B, createBuilderContext, merged, pick, TUNING_KEYS, useForwardedRef, utilities } from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -109,21 +109,18 @@ const createAlertBaseComponent = (
                 : null,
         );
     });
-
 const createAlertComponent = (
     input: FBInput<'alert'>,
     vars: Record<string, string>,
     feedback: Resolved['feedback'],
     animation: Resolved['animation'],
 ) => createAlertBaseComponent(input, vars, feedback, animation, { shadow: false, title: false });
-
 const createToastComponent = (
     input: FBInput<'toast'>,
     vars: Record<string, string>,
     feedback: Resolved['feedback'],
     animation: Resolved['animation'],
 ) => createAlertBaseComponent(input, vars, feedback, animation, { shadow: true, title: true });
-
 const createProgressComponent = (input: FBInput<'progress'>, vars: Record<string, string>) =>
     forwardRef((props: ProgressProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { className, style, value = 0, ...rest } = props;
@@ -152,7 +149,6 @@ const createProgressComponent = (input: FBInput<'progress'>, vars: Record<string
             }),
         );
     });
-
 const createSkeletonComponent = (input: FBInput<'skeleton'>, computed: Computed, vars: Record<string, string>) =>
     forwardRef((props: SkeletonProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { className, lines = 1, style, ...rest } = props;
@@ -180,9 +176,7 @@ const createSkeletonComponent = (input: FBInput<'skeleton'>, computed: Computed,
             ),
         );
     });
-
 const getSpinnerIcon = (name: IconName): LucideIcon => icons[name];
-
 const createSpinnerComponent = (input: FBInput<'spinner'>, computed: Computed) =>
     forwardRef((props: SpinnerProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { className, icon = 'LoaderCircle', style, ...rest } = props;
@@ -207,7 +201,6 @@ const createSpinnerComponent = (input: FBInput<'spinner'>, computed: Computed) =
             }),
         );
     });
-
 const createEmptyStateComponent = (input: FBInput<'empty'>, vars: Record<string, string>) =>
     forwardRef((props: EmptyStateProps, fRef: ForwardedRef<HTMLDivElement>) => {
         const { action, className, description, icon, style, title, ...rest } = props;
@@ -266,13 +259,8 @@ const builderHandlers = {
     spinner: createSpinnerComponent,
     toast: createToastComponent,
 } as const;
-
 const createFeedbackComponent = <T extends FeedbackType>(input: FBInput<T>): FeedbackComponentMap[T] => {
-    const scale = resolve('scale', input.scale);
-    const feedback = resolve('feedback', input.feedback);
-    const animation = resolve('animation', input.animation);
-    const computed = utilities.computeScale(scale);
-    const vars = utilities.cssVars(computed, 'fb');
+    const ctx = createBuilderContext('fb', ['scale', 'feedback', 'animation'], input);
     const builder = builderHandlers[input.type ?? 'alert'];
     const component = (
         builder as unknown as (
@@ -281,7 +269,7 @@ const createFeedbackComponent = <T extends FeedbackType>(input: FBInput<T>): Fee
             feedback: Resolved['feedback'],
             animation: Resolved['animation'],
         ) => FeedbackComponentMap[T]
-    )(input, vars, feedback, animation);
+    )(input, ctx.vars, ctx.feedback, ctx.animation);
     component.displayName = `Feedback(${input.type ?? 'alert'})`;
     return component;
 };

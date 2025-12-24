@@ -2,11 +2,14 @@
  * Icon generation domain contracts.
  * App-specific request/response schemas for icon generation.
  */
-
-import { type ColorMode, ColorModeSchema, IntentSchema } from '@parametric-portal/types/database';
-import { SvgAssetSchema } from '@parametric-portal/types/svg';
-import { VariantCountSchema } from '@parametric-portal/types/types';
+import { type ColorMode, database } from '@parametric-portal/types/database';
+import { svg } from '@parametric-portal/types/svg';
+import { types } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
+
+const db = database();
+const svgApi = svg();
+const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -33,18 +36,18 @@ type LayerSpec = {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const GenerateRequestSchema = S.Struct({
-    attachments: S.optional(S.Array(SvgAssetSchema)),
-    colorMode: S.optional(ColorModeSchema),
-    intent: S.optional(IntentSchema),
+    attachments: S.optional(S.Array(svgApi.schemas.SvgAsset)),
+    colorMode: S.optional(db.schemas.entities.ColorMode),
+    intent: S.optional(db.schemas.entities.Intent),
     prompt: S.NonEmptyTrimmedString,
     referenceSvg: S.optional(S.String),
-    variantCount: S.optional(VariantCountSchema),
+    variantCount: S.optional(typesApi.schemas.VariantCount),
 });
 type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
 
 const GenerateResponseSchema = S.Struct({
     id: S.String,
-    variants: S.Array(SvgAssetSchema),
+    variants: S.Array(svgApi.schemas.SvgAsset),
 });
 type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
 

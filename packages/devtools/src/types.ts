@@ -19,7 +19,6 @@ const LogLevelLiteral = S.Union(
     S.Literal('Error'),
     S.Literal('Fatal'),
 );
-
 const LogEntrySchema = S.Struct({
     annotations: S.Record({ key: S.String, value: S.Unknown }),
     fiberId: S.String,
@@ -28,7 +27,6 @@ const LogEntrySchema = S.Struct({
     spans: S.Record({ key: S.String, value: S.Number }),
     timestamp: S.DateFromSelf,
 });
-
 const OverlayConfigSchema = S.Struct({
     colors: S.optional(
         S.Struct({
@@ -52,7 +50,6 @@ const OverlayConfigSchema = S.Struct({
         }),
     ),
 });
-
 const DevToolsConfigSchema = S.Struct({
     app: S.String,
     env: S.Record({ key: S.String, value: S.Unknown }),
@@ -66,7 +63,6 @@ const DevToolsConfigSchema = S.Struct({
 // --- [CONSTANTS] -------------------------------------------------------------
 
 type LogLevelKey = S.Schema.Type<typeof LogLevelLiteral>;
-
 const B = Object.freeze({
     defaults: {
         logLevel: 'Info' as const satisfies LogLevelKey,
@@ -88,14 +84,11 @@ const safeString = (value: unknown): string =>
     (typeof value === 'string' ? value : null) ??
     (typeof value !== 'object' || value === null ? String(value) : null) ??
     Object.prototype.toString.call(value);
-
 const toError = (value: unknown): Error => (value instanceof Error ? value : new Error(safeString(value)));
-
 const formatDuration = (ms: number): string =>
     ms < B.format.msPerSecond
         ? `${ms.toFixed(B.format.durationPrecision.ms)}ms`
         : `${(ms / B.format.msPerSecond).toFixed(B.format.durationPrecision.seconds)}s`;
-
 const formatLogEntry = (entry: LogEntry): string => {
     const time = entry.timestamp.toISOString().slice(B.format.timeSlice.start, B.format.timeSlice.end);
     const spans = Object.entries(entry.spans)
@@ -114,9 +107,7 @@ const logLevelMap = Object.freeze({
     Info: LogLevel.Info,
     Warning: LogLevel.Warning,
 } as const satisfies Record<string, LogLevel.LogLevel>);
-
 const isLogLevelKey = (level: string): level is LogLevelKey => Object.hasOwn(logLevelMap, level);
-
 const parseLogLevel = (level: string | undefined): LogLevel.LogLevel =>
     level !== undefined && isLogLevelKey(level) ? logLevelMap[level] : logLevelMap[B.defaults.logLevel];
 

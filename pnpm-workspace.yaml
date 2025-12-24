@@ -5,6 +5,7 @@ packages:
 catalog:
   '@anthropic-ai/sdk': 0.71.2
   '@anthropic-ai/tokenizer': 0.0.4
+  '@axe-core/playwright': 4.10.0
   '@biomejs/biome': 2.3.10
   '@effect/experimental': 0.58.0
   '@effect/platform': 0.94.0
@@ -27,6 +28,7 @@ catalog:
   '@radix-ui/react-separator': 1.1.8
   '@radix-ui/react-slot': 1.2.4
   '@rollup/plugin-typescript': 12.3.0
+  '@rottitime/react-hook-message-event': 1.0.10
   '@sonar/scan': 4.3.2
   '@stryker-mutator/core': 9.4.0
   '@stryker-mutator/vitest-runner': 9.4.0
@@ -36,10 +38,13 @@ catalog:
   '@tanstack/react-query-persist-client': 5.90.14
   '@tanstack/react-table': 8.21.3
   '@tanstack/react-virtual': 3.13.13
+  '@testing-library/react': 16.3.1
   '@types/node': 25.0.3
   '@types/react': 19.2.7
   '@types/react-dom': 19.2.3
+  '@types/supertest': 6.0.2
   '@vitejs/plugin-react': 5.1.2
+  '@vitest/browser-playwright': 4.0.16
   '@vitest/coverage-v8': 4.0.16
   '@vitest/ui': 4.0.16
   arctic: 3.7.0
@@ -51,17 +56,23 @@ catalog:
   date-fns: 4.1.0
   dompurify: 3.3.1
   effect: 3.19.13
+  fake-indexeddb: 6.2.5
   fast-check: 4.5.1
   happy-dom: 20.0.11
+  idb-keyval: 6.2.1
   immer: 11.1.0
   isomorphic-dompurify: 2.34.0
   jspdf: 3.0.4
   jszip: 3.10.1
   lefthook: 2.0.12
   lightningcss: 1.30.2
+  lost-pixel: 3.27.0
   lucide-react: 0.562.0
   mermaid: 11.12.2
+  msw: 2.8.0
+  nuqs: 2.8.5
   nx: 22.3.3
+  persist-and-sync: 1.2.3
   react: 19.3.0-canary-f93b9fd4-20251217
   react-aria: 3.45.0
   react-aria-components: 1.14.0
@@ -71,6 +82,8 @@ catalog:
   react-stately: 3.43.0
   rollup-plugin-visualizer: 6.0.5
   sharp: 0.34.5
+  snapshot-diff: 0.10.0
+  supertest: 7.1.0
   tailwind-merge: 3.4.0
   tailwindcss: 4.1.18
   tslib: 2.8.1
@@ -88,4 +101,12 @@ catalog:
   vite-plugin-webfont-dl: 3.11.1
   vite-tsconfig-paths: 6.0.3
   vitest: 4.0.16
+  vitest-axe: 0.1.0
+  vitest-browser-react: 2.0.2
+  zundo: 2.3.0
   zustand: 5.0.9
+  zustand-computed: 2.1.1
+  zustand-slices: 0.4.0
+  zustand-x: 6.2.1
+
+dangerouslyAllowAllBuilds: true
