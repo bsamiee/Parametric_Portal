@@ -1,6 +1,6 @@
 # --- POD DISRUPTION BUDGETS ---------------------------------------------------
-# HA guarantees during voluntary disruptions
-# maxUnavailable: 1 allows node drains while HPA scales replicas
+# minAvailable: 0 allows voluntary disruptions for single-replica base config
+# Production overlay with HPA (minReplicas >= 2) can override to minAvailable: 1
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: api
     app.kubernetes.io/component: backend
 spec:
-  maxUnavailable: 1
+  minAvailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: api
@@ -23,7 +23,7 @@ metadata:
     app.kubernetes.io/name: icons
     app.kubernetes.io/component: frontend
 spec:
-  maxUnavailable: 1
+  minAvailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: icons
@@ -36,7 +36,7 @@ metadata:
     app.kubernetes.io/name: postgres
     app.kubernetes.io/component: database
 spec:
-  maxUnavailable: 1
+  minAvailable: 0
   selector:
     matchLabels:
       cnpg.io/cluster: parametric-portal-db

@@ -51,8 +51,16 @@ check_prerequisites() {
 
     command -v curl >/dev/null 2>&1 || { log_error "curl required"; exit 1; }
     command -v helm >/dev/null 2>&1 || {
-        log_info "Installing Helm..."
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        log_info "Installing Helm v3.17.0..."
+        local HELM_VERSION="v3.17.0"
+        local HELM_URL="https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+        local HELM_SHA256="e0e7d5766ce6fda145f85ceafd4e265e6da9ea23b97e1462a9a50e77c9c62fe6"
+
+        curl -fsSL -o /tmp/helm.tar.gz "${HELM_URL}"
+        echo "${HELM_SHA256}  /tmp/helm.tar.gz" | sha256sum -c -
+        tar -xzf /tmp/helm.tar.gz -C /tmp
+        sudo install -o root -g root -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+        rm -rf /tmp/helm.tar.gz /tmp/linux-amd64
     }
 }
 
@@ -98,7 +106,7 @@ TimeoutStartSec=0
 Restart=always
 RestartSec=5s
 ExecStartPre=/bin/sh -xc '! /usr/bin/systemctl is-enabled --quiet nm-cloud-setup.service 2>/dev/null'
-ExecStart=/usr/local/bin/k3s server --cluster-init --disable=servicelb --write-kubeconfig-mode=644
+ExecStart=/usr/local/bin/k3s server --cluster-init --disable=servicelb --write-kubeconfig-mode=600
 SYSTEMD
 
     log_info "Starting K3s..."

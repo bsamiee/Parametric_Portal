@@ -106,7 +106,15 @@ jobs:
         working-directory: infrastructure/overlays/prod
         run: |
           TAG="${{ needs.build.outputs.image-tag }}"
-          sed -i "s|newTag: .*|newTag: ${TAG}|g" kustomization.yaml
+          AFFECTED='${{ needs.build.outputs.affected }}'
+
+          # Update only affected app image tags
+          if [[ "${AFFECTED}" == *'"api"'* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            sed -i '/name:.*\/api$/,/newTag:/{s|newTag: .*|newTag: '"${TAG}"'|}' kustomization.yaml
+          fi
+          if [[ "${AFFECTED}" == *'"parametric_icons"'* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            sed -i '/name:.*\/icons$/,/newTag:/{s|newTag: .*|newTag: '"${TAG}"'|}' kustomization.yaml
+          fi
 
       - name: Commit and Push
         run: |

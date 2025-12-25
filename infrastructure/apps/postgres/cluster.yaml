@@ -53,8 +53,9 @@ spec:
 
   backup:
     barmanObjectStore:
+      # destinationPath uses AWS S3 by default; for S3-compatible storage,
+      # add endpointURL via Kustomize patch in overlays/prod
       destinationPath: "s3://parametric-portal-backups/postgres/"
-      endpointURL: "${S3_ENDPOINT_URL}"
       s3Credentials:
         accessKeyId:
           name: s3-backup-credentials

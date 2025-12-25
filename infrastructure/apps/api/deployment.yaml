@@ -29,11 +29,11 @@ spec:
             - name: API_PORT
               value: "4000"
             - name: POSTGRES_HOST
-              value: "postgres.parametric-portal.svc.cluster.local"
+              value: "parametric-portal-db-rw.parametric-portal.svc.cluster.local"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
-              value: "parametric"
+              value: "parametric_portal"
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:

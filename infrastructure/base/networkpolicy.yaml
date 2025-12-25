@@ -75,11 +75,11 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # PostgreSQL
+    # PostgreSQL (CloudNativePG)
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: postgres
+              cnpg.io/cluster: parametric-portal-db
       ports:
         - protocol: TCP
           port: 5432
