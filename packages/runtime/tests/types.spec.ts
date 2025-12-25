@@ -41,7 +41,7 @@ describe('validateStoreName', () => {
     it.prop([FC_ARB.storeName()])('accepts valid names matching pattern', (name) => {
         expect(validateStoreName(name)).toBe(true);
     });
-    it.prop([FC_ARB.invalidStoreName()])('rejects invalid names not matching pattern', (name) => {
+    it.prop([FC_ARB.invalidStoreName()])('rejects invalid names not matching pattern', (name: string) => {
         expect(validateStoreName(name)).toBe(false);
     });
     it.each(B.samples.validNames)('accepts valid sample: "%s"', (name) => {
@@ -135,12 +135,15 @@ describe('schema and validator consistency', () => {
         const schemaValid = schemaResult._tag === 'Right';
         expect(validatorResult).toBe(schemaValid);
     });
-    it.prop([FC_ARB.invalidStoreName()])('validateStoreName and StoreNameSchema agree on invalid names', (name) => {
-        const validatorResult = validateStoreName(name);
-        const schemaResult = S.decodeUnknownEither(StoreNameSchema)(name);
-        const schemaValid = schemaResult._tag === 'Right';
-        expect(validatorResult).toBe(schemaValid);
-    });
+    it.prop([FC_ARB.invalidStoreName()])(
+        'validateStoreName and StoreNameSchema agree on invalid names',
+        (name: string) => {
+            const validatorResult = validateStoreName(name);
+            const schemaResult = S.decodeUnknownEither(StoreNameSchema)(name);
+            const schemaValid = schemaResult._tag === 'Right';
+            expect(validatorResult).toBe(schemaValid);
+        },
+    );
     it('TUNING pattern source matches local pattern', () => {
         expect(STORE_TYPES_TUNING.patterns.storeName.source).toBe(B.pattern.source);
     });
