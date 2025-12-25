@@ -1,0 +1,14 @@
+# --- ICONS KUSTOMIZATION ------------------------------------------------------
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingressroute.yaml
+  - middleware.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/component: frontend
+    includeSelectors: false

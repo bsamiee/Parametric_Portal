@@ -1,0 +1,23 @@
+# --- BASE KUSTOMIZATION -------------------------------------------------------
+# Shared resources for all environments (security, networking, HA)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: parametric-portal-base
+  annotations:
+    config.kubernetes.io/local-config: "true"
+
+resources:
+  - namespace.yaml
+  - tlsoption.yaml
+  - networkpolicy.yaml
+  - poddisruptionbudget.yaml
+  - shared-middleware.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: parametric-portal
+      app.kubernetes.io/part-of: parametric-suite
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

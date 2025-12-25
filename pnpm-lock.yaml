@@ -45,6 +45,9 @@ catalogs:
     '@mermaid-js/mermaid-cli':
       specifier: 11.12.0
       version: 11.12.0
+    '@nx/docker':
+      specifier: 22.3.3
+      version: 22.3.3
     '@nx/js':
       specifier: 22.3.3
       version: 22.3.3
@@ -337,6 +340,9 @@ importers:
       '@mermaid-js/mermaid-cli':
         specifier: 'catalog:'
         version: 11.12.0(@babel/core@7.28.5)(@babel/template@7.27.2)(@types/react@19.2.7)(puppeteer@24.34.0(typescript@6.0.0-dev.20251125))(tsx@4.21.0)(yaml@2.8.2)
+      '@nx/docker':
+        specifier: 'catalog:'
+        version: 22.3.3(nx@22.3.3)
       '@nx/js':
         specifier: 'catalog:'
         version: 22.3.3(@babel/traverse@7.28.5)(nx@22.3.3)
@@ -2722,6 +2728,9 @@ packages:
     resolution: {integrity: sha512-/hxcdhE+QDalsWEbJurHtZh9aY27taHeImbCVJnogwv85H3RbAE+0YuKXGInutfLszAs7phwzli71yq+d2P45Q==}
     peerDependencies:
       nx: '>= 21 <= 23 || ^22.0.0-0'
+
+  '@nx/docker@22.3.3':
+    resolution: {integrity: sha512-Z1Phb+IZP5ofRadrzJQdMOdMKOaJ6nKXifgGPN0uxd9gNQ7V7XiHxK3+RW7nANuotYW5sf5DnLxDbhbSDD3Syw==}
 
   '@nx/eslint@22.3.3':
     resolution: {integrity: sha512-iG/LvrYf2CFAm2A0kfmRU4VeCTAN5PjUw8xc6oD1zfQ/KTmE/gFG2P1aJBo2mTIyzk9k8ZI0dqIhPLdl/AAtxg==}
@@ -11687,6 +11696,14 @@ snapshots:
       semver: 7.7.3
       tslib: 2.8.1
       yargs-parser: 21.1.1
+
+  '@nx/docker@22.3.3(nx@22.3.3)':
+    dependencies:
+      '@nx/devkit': 22.3.3(nx@22.3.3)
+      enquirer: 2.3.6
+      tslib: 2.8.1
+    transitivePeerDependencies:
+      - nx
 
   '@nx/eslint@22.3.3(@babel/traverse@7.28.5)(@zkochan/js-yaml@0.0.7)(eslint@9.39.2(jiti@2.6.1))(nx@22.3.3)':
     dependencies:

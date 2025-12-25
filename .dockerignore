@@ -1,0 +1,68 @@
+# --- DOCKER IGNORE ------------------------------------------------------------
+# Excludes files from Docker build context for faster builds
+
+# --- DEPENDENCIES -------------------------------------------------------------
+node_modules
+.pnpm-store
+
+# --- BUILD ARTIFACTS ----------------------------------------------------------
+dist
+build
+coverage
+.nx/cache
+.vite
+.vite-inspect
+stryker-tmp
+
+# --- VERSION CONTROL ----------------------------------------------------------
+.git
+.gitignore
+.github
+
+# --- IDE/EDITOR ---------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# --- LOGS ---------------------------------------------------------------------
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# --- ENVIRONMENT/SECRETS ------------------------------------------------------
+.env
+.env.*
+*.env.local
+*.pem
+credentials.json
+infrastructure/kamal/.kamal/secrets
+
+# --- DOCUMENTATION ------------------------------------------------------------
+*.md
+!README.md
+docs/
+CHANGELOG.md
+
+# --- TESTING ------------------------------------------------------------------
+test-results/
+playwright-report/
+reports/
+
+# --- INFRASTRUCTURE -----------------------------------------------------------
+infrastructure/
+.claude/
+
+# --- MISC ---------------------------------------------------------------------
+*.tsbuildinfo
+lefthook.yml
+biome.json
+*.config.js
+*.config.ts
+!vite.config.ts
+!vitest.config.ts
+!tsconfig.base.json
+!nx.json
+!vite.factory.ts

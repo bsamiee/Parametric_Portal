@@ -68,7 +68,6 @@ const M = Object.freeze({
 const isProtected = (branch: string): boolean => M.protected.some((p) => branch === p || branch.startsWith(`${p}/`));
 const branchAge = (date: string): number => fn.age(date, new Date());
 const shouldWarnDraft = (pr: PR): boolean => pr.draft && branchAge(pr.updated_at) >= M.thresholds.draftWarn;
-
 const branchActionMap = Object.freeze({
     active: (branch: string): BranchAnalysis => ({ action: 'skip', branch, reason: 'has-active-pr' }),
     draft: (branch: string): BranchAnalysis => ({ action: 'warn', branch, reason: 'draft-pr' }),
@@ -76,7 +75,6 @@ const branchActionMap = Object.freeze({
     recent: (branch: string): BranchAnalysis => ({ action: 'skip', branch, reason: 'recent' }),
     stale: (branch: string, age: number): BranchAnalysis => ({ action: 'delete', branch, reason: `stale-${age}d` }),
 } as const);
-
 const shouldDeleteBranch = (branch: Branch, prs: ReadonlyArray<PR>, commit: BranchCommit): BranchAnalysis => {
     const prForBranch = prs.find((pr) => pr.head.ref === branch.name);
     const age = branchAge(commit.commit.committer.date);
@@ -84,7 +82,6 @@ const shouldDeleteBranch = (branch: Branch, prs: ReadonlyArray<PR>, commit: Bran
     const hasActivePr = prForBranch !== undefined && !prForBranch.draft;
     const hasDraftPr = prForBranch?.draft;
     const isStale = age >= M.thresholds.branchStale;
-
     if (isProtectedBranch) {
         return { action: 'skip', branch: branch.name, reason: 'protected' };
     }
@@ -104,19 +101,15 @@ const shouldDeleteBranch = (branch: Branch, prs: ReadonlyArray<PR>, commit: Bran
 
 const fetchBranches = async (ctx: Ctx): Promise<ReadonlyArray<Branch>> =>
     (await call(ctx, 'branch.list')) as ReadonlyArray<Branch>;
-
 const fetchOpenPRs = async (ctx: Ctx): Promise<ReadonlyArray<PR>> =>
     (await call(ctx, 'pull.list', B.api.state.open)) as ReadonlyArray<PR>;
-
 const fetchBranchCommit = async (ctx: Ctx, branch: string): Promise<BranchCommit> =>
     (await call(ctx, 'branch.get', branch)) as BranchCommit;
-
 const deleteBranch = async (ctx: Ctx, branch: string): Promise<{ success: boolean; error?: string }> =>
     ctx.github.rest.git
         .deleteRef({ owner: ctx.owner, ref: `heads/${branch}`, repo: ctx.repo })
         .then(() => ({ success: true }))
         .catch((err: Error) => ({ error: err.message || 'Unknown error', success: false }));
-
 const warnDraftPR = async (ctx: Ctx, pr: PR): Promise<void> => {
     const age = branchAge(pr.updated_at);
     await mutate(ctx, {
@@ -145,9 +138,7 @@ const maintenanceHandlers = {
         const deleteResults = dryRun
             ? toDelete.map(() => ({ success: true }))
             : await Promise.all(toDelete.map((a) => deleteBranch(ctx, a.branch)));
-
         await Promise.all(dryRun ? [] : draftPRs.map((pr) => warnDraftPR(ctx, pr)));
-
         return {
             deleted: deleteResults.filter((r) => r.success).length,
             errors: deleteResults.filter((r) => !r.success).length,
@@ -198,7 +189,6 @@ const run = async (params: RunParams & { readonly spec: MaintenanceSpec }): Prom
         },
     } as const;
     const result = await kindDispatch[params.spec.kind]();
-
     if (result.branchErrors > 0) {
         params.core.info(`[WARN] ${result.branchErrors} branch deletion(s) failed`);
     }

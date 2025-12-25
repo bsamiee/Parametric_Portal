@@ -1,3 +1,0 @@
-# [H1][AGENT_RULES]
-
-Read @CLAUDE.md

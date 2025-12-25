@@ -6,14 +6,16 @@
 
 // --- Types -------------------------------------------------------------------
 
-// SECURITY: Type guard for REST API responses (runtime validation instead of unsafe assertion)
-type RestApiResponse = { readonly data: unknown };
-const isRestApiResponse = (value: unknown): value is RestApiResponse =>
-    typeof value === 'object' && value !== null && 'data' in value;
-
+type RestApiResponse = { readonly data: unknown }; // SECURITY: Type guard for REST API responses (runtime validation instead of unsafe assertion)
 type User = { readonly login: string };
 type Label = { readonly name: string };
 type Repo = { readonly owner: string; readonly repo: string };
+type ValidateResult =
+    | { readonly valid: true; readonly type: TypeKey; readonly breaking: boolean; readonly subject: string }
+    | { readonly valid: false; readonly error: string };
+type Target = 'title' | 'commit' | 'label' | 'body';
+type TypeKey = 'feat' | 'fix' | 'docs' | 'style' | 'refactor' | 'test' | 'chore' | 'perf' | 'ci' | 'build';
+type MarkerKey = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 type Issue = {
     readonly body: string | null;
     readonly closed_at?: string;
@@ -57,6 +59,77 @@ type RunParams = {
     readonly core: Core;
     readonly github: GitHub;
 };
+type Section =
+    | { readonly kind: 'list'; readonly items: ReadonlyArray<string>; readonly ordered?: boolean }
+    | { readonly kind: 'task'; readonly items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }> }
+    | { readonly kind: 'field'; readonly label: string; readonly value: string }
+    | { readonly kind: 'heading'; readonly level: 2 | 3; readonly text: string }
+    | { readonly kind: 'text'; readonly content: string }
+    | { readonly kind: 'code'; readonly lang: string; readonly content: string }
+    | { readonly kind: 'details'; readonly summary: string; readonly content: string; readonly open?: boolean }
+    | {
+          readonly kind: 'alert';
+          readonly type: 'note' | 'tip' | 'important' | 'warning' | 'caution';
+          readonly content: string;
+      }
+    | { readonly kind: 'divider' }
+    | { readonly kind: 'timestamp' };
+type BodySpec = ReadonlyArray<Section>;
+type MetaCat = keyof typeof B.meta.ops;
+type MetaCap = keyof typeof B.meta.caps;
+type MutateSpec =
+    | {
+          readonly t: 'comment';
+          readonly n: number;
+          readonly marker: string;
+          readonly body: string;
+          readonly mode?: 'replace' | 'append' | 'prepend' | 'section';
+          readonly sectionId?: string;
+      }
+    | {
+          readonly t: 'issue';
+          readonly label: string;
+          readonly pattern: string;
+          readonly title: string;
+          readonly labels: ReadonlyArray<string>;
+          readonly body: string;
+          readonly mode?: 'replace' | 'append' | 'prepend';
+          readonly pin?: boolean;
+      }
+    | {
+          readonly t: 'label';
+          readonly n: number;
+          readonly labels: ReadonlyArray<string>;
+          readonly action: 'add' | 'remove';
+      }
+    | {
+          readonly t: 'review';
+          readonly pr: number;
+          readonly body: string;
+          readonly event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+      }
+    | {
+          readonly t: 'release';
+          readonly tag: string;
+          readonly name: string;
+          readonly body: string;
+          readonly draft?: boolean;
+          readonly prerelease?: boolean;
+      };
+type Op = {
+    readonly api?: readonly [string, string];
+    readonly map: (args: ReadonlyArray<unknown>) => Record<string, unknown>;
+    readonly out?: (data: unknown) => unknown;
+    readonly query?: string;
+    readonly safe?: boolean;
+};
+
+// --- Constants ---------------------------------------------------------------
+
+const isRestApiResponse = (value: unknown): value is RestApiResponse =>
+    typeof value === 'object' && value !== null && 'data' in value;
+const TYPES = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build'] as const;
+const MARKERS = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;
 
 // --- Markdown ----------------------------------------------------------------
 
@@ -65,7 +138,6 @@ const shieldUrl = (label: string, message: string, color: string, style?: string
     const params = [style && `style=${style}`, logo && `logo=${logo}&logoColor=white`].filter(Boolean).join('&');
     return params ? `${base}?${params}` : base;
 };
-
 const md = Object.freeze({
     alert: (type: 'note' | 'tip' | 'important' | 'warning' | 'caution', content: string): string =>
         `> [!${type.toUpperCase()}]\n> ${content.split('\n').join('\n> ')}`,
@@ -110,39 +182,6 @@ const md = Object.freeze({
         workflow: (repo: string, file: string): string => `https://github.com/${repo}/actions/workflows/${file}.yml`,
     },
 } as const);
-
-// --- Types -------------------------------------------------------------------
-
-type Section =
-    | { readonly kind: 'list'; readonly items: ReadonlyArray<string>; readonly ordered?: boolean }
-    | { readonly kind: 'task'; readonly items: ReadonlyArray<{ readonly text: string; readonly done?: boolean }> }
-    | { readonly kind: 'field'; readonly label: string; readonly value: string }
-    | { readonly kind: 'heading'; readonly level: 2 | 3; readonly text: string }
-    | { readonly kind: 'text'; readonly content: string }
-    | { readonly kind: 'code'; readonly lang: string; readonly content: string }
-    | { readonly kind: 'details'; readonly summary: string; readonly content: string; readonly open?: boolean }
-    | {
-          readonly kind: 'alert';
-          readonly type: 'note' | 'tip' | 'important' | 'warning' | 'caution';
-          readonly content: string;
-      }
-    | { readonly kind: 'divider' }
-    | { readonly kind: 'timestamp' };
-
-type BodySpec = ReadonlyArray<Section>;
-
-// --- Types -------------------------------------------------------------------
-
-type ValidateResult =
-    | { readonly valid: true; readonly type: TypeKey; readonly breaking: boolean; readonly subject: string }
-    | { readonly valid: false; readonly error: string };
-type Target = 'title' | 'commit' | 'label' | 'body';
-type TypeKey = 'feat' | 'fix' | 'docs' | 'style' | 'refactor' | 'test' | 'chore' | 'perf' | 'ci' | 'build';
-type MarkerKey = 'note' | 'tip' | 'important' | 'warning' | 'caution';
-// --- Constants ---------------------------------------------------------------
-
-const TYPES = ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'perf', 'ci', 'build'] as const;
-const MARKERS = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'] as const;
 
 // --- Constants ---------------------------------------------------------------
 
@@ -369,53 +408,6 @@ const B = Object.freeze({
     time: { day: 86400000 },
 } as const);
 
-// --- Types -------------------------------------------------------------------
-
-type MetaCat = keyof typeof B.meta.ops;
-type MetaCap = keyof typeof B.meta.caps;
-
-// --- Types -------------------------------------------------------------------
-
-type MutateSpec =
-    | {
-          readonly t: 'comment';
-          readonly n: number;
-          readonly marker: string;
-          readonly body: string;
-          readonly mode?: 'replace' | 'append' | 'prepend' | 'section';
-          readonly sectionId?: string;
-      }
-    | {
-          readonly t: 'issue';
-          readonly label: string;
-          readonly pattern: string;
-          readonly title: string;
-          readonly labels: ReadonlyArray<string>;
-          readonly body: string;
-          readonly mode?: 'replace' | 'append' | 'prepend';
-          readonly pin?: boolean;
-      }
-    | {
-          readonly t: 'label';
-          readonly n: number;
-          readonly labels: ReadonlyArray<string>;
-          readonly action: 'add' | 'remove';
-      }
-    | {
-          readonly t: 'review';
-          readonly pr: number;
-          readonly body: string;
-          readonly event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
-      }
-    | {
-          readonly t: 'release';
-          readonly tag: string;
-          readonly name: string;
-          readonly body: string;
-          readonly draft?: boolean;
-          readonly prerelease?: boolean;
-      };
-
 // --- Pure Functions ----------------------------------------------------------
 
 const fn = {
@@ -532,14 +524,6 @@ const fn = {
 } as const;
 
 // --- Dispatch Tables ---------------------------------------------------------
-
-type Op = {
-    readonly api?: readonly [string, string];
-    readonly map: (args: ReadonlyArray<unknown>) => Record<string, unknown>;
-    readonly out?: (data: unknown) => unknown;
-    readonly query?: string;
-    readonly safe?: boolean;
-};
 
 const prop =
     <K extends string>(...keys: readonly K[]) =>

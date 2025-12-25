@@ -1,0 +1,401 @@
+# --- MISE CONFIGURATION -------------------------------------------------------
+# Unified tool management + environment variables + task automation
+# Run: mise run <task>  |  List: mise tasks  |  Install: mise install
+
+[settings]
+experimental = true
+experimental_monorepo_root = true
+task_output = "prefix"
+jobs = 4
+
+# --- [TOOLS] ------------------------------------------------------------------
+[tools]
+node = "25"
+pnpm = "latest"
+
+# --- [ENV] --------------------------------------------------------------------
+[env]
+KUBECONFIG = "/etc/rancher/k3s/k3s.yaml"
+NAMESPACE = "parametric-portal"
+
+# --- [TASKS] ------------------------------------------------------------------
+
+[tasks.setup-k3s]
+description = "Install K3s + ArgoCD + Sealed Secrets with Traefik v3"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- [CONSTANTS] --------------------------------------------------------------
+readonly K3S_VERSION="v1.32.2+k3s1"
+readonly ARGOCD_CHART_VERSION="7.8.28"
+readonly SEALED_SECRETS_VERSION="2.17.1"
+readonly NAMESPACE="${NAMESPACE:-parametric-portal}"
+
+# --- [COLORS] -----------------------------------------------------------------
+readonly RED='\\033[0;31m'
+readonly GREEN='\\033[0;32m'
+readonly YELLOW='\\033[1;33m'
+readonly NC='\\033[0m'
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# --- [PREREQUISITES] ----------------------------------------------------------
+check_prerequisites() {
+    log_info "Checking prerequisites..."
+
+    [[ -z "${ACME_EMAIL:-}" ]] && { log_error "ACME_EMAIL required (export ACME_EMAIL=admin@yourdomain.com)"; exit 1; }
+    [[ -z "${DOMAIN:-}" ]] && { log_error "DOMAIN required (export DOMAIN=yourdomain.com)"; exit 1; }
+
+    command -v curl >/dev/null 2>&1 || { log_error "curl required"; exit 1; }
+    command -v helm >/dev/null 2>&1 || {
+        log_info "Installing Helm..."
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    }
+}
+
+# --- [K3S_INSTALL] ------------------------------------------------------------
+install_k3s() {
+    log_info "Installing K3s ${K3S_VERSION}..."
+
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" \\
+        K3S_KUBECONFIG_MODE="644" \\
+        sh -s - server \\
+        --cluster-init \\
+        --disable=servicelb \\
+        --write-kubeconfig-mode=644
+
+    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+    log_info "Waiting for K3s to be ready..."
+    kubectl wait --for=condition=Ready nodes --all --timeout=120s
+}
+
+# --- [TRAEFIK_CONFIG] ---------------------------------------------------------
+configure_traefik() {
+    log_info "Configuring Traefik v3..."
+
+    cat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml << 'EOF'
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    image:
+      repository: docker.io/library/traefik
+      tag: "3.3.5"
+
+    deployment:
+      replicas: 1
+
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+    ports:
+      web:
+        port: 8000
+        expose:
+          default: true
+        exposedPort: 80
+        protocol: TCP
+        redirectTo:
+          port: websecure
+      websecure:
+        port: 8443
+        expose:
+          default: true
+        exposedPort: 443
+        protocol: TCP
+        tls:
+          enabled: true
+
+    ingressRoute:
+      dashboard:
+        enabled: false
+
+    providers:
+      kubernetesCRD:
+        enabled: true
+        allowCrossNamespace: true
+      kubernetesIngress:
+        enabled: true
+
+    logs:
+      general:
+        level: INFO
+      access:
+        enabled: true
+
+    certificatesResolvers:
+      letsencrypt:
+        acme:
+          email: "${ACME_EMAIL}"
+          storage: /data/acme.json
+          tlsChallenge: {}
+
+    persistence:
+      enabled: true
+      size: 128Mi
+      path: /data
+EOF
+}
+
+# --- [ARGOCD_INSTALL] ---------------------------------------------------------
+install_argocd() {
+    log_info "Installing ArgoCD ${ARGOCD_CHART_VERSION}..."
+
+    helm repo add argo https://argoproj.github.io/argo-helm
+    helm repo update
+
+    kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+
+    helm upgrade --install argocd argo/argo-cd \\
+        --namespace argocd \\
+        --version "${ARGOCD_CHART_VERSION}" \\
+        --set configs.cm."kustomize\\.buildOptions"="--enable-helm" \\
+        --set server.ingress.enabled=false \\
+        --set server.service.type=ClusterIP \\
+        --set crds.install=true \\
+        --set crds.keep=true \\
+        --wait
+
+    log_info "ArgoCD admin password:"
+    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+    echo ""
+}
+
+# --- [SEALED_SECRETS_INSTALL] -------------------------------------------------
+install_sealed_secrets() {
+    log_info "Installing Sealed Secrets ${SEALED_SECRETS_VERSION}..."
+
+    helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+    helm repo update
+
+    helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets \\
+        --namespace kube-system \\
+        --version "${SEALED_SECRETS_VERSION}" \\
+        --set fullnameOverride=sealed-secrets-controller \\
+        --set keyrenewperiod=720h \\
+        --set resources.requests.cpu=50m \\
+        --set resources.requests.memory=64Mi \\
+        --set resources.limits.cpu=200m \\
+        --set resources.limits.memory=256Mi \\
+        --wait
+
+    log_info "Fetching sealed secrets certificate..."
+    kubeseal --controller-name=sealed-secrets-controller \\
+        --controller-namespace=kube-system \\
+        --fetch-cert > /opt/sealed-secrets-cert.pem
+
+    log_info "Certificate saved to /opt/sealed-secrets-cert.pem"
+}
+
+# --- [NAMESPACE_SETUP] --------------------------------------------------------
+setup_namespace() {
+    log_info "Creating ${NAMESPACE} namespace..."
+
+    kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limits
+  namespace: ${NAMESPACE}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "2"
+        memory: "2Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+EOF
+}
+
+# --- [ENTRY_POINT] ------------------------------------------------------------
+main() {
+    log_info "Starting K3s cluster setup..."
+
+    check_prerequisites
+    install_k3s
+    configure_traefik
+    install_argocd
+    install_sealed_secrets
+    setup_namespace
+
+    log_info "Setup complete!"
+    log_info "KUBECONFIG: /etc/rancher/k3s/k3s.yaml"
+    log_info "ArgoCD UI: kubectl port-forward svc/argocd-server -n argocd 8080:443"
+}
+
+main "$@"
+"""
+
+[tasks.seal-secret]
+description = "Create SealedSecret from environment variables"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- [CONSTANTS] --------------------------------------------------------------
+readonly CERT_PATH="${SEALED_SECRETS_CERT:-/opt/sealed-secrets-cert.pem}"
+readonly OUTPUT_DIR="${OUTPUT_DIR:-infrastructure/overlays/prod}"
+
+# --- [COLORS] -----------------------------------------------------------------
+readonly GREEN='\\033[0;32m'
+readonly RED='\\033[0;31m'
+readonly NC='\\033[0m'
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# --- [VALIDATION] -------------------------------------------------------------
+validate_inputs() {
+    local secret_name="${1:-}"
+    local namespace="${2:-}"
+
+    [[ -z "${secret_name}" ]] && { log_error "Usage: mise run seal-secret <secret-name> <namespace>"; exit 1; }
+    [[ -z "${namespace}" ]] && { log_error "Usage: mise run seal-secret <secret-name> <namespace>"; exit 1; }
+    [[ ! -f "${CERT_PATH}" ]] && { log_error "Certificate not found: ${CERT_PATH}"; exit 1; }
+    command -v kubeseal >/dev/null 2>&1 || { log_error "kubeseal required"; exit 1; }
+}
+
+# --- [CREATE_SECRET] ----------------------------------------------------------
+create_sealed_secret() {
+    local secret_name="$1"
+    local namespace="$2"
+
+    log_info "Creating SealedSecret: ${secret_name} in ${namespace}"
+
+    # Collect secrets from environment
+    local -a secret_args=()
+
+    [[ -n "${POSTGRES_USER:-}" ]] && secret_args+=("--from-literal=POSTGRES_USER=${POSTGRES_USER}")
+    [[ -n "${POSTGRES_PASSWORD:-}" ]] && secret_args+=("--from-literal=POSTGRES_PASSWORD=${POSTGRES_PASSWORD}")
+    [[ -n "${ENCRYPTION_KEY:-}" ]] && secret_args+=("--from-literal=ENCRYPTION_KEY=${ENCRYPTION_KEY}")
+    [[ -n "${ANTHROPIC_API_KEY:-}" ]] && secret_args+=("--from-literal=ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
+    [[ -n "${OAUTH_GITHUB_CLIENT_ID:-}" ]] && secret_args+=("--from-literal=OAUTH_GITHUB_CLIENT_ID=${OAUTH_GITHUB_CLIENT_ID}")
+    [[ -n "${OAUTH_GITHUB_CLIENT_SECRET:-}" ]] && secret_args+=("--from-literal=OAUTH_GITHUB_CLIENT_SECRET=${OAUTH_GITHUB_CLIENT_SECRET}")
+    [[ -n "${OAUTH_GOOGLE_CLIENT_ID:-}" ]] && secret_args+=("--from-literal=OAUTH_GOOGLE_CLIENT_ID=${OAUTH_GOOGLE_CLIENT_ID}")
+    [[ -n "${OAUTH_GOOGLE_CLIENT_SECRET:-}" ]] && secret_args+=("--from-literal=OAUTH_GOOGLE_CLIENT_SECRET=${OAUTH_GOOGLE_CLIENT_SECRET}")
+    [[ -n "${OAUTH_MICROSOFT_CLIENT_ID:-}" ]] && secret_args+=("--from-literal=OAUTH_MICROSOFT_CLIENT_ID=${OAUTH_MICROSOFT_CLIENT_ID}")
+    [[ -n "${OAUTH_MICROSOFT_CLIENT_SECRET:-}" ]] && secret_args+=("--from-literal=OAUTH_MICROSOFT_CLIENT_SECRET=${OAUTH_MICROSOFT_CLIENT_SECRET}")
+
+    [[ ${#secret_args[@]} -eq 0 ]] && { log_error "No secrets found in environment"; exit 1; }
+
+    kubectl create secret generic "${secret_name}" \\
+        --namespace="${namespace}" \\
+        "${secret_args[@]}" \\
+        --dry-run=client -o yaml | \\
+    kubeseal \\
+        --cert="${CERT_PATH}" \\
+        --format yaml \\
+        --scope namespace-wide > "${OUTPUT_DIR}/sealed-${secret_name}.yaml"
+
+    log_info "Created: ${OUTPUT_DIR}/sealed-${secret_name}.yaml"
+}
+
+# --- [ENTRY_POINT] ------------------------------------------------------------
+main() {
+    validate_inputs "$@"
+    create_sealed_secret "$@"
+}
+
+main "$@"
+"""
+
+[tasks.backup-db]
+description = "Backup PostgreSQL database with retention"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+# --- [CONSTANTS] --------------------------------------------------------------
+readonly BACKUP_DIR="${BACKUP_DIR:-/opt/backups/postgres}"
+readonly RETENTION_DAYS="${RETENTION_DAYS:-7}"
+readonly CONTAINER_NAME="${CONTAINER_NAME:-postgres}"
+readonly DB_NAME="${DB_NAME:-parametric}"
+readonly DB_USER="${DB_USER:-postgres}"
+readonly TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+readonly BACKUP_FILE="${BACKUP_DIR}/${DB_NAME}_${TIMESTAMP}.sql.gz"
+
+# --- [COLORS] -----------------------------------------------------------------
+readonly GREEN='\\033[0;32m'
+readonly NC='\\033[0m'
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+
+# --- [ENTRY_POINT] ------------------------------------------------------------
+main() {
+    mkdir -p "${BACKUP_DIR}"
+
+    log_info "[1/4] Starting backup of ${DB_NAME}..."
+
+    docker exec "${CONTAINER_NAME}" \\
+        pg_dump -U "${DB_USER}" -d "${DB_NAME}" --clean --if-exists \\
+        | gzip > "${BACKUP_FILE}"
+
+    FILESIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
+    log_info "[2/4] Backup created: ${BACKUP_FILE} (${FILESIZE})"
+
+    log_info "[3/4] Cleaning up backups older than ${RETENTION_DAYS} days..."
+    find "${BACKUP_DIR}" -name "*.sql.gz" -mtime "+${RETENTION_DAYS}" -delete
+
+    BACKUP_COUNT=$(find "${BACKUP_DIR}" -name "*.sql.gz" | wc -l)
+    log_info "[4/4] Backup complete. ${BACKUP_COUNT} backups retained."
+
+    log_info "[OK] Backup successful: ${BACKUP_FILE}"
+}
+
+main "$@"
+"""
+
+# --- KUBERNETES ---------------------------------------------------------------
+
+[tasks."k8s:build"]
+description = "Build Kustomize manifests for prod"
+run = "kustomize build infrastructure/overlays/prod"
+sources = ["infrastructure/**/*.yaml"]
+
+[tasks."k8s:validate"]
+description = "Validate Kustomize manifests"
+sources = ["infrastructure/**/*.yaml"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[1/2] Building manifests..."
+kustomize build infrastructure/overlays/prod > /tmp/k8s-manifests.yaml
+
+echo "[2/2] Validating with kubectl..."
+kubectl apply --dry-run=client -f /tmp/k8s-manifests.yaml
+
+echo "[OK] All manifests valid"
+"""
+
+[tasks."k8s:diff"]
+description = "Show diff between current and desired state"
+sources = ["infrastructure/**/*.yaml"]
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+kustomize build infrastructure/overlays/prod | kubectl diff -f - || true
+"""

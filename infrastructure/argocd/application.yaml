@@ -1,0 +1,71 @@
+# --- ARGOCD APPLICATIONSET ----------------------------------------------------
+# GitOps deployment with automatic Application generation per overlay
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: parametric-portal
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/managed-by: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - git:
+        repoURL: https://github.com/bardiasamiee/Parametric_Portal.git
+        revision: HEAD
+        directories:
+          - path: infrastructure/overlays/*
+  template:
+    metadata:
+      name: 'parametric-portal-{{ .path.basename }}'
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+      labels:
+        app.kubernetes.io/name: parametric-portal
+        app.kubernetes.io/instance: '{{ .path.basename }}'
+        app.kubernetes.io/managed-by: argocd
+    spec:
+      project: default
+
+      source:
+        repoURL: https://github.com/bardiasamiee/Parametric_Portal.git
+        targetRevision: HEAD
+        path: '{{ .path.path }}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: parametric-portal
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+          - ServerSideApply=true
+          - SkipDryRunOnMissingResource=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+      ignoreDifferences:
+        - group: ""
+          kind: Secret
+          jsonPointers:
+            - /data
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas
+
+      revisionHistoryLimit: 10

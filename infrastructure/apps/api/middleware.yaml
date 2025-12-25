@@ -1,0 +1,38 @@
+# --- API MIDDLEWARE -----------------------------------------------------------
+# App-specific middleware for api.parametric-portal.com
+# Each app defines its own CSP and middleware chain
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: api-security-headers
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: middleware
+spec:
+  headers:
+    frameDeny: true
+    customFrameOptionsValue: "DENY"
+    contentTypeNosniff: true
+    browserXssFilter: true
+    referrerPolicy: "strict-origin-when-cross-origin"
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: true
+    forceSTSHeader: true
+    customResponseHeaders:
+      X-Robots-Tag: "noindex, nofollow"
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: api-middleware-chain
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: middleware
+spec:
+  chain:
+    middlewares:
+      - name: api-security-headers
+      - name: rate-limit-api
+      - name: compress

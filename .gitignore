@@ -108,3 +108,9 @@ Thumbs.db
 .gemini/telemetry.log
 .gemini/settings.json
 .gemini/.DS_Store
+
+# --- [INFRASTRUCTURE_SECRETS] -------------------------------------------------
+infrastructure/kamal/.kamal/secrets
+infrastructure/traefik/acme/
+*.pem
+credentials.json

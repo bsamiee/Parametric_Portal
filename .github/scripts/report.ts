@@ -7,6 +7,7 @@ import { type Ctx, call, createCtx, fn, type Issue, mutate, type RunParams } fro
 
 // --- Types -------------------------------------------------------------------
 
+type SourceFn = (ctx: Ctx, cfg: ContentConfig, spec: ContentSpec, p: RunParams) => Promise<unknown>;
 type ContentSpec = { readonly kind: string } & Record<string, unknown>;
 type ContentConfig = {
     readonly src: { readonly source: 'fetch'; readonly op: string; readonly args?: ReadonlyArray<unknown> };
@@ -39,7 +40,6 @@ const reportSpecs: Record<string, ContentConfig> = Object.freeze({
 
 // --- Pure Functions ----------------------------------------------------------
 
-type SourceFn = (ctx: Ctx, cfg: ContentConfig, spec: ContentSpec, p: RunParams) => Promise<unknown>;
 const dataSources: Record<string, SourceFn> = {
     fetch: async (ctx, cfg) => call(ctx, cfg.src.op, ...(cfg.src.args ?? [])),
     params: async (_, __, spec) => spec,

@@ -65,12 +65,10 @@ const alertSpecs = Object.freeze({
 const run = async (params: RunParams & { readonly spec: AlertSpec }): Promise<void> => {
     const ctx = createCtx(params);
     const spec = params.spec;
-
     // CI Failure Logic
     if (spec.kind === 'ci') {
         const classification = fn.classify(spec.job, alertSpecs.ci.rules, alertSpecs.ci.default);
         const body = fn.body(alertSpecs.ci.body, { job: spec.job, runUrl: spec.runUrl });
-
         // If PR number provided, update PR comment section
         if (spec.prNumber) {
             await mutate(ctx, {
@@ -94,7 +92,6 @@ const run = async (params: RunParams & { readonly spec: AlertSpec }): Promise<vo
             });
         }
     }
-
     // Security Alert Logic
     else {
         const body = fn.body(alertSpecs.security.body, { runUrl: spec.runUrl });

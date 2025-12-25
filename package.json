@@ -17,6 +17,7 @@
         "@effect/vitest": "catalog:",
         "@fast-check/vitest": "catalog:",
         "@mermaid-js/mermaid-cli": "catalog:",
+        "@nx/docker": "catalog:",
         "@nx/js": "catalog:",
         "@nx/react": "catalog:",
         "@nx/vite": "catalog:",
