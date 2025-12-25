@@ -18,7 +18,7 @@ const { init } = createMain({
     isDev: import.meta.env.DEV,
     loggerLayer: session.layer,
     onError: session.renderDebug,
-    onFatal: (e: Error) => session.renderDebug(e, { phase: 'fatal' }),
+    onFatal: session.fatal,
     startTime: session.startTime,
 });
 

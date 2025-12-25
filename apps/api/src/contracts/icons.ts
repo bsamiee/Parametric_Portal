@@ -13,6 +13,8 @@ const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
+type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
 type Palette = {
     readonly structural: {
         readonly guide: string;
@@ -25,7 +27,6 @@ type Palette = {
         readonly gripStroke: string;
     };
 };
-
 type LayerSpec = {
     readonly id: string;
     readonly strokeWidth: number;
@@ -43,13 +44,10 @@ const GenerateRequestSchema = S.Struct({
     referenceSvg: S.optional(S.String),
     variantCount: S.optional(typesApi.schemas.VariantCount),
 });
-type GenerateRequest = S.Schema.Type<typeof GenerateRequestSchema>;
-
 const GenerateResponseSchema = S.Struct({
     id: S.String,
     variants: S.Array(svgApi.schemas.SvgAsset),
 });
-type GenerateResponse = S.Schema.Type<typeof GenerateResponseSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 

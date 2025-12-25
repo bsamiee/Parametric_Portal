@@ -8,7 +8,7 @@ import type { DropEvent, FileDropItem } from 'react-aria';
 import type { DropZoneRenderProps } from 'react-aria-components';
 import { DropZone as AriaDropZone, FileTrigger as AriaFileTrigger } from 'react-aria-components';
 import type { Inputs, TuningFor } from './schema.ts';
-import { resolve, utilities } from './schema.ts';
+import { B, resolve, utilities } from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -34,22 +34,6 @@ type UploadApi = Readonly<{
     Zone: ForwardRefExoticComponent<DropZoneProps & RefAttributes<HTMLDivElement>>;
 }>;
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    cls: {
-        dropzone: 'relative border-2 border-dashed rounded-lg transition-colors',
-        dropzoneActive: 'border-(--ctrl-primary-bg) bg-(--ctrl-primary-bg)/5',
-        dropzoneIdle: 'border-(--upload-border)',
-        trigger: 'cursor-pointer',
-        triggerDisabled: 'cursor-(--upload-disabled-cursor) opacity-(--upload-disabled-opacity)',
-    },
-    defaults: {
-        accept: 'image/svg+xml',
-        multiple: false,
-    },
-} as const);
-
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const extractFilesFromDrop = async (event: DropEvent): Promise<FileList> => {
@@ -71,15 +55,15 @@ const createUpload = (input?: UploadInput & TuningFor<'ctrl'>): UploadApi => {
 
     const Trigger = forwardRef<HTMLDivElement, UploadProps>((props: UploadProps, ref: ForwardedRef<HTMLDivElement>) => {
         const {
-            accept = B.defaults.accept,
+            accept = B.upload.defaults.accept,
             children,
             className,
             disabled = false,
-            multiple = B.defaults.multiple,
+            multiple = B.upload.defaults.multiple,
             onSelect,
         } = props;
 
-        const triggerCls = utilities.cls(B.cls.trigger, disabled && B.cls.triggerDisabled, className);
+        const triggerCls = utilities.cls(B.upload.trigger.base, disabled && B.upload.trigger.disabled, className);
 
         return createElement(
             AriaFileTrigger,
@@ -116,8 +100,8 @@ const createUpload = (input?: UploadInput & TuningFor<'ctrl'>): UploadApi => {
                     'div',
                     {
                         className: utilities.cls(
-                            B.cls.dropzone,
-                            renderProps.isDropTarget ? B.cls.dropzoneActive : B.cls.dropzoneIdle,
+                            B.upload.dropzone.base,
+                            renderProps.isDropTarget ? B.upload.dropzone.active : B.upload.dropzone.idle,
                             className,
                         ),
                         'data-drop-target': renderProps.isDropTarget || undefined,
@@ -139,5 +123,5 @@ const createUpload = (input?: UploadInput & TuningFor<'ctrl'>): UploadApi => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as UPLOAD_TUNING, createUpload };
+export { createUpload };
 export type { DropZoneProps, UploadApi, UploadInput, UploadProps };

@@ -7,12 +7,19 @@ import type { LucideIcon, LucideProps } from 'lucide-react';
 import { icons } from 'lucide-react';
 import type { CSSProperties, ForwardedRef, SVGAttributes } from 'react';
 import { createElement, forwardRef, memo, useMemo, useRef } from 'react';
-import type { Inputs, TooltipSide } from './schema.ts';
-import { B, computeOffsetPx, merged, renderTooltipPortal, resolve, useTooltipState, utilities } from './schema.ts';
+import type { IconTuning, Inputs, TooltipSide } from './schema.ts';
+import {
+    B,
+    computeOffsetPx,
+    merged,
+    renderTooltipPortal,
+    resolve,
+    TUNING_KEYS,
+    useTooltipState,
+    utilities,
+} from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
-
-type IconTuning = { readonly scale?: Inputs['scale'] | undefined; readonly strokeWidth?: number | undefined };
 type IconName = keyof typeof icons;
 type IconProps = SVGAttributes<SVGElement> &
     IconTuning & {
@@ -31,7 +38,6 @@ type DynamicIconProps = IconProps & { readonly name: IconName };
 
 const iconNames = Object.freeze(Object.keys(icons) as ReadonlyArray<IconName>);
 const getIcon = (name: IconName): LucideIcon => icons[name];
-
 const createIconComponent = (input: IconInput) => {
     const Icon = getIcon(input.name);
     const Component = forwardRef((props: IconProps, ref: ForwardedRef<SVGSVGElement>) => {
@@ -56,14 +62,12 @@ const createIconComponent = (input: IconInput) => {
                 stroke: propStrokeWidth ?? input.strokeWidth ?? utilities.strokeWidth(resolvedScale.scale),
             };
         }, [propScale, propStrokeWidth, input.scale, input.strokeWidth]);
-
         const tooltipOffsetPx = computeOffsetPx(scale, B.algo.tooltipOffMul);
         const tooltipState = useTooltipState(wrapperRef, {
             ...(tooltip !== undefined && { content: tooltip }),
             offsetPx: tooltipOffsetPx,
             side: tooltipSide,
         });
-
         const iconProps: LucideProps = {
             ...rest,
             'aria-hidden': rest['aria-label'] === undefined && !tooltip,
@@ -74,9 +78,7 @@ const createIconComponent = (input: IconInput) => {
             style: { '--icon-size': size, ...style } as CSSProperties,
             width: size,
         };
-
         const iconEl = createElement(Icon, iconProps);
-
         return tooltip
             ? createElement(
                   'span',
@@ -96,7 +98,6 @@ const createIconComponent = (input: IconInput) => {
     Component.displayName = `Icon(${input.name})`;
     return memo(Component);
 };
-
 const DynamicIcon = memo(
     forwardRef((props: DynamicIconProps, ref: ForwardedRef<SVGSVGElement>) => {
         const {
@@ -120,14 +121,12 @@ const DynamicIcon = memo(
                 stroke: propStrokeWidth ?? utilities.strokeWidth(resolvedScale.scale),
             };
         }, [propScale, propStrokeWidth]);
-
         const tooltipOffsetPx = computeOffsetPx(scale, B.algo.tooltipOffMul);
         const tooltipState = useTooltipState(wrapperRef, {
             ...(tooltip !== undefined && { content: tooltip }),
             offsetPx: tooltipOffsetPx,
             side: tooltipSide,
         });
-
         const iconProps: LucideProps = {
             ...rest,
             'aria-hidden': rest['aria-label'] === undefined && !tooltip,
@@ -138,9 +137,7 @@ const DynamicIcon = memo(
             style: { '--icon-size': size, ...style } as CSSProperties,
             width: size,
         };
-
         const iconEl = createElement(Icon, iconProps);
-
         return tooltip
             ? createElement(
                   'span',
@@ -167,7 +164,7 @@ const createIcons = (tuning?: IconTuning) =>
         create: (input: IconInput) =>
             createIconComponent({
                 ...input,
-                ...merged(tuning, input, ['scale']),
+                ...merged(tuning, input, TUNING_KEYS.icon),
                 ...((input.strokeWidth ?? tuning?.strokeWidth)
                     ? { strokeWidth: input.strokeWidth ?? tuning?.strokeWidth }
                     : {}),

@@ -4,6 +4,7 @@
  */
 import AutoImport from 'unplugin-auto-import/vite';
 import type { Plugin } from 'vite';
+import { DEVTOOLS_TUNING } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -14,31 +15,27 @@ type DevtoolsPluginConfig = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        app: 'app',
-    },
-    virtualModule: {
-        id: 'virtual:devtools',
-        resolvedId: '\0virtual:devtools',
-    },
-} as const);
+const T = DEVTOOLS_TUNING.vitePlugin;
+
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const isPlugin = (x: unknown): x is Plugin => typeof x === 'object' && x !== null && 'name' in x;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
-    const app = config.app ?? B.defaults.app;
+    const app = config.app ?? T.defaults.app;
     const virtualModule: Plugin = {
         apply: 'serve',
         applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
         load(id) {
-            return id === B.virtualModule.resolvedId
+            return id === T.virtualModule.resolvedId
                 ? `export const __DEV__ = true;\nexport const __APP__ = '${app}';`
                 : undefined;
         },
         name: 'devtools-virtual',
         resolveId(id) {
-            return id === B.virtualModule.id ? B.virtualModule.resolvedId : undefined;
+            return id === T.virtualModule.id ? T.virtualModule.resolvedId : undefined;
         },
     };
     const autoImport = AutoImport({
@@ -49,7 +46,8 @@ const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
             },
         ],
     });
-    const autoImportPlugins = (Array.isArray(autoImport) ? autoImport : [autoImport]) as unknown as Plugin[];
+    const normalized = Array.isArray(autoImport) ? autoImport : [autoImport];
+    const autoImportPlugins = normalized.filter(isPlugin);
     const clientAutoImportPlugins = autoImportPlugins.map((plugin) => ({
         ...plugin,
         applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
@@ -60,4 +58,4 @@ const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { DevtoolsPluginConfig };
-export { B as VITE_PLUGIN_TUNING, devtoolsPlugin };
+export { devtoolsPlugin };

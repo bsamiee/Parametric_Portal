@@ -1,57 +1,28 @@
 /**
  * Store factory tests: property-based + dispatch-driven middleware composition.
- * Achieves 100% coverage of factory.ts via algorithmic/polymorphic patterns.
- *
- * NOTE: Browser mode requires inline vi.mock with importOriginal pattern.
- * The test-utils/mocks/zustand module uses top-level await which is incompatible.
+ * Browser mode compatible: uses unique store names per test for isolation.
  */
-
-import { fc, it } from '@fast-check/vitest';
-import { TEST_CONSTANTS } from '@parametric-portal/test-utils/constants';
+import { fc, it as itProp } from '@fast-check/vitest';
 import { TEST_HARNESS } from '@parametric-portal/test-utils/harness';
 import { Schema as S } from 'effect';
-import { afterEach, describe, expect, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createSlice, createSlicedStore, createStore, STORE_FACTORY_TUNING } from '../src/store/factory';
 import type { DevtoolsConfig, PersistConfig, TemporalConfig } from '../src/store/types';
 
-// --- [MOCK] ------------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const { storeResetFns } = vi.hoisted(() => ({ storeResetFns: new Set<() => void>() }));
-
-vi.mock('zustand', async (importOriginal) => {
-    const zustand = await importOriginal<typeof import('zustand')>();
-    const wrap = <T>(store: ReturnType<typeof zustand.createStore<T>>) => {
-        storeResetFns.add(() => store.setState(store.getInitialState(), true));
-        return store;
-    };
-    return {
-        ...zustand,
-        create: <T>(fn: Parameters<typeof zustand.create<T>>[0]) =>
-            typeof fn === 'function' ? wrap(zustand.create(fn)) : (f: typeof fn) => wrap(zustand.create(f)),
-        createStore: <T>(fn: Parameters<typeof zustand.createStore<T>>[0]) => wrap(zustand.createStore(fn)),
-    };
-});
-
-afterEach(() => {
-    storeResetFns.forEach((reset) => {
-        reset();
-    });
-    storeResetFns.clear();
-});
-
-// --- [CONFIG] ----------------------------------------------------------------
-
-fc.configureGlobal(TEST_CONSTANTS.fc);
+/** Unique store names for browser mode isolation (leverages harness counter). */
+const uniqueName = (base: string): string => TEST_HARNESS.uniqueId(base);
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ValueState = { n: number; setN: (v: number) => void };
 type BaseState = { readonly v: number };
+type ValueState = { n: number; setN: (v: number) => void };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    arbitraries: {
+    arb: {
         devtools: fc.oneof(
             fc.boolean(),
             fc.record({ enabled: fc.boolean() }) as fc.Arbitrary<DevtoolsConfig>,
@@ -69,13 +40,31 @@ const B = Object.freeze({
             fc.constant(undefined),
         ),
     },
-    schemas: { value: S.Struct({ value: S.Number }) },
-    storeName: 'test-store',
+    init: () => ({ v: 1 }),
+    schema: S.Struct({ value: S.Number }),
 } as const);
+
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const configTests = Object.freeze({
+    devtools: (cfg: boolean | DevtoolsConfig | undefined) =>
+        createStore<BaseState>(B.init, { name: uniqueName('devtools'), ...(cfg !== undefined && { devtools: cfg }) }),
+    immer: (cfg: boolean | undefined) =>
+        createStore<BaseState>(B.init, { name: uniqueName('immer'), ...(cfg !== undefined && { immer: cfg }) }),
+    persist: (cfg: boolean | PersistConfig<BaseState> | undefined) =>
+        createStore<BaseState>(B.init, { name: uniqueName('persist'), ...(cfg !== undefined && { persist: cfg }) }),
+    temporal: (cfg: boolean | TemporalConfig<BaseState> | undefined) =>
+        createStore<BaseState>(B.init, { name: uniqueName('temporal'), ...(cfg !== undefined && { temporal: cfg }) }),
+} as const);
+const valueStore = (cfg: boolean | TemporalConfig<ValueState>) =>
+    createStore<ValueState>((set) => ({ n: 0, setN: (v) => set({ n: v }) }), {
+        name: uniqueName('value'),
+        temporal: cfg,
+    });
 
 // --- [DESCRIBE] STORE_FACTORY_TUNING -----------------------------------------
 
-describe('STORE_FACTORY_TUNING', () => {
+describe('STORE_FACTORY_TUNING', () =>
     it('is frozen with correct structure', () => {
         expect(Object.isFrozen(STORE_FACTORY_TUNING)).toBe(true);
         expect(STORE_FACTORY_TUNING.order).toEqual([
@@ -88,26 +77,15 @@ describe('STORE_FACTORY_TUNING', () => {
         ]);
         expect(STORE_FACTORY_TUNING.defaults.persist.exclude).toContainEqual(/^set/);
         expect(STORE_FACTORY_TUNING.defaults.temporal.limit).toBe(100);
-    });
-});
+    }));
 
-// --- [DESCRIBE] normalizeConfig (property-based) -----------------------------
-
-const configTests = {
-    devtools: (cfg: boolean | DevtoolsConfig | undefined) =>
-        createStore<BaseState>(() => ({ v: 1 }), { devtools: cfg, name: B.storeName }),
-    immer: (cfg: boolean | undefined) => createStore<BaseState>(() => ({ v: 1 }), { immer: cfg, name: B.storeName }),
-    persist: (cfg: boolean | PersistConfig<BaseState> | undefined) =>
-        createStore<BaseState>(() => ({ v: 1 }), { name: B.storeName, persist: cfg }),
-    temporal: (cfg: boolean | TemporalConfig<BaseState> | undefined) =>
-        createStore<BaseState>(() => ({ v: 1 }), { name: B.storeName, temporal: cfg }),
-} as const;
+// --- [DESCRIBE] normalizeConfig ----------------------------------------------
 
 describe('normalizeConfig', () => {
-    it.prop([B.arbitraries.immer])('immer', (cfg) => configTests.immer(cfg).getState().v === 1);
-    it.prop([B.arbitraries.persist])('persist', (cfg) => configTests.persist(cfg).getState().v === 1);
-    it.prop([B.arbitraries.temporal])('temporal', (cfg) => configTests.temporal(cfg).getState().v === 1);
-    it.prop([B.arbitraries.devtools])('devtools', (cfg) => configTests.devtools(cfg).getState().v === 1);
+    itProp.prop([B.arb.immer])('immer', (cfg) => configTests.immer(cfg).getState().v === 1);
+    itProp.prop([B.arb.persist])('persist', (cfg) => configTests.persist(cfg).getState().v === 1);
+    itProp.prop([B.arb.temporal])('temporal', (cfg) => configTests.temporal(cfg).getState().v === 1);
+    itProp.prop([B.arb.devtools])('devtools', (cfg) => configTests.devtools(cfg).getState().v === 1);
 });
 
 // --- [DESCRIBE] warnInvalidConfig --------------------------------------------
@@ -115,23 +93,19 @@ describe('normalizeConfig', () => {
 describe('warnInvalidConfig', () => {
     it.each(['INVALID!', '@invalid', 'has spaces'])('warns on invalid name: %s', (name) =>
         TEST_HARNESS.console.warn((spy) => {
-            createStore(() => ({ v: 1 }), { name });
+            createStore(B.init, { name });
             expect(spy).toHaveBeenCalledWith(expect.stringContaining('Invalid store name'));
         }));
-
-    it('skips warning in production', () => {
-        const init = () => ({ v: 1 });
+    it('skips warning in production', () =>
         TEST_HARNESS.console.warn((spy) =>
             TEST_HARNESS.env.production(() => {
-                createStore(init, { name: 'INVALID!' });
+                createStore(B.init, { name: 'INVALID!' });
                 expect(spy).not.toHaveBeenCalled();
             }),
-        );
-    });
-
+        ));
     it('does not warn on valid name', () =>
         TEST_HARNESS.console.warn((spy) => {
-            createStore(() => ({ v: 1 }), { name: 'valid-name' });
+            createStore(B.init, { name: 'valid-name' });
             expect(spy).not.toHaveBeenCalled();
         }));
 });
@@ -140,56 +114,41 @@ describe('warnInvalidConfig', () => {
 
 describe('attachSelectors', () =>
     it('creates use property with state selectors', () => {
-        const store = createStore(() => ({ a: 1, b: 'x' }), { name: B.storeName });
+        const store = createStore(() => ({ a: 1, b: 'x' }), { name: uniqueName('selectors') });
         expect(typeof store.use.a).toBe('function');
         expect(typeof store.use.b).toBe('function');
     }));
 
-// --- [DESCRIBE] immer middleware ---------------------------------------------
+// --- [DESCRIBE] middleware ---------------------------------------------------
 
-const incAction = (s: { count: number }) => ({ count: s.count + 1 });
-
-describe('immer middleware', () => {
+const incReducer = (s: { count: number }) => ({ count: s.count + 1 });
+describe('immer', () => {
     it('allows mutations when enabled', () => {
         const store = createStore<{ count: number; inc: () => void }>(
-            (set) => ({ count: 0, inc: () => set(incAction) }),
-            { immer: true, name: B.storeName },
+            (set) => ({ count: 0, inc: () => set(incReducer) }),
+            { immer: true, name: uniqueName('immer-enabled') },
         );
         store.getState().inc();
         expect(store.getState().count).toBe(1);
     });
-
     it('works when disabled', () =>
-        expect(createStore(() => ({ v: 1 }), { immer: false, name: B.storeName }).getState().v).toBe(1));
+        expect(createStore(B.init, { immer: false, name: uniqueName('immer-disabled') }).getState().v).toBe(1));
 });
-
-// --- [DESCRIBE] computed middleware ------------------------------------------
-
-describe('computed middleware', () => {
+describe('computed', () => {
     it('computes derived state', () => {
         const store = createStore<{ items: number[] }, { total: number }>(() => ({ items: [1, 2, 3] }), {
             computed: { compute: (s) => ({ total: s.items.reduce((a, b) => a + b, 0) }), keys: ['items'] },
-            name: B.storeName,
+            name: uniqueName('computed'),
         });
         expect(store.getState().total).toBe(6);
     });
-
     it('works without compute', () =>
-        expect(createStore(() => ({ v: 1 }), { name: B.storeName }).getState().v).toBe(1));
+        expect(createStore(B.init, { name: uniqueName('no-compute') }).getState().v).toBe(1));
 });
-
-// --- [DESCRIBE] devtools middleware ------------------------------------------
-
-describe('devtools middleware', () =>
+describe('devtools', () =>
     it.each([true, false])('enabled=%s', (e) =>
-        expect(createStore(() => ({ v: 1 }), { devtools: e, name: B.storeName }).getState().v).toBe(1)));
-
-// --- [DESCRIBE] temporal middleware ------------------------------------------
-
-const valueStore = (cfg: boolean | TemporalConfig<ValueState>) =>
-    createStore<ValueState>((set) => ({ n: 0, setN: (v) => set({ n: v }) }), { name: B.storeName, temporal: cfg });
-
-describe('temporal middleware', () => {
+        expect(createStore(B.init, { devtools: e, name: uniqueName('devtools-test') }).getState().v).toBe(1)));
+describe('temporal', () => {
     it('provides undo/redo', () => {
         const store = valueStore(true);
         store.getState().setN(10);
@@ -199,83 +158,76 @@ describe('temporal middleware', () => {
         store.temporal.getState().redo();
         expect(store.getState().n).toBe(20);
     });
-
     it('respects custom limit', () => {
         const store = valueStore({ enabled: true, limit: 2 });
-        [1, 2, 3].forEach((v) => store.getState().setN(v));
+        [1, 2, 3].forEach((v) => {
+            store.getState().setN(v);
+        });
         expect(store.temporal.getState().pastStates.length).toBeLessThanOrEqual(2);
     });
-
     it('uses custom partialize', () => {
         const store = createStore<{ a: number; b: number; setA: (v: number) => void }>(
             (set) => ({ a: 1, b: 2, setA: (v) => set({ a: v }) }),
-            { name: B.storeName, temporal: { enabled: true, partialize: (s) => ({ a: s.a }) } },
+            { name: uniqueName('partialize'), temporal: { enabled: true, partialize: (s) => ({ a: s.a }) } },
         );
         store.getState().setA(10);
         expect(store.temporal.getState().pastStates[0]).toEqual({ a: 1 });
     });
-
     it('filters functions via default partialize', () => {
-        const store = createStore(() => ({ action: () => {}, data: 'x' }), { name: B.storeName, temporal: true });
+        const store = createStore(() => ({ action: () => {}, data: 'x' }), {
+            name: uniqueName('partialize-fn'),
+            temporal: true,
+        });
         store.setState({ data: 'y' });
         expect(store.temporal.getState().pastStates[0] ?? {}).not.toHaveProperty('action');
     });
-
     it('works when disabled', () =>
-        expect(createStore(() => ({ v: 1 }), { name: B.storeName, temporal: false }).getState().v).toBe(1));
+        expect(createStore(B.init, { name: uniqueName('temporal-disabled'), temporal: false }).getState().v).toBe(1));
 });
-
-// --- [DESCRIBE] persist middleware -------------------------------------------
-
-describe('persist middleware', () => {
+describe('persist', () => {
     it('validates hydration with schema (success)', async () => {
-        TEST_HARNESS.storage.seed('schema-valid', { value: 42 });
-        const store = createStore(() => ({ value: 0 }), { name: 'schema-valid', persist: { schema: B.schemas.value } });
+        const name = uniqueName('schema-valid');
+        TEST_HARNESS.storage.seed(name, { value: 42 });
+        const store = createStore(() => ({ value: 0 }), { name, persist: { schema: B.schema } });
         await TEST_HARNESS.timers.advance();
         expect(store.getState().value).toBe(42);
     });
-
     it('validates hydration with schema (failure)', async () => {
-        TEST_HARNESS.storage.seed('schema-invalid', { value: 'bad' });
+        const name = uniqueName('schema-invalid');
+        TEST_HARNESS.storage.seed(name, { value: 'bad' });
         await TEST_HARNESS.console.warn(async (spy) => {
-            const store = createStore(() => ({ value: 99 }), {
-                name: 'schema-invalid',
-                persist: { schema: B.schemas.value },
-            });
+            const store = createStore(() => ({ value: 99 }), { name, persist: { schema: B.schema } });
             await TEST_HARNESS.timers.advance();
             expect(spy).toHaveBeenCalledWith(expect.stringContaining('Hydration validation failed'), expect.anything());
             expect(store.getState().value).toBe(99);
         });
     });
-
     it('merges without schema', async () => {
-        TEST_HARNESS.storage.seed('no-schema', { x: 5 });
-        const store = createStore(() => ({ x: 0 }), { name: 'no-schema', persist: true });
+        const name = uniqueName('no-schema');
+        TEST_HARNESS.storage.seed(name, { x: 5 });
+        const store = createStore(() => ({ x: 0 }), { name, persist: true });
         await TEST_HARNESS.timers.advance();
         expect(store.getState().x).toBe(5);
     });
-
     it('filters keys via exclude patterns', () => {
         // biome-ignore lint/style/useNamingConvention: _private tests /^_/ pattern
         const store = createStore(() => ({ _private: 1, data: 2, secretKey: 3, setData: () => {} }), {
-            name: B.storeName,
+            name: uniqueName('exclude-patterns'),
             persist: { exclude: ['secretKey', /^_/, /^set/] },
         });
         expect(store.getState().data).toBe(2);
     });
-
     it('works when disabled', () =>
-        expect(createStore(() => ({ v: 1 }), { name: B.storeName, persist: false }).getState().v).toBe(1));
+        expect(createStore(B.init, { name: uniqueName('persist-disabled'), persist: false }).getState().v).toBe(1));
 });
 
-// --- [DESCRIBE] createSlicedStore --------------------------------------------
+// --- [DESCRIBE] slices -------------------------------------------------------
 
 const counterSlice = createSlice({
     actions: { inc: () => (s) => ({ count: s.count + 1 }) },
     name: 'counter',
     value: { count: 0 },
 });
-
 describe('createSlicedStore', () =>
     it('composes slices', () => {
         // biome-ignore lint/suspicious/noExplicitAny: zustand-slices typing
@@ -284,7 +236,4 @@ describe('createSlicedStore', () =>
         store.getState().inc();
         expect(store.getState().counter.count).toBe(1);
     }));
-
-// --- [DESCRIBE] createSlice --------------------------------------------------
-
 describe('createSlice', () => it('re-exports', () => expect(typeof createSlice).toBe('function')));

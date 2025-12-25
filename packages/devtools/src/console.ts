@@ -1,11 +1,18 @@
 /**
  * Capture console.* calls without Effect routing (prevents prettyLogger circular dep).
  */
-import type { LogEntry } from './types.ts';
+import {
+    type ConsoleMethod,
+    createLogEntry,
+    DEVTOOLS_TUNING,
+    type LogEntry,
+    type LogEntrySource,
+    mapConsoleMethod,
+    stringifyArgs,
+} from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ConsoleMethod = 'debug' | 'error' | 'info' | 'log' | 'warn';
 type ConsoleInterceptConfig = {
     readonly logs: LogEntry[];
     readonly methods?: ReadonlyArray<ConsoleMethod> | undefined;
@@ -17,45 +24,22 @@ type OriginalConsole = {
     [K in ConsoleMethod]: typeof console.log;
 };
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    defaults: {
-        methods: ['log', 'info', 'warn', 'error', 'debug'] as ReadonlyArray<ConsoleMethod>,
-    },
-    levelMap: {
-        debug: 'Debug',
-        error: 'Error',
-        info: 'Info',
-        log: 'Info',
-        warn: 'Warning',
-    } as const satisfies Record<ConsoleMethod, LogEntry['level']>,
-} as const);
-
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const formatArgs = (args: ReadonlyArray<unknown>): string =>
-    args.map((arg) => (typeof arg === 'object' && arg !== null ? JSON.stringify(arg) : String(arg))).join(' ');
-const createLogEntry = (method: ConsoleMethod, args: ReadonlyArray<unknown>): LogEntry => ({
-    annotations: { source: 'console' },
-    fiberId: 'console',
-    level: B.levelMap[method],
-    message: formatArgs(args),
-    spans: {},
-    timestamp: new Date(),
-});
+const T = DEVTOOLS_TUNING;
+const consoleLogSource: LogEntrySource = { annotations: { source: 'console' }, fiberId: 'console' };
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const interceptConsole = (config: ConsoleInterceptConfig): ConsoleInterceptResult => {
-    const methods = config.methods ?? B.defaults.methods;
+    const methods = config.methods ?? T.console.methods;
     const original: Partial<OriginalConsole> = {};
     const mutableConsole = console as { -readonly [K in ConsoleMethod]: typeof console.log };
     methods.forEach((method) => {
         // biome-ignore lint/suspicious/noConsole: Intentional console interception
         original[method] = console[method].bind(console);
         mutableConsole[method] = (...args: unknown[]): void => {
-            config.logs.push(createLogEntry(method, args));
+            config.logs.push(createLogEntry(consoleLogSource, mapConsoleMethod(method), stringifyArgs(args)));
             original[method]?.(...args);
         };
     });
@@ -65,10 +49,10 @@ const interceptConsole = (config: ConsoleInterceptConfig): ConsoleInterceptResul
             orig !== undefined && Object.assign(mutableConsole, { [method]: orig });
         });
     };
-    return { restore };
+    return Object.freeze({ restore });
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { ConsoleInterceptConfig, ConsoleInterceptResult, ConsoleMethod, OriginalConsole };
-export { B as CONSOLE_TUNING, createLogEntry, formatArgs, interceptConsole };
+export type { ConsoleInterceptConfig, ConsoleInterceptResult, OriginalConsole };
+export { interceptConsole };

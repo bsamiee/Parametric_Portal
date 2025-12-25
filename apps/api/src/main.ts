@@ -56,7 +56,6 @@ const SessionAuthLive = pipe(
     ),
     Layer.provide(PgLive),
 );
-
 const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -80,7 +79,6 @@ const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
             );
     }),
 );
-
 const ApiLive = HttpApiBuilder.api(AppApi).pipe(
     Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive)),
     Layer.provide(PgLive),
@@ -88,7 +86,6 @@ const ApiLive = HttpApiBuilder.api(AppApi).pipe(
     Layer.provide(IconGenerationServiceLive),
     Layer.provide(AnthropicClientLive),
 );
-
 const ServerLive = pipe(
     HttpApiBuilder.serve(composeMiddleware),
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),

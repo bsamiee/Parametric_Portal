@@ -5,7 +5,7 @@ import { Effect, type Layer, pipe } from 'effect';
 import { type ComponentType, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createRootErrorOptions, type ErrorCallback } from './boundary.tsx';
-import { toError } from './types.ts';
+import { DEVTOOLS_TUNING, toError } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -35,12 +35,7 @@ type MainResult = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        rootId: 'root',
-        verifyDelayMs: 16, // Single animation frame (~16ms) instead of 100ms
-    },
-} as const);
+const T = DEVTOOLS_TUNING.defaults;
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -89,8 +84,8 @@ const verifyRender = (root: HTMLElement, delayMs: number): Effect.Effect<void> =
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createBootstrap = <T extends { App: ComponentType }>(config: BootstrapConfig<T>): BootstrapResult => {
-    const rootId = config.rootId ?? B.defaults.rootId;
-    const verifyDelayMs = config.verifyDelayMs ?? B.defaults.verifyDelayMs;
+    const rootId = config.rootId ?? T.rootId;
+    const verifyDelayMs = config.verifyDelayMs ?? T.verifyDelayMs;
     const bootstrap = (): Effect.Effect<void, Error> =>
         Effect.gen(function* () {
             yield* Effect.logInfo('Bootstrap sequence starting');
@@ -130,7 +125,7 @@ const createBootstrap = <T extends { App: ComponentType }>(config: BootstrapConf
             Effect.annotateLogs({ component: 'main' }),
             Effect.provide(config.loggerLayer),
         );
-    return { bootstrap };
+    return Object.freeze({ bootstrap });
 };
 const createMain = <T extends { App: ComponentType }>(config: MainConfig<T>): MainResult => {
     const { bootstrap } = createBootstrap(config);
@@ -152,12 +147,11 @@ const createMain = <T extends { App: ComponentType }>(config: MainConfig<T>): Ma
     const init = (): void => {
         Effect.runFork(main);
     };
-    return { init, main };
+    return Object.freeze({ init, main });
 };
 const initWhenReady = (init: () => void, loggerLayer: Layer.Layer<never, never, never>): void => {
     document.readyState === 'loading'
         ? document.addEventListener('DOMContentLoaded', () => {
-              // Non-blocking: fork Effect instead of runSync to prevent main thread blocking
               Effect.runFork(Effect.logDebug('DOMContentLoaded fired').pipe(Effect.provide(loggerLayer)));
               init();
           })
@@ -167,4 +161,4 @@ const initWhenReady = (init: () => void, loggerLayer: Layer.Layer<never, never, 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { BootstrapConfig, BootstrapResult, MainConfig, MainResult, ModuleLoader };
-export { B as BOOTSTRAP_TUNING, createBootstrap, createMain, initWhenReady, loadCss, loadModule, verifyRender };
+export { createBootstrap, createMain, initWhenReady, loadCss, loadModule, verifyRender };

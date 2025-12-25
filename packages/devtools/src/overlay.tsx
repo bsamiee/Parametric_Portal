@@ -3,8 +3,14 @@
  */
 import { Option, pipe } from 'effect';
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from 'react';
-import type { LogEntry, LogLevelKey, OverlayConfig } from './types.ts';
-import { formatDuration, formatLogEntry } from './types.ts';
+import {
+    DEVTOOLS_TUNING,
+    formatDuration,
+    formatLogEntry,
+    getLevelColor,
+    type LogEntry,
+    type OverlayConfig,
+} from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -27,53 +33,17 @@ type DebugOverlayProviderProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    colors: {
-        bg: 'oklch(0.12 0.02 260)',
-        errorBorder: 'oklch(0.55 0.25 25)',
-        errorColor: 'oklch(0.70 0.20 25)',
-        infoBorder: 'oklch(0.50 0.20 260)',
-        infoColor: 'oklch(0.75 0.15 260)',
-        preBg: 'oklch(0.15 0.02 260)',
-        successColor: 'oklch(0.70 0.20 145)',
-        text: '#fff',
-        textMuted: 'oklch(0.70 0.02 260)',
-        warnColor: 'oklch(0.75 0.20 85)',
-    },
-    font: {
-        mono: 'ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Code", monospace',
-    },
-    layout: {
-        accentBorder: '4px',
-        borderRadius: '8px',
-        cardMinWidth: '200px',
-        fontSize: { h1: '1.5rem', h2: '1rem', label: '0.75rem', logEntry: '0.8rem', stackTrace: '0.85rem' },
-        fontWeight: { bold: 600 },
-        lineHeight: 1.6,
-        logMaxHeight: '400px',
-        maxWidth: '900px',
-        padding: '2rem',
-        spacing: { lg: '1.5rem', md: '1rem', sm: '0.5rem', xs: '0.25rem' },
-    },
-    levelColors: {
-        Debug: 'oklch(0.70 0.02 260)',
-        Error: 'oklch(0.70 0.20 25)',
-        Fatal: 'oklch(0.55 0.25 25)',
-        Info: 'oklch(0.75 0.15 260)',
-        Warning: 'oklch(0.75 0.20 85)',
-    } satisfies Record<LogLevelKey, string>,
-    text: {
-        emptyLogs: 'No logs captured',
-        noStack: 'No stack trace available',
-        title: 'Application Failed to Load',
-    },
-} as const);
+const T = DEVTOOLS_TUNING.overlay;
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const getLevelColor = (level: LogLevelKey): string => B.levelColors[level];
-const mergeColors = (override?: OverlayConfig['colors']): Record<keyof typeof B.colors, string> => ({
-    ...B.colors,
+const escapeHtml = (str: string): string =>
+    str.replaceAll(
+        /[&<>"']/g,
+        (c) => ({ "'": '&#39;', '"': '&quot;', '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] ?? c,
+    );
+const mergeColors = (override?: OverlayConfig['colors']): Record<keyof typeof T.colors, string> => ({
+    ...T.colors,
     ...override,
 });
 
@@ -85,7 +55,7 @@ const OverlayContext = createContext<OverlayContextValue | null>(null);
 
 const DebugOverlay = ({ context, env, error, logs, startTime }: DebugOverlayProps): ReactNode => {
     const elapsed = formatDuration(performance.now() - startTime);
-    const { colors, font, layout, text } = B;
+    const { colors, font, layout, text } = T;
     const contextHtml = context ? (
         <details style={{ marginTop: layout.spacing.md }}>
             <summary style={{ color: colors.infoColor, cursor: 'pointer' }}>Context Data</summary>
@@ -294,12 +264,12 @@ const useDebugOverlay = (): OverlayContextValue =>
 
 const renderDebugOverlay = (props: DebugOverlayProps): void => {
     const root = document.getElementById('root');
-    const { colors, font, layout, text } = B;
+    const { colors, font, layout, text } = T;
     const elapsed = formatDuration(performance.now() - props.startTime);
     const contextHtml = props.context
         ? `<details style="margin-top:${layout.spacing.md};">
             <summary style="cursor:pointer;color:${colors.infoColor};">Context Data</summary>
-            <pre style="background:${colors.preBg};padding:${layout.spacing.md};border-radius:${layout.borderRadius};margin-top:${layout.spacing.sm};overflow-x:auto;">${JSON.stringify(props.context, null, 2)}</pre>
+            <pre style="background:${colors.preBg};padding:${layout.spacing.md};border-radius:${layout.borderRadius};margin-top:${layout.spacing.sm};overflow-x:auto;">${escapeHtml(JSON.stringify(props.context, null, 2))}</pre>
            </details>`
         : '';
     const html = `
@@ -307,9 +277,9 @@ const renderDebugOverlay = (props: DebugOverlayProps): void => {
             <div style="max-width:${layout.maxWidth};margin:0 auto;">
                 <h1 style="color:${colors.errorColor};margin:0 0 ${layout.spacing.lg};font-size:${layout.fontSize.h1};border-left:${layout.accentBorder} solid ${colors.errorBorder};padding-left:${layout.spacing.md};">${text.title}</h1>
                 <div style="background:${colors.preBg};border-left:${layout.accentBorder} solid ${colors.errorBorder};padding:${layout.spacing.lg};border-radius:0 ${layout.borderRadius} ${layout.borderRadius} 0;margin-bottom:${layout.spacing.lg};">
-                    <div style="color:${colors.errorColor};font-weight:${layout.fontWeight.bold};margin-bottom:${layout.spacing.sm};">${props.error.name}</div>
-                    <div style="color:${colors.text};margin-bottom:${layout.spacing.md};">${props.error.message}</div>
-                    <pre style="color:${colors.textMuted};font-size:${layout.fontSize.stackTrace};overflow-x:auto;white-space:pre-wrap;margin:0;">${props.error.stack ?? text.noStack}</pre>
+                    <div style="color:${colors.errorColor};font-weight:${layout.fontWeight.bold};margin-bottom:${layout.spacing.sm};">${escapeHtml(props.error.name)}</div>
+                    <div style="color:${colors.text};margin-bottom:${layout.spacing.md};">${escapeHtml(props.error.message)}</div>
+                    <pre style="color:${colors.textMuted};font-size:${layout.fontSize.stackTrace};overflow-x:auto;white-space:pre-wrap;margin:0;">${escapeHtml(props.error.stack ?? text.noStack)}</pre>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(${layout.cardMinWidth},1fr));gap:${layout.spacing.md};margin-bottom:${layout.spacing.lg};">
                     <div style="background:${colors.preBg};padding:${layout.spacing.md};border-radius:${layout.borderRadius};">
@@ -329,7 +299,7 @@ const renderDebugOverlay = (props: DebugOverlayProps): void => {
                 <div style="margin-top:${layout.spacing.lg};">
                     <h2 style="color:${colors.infoColor};margin:0 0 ${layout.spacing.md};font-size:${layout.fontSize.h2};">Debug Log</h2>
                     <div style="background:${colors.preBg};border-radius:${layout.borderRadius};padding:${layout.spacing.md};max-height:${layout.logMaxHeight};overflow-y:auto;">
-                        ${props.logs.length === 0 ? `<div style="color:${colors.textMuted};">${text.emptyLogs}</div>` : props.logs.map((entry) => `<div style="color:${getLevelColor(entry.level)};font-size:${layout.fontSize.logEntry};padding:${layout.spacing.xs} 0;border-bottom:1px solid ${colors.bg};">${formatLogEntry(entry)}</div>`).join('')}
+                        ${props.logs.length === 0 ? `<div style="color:${colors.textMuted};">${text.emptyLogs}</div>` : props.logs.map((entry) => `<div style="color:${getLevelColor(entry.level)};font-size:${layout.fontSize.logEntry};padding:${layout.spacing.xs} 0;border-bottom:1px solid ${colors.bg};">${escapeHtml(formatLogEntry(entry))}</div>`).join('')}
                     </div>
                 </div>
             </div>
@@ -348,12 +318,4 @@ const renderDebugOverlay = (props: DebugOverlayProps): void => {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { DebugOverlayProps, DebugOverlayProviderProps, OverlayContextValue };
-export {
-    B as OVERLAY_TUNING,
-    DebugOverlay,
-    DebugOverlayProvider,
-    getLevelColor,
-    mergeColors,
-    renderDebugOverlay,
-    useDebugOverlay,
-};
+export { DebugOverlay, DebugOverlayProvider, mergeColors, renderDebugOverlay, useDebugOverlay };

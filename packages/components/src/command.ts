@@ -2,7 +2,7 @@
  * Command palette components: render dialog, inline, and palette command interfaces.
  * Uses B, utilities, animStyle, stateCls, createBuilderContext from schema.ts.
  */
-import { Command as Cmdk, useCommandState } from 'cmdk';
+import { Command as Cmdk } from 'cmdk';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Inputs, Resolved, ResolvedContext, TuningFor } from './schema.ts';
@@ -89,8 +89,7 @@ const commandCls = {
     shortcut: B.cmd.var.xsFs,
     shortcutKey: utilities.cls(B.cmd.item.shortcut.key, B.cmd.var.shortcutPx, B.cmd.var.shortcutPy),
 } as const;
-
-const commandHelpers = {
+const commandPrimitives = {
     baseStyle: (ctx: Ctx, style?: CSSProperties): CSSProperties => ({
         ...ctx.vars,
         ...animStyle(ctx.animation),
@@ -100,7 +99,7 @@ const commandHelpers = {
     enhance:
         (pages: ReadonlyArray<PageData> | undefined, push: ((key: string) => void) | undefined) =>
         (item: ItemData | SeparatorData): ItemData | SeparatorData =>
-            commandHelpers.isSeparator(item) || !push
+            commandPrimitives.isSeparator(item) || !push
                 ? item
                 : {
                       ...item,
@@ -124,16 +123,14 @@ const commandHelpers = {
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const wrappers = { dialog: Cmdk.Dialog, inline: Cmdk, palette: Cmdk } as const;
-
 const rootStyles = {
     dialog: (ctx: Ctx, style?: CSSProperties) => ({
-        ...commandHelpers.baseStyle(ctx, style),
+        ...commandPrimitives.baseStyle(ctx, style),
         ...utilities.zStyle(ctx.overlay),
     }),
-    inline: commandHelpers.baseStyle,
-    palette: commandHelpers.baseStyle,
+    inline: commandPrimitives.baseStyle,
+    palette: commandPrimitives.baseStyle,
 } as { readonly [K in CommandType]: (ctx: Ctx, style?: CSSProperties) => CSSProperties };
-
 const dialogPropsFor = {
     dialog: (
         overlayCls?: string,
@@ -150,7 +147,6 @@ const dialogPropsFor = {
     inline: () => ({}),
     palette: () => ({}),
 } as const;
-
 const renderHandlers = {
     group: (group: GroupData) =>
         createElement(
@@ -172,12 +168,12 @@ const renderHandlers = {
             group.items.map(renderHandlers.item),
         ),
     item: (item: ItemData | SeparatorData) =>
-        commandHelpers.isSeparator(item)
+        commandPrimitives.isSeparator(item)
             ? createElement(Cmdk.Separator, { className: B.cmd.separator, key: item.key })
             : createElement(
                   Cmdk.Item,
                   {
-                      className: utilities.cls(commandHelpers.itemCls(item.disabled), commandCls.item),
+                      className: utilities.cls(commandPrimitives.itemCls(item.disabled), commandCls.item),
                       key: item.key,
                       value: item.value ?? String(item.label),
                       ...(item.disabled !== undefined && { disabled: item.disabled }),
@@ -204,7 +200,6 @@ const renderHandlers = {
                       ),
               ),
 } as const;
-
 const usePageNavigation = (vimBindingsEnabled?: boolean) => {
     const [search, setSearch] = useState('');
     const [stack, setStack] = useState<ReadonlyArray<string>>([B.cmd.initialPage]);
@@ -219,21 +214,20 @@ const usePageNavigation = (vimBindingsEnabled?: boolean) => {
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
             const shouldGoBack = stack.length > 1 && (event.key === 'Escape' || (event.key === 'Backspace' && !search));
-            shouldGoBack && commandHelpers.prevent(event, pop);
+            shouldGoBack && commandPrimitives.prevent(event, pop);
             vimBindingsEnabled &&
                 event.ctrlKey &&
                 event.key === 'j' &&
-                commandHelpers.prevent(event, () => commandHelpers.dispatchKey('ArrowDown'));
+                commandPrimitives.prevent(event, () => commandPrimitives.dispatchKey('ArrowDown'));
             vimBindingsEnabled &&
                 event.ctrlKey &&
                 event.key === 'k' &&
-                commandHelpers.prevent(event, () => commandHelpers.dispatchKey('ArrowUp'));
+                commandPrimitives.prevent(event, () => commandPrimitives.dispatchKey('ArrowUp'));
         },
         [stack.length, search, pop, vimBindingsEnabled],
     );
     return { activePage: stack.at(-1) ?? B.cmd.initialPage, handleKeyDown, push, search, setSearch };
 };
-
 const ListContent = ({
     ctx,
     page,
@@ -253,10 +247,10 @@ const ListContent = ({
     readonly pages?: ReadonlyArray<PageData> | undefined;
     readonly push?: ((key: string) => void) | undefined;
 }) => {
-    const enhance = useMemo(() => commandHelpers.enhance(pages, push), [pages, push]);
+    const enhance = useMemo(() => commandPrimitives.enhance(pages, push), [pages, push]);
     return createElement(
         Cmdk.List,
-        { className: utilities.cls(B.cmd.list.base, commandHelpers.listCls(ctx.animation)) },
+        { className: utilities.cls(B.cmd.list.base, commandPrimitives.listCls(ctx.animation)) },
         loading &&
             createElement(
                 Cmdk.Loading,
@@ -276,7 +270,6 @@ const ListContent = ({
         page?.items?.map((item) => renderHandlers.item(enhance(item))),
     );
 };
-
 const createCommandFactory = <T extends CommandType>(commandType: T, input: CommandInput<T>, ctx: Ctx) => {
     const config = B.cmd.defaults[commandType];
     const Wrapper = wrappers[commandType];
@@ -376,7 +369,6 @@ const createCommandFactory = <T extends CommandType>(commandType: T, input: Comm
         ? ReturnType<typeof forwardRef<HTMLDivElement, DialogProps>>
         : ReturnType<typeof forwardRef<HTMLDivElement, BaseProps>>;
 };
-
 const createCommandComponent = <T extends CommandType>(input: CommandInput<T>) => {
     const ctx = createBuilderContext('cmd', ['animation', 'behavior', 'overlay', 'scale'] as const, input);
     const commandType = (input.type ?? 'palette') as T;
@@ -401,7 +393,7 @@ const createCommand = (tuning?: TuningFor<'cmd'>) =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { createCommand, useCommandState };
+export { createCommand };
 export type {
     BaseProps as CommandProps,
     CommandInput,

@@ -2,6 +2,7 @@
  * Validate Vite environment variables with type-safe schema defaults.
  */
 import { Effect, pipe, Schema as S } from 'effect';
+import { DEVTOOLS_TUNING } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -43,57 +44,25 @@ const EnvSchema = S.Struct({
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    buildModes: { development: 'development', production: 'production' } as const,
-    defaults: {
-        devtools: {
-            console: 'true',
-            experimental: 'true',
-            logLevel: 'Debug',
-            performance: 'true',
-        },
-        version: '0.0.0',
-    },
-    envKeys: {
-        appVersion: 'APP_VERSION',
-        baseUrl: 'BASE_URL',
-        buildMode: 'BUILD_MODE',
-        buildTime: 'BUILD_TIME',
-        dev: 'DEV',
-        devtoolsConsole: 'VITE_DEVTOOLS_CONSOLE',
-        devtoolsExperimental: 'VITE_DEVTOOLS_EXPERIMENTAL',
-        devtoolsLogLevel: 'VITE_DEVTOOLS_LOG_LEVEL',
-        devtoolsPerformance: 'VITE_DEVTOOLS_PERFORMANCE',
-        mode: 'MODE',
-        prod: 'PROD',
-        ssr: 'SSR',
-        viteApiUrl: 'VITE_API_URL',
-    } as const,
-    required: ['MODE', 'BASE_URL', 'DEV', 'PROD'],
-} as const);
+const T = DEVTOOLS_TUNING.env;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-// Required fields (MODE, BASE_URL) get NO defaults - schema validation will fail if missing
-const normalizeEnv = (raw: RawEnv): Record<string, unknown> => {
-    const k = B.envKeys;
-    const d = B.defaults;
-    return {
-        [k.appVersion]: raw[k.appVersion] ?? d.version,
-        [k.baseUrl]: raw[k.baseUrl], // Required: no default
-        [k.buildMode]: raw[k.buildMode],
-        [k.buildTime]: raw[k.buildTime],
-        [k.dev]: Boolean(raw[k.dev]),
-        [k.devtoolsConsole]: raw[k.devtoolsConsole] ?? d.devtools.console,
-        [k.devtoolsExperimental]: raw[k.devtoolsExperimental] ?? d.devtools.experimental,
-        [k.devtoolsLogLevel]: raw[k.devtoolsLogLevel] ?? d.devtools.logLevel,
-        [k.devtoolsPerformance]: raw[k.devtoolsPerformance] ?? d.devtools.performance,
-        [k.mode]: raw[k.mode], // Required: no default
-        [k.prod]: Boolean(raw[k.prod]),
-        [k.ssr]: raw[k.ssr] === undefined ? undefined : Boolean(raw[k.ssr]),
-        [k.viteApiUrl]: raw[k.viteApiUrl],
-    };
-};
+const normalizeEnv = (raw: RawEnv): Record<string, unknown> => ({
+    [T.keys.appVersion]: raw[T.keys.appVersion] ?? T.defaults.version,
+    [T.keys.baseUrl]: raw[T.keys.baseUrl],
+    [T.keys.buildMode]: raw[T.keys.buildMode],
+    [T.keys.buildTime]: raw[T.keys.buildTime],
+    [T.keys.dev]: Boolean(raw[T.keys.dev]),
+    [T.keys.console]: raw[T.keys.console] ?? T.defaults.console,
+    [T.keys.experimental]: raw[T.keys.experimental] ?? T.defaults.experimental,
+    [T.keys.logLevel]: raw[T.keys.logLevel] ?? T.defaults.logLevel,
+    [T.keys.performance]: raw[T.keys.performance] ?? T.defaults.performance,
+    [T.keys.mode]: raw[T.keys.mode],
+    [T.keys.prod]: Boolean(raw[T.keys.prod]),
+    [T.keys.ssr]: raw[T.keys.ssr] === undefined ? undefined : Boolean(raw[T.keys.ssr]),
+    [T.keys.viteApiUrl]: raw[T.keys.viteApiUrl],
+});
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -115,4 +84,4 @@ const createEnvSync = (raw: RawEnv): Env => {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { Env, RawEnv };
-export { B as ENV_TUNING, createEnv, createEnvSync, DevToolsEnvSchema, EnvSchema, EnvValidationError };
+export { createEnv, createEnvSync, DevToolsEnvSchema, EnvSchema, EnvValidationError };

@@ -2,9 +2,11 @@
  * Theme configuration using @parametric-portal/theme presets.
  * Single source of truth: dracula preset defines all colors.
  */
-import { getPresetThemes } from '@parametric-portal/theme/presets';
+import { presets } from '@parametric-portal/theme/presets';
 
 // --- [CONSTANTS] -------------------------------------------------------------
+
+const p = presets();
 
 const B = Object.freeze({
     fonts: {
@@ -18,12 +20,13 @@ const B = Object.freeze({
         container: { maxWidth: 1280, padding: 6 },
         grid: { gap: 4, minItemWidth: 280 },
         stack: { gap: 4 },
+        toolbar: { gap: 2 },
     },
 } as const);
 
 // --- [THEME_CONFIG] ----------------------------------------------------------
 
-const themes = getPresetThemes('dracula');
+const themes = p.themes('dracula');
 
 // --- [FONT_CONFIG] -----------------------------------------------------------
 
@@ -79,7 +82,7 @@ const layouts = [
     {
         align: 'center' as const,
         direction: 'horizontal' as const,
-        gap: 2,
+        gap: B.layouts.toolbar.gap,
         justify: 'start' as const,
         name: 'toolbar',
         type: 'stack' as const,

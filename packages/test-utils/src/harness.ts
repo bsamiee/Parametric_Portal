@@ -1,12 +1,14 @@
 /**
  * Test harness: setup/capture utilities for test isolation.
  */
+import './matchers/effect';
+import { Effect, type Exit } from 'effect';
 import { vi } from 'vitest';
 import { TEST_CONSTANTS } from './constants';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ConsoleSpy = ReturnType<typeof vi.spyOn>;
+type SpyInstance = ReturnType<typeof vi.spyOn>;
 type ConsoleMethod = 'error' | 'log' | 'warn';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -24,7 +26,7 @@ const withCleanup = <T, C>(setup: () => C, cleanup: (ctx: C) => void, fn: (ctx: 
               })()
     ) as T;
 };
-const captureConsole = <T>(method: ConsoleMethod, fn: (spy: ConsoleSpy) => T): T =>
+const captureConsole = <T>(method: ConsoleMethod, fn: (spy: SpyInstance) => T): T =>
     withCleanup(
         () => vi.spyOn(console, method).mockImplementation(() => {}),
         (spy) => spy.mockRestore(),
@@ -39,31 +41,52 @@ const withEnv = <T>(env: string, fn: () => T): T =>
         () => vi.unstubAllGlobals(),
         fn,
     );
+const counter = { value: 0 };
 const Harness = Object.freeze({
     console: Object.freeze({
-        error: <T>(fn: (spy: ConsoleSpy) => T): T => captureConsole('error', fn),
-        log: <T>(fn: (spy: ConsoleSpy) => T): T => captureConsole('log', fn),
-        warn: <T>(fn: (spy: ConsoleSpy) => T): T => captureConsole('warn', fn),
+        error: <T>(fn: (spy: SpyInstance) => T): T => captureConsole('error', fn),
+        log: <T>(fn: (spy: SpyInstance) => T): T => captureConsole('log', fn),
+        warn: <T>(fn: (spy: SpyInstance) => T): T => captureConsole('warn', fn),
+    }),
+    effect: Object.freeze({
+        /** Runs Effect synchronously, returning Exit for matcher assertions. */
+        runSync: <A, E>(eff: Effect.Effect<A, E, never>): Exit.Exit<A, E> => Effect.runSyncExit(eff),
     }),
     env: Object.freeze({
         development: <T>(fn: () => T): T => withEnv('development', fn),
         production: <T>(fn: () => T): T => withEnv('production', fn),
         test: <T>(fn: () => T): T => withEnv('test', fn),
     }),
+    /** Auto-cleanup spy: setup before fn, restore after (handles sync/async). */
+    // biome-ignore lint/suspicious/noExplicitAny: vi.spyOn requires loose typing for generic targets
+    spy: <T>(target: any, method: string, fn: (spy: SpyInstance) => T, impl?: () => void): T =>
+        withCleanup(
+            () => vi.spyOn(target, method).mockImplementation(impl ?? (() => {})),
+            (s) => s.mockRestore(),
+            fn,
+        ),
     storage: Object.freeze({
-        clear: (): void => localStorage.clear(),
+        clear: (): void => {
+            localStorage.clear();
+            sessionStorage.clear();
+        },
         seed: (name: string, state: object): void =>
             localStorage.setItem(name, JSON.stringify({ state, version: TEST_CONSTANTS.storage.version })),
     }),
     timers: Object.freeze({
-        /** Advances fake timers. Default 10ms (sufficient for microtask flush). */
-        advance: async (ms = 10): Promise<void> => {
+        /** Advances fake timers. Default from TEST_CONSTANTS (sufficient for microtask flush). */
+        advance: async (ms = TEST_CONSTANTS.defaults.timerAdvanceMs): Promise<void> => {
             await vi.advanceTimersByTimeAsync(ms);
         },
     }),
+    /** Generates unique test IDs for isolation (e.g., store names in browser mode). */
+    uniqueId: (prefix = 'test'): string => {
+        counter.value += 1;
+        return `${prefix}-${counter.value}`;
+    },
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { Harness as TEST_HARNESS };
-export type { ConsoleSpy };
+export type { SpyInstance };

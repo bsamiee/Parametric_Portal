@@ -7,14 +7,22 @@ import fc from 'fast-check';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { TEST_CONSTANTS } from './constants';
 
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const isBrowser = globalThis.window !== undefined;
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 fc.configureGlobal(TEST_CONSTANTS.fc);
 addEqualityTesters();
 
-beforeEach(() => {
-    localStorage?.clear?.();
-    sessionStorage?.clear?.();
+beforeEach(async () => {
+    // @ts-expect-error fake-indexeddb exports don't match package.json types
+    !isBrowser && (await import('fake-indexeddb/auto'));
+    globalThis.localStorage?.clear();
+    globalThis.sessionStorage?.clear();
+    // biome-ignore lint/style/useNamingConvention: _databases is fake-indexeddb private API
+    globalThis.indexedDB && (indexedDB as unknown as { _databases: Map<string, unknown> })._databases?.clear();
     vi.useFakeTimers();
     vi.setSystemTime(TEST_CONSTANTS.frozenTime);
 });

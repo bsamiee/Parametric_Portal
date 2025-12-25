@@ -4,7 +4,7 @@
 import { Effect, type Layer, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { toError } from './types.ts';
+import { DEVTOOLS_TUNING, toError } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -27,63 +27,38 @@ type EffectErrorBoundaryProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    fallback: { text: 'Something went wrong' },
-    messages: {
-        boundaryCaught: 'Error boundary caught',
-        reactCaught: 'React caught error',
-        reactRecoverable: 'React recoverable error',
-        reactUncaught: 'React uncaught error',
-    },
-    phases: {
-        boundary: 'error-boundary',
-        caught: 'react-caught',
-        recoverable: 'react-recoverable',
-        uncaught: 'react-uncaught',
-    },
-} as const);
+const T = DEVTOOLS_TUNING.boundary;
+
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+type LogMethod = 'logError' | 'logFatal' | 'logInfo' | 'logWarning';
+const dispatchLog = (method: LogMethod, msg: string, ctx: Record<string, unknown>, layer: Layer.Layer<never>): void => {
+    Effect.runFork(pipe(Effect[method](msg, ctx), Effect.provide(layer)));
+};
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createRootErrorOptions = (config: RootErrorConfig): RootOptions => ({
-    onCaughtError: (error, errorInfo) => {
-        // Non-blocking: fork Effect to prevent async fiber issues with devtools layer
-        Effect.runFork(
-            pipe(
-                Effect.logError(B.messages.reactCaught, { error: toError(error), errorInfo }),
-                Effect.provide(config.loggerLayer),
-            ),
-        );
-    },
-    onRecoverableError: (error, errorInfo) => {
-        // Non-blocking: fork Effect to prevent async fiber issues with devtools layer
-        Effect.runFork(
-            pipe(
-                Effect.logWarning(B.messages.reactRecoverable, { error: toError(error), errorInfo }),
-                Effect.provide(config.loggerLayer),
-            ),
-        );
-    },
+    onCaughtError: (error, errorInfo) =>
+        dispatchLog('logError', T.messages.reactCaught, { error: toError(error), errorInfo }, config.loggerLayer),
+    onRecoverableError: (error, errorInfo) =>
+        dispatchLog(
+            'logWarning',
+            T.messages.reactRecoverable,
+            { error: toError(error), errorInfo },
+            config.loggerLayer,
+        ),
     onUncaughtError: (error, errorInfo) => {
-        // Non-blocking: fork Effect to prevent async fiber issues with devtools layer
-        Effect.runFork(
-            pipe(
-                Effect.logFatal(B.messages.reactUncaught, { error: toError(error), errorInfo }),
-                Effect.provide(config.loggerLayer),
-            ),
-        );
-        config.onError(toError(error), { errorInfo, phase: B.phases.uncaught });
+        dispatchLog('logFatal', T.messages.reactUncaught, { error: toError(error), errorInfo }, config.loggerLayer);
+        config.onError(toError(error), { errorInfo, phase: T.phases.uncaught });
     },
 });
 const EffectErrorBoundary = ({ children, fallback, loggerLayer, onError }: EffectErrorBoundaryProps): ReactNode => (
     <ErrorBoundary
-        fallback={fallback ?? <div>{B.fallback.text}</div>}
+        fallback={fallback ?? <div>{T.fallbackText}</div>}
         onError={(error, info) => {
-            // Non-blocking: fork Effect instead of runSync to prevent main thread blocking
-            Effect.runFork(
-                pipe(Effect.logError(B.messages.boundaryCaught, { error, info }), Effect.provide(loggerLayer)),
-            );
-            onError(error, { info, phase: B.phases.boundary });
+            dispatchLog('logError', T.messages.boundaryCaught, { error, info }, loggerLayer);
+            onError(error, { info, phase: T.phases.boundary });
         }}
     >
         {children}
@@ -93,4 +68,4 @@ const EffectErrorBoundary = ({ children, fallback, loggerLayer, onError }: Effec
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { EffectErrorBoundaryProps, ErrorCallback, RootErrorConfig, RootOptions };
-export { B as BOUNDARY_TUNING, createRootErrorOptions, EffectErrorBoundary };
+export { createRootErrorOptions, EffectErrorBoundary };

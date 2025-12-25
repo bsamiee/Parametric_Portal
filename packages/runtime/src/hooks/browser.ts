@@ -85,6 +85,7 @@ const mkExportError = mkBrowserError('ExportError');
 const sanitizeFilename = (text: string): string =>
     text
         .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
+        .replaceAll(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
         .toLowerCase()
         .trim()
         .replaceAll(/[^a-z0-9 -]/g, '')
@@ -222,11 +223,11 @@ const readClipboard = (): Effect.Effect<string, ClipboardError, never> =>
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 type ExportHandler = (input: ExportInput) => Effect.Effect<void, ExportError, never>;
-const exportHandlers: Readonly<Record<ExportFormat, ExportHandler>> = {
+const exportHandlers: Readonly<Record<ExportFormat, ExportHandler>> = Object.freeze({
     png: exportPng,
     svg: exportSvg,
     zip: exportZip,
-};
+});
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

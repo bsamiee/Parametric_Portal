@@ -32,15 +32,13 @@ type WeightSpec = S.Schema.Type<typeof WeightSpecSchema>;
 
 const AlphaSchema = pipe(S.Number, S.between(0, 1), S.brand('Alpha'));
 const ChromaSchema = pipe(S.Number, S.between(0, 0.4), S.brand('Chroma'));
-
-/** Normalize hue to 0-360 range. Grounding: OKLCH hue wraps cylindrically. */
 const HueSchema = pipe(
+    /** Normalize hue to 0-360 range. Grounding: OKLCH hue wraps cylindrically. */
     S.Number,
     S.transform(S.Number, { decode: (h) => ((h % 360) + 360) % 360, encode: (h) => h }),
     S.brand('Hue'),
 );
 const LightnessSchema = pipe(S.Number, S.between(0, 1), S.brand('Lightness'));
-
 const OklchColorSchema = pipe(
     S.Struct({
         a: AlphaSchema,
@@ -50,7 +48,6 @@ const OklchColorSchema = pipe(
     }),
     S.brand('OklchColor'),
 );
-
 const ModifierOverrideSchema = S.Union(
     S.Literal(true),
     S.Struct({
@@ -59,14 +56,12 @@ const ModifierOverrideSchema = S.Union(
         lightnessShift: S.optional(S.Number),
     }),
 );
-
 const CustomModifierSchema = S.Struct({
     alphaShift: S.Number,
     chromaShift: S.Number,
     lightnessShift: S.Number,
     name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
 });
-
 const ThemeModifiersSchema = S.partial(
     S.Struct({
         active: ModifierOverrideSchema,
@@ -78,7 +73,6 @@ const ThemeModifiersSchema = S.partial(
         selected: ModifierOverrideSchema,
     }),
 );
-
 const ThemeInputSchema = S.Struct({
     alpha: S.optional(pipe(S.Number, S.between(0, 1))),
     chroma: pipe(S.Number, S.between(0, 0.4)),
@@ -89,21 +83,18 @@ const ThemeInputSchema = S.Struct({
     name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
     scale: pipe(S.Number, S.int(), S.between(2, 20)),
     spacing: S.optional(pipe(S.Number, S.int(), S.between(1, 100))),
+    targetRange: S.optional(pipe(S.Number, S.between(0.05, 0.9))),
 });
-
 const FontWeightSchema = pipe(S.Number, S.int(), S.between(100, 900), S.brand('FontWeight'));
-
 const FontAxisConfigSchema = S.Struct({
     default: S.Number,
     max: S.Number,
     min: S.Number,
 });
-
 const WeightSpecSchema = S.Record({
     key: pipe(S.String, S.pattern(/^[a-z]+$/)),
     value: FontWeightSchema,
 });
-
 const FontInputSchema = S.Struct({
     axes: S.optional(
         S.Record({
@@ -120,11 +111,9 @@ const FontInputSchema = S.Struct({
     type: S.Literal('variable', 'static'),
     weights: WeightSpecSchema,
 });
-
 const PixelValueSchema = pipe(S.Number, S.int(), S.positive(), S.brand('PixelValue'));
 const GridColumnsSchema = pipe(S.Number, S.int(), S.between(1, 12), S.brand('GridColumns'));
 const GapScaleSchema = pipe(S.Number, S.int(), S.nonNegative(), S.brand('GapScale'));
-
 const GridLayoutSchema = S.Struct({
     alignItems: S.optional(S.Literal('start', 'end', 'center', 'stretch', 'baseline')),
     containerQuery: S.optional(S.Boolean),
@@ -135,7 +124,6 @@ const GridLayoutSchema = S.Struct({
     name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
     type: S.Literal('grid'),
 });
-
 const StackLayoutSchema = S.Struct({
     align: S.optional(S.Literal('start', 'end', 'center', 'stretch', 'baseline')),
     containerQuery: S.optional(S.Boolean),
@@ -146,7 +134,6 @@ const StackLayoutSchema = S.Struct({
     type: S.Literal('stack'),
     wrap: S.optional(S.Boolean),
 });
-
 const StickyLayoutSchema = S.Struct({
     name: pipe(S.String, S.pattern(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/)),
     offset: GapScaleSchema,
@@ -154,7 +141,6 @@ const StickyLayoutSchema = S.Struct({
     type: S.Literal('sticky'),
     zIndex: S.optional(pipe(S.Number, S.int(), S.between(0, 100))),
 });
-
 const ContainerLayoutSchema = S.Struct({
     containerQuery: S.optional(S.Boolean),
     maxWidth: PixelValueSchema,
@@ -162,47 +148,37 @@ const ContainerLayoutSchema = S.Struct({
     padding: S.optionalWith(GapScaleSchema, { default: () => 4 as GapScale }),
     type: S.Literal('container'),
 });
-
 const LayoutInputSchema = S.Union(GridLayoutSchema, StackLayoutSchema, StickyLayoutSchema, ContainerLayoutSchema);
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const isAlpha = S.is(AlphaSchema);
-const isChroma = S.is(ChromaSchema);
-const isContainerLayout = S.is(ContainerLayoutSchema);
-const isFontWeight = S.is(FontWeightSchema);
-const isGapScale = S.is(GapScaleSchema);
-const isGridColumns = S.is(GridColumnsSchema);
-const isGridLayout = S.is(GridLayoutSchema);
-const isHue = S.is(HueSchema);
-const isLightness = S.is(LightnessSchema);
-const isOklchColor = S.is(OklchColorSchema);
-const isPixelValue = S.is(PixelValueSchema);
-const isStackLayout = S.is(StackLayoutSchema);
-const isStickyLayout = S.is(StickyLayoutSchema);
-
-const validateTheme = (input: unknown): Effect.Effect<ThemeInput, ParseError> =>
-    S.decodeUnknown(ThemeInputSchema)(input);
-
-const validateFont = (input: unknown): Effect.Effect<FontInput, ParseError> => S.decodeUnknown(FontInputSchema)(input);
-
-const validateLayout = (input: unknown): Effect.Effect<LayoutInput, ParseError> =>
-    S.decodeUnknown(LayoutInputSchema)(input);
-
-const validateOklchColor = (input: unknown): Effect.Effect<OklchColor, ParseError> =>
-    S.decodeUnknown(OklchColorSchema)(input);
-
-const validateGridLayout = (input: unknown): Effect.Effect<GridLayout, ParseError> =>
-    S.decodeUnknown(GridLayoutSchema)(input);
-
-const validateStackLayout = (input: unknown): Effect.Effect<StackLayout, ParseError> =>
-    S.decodeUnknown(StackLayoutSchema)(input);
-
-const validateStickyLayout = (input: unknown): Effect.Effect<StickyLayout, ParseError> =>
-    S.decodeUnknown(StickyLayoutSchema)(input);
-
-const validateContainerLayout = (input: unknown): Effect.Effect<ContainerLayout, ParseError> =>
-    S.decodeUnknown(ContainerLayoutSchema)(input);
+const is = Object.freeze({
+    alpha: S.is(AlphaSchema),
+    chroma: S.is(ChromaSchema),
+    containerLayout: S.is(ContainerLayoutSchema),
+    fontWeight: S.is(FontWeightSchema),
+    gapScale: S.is(GapScaleSchema),
+    gridColumns: S.is(GridColumnsSchema),
+    gridLayout: S.is(GridLayoutSchema),
+    hue: S.is(HueSchema),
+    lightness: S.is(LightnessSchema),
+    oklchColor: S.is(OklchColorSchema),
+    pixelValue: S.is(PixelValueSchema),
+    stackLayout: S.is(StackLayoutSchema),
+    stickyLayout: S.is(StickyLayoutSchema),
+} as const);
+const validate = Object.freeze({
+    containerLayout: (input: unknown): Effect.Effect<ContainerLayout, ParseError> =>
+        S.decodeUnknown(ContainerLayoutSchema)(input),
+    font: (input: unknown): Effect.Effect<FontInput, ParseError> => S.decodeUnknown(FontInputSchema)(input),
+    gridLayout: (input: unknown): Effect.Effect<GridLayout, ParseError> => S.decodeUnknown(GridLayoutSchema)(input),
+    layout: (input: unknown): Effect.Effect<LayoutInput, ParseError> => S.decodeUnknown(LayoutInputSchema)(input),
+    oklchColor: (input: unknown): Effect.Effect<OklchColor, ParseError> => S.decodeUnknown(OklchColorSchema)(input),
+    stackLayout: (input: unknown): Effect.Effect<StackLayout, ParseError> => S.decodeUnknown(StackLayoutSchema)(input),
+    stickyLayout: (input: unknown): Effect.Effect<StickyLayout, ParseError> =>
+        S.decodeUnknown(StickyLayoutSchema)(input),
+    theme: (input: unknown): Effect.Effect<ThemeInput, ParseError> => S.decodeUnknown(ThemeInputSchema)(input),
+} as const);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
@@ -210,7 +186,6 @@ export {
     AlphaSchema,
     ChromaSchema,
     ContainerLayoutSchema,
-    CustomModifierSchema,
     FontAxisConfigSchema,
     FontInputSchema,
     FontWeightSchema,
@@ -218,39 +193,18 @@ export {
     GridColumnsSchema,
     GridLayoutSchema,
     HueSchema,
+    is,
     LayoutInputSchema,
     LightnessSchema,
-    ModifierOverrideSchema,
     OklchColorSchema,
     PixelValueSchema,
     StackLayoutSchema,
     StickyLayoutSchema,
     ThemeInputSchema,
     ThemeModifiersSchema,
+    validate,
     WeightSpecSchema,
-    isAlpha,
-    isChroma,
-    isContainerLayout,
-    isFontWeight,
-    isGapScale,
-    isGridColumns,
-    isGridLayout,
-    isHue,
-    isLightness,
-    isOklchColor,
-    isPixelValue,
-    isStackLayout,
-    isStickyLayout,
-    validateContainerLayout,
-    validateFont,
-    validateGridLayout,
-    validateLayout,
-    validateOklchColor,
-    validateStackLayout,
-    validateStickyLayout,
-    validateTheme,
 };
-
 export type {
     Alpha,
     Chroma,

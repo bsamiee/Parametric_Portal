@@ -1,12 +1,12 @@
 /**
- * Define pre-configured theme presets.
+ * Access pre-configured theme presets via unified API.
  * Grounding: Static OKLCH palettes enable rapid theme application.
  */
-import type { OklchParams } from './factories.ts';
 import type { ThemeInput } from './schemas.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type OklchParams = { readonly chroma: number; readonly hue: number; readonly lightness: number };
 type PresetName = 'catppuccin' | 'dracula' | 'nord';
 type PaletteConfig = {
     readonly accent: OklchParams;
@@ -23,6 +23,10 @@ type PresetOverrides = {
     readonly modifiers?: Partial<Record<ModifierKey, boolean | ModifierShifts>>;
     readonly surface?: Partial<OklchParams>;
 };
+type PresetsApi = {
+    readonly palette: typeof palette;
+    readonly themes: typeof themes;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -34,6 +38,7 @@ const B = Object.freeze({
         status: { hover: true } as const,
         text: { disabled: true, hover: true } as const,
     },
+    muted: { scale: 11, targetRange: 0.45 },
     palettes: {
         catppuccin: {
             accent: { chroma: 0.14, hue: 280, lightness: 0.68 },
@@ -47,16 +52,16 @@ const B = Object.freeze({
             yellow: { chroma: 0.13, hue: 85, lightness: 0.82 },
         },
         dracula: {
-            accent: { chroma: 0.12, hue: 285, lightness: 0.58 }, // #A072C6 purple
-            cyan: { chroma: 0.14, hue: 175, lightness: 0.82 }, // #94F2E8 cyan
-            destructive: { chroma: 0.2, hue: 25, lightness: 0.6 }, // #FF5555 red
-            green: { chroma: 0.22, hue: 145, lightness: 0.78 }, // #50FA7B green
-            muted: { chroma: 0.06, hue: 240, lightness: 0.5 }, // #6272A4 comment (raised for visibility)
-            orange: { chroma: 0.18, hue: 25, lightness: 0.65 }, // #F97359 orange
-            pink: { chroma: 0.16, hue: 350, lightness: 0.72 }, // #E98FBE pink
-            surface: { chroma: 0.04, hue: 275, lightness: 0.2 }, // #2A2640 current_line (charcoal)
-            text: { chroma: 0.01, hue: 60, lightness: 0.97 }, // #F8F8F2 foreground
-            yellow: { chroma: 0.16, hue: 100, lightness: 0.88 }, // #F1FA8C yellow
+            accent: { chroma: 0.12, hue: 285, lightness: 0.58 },
+            cyan: { chroma: 0.14, hue: 175, lightness: 0.82 },
+            destructive: { chroma: 0.2, hue: 25, lightness: 0.6 },
+            green: { chroma: 0.22, hue: 145, lightness: 0.78 },
+            muted: { chroma: 0.06, hue: 240, lightness: 0.5 },
+            orange: { chroma: 0.18, hue: 25, lightness: 0.65 },
+            pink: { chroma: 0.16, hue: 350, lightness: 0.72 },
+            surface: { chroma: 0.04, hue: 275, lightness: 0.2 },
+            text: { chroma: 0.01, hue: 60, lightness: 0.97 },
+            yellow: { chroma: 0.16, hue: 100, lightness: 0.88 },
         },
         nord: {
             accent: { chroma: 0.12, hue: 210, lightness: 0.7 },
@@ -73,7 +78,6 @@ const B = Object.freeze({
     scales: {
         accent: 11,
         destructive: 7,
-        muted: 5,
         success: 7,
         surface: 11,
         text: 5,
@@ -88,22 +92,28 @@ const mergeModifiers = (
     overrides: Partial<Record<ModifierKey, boolean | ModifierShifts>> | undefined,
 ): Record<string, boolean | object> | undefined =>
     overrides && base
-        ? Object.fromEntries(
+        ? (Object.fromEntries(
               Object.entries(base).map(([key, value]) => {
                   const override = overrides[key as ModifierKey];
-                  return override === undefined
-                      ? [key, value]
-                      : typeof override === 'boolean' || typeof value === 'boolean'
-                        ? [key, override]
-                        : [key, { ...(value as object), ...override }];
+                  return (
+                      (override === undefined ? [key, value] : null) ??
+                      (typeof override === 'boolean' || typeof value === 'boolean' ? [key, override] : null) ?? [
+                          key,
+                          { ...(value as Record<string, unknown>), ...(override as Record<string, unknown>) },
+                      ]
+                  );
               }),
-          )
+          ) as Record<string, boolean | object>)
         : base;
-
 const mkTheme = (
     name: string,
     oklch: OklchParams,
-    opts: { readonly modifiers?: Record<string, boolean | object>; readonly scale?: number; readonly spacing?: number },
+    opts: {
+        readonly modifiers?: Record<string, boolean | object>;
+        readonly scale?: number;
+        readonly spacing?: number;
+        readonly targetRange?: number;
+    },
     modifierOverrides?: Partial<Record<ModifierKey, boolean | ModifierShifts>>,
 ): ThemeInput =>
     ({
@@ -114,40 +124,46 @@ const mkTheme = (
         name,
         scale: opts.scale ?? 11,
         spacing: opts.spacing,
+        targetRange: opts.targetRange,
     }) as ThemeInput;
-
-const getPresetThemes = (preset: PresetName, overrides?: PresetOverrides): ReadonlyArray<ThemeInput> => {
-    const palette = B.palettes[preset];
-    const surface = { ...palette.surface, ...overrides?.surface };
-    const accent = { ...palette.accent, ...overrides?.accent };
-    const pink = 'pink' in palette ? palette.pink : palette.accent;
+const themes = (preset: PresetName, overrides?: PresetOverrides): ReadonlyArray<ThemeInput> => {
+    const pal = B.palettes[preset];
+    const surface = { ...pal.surface, ...overrides?.surface };
+    const accent = { ...pal.accent, ...overrides?.accent };
+    const pink = 'pink' in pal ? pal.pink : pal.accent;
     const mods = overrides?.modifiers;
-
     return Object.freeze([
         mkTheme('surface', surface, { modifiers: B.modifiers.all, scale: B.scales.surface, spacing: 24 }, mods),
-        mkTheme('text', palette.text, { modifiers: B.modifiers.text, scale: B.scales.text }, mods),
-        mkTheme('muted', palette.muted, { modifiers: B.modifiers.hover, scale: B.scales.muted }, mods),
+        mkTheme('text', pal.text, { modifiers: B.modifiers.text, scale: B.scales.text }, mods),
+        mkTheme('muted', pal.muted, { modifiers: B.modifiers.hover, ...B.muted }, mods),
         mkTheme('accent', accent, { modifiers: B.modifiers.all, scale: B.scales.accent }, mods),
-        mkTheme('cyan', palette.cyan, { modifiers: B.modifiers.hover, scale: 7 }, mods),
+        mkTheme('cyan', pal.cyan, { modifiers: B.modifiers.hover, scale: 7 }, mods),
         mkTheme('pink', pink, { modifiers: B.modifiers.hover, scale: 7 }, mods),
-        mkTheme('success', palette.green, { modifiers: B.modifiers.status, scale: B.scales.success }, mods),
-        mkTheme('warning', palette.orange, { modifiers: B.modifiers.status, scale: B.scales.warning }, mods),
-        mkTheme('highlight', palette.yellow, { modifiers: B.modifiers.hover, scale: 5 }, mods),
+        mkTheme('success', pal.green, { modifiers: B.modifiers.status, scale: B.scales.success }, mods),
+        mkTheme('warning', pal.orange, { modifiers: B.modifiers.status, scale: B.scales.warning }, mods),
+        mkTheme('highlight', pal.yellow, { modifiers: B.modifiers.hover, scale: 5 }, mods),
         mkTheme(
             'destructive',
-            palette.destructive,
+            pal.destructive,
             { modifiers: B.modifiers.destructive, scale: B.scales.destructive },
             mods,
         ),
     ]);
 };
-
-const getPalette = (preset: PresetName): PaletteConfig => ({
+const palette = (preset: PresetName): PaletteConfig => ({
     accent: B.palettes[preset].accent,
     surface: B.palettes[preset].surface,
 });
 
+// --- [ENTRY_POINT] -----------------------------------------------------------
+
+const presets = (): PresetsApi =>
+    Object.freeze({
+        palette,
+        themes,
+    });
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as PRESET_TUNING, getPalette, getPresetThemes };
-export type { ModifierKey, ModifierShifts, PaletteConfig, PresetName, PresetOverrides };
+export { B as PRESET_TUNING, presets };
+export type { ModifierKey, ModifierShifts, PaletteConfig, PresetName, PresetOverrides, PresetsApi };
