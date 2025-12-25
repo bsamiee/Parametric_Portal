@@ -306,7 +306,6 @@ const sections: Record<string, (metrics: Metrics, repo: string) => string> = {
             ].join('\n'),
         ),
 };
-
 const format = (metrics: Metrics, repo: string): string =>
     [
         `# ${B.dashboard.output.displayTitle}`,

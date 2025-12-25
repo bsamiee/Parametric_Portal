@@ -124,7 +124,6 @@ const fixTarget = (ctx: Ctx, config: MetaConfig, target: Target, issue: Issue): 
               (local ? Promise.resolve(local) : callAiApi(config, fixRules[target].prompt(issue))).then((value) =>
                   value ? fixRules[target].write(ctx, issue.number, value.trim().split('\n')[0]).then(() => 1) : 0,
               ))(fixRules[target].fix(issue));
-
 const syncBreakingLabel = (ctx: Ctx, issue: Issue): Promise<number> => {
     const breaking = isBreak(issue.title, issue.body);
     const hasLabel = issue.labels.some((label) => label.name === B.breaking.label);

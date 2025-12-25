@@ -13,6 +13,7 @@
     },
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
+        "docker": ["{projectRoot}/Dockerfile", "{projectRoot}/.dockerignore", "production"],
         "lint": [
             "{projectRoot}/**/*.ts",
             "{projectRoot}/**/*.tsx",
@@ -46,7 +47,6 @@
             "{workspaceRoot}/biome.json",
             "{workspaceRoot}/package.json",
             "{workspaceRoot}/pnpm-lock.yaml",
-            "{workspaceRoot}/.npmrc",
             "{workspaceRoot}/pnpm-workspace.yaml"
         ],
         "testing": [
@@ -82,6 +82,14 @@
                 "testTargetName": "test"
             },
             "plugin": "@nx/vitest"
+        },
+        {
+            "include": ["apps/**/*"],
+            "options": {
+                "buildTargetName": "docker:build",
+                "defaultPlatform": "linux/amd64"
+            },
+            "plugin": "@nx/docker"
         }
     ],
     "release": {
@@ -178,6 +186,12 @@
                     }
                 }
             }
+        },
+        "docker:build": {
+            "cache": true,
+            "dependsOn": ["build"],
+            "inputs": ["docker"],
+            "outputs": []
         },
         "e2e": {
             "cache": false,

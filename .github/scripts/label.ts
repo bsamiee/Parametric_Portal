@@ -7,17 +7,16 @@ import { B, type Ctx, call, createCtx, mutate, type RunParams } from './schema.t
 
 // --- Types -------------------------------------------------------------------
 
+type Behavior = 'pin' | 'unpin' | 'comment';
+type LabelResult = { readonly executed: boolean; readonly behavior: string | null };
 type LabelSpec = {
     readonly action: 'labeled' | 'unlabeled';
     readonly label: string;
     readonly nodeId: string;
     readonly number: number;
 };
-type LabelResult = { readonly executed: boolean; readonly behavior: string | null };
 
 // --- Dispatch Tables ---------------------------------------------------------
-
-type Behavior = 'pin' | 'unpin' | 'comment';
 
 const labelHandlers: Record<Behavior, (ctx: Ctx, spec: LabelSpec) => Promise<void>> = {
     comment: (ctx, spec) =>

@@ -1,11 +1,9 @@
-/** Configure Vite library build for @parametric-portal/theme package. Grounding: Multi-entry export strategy supports tree-shaking per theme module. */
-
 import { Effect } from 'effect';
 import type { UserConfig } from 'vite';
 import { defineConfig } from 'vite';
 import { createConfig } from '../../vite.factory.ts';
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
 
 export default defineConfig(
     Effect.runSync(

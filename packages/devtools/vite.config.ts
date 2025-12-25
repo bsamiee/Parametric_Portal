@@ -3,6 +3,8 @@ import type { UserConfig } from 'vite';
 import { defineConfig } from 'vite';
 import { createConfig } from '../../vite.factory.ts';
 
+// --- [EXPORT] ----------------------------------------------------------------
+
 export default defineConfig(
     Effect.runSync(
         createConfig({
@@ -26,11 +28,19 @@ export default defineConfig(
                 '@effect/experimental',
                 '@effect/schema',
                 'effect',
+                'fdir',
+                'picomatch',
                 'react',
                 'react-dom',
                 'react-dom/client',
                 'react-error-boundary',
                 'react/jsx-runtime',
+                'tinyglobby',
+                'unimport',
+                'unplugin',
+                'unplugin-auto-import',
+                'unplugin-auto-import/vite',
+                'webpack-virtual-modules',
             ],
             mode: 'library',
             name: 'ParametricDevtools',

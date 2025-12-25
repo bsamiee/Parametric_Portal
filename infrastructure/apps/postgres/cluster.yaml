@@ -1,0 +1,70 @@
+# --- CLOUDNATIVEPG CLUSTER ----------------------------------------------------
+# PostgreSQL 17 cluster with single instance for K3s single-node deployment
+# Scale instances: 3 for HA when multi-node cluster is available
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: parametric-portal-db
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  instances: 1
+
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+
+  storage:
+    size: 10Gi
+    storageClass: local-path
+
+  postgresql:
+    parameters:
+      shared_buffers: "256MB"
+      effective_cache_size: "512MB"
+      maintenance_work_mem: "64MB"
+      checkpoint_completion_target: "0.9"
+      wal_buffers: "8MB"
+      random_page_cost: "1.1"
+      effective_io_concurrency: "200"
+      log_statement: "ddl"
+      log_min_duration_statement: "1000"
+
+  bootstrap:
+    initdb:
+      database: parametric_portal
+      owner: app
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+  affinity:
+    enablePodAntiAffinity: false
+
+  monitoring:
+    enablePodMonitor: false
+
+  backup:
+    barmanObjectStore:
+      # destinationPath uses AWS S3 by default; for S3-compatible storage,
+      # add endpointURL via Kustomize patch in overlays/prod
+      destinationPath: "s3://parametric-portal-backups/postgres/"
+      s3Credentials:
+        accessKeyId:
+          name: s3-backup-credentials
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: s3-backup-credentials
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "7d"

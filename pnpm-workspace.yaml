@@ -109,5 +109,24 @@ catalog:
   zustand-computed: 2.1.1
   zustand-slices: 0.4.0
   zustand-x: 6.2.1
+  '@nx/docker': 22.3.3
 
+# --- [VERSION_ENFORCEMENT] ----------------------------------------------------
+engineStrict: true
+
+# --- [DEPENDENCY_RESOLUTION] --------------------------------------------------
+saveExact: true
+
+# --- [WORKSPACE] --------------------------------------------------------------
+preferWorkspacePackages: true
+linkWorkspacePackages: deep
+
+# --- [NETWORK] ----------------------------------------------------------------
+strictSsl: true
+fetchRetries: 3
+fetchRetryFactor: 2
+fetchRetryMintimeout: 10000
+fetchRetryMaxtimeout: 60000
+
+# --- [BUILDS] -----------------------------------------------------------------
 dangerouslyAllowAllBuilds: true

@@ -1,0 +1,157 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+
+jobs:
+  # --- BUILD IMAGES -----------------------------------------------------------
+  build:
+    name: Build Images
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tag }}
+      affected: ${{ steps.affected.outputs.apps }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/node-env
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Login to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine Affected Apps
+        id: affected
+        run: |
+          AFFECTED=$(pnpm exec nx show projects --affected --type=application --json 2>/dev/null || echo '[]')
+          echo "apps=${AFFECTED}" >> $GITHUB_OUTPUT
+
+      - name: Generate Image Tag
+        id: meta
+        run: echo "tag=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build API
+        if: contains(steps.affected.outputs.apps, 'api') || github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          provenance: true
+
+      - name: Build Icons
+        if: contains(steps.affected.outputs.apps, 'parametric_icons') || github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: apps/parametric_icons/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/icons:${{ steps.meta.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/icons:latest
+          build-args: |
+            VITE_API_URL=${{ vars.API_URL }}
+          cache-from: type=gha,scope=icons
+          cache-to: type=gha,mode=max,scope=icons
+          provenance: true
+
+  # --- UPDATE MANIFESTS (GitOps) ----------------------------------------------
+  update-manifests:
+    name: Update K8s Manifests
+    needs: build
+    if: contains(needs.build.outputs.affected, 'api') || contains(needs.build.outputs.affected, 'parametric_icons') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/git-identity
+
+      - name: Update Image Tags
+        working-directory: infrastructure/overlays/prod
+        run: |
+          TAG="${{ needs.build.outputs.image-tag }}"
+          AFFECTED='${{ needs.build.outputs.affected }}'
+
+          # Update only affected app image tags
+          if [[ "${AFFECTED}" == *'"api"'* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            sed -i '/name:.*\/api$/,/newTag:/{s|newTag: .*|newTag: '"${TAG}"'|}' kustomization.yaml
+          fi
+          if [[ "${AFFECTED}" == *'"parametric_icons"'* ]] || [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            sed -i '/name:.*\/icons$/,/newTag:/{s|newTag: .*|newTag: '"${TAG}"'|}' kustomization.yaml
+          fi
+
+      - name: Commit and Push
+        run: |
+          git add infrastructure/overlays/prod/kustomization.yaml
+          git diff --staged --quiet && exit 0
+          git commit -m "deploy: update image tags to ${{ needs.build.outputs.image-tag }}"
+          git push origin main
+
+  # --- NOTIFY FAILURE ---------------------------------------------------------
+  notify-failure:
+    name: Notify Failure
+    needs: [build, update-manifests]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: |
+            .github/scripts
+            .github/actions
+
+      - uses: ./.github/actions/node-env
+
+      - name: Create Failure Issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          NODE_OPTIONS: --import tsx
+        with:
+          script: |
+            const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
+            await run({
+              context: { repo: context.repo, payload: context.payload },
+              core,
+              github,
+              spec: {
+                kind: 'ci',
+                job: 'deploy',
+                runUrl: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+              }
+            });

@@ -1,0 +1,86 @@
+# --- SHARED MIDDLEWARE --------------------------------------------------------
+# Domain-agnostic middleware used by all apps
+# Rate limiting, compression, HTTPS redirect
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit-api
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: middleware
+spec:
+  rateLimit:
+    average: 100
+    period: 1s
+    burst: 200
+    sourceCriterion:
+      ipStrategy:
+        depth: 1
+        excludedIPs:
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: rate-limit-web
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: middleware
+spec:
+  rateLimit:
+    average: 50
+    period: 1s
+    burst: 100
+    sourceCriterion:
+      ipStrategy:
+        depth: 1
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: redirect-to-https
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: middleware
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+    port: "443"
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: compress
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: middleware
+spec:
+  compress:
+    excludedContentTypes:
+      - text/event-stream
+    minResponseBodyBytes: 1024
+---
+# HTTP to HTTPS redirect for ALL domains (generic)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: http-redirect
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: redirect
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: HostRegexp(`{host:.+}`)
+      kind: Rule
+      priority: 1
+      middlewares:
+        - name: redirect-to-https
+      services:
+        - kind: TraefikService
+          name: noop@internal

@@ -1,0 +1,16 @@
+# --- TLS STORE ----------------------------------------------------------------
+# Default certificate store configuration for Traefik v3
+apiVersion: traefik.io/v1alpha1
+kind: TLSStore
+metadata:
+  name: default
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: security
+spec:
+  defaultGeneratedCert:
+    resolver: letsencrypt
+    domain:
+      main: parametric-portal.com
+      sans:
+        - "*.parametric-portal.com"

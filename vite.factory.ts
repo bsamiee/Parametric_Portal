@@ -89,7 +89,7 @@ const B = Object.freeze({
         'default-src': ["'self'"],
         'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
         'img-src': ["'self'", 'data:', 'blob:', 'https:'],
-        'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        'script-src': ["'self'"],
         'style-src': ["'self'", "'unsafe-inline'"],
         'worker-src': ["'self'", 'blob:'],
     },

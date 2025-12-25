@@ -8,16 +8,10 @@ import { B, type Ctx, call, createCtx, fn, type Label, md, mutate, type RunParam
 // --- Types -------------------------------------------------------------------
 
 type ReactionGroups = ReadonlyArray<{ readonly content: string; readonly users: { readonly totalCount: number } }>;
-
-// --- Dispatch Tables ---------------------------------------------------------
-
-type DiscussionReply = {
-    readonly author: User;
-    readonly body: string;
-    readonly createdAt: string;
-    readonly reactionGroups: ReactionGroups;
-};
+type IssueProbe = Awaited<ReturnType<typeof probeHandlers.issue>>;
+type PrProbe = Awaited<ReturnType<typeof probeHandlers.pr>>;
 type DiscussionComment = DiscussionReply & { readonly replies: { readonly nodes: ReadonlyArray<DiscussionReply> } };
+type DiscussionProbe = Awaited<ReturnType<typeof probeHandlers.discussion>>;
 type Discussion = {
     readonly answer: { readonly author: User; readonly body: string; readonly createdAt: string } | null;
     readonly author: User;
@@ -29,6 +23,14 @@ type Discussion = {
     readonly reactionGroups: ReactionGroups;
     readonly title: string;
 };
+type DiscussionReply = {
+    readonly author: User;
+    readonly body: string;
+    readonly createdAt: string;
+    readonly reactionGroups: ReactionGroups;
+};
+
+// --- Dispatch Tables ---------------------------------------------------------
 
 const mapReply = (reply: DiscussionReply) => ({
     author: reply.author.login,
@@ -36,7 +38,6 @@ const mapReply = (reply: DiscussionReply) => ({
     createdAt: reply.createdAt,
     reactions: fn.reactions(reply.reactionGroups),
 });
-
 const probeHandlers = {
     discussion: async (ctx: Ctx, number: number) => {
         const discussion = (await call(ctx, 'discussion.get', number)) as Discussion;
@@ -64,7 +65,6 @@ const probeHandlers = {
             },
         };
     },
-
     issue: async (ctx: Ctx, number: number) => {
         type IssueData = {
             readonly assignees: ReadonlyArray<User>;
@@ -97,7 +97,6 @@ const probeHandlers = {
             },
         };
     },
-
     pr: async (ctx: Ctx, number: number) => {
         type PrData = {
             readonly assignees: ReadonlyArray<User>;
@@ -180,7 +179,6 @@ const probeHandlers = {
 
 const probe = async <K extends keyof typeof probeHandlers>(params: RunParams, kind: K, number: number) =>
     probeHandlers[kind](createCtx(params), number);
-
 const post = async (params: RunParams, number: number, marker: string, title: string, body: string): Promise<void> =>
     ((formattedMarker) =>
         mutate(createCtx(params), {
@@ -190,12 +188,6 @@ const post = async (params: RunParams, number: number, marker: string, title: st
             n: number,
             t: 'comment',
         }))(md.marker(marker)).then(() => params.core.info(`Posted ${title} to PR #${number}`));
-
-// --- Types -------------------------------------------------------------------
-
-type DiscussionProbe = Awaited<ReturnType<typeof probeHandlers.discussion>>;
-type IssueProbe = Awaited<ReturnType<typeof probeHandlers.issue>>;
-type PrProbe = Awaited<ReturnType<typeof probeHandlers.pr>>;
 
 // --- Export ------------------------------------------------------------------
 

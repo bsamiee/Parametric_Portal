@@ -41,7 +41,7 @@ You will:
 
 5. **Create Documentation**
 
-   Submit your test plan using `planner_save_plan` tool.
+   Submit your test plan using `planner_save_plan` tool to `docs/specs/`.
 
 **Quality Standards**:
 - Write steps that are specific enough for any tester to follow

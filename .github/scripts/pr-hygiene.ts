@@ -74,11 +74,8 @@ const H = Object.freeze({
 
 const isBot = (login: string | undefined): boolean =>
     login ? H.agentBots.some((b) => login.toLowerCase() === b.toLowerCase()) : false;
-
 const isValuable = (body: string): boolean => H.valuablePatterns.some((p) => p.test(body));
-
 const pathMatch = (path: string | null, files: ReadonlyArray<string>): boolean => path !== null && files.includes(path);
-
 const classify = (t: Thread, commits: ReadonlyArray<CommitFile>): Action => {
     if (t.isResolved) {
         return 'skip';
@@ -103,10 +100,8 @@ const fetchThreads = async (ctx: Ctx, n: number): Promise<ReadonlyArray<Thread>>
             repository: { pullRequest: { reviewThreads: { nodes: ReadonlyArray<Thread> } } };
         }>(H.gql.threads, { n, o: ctx.owner, r: ctx.repo }),
     );
-
 const fetchComments = async (ctx: Ctx, n: number): Promise<ReadonlyArray<IssueComment>> =>
     ((await call(ctx, 'comment.list', n)) ?? []) as ReadonlyArray<IssueComment>;
-
 const fetchCommitFiles = async (ctx: Ctx, n: number, since: string): Promise<ReadonlyArray<CommitFile>> => {
     type Raw = ReadonlyArray<{ sha: string; commit: { author: { date: string } | null } }>;
     const commits = ((await call(ctx, 'pull.listCommits', n)) ?? []) as Raw;
@@ -128,19 +123,16 @@ const fetchCommitFiles = async (ctx: Ctx, n: number, since: string): Promise<Rea
         })),
     );
 };
-
 const resolveThread = (ctx: Ctx, id: string): Promise<boolean> =>
     ctx.github.graphql(H.gql.resolve, { id }).then(
         () => true,
         () => false,
     );
-
 const minimizeComment = (ctx: Ctx, nodeId: string): Promise<boolean> =>
     ctx.github.graphql(H.gql.minimize, { c: 'OUTDATED', id: nodeId }).then(
         () => true,
         () => false,
     );
-
 const replyToThread = (
     ctx: Ctx,
     n: number,
@@ -159,13 +151,11 @@ const replyToThread = (
             (result) => ({ nodeId: (result.data as { node_id?: string }).node_id ?? null, success: true }),
             () => ({ nodeId: null, success: false }),
         );
-
 const deleteComment = (ctx: Ctx, id: number): Promise<boolean> =>
     ctx.github.rest.issues.deleteComment({ comment_id: id, owner: ctx.owner, repo: ctx.repo }).then(
         () => true,
         () => false,
     );
-
 const reactToComment = (ctx: Ctx, id: number, content: string): Promise<boolean> =>
     call(ctx, 'reaction.createForReviewComment', id, content).then(
         () => true,
@@ -176,7 +166,6 @@ const reactToComment = (ctx: Ctx, id: number, content: string): Promise<boolean>
 
 const minimizeAllComments = (ctx: Ctx, comments: ReadonlyArray<ThreadComment>): Promise<boolean[]> =>
     Promise.all(comments.filter((c) => c.id).map((c) => minimizeComment(ctx, c.id)));
-
 const threadActions: Record<
     Action,
     (
@@ -241,7 +230,6 @@ const processThreads = async (
         }),
         { minimized: 0, replied: 0, resolved: 0 },
     );
-
 const cleanupUserComments = async (ctx: Ctx, comments: ReadonlyArray<IssueComment>): Promise<number> =>
     (await Promise.all(comments.filter((c) => !isBot(c.user?.login)).map((c) => deleteComment(ctx, c.id)))).filter(
         Boolean,
@@ -253,7 +241,6 @@ const noWorkResult = (core: Core, prNumber: number): HygieneResult => {
     core.info(`[PR-HYGIENE] #${prNumber}: no work`);
     return { deleted: 0, minimized: 0, replied: 0, resolved: 0 };
 };
-
 const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<HygieneResult> => {
     const ctx = createCtx(params);
     const { prNumber } = params.spec;
@@ -266,7 +253,6 @@ const run = async (params: RunParams & { readonly spec: HygieneSpec }): Promise<
         ? noWorkResult(params.core, prNumber)
         : processHygiene(ctx, params, threads, unresolved, comments, prNumber);
 };
-
 const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, core: Core): Promise<HygieneResult> => {
     const { resolved, replied, deleted, minimized } = result;
     const body = `### [/] PR Hygiene\n| Resolved | Replied | Minimized | Deleted |\n|:--:|:--:|:--:|:--:|\n| ${resolved} | ${replied} | ${minimized} | ${deleted} |\n\n_${fn.formatTime(new Date())}_`;
@@ -294,14 +280,12 @@ const postSummary = async (ctx: Ctx, prNumber: number, result: HygieneResult, co
     );
     return result;
 };
-
 const cleanupResolvedThreads = async (ctx: Ctx, threads: ReadonlyArray<Thread>): Promise<number> => {
     const resolved = threads.filter((t) => t.isResolved || t.isOutdated);
     const allComments = resolved.flatMap((t) => t.comments.nodes);
     const results = await minimizeAllComments(ctx, allComments);
     return results.filter(Boolean).length;
 };
-
 const cleanupOutdatedIssueComments = async (ctx: Ctx, comments: ReadonlyArray<IssueComment>): Promise<number> => {
     const ciFailurePattern = /^## CI Failure/;
     const ciComments = comments.filter((c) => isBot(c.user?.login) && ciFailurePattern.test(c.body));
@@ -309,7 +293,6 @@ const cleanupOutdatedIssueComments = async (ctx: Ctx, comments: ReadonlyArray<Is
     const results = await Promise.all(outdated.map((c) => minimizeComment(ctx, c.node_id)));
     return results.filter(Boolean).length;
 };
-
 const processHygiene = async (
     ctx: Ctx,
     params: RunParams,
@@ -323,7 +306,6 @@ const processHygiene = async (
         allDates.length > 0
             ? new Date(Math.min(...allDates)).toISOString()
             : new Date(Date.now() - B.time.day).toISOString();
-
     const commits = await fetchCommitFiles(ctx, prNumber, since);
     const [{ resolved, replied, minimized: threadMinimized }, deleted, resolvedCleanup, issueCleanup] =
         await Promise.all([
@@ -332,7 +314,6 @@ const processHygiene = async (
             cleanupResolvedThreads(ctx, allThreads),
             cleanupOutdatedIssueComments(ctx, comments),
         ]);
-
     const minimized = threadMinimized + resolvedCleanup + issueCleanup;
     const result = { deleted, minimized, replied, resolved };
     params.core.info(

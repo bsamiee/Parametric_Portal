@@ -101,6 +101,10 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t build
 
+      - name: Install Playwright Browsers
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        run: pnpm exec playwright install chromium --with-deps
+
       - name: Test
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t test -- --coverage
