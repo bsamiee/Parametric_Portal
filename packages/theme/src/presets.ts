@@ -116,7 +116,7 @@ const mkTheme = (
     },
     modifierOverrides?: Partial<Record<ModifierKey, boolean | ModifierShifts>>,
 ): ThemeInput =>
-    ({
+    Object.freeze({
         chroma: oklch.chroma,
         hue: oklch.hue,
         lightness: oklch.lightness,

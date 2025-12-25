@@ -3,7 +3,7 @@
  */
 import fc from 'fast-check';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [TYPES] ----------------------------------------------------------------
 
 type StorageType = 'cookies' | 'indexedDB' | 'localStorage' | 'sessionStorage';
 type FileExtension = 'jpg' | 'pdf' | 'png' | 'svg' | 'zip';
@@ -12,7 +12,7 @@ type PatternKey = keyof typeof B.patterns;
 type EnumKey = keyof typeof B.enums;
 type IntegerBoundKey = keyof typeof B.integers;
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [CONSTANTS] ------------------------------------------------------------
 
 const B = Object.freeze({
     charSets: {
@@ -57,13 +57,11 @@ const B = Object.freeze({
     temporal: { days: 365, hours: 24, minutes: 60, months: 12 },
 } as const);
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [PURE_FUNCTIONS] -------------------------------------------------------
 
 const charsToArb = (chars: string): fc.Arbitrary<string> => fc.constantFrom(...chars.split(''));
 const stringOfChars = (chars: string, opts: { maxLength: number; minLength: number }): fc.Arbitrary<string> =>
     fc.string({ maxLength: opts.maxLength, minLength: opts.minLength, unit: charsToArb(chars) });
-
-// --- [POLYMORPHIC_FACTORIES] -------------------------------------------------
 
 /** Temporal offset: symmetric integer range around zero. */
 const fcTemporalOffset = (unit: TemporalUnit): fc.Arbitrary<number> => {
@@ -87,18 +85,15 @@ const fcBoundedInteger = (key: IntegerBoundKey): fc.Arbitrary<number> => {
     const bounds = B.integers[key];
     return fc.integer({ max: bounds.max, min: bounds.min });
 };
-/** Invalid cases: union of deliberately invalid arbitraries. */
-const fcInvalid = <K extends keyof typeof B.invalidCases>(key: K): fc.Arbitrary<unknown> =>
-    fc.oneof(...B.invalidCases[key].map((f) => f()));
+/** Invalid cases: union of deliberately invalid arbitraries with typed output. */
+const fcInvalid = <K extends keyof typeof B.invalidCases, T>(key: K): fc.Arbitrary<T> =>
+    fc.oneof(...B.invalidCases[key].map((f) => f())) as fc.Arbitrary<T>;
 /** Nullable: wraps arbitrary to include null. */
 const fcNullable = <T>(arb: fc.Arbitrary<T>): fc.Arbitrary<T | null> => fc.oneof(arb, fc.constant(null));
 /** Optional: wraps arbitrary to include undefined. */
 const fcOptional = <T>(arb: fc.Arbitrary<T>): fc.Arbitrary<T | undefined> => fc.oneof(arb, fc.constant(undefined));
 /** Boolean: simple true/false. */
 const fcBoolean = (): fc.Arbitrary<boolean> => fc.boolean();
-
-// --- [SINGLE_PURPOSE] --------------------------------------------------------
-
 const fcFilename = (): fc.Arbitrary<string> => fc.string({ maxLength: 100, minLength: B.strings.min });
 const fcSafeFilename = (): fc.Arbitrary<string> =>
     stringOfChars(B.charSets.filename, { maxLength: B.filenames.max, minLength: B.filenames.min });
@@ -122,7 +117,7 @@ const fcMessageData = (): fc.Arbitrary<unknown> =>
         fc.array(fc.integer()),
     );
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [ENTRY_POINT] ----------------------------------------------------------
 
 const Arbitraries = Object.freeze({
     boolean: fcBoolean,
@@ -132,8 +127,8 @@ const Arbitraries = Object.freeze({
     filename: fcFilename,
     historyLimit: () => fcBoundedInteger('historyLimit'),
     hours: () => fcTemporalOffset('hours'),
-    invalidHistoryLimit: () => fcInvalid('historyLimit'),
-    invalidStoreName: () => fcInvalid('storeName'),
+    invalidHistoryLimit: (): fc.Arbitrary<number> => fcInvalid<'historyLimit', number>('historyLimit'),
+    invalidStoreName: (): fc.Arbitrary<string> => fcInvalid<'storeName', string>('storeName'),
     isoDate: fcIsoDate,
     jsonValue: fcJsonValue,
     messageData: fcMessageData,
@@ -149,7 +144,7 @@ const Arbitraries = Object.freeze({
     variantIndex: () => fcBoundedInteger('variantIndex'),
 } as const);
 
-// --- [EXPORT] ----------------------------------------------------------------
+// --- [EXPORT] ---------------------------------------------------------------
 
 export { Arbitraries as FC_ARB, B as ARB_TUNING };
 export type { FileExtension, StorageType };

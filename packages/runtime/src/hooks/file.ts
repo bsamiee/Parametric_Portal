@@ -115,12 +115,10 @@ const useFileInput = <R>(options: FileInputOptions = {}): FileInputState => {
     useEffect(() => {
         const input = globalThis.document?.createElement('input');
         input &&
-            Object.assign(input, {
-                accept: resolvedAccept,
-                multiple: resolvedMultiple,
-                style: { display: 'none' },
-                type: 'file',
-            });
+            Object.assign(
+                Object.assign(input, { accept: resolvedAccept, multiple: resolvedMultiple, type: 'file' }).style,
+                { display: 'none' },
+            );
         inputRef.current = input ?? null;
         const handleChange = () => {
             const selectedFiles = FileOps.fromFileList(inputRef.current?.files ?? null);

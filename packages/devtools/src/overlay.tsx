@@ -34,14 +34,20 @@ type DebugOverlayProviderProps = {
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const T = DEVTOOLS_TUNING.overlay;
+const B = Object.freeze({
+    htmlEscape: Object.freeze({
+        "'": '&#39;',
+        '"': '&quot;',
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+    } as const),
+} as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const escapeHtml = (str: string): string =>
-    str.replaceAll(
-        /[&<>"']/g,
-        (c) => ({ "'": '&#39;', '"': '&quot;', '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c] ?? c,
-    );
+    str.replaceAll(/[&<>"']/g, (c) => B.htmlEscape[c as keyof typeof B.htmlEscape]);
 const mergeColors = (override?: OverlayConfig['colors']): Record<keyof typeof T.colors, string> => ({
     ...T.colors,
     ...override,

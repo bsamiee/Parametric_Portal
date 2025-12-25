@@ -67,6 +67,9 @@ const interpolateHue = (h1: number, h2: number, t: number, method: HueInterpolat
 /** Convert OklchColor to Color.js object. Grounding: Enables Color.js API usage with branded types. */
 const toColorJs = (color: OklchColor): Color => new Color('oklch', [color.l, color.c, color.h], color.a);
 
+/** Generate CSS custom property reference. Grounding: Standardized var() syntax for theme integration. */
+const getVar = (name: string, step: number | string): string => `var(--color-${name}-${step})`;
+
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const create = (l: number, c: number, h: number, a = 1): Effect.Effect<OklchColor, ParseError> =>
@@ -142,8 +145,6 @@ const toSRGB = (color: OklchColor): string =>
         .to('srgb')
         .toGamut()
         .toString({ format: color.a < 1 ? 'rgba' : 'rgb' });
-
-const getVar = (name: string, step: number | string): string => `var(--color-${name}-${step})`;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

@@ -41,7 +41,11 @@ const withEnv = <T>(env: string, fn: () => T): T =>
         () => vi.unstubAllGlobals(),
         fn,
     );
-const counter = { value: 0 };
+const idState = { count: 0 };
+const createUniqueId = (prefix = 'test'): string => {
+    idState.count += 1;
+    return `${prefix}-${idState.count}`;
+};
 const Harness = Object.freeze({
     console: Object.freeze({
         error: <T>(fn: (spy: SpyInstance) => T): T => captureConsole('error', fn),
@@ -80,10 +84,7 @@ const Harness = Object.freeze({
         },
     }),
     /** Generates unique test IDs for isolation (e.g., store names in browser mode). */
-    uniqueId: (prefix = 'test'): string => {
-        counter.value += 1;
-        return `${prefix}-${counter.value}`;
-    },
+    uniqueId: createUniqueId,
 });
 
 // --- [EXPORT] ----------------------------------------------------------------

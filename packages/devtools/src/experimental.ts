@@ -34,22 +34,22 @@ const T = DEVTOOLS_TUNING.experimental;
 
 const isBrowser = (): boolean => globalThis.window !== undefined && typeof WebSocket !== 'undefined';
 const shouldEnable = (config: DevToolsConfig): boolean => (config.enabled ?? T.defaults.enabled) && isBrowser();
-const testConnection = (url: string, timeoutMs: number): Promise<boolean> =>
-    new Promise((resolve) => {
+const testConnection = (url: string, timeoutMs: number): Effect.Effect<boolean, never> =>
+    Effect.async((resume) => {
         const ws = new WebSocket(url);
         const timeout = setTimeout(() => {
             ws.close();
-            resolve(false);
+            resume(Effect.succeed(false));
         }, timeoutMs);
         ws.onopen = () => {
             clearTimeout(timeout);
             ws.close();
-            resolve(true);
+            resume(Effect.succeed(true));
         };
         ws.onerror = () => {
             clearTimeout(timeout);
             ws.close();
-            resolve(false);
+            resume(Effect.succeed(false));
         };
     });
 const normalizeConfig = (config: Partial<DevToolsConfig>): InternalConfig => ({
@@ -71,10 +71,7 @@ const modeHandlers = {
         layer: cfg.enabled
             ? Layer.unwrapEffect(
                   pipe(
-                      Effect.tryPromise({
-                          catch: () => false,
-                          try: () => testConnection(cfg.url, cfg.timeoutMs),
-                      }),
+                      testConnection(cfg.url, cfg.timeoutMs),
                       Effect.map((available) => (available ? DevTools.layer(cfg.url) : Layer.empty)),
                       Effect.catchAll(() => Effect.succeed(Layer.empty)),
                   ),

@@ -127,6 +127,7 @@ export default defineConfig({
                     exclude: ['packages/runtime/**'],
                     include: ['packages/*/tests/**/*.spec.ts'],
                     name: 'packages-node',
+                    root: Dirname,
                 },
             },
             {
@@ -143,6 +144,7 @@ export default defineConfig({
                     },
                     include: ['packages/runtime/tests/**/*.spec.ts'],
                     name: 'runtime-browser',
+                    root: Dirname,
                     setupFiles: [path.resolve(Dirname, 'packages/test-utils/src/setup.ts')],
                 },
             },
@@ -152,6 +154,7 @@ export default defineConfig({
                     environment: 'jsdom',
                     include: ['apps/*/tests/**/*.spec.ts'],
                     name: 'apps',
+                    root: Dirname,
                 },
             },
         ],

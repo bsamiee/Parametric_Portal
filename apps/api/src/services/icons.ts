@@ -59,6 +59,9 @@ const B = Object.freeze({
         invalidInput: { code: 'INVALID_INPUT', message: 'Invalid generation input' },
         parseFailure: { cause: 'Failed to parse response' },
     },
+    regex: {
+        jsonExtract: /\{[\s\S]*"variants"[\s\S]*\}/,
+    },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -191,7 +194,7 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
     return parts.join('\n\n');
 };
 
-const extractJsonFromText = (text: string): string => /\{[\s\S]*"variants"[\s\S]*\}/.exec(text)?.[0] ?? text;
+const extractJsonFromText = (text: string): string => B.regex.jsonExtract.exec(text)?.[0] ?? text;
 const parseAiResponse = (text: string): Effect.Effect<S.Schema.Type<typeof AiResponseSchema>, InternalError> =>
     pipe(
         Effect.try({
