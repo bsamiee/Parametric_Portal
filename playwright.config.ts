@@ -42,7 +42,7 @@ const B = Object.freeze({
     },
     output: {
         dir: 'test-results/e2e',
-        reportDir: 'test-results/e2e/report',
+        reportDir: 'test-results/e2e-report',
     },
     patterns: {
         testDir: 'tests/e2e',

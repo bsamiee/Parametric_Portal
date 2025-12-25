@@ -23,7 +23,6 @@ test.describe('Application Bootstrap', () => {
         await page.waitForLoadState('domcontentloaded');
         await expect(page).toHaveTitle(B.apps.parametric_icons.title);
     });
-
     test('api - health check returns ok', async ({ request }) => {
         const response = await request.get(`${B.apps.api.baseURL}${B.apps.api.healthPath}`);
         expect(response.ok()).toBe(true);

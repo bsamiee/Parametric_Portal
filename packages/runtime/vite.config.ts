@@ -1,5 +1,6 @@
 /** Vite config for runtime package (library mode). Builds runtime core, store
- ** factory/types, auth store, and temporal utilities via shared factory. */
+ * factory/types, auth store, and temporal utilities via shared factory.
+ */
 import { Effect } from 'effect';
 import type { UserConfig } from 'vite';
 import { defineConfig } from 'vite';

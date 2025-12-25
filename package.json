@@ -88,6 +88,8 @@
     "packageManager": "pnpm@10.26.1",
     "pnpm": {
         "overrides": {
+            "@effect/cluster": "0.56.0",
+            "@effect/rpc": "0.73.0",
             "jiti": "2.6.1",
             "node-forge": "1.3.3",
             "puppeteer": "24.34.0"
@@ -107,7 +109,7 @@
         "e2e": "playwright test",
         "e2e:debug": "playwright test --debug",
         "e2e:headed": "playwright test --headed",
-        "e2e:report": "playwright show-report test-results/e2e/report",
+        "e2e:report": "playwright show-report test-results/e2e-report",
         "e2e:ui": "playwright test --ui",
         "build:libs": "nx run-many -t build --projects=@parametric-portal/types,@parametric-portal/theme,@parametric-portal/runtime,@parametric-portal/components,@parametric-portal/devtools",
         "check:all": "nx run-many -t check",
