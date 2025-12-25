@@ -33,4 +33,7 @@ pre-push:
   parallel: false
   commands:
     quality:
-      run: pnpm exec nx affected -t typecheck,check --base=origin/main
+      env:
+        NX_DAEMON: "false"
+        FORCE_COLOR: "0"
+      run: pnpm exec nx affected -t typecheck,check --base=origin/main --output-style=stream
