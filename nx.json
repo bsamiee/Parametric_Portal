@@ -41,6 +41,7 @@
             "{workspaceRoot}/tsconfig.base.json",
             "{workspaceRoot}/vite.config.ts",
             "{workspaceRoot}/vitest.config.ts",
+            "{workspaceRoot}/playwright.config.ts",
             "{workspaceRoot}/stryker.config.js",
             "{workspaceRoot}/biome.json",
             "{workspaceRoot}/package.json",
@@ -177,6 +178,16 @@
                     }
                 }
             }
+        },
+        "e2e": {
+            "cache": false,
+            "dependsOn": ["build"],
+            "executor": "nx:run-commands",
+            "inputs": ["default", "{workspaceRoot}/tests/e2e/**/*", "{workspaceRoot}/playwright.config.ts"],
+            "options": {
+                "command": "playwright test"
+            },
+            "outputs": ["{workspaceRoot}/test-results/e2e"]
         },
         "fix": {
             "cache": false,

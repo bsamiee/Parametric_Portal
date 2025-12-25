@@ -148,7 +148,6 @@ const browsers = (): Browsers =>
         ),
         Option.getOrElse(() => B.browsers),
     );
-
 const chunk = (id: string) =>
     id.includes('node_modules')
         ? pipe(
@@ -158,11 +157,9 @@ const chunk = (id: string) =>
               Option.getOrUndefined,
           )
         : undefined;
-
 const css = (dev = false) => ({
     devSourcemap: dev,
 });
-
 const esbuild = (app: boolean, prod = false) => ({
     ...(app
         ? {
@@ -182,25 +179,20 @@ const esbuild = (app: boolean, prod = false) => ({
     target: 'esnext' as const,
     treeShaking: true,
 });
-
 const toPolicy = (p: Record<string, ReadonlyArray<string>> | undefined) =>
     Object.fromEntries(Object.entries(p ?? B.csp).map(([k, v]) => [k, [...v]]));
-
 const compress = (alg: 'brotliCompress' | 'gzip', ext: string, t: number) =>
     viteCompression({ algorithm: alg, deleteOriginFile: false, ext, filter: B.comp.f, threshold: t, verbose: true });
-
 const cache = <H extends 'CacheFirst' | 'NetworkFirst'>(h: H, n: string, s: number, u: RegExp) => ({
     handler: h,
     options: { cacheName: n, expiration: { maxAgeSeconds: s, maxEntries: B.cache.max } },
     urlPattern: u,
 });
-
 const output = (p = '') => ({
     assetFileNames: `${p}assets/[name]-[hash][extname]`,
     chunkFileNames: `${p}chunks/[name]-[hash].js`,
     entryFileNames: `${p}${p ? '' : 'entries/'}[name]-[hash].js`,
 });
-
 const icons = () => [
     ...[192, 512].map((s) => ({
         purpose: 'any' as const,
@@ -210,7 +202,6 @@ const icons = () => [
     })),
     { purpose: 'maskable' as const, sizes: '512x512', src: '/icon-maskable.png', type: 'image/png' },
 ];
-
 const imgOpt = (q: { readonly avif: number; readonly jpeg: number; readonly png: number; readonly webp: number }) => ({
     avif: { lossless: false, quality: q.avif },
     exclude: /^(?:virtual:|node_modules)/,
@@ -221,13 +212,11 @@ const imgOpt = (q: { readonly avif: number; readonly jpeg: number; readonly png:
     test: /\.(jpe?g|png|gif|tiff|webp|svg|avif)$/i,
     webp: { lossless: false, quality: q.webp },
 });
-
 const resolve = (browser = false) => ({
     alias: { '@': '/packages' },
     conditions: browser ? ['import', 'module', 'browser', 'default'] : ['import', 'module', 'default'],
     ...(browser ? { dedupe: ['react', 'react-dom'], extensions: [...B.exts] } : {}),
 });
-
 const clientOnly = (plugin: Plugin): Plugin => ({
     ...plugin,
     applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
@@ -253,7 +242,6 @@ const buildAppHandlers: Record<BuildStrategy, (builder: ViteBuilder) => Promise<
             }),
         ),
 } as const;
-
 const plugins = {
     app: (c: Extract<Cfg, { mode: 'app' }>, prod: boolean) => [
         tsconfigPaths({ root: c.root ?? ROOT_DIR }),
@@ -320,7 +308,6 @@ const plugins = {
     ],
     server: () => [tsconfigPaths({ projects: ['./tsconfig.json'] })],
 } as const;
-
 const config: {
     readonly [M in Mode]: (
         c: Extract<Cfg, { mode: M }>,

@@ -2,7 +2,10 @@
     "$schema": "https://biomejs.dev/schemas/2.3.10/schema.json",
     "plugins": [],
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
-    "files": { "ignoreUnknown": true, "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows"] },
+    "files": {
+        "ignoreUnknown": true,
+        "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows", "!.mcp.json"]
+    },
     "assist": {
         "actions": { "source": { "useSortedProperties": "on", "organizeImports": "on", "useSortedKeys": "on" } }
     },
@@ -46,7 +49,7 @@
                             },
                             {
                                 "selector": { "kind": "objectLiteralProperty" },
-                                "match": "_tag|__html|background_color|theme_color|short_name|start_url|test_coverage|(.*)",
+                                "match": "_tag|__html|background_color|theme_color|short_name|start_url|test_coverage|parametric_icons|(.*)",
                                 "formats": ["camelCase", "PascalCase"]
                             },
                             {

@@ -43,7 +43,9 @@
             "Bash(git:*)",
             "Bash(gh:*)",
             "Bash(node:*)",
-            "Bash(uv:*)"
+            "Bash(uv:*)",
+            "mcp__playwright-test__*",
+            "mcp__playwright__browser_*"
         ],
         "ask": [],
         "deny": []

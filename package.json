@@ -104,6 +104,11 @@
     "scripts": {
         "affected": "nx affected -t build,test,typecheck,check",
         "build:all": "nx run-many -t build",
+        "e2e": "playwright test",
+        "e2e:debug": "playwright test --debug",
+        "e2e:headed": "playwright test --headed",
+        "e2e:report": "playwright show-report test-results/e2e/report",
+        "e2e:ui": "playwright test --ui",
         "build:libs": "nx run-many -t build --projects=@parametric-portal/types,@parametric-portal/theme,@parametric-portal/runtime,@parametric-portal/components,@parametric-portal/devtools",
         "check:all": "nx run-many -t check",
         "clean": "rm -rf .nx/cache node_modules/.cache packages/*/dist apps/*/dist packages/*/.vite-inspect apps/*/.vite-inspect",
