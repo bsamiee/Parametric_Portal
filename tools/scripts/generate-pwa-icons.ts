@@ -11,11 +11,14 @@ type IconMode = 'maskable' | 'standard';
 
 class IconGenerationError {
     readonly _tag = 'IconGenerationError';
-    constructor(
-        readonly size: number,
-        readonly mode: IconMode,
-        readonly reason: string,
-    ) {}
+    readonly size: number;
+    readonly mode: IconMode;
+    readonly reason: string;
+    constructor(size: number, mode: IconMode, reason: string) {
+        this.size = size;
+        this.mode = mode;
+        this.reason = reason;
+    }
 }
 
 // --- [CONSTANTS] -------------------------------------------------------------
