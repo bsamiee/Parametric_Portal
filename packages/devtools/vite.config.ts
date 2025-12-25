@@ -33,6 +33,8 @@ export default defineConfig(
                 'react-dom/client',
                 'react-error-boundary',
                 'react/jsx-runtime',
+                'unplugin-auto-import',
+                'unplugin-auto-import/vite',
             ],
             mode: 'library',
             name: 'ParametricDevtools',

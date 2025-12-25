@@ -21,9 +21,8 @@ defaults:
   run:
     shell: 'bash'
 
-concurrency:
-  group: gemini-dispatch-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
-  cancel-in-progress: true
+# NOTE: Concurrency handled by reusable workflows (gemini-review.yml, gemini-invoke.yml).
+# Parent dispatch can run multiple times; child workflows dedupe via their own concurrency groups.
 
 jobs:
   debugger:
