@@ -1,3 +1,13 @@
+## 1.0.5 (2025-12-25)
+
+### [BUG_FIXES]
+
+- infrastructure + theme consolidation ([#120](https://github.com/bsamiee/Parametric_Portal/pull/120))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+
 ## 1.0.4 (2025-12-23)
 
 ### [BUG_FIXES]

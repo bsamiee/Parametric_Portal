@@ -1,134 +1,134 @@
 {
-    "dependencies": {
-        "@parametric-portal/types": "workspace:*",
-        "@rottitime/react-hook-message-event": "catalog:",
-        "@tanstack/react-query": "catalog:",
-        "effect": "catalog:",
-        "idb-keyval": "catalog:",
-        "immer": "catalog:",
-        "jszip": "catalog:",
-        "nuqs": "catalog:",
-        "react": "catalog:",
-        "zundo": "catalog:",
-        "zustand": "catalog:",
-        "zustand-computed": "catalog:",
-        "zustand-slices": "catalog:",
-        "zustand-x": "catalog:"
+  "dependencies": {
+    "@parametric-portal/types": "workspace:*",
+    "@rottitime/react-hook-message-event": "catalog:",
+    "@tanstack/react-query": "catalog:",
+    "effect": "catalog:",
+    "idb-keyval": "catalog:",
+    "immer": "catalog:",
+    "jszip": "catalog:",
+    "nuqs": "catalog:",
+    "react": "catalog:",
+    "zundo": "catalog:",
+    "zustand": "catalog:",
+    "zustand-computed": "catalog:",
+    "zustand-slices": "catalog:",
+    "zustand-x": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@fast-check/vitest": "catalog:",
+    "@parametric-portal/test-utils": "workspace:*",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "fake-indexeddb": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vitest-browser-react": "catalog:"
+  },
+  "exports": {
+    "./hooks/async": {
+      "types": "./src/hooks/async.ts",
+      "import": "./src/hooks/async.ts",
+      "default": "./src/hooks/async.ts"
     },
-    "devDependencies": {
-        "@effect/vitest": "catalog:",
-        "@fast-check/vitest": "catalog:",
-        "@parametric-portal/test-utils": "workspace:*",
-        "@testing-library/react": "catalog:",
-        "@types/react": "catalog:",
-        "@vitest/browser-playwright": "catalog:",
-        "fake-indexeddb": "catalog:",
-        "fast-check": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:",
-        "vitest-browser-react": "catalog:"
+    "./hooks/boundary": {
+      "types": "./src/hooks/boundary.ts",
+      "import": "./src/hooks/boundary.ts",
+      "default": "./src/hooks/boundary.ts"
     },
-    "exports": {
-        "./hooks/async": {
-            "types": "./src/hooks/async.ts",
-            "import": "./src/hooks/async.ts",
-            "default": "./src/hooks/async.ts"
-        },
-        "./hooks/boundary": {
-            "types": "./src/hooks/boundary.ts",
-            "import": "./src/hooks/boundary.ts",
-            "default": "./src/hooks/boundary.ts"
-        },
-        "./hooks/browser": {
-            "types": "./src/hooks/browser.ts",
-            "import": "./src/hooks/browser.ts",
-            "default": "./src/hooks/browser.ts"
-        },
-        "./hooks/file": {
-            "types": "./src/hooks/file.ts",
-            "import": "./src/hooks/file.ts",
-            "default": "./src/hooks/file.ts"
-        },
-        "./hooks/form": {
-            "types": "./src/hooks/form.ts",
-            "import": "./src/hooks/form.ts",
-            "default": "./src/hooks/form.ts"
-        },
-        "./hooks/query": {
-            "types": "./src/hooks/query.ts",
-            "import": "./src/hooks/query.ts",
-            "default": "./src/hooks/query.ts"
-        },
-        "./hooks/suspense": {
-            "types": "./src/hooks/suspense.ts",
-            "import": "./src/hooks/suspense.ts",
-            "default": "./src/hooks/suspense.ts"
-        },
-        "./hooks/transition": {
-            "types": "./src/hooks/transition.ts",
-            "import": "./src/hooks/transition.ts",
-            "default": "./src/hooks/transition.ts"
-        },
-        "./css-sync": {
-            "types": "./src/css-sync.ts",
-            "import": "./src/css-sync.ts",
-            "default": "./src/css-sync.ts"
-        },
-        "./messaging": {
-            "types": "./src/messaging.ts",
-            "import": "./src/messaging.ts",
-            "default": "./src/messaging.ts"
-        },
-        "./runtime": {
-            "types": "./src/runtime.tsx",
-            "import": "./src/runtime.tsx",
-            "default": "./src/runtime.tsx"
-        },
-        "./store/factory": {
-            "types": "./src/store/factory.ts",
-            "import": "./src/store/factory.ts",
-            "default": "./src/store/factory.ts"
-        },
-        "./store/provider": {
-            "types": "./src/store/provider.tsx",
-            "import": "./src/store/provider.tsx",
-            "default": "./src/store/provider.tsx"
-        },
-        "./store/storage": {
-            "types": "./src/store/storage.ts",
-            "import": "./src/store/storage.ts",
-            "default": "./src/store/storage.ts"
-        },
-        "./store/types": {
-            "types": "./src/store/types.ts",
-            "import": "./src/store/types.ts",
-            "default": "./src/store/types.ts"
-        },
-        "./stores/auth": {
-            "types": "./src/stores/auth.ts",
-            "import": "./src/stores/auth.ts",
-            "default": "./src/stores/auth.ts"
-        },
-        "./temporal": {
-            "types": "./src/temporal.ts",
-            "import": "./src/temporal.ts",
-            "default": "./src/temporal.ts"
-        },
-        "./url": {
-            "types": "./src/url.ts",
-            "import": "./src/url.ts",
-            "default": "./src/url.ts"
-        }
+    "./hooks/browser": {
+      "types": "./src/hooks/browser.ts",
+      "import": "./src/hooks/browser.ts",
+      "default": "./src/hooks/browser.ts"
     },
-    "name": "@parametric-portal/runtime",
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "test": "vitest run --config ../../vitest.config.ts --project runtime-browser",
-        "test:coverage": "vitest run --config ../../vitest.config.ts --project runtime-browser --coverage",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./hooks/file": {
+      "types": "./src/hooks/file.ts",
+      "import": "./src/hooks/file.ts",
+      "default": "./src/hooks/file.ts"
     },
-    "type": "module",
-    "version": "1.0.4"
+    "./hooks/form": {
+      "types": "./src/hooks/form.ts",
+      "import": "./src/hooks/form.ts",
+      "default": "./src/hooks/form.ts"
+    },
+    "./hooks/query": {
+      "types": "./src/hooks/query.ts",
+      "import": "./src/hooks/query.ts",
+      "default": "./src/hooks/query.ts"
+    },
+    "./hooks/suspense": {
+      "types": "./src/hooks/suspense.ts",
+      "import": "./src/hooks/suspense.ts",
+      "default": "./src/hooks/suspense.ts"
+    },
+    "./hooks/transition": {
+      "types": "./src/hooks/transition.ts",
+      "import": "./src/hooks/transition.ts",
+      "default": "./src/hooks/transition.ts"
+    },
+    "./css-sync": {
+      "types": "./src/css-sync.ts",
+      "import": "./src/css-sync.ts",
+      "default": "./src/css-sync.ts"
+    },
+    "./messaging": {
+      "types": "./src/messaging.ts",
+      "import": "./src/messaging.ts",
+      "default": "./src/messaging.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime.tsx",
+      "import": "./src/runtime.tsx",
+      "default": "./src/runtime.tsx"
+    },
+    "./store/factory": {
+      "types": "./src/store/factory.ts",
+      "import": "./src/store/factory.ts",
+      "default": "./src/store/factory.ts"
+    },
+    "./store/provider": {
+      "types": "./src/store/provider.tsx",
+      "import": "./src/store/provider.tsx",
+      "default": "./src/store/provider.tsx"
+    },
+    "./store/storage": {
+      "types": "./src/store/storage.ts",
+      "import": "./src/store/storage.ts",
+      "default": "./src/store/storage.ts"
+    },
+    "./store/types": {
+      "types": "./src/store/types.ts",
+      "import": "./src/store/types.ts",
+      "default": "./src/store/types.ts"
+    },
+    "./stores/auth": {
+      "types": "./src/stores/auth.ts",
+      "import": "./src/stores/auth.ts",
+      "default": "./src/stores/auth.ts"
+    },
+    "./temporal": {
+      "types": "./src/temporal.ts",
+      "import": "./src/temporal.ts",
+      "default": "./src/temporal.ts"
+    },
+    "./url": {
+      "types": "./src/url.ts",
+      "import": "./src/url.ts",
+      "default": "./src/url.ts"
+    }
+  },
+  "name": "@parametric-portal/runtime",
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "test": "vitest run --config ../../vitest.config.ts --project runtime-browser",
+    "test:coverage": "vitest run --config ../../vitest.config.ts --project runtime-browser --coverage",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "type": "module",
+  "version": "1.0.5"
 }
