@@ -12,6 +12,8 @@ import type { ParseError } from 'effect/ParseResult';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type GitHubUserInfo = S.Schema.Type<typeof GitHubUserInfoSchema>;
+type OIDCUserInfo = S.Schema.Type<typeof OIDCUserInfoSchema>;
 /** Arctic-library-specific provider config (internal to OAuthServiceLive) */
 type ArcticProviderConfig = {
     readonly clientId: string;
@@ -29,16 +31,12 @@ const GitHubUserInfoSchema = S.Struct({
     id: S.Number,
     name: S.optional(S.NullOr(S.String)),
 });
-
 const OIDCUserInfoSchema = S.Struct({
     email: S.optional(S.String),
     name: S.optional(S.String),
     picture: S.optional(S.String),
     sub: S.String,
 });
-
-type GitHubUserInfo = S.Schema.Type<typeof GitHubUserInfoSchema>;
-type OIDCUserInfo = S.Schema.Type<typeof OIDCUserInfoSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -88,7 +86,6 @@ const decodeAndNormalize = {
     microsoft: (response: unknown) =>
         S.decodeUnknown(OIDCUserInfoSchema)(response).pipe(Effect.map(normalizeUserInfo.microsoft)),
 } as const satisfies Record<OAuthProvider, (response: unknown) => Effect.Effect<OAuthUserInfo, ParseError>>;
-
 const fetchUserInfo = (provider: OAuthProvider, accessToken: string): Effect.Effect<OAuthUserInfo, OAuthError> =>
     pipe(
         Effect.tryPromise({

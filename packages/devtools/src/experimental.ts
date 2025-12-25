@@ -1,100 +1,103 @@
 /**
  * Effect DevTools WebSocket layer with connection test to prevent startup hangs.
+ * Unified factory with mode dispatch for immediate/safe connection handling.
  */
 import { DevTools } from '@effect/experimental';
 import { Effect, Layer, pipe } from 'effect';
+import { DEVTOOLS_TUNING } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type DevToolsMode = 'immediate' | 'safe';
 type DevToolsConfig = {
     readonly enabled?: boolean | undefined;
+    readonly mode?: DevToolsMode | undefined;
     readonly timeoutMs?: number | undefined;
     readonly url?: string | undefined;
 };
 type DevToolsResult = {
-    readonly layer: Layer.Layer<never>;
     readonly isEnabled: boolean;
+    readonly layer: Layer.Layer<never>;
+};
+type InternalConfig = {
+    readonly enabled: boolean;
+    readonly mode: DevToolsMode;
+    readonly timeoutMs: number;
+    readonly url: string;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        enabled: true,
-        timeoutMs: 1000,
-        url: 'ws://localhost:34437',
-    },
-    messages: {
-        connectionFailed: 'DevTools connection failed, continuing without',
-        disabled: 'DevTools disabled',
-        enabled: 'DevTools connected',
-        timeout: 'DevTools connection timeout, continuing without',
-    },
-} as const);
+const T = DEVTOOLS_TUNING.experimental;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const isBrowser = (): boolean => globalThis.window !== undefined && typeof WebSocket !== 'undefined';
-const shouldEnable = (config: DevToolsConfig): boolean => (config.enabled ?? B.defaults.enabled) && isBrowser();
-const testConnection = (url: string, timeoutMs: number): Promise<boolean> =>
-    new Promise((resolve) => {
+const shouldEnable = (config: DevToolsConfig): boolean => (config.enabled ?? T.defaults.enabled) && isBrowser();
+const testConnection = (url: string, timeoutMs: number): Effect.Effect<boolean, never> =>
+    Effect.async((resume) => {
         const ws = new WebSocket(url);
         const timeout = setTimeout(() => {
             ws.close();
-            resolve(false);
+            resume(Effect.succeed(false));
         }, timeoutMs);
         ws.onopen = () => {
             clearTimeout(timeout);
             ws.close();
-            resolve(true);
+            resume(Effect.succeed(true));
         };
         ws.onerror = () => {
             clearTimeout(timeout);
             ws.close();
-            resolve(false);
+            resume(Effect.succeed(false));
         };
     });
+const normalizeConfig = (config: Partial<DevToolsConfig>): InternalConfig => ({
+    enabled: shouldEnable(config),
+    mode: config.mode ?? 'safe',
+    timeoutMs: config.timeoutMs ?? T.defaults.timeoutMs,
+    url: config.url ?? T.defaults.url,
+});
+
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const modeHandlers = {
+    immediate: (cfg: InternalConfig): DevToolsResult => ({
+        isEnabled: cfg.enabled,
+        layer: cfg.enabled ? DevTools.layer(cfg.url) : Layer.empty,
+    }),
+    safe: (cfg: InternalConfig): DevToolsResult => ({
+        isEnabled: cfg.enabled,
+        layer: cfg.enabled
+            ? Layer.unwrapEffect(
+                  pipe(
+                      testConnection(cfg.url, cfg.timeoutMs),
+                      Effect.map((available) => (available ? DevTools.layer(cfg.url) : Layer.empty)),
+                      Effect.catchAll(() => Effect.succeed(Layer.empty)),
+                  ),
+              )
+            : Layer.empty,
+    }),
+} as const satisfies Record<DevToolsMode, (c: InternalConfig) => DevToolsResult>;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-// May hang if server unavailable - prefer createDevToolsLayerSafe
 const createDevToolsLayer = (config: Partial<DevToolsConfig> = {}): DevToolsResult => {
-    const enabled = shouldEnable(config);
-    const url = config.url ?? B.defaults.url;
-    const layer: Layer.Layer<never> = enabled ? DevTools.layer(url) : Layer.empty;
-    return { isEnabled: enabled, layer };
+    const internal = normalizeConfig(config);
+    return Object.freeze(modeHandlers[internal.mode](internal));
 };
-const createDevToolsLayerSafe = (config: Partial<DevToolsConfig> = {}): DevToolsResult => {
-    const enabled = shouldEnable(config);
-    const url = config.url ?? B.defaults.url;
-    const timeoutMs = config.timeoutMs ?? B.defaults.timeoutMs;
-    const layer: Layer.Layer<never> = enabled
-        ? Layer.unwrapEffect(
-              pipe(
-                  Effect.tryPromise({
-                      catch: () => false,
-                      try: () => testConnection(url, timeoutMs),
-                  }),
-                  Effect.map((available) => (available ? DevTools.layer(url) : Layer.empty)),
-                  Effect.catchAll(() => Effect.succeed(Layer.empty)),
-              ),
-          )
-        : Layer.empty;
-    return { isEnabled: enabled, layer };
-};
-
 const createDevToolsLayerEffect = (config: Partial<DevToolsConfig> = {}): Effect.Effect<DevToolsResult> =>
     pipe(
-        Effect.sync(() => createDevToolsLayerSafe(config)),
+        Effect.sync(() => createDevToolsLayer({ ...config, mode: 'safe' })),
         Effect.tap(({ isEnabled }) =>
             isEnabled
-                ? Effect.logDebug(B.messages.enabled, { url: config.url ?? B.defaults.url })
-                : Effect.logDebug(B.messages.disabled),
+                ? Effect.logDebug(T.messages.enabled, { url: config.url ?? T.defaults.url })
+                : Effect.logDebug(T.messages.disabled),
         ),
         Effect.annotateLogs({ module: 'devtools', phase: 'init' }),
     );
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { DevToolsConfig, DevToolsResult };
-export { B as EXPERIMENTAL_TUNING, createDevToolsLayer, createDevToolsLayerEffect, createDevToolsLayerSafe };
+export type { DevToolsConfig, DevToolsMode, DevToolsResult };
+export { createDevToolsLayer, createDevToolsLayerEffect };

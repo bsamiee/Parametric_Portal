@@ -21,15 +21,7 @@ type DevSessionHook = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    errors: {
-        missingProvider: 'useDevSession requires DevSession.SessionProvider in component tree',
-    },
-    noop: {
-        hide: () => {},
-        show: () => {},
-    },
-} as const);
+const noop = Object.freeze({ hide: () => {}, show: () => {} });
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -52,8 +44,8 @@ const useDevSession = (): DevSessionHook => {
         },
         [session],
     );
-    const hide = useCallback((): void => {}, []); // Overlay is replaced by re-render; no explicit hide needed
-    const overlay = useMemo(() => (enabled ? { hide, show } : B.noop), [enabled, hide, show]);
+    const hide = useCallback((): void => {}, []);
+    const overlay = useMemo(() => (enabled ? { hide, show } : noop), [enabled, hide, show]);
     const ownerStack = useCallback(getOwnerStack, []);
     return Object.freeze({
         enabled,
@@ -68,11 +60,15 @@ const enhanceError = (error: Error): Error =>
         Option.match({
             onNone: () => error,
             onSome: (stack) =>
-                Object.assign(error, { cause: { ownerStack: stack, ...(error.cause as object | undefined) } }),
+                Object.assign(new Error(error.message), {
+                    name: error.name,
+                    ...(error.stack !== undefined ? { stack: error.stack } : {}),
+                    cause: { ownerStack: stack, ...(error.cause as object | undefined) },
+                }),
         }),
     );
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { DevSessionHook };
-export { B as DEVTOOLS_HOOK_TUNING, enhanceError, useDevSession };
+export { enhanceError, useDevSession };

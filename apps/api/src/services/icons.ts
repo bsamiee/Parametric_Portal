@@ -7,7 +7,6 @@ import { InternalError } from '@parametric-portal/server/errors';
 import type { ColorMode } from '@parametric-portal/types/database';
 import { type SvgAsset, svg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
-
 import { GenerateRequestSchema, ICON_DESIGN, type Palette } from '../contracts/icons.ts';
 
 const svgApi = svg();
@@ -60,19 +59,19 @@ const B = Object.freeze({
         invalidInput: { code: 'INVALID_INPUT', message: 'Invalid generation input' },
         parseFailure: { cause: 'Failed to parse response' },
     },
+    regex: {
+        jsonExtract: /\{[\s\S]*"variants"[\s\S]*\}/,
+    },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const getPalette = (mode: ColorMode): Palette => ICON_DESIGN.palettes[mode];
-
 const minifySvgForPrompt = (svgContent: string): string =>
     svgApi.sanitizeSvg(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
-
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
     const { layers } = ICON_DESIGN;
-
     return `You generate professional Rhino/Grasshopper-style CAD toolbar icons as SVG.
 
 <canvas>
@@ -161,7 +160,6 @@ Generate ${ctx.variantCount} variant(s).
 
 const buildUserMessage = (ctx: PromptContext): string => {
     const parts: string[] = [];
-
     ctx.intent === 'refine' && ctx.referenceSvg
         ? parts.push(
               `<task>REFINE this existing icon according to the instructions below.</task>`,
@@ -196,8 +194,7 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
     return parts.join('\n\n');
 };
 
-const extractJsonFromText = (text: string): string => /\{[\s\S]*"variants"[\s\S]*\}/.exec(text)?.[0] ?? text;
-
+const extractJsonFromText = (text: string): string => B.regex.jsonExtract.exec(text)?.[0] ?? text;
 const parseAiResponse = (text: string): Effect.Effect<S.Schema.Type<typeof AiResponseSchema>, InternalError> =>
     pipe(
         Effect.try({
@@ -210,7 +207,6 @@ const parseAiResponse = (text: string): Effect.Effect<S.Schema.Type<typeof AiRes
             ),
         ),
     );
-
 const buildContext = (input: ServiceInput): PromptContext => ({
     ...(input.attachments !== undefined && { attachments: input.attachments }),
     colorMode: input.colorMode ?? B.ai.defaults.colorMode,
@@ -226,12 +222,10 @@ class IconGenerationService extends Context.Tag('IconGenerationService')<
     IconGenerationService,
     IconGenerationServiceInterface
 >() {}
-
 const IconGenerationServiceLive = Layer.effect(
     IconGenerationService,
     Effect.gen(function* () {
         const anthropic = yield* AnthropicClient;
-
         return IconGenerationService.of({
             generate: (input) =>
                 pipe(

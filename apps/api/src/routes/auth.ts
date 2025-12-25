@@ -15,12 +15,15 @@ import {
     database,
     type OAuthProvider,
 } from '@parametric-portal/types/database';
-
 import type { Uuidv7 } from '@parametric-portal/types/types';
 import { type Context, DateTime, Duration, Effect, Option, pipe } from 'effect';
 import { AppApi } from '../api.ts';
 
 const db = database();
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type OAuthServiceType = Context.Tag.Service<typeof OAuthService>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -47,7 +50,6 @@ const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: U
             }),
         ),
     );
-
 const buildLogoutResponse = () =>
     pipe(
         HttpServerResponse.json({ success: true }),
@@ -61,7 +63,6 @@ const buildLogoutResponse = () =>
             }),
         ),
     );
-
 const createAuthTokenPairs = () =>
     Effect.gen(function* () {
         const session = yield* createTokenPair();
@@ -76,15 +77,12 @@ const createAuthTokenPairs = () =>
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-type OAuthServiceType = Context.Tag.Service<typeof OAuthService>;
-
 const handleOAuthStart = (oauth: OAuthServiceType, provider: OAuthProvider) =>
     Effect.gen(function* () {
         const state = crypto.randomUUID();
         const url = yield* oauth.createAuthorizationUrl(provider, state);
         return { url: url.toString() };
     });
-
 const handleOAuthCallback = (
     oauth: OAuthServiceType,
     repos: Repositories,
@@ -137,7 +135,6 @@ const handleOAuthCallback = (
             SqlError: () => Effect.fail(new OAuthError({ provider, reason: 'Database error' })),
         }),
     );
-
 const handleRefresh = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
@@ -180,7 +177,6 @@ const handleRefresh = (repos: Repositories) =>
             UnauthorizedError: (err) => Effect.fail(err),
         }),
     );
-
 const handleLogout = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
@@ -196,7 +192,6 @@ const handleLogout = (repos: Repositories) =>
             SqlError: () => Effect.fail(new InternalError({ cause: 'Session revocation failed' })),
         }),
     );
-
 const handleMe = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
@@ -213,7 +208,6 @@ const handleMe = (repos: Repositories) =>
             SqlError: () => Effect.fail(new InternalError({ cause: 'User lookup failed' })),
         }),
     );
-
 const handleListApiKeys = (repos: Repositories) =>
     pipe(
         Effect.gen(function* () {
@@ -226,7 +220,6 @@ const handleListApiKeys = (repos: Repositories) =>
             SqlError: () => Effect.fail(new InternalError({ cause: 'API key list failed' })),
         }),
     );
-
 const handleCreateApiKey = (repos: Repositories, input: { key: string; name: string; provider: AiProvider }) =>
     pipe(
         Effect.gen(function* () {
@@ -258,7 +251,6 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
             SqlError: () => Effect.fail(new InternalError({ cause: 'API key insert failed' })),
         }),
     );
-
 const handleDeleteApiKey = (repos: Repositories, id: ApiKeyId) =>
     pipe(
         Effect.gen(function* () {

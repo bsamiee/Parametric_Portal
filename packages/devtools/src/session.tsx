@@ -5,12 +5,12 @@
 import { Effect, Layer } from 'effect';
 import { createContext, type FC, type ReactNode, useContext, useMemo } from 'react';
 import { interceptConsole } from './console.ts';
-import { createDevToolsLayerSafe } from './experimental.ts';
+import { createDevToolsLayer } from './experimental.ts';
 import { installGlobalHandlers } from './handlers.ts';
-import { clearLogs, createHmrHandler, createLoggerLayer, installDevTools } from './logger.ts';
+import { createLogger } from './logger.ts';
 import { type DebugOverlayProps, renderDebugOverlay } from './overlay.tsx';
-import { observePerformance } from './performance.ts';
-import type { LogEntry } from './types.ts';
+import { createPerformanceObserver } from './performance.ts';
+import { DEVTOOLS_TUNING, isLogLevelKey, type LogEntry, type LogLevelKey } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -28,6 +28,7 @@ type DebugDispatch = {
 type SessionContextValue = {
     readonly debug: DebugDispatch;
     readonly dispose: () => void;
+    readonly fatal: (error: Error) => void;
     readonly layer: Layer.Layer<never>;
     readonly logs: LogEntry[];
     readonly renderDebug: (error: Error, context?: Readonly<Record<string, unknown>>) => void;
@@ -39,7 +40,7 @@ type DevSession = SessionContextValue & {
 type EnvConfig = {
     readonly console: boolean;
     readonly experimental: boolean;
-    readonly logLevel: string;
+    readonly logLevel: LogLevelKey;
     readonly performance: boolean;
 };
 type SessionProviderProps = {
@@ -49,21 +50,7 @@ type SessionProviderProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        console: true,
-        experimental: false,
-        logLevel: 'Debug',
-        performance: true,
-        timeoutMs: 1000,
-    },
-    envKeys: {
-        console: 'VITE_DEVTOOLS_CONSOLE',
-        experimental: 'VITE_DEVTOOLS_EXPERIMENTAL',
-        logLevel: 'VITE_DEVTOOLS_LOG_LEVEL',
-        performance: 'VITE_DEVTOOLS_PERFORMANCE',
-    },
-} as const);
+const T = DEVTOOLS_TUNING;
 
 // --- [CONTEXT] ---------------------------------------------------------------
 
@@ -74,10 +61,13 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 const parseBoolean = (value: unknown, fallback: boolean): boolean =>
     value === undefined ? fallback : value === 'true';
 const parseEnvConfig = (env: Readonly<Record<string, unknown>>): EnvConfig => ({
-    console: parseBoolean(env[B.envKeys.console], B.defaults.console),
-    experimental: parseBoolean(env[B.envKeys.experimental], B.defaults.experimental),
-    logLevel: (env[B.envKeys.logLevel] as string | undefined) ?? B.defaults.logLevel,
-    performance: parseBoolean(env[B.envKeys.performance], B.defaults.performance),
+    console: parseBoolean(env[T.env.keys.console], T.defaults.console),
+    experimental: parseBoolean(env[T.env.keys.experimental], T.defaults.experimental),
+    logLevel: (() => {
+        const raw = env[T.env.keys.logLevel] as string | undefined;
+        return raw !== undefined && isLogLevelKey(raw) ? raw : (T.env.defaults.logLevel as LogLevelKey);
+    })(),
+    performance: parseBoolean(env[T.env.keys.performance], T.defaults.performance),
 });
 const createDebugDispatch = (layer: Layer.Layer<never>): DebugDispatch => {
     const dispatch =
@@ -108,37 +98,42 @@ const createDevSession = (config: DevSessionConfig): DevSession => {
     const envConfig = parseEnvConfig(config.env);
     const startTime = config.startTime ?? performance.now();
     const envMode = (config.env['MODE'] as string | undefined) ?? 'production';
-    const { layer: loggerLayer, logs } = createLoggerLayer({
+    const logger = createLogger({
         logLevel: isDev ? envConfig.logLevel : 'Info',
     });
-    const { isEnabled: effectDevToolsEnabled, layer: effectDevToolsLayer } = createDevToolsLayerSafe({
+    const { isEnabled: effectDevToolsEnabled, layer: effectDevToolsLayer } = createDevToolsLayer({
         enabled: isDev && envConfig.experimental,
-        timeoutMs: B.defaults.timeoutMs,
+        timeoutMs: T.defaults.timeoutMs,
     });
     const combinedLayer: Layer.Layer<never> =
-        isDev && effectDevToolsEnabled ? Layer.mergeAll(effectDevToolsLayer, loggerLayer) : loggerLayer;
+        isDev && effectDevToolsEnabled ? Layer.mergeAll(effectDevToolsLayer, logger.layer) : logger.layer;
     const renderDebug = (error: Error, context?: Readonly<Record<string, unknown>>): void => {
-        const props: DebugOverlayProps = { context, env: envMode, error, logs, startTime };
+        const props: DebugOverlayProps = { context, env: envMode, error, logs: logger.logs, startTime };
         renderDebugOverlay(props);
     };
-    const consoleInterceptor = isDev && envConfig.console ? interceptConsole({ logs }) : { restore: () => {} };
+    const consoleInterceptor =
+        isDev && envConfig.console ? interceptConsole({ logs: logger.logs }) : { restore: () => {} };
     const performanceObserver =
-        isDev && envConfig.performance ? observePerformance({ loggerLayer, logs }) : { disconnect: () => {} };
-    const handlersResult = installGlobalHandlers({ loggerLayer, onError: renderDebug });
-    isDev && createHmrHandler(logs, loggerLayer);
-    isDev && installDevTools({ env: envMode, loggerLayer, logs, renderDebug, startTime });
+        isDev && envConfig.performance
+            ? createPerformanceObserver({ loggerLayer: logger.layer, logs: logger.logs })
+            : { disconnect: () => {} };
+    const handlersResult = installGlobalHandlers({ loggerLayer: logger.layer, onError: renderDebug });
+    isDev && logger.createHmrHandler();
+    isDev && logger.installDevTools({ env: envMode, renderDebug, startTime });
     const dispose = (): void => {
         consoleInterceptor.restore();
         performanceObserver.disconnect();
         handlersResult.uninstall();
-        clearLogs(logs);
+        logger.clear();
     };
     const debug = createDebugDispatch(combinedLayer);
+    const fatal = (error: Error): void => renderDebug(error, { phase: 'fatal' });
     const sessionValue: SessionContextValue = {
         debug,
         dispose,
+        fatal,
         layer: combinedLayer,
-        logs,
+        logs: logger.logs,
         renderDebug,
         startTime,
     };
@@ -152,4 +147,4 @@ const useSession = (): SessionContextValue | null => useContext(SessionContext);
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { DebugDispatch, DevSession, DevSessionConfig, EnvConfig, SessionContextValue };
-export { B as SESSION_TUNING, createDevSession, SessionContext, useSession };
+export { createDevSession, SessionContext, useSession };

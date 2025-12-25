@@ -2,21 +2,13 @@
  * Generate CSS layout utilities from schema-validated inputs.
  * Grounding: Single-source schema enforcement prevents runtime CSS errors.
  */
-import { Effect, pipe, Schema as S } from 'effect';
+import { Effect, pipe, type Schema as S } from 'effect';
 import type { ParseError } from 'effect/ParseResult';
-import type { Plugin } from 'vite';
-import {
-    ContainerLayoutSchema,
-    GridLayoutSchema,
-    type LayoutInput,
-    LayoutInputSchema,
-    StackLayoutSchema,
-    StickyLayoutSchema,
-} from './schemas.ts';
+import { createParametricPlugin, normalizeInputs } from './plugin.ts';
+import { type LayoutInput, type LayoutInputSchema, validate } from './schemas.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
 type LayoutInputRaw = S.Schema.Encoded<typeof LayoutInputSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -24,20 +16,9 @@ type LayoutInputRaw = S.Schema.Encoded<typeof LayoutInputSchema>;
 const B = Object.freeze({
     gap: { multiplier: 4, remBase: 16 },
     sticky: { zindex: 10 },
-    tailwindMarker: '@import "tailwindcss";',
-    virtualImportPattern: /@import\s+['"]virtual:parametric-layouts['"];?\s*/g,
-} as const);
-
-const VIRTUAL_MODULE_ID = Object.freeze({
-    resolved: '\0virtual:parametric-layouts' as const,
-    virtual: 'virtual:parametric-layouts' as const,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
-const normalizeInputs = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): ReadonlyArray<LayoutInputRaw> =>
-    isArray(input) ? input : [input];
 
 const fn = {
     gap: (scale: number): string =>
@@ -53,7 +34,7 @@ const fn = {
 
 const generateGridLayout = (input: Extract<LayoutInput, { type: 'grid' }>): Effect.Effect<string, ParseError> =>
     pipe(
-        S.decode(GridLayoutSchema)(input),
+        validate.gridLayout(input),
         Effect.map((config) => {
             const gridFormula = fn.gridFormula(config.minItemWidth, config.maxColumns);
             const gapValue = fn.gap(config.gap);
@@ -78,7 +59,7 @@ ${alignRule}${justifyRule}}
 
 const generateStackLayout = (input: Extract<LayoutInput, { type: 'stack' }>): Effect.Effect<string, ParseError> =>
     pipe(
-        S.decode(StackLayoutSchema)(input),
+        validate.stackLayout(input),
         Effect.map((config) => {
             const flexDirection = config.direction === 'horizontal' ? 'row' : 'column';
             const gapValue = fn.gap(config.gap);
@@ -106,7 +87,7 @@ ${containerRule}  display: flex;
 
 const generateStickyLayout = (input: Extract<LayoutInput, { type: 'sticky' }>): Effect.Effect<string, ParseError> =>
     pipe(
-        S.decode(StickyLayoutSchema)(input),
+        validate.stickyLayout(input),
         Effect.map((config) => {
             const offsetValue = fn.gap(config.offset);
             const offsetRule = fn.stickyOffset(config.position, offsetValue);
@@ -126,7 +107,7 @@ const generateContainerLayout = (
     input: Extract<LayoutInput, { type: 'container' }>,
 ): Effect.Effect<string, ParseError> =>
     pipe(
-        S.decode(ContainerLayoutSchema)(input),
+        validate.containerLayout(input),
         Effect.map((config) => {
             const containerRule = config.containerQuery ? `  container-type: inline-size;\n` : '';
             const paddingValue = fn.gap(config.padding);
@@ -154,16 +135,14 @@ const layoutHandlers = Object.freeze({
     stack: generateStackLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
     sticky: generateStickyLayout as (input: LayoutInput) => Effect.Effect<string, ParseError>,
 } as const);
-
 const generateLayout = (input: LayoutInput): Effect.Effect<string, ParseError> => layoutHandlers[input.type](input);
-
-/** Generate all layout CSS blocks without Tailwind import. */
 const generateAllLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): string =>
+    /** Generate all layout CSS blocks without Tailwind import. */
     Effect.runSync(
         pipe(
             Effect.forEach(normalizeInputs(input), (layoutInput) =>
                 pipe(
-                    S.decode(LayoutInputSchema)(layoutInput),
+                    validate.layout(layoutInput),
                     Effect.flatMap(generateLayout),
                     Effect.catchAll((error) => Effect.succeed(`/* Failed: ${layoutInput.name} - ${error._tag} */`)),
                 ),
@@ -174,27 +153,15 @@ const generateAllLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const defineLayouts = (input: LayoutInputRaw | ReadonlyArray<LayoutInputRaw>): Plugin => ({
-    applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
-    enforce: 'pre',
-    load: (id) =>
-        id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllLayouts(input)}` : undefined,
-    name: 'parametric-layouts',
-    resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
-    transform: (code, id) =>
-        // Inject layouts CSS into entry CSS file (bypasses enhanced-resolve limitation)
-        !id.endsWith('main.css') || !code.includes(B.tailwindMarker)
-            ? undefined
-            : code
-                  .replaceAll(B.virtualImportPattern, '')
-                  .replace(
-                      B.tailwindMarker,
-                      `${B.tailwindMarker}\n\n/* --- [LAYOUTS] --- */\n${generateAllLayouts(input)}`,
-                  ),
+const defineLayouts = createParametricPlugin<LayoutInputRaw>({
+    generate: generateAllLayouts,
+    name: 'layouts',
+    sectionLabel: 'LAYOUTS',
+    virtualId: 'layouts',
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B, defineLayouts };
+export { B as LAYOUT_TUNING, defineLayouts };
 export type { LayoutInputRaw };
 export type { LayoutInput } from './schemas.ts';

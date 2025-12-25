@@ -61,18 +61,10 @@ type OverlayComponentMap = {
     readonly sheet: ForwardRefExoticComponent<DrawerProps & RefAttributes<HTMLDivElement>>;
 };
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const overlayCls = {
-    content: utilities.cls(B.ov.var.r, B.ov.var.px, B.ov.var.py),
-    radius: B.ov.var.r,
-} as const;
-
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const createFocusScope = (opts: { autoFocus: boolean; contain: boolean; restoreFocus: boolean }, child: ReactNode) =>
     createElement(FocusScope, { ...opts, ...({ children: child } as const) });
-
 const createModalComponent = (
     input: OverlayInput<'modal'>,
     vars: Record<string, string>,
@@ -101,7 +93,7 @@ const createModalComponent = (
                     B.ov.modal.content,
                     B.ov.modal.shadow,
                     B.ov.modal.maxH,
-                    overlayCls.radius,
+                    B.ov.var.r,
                     B.ov.size[size],
                     input.className,
                     className,
@@ -133,7 +125,6 @@ const createModalComponent = (
               )
             : null;
     });
-
 const createDialogComponent = (
     input: OverlayInput<'dialog'>,
     vars: Record<string, string>,
@@ -175,7 +166,7 @@ const createDialogComponent = (
                     B.ov.dialog.pos,
                     B.ov.modal.shadow,
                     'w-full',
-                    overlayCls.radius,
+                    B.ov.var.r,
                     B.ov.size[size],
                     input.className,
                     className,
@@ -200,7 +191,7 @@ const createDialogComponent = (
                 { className: utilities.cls(B.ov.dialog.footer, B.ov.var.px, B.ov.var.py) },
                 createElement(
                     'button',
-                    { className: 'px-4 py-2 rounded border', onClick: onClose, type: 'button' },
+                    { className: B.ov.dialog.button, onClick: onClose, type: 'button' },
                     cancelLabel,
                 ),
                 onConfirm
@@ -208,8 +199,9 @@ const createDialogComponent = (
                           'button',
                           {
                               className: utilities.cls(
-                                  'px-4 py-2 rounded',
-                                  confirmDisabled && 'opacity-50 cursor-not-allowed',
+                                  B.ov.dialog.button,
+                                  B.ov.dialog.buttonConfirm,
+                                  confirmDisabled && B.ov.dialog.buttonDisabled,
                               ),
                               disabled: confirmDisabled,
                               onClick: onConfirm,
@@ -232,7 +224,6 @@ const createDialogComponent = (
               )
             : null;
     });
-
 const createDrawerComponent = (
     input: OverlayInput<'drawer'>,
     vars: Record<string, string>,
@@ -260,7 +251,7 @@ const createDrawerComponent = (
                     'fixed',
                     B.ov.modal.shadow,
                     B.ov.popover.base,
-                    overlayCls.radius,
+                    B.ov.var.r,
                     B.ov.pos[position],
                     isHorizontal ? 'h-full' : 'w-full',
                     input.className,
@@ -287,7 +278,6 @@ const createDrawerComponent = (
               )
             : null;
     });
-
 const createPopoverComponent = (
     input: OverlayInput<'popover'>,
     vars: Record<string, string>,
@@ -301,12 +291,10 @@ const createPopoverComponent = (
         const { overlayProps } = useOverlay({ isDismissable: overlay.closeOnOutsideClick, isOpen, onClose }, ref);
         const offsetPx = computeOffsetPx(scale, B.algo.popoverOffMul);
         const { floatingStyles, refs } = useTooltipPosition(isOpen, 'bottom', offsetPx);
-
         // Sync trigger ref with floating-ui reference
         useLayoutEffect(() => {
             triggerRef.current && refs.setReference(triggerRef.current);
         }, [triggerRef, refs]);
-
         return isOpen
             ? createElement(
                   'div',
@@ -317,7 +305,7 @@ const createPopoverComponent = (
                           B.ov.popover.shadow,
                           B.ov.popover.border,
                           B.ov.popover.base,
-                          overlayCls.radius,
+                          B.ov.var.r,
                           input.className,
                           className,
                       ),
@@ -341,7 +329,6 @@ const builderHandlers = {
     popover: createPopoverComponent,
     sheet: createDrawerComponent,
 } as const;
-
 const createOverlayComponent = <T extends OverlayType>(input: OverlayInput<T>): OverlayComponentMap[T] => {
     const scale = resolve('scale', input.scale);
     const overlay = resolve(

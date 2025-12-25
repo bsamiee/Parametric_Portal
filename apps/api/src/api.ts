@@ -9,7 +9,6 @@ import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@pa
 import { SessionAuth } from '@parametric-portal/server/middleware';
 import { database } from '@parametric-portal/types/database';
 import { Schema as S } from 'effect';
-
 import { GenerateRequestSchema, GenerateResponseSchema } from './contracts/icons.ts';
 
 const db = database();
@@ -22,7 +21,6 @@ const PaginatedAssetListSchema = S.Struct({
     offset: S.Int,
     total: S.Int,
 });
-
 const CreateApiKeyRequestSchema = S.Struct({
     key: S.NonEmptyTrimmedString,
     name: S.NonEmptyTrimmedString,
@@ -87,7 +85,6 @@ const AuthGroup = createGroup('auth', { prefix: '/auth' })
             .addError(NotFoundError, { status: 404 })
             .addError(InternalError, { status: 500 }),
     );
-
 const IconsGroup = createGroup('icons', { prefix: '/icons' })
     .add(
         HttpApiEndpoint.get('list', '/')
@@ -103,7 +100,6 @@ const IconsGroup = createGroup('icons', { prefix: '/icons' })
             .addSuccess(GenerateResponseSchema)
             .addError(InternalError, { status: 500 }),
     );
-
 const HealthGroup = createHealthGroup();
 
 // --- [API] -------------------------------------------------------------------

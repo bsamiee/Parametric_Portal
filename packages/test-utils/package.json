@@ -8,6 +8,7 @@
     },
     "sideEffects": ["./src/setup.ts", "./src/matchers/effect.ts"],
     "exports": {
+        "./arbitraries": { "types": "./src/arbitraries.ts", "import": "./src/arbitraries.ts" },
         "./constants": { "types": "./src/constants.ts", "import": "./src/constants.ts" },
         "./harness": { "types": "./src/harness.ts", "import": "./src/harness.ts" },
         "./setup": { "types": "./src/setup.ts", "import": "./src/setup.ts" },
@@ -18,6 +19,7 @@
     "dependencies": {
         "@effect/vitest": "catalog:",
         "effect": "catalog:",
+        "fake-indexeddb": "catalog:",
         "fast-check": "catalog:",
         "msw": "catalog:"
     },

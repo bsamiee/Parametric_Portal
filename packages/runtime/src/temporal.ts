@@ -2,10 +2,7 @@
  * Effect-native date/time operations with timezone-aware logic.
  */
 
-import { types } from '@parametric-portal/types/types';
 import { DateTime, Duration, Effect, pipe, Schema as S } from 'effect';
-
-const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -35,6 +32,9 @@ class TemporalError extends S.TaggedClass<TemporalError>()('TemporalError', {
     operation: S.Literal('format', 'parse', 'math'),
 }) {}
 
+/** Simple date schema: YYYY-MM-DD format, validates day/month bounds. */
+const SimpleDateSchema = pipe(S.String, S.pattern(/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/));
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
@@ -45,10 +45,6 @@ const B = Object.freeze({
     msPerDay: 24 * 60 * 60 * 1000,
 } as const);
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const deriveDays = (millis: number): number => Math.floor(millis / B.msPerDay);
-
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const temporalHandlers = {
@@ -57,28 +53,31 @@ const temporalHandlers = {
     addMinutes: (minutes: number) => (dt: DateTime.DateTime) => Effect.sync(() => DateTime.add(dt, { minutes })),
     addMonths: (months: number) => (dt: DateTime.DateTime) => Effect.sync(() => DateTime.add(dt, { months })),
     daysBetween: (start: DateTime.DateTime, end: DateTime.DateTime) =>
-        Effect.sync(() => deriveDays(Duration.toMillis(DateTime.distance(start, end)))),
+        Effect.sync(() => Math.round(Duration.toDays(DateTime.distanceDuration(start, end)))),
     endOfDay: (dt: DateTime.DateTime) => Effect.sync(() => DateTime.endOf(dt, 'day')),
-    format: (config: TemporalConfig) => (dt: DateTime.DateTime, _formatStr?: string) =>
+    format: (config: TemporalConfig) => (dt: DateTime.DateTime, formatStr?: string) =>
         Effect.try({
             catch: (error) =>
                 new TemporalError({
                     message: `Format failed: ${String(error)}`,
                     operation: 'format',
                 }),
-            try: () =>
-                DateTime.format(dt, {
-                    dateStyle: 'short',
-                    timeZone: config.timeZone ?? B.defaults.timeZone,
-                }),
+            try: () => {
+                const fmt = formatStr ?? config.defaultFormat ?? B.defaults.format;
+                const date = new Date(DateTime.toEpochMillis(dt));
+                const yyyy = date.getUTCFullYear();
+                const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+                const dd = String(date.getUTCDate()).padStart(2, '0');
+                return fmt === 'yyyy-MM-dd' ? `${yyyy}-${mm}-${dd}` : DateTime.format(dt, { dateStyle: 'short' });
+            },
         }),
     isAfter: (dt1: DateTime.DateTime, dt2: DateTime.DateTime) => Effect.sync(() => DateTime.greaterThan(dt1, dt2)),
     isBefore: (dt1: DateTime.DateTime, dt2: DateTime.DateTime) => Effect.sync(() => DateTime.lessThan(dt1, dt2)),
     parseIso: (input: string) =>
         pipe(
-            S.decodeUnknown(typesApi.schemas.IsoDate)(input),
-            Effect.flatMap((iso) =>
-                DateTime.make(iso).pipe(
+            S.decodeUnknown(SimpleDateSchema)(input),
+            Effect.flatMap((dateStr) =>
+                DateTime.make(`${dateStr}T00:00:00.000Z`).pipe(
                     Effect.mapError(
                         () =>
                             new TemporalError({

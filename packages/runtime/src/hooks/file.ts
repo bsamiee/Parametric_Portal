@@ -115,12 +115,10 @@ const useFileInput = <R>(options: FileInputOptions = {}): FileInputState => {
     useEffect(() => {
         const input = globalThis.document?.createElement('input');
         input &&
-            Object.assign(input, {
-                accept: resolvedAccept,
-                multiple: resolvedMultiple,
-                type: 'file',
-            }) &&
-            (input.style.display = 'none');
+            Object.assign(
+                Object.assign(input, { accept: resolvedAccept, multiple: resolvedMultiple, type: 'file' }).style,
+                { display: 'none' },
+            );
         inputRef.current = input ?? null;
         const handleChange = () => {
             const selectedFiles = FileOps.fromFileList(inputRef.current?.files ?? null);
@@ -144,7 +142,7 @@ const useFileInput = <R>(options: FileInputOptions = {}): FileInputState => {
     const reset = useCallback(() => {
         fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
         fiberRef.current = null;
-        inputRef.current && (inputRef.current.value = '');
+        inputRef.current && Object.assign(inputRef.current, { value: '' });
         setFiles([]);
         setState(asyncApi.idle());
     }, [runtime]);

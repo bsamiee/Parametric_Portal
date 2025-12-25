@@ -9,6 +9,15 @@ const env = (key: string): string | undefined => (typeof process === 'undefined'
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    defaults: {
+        timerAdvanceMs: 10,
+    },
+    errors: {
+        clipboardRead: { code: 'CLIPBOARD_READ', message: 'Failed to read from clipboard' },
+        clipboardWrite: { code: 'CLIPBOARD_WRITE', message: 'Failed to write to clipboard' },
+        downloadFailed: { code: 'DOWNLOAD_FAILED', message: 'Download failed' },
+        exportFailed: { code: 'EXPORT_FAILED', message: 'Export failed' },
+    },
     fc: {
         interruptAfterTimeLimit: 5_000,
         numRuns: env('CI') ? 100 : 50,

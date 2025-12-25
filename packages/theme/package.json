@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "colorjs.io": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
@@ -15,11 +16,6 @@
       "import": "./src/colors.ts",
       "default": "./src/colors.ts"
     },
-    "./factories": {
-      "types": "./src/factories.ts",
-      "import": "./src/factories.ts",
-      "default": "./src/factories.ts"
-    },
     "./fonts": {
       "types": "./src/fonts.ts",
       "import": "./src/fonts.ts",
@@ -29,6 +25,11 @@
       "types": "./src/layouts.ts",
       "import": "./src/layouts.ts",
       "default": "./src/layouts.ts"
+    },
+    "./plugin": {
+      "types": "./src/plugin.ts",
+      "import": "./src/plugin.ts",
+      "default": "./src/plugin.ts"
     },
     "./presets": {
       "types": "./src/presets.ts",

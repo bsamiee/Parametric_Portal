@@ -81,50 +81,55 @@
 /* --- [PANEL_VARIABLES] ----------------------------------------------------- */
 
 :root {
-    /* Surface backgrounds — progressive lightness scale */
-    --panel-bg-dark: oklch(14% 0.04 275);
-    --panel-bg-medium: oklch(18% 0.04 275);
-    --panel-bg-light: oklch(22% 0.04 275);
-    --panel-bg-lighter: oklch(26% 0.04 275);
+    /* Surface backgrounds — linear 2% increment tokens (base 20% at step 300) */
+    --panel-bg-dark: var(--color-surface-150);
+    --panel-bg-medium: var(--color-surface-250);
+    --panel-bg-light: var(--color-surface-350);
+    --panel-bg-lighter: var(--color-surface-450);
 
     /* Borders — subtle separation */
-    --panel-border-dark: oklch(20% 0.03 275);
-    --panel-border-light: oklch(30% 0.04 275);
-    --panel-border-preview: oklch(50% 0.06 240);
+    --panel-border-dark: var(--color-surface-300);
+    --panel-border-light: var(--color-surface-550);
+    --panel-border-preview: var(--color-muted-200);
 
-    /* Text colors — semantic scale */
-    --panel-text-primary: oklch(97% 0.01 60);
-    --panel-text-strong: oklch(85% 0.02 240);
-    --panel-text-secondary: oklch(60% 0.02 240);
-    --panel-text-muted: oklch(55% 0.04 240);
-    --panel-text-placeholder: oklch(50% 0.04 240);
+    /* Text colors — reference generated text tokens */
+    --panel-text-primary: var(--color-text-150);
+    --panel-text-strong: var(--color-muted-500);
+    --panel-text-secondary: var(--color-muted-350);
+    --panel-text-muted: var(--color-muted-300);
+    --panel-text-placeholder: var(--color-muted-250);
 
-    /* Icon colors — state-based */
-    --panel-icon-default: oklch(65% 0.06 240);
-    --panel-icon-hover: oklch(80% 0.04 240);
-    --panel-icon-muted: oklch(40% 0.04 240);
-    --panel-icon-active: oklch(70% 0.06 240);
+    /* Icon colors — derived from muted scale */
+    --panel-icon-default: var(--color-muted-350);
+    --panel-icon-hover: var(--color-muted-450);
+    --panel-icon-muted: var(--color-muted-250);
+    --panel-icon-active: var(--color-muted-400);
+
+    /* Base colors — universal values */
+    --white: oklch(98% 0.01 0);
+    --white-10: oklch(100% 0 0 / 0.1);
+    --white-05: oklch(100% 0 0 / 0.05);
 
     /* Control variants — button styling */
-    --ctrl-destructive-bg: oklch(60% 0.25 25);
-    --ctrl-destructive-text: oklch(98% 0.01 0);
-    --ctrl-destructive-hover: oklch(55% 0.25 25);
-    --ctrl-destructive-ring: oklch(60% 0.25 25);
-    --ctrl-ghost-hover: oklch(100% 0 0 / 0.1);
+    --ctrl-destructive-bg: var(--color-destructive-200);
+    --ctrl-destructive-text: var(--white);
+    --ctrl-destructive-hover: var(--color-destructive-hover);
+    --ctrl-destructive-ring: var(--color-destructive-200);
+    --ctrl-ghost-hover: var(--white-10);
     --ctrl-outline-border: currentColor / 0.2;
-    --ctrl-outline-hover: oklch(100% 0 0 / 0.05);
+    --ctrl-outline-hover: var(--white-05);
     --ctrl-primary-bg: currentColor;
-    --ctrl-primary-text: oklch(98% 0.01 0);
+    --ctrl-primary-text: var(--white);
     --ctrl-secondary-bg: currentColor / 0.1;
     --ctrl-secondary-hover: currentColor / 0.2;
-    --ctrl-switch-thumb: oklch(98% 0.01 0);
+    --ctrl-switch-thumb: var(--white);
     --ctrl-switch-track: currentColor / 0.2;
     --ctrl-switch-track-on: currentColor;
 
-    /* Pressed/toggle state — Dracula cyan (#94F2E8) */
-    --ctrl-pressed-bg: oklch(82% 0.14 175 / 0.18);
-    --ctrl-pressed-border: oklch(82% 0.14 175);
-    --ctrl-pressed-text: oklch(82% 0.14 175);
+    /* Pressed/toggle state — derived from cyan scale */
+    --ctrl-pressed-bg: color-mix(in oklch, var(--color-cyan-200) 18%, transparent);
+    --ctrl-pressed-border: var(--color-cyan-200);
+    --ctrl-pressed-text: var(--color-cyan-200);
 
     /* Solid button variant — matches input bar fill */
     --ctrl-solid-bg: var(--panel-bg-light);
@@ -136,7 +141,7 @@
     --data-card-bg: transparent;
 
     /* Tooltip styling — light surface for contrast */
-    --ov-tooltip-bg: oklch(97% 0.01 60);
+    --ov-tooltip-bg: var(--color-text-150);
     --ov-tooltip-font-family: var(--font-ui), system-ui, sans-serif;
     --ov-tooltip-font-size: 0.8125rem;
     --ov-tooltip-font-weight: 500;
@@ -145,13 +150,13 @@
     --ov-tooltip-padding-y: 0.375rem;
     --ov-tooltip-radius: 0.5rem;
     --ov-tooltip-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.25);
-    --ov-tooltip-text: oklch(12% 0.04 275);
+    --ov-tooltip-text: var(--color-surface-100);
     --ov-tooltip-z-index: 9999;
 
     /* --- Menu Variables --- */
 
     /* Dropdown container — matches input bar (22% lightness) */
-    --menu-dropdown-bg: oklch(22% 0.04 275);
+    --menu-dropdown-bg: var(--panel-bg-light);
     --menu-dropdown-gap: 0.25rem;
     --menu-dropdown-max-height: 20rem;
     --menu-dropdown-padding: 0.375rem;
@@ -159,7 +164,7 @@
     --menu-dropdown-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.3);
 
     /* Section headers — muted, uppercase */
-    --menu-header-color: oklch(55% 0.04 240);
+    --menu-header-color: var(--color-muted-150);
     --menu-header-font-size: 0.6875rem;
     --menu-header-padding-x: 0.375rem;
     --menu-header-padding-y: 0.375rem;
@@ -168,17 +173,17 @@
     --menu-item-font-size: 0.8125rem;
     --menu-item-gap: 0.375rem;
     --menu-item-height: 2rem;
-    --menu-item-hover-bg: oklch(26% 0.04 275);
+    --menu-item-hover-bg: var(--panel-bg-lighter);
     --menu-item-icon-gap: 0.5rem;
     --menu-item-padding-x: 0.375rem;
     --menu-item-padding-y: 0.25rem;
     --menu-item-radius: 0.375rem;
-    --menu-item-selected-bg: oklch(28% 0.04 275);
-    --menu-item-selected-text: oklch(97% 0.01 60);
-    --menu-item-text: oklch(65% 0.04 240);
+    --menu-item-selected-bg: var(--color-surface-500);
+    --menu-item-selected-text: var(--color-text-150);
+    --menu-item-text: var(--color-muted-250);
 
     /* Checkmark — cyan accent */
-    --menu-check-color: oklch(75% 0.14 200);
+    --menu-check-color: var(--color-cyan-150);
     --menu-check-size: 0.875rem;
 
     /* Icons */
@@ -186,26 +191,26 @@
     --menu-icon-size: 1rem;
 
     /* Separators */
-    --menu-separator-bg: oklch(30% 0.04 275);
+    --menu-separator-bg: var(--panel-border-light);
     --menu-separator-spacing: 0.25rem;
 
     /* Trigger — dim labels, bright values */
     --menu-trigger-bg: transparent;
     --menu-trigger-font-size: 0.8125rem;
     --menu-trigger-gap: 0.5rem;
-    --menu-trigger-hover-bg: oklch(26% 0.04 275);
-    --menu-trigger-icon: oklch(55% 0.04 240);
-    --menu-trigger-indicator: oklch(55% 0.04 240);
+    --menu-trigger-hover-bg: var(--panel-bg-lighter);
+    --menu-trigger-icon: var(--color-muted-150);
+    --menu-trigger-indicator: var(--color-muted-150);
     --menu-trigger-indicator-size: 0.5rem;
     --menu-trigger-indicator-margin: 0.25rem;
     --menu-trigger-indicator-opacity: 0.7;
     --menu-trigger-indicator-rotation: 180deg;
-    --menu-trigger-label: oklch(55% 0.04 240);
+    --menu-trigger-label: var(--color-muted-150);
     --menu-trigger-min-width: 0;
     --menu-trigger-padding-x: 0.75rem;
     --menu-trigger-padding-y: 0.375rem;
     --menu-trigger-radius: 0.5rem;
-    --menu-trigger-value: oklch(90% 0.02 60);
+    --menu-trigger-value: var(--color-text-100);
 
     /* InputBar state slots — values for package-defined CSS variable slots */
     --bar-icon-opacity: 0.7;
@@ -213,15 +218,15 @@
     --bar-disabled-opacity: 0.4;
     --bar-loading-cursor: not-allowed;
 
-    /* Submit button — deep magenta (#d82f94) with cyan arrow */
-    --submit-btn-bg: oklch(55% 0.3 338);
-    --submit-btn-text: oklch(82% 0.14 175);
+    /* Submit button — deep magenta with cyan arrow */
+    --submit-btn-bg: var(--color-pink-100);
+    --submit-btn-text: var(--color-cyan-200);
 
     /* Thumb component — matches sidebar-item-thumb styling */
     --data-thumb-bg: var(--panel-bg-lighter);
     --data-thumb-radius: 0.5rem;
     --data-thumb-action-bg: var(--panel-bg-dark);
-    --data-thumb-action-border: oklch(70% 0.12 195);
+    --data-thumb-action-border: var(--color-cyan-150);
     --data-thumb-action-color: var(--panel-text-primary);
     --data-thumb-action-hover-bg: var(--panel-bg-dark);
     --data-thumb-action-hover-border: var(--ctrl-destructive-bg);
@@ -232,8 +237,8 @@
     --data-listitem-padding-x: 0.75rem;
     --data-listitem-padding-y: 0.75rem;
     --data-listitem-radius: 0.5rem;
-    --data-listitem-hover-bg: oklch(18% 0.03 275);
-    --data-listitem-selected-bg: oklch(20% 0.03 275);
+    --data-listitem-hover-bg: var(--panel-bg-medium);
+    --data-listitem-selected-bg: var(--color-surface-300);
     --data-listitem-thumb-size: 2.75rem;
     --data-listitem-thumb-radius: 0.5rem;
     --data-listitem-thumb-bg: var(--panel-bg-lighter);
@@ -246,6 +251,15 @@
     --fb-exit-animation: fadeOut 150ms ease-in;
     --data-loading-animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     --menu-loading-animation: spin 1s linear infinite;
+
+    /* Semantic intent/role colors — tuned for UI clarity */
+    --intent-create: var(--color-highlight-150);
+    --intent-refine: var(--color-cyan-150);
+    --intent-upload: var(--color-cyan-150);
+    --role-user: var(--color-cyan-150);
+    --role-assistant: var(--color-highlight-150);
+    --state-saved: var(--color-success-150);
+    --state-attachment: var(--color-cyan-150);
 }
 
 /* --- [MENU_STATES] --------------------------------------------------------- */
@@ -386,14 +400,14 @@ li:not([data-selected='true']) {
 
 /* Attachments tray - dashed border with legend-style label */
 .attachments-tray {
-    --attachment-border: oklch(70% 0.12 195);
+    --attachment-border: var(--state-attachment);
     position: relative;
     display: flex;
     gap: 0.75rem;
     align-items: center;
     padding: 1rem 1rem 0.75rem;
     margin-bottom: 0.75rem;
-    background: oklch(70% 0.12 195 / 0.06);
+    background: color-mix(in oklch, var(--state-attachment) 6%, transparent);
     border: 1px dashed var(--attachment-border);
     border-radius: 0.75rem;
 }
@@ -404,7 +418,7 @@ li:not([data-selected='true']) {
     padding: 0.125rem 0.5rem;
     font-size: 0.625rem;
     font-weight: 600;
-    color: oklch(20% 0.04 195);
+    color: var(--color-surface-200);
     text-transform: capitalize;
     letter-spacing: 0.025em;
     background: var(--attachment-border);
@@ -425,8 +439,8 @@ li:not([data-selected='true']) {
     opacity: 1;
 }
 .sidebar-action-btn-destructive:hover {
-    color: oklch(65% 0.25 25);
-    background: oklch(65% 0.25 25 / 0.1);
+    color: var(--ctrl-destructive-bg);
+    background: color-mix(in oklch, var(--ctrl-destructive-bg) 10%, transparent);
 }
 
 /* Clear history button */
@@ -465,7 +479,7 @@ li:not([data-selected='true']) {
     transition: background-color 150ms;
 }
 .context-trigger:hover {
-    background: oklch(100% 0 0 / 0.05);
+    background: var(--ctrl-outline-hover);
 }
 .context-divider {
     width: 1px;
@@ -566,8 +580,8 @@ li:not([data-selected='true']) {
     background: var(--panel-bg-lighter);
 }
 .viewport-hud-btn[data-saved='true'] svg {
-    color: oklch(60% 0.15 160);
-    fill: oklch(60% 0.15 160);
+    color: var(--state-saved);
+    fill: var(--state-saved);
 }
 
 /* CAD reticle corner marks */
@@ -661,16 +675,16 @@ li:not([data-selected='true']) {
     border-radius: 0.25rem;
 }
 .intent-badge[data-intent='create'] {
-    color: oklch(75% 0.15 85);
-    background: oklch(75% 0.15 85 / 0.15);
+    color: var(--intent-create);
+    background: color-mix(in oklch, var(--intent-create) 15%, transparent);
 }
 .intent-badge[data-intent='refine'] {
-    color: oklch(70% 0.15 200);
-    background: color-mix(in oklch, oklch(70% 0.15 200) 20%, transparent);
+    color: var(--intent-refine);
+    background: color-mix(in oklch, var(--intent-refine) 20%, transparent);
 }
 .intent-badge[data-intent='upload'] {
-    color: oklch(70% 0.12 195);
-    background: oklch(70% 0.12 195 / 0.15);
+    color: var(--intent-upload);
+    background: color-mix(in oklch, var(--intent-upload) 15%, transparent);
 }
 
 /* Session message - matches sidebar-item styling pattern */
@@ -683,7 +697,7 @@ li:not([data-selected='true']) {
     transition: background-color 150ms;
 }
 .session-message:hover {
-    background: oklch(18% 0.03 275);
+    background: var(--panel-bg-medium);
 }
 .session-message-icon {
     display: flex;
@@ -696,12 +710,12 @@ li:not([data-selected='true']) {
     transition: background-color 150ms;
 }
 .session-message-icon[data-role='user'] {
-    color: oklch(70% 0.14 195);
-    background: oklch(70% 0.14 195 / 0.15);
+    color: var(--role-user);
+    background: color-mix(in oklch, var(--role-user) 15%, transparent);
 }
 .session-message-icon[data-role='assistant'] {
-    color: oklch(75% 0.15 85);
-    background: oklch(75% 0.15 85 / 0.15);
+    color: var(--role-assistant);
+    background: color-mix(in oklch, var(--role-assistant) 15%, transparent);
 }
 .session-message-label {
     display: block;
@@ -711,10 +725,10 @@ li:not([data-selected='true']) {
     letter-spacing: 0.1em;
 }
 .session-message-label[data-role='user'] {
-    color: oklch(70% 0.14 195);
+    color: var(--role-user);
 }
 .session-message-label[data-role='assistant'] {
-    color: oklch(75% 0.15 85);
+    color: var(--role-assistant);
 }
 
 /* Session thinking card */
@@ -730,7 +744,7 @@ li:not([data-selected='true']) {
 /* Processing skeleton */
 .skeleton {
     height: 0.75rem;
-    background: color-mix(in oklch, oklch(50% 0.02 240) 50%, transparent);
+    background: color-mix(in oklch, var(--color-muted-200) 50%, transparent);
     border-radius: 0.25rem;
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -752,8 +766,8 @@ html {
 }
 
 body {
-    color: var(--color-text-100, oklch(97% 0.01 60));
-    background-color: var(--color-surface-300, oklch(20% 0.04 275));
+    color: var(--panel-text-primary);
+    background-color: var(--color-surface-300);
 }
 
 /* Scrollbar styling using generated surface tokens */

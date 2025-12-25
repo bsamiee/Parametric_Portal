@@ -50,7 +50,6 @@ const B = Object.freeze({
     },
 } as const);
 
-// Computed icon gap: iconScale.scale × iconGapMul × density × baseUnit = 2 × 3 × 1 × 0.25 = 1.5rem (24px)
 const ICON_GAP = `${B.iconScale.scale * B.algo.iconGapMul * B.iconScale.density * B.iconScale.baseUnit}rem`;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

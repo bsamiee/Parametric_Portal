@@ -12,9 +12,9 @@ export default defineConfig(
         createConfig({
             entry: {
                 colors: './src/colors.ts',
-                factories: './src/factories.ts',
                 fonts: './src/fonts.ts',
                 layouts: './src/layouts.ts',
+                plugin: './src/plugin.ts',
                 presets: './src/presets.ts',
                 schemas: './src/schemas.ts',
                 theme: './src/theme.ts',

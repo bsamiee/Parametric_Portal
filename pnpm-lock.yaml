@@ -147,6 +147,9 @@ catalogs:
     cmdk:
       specifier: 1.1.1
       version: 1.1.1
+    colorjs.io:
+      specifier: 0.5.2
+      version: 0.5.2
     date-fns:
       specifier: 4.1.0
       version: 4.1.0
@@ -907,6 +910,9 @@ importers:
       effect:
         specifier: 'catalog:'
         version: 3.19.13
+      fake-indexeddb:
+        specifier: 'catalog:'
+        version: 6.2.5
       fast-check:
         specifier: 'catalog:'
         version: 4.5.1
@@ -920,12 +926,12 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.0.16(@types/node@25.0.3)(@vitest/browser-playwright@4.0.16)(@vitest/ui@4.0.16)(happy-dom@20.0.11)(jiti@2.6.1)(jsdom@27.3.0)(lightningcss@1.30.2)(msw@2.8.0(@types/node@25.0.3)(typescript@6.0.0-dev.20251125))(terser@5.44.1)(tsx@4.21.0)(yaml@2.8.2)
-      zustand:
-        specifier: 'catalog:'
-        version: 5.0.9(@types/react@19.2.7)(immer@11.1.0)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
 
   packages/theme:
     dependencies:
+      colorjs.io:
+        specifier: 'catalog:'
+        version: 0.5.2
       effect:
         specifier: 'catalog:'
         version: 3.19.13
@@ -4080,8 +4086,8 @@ packages:
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
-  '@sinclair/typebox@0.34.43':
-    resolution: {integrity: sha512-zD2/pAP6nq+ypyNPxsDhc5as3BamstGwCvhOEFTvull2qog9fdb/sj4m/431mk6iuXXW+WE1PER94uBDqxkoIg==}
+  '@sinclair/typebox@0.34.45':
+    resolution: {integrity: sha512-qJcFVfCa5jxBFSuv7S5WYbA8XdeCPmhnaVVfX/2Y6L8WYg8sk3XY2+6W0zH+3mq1Cz+YC7Ki66HfqX6IHAwnkg==}
 
   '@sindresorhus/merge-streams@4.0.0':
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
@@ -5174,6 +5180,9 @@ packages:
 
   colord@2.9.3:
     resolution: {integrity: sha512-jeC1axXpnb0/2nn/Y1LPuLdgXBLH7aDcHu4KEKfqw3CUhX7ZpfBSlPKyqXE6btIgEzfWtrX3/tyBCaCvXvMkOw==}
+
+  colorjs.io@0.5.2:
+    resolution: {integrity: sha512-twmVoizEW7ylZSN32OgKdXRmo1qg+wT5/6C3xu5b9QsWzSFAhHLn2xd8ro0diCsKfCj1RdaTP/nrcW+vAoQPIw==}
 
   columnify@1.6.0:
     resolution: {integrity: sha512-lomjuFZKfM6MSAnV9aCZC9sc0qGbmZdfygNv+nCpqVkSKdCxCklLtd16O0EILGkImHw9ZpHkAnHaB+8Zxq5W6Q==}
@@ -11193,7 +11202,7 @@ snapshots:
 
   '@jest/schemas@30.0.5':
     dependencies:
-      '@sinclair/typebox': 0.34.43
+      '@sinclair/typebox': 0.34.45
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -13614,7 +13623,7 @@ snapshots:
 
   '@sec-ant/readable-stream@0.4.1': {}
 
-  '@sinclair/typebox@0.34.43': {}
+  '@sinclair/typebox@0.34.45': {}
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
@@ -14938,6 +14947,8 @@ snapshots:
       color-name: 2.1.0
 
   colord@2.9.3: {}
+
+  colorjs.io@0.5.2: {}
 
   columnify@1.6.0:
     dependencies:
@@ -19854,13 +19865,6 @@ snapshots:
       - react-dom
       - react-native
       - scheduler
-
-  zustand@5.0.9(@types/react@19.2.7)(immer@11.1.0)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3)):
-    optionalDependencies:
-      '@types/react': 19.2.7
-      immer: 11.1.0
-      react: 19.2.3
-      use-sync-external-store: 1.6.0(react@19.2.3)
 
   zustand@5.0.9(@types/react@19.2.7)(immer@11.1.0)(react@19.3.0-canary-f93b9fd4-20251217)(use-sync-external-store@1.6.0(react@19.3.0-canary-f93b9fd4-20251217)):
     optionalDependencies:

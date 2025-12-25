@@ -2,15 +2,22 @@
  * Generate @font-face rules and semantic utilities via validated schema.
  * Grounding: Vite plugin exposes virtual module for Tailwind integration.
  */
-import { Effect, Option, pipe, Schema as S } from 'effect';
+import { Effect, Option, pipe, type Schema as S } from 'effect';
 import type { ParseError } from 'effect/ParseResult';
-import type { Plugin } from 'vite';
-import { type FontInput, FontInputSchema, type FontWeight } from './schemas.ts';
+import { createParametricPlugin, normalizeInputs } from './plugin.ts';
+import { type FontInput, type FontInputSchema, type FontWeight, validate } from './schemas.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
+type FontType = 'static' | 'variable';
 type FontInputRaw = S.Schema.Encoded<typeof FontInputSchema>;
+type FontAxisConfig = { readonly default: number; readonly max: number; readonly min: number };
+type FontOptions = {
+    readonly axes?: Record<string, FontAxisConfig>;
+    readonly display?: 'auto' | 'block' | 'fallback' | 'optional' | 'swap';
+    readonly fallback?: ReadonlyArray<'monospace' | 'sans-serif' | 'serif' | 'system-ui'>;
+    readonly features?: ReadonlyArray<string>;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -19,20 +26,9 @@ const B = Object.freeze({
         static: { format: 'woff2', tech: undefined },
         variable: { format: 'woff2', tech: 'variations' },
     },
-    tailwindMarker: '@import "tailwindcss";',
-    virtualImportPattern: /@import\s+['"]virtual:parametric-fonts['"];?\s*/g,
-} as const);
-
-const VIRTUAL_MODULE_ID = Object.freeze({
-    resolved: '\0virtual:parametric-fonts' as const,
-    virtual: 'virtual:parametric-fonts' as const,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const isArray = <T>(input: T | ReadonlyArray<T>): input is ReadonlyArray<T> => Array.isArray(input);
-const normalizeInputs = (input: FontInputRaw | ReadonlyArray<FontInputRaw>): ReadonlyArray<FontInputRaw> =>
-    isArray(input) ? input : [input];
 
 const fontUtilities = {
     fallbackStack: (family: string, fallback: ReadonlyArray<string> | undefined): string =>
@@ -136,7 +132,7 @@ const createThemeVariables = (input: FontInput): Effect.Effect<readonly string[]
 /** Orchestrate font-face, variables, and utility generation. Grounding: Validates input then combines three CSS block types. */
 const createFontBlocks = (input: FontInputRaw): Effect.Effect<readonly string[], ParseError> =>
     pipe(
-        S.decode(FontInputSchema)(input),
+        validate.font(input),
         Effect.flatMap((validated) =>
             Effect.all({
                 fontFace: createFontFaceBlock(validated),
@@ -161,30 +157,43 @@ const generateAllFonts = (inputs: FontInputRaw | ReadonlyArray<FontInputRaw>): s
         ),
     );
 
+/** Create validated font configuration. Grounding: Effect pipeline validates schema at runtime. */
+const createFont = (
+    type: FontType,
+    name: string,
+    family: string,
+    src: string,
+    weights: Record<string, number>,
+    options: FontOptions = {},
+): Effect.Effect<FontInput, ParseError> =>
+    validate.font({
+        axes: options.axes,
+        display: options.display ?? 'swap',
+        fallback: options.fallback,
+        family,
+        features: options.features,
+        name,
+        src,
+        type,
+        weights,
+    });
+
+/** Create variable font axis configuration. Grounding: Defines min/max/default for OpenType axes. */
+const createFontAxis = (min: number, max: number, defaultVal: number): FontAxisConfig =>
+    Object.freeze({ default: defaultVal, max, min });
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 /** Create Vite plugin exposing virtual font module. Grounding: Resolves virtual:parametric-fonts for runtime CSS injection. */
-const defineFonts = (inputs: FontInputRaw | ReadonlyArray<FontInputRaw>): Plugin => ({
-    applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
-    enforce: 'pre',
-    load: (id) =>
-        id === VIRTUAL_MODULE_ID.resolved ? `${B.tailwindMarker}\n\n${generateAllFonts(inputs)}` : undefined,
-    name: 'parametric-fonts',
-    resolveId: (id) => (id === VIRTUAL_MODULE_ID.virtual ? VIRTUAL_MODULE_ID.resolved : undefined),
-    transform: (code, id) =>
-        // Inject fonts CSS into entry CSS file (bypasses enhanced-resolve limitation)
-        !id.endsWith('main.css') || !code.includes(B.tailwindMarker)
-            ? undefined
-            : code
-                  .replaceAll(B.virtualImportPattern, '')
-                  .replace(
-                      B.tailwindMarker,
-                      `${B.tailwindMarker}\n\n/* --- [FONTS] --- */\n${generateAllFonts(inputs)}`,
-                  ),
+const defineFonts = createParametricPlugin<FontInputRaw>({
+    generate: generateAllFonts,
+    name: 'fonts',
+    sectionLabel: 'FONTS',
+    virtualId: 'fonts',
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B, defineFonts };
-export type { FontInputRaw };
+export { B as FONT_TUNING, createFont, createFontAxis, defineFonts };
+export type { FontAxisConfig, FontInputRaw, FontOptions, FontType };
 export type { FontInput } from './schemas.ts';

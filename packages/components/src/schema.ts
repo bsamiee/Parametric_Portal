@@ -17,7 +17,16 @@ import { twMerge } from 'tailwind-merge';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type SchemaKey = keyof typeof Schemas;
+type Resolved = { readonly [K in SchemaKey]: S.Schema.Type<(typeof Schemas)[K]> };
+type Inputs = { readonly [K in SchemaKey]: S.Schema.Encoded<(typeof Schemas)[K]> };
+type Computed = { readonly [K in keyof typeof compute]: string };
 type ScaleComputed = { readonly scale: number; readonly density: number; readonly baseUnit: number };
+type TuningConfig = { readonly [K in SchemaKey]?: Inputs[K] | undefined };
+type TuningKey = keyof TuningConfig;
+type IconTuning = { readonly scale?: Inputs['scale'] | undefined; readonly strokeWidth?: number | undefined };
+type TuningFor<K extends keyof typeof TUNING_KEYS> = Pick<TuningConfig, (typeof TUNING_KEYS)[K][number]>;
+type StateKey = 'bar' | 'cmd' | 'ctrl' | 'data' | 'el' | 'fb' | 'menu' | 'nav' | 'ov';
 type TooltipSide = 'bottom' | 'left' | 'right' | 'top';
 type TooltipPositionResult = {
     readonly floatingStyles: CSSProperties;
@@ -39,6 +48,23 @@ type TooltipState = TooltipPositionResult & {
     readonly tooltipAriaProps: object;
     readonly triggerProps: object;
 };
+type CollectionElResult<T extends HTMLElement> = {
+    readonly focusProps: ReturnType<typeof useFocusRing>['focusProps'];
+    readonly isFocusVisible: boolean;
+    readonly merge: <P>(
+        ariaProps: P,
+        ...classes: ReadonlyArray<string | false | undefined>
+    ) => P & {
+        readonly className: string;
+        readonly ref: RefObject<T | null>;
+    };
+    readonly ref: RefObject<T | null>;
+};
+type ResolvedContext<R extends SchemaKey> = {
+    readonly computed: Computed;
+    readonly scale: Resolved['scale'];
+    readonly vars: Record<string, string>;
+} & { readonly [K in R]: Resolved[K] };
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -63,7 +89,6 @@ const addScaleOffset = (computed: ScaleComputed, base: number, step: number, mul
 
 const PositiveSchema = pipe(S.Number, S.positive());
 const NonNegativeIntSchema = pipe(S.Number, S.int(), S.nonNegative());
-
 const ScaleSchema = S.Struct({
     _tag: S.optionalWith(S.Literal('scale'), { default: () => 'scale' as const }),
     baseUnit: S.optionalWith(pipe(PositiveSchema, S.brand('Unit')), { default: () => 0.25 as never }),
@@ -73,7 +98,6 @@ const ScaleSchema = S.Struct({
     }),
     scale: S.optionalWith(pipe(S.Number, S.between(1, 10), S.brand('Scale')), { default: () => 5 as never }),
 });
-
 const BehaviorSchema = S.Struct({
     _tag: S.optionalWith(S.Literal('behavior'), { default: () => 'behavior' as const }),
     asChild: optionalBoolean(false),
@@ -83,7 +107,6 @@ const BehaviorSchema = S.Struct({
     loading: optionalBoolean(false),
     readonly: optionalBoolean(false),
 });
-
 const OverlaySchema = S.Struct({
     _tag: S.optionalWith(S.Literal('overlay'), { default: () => 'overlay' as const }),
     backdrop: optionalBoolean(true),
@@ -96,14 +119,12 @@ const OverlaySchema = S.Struct({
     trapFocus: optionalBoolean(true),
     zIndex: S.optionalWith(pipe(S.Number, S.int(), S.between(0, 9999)), { default: () => 50 as never }),
 });
-
 const FeedbackSchema = S.Struct({
     _tag: S.optionalWith(S.Literal('feedback'), { default: () => 'feedback' as const }),
     autoDismiss: optionalBoolean(true),
     dismissible: optionalBoolean(true),
     duration: S.optionalWith(PositiveSchema, { default: () => 5000 as never }),
 });
-
 const AnimationSchema = S.Struct({
     _tag: S.optionalWith(S.Literal('animation'), { default: () => 'animation' as const }),
     delay: S.optionalWith(NonNegativeIntSchema, { default: () => 0 as never }),
@@ -121,11 +142,6 @@ const Schemas = {
     overlay: OverlaySchema,
     scale: ScaleSchema,
 } as const;
-
-type SchemaKey = keyof typeof Schemas;
-type Resolved = { readonly [K in SchemaKey]: S.Schema.Type<(typeof Schemas)[K]> };
-type Inputs = { readonly [K in SchemaKey]: S.Schema.Encoded<(typeof Schemas)[K]> };
-
 const compute = {
     badgePaddingX: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.badgePxMul)),
     badgePaddingY: (computed: Resolved['scale']) => toRem(multiplyScale(computed, B.algo.badgePyMul)),
@@ -172,8 +188,6 @@ const compute = {
     xsFontSize: (computed: Resolved['scale']) =>
         toRem(B.algo.fontBase + Math.max(1, computed.scale - 2) * B.algo.fontStep),
 } as const;
-
-type Computed = { readonly [K in keyof typeof compute]: string };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -587,6 +601,9 @@ const B = Object.freeze({
     ov: {
         backdrop: 'bg-(--ov-backdrop-bg)',
         dialog: {
+            button: 'px-(--ov-button-px) py-(--ov-button-py) rounded-(--ov-button-radius) border-(--ov-button-border) transition-colors',
+            buttonConfirm: 'bg-(--ov-button-confirm-bg) text-(--ov-button-confirm-text)',
+            buttonDisabled: 'opacity-(--ov-button-disabled-opacity) cursor-(--ov-button-disabled-cursor)',
             footer: 'border-t-(--ov-footer-border) flex justify-end gap-(--ov-footer-gap)',
             pos: 'fixed left-(--ov-dialog-left) top-(--ov-dialog-top) translate-(--ov-dialog-translate) overflow-hidden',
         },
@@ -637,6 +654,21 @@ const B = Object.freeze({
             popoverOff: 'var(--ov-popover-offset)',
         },
     },
+    upload: {
+        defaults: { accept: 'image/svg+xml', multiple: false },
+        dropzone: {
+            active: 'border-(--upload-active-border) bg-(--upload-active-bg)',
+            base: 'relative border-(--upload-border-width) border-(--upload-border-style) rounded-(--upload-radius) transition-colors',
+            idle: 'border-(--upload-idle-border)',
+        },
+        trigger: {
+            base: 'cursor-(--upload-cursor)',
+            disabled: 'cursor-(--upload-disabled-cursor) opacity-(--upload-disabled-opacity)',
+        },
+        var: {
+            ...coreCSSVariables('upload'),
+        },
+    },
     util: {
         dir: {
             both: 'overflow-(--util-overflow-both)',
@@ -654,7 +686,6 @@ const B = Object.freeze({
         },
     },
 } as const);
-
 const utilities = {
     cls: (...inputs: ReadonlyArray<string | false | undefined>): string => twMerge(clsx(inputs)),
     computeScale: (scale: Resolved['scale']): Computed =>
@@ -678,8 +709,6 @@ const utilities = {
         zIndex: isUnderlay ? overlay.zIndex - 10 : overlay.zIndex,
     }),
 } as const;
-
-type StateKey = 'bar' | 'cmd' | 'ctrl' | 'data' | 'el' | 'fb' | 'menu' | 'nav' | 'ov';
 const stateCls: { readonly [K in StateKey]: (behavior: Resolved['behavior']) => string } = {
     bar: (behavior) =>
         utilities.cls(
@@ -720,25 +749,10 @@ const stateCls: { readonly [K in StateKey]: (behavior: Resolved['behavior']) => 
             behavior.loading ? B.ctrl.state.loading : undefined,
         ),
 };
-
 const useForwardedRef = <T extends HTMLElement | SVGElement>(forwardedRef: ForwardedRef<T>): RefObject<T> => {
     const internalRef = useRef<T>(null);
     return (forwardedRef ?? internalRef) as RefObject<T>;
 };
-
-type CollectionElResult<T extends HTMLElement> = {
-    readonly focusProps: ReturnType<typeof useFocusRing>['focusProps'];
-    readonly isFocusVisible: boolean;
-    readonly merge: <P>(
-        ariaProps: P,
-        ...classes: ReadonlyArray<string | false | undefined>
-    ) => P & {
-        readonly className: string;
-        readonly ref: RefObject<T | null>;
-    };
-    readonly ref: RefObject<T | null>;
-};
-
 const useCollectionEl = <T extends HTMLElement>(focusClass?: string): CollectionElResult<T> => {
     const ref = useRef<T>(null);
     const { focusProps, isFocusVisible } = useFocusRing();
@@ -757,14 +771,12 @@ const useCollectionEl = <T extends HTMLElement>(focusClass?: string): Collection
         ref,
     };
 };
-
 const placementMap = {
     bottom: 'bottom',
     left: 'left',
     right: 'right',
     top: 'top',
 } as const satisfies Record<TooltipSide, Placement>;
-
 /** Floating UI positioning hook with flip/shift collision handling. Grounding: offset -> flip -> shift middleware order. */
 const useTooltipPosition = (isOpen: boolean, side: TooltipSide = 'top', offsetPx = 8): TooltipPositionResult => {
     const { refs, floatingStyles, placement } = useFloating({
@@ -775,12 +787,10 @@ const useTooltipPosition = (isOpen: boolean, side: TooltipSide = 'top', offsetPx
     });
     return { floatingStyles, placement, refs };
 };
-
 /** Unified tooltip class string using B.ov.tooltip infrastructure. */
 const tooltipCls = twMerge(
     clsx(B.ov.tooltip.base, B.ov.tooltip.var.px, B.ov.tooltip.var.py, B.ov.tooltip.var.bg, B.ov.tooltip.var.text),
 );
-
 /** Unified tooltip state hook combining React Aria state/accessibility with Floating UI positioning. */
 const useTooltipState = (
     triggerRef: RefObject<HTMLElement | null>,
@@ -800,7 +810,6 @@ const useTooltipState = (
         ...position,
     };
 };
-
 /** Render tooltip portal to document.body with Floating UI positioning. */
 const renderTooltipPortal = (tooltip: TooltipState): ReactNode =>
     tooltip.isOpen && tooltip.content
@@ -823,9 +832,6 @@ const renderTooltipPortal = (tooltip: TooltipState): ReactNode =>
 
 const resolve = <K extends SchemaKey>(key: K, input?: Inputs[K]): Resolved[K] =>
     S.decodeUnknownSync(Schemas[key] as unknown as S.Schema<Resolved[K], Inputs[K]>)(input ?? {});
-
-type TuningConfig = { readonly [K in SchemaKey]?: Inputs[K] | undefined };
-type TuningKey = keyof TuningConfig;
 const TUNING_KEYS = {
     bar: ['behavior', 'scale'],
     cmd: ['animation', 'behavior', 'overlay', 'scale'],
@@ -833,13 +839,13 @@ const TUNING_KEYS = {
     data: ['behavior', 'scale'],
     el: ['behavior', 'scale'],
     fb: ['animation', 'feedback', 'scale'],
+    icon: ['scale'],
     menu: ['animation', 'behavior', 'overlay', 'scale'],
     nav: ['animation', 'behavior', 'scale'],
     ov: ['animation', 'overlay', 'scale'],
+    upload: ['scale'],
     util: ['scale'],
 } as const satisfies Record<string, ReadonlyArray<SchemaKey>>;
-type TuningFor<K extends keyof typeof TUNING_KEYS> = Pick<TuningConfig, (typeof TUNING_KEYS)[K][number]>;
-
 const pick = <K extends TuningKey>(
     tuningConfig: TuningConfig | undefined,
     keys: ReadonlyArray<K>,
@@ -850,7 +856,6 @@ const pick = <K extends TuningKey>(
               K
           >)
         : ({} as Pick<TuningConfig, K>);
-
 const merged = <K extends TuningKey>(
     tuningConfig: TuningConfig | undefined,
     input: TuningConfig,
@@ -859,7 +864,6 @@ const merged = <K extends TuningKey>(
     Object.fromEntries(
         keys.map((key) => [key, utilities.merge(tuningConfig?.[key], input[key])]).filter(([, value]) => value),
     ) as Pick<TuningConfig, K>;
-
 const animStyle = (animation: Resolved['animation']): CSSProperties =>
     animation.enabled
         ? {
@@ -867,13 +871,6 @@ const animStyle = (animation: Resolved['animation']): CSSProperties =>
               transitionDelay: animation.delay ? `${animation.delay}ms` : undefined,
           }
         : {};
-
-type ResolvedContext<R extends SchemaKey> = {
-    readonly computed: Computed;
-    readonly scale: Resolved['scale'];
-    readonly vars: Record<string, string>;
-} & { readonly [K in R]: Resolved[K] };
-
 const createBuilderContext = <K extends string, R extends SchemaKey>(
     cssPrefix: K,
     resolvers: ReadonlyArray<R>,
@@ -916,6 +913,7 @@ export {
 export type {
     CollectionElResult,
     Computed,
+    IconTuning,
     Inputs,
     Resolved,
     ResolvedContext,

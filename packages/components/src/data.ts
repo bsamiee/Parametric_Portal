@@ -42,6 +42,7 @@ import {
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type TColHeaderProps<T> = { readonly column: Node<T>; readonly state: TableState<T> };
 type DataType = 'avatar' | 'badge' | 'card' | 'list' | 'listitem' | 'table' | 'thumb';
 type CardProps = HTMLAttributes<HTMLDivElement> & {
     readonly children?: ReactNode;
@@ -116,8 +117,9 @@ type DataComponentMap = {
 
 const dataCls = {
     cell: utilities.cls(B.data.var.px, B.data.var.py),
+    cellFooter: utilities.cls('border-t', B.data.var.px, B.data.var.py),
+    cellHeader: utilities.cls('border-b', B.data.card.heading, B.data.var.px, B.data.var.py),
 } as const;
-
 const createAvatarComponent = (input: DataInput<'avatar'>, computed: Computed) =>
     forwardRef((props: AvatarProps, fRef: ForwardedRef<HTMLSpanElement>) => {
         const { alt, className, fallback, src, style, ...rest } = props;
@@ -139,7 +141,6 @@ const createAvatarComponent = (input: DataInput<'avatar'>, computed: Computed) =
                   ),
         );
     });
-
 const createBadgeComponent = (input: DataInput<'badge'>, vars: Record<string, string>) =>
     forwardRef((props: BadgeProps, fRef: ForwardedRef<HTMLSpanElement>) => {
         const { children, className, style, variant, ...rest } = props;
@@ -162,7 +163,6 @@ const createBadgeComponent = (input: DataInput<'badge'>, vars: Record<string, st
             children,
         );
     });
-
 const createCardComponent = (
     input: DataInput<'card'>,
     vars: Record<string, string>,
@@ -182,18 +182,11 @@ const createCardComponent = (
                 ref,
                 style: { borderRadius: computed.radius, ...vars, ...style } as CSSProperties,
             },
-            header
-                ? createElement(
-                      'div',
-                      { className: utilities.cls('border-b', B.data.card.heading, dataCls.cell) },
-                      header,
-                  )
-                : null,
+            header ? createElement('div', { className: dataCls.cellHeader }, header) : null,
             createElement('div', { className: dataCls.cell }, children),
-            footer ? createElement('div', { className: utilities.cls('border-t', dataCls.cell) }, footer) : null,
+            footer ? createElement('div', { className: dataCls.cellFooter }, footer) : null,
         );
     });
-
 const createListComponent = <T>(
     input: DataInput<'list'>,
     vars: Record<string, string>,
@@ -216,7 +209,6 @@ const createListComponent = <T>(
             items.map((item, idx) => createElement('li', { key: keyExtractor(item, idx) }, renderItem(item, idx))),
         );
     });
-
 const createThumbComponent = (
     input: DataInput<'thumb'>,
     vars: Record<string, string>,
@@ -262,7 +254,6 @@ const createThumbComponent = (
             renderTooltipPortal(tooltipState),
         );
     });
-
 const createListItemComponent = (input: DataInput<'listitem'>, vars: Record<string, string>, _computed: Computed) =>
     forwardRef((props: ListItemProps, fRef: ForwardedRef<HTMLButtonElement>) => {
         const { action, badge, children, className, isSelected, onAction, style, thumbnail, ...rest } = props;
@@ -325,7 +316,6 @@ const createListItemComponent = (input: DataInput<'listitem'>, vars: Record<stri
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-type TColHeaderProps<T> = { readonly column: Node<T>; readonly state: TableState<T> };
 const sortDirMap = { ascending: 'asc', descending: 'desc' } as const;
 const TColHeader = <T>({ column, state }: TColHeaderProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLTableCellElement>(B.data.table.cell.focus);
@@ -345,7 +335,6 @@ const TColHeader = <T>({ column, state }: TColHeaderProps<T>) => {
             createElement('span', { className: B.data.table.header.sortIcon }, B.data.table.sort[dir]),
     );
 };
-
 type THeaderRowProps<T> = { readonly item: Node<T>; readonly state: TableState<T> };
 const THeaderRow = <T>({ item, state }: THeaderRowProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLTableRowElement>();
@@ -356,7 +345,6 @@ const THeaderRow = <T>({ item, state }: THeaderRowProps<T>) => {
         [...item.childNodes].map((col) => createElement(TColHeader, { column: col, key: col.key, state })),
     );
 };
-
 type TRowProps<T> = { readonly item: Node<T>; readonly state: TableState<T> };
 const TRow = <T>({ item, state }: TRowProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLTableRowElement>(B.data.table.row.focus);
@@ -368,14 +356,12 @@ const TRow = <T>({ item, state }: TRowProps<T>) => {
         [...item.childNodes].map((cell) => createElement(TCell, { cell, key: cell.key, state })),
     );
 };
-
 type TCellProps<T> = { readonly cell: Node<T>; readonly state: TableState<T> };
 const TCell = <T>({ cell, state }: TCellProps<T>) => {
     const { merge, ref } = useCollectionEl<HTMLTableCellElement>(B.data.table.cell.focus);
     const { gridCellProps } = useTableCell({ node: cell }, state, ref);
     return createElement('td', merge(gridCellProps, dataCls.cell), cell.rendered);
 };
-
 const createTableComponent = <T extends Record<string, unknown>>(
     input: DataInput<'table'>,
     vars: Record<string, string>,
@@ -506,7 +492,6 @@ const builderHandlers = {
     table: createTableComponent,
     thumb: createThumbComponent,
 } as const;
-
 const createDataComponent = <T extends DataType>(input: DataInput<T>): DataComponentMap[T] => {
     const scale = resolve('scale', input.scale);
     const behavior = resolve('behavior', input.behavior);

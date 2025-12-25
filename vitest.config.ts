@@ -3,8 +3,13 @@
  * Root Vitest: unified config with explicit inline projects for workspace.
  * Child packages do NOT need vitest.config.ts when using inline projects pattern.
  */
+
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
+
+const Dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -23,12 +28,12 @@ const B = Object.freeze({
                 args: ['--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage'],
             },
         }),
-        screenshotDirectory: 'test-results/screenshots',
+        screenshotDirectory: path.resolve(Dirname, 'test-results/screenshots'),
         trace: {
             mode: 'retain-on-failure' as const,
             screenshots: true,
             snapshots: true,
-            tracesDir: 'test-results/traces',
+            tracesDir: path.resolve(Dirname, 'test-results/traces'),
         },
         viewport: { height: 720, width: 1280 },
     },
@@ -44,9 +49,9 @@ const B = Object.freeze({
         chaiConfig: { includeStack: true, showDiff: true, truncateThreshold: 0 },
         diff: { expand: true, truncateThreshold: 0 },
         outputFile: {
-            blob: 'test-results/.vitest-reports',
-            json: 'test-results/results.json',
-            junit: 'test-results/junit.xml',
+            blob: path.resolve(Dirname, 'test-results/.vitest-reports'),
+            json: path.resolve(Dirname, 'test-results/results.json'),
+            junit: path.resolve(Dirname, 'test-results/junit.xml'),
         },
     },
     patterns: {
@@ -95,7 +100,7 @@ export default defineConfig({
             provider: 'v8',
             reporter: [...B.reporters.coverage],
             reportOnFailure: true,
-            reportsDirectory: 'coverage',
+            reportsDirectory: path.resolve(Dirname, 'coverage'),
             skipFull: false,
             thresholds: { autoUpdate: false, branches: 80, functions: 80, lines: 80, perFile: true, statements: 80 },
         },
@@ -122,6 +127,7 @@ export default defineConfig({
                     exclude: ['packages/runtime/**'],
                     include: ['packages/*/tests/**/*.spec.ts'],
                     name: 'packages-node',
+                    root: Dirname,
                 },
             },
             {
@@ -138,7 +144,8 @@ export default defineConfig({
                     },
                     include: ['packages/runtime/tests/**/*.spec.ts'],
                     name: 'runtime-browser',
-                    setupFiles: ['./packages/test-utils/src/setup.ts'],
+                    root: Dirname,
+                    setupFiles: [path.resolve(Dirname, 'packages/test-utils/src/setup.ts')],
                 },
             },
             {
@@ -147,6 +154,7 @@ export default defineConfig({
                     environment: 'jsdom',
                     include: ['apps/*/tests/**/*.spec.ts'],
                     name: 'apps',
+                    root: Dirname,
                 },
             },
         ],

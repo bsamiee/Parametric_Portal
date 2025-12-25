@@ -11,10 +11,10 @@
             "@parametric-portal/types/*": ["../../packages/types/src/*"]
         },
         "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/parametric-icons.tsbuildinfo",
-        "types": ["vite/client"]
+        "types": ["vite/client", "vitest/globals"]
     },
     "exclude": ["dist", "node_modules"],
     "extends": "../../tsconfig.base.json",
-    "include": ["src/**/*", "*.config.ts", "../../packages/types/src/env.d.ts"],
+    "include": ["src/**/*", "tests/**/*", "*.config.ts", "../../packages/types/src/env.d.ts"],
     "references": []
 }
