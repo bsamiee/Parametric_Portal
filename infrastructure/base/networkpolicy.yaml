@@ -94,3 +94,25 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cnpg-operator
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: security
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: parametric-portal-db
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - protocol: TCP
+          port: 8000

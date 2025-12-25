@@ -2,10 +2,10 @@
 # --- FRONTEND SERVICE DOCKERFILE ----------------------------------------------
 # React 19 SPA served via spa-to-http (10MB, zero-config, built-in Brotli)
 
-ARG NODE_VERSION=25
+ARG NODE_VERSION=22
 
 # --- BASE + DEPS + BUILD ------------------------------------------------------
-FROM node:${NODE_VERSION}-slim AS base
+FROM node:${NODE_VERSION}-slim-bookworm AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
@@ -31,7 +31,7 @@ COPY tsconfig.base.json nx.json vite.config.ts vite.factory.ts ./
 RUN pnpm exec nx run @parametric-portal/parametric-icons:build
 
 # --- RUNTIME (spa-to-http) ----------------------------------------------------
-FROM devforth/spa-to-http:1.0.3 AS runtime
+FROM devforth/spa-to-http@sha256:f6e18f2ae51fd95f7f53808d8f4dad2e0ee874b70ae83fc79c872da89d2ddeb7 AS runtime
 
 COPY --link --from=build /app/apps/parametric_icons/dist .
 
@@ -48,6 +48,6 @@ ENV CACHE=true
 ENV CACHE_BUFFER=51200
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
+    CMD node -e "require('http').get('http://localhost:8080/', r => process.exit(r.statusCode < 400 ? 0 : 1))" || exit 1
 
 EXPOSE 8080

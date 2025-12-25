@@ -1,5 +1,6 @@
 # --- POD DISRUPTION BUDGETS ---------------------------------------------------
 # HA guarantees during voluntary disruptions
+# maxUnavailable: 1 allows node drains while HPA scales replicas
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -9,7 +10,7 @@ metadata:
     app.kubernetes.io/name: api
     app.kubernetes.io/component: backend
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: api
@@ -22,7 +23,20 @@ metadata:
     app.kubernetes.io/name: icons
     app.kubernetes.io/component: frontend
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: icons
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      cnpg.io/cluster: parametric-portal-db

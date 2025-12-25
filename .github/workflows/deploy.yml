@@ -90,6 +90,7 @@ jobs:
   update-manifests:
     name: Update K8s Manifests
     needs: build
+    if: contains(needs.build.outputs.affected, 'api') || contains(needs.build.outputs.affected, 'parametric_icons') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

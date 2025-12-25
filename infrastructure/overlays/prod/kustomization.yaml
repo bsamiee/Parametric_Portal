@@ -13,14 +13,15 @@ resources:
   - ../../base
   - ../../apps/api
   - ../../apps/icons
+  - ../../apps/postgres
   - hpa-api.yaml
   - tlsstore.yaml
 
 images:
   - name: ghcr.io/parametric-portal/api
-    newTag: latest
+    newTag: sha-00000000
   - name: ghcr.io/parametric-portal/icons
-    newTag: latest
+    newTag: sha-00000000
 
 patches:
   - target:

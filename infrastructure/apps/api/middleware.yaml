@@ -12,7 +12,6 @@ metadata:
 spec:
   headers:
     frameDeny: true
-    customFrameOptionsValue: "DENY"
     contentTypeNosniff: true
     browserXssFilter: true
     referrerPolicy: "strict-origin-when-cross-origin"

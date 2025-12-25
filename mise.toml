@@ -10,12 +10,12 @@ jobs = 4
 
 # --- [TOOLS] ------------------------------------------------------------------
 [tools]
-node = "25"
+node = "22"
 pnpm = "latest"
 
 # --- [ENV] --------------------------------------------------------------------
 [env]
-KUBECONFIG = "/etc/rancher/k3s/k3s.yaml"
+KUBECONFIG = "{{ env.KUBECONFIG | default(value='/etc/rancher/k3s/k3s.yaml') }}"
 NAMESPACE = "parametric-portal"
 
 # --- [TASKS] ------------------------------------------------------------------
@@ -60,12 +60,50 @@ check_prerequisites() {
 install_k3s() {
     log_info "Installing K3s ${K3S_VERSION}..."
 
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${K3S_VERSION}" \\
-        K3S_KUBECONFIG_MODE="644" \\
-        sh -s - server \\
-        --cluster-init \\
-        --disable=servicelb \\
-        --write-kubeconfig-mode=644
+    # Download versioned binary with checksum verification
+    local K3S_URL="https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION/+/%2B}/k3s"
+    local CHECKSUM_URL="https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION/+/%2B}/sha256sum-amd64.txt"
+
+    log_info "Downloading K3s binary..."
+    curl -Lo /tmp/k3s "${K3S_URL}"
+    curl -Lo /tmp/sha256sum-amd64.txt "${CHECKSUM_URL}"
+
+    log_info "Verifying checksum..."
+    cd /tmp && grep -E "^[a-f0-9]+[[:space:]]+k3s$" sha256sum-amd64.txt | sha256sum -c -
+
+    log_info "Installing binary..."
+    sudo install -o root -g root -m 0755 /tmp/k3s /usr/local/bin/k3s
+
+    log_info "Creating systemd service..."
+    cat <<SYSTEMD | sudo tee /etc/systemd/system/k3s.service
+[Unit]
+Description=Lightweight Kubernetes
+Documentation=https://k3s.io
+Wants=network-online.target
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=notify
+EnvironmentFile=-/etc/systemd/system/k3s.service.env
+KillMode=process
+Delegate=yes
+LimitNOFILE=1048576
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStartSec=0
+Restart=always
+RestartSec=5s
+ExecStartPre=/bin/sh -xc '! /usr/bin/systemctl is-enabled --quiet nm-cloud-setup.service 2>/dev/null'
+ExecStart=/usr/local/bin/k3s server --cluster-init --disable=servicelb --write-kubeconfig-mode=644
+SYSTEMD
+
+    log_info "Starting K3s..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now k3s
 
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
@@ -77,7 +115,7 @@ install_k3s() {
 configure_traefik() {
     log_info "Configuring Traefik v3..."
 
-    cat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml << 'EOF'
+    cat > /var/lib/rancher/k3s/server/manifests/traefik-config.yaml << EOF
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:
@@ -348,9 +386,17 @@ main() {
 
     log_info "[1/4] Starting backup of ${DB_NAME}..."
 
-    docker exec "${CONTAINER_NAME}" \\
-        pg_dump -U "${DB_USER}" -d "${DB_NAME}" --clean --if-exists \\
-        | gzip > "${BACKUP_FILE}"
+    # Use kubectl for CloudNativePG pod (production), docker for local dev
+    if command -v kubectl &>/dev/null && kubectl get pods -n "${NAMESPACE:-parametric-portal}" -l cnpg.io/cluster 2>/dev/null | grep -q Running; then
+        POD=$(kubectl get pods -n "${NAMESPACE:-parametric-portal}" -l cnpg.io/cluster -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n "${NAMESPACE:-parametric-portal}" "${POD}" -- \\
+            pg_dump -U "${DB_USER}" -d "${DB_NAME}" --clean --if-exists \\
+            | gzip > "${BACKUP_FILE}"
+    else
+        docker exec "${CONTAINER_NAME}" \\
+            pg_dump -U "${DB_USER}" -d "${DB_NAME}" --clean --if-exists \\
+            | gzip > "${BACKUP_FILE}"
+    fi
 
     FILESIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
     log_info "[2/4] Backup created: ${BACKUP_FILE} (${FILESIZE})"
@@ -399,3 +445,4 @@ set -euo pipefail
 
 kustomize build infrastructure/overlays/prod | kubectl diff -f - || true
 """
+

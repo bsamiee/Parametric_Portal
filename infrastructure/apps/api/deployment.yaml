@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ghcr.io/parametric-portal/api:latest
+          image: ghcr.io/parametric-portal/api:v0.0.0
           ports:
             - containerPort: 4000
               protocol: TCP
@@ -93,7 +93,7 @@ spec:
               memory: "1Gi"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /live
               port: 4000
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -101,7 +101,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: 4000
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -115,5 +115,11 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       securityContext:
         fsGroup: 1001
