@@ -21,17 +21,6 @@ type ContentValidator = (content: string) => boolean;
 type FilesConfig = {
     readonly maxSizeBytes?: number;
 };
-type FilesApi = {
-    readonly errors: typeof B.errors;
-    readonly getCategory: (mimeType: MimeType) => MimeCategory;
-    readonly isSupported: (mimeType: string) => mimeType is MimeType;
-    readonly limits: typeof B.limits;
-    readonly mimesByCategory: typeof mimesByCategory;
-    readonly mkFileError: typeof mkFileError;
-    readonly schemas: typeof schemas;
-    readonly validateContent: (mimeType: MimeType, content: string) => Effect.Effect<string, FileError>;
-    readonly validateFile: (file: File, maxSize?: number) => Effect.Effect<FileMetadata, FileError>;
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -189,36 +178,13 @@ const validationChecks = {
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
+const checkOption = <T>(value: T, check: (v: T) => Option.Option<FileError>): Effect.Effect<T, FileError> =>
+    pipe(check(value), Option.match({ onNone: () => Effect.succeed(value), onSome: Effect.fail }));
 const validateFile = (file: File, maxSize: number = B.limits.maxSizeBytes): Effect.Effect<FileMetadata, FileError> =>
     pipe(
-        Effect.succeed(file),
-        Effect.flatMap((f) =>
-            pipe(
-                validationChecks.empty(f),
-                Option.match({
-                    onNone: () => Effect.succeed(f),
-                    onSome: Effect.fail,
-                }),
-            ),
-        ),
-        Effect.flatMap((f) =>
-            pipe(
-                validationChecks.size(f, maxSize),
-                Option.match({
-                    onNone: () => Effect.succeed(f),
-                    onSome: Effect.fail,
-                }),
-            ),
-        ),
-        Effect.flatMap((f) =>
-            pipe(
-                validationChecks.mimeType(f),
-                Option.match({
-                    onNone: () => Effect.succeed(f),
-                    onSome: Effect.fail,
-                }),
-            ),
-        ),
+        checkOption(file, validationChecks.empty),
+        Effect.flatMap((f) => checkOption(f, (v) => validationChecks.size(v, maxSize))),
+        Effect.flatMap((f) => checkOption(f, validationChecks.mimeType)),
         Effect.flatMap(extractMetadata),
     );
 const validateContent = (mimeType: MimeType, content: string): Effect.Effect<string, FileError> =>
@@ -228,7 +194,7 @@ const validateContent = (mimeType: MimeType, content: string): Effect.Effect<str
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const files = (config: FilesConfig = {}): FilesApi => {
+const files = (config: FilesConfig = {}) => {
     const maxSize = config.maxSizeBytes ?? B.limits.maxSizeBytes;
     return Object.freeze({
         errors: B.errors,
@@ -240,10 +206,10 @@ const files = (config: FilesConfig = {}): FilesApi => {
         schemas,
         validateContent,
         validateFile: (file: File, customMaxSize?: number) => validateFile(file, customMaxSize ?? maxSize),
-    } as FilesApi);
+    });
 };
-
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as FILES_TUNING, files };
 export type { FileError, FileMetadata, MimeType };
+export type FilesApi = ReturnType<typeof files>;

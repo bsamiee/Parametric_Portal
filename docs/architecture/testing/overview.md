@@ -17,22 +17,22 @@ Property-based unit testing via Vitest, E2E automation via Playwright, mutation 
 |   [2]   | Browser        | @vitest/browser-playwright | 4.0.16    | Real browser isolation for runtime pkg |
 |   [3]   | E2E            | @playwright/test           | 1.57.0    | Chromium automation, trace capture     |
 |   [4]   | Mutation       | @stryker-mutator/core      | 9.4.0     | Mutation score enforcement (80%)       |
-|   [5]   | Property-Based | fast-check                 | 4.5.1     | Arbitrary generators, shrinking        |
+|   [5]   | Property-Based | fast-check                 | 4.5.2     | Arbitrary generators, shrinking        |
 |   [6]   | Effect Testing | @effect/vitest             | 0.27.0    | Effect matchers, equality testers      |
-|   [7]   | Mocking        | msw                        | 2.8.0     | Request interception, network mocks    |
-|   [8]   | Accessibility  | @axe-core/playwright       | 4.10.0    | WCAG validation in E2E                 |
+|   [7]   | Mocking        | msw                        | 2.12.4    | Request interception, network mocks    |
+|   [8]   | Accessibility  | @axe-core/playwright       | 4.11.0    | WCAG validation in E2E                 |
 
 <br>
 
 ### [1.1][COVERAGE_THRESHOLDS]
 
-| [INDEX] | [METRIC]   | [THRESHOLD] |
-| :-----: | ---------- | :---------: |
-|   [1]   | Lines      |     80%     |
-|   [2]   | Branches   |     80%     |
-|   [3]   | Functions  |     80%     |
-|   [4]   | Statements |     80%     |
-|   [5]   | Mutation   |     80%     |
+| [INDEX] | [METRIC]   | [THRESHOLD] | [NOTE]                  |
+| :-----: | ---------- | :---------: | ----------------------- |
+|   [1]   | Lines      |     30%     | V8 coverage minimum     |
+|   [2]   | Branches   |     30%     | V8 coverage minimum     |
+|   [3]   | Functions  |     30%     | V8 coverage minimum     |
+|   [4]   | Statements |     30%     | V8 coverage minimum     |
+|   [5]   | Mutation   |     80%     | Stryker break threshold |
 
 ---
 ## [2][TOPOLOGY]
@@ -183,10 +183,11 @@ E2E tests leverage Claude agents for automated test lifecycle:
 
 <br>
 
-| [INDEX] | [DOCUMENT]                  | [SCOPE]                        |
-| :-----: | --------------------------- | ------------------------------ |
-|   [1]   | [→patterns.md](patterns.md) | Test code patterns, B constant |
-|   [2]   | [→tooling.md](tooling.md)   | External dependency catalog    |
-|   [3]   | `vitest.config.ts`          | Root configuration source      |
-|   [4]   | `playwright.config.ts`      | E2E configuration source       |
-|   [5]   | `packages/test-utils/`      | Shared infrastructure source   |
+| [INDEX] | [DOCUMENT]                    | [SCOPE]                            |
+| :-----: | ----------------------------- | ---------------------------------- |
+|   [1]   | [→standards.md](standards.md) | Authoring standards, anti-patterns |
+|   [2]   | [→patterns.md](patterns.md)   | Test code patterns, B constant     |
+|   [3]   | [→tooling.md](tooling.md)     | External dependency catalog        |
+|   [4]   | `vitest.config.ts`            | Root configuration source          |
+|   [5]   | `playwright.config.ts`        | E2E configuration source           |
+|   [6]   | `packages/test-utils/`        | Shared infrastructure source       |

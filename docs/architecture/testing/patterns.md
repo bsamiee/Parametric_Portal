@@ -192,3 +192,8 @@ it.prop([FC_ARB.storeName()])('schema and validator agree', (name) => {
 |   [4]   | `packages/runtime/tests/browser.spec.ts`  | Error factories, property-based        |
 |   [5]   | `packages/test-utils/src/arbitraries.ts`  | FC_ARB implementation, B constant      |
 |   [6]   | `packages/test-utils/src/harness.ts`      | TEST_HARNESS implementation            |
+
+**Related Docs:**
+- [→standards.md](standards.md) — Authoring standards, anti-patterns
+- [→overview.md](overview.md) — Architecture, topology, commands
+- [→tooling.md](tooling.md) — Dependency catalog, version matrix

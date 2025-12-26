@@ -282,6 +282,23 @@
                 "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && nx dev"
             }
         },
+        "k8s:diff": {
+            "cache": false,
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "kubectl diff -k infrastructure/overlays/prod || true",
+                "cwd": "{workspaceRoot}"
+            }
+        },
+        "k8s:validate": {
+            "cache": true,
+            "executor": "nx:run-commands",
+            "inputs": ["infrastructure"],
+            "options": {
+                "command": "kustomize build infrastructure/overlays/prod | kubeconform -strict -ignore-missing-schemas -summary",
+                "cwd": "{workspaceRoot}"
+            }
+        },
         "mutate": {
             "cache": true,
             "dependsOn": ["build"],

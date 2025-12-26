@@ -19,23 +19,6 @@ type SanitizeOptions = { readonly scope?: Scope | undefined };
 type SvgConfig = {
     readonly defaultScope?: Scope;
 };
-type SvgApi = {
-    readonly createSvgAsset: typeof createSvgAsset;
-    readonly deriveScope: typeof deriveScope;
-    readonly generateScope: typeof generateScope;
-    readonly isSvgValid: typeof isSvgValid;
-    readonly sanitizeSvg: (svg: string, options?: SanitizeOptions) => string;
-    readonly schemas: {
-        readonly Scope: typeof ScopeSchema;
-        readonly Svg: typeof SvgSchema;
-        readonly SvgAsset: typeof SvgAssetSchema;
-        readonly SvgAssetInput: typeof SvgAssetInputSchema;
-        readonly SvgId: typeof SvgIdSchema;
-    };
-    readonly validate: {
-        readonly isSvgValid: typeof isSvgValid;
-    };
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -173,7 +156,7 @@ const createSvgAsset = (input: SvgAssetInput): SvgAsset => ({
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const svg = (config: SvgConfig = {}): SvgApi =>
+const svg = (config: SvgConfig = {}) =>
     Object.freeze({
         createSvgAsset,
         deriveScope,
@@ -192,6 +175,7 @@ const svg = (config: SvgConfig = {}): SvgApi =>
             isSvgValid,
         }),
     });
+type SvgApi = ReturnType<typeof svg>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

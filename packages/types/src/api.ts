@@ -29,29 +29,6 @@ type PaginatedSuccess<T = unknown> = {
     readonly pagination: PaginationMeta;
     readonly status: HttpStatusSuccess;
 };
-type ApiApi = {
-    readonly error: typeof error;
-    readonly flatMap: typeof flatMap;
-    readonly fold: typeof fold;
-    readonly forbidden: typeof forbidden;
-    readonly hasNextPage: typeof hasNextPage;
-    readonly hasPrevPage: typeof hasPrevPage;
-    readonly map: typeof map;
-    readonly mapError: typeof mapError;
-    readonly notFound: typeof notFound;
-    readonly paginated: typeof paginated;
-    readonly success: typeof success;
-    readonly toEffect: typeof toEffect;
-    readonly toEffectM: typeof toEffectM;
-    readonly unauthorized: typeof unauthorized;
-    readonly schemas: {
-        readonly HttpStatusError: typeof HttpStatusErrorSchema;
-        readonly HttpStatusSuccess: typeof HttpStatusSuccessSchema;
-        readonly PaginatedResponse: typeof PaginatedResponseSchema;
-        readonly PaginationMeta: typeof PaginationMetaSchema;
-        readonly Response: typeof ApiResponseSchema;
-    };
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -169,7 +146,7 @@ const toEffectM =
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const api = (): ApiApi =>
+const api = () =>
     Object.freeze({
         error,
         flatMap,
@@ -193,8 +170,9 @@ const api = (): ApiApi =>
         toEffectM,
         unauthorized,
     });
+type ApiApi = ReturnType<typeof api>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { api, B as API_TUNING };
-export type { ApiError, ApiResponse, ApiSuccess, HttpStatusError };
+export type { ApiApi, ApiError, ApiResponse, ApiSuccess, HttpStatusError };

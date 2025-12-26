@@ -32,6 +32,11 @@
       "types": "./src/metrics.ts",
       "import": "./src/metrics.ts",
       "default": "./src/metrics.ts"
+    },
+    "./messages": {
+      "types": "./src/messages.ts",
+      "import": "./src/messages.ts",
+      "default": "./src/messages.ts"
     }
   },
   "dependencies": {

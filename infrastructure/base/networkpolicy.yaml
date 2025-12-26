@@ -42,28 +42,6 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-dns-egress
-  labels:
-    app.kubernetes.io/name: parametric-portal
-    app.kubernetes.io/component: security
-spec:
-  podSelector: {}
-  policyTypes:
-    - Egress
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
   name: allow-api-egress
   labels:
     app.kubernetes.io/name: parametric-portal
@@ -75,6 +53,16 @@ spec:
   policyTypes:
     - Egress
   egress:
+    # DNS resolution (kube-system)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
     # PostgreSQL (CloudNativePG)
     - to:
         - podSelector:
@@ -105,6 +93,39 @@ spec:
       ports:
         - protocol: TCP
           port: 4317
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-icons-egress
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: security
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: icons
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution (kube-system)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # API service (backend calls from SPA if needed via SSR or proxy)
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api
+      ports:
+        - protocol: TCP
+          port: 4000
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

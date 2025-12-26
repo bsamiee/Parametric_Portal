@@ -46,46 +46,6 @@ type OAuthProviderConfig = {
 type DatabaseConfig = {
     readonly refreshBuffer?: Duration.Duration;
 };
-type DatabaseApi = {
-    readonly expiry: typeof Expiry;
-    readonly providers: typeof B.providers;
-    readonly schemas: {
-        readonly ids: {
-            readonly ApiKeyId: typeof ApiKeyIdSchema;
-            readonly AssetId: typeof AssetIdSchema;
-            readonly OAuthAccountId: typeof OAuthAccountIdSchema;
-            readonly OrganizationId: typeof OrganizationIdSchema;
-            readonly OrganizationMemberId: typeof OrganizationMemberIdSchema;
-            readonly RefreshTokenId: typeof RefreshTokenIdSchema;
-            readonly SessionId: typeof SessionIdSchema;
-            readonly UserId: typeof UserIdSchema;
-        };
-        readonly entities: {
-            readonly AiProvider: typeof AiProviderSchema;
-            readonly ApiKeyListItem: typeof ApiKeyListItemSchema;
-            readonly ApiKeyResult: typeof ApiKeyResultSchema;
-            readonly AssetCountResult: typeof AssetCountResultSchema;
-            readonly AssetListItem: typeof AssetListItemSchema;
-            readonly AssetMetadata: typeof AssetMetadataSchema;
-            readonly ColorMode: typeof ColorModeSchema;
-            readonly Intent: typeof IntentSchema;
-            readonly OAuthProvider: typeof OAuthProviderSchema;
-            readonly OAuthTokens: typeof OAuthTokensSchema;
-            readonly OAuthUserInfo: typeof OAuthUserInfoSchema;
-            readonly OrganizationRole: typeof OrganizationRoleSchema;
-            readonly OutputMode: typeof OutputModeSchema;
-            readonly SessionResult: typeof SessionResultSchema;
-            readonly TokenHash: typeof TokenHashSchema;
-            readonly Version: typeof VersionSchema;
-        };
-        readonly responses: {
-            readonly LogoutResponse: typeof LogoutResponseSchema;
-            readonly OAuthStartResponse: typeof OAuthStartResponseSchema;
-            readonly SessionResponse: typeof SessionResponseSchema;
-            readonly UserResponse: typeof UserResponseSchema;
-        };
-    };
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -177,7 +137,7 @@ const Expiry = Object.freeze({
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const database = (config: DatabaseConfig = {}): DatabaseApi =>
+const database = (config: DatabaseConfig = {}) =>
     Object.freeze({
         expiry: Object.freeze({
             check: (date: Date | null | undefined, bufferMs?: number) =>
@@ -222,6 +182,7 @@ const database = (config: DatabaseConfig = {}): DatabaseApi =>
             }),
         }),
     });
+type DatabaseApi = ReturnType<typeof database>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

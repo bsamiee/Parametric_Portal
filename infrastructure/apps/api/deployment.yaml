@@ -41,7 +41,10 @@ spec:
             - name: OTEL_TRACES_SAMPLER
               value: "traceidratio"
             - name: OTEL_TRACES_SAMPLER_ARG
-              value: "0.1"
+              value: "0.5"
+            # --- POSTGRES POOL TUNING ---
+            - name: POSTGRES_POOL_MAX
+              value: "5"
             - name: POSTGRES_HOST
               value: "parametric-portal-db-rw.parametric-portal.svc.cluster.local"
             - name: POSTGRES_PORT

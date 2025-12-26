@@ -7,6 +7,7 @@ import { makeRepositories, type Repositories } from '@parametric-portal/database
 import { HttpApiBuilder } from '@parametric-portal/server/api';
 import { createTokenPair, encryptApiKey, hashString } from '@parametric-portal/server/crypto';
 import { InternalError, NotFoundError, OAuthError, UnauthorizedError } from '@parametric-portal/server/errors';
+import { AUTH_MESSAGES } from '@parametric-portal/server/messages';
 import { OAuthService, SessionContext } from '@parametric-portal/server/middleware';
 import {
     type AiProvider,
@@ -95,28 +96,28 @@ const handleOAuthCallback = (
         const tokens = yield* oauth.validateCallback(provider, code, state);
         const userInfo = yield* oauth.getUserInfo(provider, tokens.accessToken);
         const emailRaw = yield* Option.match(userInfo.email, {
-            onNone: () => Effect.fail(new OAuthError({ provider, reason: 'Email not provided' })),
+            onNone: () => Effect.fail(new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.emailNotProvided })),
             onSome: Effect.succeed,
         });
         const email = yield* pipe(
             S.decodeUnknown(typesApi.schemas.Email)(emailRaw),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'Invalid email format from provider' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.invalidEmailFormat })),
         );
         const existingUserOpt = yield* pipe(
             repos.users.findByEmail(email),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'User lookup failed' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.userLookupFailed })),
         );
         const user = yield* Option.match(existingUserOpt, {
             onNone: () =>
                 pipe(
                     repos.users.insert({ email }),
-                    Effect.mapError(() => new OAuthError({ provider, reason: 'User insert failed' })),
+                    Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.userInsertFailed })),
                 ),
             onSome: Effect.succeed,
         });
         const userId = yield* pipe(
             S.decodeUnknown(db.schemas.ids.UserId)(user.id),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'Invalid user ID format' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.invalidUserIdFormat })),
         );
         yield* pipe(
             repos.oauthAccounts.upsert({
@@ -127,25 +128,25 @@ const handleOAuthCallback = (
                 refreshToken: Option.getOrNull(tokens.refreshToken),
                 userId,
             }),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'OAuth account upsert failed' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.accountUpsertFailed })),
         );
         const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* pipe(
             createAuthTokenPairs(),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'Token generation failed' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.tokenGenerationFailed })),
         );
         const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
         const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
         yield* pipe(
             repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId }),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'Session insert failed' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.sessionInsertFailed })),
         );
         yield* pipe(
             repos.refreshTokens.insert({ expiresAt: refreshExpiresAt, tokenHash: refreshHash, userId }),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'Refresh token insert failed' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.refreshTokenInsertFailed })),
         );
         return yield* pipe(
             buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
-            Effect.mapError(() => new OAuthError({ provider, reason: 'Response build failed' })),
+            Effect.mapError(() => new OAuthError({ provider, reason: AUTH_MESSAGES.oauth.responseBuildFailed })),
         );
     });
 const handleRefresh = (repos: Repositories) =>
@@ -154,51 +155,51 @@ const handleRefresh = (repos: Repositories) =>
         const refreshTokenInput = yield* pipe(
             Option.fromNullable(request.cookies[B.cookie.name]),
             Option.match({
-                onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Missing refresh token cookie' })),
+                onNone: () => Effect.fail(new UnauthorizedError({ reason: AUTH_MESSAGES.auth.missingRefreshCookie })),
                 onSome: Effect.succeed,
             }),
         );
         const hashInput = yield* pipe(
             hashString(refreshTokenInput),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Token hashing failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.tokenHashingFailed })),
         );
         const tokenOpt = yield* pipe(
             repos.refreshTokens.findValidByTokenHash(hashInput),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Token lookup failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.tokenLookupFailed })),
         );
         const token = yield* Option.match(tokenOpt, {
-            onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
+            onNone: () => Effect.fail(new UnauthorizedError({ reason: AUTH_MESSAGES.auth.invalidRefreshToken })),
             onSome: Effect.succeed,
         });
         const userId = yield* pipe(
             S.decodeUnknown(db.schemas.ids.UserId)(token.userId),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Invalid user ID format' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.user.invalidUserIdFormat })),
         );
         const tokenId = yield* pipe(
             S.decodeUnknown(db.schemas.ids.RefreshTokenId)(token.id),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Invalid token ID format' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.invalidTokenIdFormat })),
         );
         const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* pipe(
             createAuthTokenPairs(),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Token generation failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.tokenGenerationFailed })),
         );
         const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
         const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
         yield* pipe(
             repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId }),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Session insert failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.sessionInsertFailed })),
         );
         yield* pipe(
             repos.refreshTokens.insert({ expiresAt: refreshExpiresAt, tokenHash: refreshHash, userId }),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Refresh token insert failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.refreshTokenInsertFailed })),
         );
         yield* pipe(
             repos.refreshTokens.revoke(tokenId),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Token revocation failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.tokenRevocationFailed })),
         );
         return yield* pipe(
             buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
-            Effect.mapError(() => new UnauthorizedError({ reason: 'Response build failed' })),
+            Effect.mapError(() => new UnauthorizedError({ reason: AUTH_MESSAGES.auth.responseBuildFailed })),
         );
     });
 const handleLogout = (repos: Repositories) =>
@@ -206,15 +207,15 @@ const handleLogout = (repos: Repositories) =>
         const session = yield* SessionContext;
         yield* pipe(
             repos.sessions.revoke(session.sessionId),
-            Effect.mapError(() => new InternalError({ cause: 'Session revocation failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.auth.sessionRevocationFailed })),
         );
         yield* pipe(
             repos.refreshTokens.revokeAllByUserId(session.userId),
-            Effect.mapError(() => new InternalError({ cause: 'Refresh token revocation failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.auth.refreshTokenRevocationFailed })),
         );
         return yield* pipe(
             buildLogoutResponse(),
-            Effect.mapError(() => new InternalError({ cause: 'Response build failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.auth.responseBuildFailed })),
         );
     });
 const handleMe = (repos: Repositories) =>
@@ -222,7 +223,7 @@ const handleMe = (repos: Repositories) =>
         const session = yield* SessionContext;
         const userOpt = yield* pipe(
             repos.users.findById(session.userId),
-            Effect.mapError(() => new InternalError({ cause: 'User lookup failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.user.lookupFailed })),
         );
         return yield* Option.match(userOpt, {
             onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
@@ -230,7 +231,7 @@ const handleMe = (repos: Repositories) =>
                 pipe(
                     S.decodeUnknown(db.schemas.ids.UserId)(user.id),
                     Effect.map((id) => ({ email: user.email, id })),
-                    Effect.mapError(() => new InternalError({ cause: 'Invalid user ID format' })),
+                    Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.user.invalidUserIdFormat })),
                 ),
         });
     });
@@ -239,7 +240,7 @@ const handleListApiKeys = (repos: Repositories) =>
         const session = yield* SessionContext;
         const keys = yield* pipe(
             repos.apiKeys.findAllByUserId(session.userId),
-            Effect.mapError(() => new InternalError({ cause: 'API key list failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.listFailed })),
         );
         return { data: keys };
     });
@@ -248,11 +249,11 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
         const session = yield* SessionContext;
         const keyHash = yield* pipe(
             hashString(input.key),
-            Effect.mapError(() => new InternalError({ cause: 'API key hashing failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.hashingFailed })),
         );
         const encrypted = yield* pipe(
             encryptApiKey(input.key),
-            Effect.mapError(() => new InternalError({ cause: 'API key encryption failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.encryptionFailed })),
         );
         const keyEncrypted = new Uint8Array([...encrypted.iv, ...encrypted.ciphertext]);
         const apiKey = yield* pipe(
@@ -264,7 +265,7 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
                 provider: input.provider,
                 userId: session.userId,
             }),
-            Effect.mapError(() => new InternalError({ cause: 'API key insert failed' })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.insertFailed })),
         );
         return {
             createdAt: DateTime.toDateUtc(apiKey.createdAt),
@@ -277,17 +278,18 @@ const handleCreateApiKey = (repos: Repositories, input: { key: string; name: str
 const handleDeleteApiKey = (repos: Repositories, id: ApiKeyId) =>
     Effect.gen(function* () {
         const session = yield* SessionContext;
-        const userKeys = yield* pipe(
-            repos.apiKeys.findAllByUserId(session.userId),
-            Effect.mapError(() => new InternalError({ cause: 'API key list failed' })),
+        const keyOpt = yield* pipe(
+            repos.apiKeys.findByIdAndUserId({ id, userId: session.userId }),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.listFailed })),
         );
-        const keyBelongsToUser = userKeys.some((k) => k.id === id);
-        yield* keyBelongsToUser
-            ? pipe(
-                  repos.apiKeys.delete(id),
-                  Effect.mapError(() => new InternalError({ cause: 'API key deletion failed' })),
-              )
-            : Effect.fail(new NotFoundError({ id, resource: 'apikey' }));
+        yield* Option.match(keyOpt, {
+            onNone: () => Effect.fail(new NotFoundError({ id, resource: 'apikey' })),
+            onSome: () =>
+                pipe(
+                    repos.apiKeys.delete(id),
+                    Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.deletionFailed })),
+                ),
+        });
         return { success: true };
     });
 

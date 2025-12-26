@@ -54,27 +54,6 @@ type ValidationFold<R> = {
     readonly ValidationError: (error: ValidationError) => R;
     readonly ValidationSuccess: (field: FieldName) => R;
 };
-type FormsApi = {
-    readonly AsyncValidation: typeof AsyncValidation;
-    readonly config: FormConfig;
-    readonly Field: typeof Field;
-    readonly FieldArray: typeof FieldArray;
-    readonly fold: typeof fold;
-    readonly Form: typeof Form;
-    readonly schemas: {
-        readonly Field: typeof FormFieldSchema;
-        readonly FieldName: typeof FieldNameSchema;
-        readonly FieldState: typeof FieldStateSchema;
-        readonly FormState: typeof FormStateSchema;
-        readonly ValidationError: typeof ValidationErrorSchema;
-        readonly ValidationResult: typeof ValidationResultSchema;
-        readonly ValidationSuccess: typeof ValidationSuccessSchema;
-    };
-    readonly validateCrossFields: typeof validateCrossFields;
-    readonly validateField: typeof validateField;
-    readonly validateFieldWithRules: typeof validateFieldWithRules;
-    readonly Validation: typeof Validation;
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -295,7 +274,7 @@ const validateCrossFields = (
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const forms = (config: FormConfig = B.defaults): FormsApi =>
+const forms = (config: FormConfig = B.defaults) =>
     Object.freeze({
         AsyncValidation,
         config,
@@ -317,6 +296,7 @@ const forms = (config: FormConfig = B.defaults): FormsApi =>
         validateField,
         validateFieldWithRules,
     });
+type FormsApi = ReturnType<typeof forms>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

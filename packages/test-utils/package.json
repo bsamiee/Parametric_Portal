@@ -39,6 +39,10 @@
     "./mocks/msw": {
       "types": "./src/mocks/msw.ts",
       "import": "./src/mocks/msw.ts"
+    },
+    "./mocks/github": {
+      "types": "./src/mocks/github/events.ts",
+      "import": "./src/mocks/github/events.ts"
     }
   },
   "dependencies": {
