@@ -1,3 +1,15 @@
+## 1.0.7 (2025-12-26)
+
+### [BUG_FIXES]
+
+- to @effect/sql 0.49 with proper Option handling ([#122](https://github.com/bsamiee/Parametric_Portal/pull/122))
+- **workflows:** gemini timeout and concurrency issues ([51a3c7a](https://github.com/bsamiee/Parametric_Portal/commit/51a3c7a))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+
 ## 1.0.6 (2025-12-25)
 
 ### [BUG_FIXES]
