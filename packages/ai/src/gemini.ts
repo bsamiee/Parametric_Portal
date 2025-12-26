@@ -42,10 +42,7 @@ const createLayers = (config: ProviderConfig) => {
 
 const buildPrompt = (options: GenerateTextOptions): Prompt.Prompt =>
     options.system !== undefined
-        ? Prompt.make([
-              Prompt.systemMessage({ content: options.system }),
-              ...Prompt.make(options.prompt).content,
-          ])
+        ? Prompt.make([Prompt.systemMessage({ content: options.system }), ...Prompt.make(options.prompt).content])
         : Prompt.make(options.prompt);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

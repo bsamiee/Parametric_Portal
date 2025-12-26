@@ -49,9 +49,9 @@ const createProvider = (config: ProviderConfig) => {
             pipe(
                 LanguageModel.generateText({ prompt: options.prompt }),
                 OpenAiLanguageModel.withConfigOverride({
+                    instructions: options.system,
                     // biome-ignore lint/style/useNamingConvention: OpenAI SDK requires snake_case
                     max_output_tokens: options.maxTokens ?? config.maxTokens ?? B.defaults.maxTokens,
-                    instructions: options.system,
                 }),
                 Effect.map((response) => response.text),
                 Effect.provide(ModelLive),
