@@ -7,13 +7,24 @@
       "types": "./src/anthropic.ts",
       "import": "./src/anthropic.ts",
       "default": "./src/anthropic.ts"
+    },
+    "./openai": {
+      "types": "./src/openai.ts",
+      "import": "./src/openai.ts",
+      "default": "./src/openai.ts"
+    },
+    "./gemini": {
+      "types": "./src/gemini.ts",
+      "import": "./src/gemini.ts",
+      "default": "./src/gemini.ts"
     }
   },
   "dependencies": {
     "@effect/ai": "catalog:",
     "@effect/ai-anthropic": "catalog:",
+    "@effect/ai-google": "catalog:",
+    "@effect/ai-openai": "catalog:",
     "@effect/platform": "catalog:",
-    "@parametric-portal/server": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

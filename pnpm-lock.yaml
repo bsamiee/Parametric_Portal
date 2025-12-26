@@ -21,6 +21,12 @@ catalogs:
     '@effect/ai-anthropic':
       specifier: 0.23.0
       version: 0.23.0
+    '@effect/ai-google':
+      specifier: 0.12.0
+      version: 0.12.0
+    '@effect/ai-openai':
+      specifier: 0.37.0
+      version: 0.37.0
     '@effect/experimental':
       specifier: 0.58.0
       version: 0.58.0
@@ -689,12 +695,15 @@ importers:
       '@effect/ai-anthropic':
         specifier: 'catalog:'
         version: 0.23.0(@effect/ai@0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
+      '@effect/ai-google':
+        specifier: 'catalog:'
+        version: 0.12.0(@effect/ai@0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
+      '@effect/ai-openai':
+        specifier: 'catalog:'
+        version: 0.37.0(@effect/ai@0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
       '@effect/platform':
         specifier: 'catalog:'
         version: 0.94.0(effect@3.19.13)
-      '@parametric-portal/server':
-        specifier: workspace:*
-        version: link:../server
       effect:
         specifier: 'catalog:'
         version: 3.19.13
@@ -1797,6 +1806,22 @@ packages:
 
   '@effect/ai-anthropic@0.23.0':
     resolution: {integrity: sha512-ftkyQpTY4OCPTe9hlB53WCXseWm11lOf+zXDNCJG2nAqW5mZ+4kd/PPiqV7jd2zDukAtLc0I+R3EGs1fOLCG5A==}
+    peerDependencies:
+      '@effect/ai': ^0.33.0
+      '@effect/experimental': ^0.58.0
+      '@effect/platform': ^0.94.0
+      effect: ^3.19.13
+
+  '@effect/ai-google@0.12.0':
+    resolution: {integrity: sha512-a1oamKpbYNXRRuOKLVlnXlW7yRYuAYon5wptBGWoxjTJEH26ezXJMsBSxUvxz8Mroq8UCntrJRt/KnN4A8laQg==}
+    peerDependencies:
+      '@effect/ai': ^0.33.0
+      '@effect/experimental': ^0.58.0
+      '@effect/platform': ^0.94.0
+      effect: ^3.19.13
+
+  '@effect/ai-openai@0.37.0':
+    resolution: {integrity: sha512-Rz6QNJqx8qpzPTNcMf6MjEHM81klrhMW0D1MNzP079PHvslOzWyGF58eikgCDWpX3y+cYnYrcjLFtgYzPJnGww==}
     peerDependencies:
       '@effect/ai': ^0.33.0
       '@effect/experimental': ^0.58.0
@@ -7047,6 +7072,9 @@ packages:
     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
     engines: {node: '>= 0.4'}
 
+  gpt-tokenizer@2.9.0:
+    resolution: {integrity: sha512-YSpexBL/k4bfliAzMrRqn3M6+it02LutVyhVpDeMKrC/O9+pCe/5s8U2hYKa2vFLD5/vHhsKc8sOn/qGqII8Kg==}
+
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
@@ -11445,6 +11473,21 @@ snapshots:
       '@effect/experimental': 0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
       '@effect/platform': 0.94.0(effect@3.19.13)
       effect: 3.19.13
+
+  '@effect/ai-google@0.12.0(@effect/ai@0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)':
+    dependencies:
+      '@effect/ai': 0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
+      '@effect/experimental': 0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
+      '@effect/platform': 0.94.0(effect@3.19.13)
+      effect: 3.19.13
+
+  '@effect/ai-openai@0.37.0(@effect/ai@0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13))(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)':
+    dependencies:
+      '@effect/ai': 0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
+      '@effect/experimental': 0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
+      '@effect/platform': 0.94.0(effect@3.19.13)
+      effect: 3.19.13
+      gpt-tokenizer: 2.9.0
 
   '@effect/ai@0.33.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/rpc@0.73.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)':
     dependencies:
@@ -17975,6 +18018,8 @@ snapshots:
   google-logging-utils@0.0.2: {}
 
   gopd@1.2.0: {}
+
+  gpt-tokenizer@2.9.0: {}
 
   graceful-fs@4.2.11: {}
 

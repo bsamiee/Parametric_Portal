@@ -1,9 +1,9 @@
 /**
- * Effect AI Anthropic integration layer.
+ * Effect AI OpenAI integration layer.
  * Factory-based provider with consumer-defined model selection.
  */
 import { LanguageModel, type Prompt } from '@effect/ai';
-import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
+import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
 import { Config, Effect, Layer, pipe } from 'effect';
 
@@ -30,12 +30,12 @@ const B = Object.freeze({
 
 const createLayers = (config: ProviderConfig) => {
     const HttpLive = FetchHttpClient.layer;
-    const ClientLive = AnthropicClient.layerConfig({
-        apiKey: Config.redacted('ANTHROPIC_API_KEY'),
+    const ClientLive = OpenAiClient.layerConfig({
+        apiKey: Config.redacted('OPENAI_API_KEY'),
     }).pipe(Layer.provide(HttpLive));
-    const ModelLive = AnthropicLanguageModel.model(config.model, {
-        // biome-ignore lint/style/useNamingConvention: Anthropic SDK requires snake_case
-        max_tokens: config.maxTokens ?? B.defaults.maxTokens,
+    const ModelLive = OpenAiLanguageModel.model(config.model, {
+        // biome-ignore lint/style/useNamingConvention: OpenAI SDK requires snake_case
+        max_output_tokens: config.maxTokens ?? B.defaults.maxTokens,
     }).pipe(Layer.provide(ClientLive));
     return { ClientLive, ModelLive };
 };
@@ -48,10 +48,10 @@ const createProvider = (config: ProviderConfig) => {
         generateText: (options: GenerateTextOptions) =>
             pipe(
                 LanguageModel.generateText({ prompt: options.prompt }),
-                AnthropicLanguageModel.withConfigOverride({
-                    // biome-ignore lint/style/useNamingConvention: Anthropic SDK requires snake_case
-                    max_tokens: options.maxTokens ?? config.maxTokens ?? B.defaults.maxTokens,
-                    system: options.system,
+                OpenAiLanguageModel.withConfigOverride({
+                    instructions: options.system,
+                    // biome-ignore lint/style/useNamingConvention: OpenAI SDK requires snake_case
+                    max_output_tokens: options.maxTokens ?? config.maxTokens ?? B.defaults.maxTokens,
                 }),
                 Effect.map((response) => response.text),
                 Effect.provide(ModelLive),
@@ -61,5 +61,5 @@ const createProvider = (config: ProviderConfig) => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as ANTHROPIC_DEFAULTS, createProvider };
+export { B as OPENAI_DEFAULTS, createProvider };
 export type { GenerateTextOptions, ProviderConfig };
