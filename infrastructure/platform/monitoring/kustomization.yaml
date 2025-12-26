@@ -19,6 +19,11 @@ resources:
   - prometheusrules.yaml
   - kyverno-exception.yaml
   - dashboard-cloudnativepg.yaml
+  - dashboard-traefik.yaml
+  - dashboard-argocd.yaml
+  - dashboard-kyverno.yaml
+  - dashboard-cluster.yaml
+  - dashboard-api.yaml
 
 labels:
   - pairs:

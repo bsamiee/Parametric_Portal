@@ -101,23 +101,23 @@ infrastructure/
 
 ### [3.1][BASE_RESOURCES]
 
-| [INDEX] | [KIND]              | [NAME]            | [PURPOSE]                   |
-| :-----: | ------------------- | ----------------- | --------------------------- |
-|   [1]   | Namespace           | parametric-portal | Workload isolation          |
-|   [2]   | TLSOption           | default           | TLS 1.2-1.3 enforcement     |
-|   [3]   | NetworkPolicy       | default-deny-all  | Zero-trust baseline         |
-|   [4]   | NetworkPolicy       | allow-traefik     | Ingress from kube-system    |
-|   [5]   | NetworkPolicy       | allow-dns         | Egress to kube-dns          |
-|   [6]   | NetworkPolicy       | allow-api-egress  | PostgreSQL + external HTTPS |
-|   [7]   | NetworkPolicy       | allow-cnpg        | CNPG operator → postgres    |
-|   [8]   | PodDisruptionBudget | api-pdb           | Min 1 available             |
-|   [9]   | PodDisruptionBudget | icons-pdb         | Min 1 available             |
-|  [10]   | PodDisruptionBudget | postgres-pdb      | Min 1 available             |
-|  [11]   | Middleware          | rate-limit-api    | Shared: 100-200 req/s       |
-|  [12]   | Middleware          | rate-limit-web    | Shared: 50-100 req/s        |
-|  [13]   | Middleware          | redirect-to-https | Shared: Force HTTPS         |
-|  [14]   | Middleware          | compress          | Shared: Gzip/Brotli         |
-|  [15]   | IngressRoute        | http-redirect     | Shared: HTTP → HTTPS        |
+| [INDEX] | [KIND]              | [NAME]                | [PURPOSE]                       |
+| :-----: | ------------------- | --------------------- | ------------------------------- |
+|   [1]   | Namespace           | parametric-portal     | Workload isolation              |
+|   [2]   | TLSOption           | default               | TLS 1.2-1.3 enforcement         |
+|   [3]   | NetworkPolicy       | default-deny-all      | Zero-trust baseline             |
+|   [4]   | NetworkPolicy       | allow-traefik-ingress | Ingress from kube-system        |
+|   [5]   | NetworkPolicy       | allow-api-egress      | DNS + PostgreSQL + HTTPS + OTLP |
+|   [6]   | NetworkPolicy       | allow-icons-egress    | DNS + API service egress        |
+|   [7]   | NetworkPolicy       | allow-cnpg-operator   | CNPG operator → postgres        |
+|   [8]   | PodDisruptionBudget | api-pdb               | Min 1 available                 |
+|   [9]   | PodDisruptionBudget | icons-pdb             | Min 1 available                 |
+|  [10]   | PodDisruptionBudget | postgres-pdb          | Min 1 available                 |
+|  [11]   | Middleware          | rate-limit-api        | Shared: 100-200 req/s           |
+|  [12]   | Middleware          | rate-limit-web        | Shared: 50-100 req/s            |
+|  [13]   | Middleware          | redirect-to-https     | Shared: Force HTTPS             |
+|  [14]   | Middleware          | compress              | Shared: Gzip/Brotli             |
+|  [15]   | IngressRoute        | http-redirect         | Shared: HTTP → HTTPS            |
 
 ---
 ### [3.2][APPLICATION_RESOURCES]

@@ -79,23 +79,22 @@ kubectl get secret -n monitoring lgtm-grafana -o jsonpath="{.data.admin-password
 |   [3]   | ArgoCD Repo       | argocd            | metrics | 30s        |
 |   [4]   | CloudNativePG     | parametric-portal | (auto)  | 30s        |
 |   [5]   | API               | parametric-portal | http    | 30s        |
-|   [6]   | Icons             | parametric-portal | http    | 30s        |
 
 <br>
 
 ### [5.2][PODMONITORS]
 
-| [INDEX] | [FILE]                  | [SELECTOR]                       | [PORT] | [PATH]     |
-| :-----: | ----------------------- | -------------------------------- | ------ | ---------- |
-|   [1]   | `podmonitor-api.yaml`   | `app.kubernetes.io/name: api`    | http   | `/metrics` |
-|   [2]   | `podmonitor-icons.yaml` | `app.kubernetes.io/name: icons`  | http   | `/metrics` |
-|   [3]   | `podmonitor-argocd.yaml`| `app.kubernetes.io/name: argocd` | metrics| `/metrics` |
-|   [4]   | `podmonitor-postgres.yaml`| `cnpg.io/cluster`              | (auto) | `/metrics` |
+| [INDEX] | [FILE]                     | [SELECTOR]                       | [PORT]  | [PATH]     |
+| :-----: | -------------------------- | -------------------------------- | ------- | ---------- |
+|   [1]   | `podmonitor-api.yaml`      | `app.kubernetes.io/name: api`    | http    | `/metrics` |
+|   [2]   | `podmonitor-argocd.yaml`   | `app.kubernetes.io/name: argocd` | metrics | `/metrics` |
+|   [3]   | `podmonitor-postgres.yaml` | `cnpg.io/cluster`                | (auto)  | `/metrics` |
+
+[NOTE] Icons app uses `spa-to-http` static server which does not expose Prometheus metrics.
 
 **Files:**
 - `infrastructure/platform/monitoring/podmonitor-argocd.yaml`
 - `infrastructure/platform/monitoring/podmonitor-api.yaml`
-- `infrastructure/platform/monitoring/podmonitor-icons.yaml`
 - `infrastructure/platform/monitoring/podmonitor-postgres.yaml`
 
 ---

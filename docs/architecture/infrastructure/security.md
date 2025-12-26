@@ -11,20 +11,21 @@ Security configuration reference for network isolation, TLS, secrets, and contai
 
 <br>
 
-Six NetworkPolicies in base namespace implement zero-trust networking. Default deny blocks all traffic; explicit policies allow specific flows. Additional monitoring namespace policies handle observability scraping.
+Five NetworkPolicies in base namespace implement zero-trust networking. Default deny blocks all traffic; explicit policies allow specific flows. Additional monitoring namespace policies handle observability scraping.
 
 <br>
 
 ### [1.1][POLICIES]
 
-| [INDEX] | [POLICY]                | [TYPE]  | [RULE]                                             |
-| :-----: | ----------------------- | ------- | -------------------------------------------------- |
-|   [1]   | `default-deny-all`      | Both    | Block all ingress and egress                       |
-|   [2]   | `allow-traefik-ingress` | Ingress | kube-system/traefik → ports 4000, 8080             |
-|   [3]   | `allow-dns-egress`      | Egress  | All pods → kube-system DNS (53/UDP, 53/TCP)        |
-|   [4]   | `allow-api-egress`      | Egress  | API pod → PostgreSQL (5432) + external HTTPS (443) |
-|   [5]   | `allow-icons-to-api`    | Egress  | Icons pod → API pod (4000) for client-side calls   |
-|   [6]   | `allow-cnpg-operator`   | Ingress | cnpg-system → postgres pod (8000) for metrics      |
+| [INDEX] | [POLICY]                | [TYPE]  | [RULE]                                                        |
+| :-----: | ----------------------- | ------- | ------------------------------------------------------------- |
+|   [1]   | `default-deny-all`      | Both    | Block all ingress and egress                                  |
+|   [2]   | `allow-traefik-ingress` | Ingress | kube-system/traefik → ports 4000, 8080                        |
+|   [3]   | `allow-api-egress`      | Egress  | API pod → DNS (53) + PostgreSQL (5432) + external HTTPS (443) |
+|   [4]   | `allow-icons-egress`    | Egress  | Icons pod → DNS (53) + API pod (4000)                         |
+|   [5]   | `allow-cnpg-operator`   | Ingress | cnpg-system → postgres pod (8000) for metrics                 |
+
+[NOTE] DNS egress rules are embedded in `allow-api-egress` and `allow-icons-egress` rather than a separate policy.
 
 ---
 ### [1.2][MONITORING_POLICIES]
@@ -224,11 +225,11 @@ Kyverno v3.6.1 enforces Pod Security Standards (Restricted) via cluster-wide pol
 ---
 ### [5.2][EXCEPTIONS]
 
-| [INDEX] | [EXCEPTION]                | [SCOPE]                             | [RATIONALE]               |
-| :-----: | -------------------------- | ----------------------------------- | ------------------------- |
-|   [1]   | system-namespace-exception | kube-system, argocd, kyverno, cnpg  | Operators need privileges |
-|   [2]   | cloudnativepg-exception    | `cnpg.io/podRole: instance` pods    | Database needs writes     |
-|   [3]   | lgtm-stack-exception       | `lgtm-*`, `grafana-*` pod patterns  | LGTM needs relaxed rules  |
+| [INDEX] | [EXCEPTION]                | [SCOPE]                            | [RATIONALE]               |
+| :-----: | -------------------------- | ---------------------------------- | ------------------------- |
+|   [1]   | system-namespace-exception | kube-system, argocd, kyverno, cnpg | Operators need privileges |
+|   [2]   | cloudnativepg-exception    | `cnpg.io/podRole: instance` pods   | Database needs writes     |
+|   [3]   | lgtm-stack-exception       | `lgtm-*`, `grafana-*` pod patterns | LGTM needs relaxed rules  |
 
 [REFERENCE] See `docs/architecture/infrastructure/kyverno.md` for operations guide.
 

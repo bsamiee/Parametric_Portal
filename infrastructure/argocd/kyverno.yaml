@@ -6,6 +6,8 @@ kind: Application
 metadata:
   name: kyverno
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
   labels:
     app.kubernetes.io/name: kyverno
     app.kubernetes.io/component: policy-engine

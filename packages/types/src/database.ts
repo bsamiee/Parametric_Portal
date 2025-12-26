@@ -9,6 +9,7 @@ const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type DatabaseApi = ReturnType<typeof database>;
 type ApiKeyId = S.Schema.Type<typeof ApiKeyIdSchema>;
 type AssetId = S.Schema.Type<typeof AssetIdSchema>;
 type UserId = S.Schema.Type<typeof UserIdSchema>;
@@ -182,7 +183,6 @@ const database = (config: DatabaseConfig = {}) =>
             }),
         }),
     });
-type DatabaseApi = ReturnType<typeof database>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
