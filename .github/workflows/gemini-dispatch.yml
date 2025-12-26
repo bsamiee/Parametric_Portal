@@ -21,8 +21,11 @@ defaults:
   run:
     shell: 'bash'
 
-# NOTE: Concurrency handled by reusable workflows (gemini-review.yml, gemini-invoke.yml).
-# Parent dispatch can run multiple times; child workflows dedupe via their own concurrency groups.
+# Dedupe by PR/issue number to prevent duplicate runs from batched events (review comments).
+# cancel-in-progress: false queues new runs instead of cancelling in-flight work.
+concurrency:
+  group: 'gemini-${{ github.event.pull_request.number || github.event.issue.number }}'
+  cancel-in-progress: false
 
 jobs:
   debugger:
