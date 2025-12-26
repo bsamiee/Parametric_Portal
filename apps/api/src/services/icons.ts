@@ -3,7 +3,7 @@
  * Contains prompt engineering, palette management, and AI integration.
  */
 import { Prompt } from '@effect/ai';
-import { generateText } from '@parametric-portal/ai/anthropic';
+import { createProvider } from '@parametric-portal/ai/anthropic';
 import { InternalError } from '@parametric-portal/server/errors';
 import type { ColorMode } from '@parametric-portal/types/database';
 import { type SvgAsset, svg } from '@parametric-portal/types/svg';
@@ -64,6 +64,8 @@ const B = Object.freeze({
         jsonExtract: /\{[\s\S]*"variants"[\s\S]*\}/,
     },
 } as const);
+
+const ai = createProvider({ maxTokens: B.ai.maxTokens, model: B.ai.model });
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -238,8 +240,7 @@ const IconGenerationServiceLive = Layer.succeed(
                 Effect.map(buildContext),
                 Effect.flatMap((ctx) =>
                     pipe(
-                        generateText({
-                            maxTokens: B.ai.maxTokens,
+                        ai.generateText({
                             prompt: buildPromptWithPrefill(ctx),
                             system: buildSystemPrompt(ctx),
                         }),

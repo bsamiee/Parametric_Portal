@@ -1,9 +1,12 @@
 /**
- * Effect AI Anthropic integration layer.
+ * Effect AI Google Gemini integration layer.
  * Factory-based provider with consumer-defined model selection.
+ *
+ * Note: Gemini's @effect/ai-google does not support withConfigOverride.
+ * System prompts are prepended to the prompt content.
  */
-import { LanguageModel, type Prompt } from '@effect/ai';
-import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
+import { LanguageModel, Prompt } from '@effect/ai';
+import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { FetchHttpClient } from '@effect/platform';
 import { Config, Effect, Layer, pipe } from 'effect';
 
@@ -30,15 +33,17 @@ const B = Object.freeze({
 
 const createLayers = (config: ProviderConfig) => {
     const HttpLive = FetchHttpClient.layer;
-    const ClientLive = AnthropicClient.layerConfig({
-        apiKey: Config.redacted('ANTHROPIC_API_KEY'),
+    const ClientLive = GoogleClient.layerConfig({
+        apiKey: Config.redacted('GEMINI_API_KEY'),
     }).pipe(Layer.provide(HttpLive));
-    const ModelLive = AnthropicLanguageModel.model(config.model, {
-        // biome-ignore lint/style/useNamingConvention: Anthropic SDK requires snake_case
-        max_tokens: config.maxTokens ?? B.defaults.maxTokens,
-    }).pipe(Layer.provide(ClientLive));
+    const ModelLive = GoogleLanguageModel.model(config.model).pipe(Layer.provide(ClientLive));
     return { ClientLive, ModelLive };
 };
+
+const buildPrompt = (options: GenerateTextOptions): Prompt.Prompt =>
+    options.system !== undefined
+        ? Prompt.make([Prompt.systemMessage({ content: options.system }), ...Prompt.make(options.prompt).content])
+        : Prompt.make(options.prompt);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -47,12 +52,7 @@ const createProvider = (config: ProviderConfig) => {
     return {
         generateText: (options: GenerateTextOptions) =>
             pipe(
-                LanguageModel.generateText({ prompt: options.prompt }),
-                AnthropicLanguageModel.withConfigOverride({
-                    // biome-ignore lint/style/useNamingConvention: Anthropic SDK requires snake_case
-                    max_tokens: options.maxTokens ?? config.maxTokens ?? B.defaults.maxTokens,
-                    system: options.system,
-                }),
+                LanguageModel.generateText({ prompt: buildPrompt(options) }),
                 Effect.map((response) => response.text),
                 Effect.provide(ModelLive),
             ),
@@ -61,5 +61,5 @@ const createProvider = (config: ProviderConfig) => {
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as ANTHROPIC_DEFAULTS, createProvider };
+export { B as GEMINI_DEFAULTS, createProvider };
 export type { GenerateTextOptions, ProviderConfig };
