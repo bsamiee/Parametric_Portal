@@ -110,15 +110,6 @@ jobs:
                 "enabled": true,
                 "target": "local",
                 "outfile": ".gemini/telemetry.log"
-              },
-              "tools": {
-                "core": [
-                  "run_shell_command(echo)",
-                  "run_shell_command(jq)",
-                  "run_shell_command(printenv)",
-                  "run_shell_command(cat)",
-                  "run_shell_command(ls)"
-                ]
               }
             }
           prompt: '/gemini-scheduled-triage'

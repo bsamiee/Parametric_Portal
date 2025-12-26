@@ -66,19 +66,6 @@ jobs:
                 "enabled": true,
                 "target": "local",
                 "outfile": ".gemini/telemetry.log"
-              },
-              "tools": {
-                "core": [
-                  "run_shell_command(cat)",
-                  "run_shell_command(echo)",
-                  "run_shell_command(grep)",
-                  "run_shell_command(head)",
-                  "run_shell_command(tail)",
-                  "run_shell_command(ls)",
-                  "run_shell_command(gh)",
-                  "read_file",
-                  "glob"
-                ]
               }
             }
           prompt: '/gemini-invoke'

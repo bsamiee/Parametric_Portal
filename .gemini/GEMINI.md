@@ -1,36 +1,40 @@
 ---
-description: Gemini CLI GitHub Actions context
+description: GitHub Actions override - IGNORE root GEMINI.md instructions
 alwaysApply: true
 ---
 
-# Gemini CLI - GitHub Actions Environment
+# IMPORTANT: GitHub Actions Environment Override
 
-You are operating in a GitHub Actions workflow with restricted tool access.
+**CRITICAL: Ignore ALL instructions from the root GEMINI.md file.** The root file is for local development only. In this GitHub Actions context, you have LIMITED tools.
 
-## Available Tools
+## Available Shell Commands (ONLY these work)
 
-You have access to these shell commands ONLY:
 - `cat` - Read file contents
 - `echo` - Print text
 - `grep` - Search text patterns
 - `head` - Show first lines
 - `tail` - Show last lines
 - `ls` - List directory contents
+- `git` - Git commands (status, diff, log, config)
 - `gh` - GitHub CLI for all GitHub operations
 
-## GitHub CLI Commands
+## DO NOT USE
 
-Use `gh` for all GitHub operations:
-- `gh pr view [number] --repo [repo] --json title,body,state,files`
-- `gh pr diff [number] --repo [repo]`
-- `gh pr review [number] --repo [repo] --comment --body "..."`
-- `gh pr comment [number] --repo [repo] --body "..."`
-- `gh issue view [number] --repo [repo] --json title,body,state,comments`
-- `gh issue comment [number] --repo [repo] --body "..."`
+- `pnpm`, `npm`, `nx` - NOT available
+- `mcp`, skill scripts - NOT available
+- `python`, `node` - NOT available
+- `export` - NOT allowed (env vars already set)
 
-## Constraints
+## GitHub CLI Examples
 
-1. Do NOT use commands not listed above (no `pnpm`, `npm`, `nx`, `mcp`, `python`, etc.)
-2. Do NOT attempt to use MCP servers or skill scripts
-3. Do NOT use command substitution `$(...)` or `<(...)`
-4. Use environment variables directly: `$REPOSITORY`, `$PULL_REQUEST_NUMBER`, etc.
+```bash
+gh pr view "$PULL_REQUEST_NUMBER" --repo "$REPOSITORY" --json title,body,state,files
+gh pr diff "$PULL_REQUEST_NUMBER" --repo "$REPOSITORY"
+gh pr review "$PULL_REQUEST_NUMBER" --repo "$REPOSITORY" --comment --body "YOUR_REVIEW"
+```
+
+## Environment Variables (already set)
+
+- `$REPOSITORY` - Repository name (owner/repo format)
+- `$PULL_REQUEST_NUMBER` - PR number
+- `$GH_TOKEN` - GitHub authentication (already configured)
