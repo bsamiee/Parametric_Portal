@@ -246,10 +246,13 @@ const useClipboard = <V, R>(
             runtime.runFork(
                 pipe(
                     writeClipboard(serializer(v)),
-                    Effect.tap(() => Effect.sync(() => setValue(v))),
-                    Effect.tapBoth({
-                        onFailure: (e) => Effect.sync(() => setError(e)),
-                        onSuccess: () => Effect.void,
+                    Effect.tap(() => {
+                        setValue(v);
+                        return Effect.void;
+                    }),
+                    Effect.tapError((e) => {
+                        setError(e);
+                        return Effect.void;
                     }),
                     Effect.ensuring(Effect.sync(() => setIsPending(false))),
                 ),
@@ -263,10 +266,13 @@ const useClipboard = <V, R>(
         runtime.runFork(
             pipe(
                 readClipboard(),
-                Effect.tap((text) => Effect.sync(() => setValue(deserializer(text)))),
-                Effect.tapBoth({
-                    onFailure: (e) => Effect.sync(() => setError(e)),
-                    onSuccess: () => Effect.void,
+                Effect.tap((text) => {
+                    setValue(deserializer(text));
+                    return Effect.void;
+                }),
+                Effect.tapError((e) => {
+                    setError(e);
+                    return Effect.void;
                 }),
                 Effect.ensuring(Effect.sync(() => setIsPending(false))),
             ),
@@ -300,23 +306,24 @@ const useExport = <R>(): ExportState => {
     const [error, setError] = useState<ExportError | null>(null);
     const [isPending, setIsPending] = useState(false);
     const exportAs = useCallback(
-        (input: ExportInput) =>
+        (input: ExportInput) => {
             globalThis.document === undefined
                 ? setError(mkExportError(B.errors.exportFailed))
-                : (() => {
+                : void (() => {
                       setIsPending(true);
                       setError(null);
                       runtime.runFork(
                           pipe(
                               exportHandlers[input.format](input),
-                              Effect.tapBoth({
-                                  onFailure: (e) => Effect.sync(() => setError(e)),
-                                  onSuccess: () => Effect.void,
+                              Effect.tapError((e) => {
+                                  setError(e);
+                                  return Effect.void;
                               }),
                               Effect.ensuring(Effect.sync(() => setIsPending(false))),
                           ),
                       );
-                  })(),
+                  })();
+        },
         [runtime],
     );
     const reset = useCallback(() => {

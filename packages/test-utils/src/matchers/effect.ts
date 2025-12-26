@@ -105,11 +105,14 @@ expect.extend({
         const isRight = Either.isRight(result);
         const value = isRight ? result.right : undefined;
         const pass = isRight && (expected === undefined || JSON.stringify(value) === JSON.stringify(expected));
+        const expectedJson = JSON.stringify(expected);
+        const valueJson = JSON.stringify(value);
+        const actualStr = isRight ? `Right(${valueJson})` : 'Left';
         return {
             message: () =>
                 pass
-                    ? `expected decode to fail but got Right(${JSON.stringify(value)})`
-                    : `expected Right(${JSON.stringify(expected)}) but got ${isRight ? `Right(${JSON.stringify(value)})` : 'Left'}`,
+                    ? `expected decode to fail but got Right(${valueJson})`
+                    : `expected Right(${expectedJson}) but got ${actualStr}`,
             pass,
         };
     },

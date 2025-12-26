@@ -62,7 +62,7 @@ const enhanceError = (error: Error): Error =>
             onSome: (stack) =>
                 Object.assign(new Error(error.message), {
                     name: error.name,
-                    ...(error.stack !== undefined ? { stack: error.stack } : {}),
+                    ...(error.stack === undefined ? {} : { stack: error.stack }),
                     cause: { ownerStack: stack, ...(error.cause as object | undefined) },
                 }),
         }),

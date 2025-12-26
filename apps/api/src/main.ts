@@ -87,9 +87,7 @@ const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
     }),
 );
 const MetricsLive = HttpApiBuilder.group(AppApi, 'metrics', (handlers) =>
-    Effect.gen(function* () {
-        return handlers.handle('list', () => Effect.promise(async () => await registry.metrics()));
-    }),
+    Effect.succeed(handlers.handle('list', () => Effect.promise(() => registry.metrics()))),
 );
 const ApiLive = HttpApiBuilder.api(AppApi).pipe(
     Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MetricsLive)),

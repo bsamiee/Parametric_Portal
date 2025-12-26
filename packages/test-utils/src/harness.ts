@@ -55,14 +55,16 @@ const Harness = Object.freeze({
     effect: Object.freeze({
         /** Extracts value from Exit, optionally transforming with fn. Returns undefined on failure. */
         extract: <A>(exit: Exit.Exit<A, unknown>, fn?: (v: A) => unknown): unknown =>
-            Exit.isSuccess(exit) ? (fn ? fn(exit.value) : exit.value) : undefined,
+            Exit.match(exit, {
+                onFailure: () => undefined,
+                onSuccess: (value) => (fn === undefined ? value : fn(value)),
+            }),
         /** Pattern-matches Exit to success/failure branches. */
         match: <A, E, R>(exit: Exit.Exit<A, E>, cases: { failure: (e: E) => R; success: (a: A) => R }): R =>
-            Exit.isSuccess(exit)
-                ? cases.success(exit.value)
-                : Exit.isFailure(exit) && exit.cause._tag === 'Fail'
-                  ? cases.failure(exit.cause.error)
-                  : cases.failure(undefined as E),
+            Exit.match(exit, {
+                onFailure: (cause) => cases.failure(cause._tag === 'Fail' ? cause.error : (undefined as E)),
+                onSuccess: cases.success,
+            }),
         /** Runs Effect synchronously, returning Exit for matcher assertions. */
         runSync: <A, E>(eff: Effect.Effect<A, E, never>): Exit.Exit<A, E> => Effect.runSyncExit(eff),
     }),
