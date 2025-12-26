@@ -36,9 +36,6 @@ catalogs:
     '@effect/sql':
       specifier: 0.49.0
       version: 0.49.0
-    '@effect/sql-drizzle':
-      specifier: 0.48.0
-      version: 0.48.0
     '@effect/sql-pg':
       specifier: 0.50.0
       version: 0.50.0
@@ -186,9 +183,6 @@ catalogs:
     date-fns:
       specifier: 4.1.0
       version: 4.1.0
-    drizzle-orm:
-      specifier: 0.45.1
-      version: 0.45.1
     effect:
       specifier: 3.19.13
       version: 3.19.13
@@ -790,18 +784,12 @@ importers:
       '@effect/sql':
         specifier: 'catalog:'
         version: 0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
-      '@effect/sql-drizzle':
-        specifier: 'catalog:'
-        version: 0.48.0(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3))(effect@3.19.13)
       '@effect/sql-pg':
         specifier: 'catalog:'
         version: 0.50.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)
       '@parametric-portal/types':
         specifier: workspace:*
         version: link:../types
-      drizzle-orm:
-        specifier: 'catalog:'
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)
       effect:
         specifier: 'catalog:'
         version: 3.19.13
@@ -1878,13 +1866,6 @@ packages:
     resolution: {integrity: sha512-iMPf6tTriz8sK0l5x4koFId8Hz5nFptHYg8WqyjHGIIVLTpZxuiSqhmXZG7FnAs5N2n6uCEws4wWGcIgXNUrFg==}
     peerDependencies:
       '@effect/platform': ^0.94.0
-      effect: ^3.19.13
-
-  '@effect/sql-drizzle@0.48.0':
-    resolution: {integrity: sha512-igvoBrc3RwHq2IOVBAzT3rzMWTIronHa+aL1SFDZDDGIAY4BEmos+ahCAyPfhyW8UbYljJtL9PWJWHtXgYa9MA==}
-    peerDependencies:
-      '@effect/sql': ^0.49.0
-      drizzle-orm: '>=0.43.1 <0.50'
       effect: ^3.19.13
 
   '@effect/sql-pg@0.50.0':
@@ -6496,98 +6477,6 @@ packages:
   dotenv@16.4.7:
     resolution: {integrity: sha512-47qPchRCykZC03FhkYAhrvwU4xDBFIj1QPqaarj6mdM/hgUzfPHcpkHJOn3mJAufFeeAxAzeGsr5X0M4k6fLZQ==}
     engines: {node: '>=12'}
-
-  drizzle-orm@0.45.1:
-    resolution: {integrity: sha512-Te0FOdKIistGNPMq2jscdqngBRfBpC8uMFVwqjf6gtTVJHIQ/dosgV/CLBU2N4ZJBsXL5savCba9b0YJskKdcA==}
-    peerDependencies:
-      '@aws-sdk/client-rds-data': '>=3'
-      '@cloudflare/workers-types': '>=4'
-      '@electric-sql/pglite': '>=0.2.0'
-      '@libsql/client': '>=0.10.0'
-      '@libsql/client-wasm': '>=0.10.0'
-      '@neondatabase/serverless': '>=0.10.0'
-      '@op-engineering/op-sqlite': '>=2'
-      '@opentelemetry/api': ^1.4.1
-      '@planetscale/database': '>=1.13'
-      '@prisma/client': '*'
-      '@tidbcloud/serverless': '*'
-      '@types/better-sqlite3': '*'
-      '@types/pg': '*'
-      '@types/sql.js': '*'
-      '@upstash/redis': '>=1.34.7'
-      '@vercel/postgres': '>=0.8.0'
-      '@xata.io/client': '*'
-      better-sqlite3: '>=7'
-      bun-types: '*'
-      expo-sqlite: '>=14.0.0'
-      gel: '>=2'
-      knex: '*'
-      kysely: '*'
-      mysql2: '>=2'
-      pg: '>=8'
-      postgres: '>=3'
-      prisma: '*'
-      sql.js: '>=1'
-      sqlite3: '>=5'
-    peerDependenciesMeta:
-      '@aws-sdk/client-rds-data':
-        optional: true
-      '@cloudflare/workers-types':
-        optional: true
-      '@electric-sql/pglite':
-        optional: true
-      '@libsql/client':
-        optional: true
-      '@libsql/client-wasm':
-        optional: true
-      '@neondatabase/serverless':
-        optional: true
-      '@op-engineering/op-sqlite':
-        optional: true
-      '@opentelemetry/api':
-        optional: true
-      '@planetscale/database':
-        optional: true
-      '@prisma/client':
-        optional: true
-      '@tidbcloud/serverless':
-        optional: true
-      '@types/better-sqlite3':
-        optional: true
-      '@types/pg':
-        optional: true
-      '@types/sql.js':
-        optional: true
-      '@upstash/redis':
-        optional: true
-      '@vercel/postgres':
-        optional: true
-      '@xata.io/client':
-        optional: true
-      better-sqlite3:
-        optional: true
-      bun-types:
-        optional: true
-      expo-sqlite:
-        optional: true
-      gel:
-        optional: true
-      knex:
-        optional: true
-      kysely:
-        optional: true
-      mysql2:
-        optional: true
-      pg:
-        optional: true
-      postgres:
-        optional: true
-      prisma:
-        optional: true
-      sql.js:
-        optional: true
-      sqlite3:
-        optional: true
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -11627,12 +11516,6 @@ snapshots:
       '@effect/platform': 0.94.0(effect@3.19.13)
       effect: 3.19.13
       msgpackr: 1.11.8
-
-  '@effect/sql-drizzle@0.48.0(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3))(effect@3.19.13)':
-    dependencies:
-      '@effect/sql': 0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13)
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3)
-      effect: 3.19.13
 
   '@effect/sql-pg@0.50.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(@effect/sql@0.49.0(@effect/experimental@0.58.0(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(@effect/platform@0.94.0(effect@3.19.13))(effect@3.19.13))(effect@3.19.13)':
     dependencies:
@@ -17369,12 +17252,6 @@ snapshots:
       dotenv: 16.4.7
 
   dotenv@16.4.7: {}
-
-  drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(pg@8.16.3):
-    optionalDependencies:
-      '@opentelemetry/api': 1.9.0
-      '@types/pg': 8.15.6
-      pg: 8.16.3
 
   dunder-proto@1.0.1:
     dependencies:
