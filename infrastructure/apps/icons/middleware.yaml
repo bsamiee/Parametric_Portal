@@ -19,11 +19,13 @@ spec:
       style-src 'self' 'unsafe-inline';
       img-src 'self' data: https:;
       font-src 'self' data:;
-      connect-src 'self' https://api.parametric-portal.com https://api.anthropic.com;
+      connect-src 'self' https://api.parametric-portal.com;
       frame-ancestors 'none';
       base-uri 'self';
       form-action 'self';
-    permissionsPolicy: "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    permissionsPolicy: >-
+      accelerometer=(), camera=(), geolocation=(), gyroscope=(),
+      magnetometer=(), microphone=(), payment=(), usb=()
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

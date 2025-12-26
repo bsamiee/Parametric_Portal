@@ -30,6 +30,7 @@ const InsertApiKey = S.Struct({
     userId: db.schemas.ids.UserId,
 });
 const FindApiKeyByUserProvider = S.Struct({ provider: db.schemas.entities.AiProvider, userId: db.schemas.ids.UserId });
+const FindApiKeyByIdAndUserId = S.Struct({ id: db.schemas.ids.ApiKeyId, userId: db.schemas.ids.UserId });
 const InsertAsset = S.Struct({ prompt: S.NonEmptyTrimmedString, svg: S.String, userId: db.schemas.ids.UserId });
 const InsertOrganization = S.Struct({ name: S.NonEmptyTrimmedString, slug: S.NonEmptyTrimmedString });
 const InsertOrganizationMember = S.Struct({
@@ -104,6 +105,12 @@ const makeRepositories = Effect.gen(function* () {
                     sql`SELECT id, name, provider, last_used_at, created_at FROM ${sql(B.tables.apiKeys)} WHERE user_id = ${userId} ORDER BY created_at DESC`,
                 Request: db.schemas.ids.UserId,
                 Result: db.schemas.entities.ApiKeyListItem,
+            }),
+            findByIdAndUserId: SqlSchema.findOne({
+                execute: ({ id, userId }) =>
+                    sql`SELECT * FROM ${sql(B.tables.apiKeys)} WHERE id = ${id} AND user_id = ${userId}`,
+                Request: FindApiKeyByIdAndUserId,
+                Result: ApiKey.select,
             }),
             findByUserIdAndProvider: SqlSchema.findOne({
                 execute: ({ userId, provider }) =>

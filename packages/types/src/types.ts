@@ -28,59 +28,6 @@ type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
 type Index = S.Schema.Type<typeof IndexSchema>;
 type VariantCount = S.Schema.Type<typeof VariantCountSchema>;
 type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>;
-type TypesApi = {
-    readonly brands: typeof brands;
-    readonly createIdGenerator: typeof createIdGenerator;
-    readonly derive: { readonly hex8: typeof deriveHex8 };
-    readonly factories: {
-        readonly boundedInt: typeof boundedInt;
-        readonly boundedNumber: typeof boundedNumber;
-    };
-    readonly generate: {
-        readonly hex8: () => Hex8;
-        readonly uuidv7: Effect.Effect<Uuidv7, never, never>;
-        readonly uuidv7Sync: () => Uuidv7;
-    };
-    readonly guards: {
-        readonly email: (u: unknown) => u is Email;
-        readonly hex8: (u: unknown) => u is Hex8;
-        readonly hex64: (u: unknown) => u is Hex64;
-        readonly hexColor: (u: unknown) => u is HexColor;
-        readonly htmlId: (u: unknown) => u is HtmlId;
-        readonly index: (u: unknown) => u is Index;
-        readonly isoDate: (u: unknown) => u is IsoDate;
-        readonly nonNegativeInt: (u: unknown) => u is NonNegativeInt;
-        readonly percentage: (u: unknown) => u is Percentage;
-        readonly positiveInt: (u: unknown) => u is PositiveInt;
-        readonly safeInteger: (u: unknown) => u is SafeInteger;
-        readonly slug: (u: unknown) => u is Slug;
-        readonly url: (u: unknown) => u is Url;
-        readonly uuidv7: (u: unknown) => u is Uuidv7;
-        readonly variantCount: (u: unknown) => u is VariantCount;
-        readonly zoomFactor: (u: unknown) => u is ZoomFactor;
-    };
-    readonly isUuidv7: (u: unknown) => u is Uuidv7;
-    readonly patterns: typeof patterns;
-    readonly schemas: typeof schemas & {
-        readonly Email: typeof EmailSchema;
-        readonly Hex8: typeof Hex8Schema;
-        readonly Hex64: typeof Hex64Schema;
-        readonly HexColor: typeof HexColorSchema;
-        readonly HtmlId: typeof HtmlIdSchema;
-        readonly Index: typeof IndexSchema;
-        readonly IsoDate: typeof IsoDateSchema;
-        readonly NonNegativeInt: typeof NonNegativeIntSchema;
-        readonly Pagination: typeof PaginationParamsSchema;
-        readonly Percentage: typeof PercentageSchema;
-        readonly PositiveInt: typeof PositiveIntSchema;
-        readonly SafeInteger: typeof SafeIntegerSchema;
-        readonly Slug: typeof SlugSchema;
-        readonly Url: typeof UrlSchema;
-        readonly Uuidv7: typeof Uuidv7Schema;
-        readonly VariantCount: typeof VariantCountSchema;
-        readonly ZoomFactor: typeof ZoomFactorSchema;
-    };
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -199,7 +146,7 @@ const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect
         Effect.sync(generateUuidv7Sync),
         Effect.flatMap((uuid) => S.decode(schema)(uuid)),
     );
-const types = (): TypesApi =>
+const types = () =>
     Object.freeze({
         brands,
         createIdGenerator,
@@ -228,7 +175,6 @@ const types = (): TypesApi =>
             variantCount: S.is(VariantCountSchema),
             zoomFactor: S.is(ZoomFactorSchema),
         }),
-        isUuidv7: S.is(Uuidv7Schema),
         patterns,
         schemas: Object.freeze({
             ...schemas,
@@ -251,6 +197,7 @@ const types = (): TypesApi =>
             ZoomFactor: ZoomFactorSchema,
         }),
     });
+type TypesApi = ReturnType<typeof types>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

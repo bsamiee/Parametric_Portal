@@ -18,21 +18,6 @@ type AsyncStateFold<A, E, R> = {
     readonly Loading: (startedAt: number) => R;
     readonly Success: (data: A, timestamp: number) => R;
 };
-type AsyncApi = {
-    readonly age: typeof age;
-    readonly elapsed: typeof elapsed;
-    readonly failure: <A, E>(error: E) => AsyncState<A, E>;
-    readonly fold: typeof fold;
-    readonly idle: <A, E = Error>() => AsyncState<A, E>;
-    readonly isFailure: typeof isFailure;
-    readonly isIdle: typeof isIdle;
-    readonly isLoading: typeof isLoading;
-    readonly isSuccess: typeof isSuccess;
-    readonly loading: <A, E = Error>() => AsyncState<A, E>;
-    readonly map: <A, E, R>(state: AsyncState<A, E>, f: (a: A) => R) => AsyncState<R, E>;
-    readonly schema: typeof AsyncStateSchema;
-    readonly success: <A, E = Error>(data: A) => AsyncState<A, E>;
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -105,7 +90,7 @@ const map = <A, E, R>(state: AsyncState<A, E>, f: (a: A) => R, ts: () => number 
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const async = (config: AsyncConfig = {}): AsyncApi => {
+const async = (config: AsyncConfig = {}) => {
     const ts = config.timestampProvider ?? B.timestamp;
     return Object.freeze({
         age,
@@ -123,8 +108,9 @@ const async = (config: AsyncConfig = {}): AsyncApi => {
         success: <A, E = Error>(data: A) => mkSuccess<A, E>(data, ts),
     });
 };
+type AsyncApi = ReturnType<typeof async>;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { async, B as ASYNC_TUNING };
-export type { AsyncState };
+export type { AsyncApi, AsyncState };

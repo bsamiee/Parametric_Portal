@@ -19,30 +19,36 @@ NAMESPACE = "{{vars.NAMESPACE}}"
 DOCKER_HOST = "unix://{{ env.HOME }}/.local/share/colima/default/docker.sock"
 DOCKER_CERT_PATH = ""
 DOCKER_TLS_VERIFY = ""
+SEALED_SECRETS_CERT = "/opt/sealed-secrets-cert.pem"
 
 # --- [VARS] -------------------------------------------------------------------
 [vars]
 # Version pins
 K3S_VERSION = "v1.32.11+k3s1"
 K3S_VERSION_URL = "v1.32.11%2Bk3s1"
+K8S_VERSION = "1.32.0"
 ARGOCD_VERSION = "7.8.28"
 SEALED_SECRETS_VERSION = "2.17.1"
 HELM_VERSION = "v3.17.0"
 TRAEFIK_VERSION = "3.3.5"
 NAMESPACE = "parametric-portal"
 
-# Kustomize paths (DRY)
+# Kustomize paths
 KUSTOMIZE_OVERLAY = "infrastructure/overlays/prod"
 MANIFEST_TMP = "/tmp/k8s-manifests.yaml"
+KUBECONFORM_CACHE = "/tmp/kubeconform-cache"
 
-# Colima resources
+# Colima resources (1:3 CPU:memory ratio for container workloads)
 COLIMA_CPU = "4"
-COLIMA_MEMORY = "8"
+COLIMA_MEMORY = "12"
 COLIMA_DISK = "60"
 
-# Act common flags (DRY)
-ACT_FLAGS = "--container-daemon-socket - --container-architecture linux/amd64"
-ACT_OFFLINE = "--action-offline-mode --artifact-server-path $PWD/.artifacts --cache-server-path $PWD/.cache"
+# Backup retention
+RETENTION_COUNT = "10"
+
+# Act flags (parallel jobs, new action cache, dynamic port)
+ACT_FLAGS = "--container-daemon-socket - --container-architecture linux/amd64 --jobs 4"
+ACT_OFFLINE = "--action-offline-mode --use-new-action-cache --artifact-server-path $PWD/.artifacts --cache-server-path $PWD/.cache --cache-server-port 0"
 
 # --- [SETUP] ------------------------------------------------------------------
 
@@ -68,6 +74,15 @@ command -v helm >/dev/null 2>&1 || {
     rm -rf /tmp/linux-amd64 "/tmp/${HELM_TAR}" "/tmp/${HELM_TAR}.sha256"
 }
 
+log "Configuring kernel parameters..."
+sudo tee /etc/sysctl.d/90-kubelet.conf <<SYSCTL
+vm.panic_on_oom=0
+vm.overcommit_memory=1
+kernel.panic=10
+kernel.panic_on_oops=1
+SYSCTL
+sudo sysctl -p /etc/sysctl.d/90-kubelet.conf
+
 log "Installing K3s {{vars.K3S_VERSION}}..."
 K3S_URL="https://github.com/k3s-io/k3s/releases/download/{{vars.K3S_VERSION_URL}}"
 curl -fsSL -o /tmp/k3s "${K3S_URL}/k3s"
@@ -90,6 +105,9 @@ LimitNOFILE=1048576
 LimitNPROC=infinity
 LimitCORE=infinity
 TasksMax=infinity
+TimeoutStartSec=0
+TimeoutStopSec=30
+MemoryMax=90%
 Restart=always
 RestartSec=5s
 ExecStart=/usr/local/bin/k3s server --cluster-init --disable=servicelb --write-kubeconfig-mode=600 --secrets-encryption
@@ -108,7 +126,9 @@ metadata: {name: traefik, namespace: kube-system}
 spec:
   valuesContent: |-
     image: {repository: docker.io/library/traefik, tag: "{{vars.TRAEFIK_VERSION}}"}
-    deployment: {replicas: 1}
+    global: {checkNewVersion: false, sendAnonymousUsage: false}
+    deployment: {replicas: 1, terminationGracePeriodSeconds: 60}
+    experimental: {fastProxy: {enabled: true, debug: false}}
     resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
     ports:
       web: {port: 8000, expose: {default: true}, exposedPort: 80, redirectTo: {port: websecure}}
@@ -170,9 +190,21 @@ die() { err "$1"; exit 1; }
 
 CERT="${SEALED_SECRETS_CERT:-/opt/sealed-secrets-cert.pem}"
 OUT="${OUTPUT_DIR:-{{vars.KUSTOMIZE_OVERLAY}}}"
+SCOPE="${SEAL_SCOPE:-strict}"
+CERT_MAX_AGE="${CERT_MAX_AGE_DAYS:-7}"
+
 [[ -z "${1:-}" || -z "${2:-}" ]] && die "Usage: mise run seal-secret <name> <namespace>"
-[[ ! -f "$CERT" ]] && die "Certificate not found: $CERT"
 command -v kubeseal >/dev/null 2>&1 || die "kubeseal required"
+
+if [[ -f "$CERT" ]]; then
+    AGE=$(( ($(date +%s) - $(stat -c %Y "$CERT" 2>/dev/null || stat -f %m "$CERT")) / 86400 ))
+    [[ $AGE -gt $CERT_MAX_AGE ]] && {
+        log "Certificate older than ${CERT_MAX_AGE}d, refreshing..."
+        kubeseal --controller-name=sealed-secrets-controller --controller-namespace=kube-system --fetch-cert > "$CERT"
+    }
+else
+    die "Certificate not found: $CERT"
+fi
 
 args=()
 for var in POSTGRES_USER POSTGRES_PASSWORD ENCRYPTION_KEY ANTHROPIC_API_KEY \
@@ -183,40 +215,52 @@ done
 [[ ${#args[@]} -eq 0 ]] && die "No secrets in environment"
 
 kubectl create secret generic "$1" --namespace="$2" "${args[@]}" --dry-run=client -o yaml | \
-    kubeseal --cert="$CERT" --format yaml --scope namespace-wide > "${OUT}/sealed-$1.yaml"
-log "Created: ${OUT}/sealed-$1.yaml"
+    kubeseal --cert="$CERT" --format yaml --scope "$SCOPE" > "${OUT}/sealed-$1.yaml"
+
+kubeseal --validate --controller-name=sealed-secrets-controller --controller-namespace=kube-system < "${OUT}/sealed-$1.yaml" || \
+    { rm -f "${OUT}/sealed-$1.yaml"; die "Validation failed"; }
+log "Created and validated: ${OUT}/sealed-$1.yaml (scope: $SCOPE)"
 '''
 
 [tasks.backup-db]
-description = "Backup PostgreSQL database with retention"
+description = "Backup PostgreSQL database with zstd compression"
 run = '''
 set -euo pipefail
 log() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 err() { echo -e "\033[0;31m[ERROR]\033[0m $1" >&2; }
+die() { err "$1"; exit 1; }
 
 DIR="${BACKUP_DIR:-/opt/backups/postgres}"
-DAYS="${RETENTION_DAYS:-7}"
+KEEP="${RETENTION_COUNT:-{{vars.RETENTION_COUNT}}}"
 DB="${DB_NAME:-parametric_portal}"
 USER="${DB_USER:-app}"
-FILE="${DIR}/${DB}_$(date +%Y%m%d_%H%M%S).sql.gz"
+FILE="${DIR}/${DB}_$(date +%Y%m%d_%H%M%S).sql.zst"
 mkdir -p "$DIR"
 
 log "Backing up ${DB}..."
 if command -v kubectl &>/dev/null; then
-    POD=$(kubectl get pods -n "{{vars.NAMESPACE}}" -l cnpg.io/cluster \
+    POD=$(kubectl get pods -n "{{vars.NAMESPACE}}" \
+        -l cnpg.io/cluster,cnpg.io/instanceRole=replica \
+        --field-selector=status.phase=Running \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
+        kubectl get pods -n "{{vars.NAMESPACE}}" \
+        -l cnpg.io/cluster,cnpg.io/instanceRole=primary \
         --field-selector=status.phase=Running \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
     if [[ -n "$POD" ]]; then
-        kubectl exec -n "{{vars.NAMESPACE}}" "$POD" -- pg_dump -U "$USER" -d "$DB" --clean --if-exists | gzip > "$FILE"
+        log "Using pod: $POD"
+        kubectl exec -n "{{vars.NAMESPACE}}" "$POD" -c postgres -- \
+            pg_dump -U "$USER" -d "$DB" --clean --if-exists | zstd -1 > "$FILE"
     else
-        docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists | gzip > "$FILE"
+        docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists | zstd -1 > "$FILE"
     fi
 else
-    docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists | gzip > "$FILE"
+    docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists | zstd -1 > "$FILE"
 fi
 
-find "$DIR" -name "*.sql.gz" -mtime "+${DAYS}" -delete
-log "Backup: $FILE ($(du -h "$FILE" | cut -f1)), $(find "$DIR" -name "*.sql.gz" | wc -l | tr -d ' ') retained"
+zstd -t "$FILE" || { rm -f "$FILE"; die "Backup verification failed"; }
+ls -t "$DIR"/*.sql.zst 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+log "Backup: $FILE ($(du -h "$FILE" | cut -f1)), $(find "$DIR" -name "*.sql.zst" | wc -l | tr -d ' ') retained"
 '''
 
 # --- [KUBERNETES] -------------------------------------------------------------
@@ -225,17 +269,24 @@ log "Backup: $FILE ($(du -h "$FILE" | cut -f1)), $(find "$DIR" -name "*.sql.gz" 
 description = "Build Kustomize manifests"
 sources = ["infrastructure/**/*.yaml"]
 outputs = ["/tmp/k8s-manifests.yaml"]
-run = "kustomize build {{vars.KUSTOMIZE_OVERLAY}} | tee {{vars.MANIFEST_TMP}}"
+run = "kustomize build --output {{vars.MANIFEST_TMP}} --load-restrictor LoadRestrictionsNone {{vars.KUSTOMIZE_OVERLAY}}"
 
 [tasks."k8s:validate"]
-description = "Validate K8s manifests"
+description = "Validate K8s manifests (schema + server)"
 depends = ["k8s:build"]
-run = "kubeconform -strict -ignore-missing-schemas -summary {{vars.MANIFEST_TMP}} && kubectl apply --dry-run=client -f {{vars.MANIFEST_TMP}} >/dev/null && echo '[OK] Manifests valid'"
+run = """
+kubeconform -strict -ignore-missing-schemas -summary \
+  -n 8 -cache {{vars.KUBECONFORM_CACHE}} \
+  -kubernetes-version {{vars.K8S_VERSION}} \
+  {{vars.MANIFEST_TMP}} && \
+kubectl apply --dry-run=server -f {{vars.MANIFEST_TMP}} >/dev/null && \
+echo '[OK] Manifests valid (schema + server)'
+"""
 
 [tasks."k8s:diff"]
-description = "Show cluster state diff"
+description = "Show cluster state diff (semantic)"
 depends = ["k8s:build"]
-run = "kubectl diff -f {{vars.MANIFEST_TMP}}; exit 0"
+run = "KUBECTL_EXTERNAL_DIFF='dyff between --omit-header --set-exit-code -b' kubectl diff -f {{vars.MANIFEST_TMP}} || true"
 
 # --- [LINTING] ----------------------------------------------------------------
 
@@ -247,11 +298,19 @@ run = "yamllint infrastructure/ .github/workflows/ && echo '[OK] YAML valid'"
 # --- [CONTAINER] --------------------------------------------------------------
 
 [tasks."container:start"]
-description = "Start Colima (macOS, VZ+Rosetta)"
+description = "Start Colima (macOS, VZ+Rosetta+virtiofs)"
 run = """
 if colima status >/dev/null 2>&1; then echo "[OK] Colima running"; colima status; exit 0; fi
 echo "[INFO] Starting Colima (cpu={{vars.COLIMA_CPU}}, mem={{vars.COLIMA_MEMORY}}GB, disk={{vars.COLIMA_DISK}}GB)..."
-colima start --cpu {{vars.COLIMA_CPU}} --memory {{vars.COLIMA_MEMORY}} --disk {{vars.COLIMA_DISK}} --vm-type vz --vz-rosetta
+colima start \
+  --cpu {{vars.COLIMA_CPU}} \
+  --memory {{vars.COLIMA_MEMORY}} \
+  --disk {{vars.COLIMA_DISK}} \
+  --vm-type vz \
+  --vz-rosetta \
+  --mount-type virtiofs \
+  --cpu-type max \
+  --binfmt=true
 colima status
 """
 
@@ -265,63 +324,76 @@ run = "colima status 2>/dev/null || echo '[WARN] Not running'"
 
 # --- [WORKFLOW] ---------------------------------------------------------------
 
-[tasks."workflow:_require-docker"]
-description = "Internal: Ensure Docker available"
-hide = true
-run = "docker info >/dev/null 2>&1 || { echo '[ERROR] No Docker. Run: mise run container:start'; exit 1; }"
-
-[tasks."workflow:lint"]
-description = "Lint GitHub Actions workflows"
+[tasks."wf:static"]
+description = "Static validation (syntax + security + pinning)"
 sources = [".github/workflows/*.yml"]
-run = "actionlint && echo '[OK] Workflows valid'"
-
-[tasks."workflow:list"]
-description = "List workflows and jobs"
-depends = ["workflow:_require-docker"]
-run = "act {{vars.ACT_FLAGS}} -l"
-
-[tasks."workflow:test"]
-description = "Dry-run workflows"
-depends = ["workflow:_require-docker"]
-run = "act {{vars.ACT_FLAGS}} -n \"$@\""
-
-[tasks."workflow:run"]
-description = "Run workflows locally"
-depends = ["workflow:_require-docker"]
-run = """
-mkdir -p .artifacts .cache
-GH="${GITHUB_TOKEN:-${GH_TOKEN:-$(gh auth token 2>/dev/null)}}"
-SECRETS="-s GITHUB_TOKEN=$GH"
-[[ -n "${SONAR_TOKEN:-}" ]] && SECRETS="$SECRETS -s SONAR_TOKEN=$SONAR_TOKEN"
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] && SECRETS="$SECRETS -s CLAUDE_CODE_OAUTH_TOKEN=$ANTHROPIC_API_KEY"
-[[ -n "${GH_PROJECTS_TOKEN:-}" ]] && SECRETS="$SECRETS -s GH_PROJECTS_TOKEN=$GH_PROJECTS_TOKEN"
-echo "[INFO] Secrets: $(echo $SECRETS | sed 's/=[^ ]*/=***/g')"
-act {{vars.ACT_FLAGS}} {{vars.ACT_OFFLINE}} $SECRETS "$@"
-"""
-
-[tasks."workflow:run-all"]
-description = "Run all testable workflows"
-depends = ["workflow:_require-docker"]
 run = '''
-mkdir -p .artifacts .cache
-GH="${GITHUB_TOKEN:-${GH_TOKEN:-$(gh auth token 2>/dev/null)}}"
-SECRETS="-s GITHUB_TOKEN=$GH"
-[[ -n "${SONAR_TOKEN:-}" ]] && SECRETS="$SECRETS -s SONAR_TOKEN=$SONAR_TOKEN"
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] && SECRETS="$SECRETS -s CLAUDE_CODE_OAUTH_TOKEN=$ANTHROPIC_API_KEY"
-[[ -n "${GH_PROJECTS_TOKEN:-}" ]] && SECRETS="$SECRETS -s GH_PROJECTS_TOKEN=$GH_PROJECTS_TOKEN"
-echo "[INFO] Secrets: $(echo $SECRETS | sed 's/=[^ ]*/=***/g')"
-
-GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; NC=$'\033[0m'
-run_job() { echo "${GREEN}[RUN]${NC} $1:$2"; act "$3" {{vars.ACT_FLAGS}} {{vars.ACT_OFFLINE}} $SECRETS -W ".github/workflows/$1" -j "$2" && echo "${GREEN}[OK]${NC} $2" || echo "${RED}[FAIL]${NC} $2"; }
-
-run_job ci.yml dependency-audit push
-run_job ci.yml quality push
-run_job passive-qc.yml sync-labels workflow_dispatch
-run_job passive-qc.yml branch-cleanup workflow_dispatch
-run_job dashboard.yml update-dashboard workflow_dispatch
-[[ -n "${SONAR_TOKEN:-}" ]] && run_job sonarcloud.yml Analysis workflow_dispatch
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] && run_job ai-maintenance.yml manual-task workflow_dispatch
-
-echo "${GREEN}[DONE]${NC} All testable workflows executed"
-echo "[INFO] Untestable locally: deploy.yml, claude.yml, claude-code-review.yml, gemini-*.yml, n8n-sync.yml"
+set -euo pipefail
+actionlint .github/workflows/*.yml && echo '[OK] actionlint'
+zizmor .github/workflows/ && echo '[OK] zizmor'
+ratchet lint .github/workflows/*.yml && echo '[OK] ratchet'
 '''
+
+[tasks."wf:dry-run"]
+description = "Dry-run validation (job graph, no execution)"
+run = '''
+docker info >/dev/null 2>&1 || { echo '[SKIP] Docker not available'; exit 0; }
+act {{vars.ACT_FLAGS}} --validate --strict -l && echo '[OK] Dry-run valid'
+'''
+
+[tasks."wf:check"]
+description = "Full validation: static + dry-run"
+depends = ["wf:static"]
+run = '''
+if docker info >/dev/null 2>&1; then
+  act {{vars.ACT_FLAGS}} --validate --strict -l 2>&1 | head -30
+  echo '[OK] Dry-run validation complete'
+else
+  echo '[SKIP] Docker not available, skipping dry-run'
+fi
+'''
+
+[tasks."wf:trigger"]
+description = "Trigger workflow on current branch"
+run = '''
+WORKFLOW="${1:-ci.yml}"
+gh workflow run "$WORKFLOW" --ref "$(git branch --show-current)"
+echo "[OK] Triggered $WORKFLOW"
+'''
+
+[tasks."wf:watch"]
+description = "Watch latest workflow run until completion"
+run = "gh run watch --exit-status"
+
+[tasks."wf:status"]
+description = "Show recent workflow runs"
+run = "gh run list --limit 5"
+
+[tasks."wf:debug"]
+description = "View failed step logs from latest run"
+run = "gh run view --log-failed"
+
+[tasks."wf:cancel"]
+description = "Cancel in-progress workflow run"
+run = "gh run cancel"
+
+[tasks."wf:rerun"]
+description = "Rerun failed jobs from latest run"
+run = "gh run rerun --failed"
+
+[tasks."wf:artifacts"]
+description = "Download artifacts from latest run"
+run = "mkdir -p .artifacts && gh run download -D .artifacts"
+
+[tasks."wf:test"]
+description = "Test workflow: trigger + watch"
+run = '''
+WORKFLOW="${1:-ci.yml}"
+gh workflow run "$WORKFLOW" --ref "$(git branch --show-current)"
+sleep 3
+gh run watch --exit-status
+'''
+
+[tasks."wf:clean"]
+description = "Clean workflow artifacts and cache"
+run = "rm -rf .artifacts/* .cache/* .act-secrets 2>/dev/null; echo '[OK] Cleaned'"

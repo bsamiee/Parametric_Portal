@@ -39,6 +39,7 @@ const useQuery = <A, E, R>(
     const { enabled = true, onError, onSettled, onSuccess } = options;
     const runtime = useRuntime<R, never>();
     const [state, setState] = useState<AsyncState<A, E>>(asyncApi.idle);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: effect/callbacks intentionally excluded (identity changes on every render)
     useEffect(
         () =>
             enabled
@@ -67,7 +68,7 @@ const useQuery = <A, E, R>(
                 : (() => {
                       setState(asyncApi.idle());
                   })(),
-        [enabled, ...deps, effect, onError, onSettled, onSuccess, runtime.runFork],
+        [enabled, ...deps, runtime],
     );
     return state;
 };

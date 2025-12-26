@@ -39,6 +39,12 @@ const OIDCUserInfoSchema = S.Struct({
     picture: S.optional(S.String),
     sub: S.String,
 });
+/** Arctic library returns token objects with method accessors, not properties */
+const ArcticTokenMethodsSchema = S.Struct({
+    accessToken: S.Unknown,
+    accessTokenExpiresAt: S.optional(S.Unknown),
+    refreshToken: S.optional(S.Unknown),
+});
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -127,6 +133,32 @@ const decodeAndNormalize = {
     microsoft: (response: unknown) =>
         S.decodeUnknown(OIDCUserInfoSchema)(response).pipe(Effect.map(normalizeUserInfo.microsoft)),
 } as const satisfies Record<OAuthProvider, (response: unknown) => Effect.Effect<OAuthUserInfo, ParseError>>;
+/** Validate Arctic token response shape, then safely invoke method accessors */
+const extractArcticTokens = (tokens: unknown, provider: OAuthProvider): Effect.Effect<OAuthTokens, OAuthError> =>
+    pipe(
+        S.decodeUnknown(ArcticTokenMethodsSchema)(tokens),
+        Effect.mapError(() => new OAuthError({ provider, reason: 'Invalid token response shape' })),
+        Effect.flatMap((validated) =>
+            Effect.try({
+                catch: () => new OAuthError({ provider, reason: 'Token method invocation failed' }),
+                try: () => {
+                    const accessTokenFn = validated.accessToken as unknown;
+                    const expiresAtFn = validated.accessTokenExpiresAt as unknown;
+                    const refreshTokenFn = validated.refreshToken as unknown;
+                    return {
+                        accessToken: typeof accessTokenFn === 'function' ? (accessTokenFn as () => string)() : '',
+                        expiresAt: Option.fromNullable(
+                            typeof expiresAtFn === 'function' ? (expiresAtFn as () => Date)() : undefined,
+                        ),
+                        refreshToken: Option.fromNullable(
+                            typeof refreshTokenFn === 'function' ? (refreshTokenFn as () => string)() : undefined,
+                        ),
+                        scope: Option.none(),
+                    } satisfies OAuthTokens;
+                },
+            }),
+        ),
+    );
 const fetchUserInfo = (provider: OAuthProvider, accessToken: string): Effect.Effect<OAuthUserInfo, OAuthError> =>
     pipe(
         Effect.tryPromise({
@@ -264,19 +296,7 @@ const OAuthServiceLive = Layer.effect(
             validateCallback: (provider, code, state) =>
                 pipe(
                     validateToken[provider](code, state),
-                    Effect.map((tokens) => {
-                        const t = tokens as {
-                            accessToken: () => string;
-                            accessTokenExpiresAt?: () => Date;
-                            refreshToken?: () => string;
-                        };
-                        return {
-                            accessToken: t.accessToken(),
-                            expiresAt: Option.fromNullable(t.accessTokenExpiresAt?.()),
-                            refreshToken: Option.fromNullable(t.refreshToken?.()),
-                            scope: Option.none(),
-                        } satisfies OAuthTokens;
-                    }),
+                    Effect.flatMap((tokens) => extractArcticTokens(tokens, provider)),
                 ),
         });
     }),

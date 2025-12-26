@@ -15,7 +15,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 | :-----: | -------------------------- | --------- | -------------------------------------- |
 |   [1]   | vitest                     | 4.0.16    | Root config, inline projects           |
 |   [2]   | @vitest/browser-playwright | 4.0.16    | runtime-browser project, real Chromium |
-|   [3]   | @vitest/coverage-v8        | 4.0.16    | Coverage provider, 80% thresholds      |
+|   [3]   | @vitest/coverage-v8        | 4.0.16    | Coverage provider, 30% thresholds      |
 |   [4]   | @vitest/ui                 | 4.0.16    | Dashboard: `pnpm vitest --ui`          |
 
 <br>
@@ -54,7 +54,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 | [INDEX] | [PACKAGE]            | [VERSION] | [INTEGRATION]                             |
 | :-----: | -------------------- | --------- | ----------------------------------------- |
 |   [1]   | @playwright/test     | 1.57.0    | E2E runner, trace capture, screenshots    |
-|   [2]   | @axe-core/playwright | 4.10.0    | Accessibility assertions, WCAG compliance |
+|   [2]   | @axe-core/playwright | 4.11.0    | Accessibility assertions, WCAG compliance |
 |   [3]   | @nx/playwright       | 22.3.3    | Nx plugin: task inference, Atomizer CI    |
 
 <br>
@@ -143,7 +143,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 
 | [INDEX] | [PACKAGE] | [VERSION] | [INTEGRATION]                             |
 | :-----: | --------- | --------- | ----------------------------------------- |
-|   [1]   | supertest | 7.1.0     | HTTP assertion library for API tests      |
+|   [1]   | supertest | 7.1.4     | HTTP assertion library for API tests      |
 |   [2]   | effect    | 3.19.13   | Monadic composition, Effect/Option/Either |
 
 ---
@@ -165,14 +165,14 @@ catalog:
   '@vitest/browser-playwright': 4.0.16
   '@vitest/coverage-v8': 4.0.16
   '@vitest/ui': 4.0.16
-  '@axe-core/playwright': 4.10.0
+  '@axe-core/playwright': 4.11.0
   fake-indexeddb: 6.2.5
-  fast-check: 4.5.1
+  fast-check: 4.5.2
   happy-dom: 20.0.11
   lost-pixel: 3.27.0
-  msw: 2.8.0
+  msw: 2.12.4
   snapshot-diff: 0.10.0
-  supertest: 7.1.0
+  supertest: 7.1.4
   vitest: 4.0.16
   vitest-axe: 0.1.0
   vitest-browser-react: 2.0.2
@@ -246,3 +246,15 @@ catalog:
 - Added: Plugin inference with proper caching
 
 [IMPORTANT] Plugins provide automatic task inference—no manual target configuration required.
+
+---
+## [10][REFERENCES]
+>**Dictum:** *Cross-references enable navigation.*
+
+<br>
+
+| [INDEX] | [DOCUMENT]                    | [SCOPE]                            |
+| :-----: | ----------------------------- | ---------------------------------- |
+|   [1]   | [→standards.md](standards.md) | Authoring standards, anti-patterns |
+|   [2]   | [→patterns.md](patterns.md)   | Test code patterns, B constant     |
+|   [3]   | [→overview.md](overview.md)   | Architecture, topology, commands   |

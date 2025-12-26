@@ -11,11 +11,12 @@ spec:
   namespaceSelector:
     matchNames:
       - parametric-portal
+      - parametric-portal-dev
   selector:
     matchLabels:
       app.kubernetes.io/name: api
   podMetricsEndpoints:
     - port: http
-      path: /api/metrics
+      path: /api/metrics/
       interval: 30s
       scrapeTimeout: 10s
