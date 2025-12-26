@@ -32,6 +32,10 @@ type TypesApi = {
     readonly brands: typeof brands;
     readonly createIdGenerator: typeof createIdGenerator;
     readonly derive: { readonly hex8: typeof deriveHex8 };
+    readonly factories: {
+        readonly boundedInt: typeof boundedInt;
+        readonly boundedNumber: typeof boundedNumber;
+    };
     readonly generate: {
         readonly hex8: () => Hex8;
         readonly uuidv7: Effect.Effect<Uuidv7, never, never>;
@@ -200,6 +204,7 @@ const types = (): TypesApi =>
         brands,
         createIdGenerator,
         derive: Object.freeze({ hex8: deriveHex8 }),
+        factories: Object.freeze({ boundedInt, boundedNumber }),
         generate: Object.freeze({
             hex8: generateHex8,
             uuidv7: Effect.sync(generateUuidv7Sync),

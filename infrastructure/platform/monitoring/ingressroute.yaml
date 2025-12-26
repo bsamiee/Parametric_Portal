@@ -1,0 +1,72 @@
+# --- GRAFANA INGRESS ROUTE ----------------------------------------------------
+# Traefik IngressRoute for Grafana dashboard access
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: grafana-https
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: ingress
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`grafana.parametric-portal.com`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: grafana-middleware-chain
+          namespace: monitoring
+      services:
+        - kind: Service
+          name: lgtm-grafana
+          port: 80
+          passHostHeader: true
+  tls:
+    certResolver: letsencrypt
+    domains:
+      - main: grafana.parametric-portal.com
+---
+# --- GRAFANA SECURITY HEADERS -------------------------------------------------
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: grafana-security-headers
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: middleware
+spec:
+  headers:
+    frameDeny: true
+    contentTypeNosniff: true
+    browserXssFilter: true
+    referrerPolicy: strict-origin-when-cross-origin
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: true
+    forceSTSHeader: true
+    customResponseHeaders:
+      X-Robots-Tag: noindex, nofollow
+      X-Download-Options: noopen
+      X-Permitted-Cross-Domain-Policies: none
+---
+# --- GRAFANA MIDDLEWARE CHAIN -------------------------------------------------
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: grafana-middleware-chain
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/component: middleware
+spec:
+  chain:
+    middlewares:
+      - name: grafana-security-headers
+        namespace: monitoring
+      - name: rate-limit-web
+        namespace: parametric-portal
+      - name: compress
+        namespace: parametric-portal

@@ -1,0 +1,27 @@
+# --- RESOURCE QUOTA -----------------------------------------------------------
+# Namespace-level resource limits for CPU, memory, and object counts
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: parametric-portal-quota
+  namespace: parametric-portal
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: resource-management
+    app.kubernetes.io/part-of: parametric-portal
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    requests.ephemeral-storage: 10Gi
+    limits.ephemeral-storage: 20Gi
+    requests.storage: 50Gi
+    # PVC headroom for future services (current: 5 + buffer: 3)
+    persistentvolumeclaims: "8"
+    count/pods: "30"
+    count/deployments.apps: "10"
+    count/services: "10"
+    count/configmaps: "20"
+    count/secrets: "20"

@@ -82,11 +82,13 @@ mise run setup-k3s
 ```
 
 **Bootstrap installs:**
-1. K3s v1.32.2+k3s1 (single node, cluster-init)
+1. K3s v1.32.11+k3s1 (single node, cluster-init)
 2. Traefik v3.3.5 (via HelmChartConfig)
 3. ArgoCD v7.8.28 (Helm chart)
 4. Sealed Secrets v2.17.1 (Helm chart)
 5. Namespace with LimitRange
+
+[IMPORTANT] Kyverno and Monitoring deployed via ArgoCD after applying Applications (see §1.3).
 
 **Outputs:**
 - Kubeconfig: `/etc/rancher/k3s/k3s.yaml`
@@ -97,8 +99,12 @@ mise run setup-k3s
 ### [1.3][POST_BOOTSTRAP]
 
 ```bash
-# Apply ArgoCD ApplicationSet
-kubectl apply -f infrastructure/argocd/application.yaml
+# Apply all ArgoCD Applications
+kubectl apply -f infrastructure/argocd/apps.yaml              # Workloads (API, Icons)
+kubectl apply -f infrastructure/argocd/kyverno.yaml           # Policy engine
+kubectl apply -f infrastructure/argocd/kyverno-policies.yaml  # Security policies
+kubectl apply -f infrastructure/argocd/monitoring.yaml        # Grafana LGTM stack
+kubectl apply -f infrastructure/argocd/monitoring-resources.yaml  # Dashboards, PodMonitors
 
 # Create and apply sealed secrets (see §3)
 mise run seal-secret api-secrets parametric-portal
@@ -106,6 +112,16 @@ mise run seal-secret api-secrets parametric-portal
 # Verify deployment
 kubectl get applications -n argocd
 ```
+
+**ArgoCD Applications:**
+
+| [INDEX] | [APPLICATION]        | [PURPOSE]                    |
+| :-----: | -------------------- | ---------------------------- |
+|   [1]   | parametric-portal-*  | Workloads (API, Icons, DB)   |
+|   [2]   | kyverno              | Kyverno Helm chart v3.6.1    |
+|   [3]   | kyverno-policies     | ClusterPolicies + exceptions |
+|   [4]   | monitoring           | Grafana LGTM stack v3.0.1    |
+|   [5]   | monitoring-resources | Dashboards, PodMonitors      |
 
 ---
 ## [2][DEPLOY]
@@ -257,10 +273,10 @@ mise run seal-secret api-secrets parametric-portal
 
 ### [4.1][HPA_CONFIGURATION]
 
-| [INDEX] | [SERVICE] | [MIN] | [MAX] | [CPU_TARGET] | [MEM_TARGET] |
-| :-----: | --------- | :---: | :---: | :----------: | :----------: |
-|   [1]   | API       |   2   |  10   |     70%      |     80%      |
-|   [2]   | Icons     |   2   |   6   |     75%      |      -       |
+| [INDEX] | [SERVICE] | [MIN] | [MAX] | [CPU_TARGET] | [MEM_TARGET] | [FILE]         |
+| :-----: | --------- | :---: | :---: | :----------: | :----------: | -------------- |
+|   [1]   | API       |   2   |  10   |     70%      |     80%      | `hpa-api.yaml` |
+|   [2]   | Icons     |   2   |   6   |     75%      |     80%      | `hpa-api.yaml` |
 
 ---
 ### [4.2][SCALE_BEHAVIOR]
@@ -299,11 +315,23 @@ kubectl scale deployment/api --replicas=5 -n parametric-portal
 
 ---
 ## [5][BACKUP]
->**Dictum:** *Automated backups enable point-in-time recovery.*
+>**Dictum:** *Layered backups enable recovery at multiple granularities.*
 
 <br>
 
-### [5.1][DATABASE_BACKUP]
+[IMPORTANT] Two backup systems operate in parallel (intentional layering):
+
+| [INDEX] | [SYSTEM]           | [METHOD]             | [FREQUENCY] | [RETENTION] |
+| :-----: | ------------------ | -------------------- | ----------- | ----------- |
+|   [1]   | Local (mise task)  | pg_dump + gzip       | On-demand   | 7 days      |
+|   [2]   | S3 (CloudNativePG) | WAL archiving + PITR | Continuous  | 7 days      |
+
+**Local backups:** Fast point-in-time recovery for recent data.
+**S3 backups:** Disaster recovery, off-site storage, full PITR capability.
+
+<br>
+
+### [5.1][LOCAL_BACKUP]
 
 ```bash
 # Run backup
@@ -319,22 +347,45 @@ mise run backup-db
 |   [1]   | `BACKUP_DIR`     | /opt/backups/postgres |
 |   [2]   | `RETENTION_DAYS` | 7                     |
 |   [3]   | `CONTAINER_NAME` | postgres              |
-|   [4]   | `DB_NAME`        | parametric            |
+|   [4]   | `DB_NAME`        | parametric_portal     |
 
 ---
-### [5.2][BACKUP_RESTORATION]
+### [5.2][S3_BACKUP]
+
+CloudNativePG continuously archives WAL to S3-compatible storage. Configured in `infrastructure/apps/postgres/cluster.yaml`:
+
+```yaml
+backup:
+  barmanObjectStore:
+    destinationPath: "s3://parametric-portal-backups/postgres/"
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: "7d"
+```
+
+**Scheduled backups:** Daily at 2:00 AM UTC via `ScheduledBackup` resource.
+
+---
+### [5.3][LOCAL_RESTORATION]
 
 ```bash
-# List available backups
+# List available local backups
 ls -la /opt/backups/postgres/
 
-# Restore specific backup
-gunzip -c /opt/backups/postgres/parametric_20250101_120000.sql.gz | \
-  docker exec -i postgres psql -U postgres -d parametric
+# Restore specific backup (production - CloudNativePG)
+POD=$(kubectl get pods -n parametric-portal -l cnpg.io/cluster -o jsonpath='{.items[0].metadata.name}')
+gunzip -c /opt/backups/postgres/parametric_portal_20250101_120000.sql.gz | \
+  kubectl exec -i -n parametric-portal "${POD}" -- psql -U app -d parametric_portal
+
+# Restore specific backup (local dev - Docker)
+gunzip -c /opt/backups/postgres/parametric_portal_20250101_120000.sql.gz | \
+  docker exec -i postgres psql -U app -d parametric_portal
 ```
 
 ---
-### [5.3][CLUSTER_BACKUP]
+### [5.4][CLUSTER_BACKUP]
 
 K3s stores cluster state in `/var/lib/rancher/k3s/server/db/`:
 

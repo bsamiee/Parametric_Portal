@@ -1,0 +1,10 @@
+# --- MONITORING NAMESPACE -----------------------------------------------------
+# Dedicated namespace for Grafana LGTM observability stack
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/part-of: parametric-suite
+    app.kubernetes.io/managed-by: kustomize

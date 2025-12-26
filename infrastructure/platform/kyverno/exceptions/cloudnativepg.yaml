@@ -1,0 +1,35 @@
+# --- CLOUDNATIVEPG EXCEPTION --------------------------------------------------
+# Exempt CloudNativePG clusters from read-only rootfs (PostgreSQL needs writes)
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: cloudnativepg-exception
+  namespace: kyverno
+spec:
+  exceptions:
+    - policyName: require-ro-rootfs
+      ruleNames:
+        - validate-readOnlyRootFilesystem
+        - autogen-validate-readOnlyRootFilesystem
+    - policyName: restrict-image-registries
+      ruleNames:
+        - validate-registries
+        - autogen-validate-registries
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+          namespaces:
+            - parametric-portal
+          selector:
+            matchLabels:
+              cnpg.io/podRole: instance
+      - resources:
+          kinds:
+            - Pod
+          namespaces:
+            - parametric-portal
+          selector:
+            matchLabels:
+              cnpg.io/jobRole: join

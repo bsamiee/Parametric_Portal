@@ -101,6 +101,9 @@ const IconsGroup = createGroup('icons', { prefix: '/icons' })
             .addError(InternalError, { status: 500 }),
     );
 const HealthGroup = createHealthGroup();
+const MetricsGroup = createGroup('metrics', { prefix: '/metrics' }).add(
+    HttpApiEndpoint.get('list', '/').addSuccess(S.String),
+);
 
 // --- [API] -------------------------------------------------------------------
 
@@ -111,7 +114,8 @@ const AppApi = createApi('ParametricPortalApi', {
 })
     .add(AuthGroup)
     .add(IconsGroup)
-    .add(HealthGroup);
+    .add(HealthGroup)
+    .add(MetricsGroup);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
@@ -124,4 +128,5 @@ export {
     HealthGroup,
     IconsGroup,
     ListApiKeysResponseSchema,
+    MetricsGroup,
 };

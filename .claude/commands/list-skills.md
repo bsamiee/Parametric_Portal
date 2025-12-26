@@ -19,7 +19,7 @@ Execute sections in sequence. Format output as definition list.
 Run skill index hook:
 
 ```bash
-uv run "$CLAUDE_PROJECT_DIR/.claude/hooks/load-skill-index.py"
+uv run .claude/hooks/load-skill-index.py
 ```
 
 ---

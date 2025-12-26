@@ -197,14 +197,4 @@ const api = (): ApiApi =>
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { api, B as API_TUNING };
-export type {
-    ApiApi,
-    ApiError,
-    ApiResponse,
-    ApiResponseFold,
-    ApiSuccess,
-    HttpStatusError,
-    HttpStatusSuccess,
-    PaginatedSuccess,
-    PaginationMeta,
-};
+export type { ApiError, ApiResponse, ApiSuccess, HttpStatusError };

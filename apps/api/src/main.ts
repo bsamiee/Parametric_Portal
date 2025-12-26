@@ -8,19 +8,20 @@ import type { HttpApp } from '@effect/platform';
 import { HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
-import { AnthropicClientLive } from '@parametric-portal/ai/anthropic';
 import { PgLive } from '@parametric-portal/database/client';
 import { sessionToResult } from '@parametric-portal/database/models';
 import { makeRepositories } from '@parametric-portal/database/repositories';
 import { HttpApiBuilder } from '@parametric-portal/server/api';
-import { ServiceUnavailableError, UnauthorizedError } from '@parametric-portal/server/errors';
+import { ServiceUnavailableError } from '@parametric-portal/server/errors';
+import { createMetricsMiddleware, registry } from '@parametric-portal/server/metrics';
 import {
     createCorsLayer,
     createRequestIdMiddleware,
     createSecurityHeadersMiddleware,
     createSessionAuthLayer,
 } from '@parametric-portal/server/middleware';
-import type { TokenHash } from '@parametric-portal/types/database';
+import { TelemetryLive } from '@parametric-portal/server/telemetry';
+import type { SessionResult, TokenHash } from '@parametric-portal/types/database';
 import { Effect, Layer, Option, pipe } from 'effect';
 import { AppApi } from './api.ts';
 import { OAuthServiceLive } from './oauth.ts';
@@ -38,7 +39,13 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const composeMiddleware = (app: HttpApp.Default): HttpApp.Default<never, never> =>
-    pipe(app, createSecurityHeadersMiddleware(), createRequestIdMiddleware(), HttpMiddleware.logger);
+    pipe(
+        app,
+        createMetricsMiddleware(),
+        createSecurityHeadersMiddleware(),
+        createRequestIdMiddleware(),
+        HttpMiddleware.logger,
+    );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -48,8 +55,8 @@ const SessionAuthLive = pipe(
             createSessionAuthLayer((tokenHash: TokenHash) =>
                 pipe(
                     repos.sessions.findByTokenHash(tokenHash),
-                    Effect.map((session) => Option.map(session, sessionToResult)),
-                    Effect.catchAll(() => Effect.fail(new UnauthorizedError({ reason: 'Session lookup failed' }))),
+                    Effect.map(Option.map(sessionToResult)),
+                    Effect.catchAll(() => Effect.succeed(Option.none<SessionResult>())),
                 ),
             ),
         ),
@@ -79,12 +86,16 @@ const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
             );
     }),
 );
+const MetricsLive = HttpApiBuilder.group(AppApi, 'metrics', (handlers) =>
+    Effect.gen(function* () {
+        return handlers.handle('list', () => Effect.promise(async () => await registry.metrics()));
+    }),
+);
 const ApiLive = HttpApiBuilder.api(AppApi).pipe(
-    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive)),
+    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MetricsLive)),
     Layer.provide(PgLive),
     Layer.provide(OAuthServiceLive),
     Layer.provide(IconGenerationServiceLive),
-    Layer.provide(AnthropicClientLive),
 );
 const ServerLive = pipe(
     HttpApiBuilder.serve(composeMiddleware),
@@ -92,6 +103,7 @@ const ServerLive = pipe(
     Layer.provide(ApiLive),
     Layer.provide(createCorsLayer({ allowedOrigins: B.cors.allowedOrigins })),
     Layer.provide(SessionAuthLive),
+    Layer.provide(TelemetryLive),
     HttpServer.withLogAddress,
     Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),
 );

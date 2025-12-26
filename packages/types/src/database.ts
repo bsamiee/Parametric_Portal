@@ -2,7 +2,7 @@
  * Define database entity identifiers, domain schemas, and auth response types.
  * Single import point for all domain primitives via @parametric-portal/types/database.
  */
-import { Duration, pipe, type Redacted, Schema as S } from 'effect';
+import { Duration, Option, pipe, type Redacted, Schema as S } from 'effect';
 import { type Hex64, types } from './types.ts';
 
 const typesApi = types();
@@ -134,22 +134,22 @@ const AssetListItemSchema = S.Struct({ id: AssetIdSchema, prompt: S.NonEmptyTrim
 const AssetCountResultSchema = S.Struct({ count: S.NumberFromString });
 const AiProviderSchema = S.Literal(...B.aiProviders);
 const ApiKeyListItemSchema = S.Struct({
-    createdAt: S.DateTimeUtc,
+    createdAt: S.DateFromSelf,
     id: ApiKeyIdSchema,
-    lastUsedAt: S.OptionFromNullOr(S.DateTimeUtc),
+    lastUsedAt: S.OptionFromNullOr(S.DateFromSelf),
     name: S.NonEmptyTrimmedString,
     provider: AiProviderSchema,
 });
 const OAuthTokensSchema = S.Struct({
     accessToken: S.String,
-    expiresAt: S.OptionFromSelf(S.DateFromSelf),
-    refreshToken: S.OptionFromSelf(S.String),
-    scope: S.OptionFromSelf(S.String),
+    expiresAt: S.OptionFromNullOr(S.DateFromSelf),
+    refreshToken: S.OptionFromNullOr(S.String),
+    scope: S.OptionFromNullOr(S.String),
 });
 const OAuthUserInfoSchema = S.Struct({
-    avatarUrl: S.OptionFromSelf(S.String),
-    email: S.OptionFromSelf(S.String),
-    name: S.OptionFromSelf(S.String),
+    avatarUrl: S.OptionFromNullOr(S.String),
+    email: S.OptionFromNullOr(S.String),
+    name: S.OptionFromNullOr(S.String),
     providerAccountId: S.String,
 });
 const OAuthStartResponseSchema = S.Struct({ url: S.String });
@@ -161,13 +161,17 @@ const LogoutResponseSchema = S.Struct({ success: S.Boolean });
 
 const Expiry = Object.freeze({
     check: (date: Date | null | undefined, bufferMs = Duration.toMillis(B.durations.refreshBuffer)) =>
-        date === null || date === undefined
-            ? { delayMs: 0, expired: false, shouldRefresh: false }
-            : {
-                  delayMs: Math.max(0, date.getTime() - Date.now() - bufferMs),
-                  expired: date.getTime() < Date.now(),
-                  shouldRefresh: date.getTime() - Date.now() - bufferMs <= 0,
-              },
+        pipe(
+            Option.fromNullable(date),
+            Option.match({
+                onNone: () => ({ delayMs: 0, expired: false, shouldRefresh: false }),
+                onSome: (d) => ({
+                    delayMs: Math.max(0, d.getTime() - Date.now() - bufferMs),
+                    expired: d.getTime() < Date.now(),
+                    shouldRefresh: d.getTime() - Date.now() - bufferMs <= 0,
+                }),
+            }),
+        ),
     computeFrom: (duration: Duration.Duration): Date => new Date(Date.now() + Duration.toMillis(duration)),
 });
 

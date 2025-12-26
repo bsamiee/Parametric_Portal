@@ -17,11 +17,15 @@ spec:
         app.kubernetes.io/name: icons
         app.kubernetes.io/component: frontend
     spec:
+      serviceAccountName: icons
+      automountServiceAccountToken: false
       containers:
         - name: icons
           image: ghcr.io/parametric-portal/icons:latest
+          imagePullPolicy: Always
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
               protocol: TCP
           env:
             - name: ADDRESS

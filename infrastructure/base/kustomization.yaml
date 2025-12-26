@@ -10,6 +10,8 @@ metadata:
 
 resources:
   - namespace.yaml
+  - rbac.yaml
+  - resourcequota.yaml
   - tlsoption.yaml
   - networkpolicy.yaml
   - poddisruptionbudget.yaml

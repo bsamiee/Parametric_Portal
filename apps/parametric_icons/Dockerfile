@@ -8,7 +8,7 @@ ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-slim-bookworm AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates=20230311* \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable
 WORKDIR /app
@@ -32,6 +32,7 @@ RUN pnpm exec nx run @parametric-portal/parametric-icons:build
 
 # --- RUNTIME (spa-to-http) ----------------------------------------------------
 FROM devforth/spa-to-http@sha256:f6e18f2ae51fd95f7f53808d8f4dad2e0ee874b70ae83fc79c872da89d2ddeb7 AS runtime
+WORKDIR /code
 
 COPY --link --from=build /app/apps/parametric_icons/dist .
 

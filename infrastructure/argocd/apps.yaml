@@ -1,5 +1,6 @@
-# --- ARGOCD APPLICATIONSET ----------------------------------------------------
-# GitOps deployment with automatic Application generation per overlay
+# --- ARGOCD APPS APPLICATIONSET -----------------------------------------------
+# Application workloads (api, icons, postgres) deployed via overlay discovery
+# Platform infrastructure (kyverno, monitoring) deployed via separate Applications
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:

@@ -1,0 +1,46 @@
+# --- MONITORING RESOURCES ARGOCD APPLICATION ----------------------------------
+# Supporting resources for LGTM stack (PodMonitors, Dashboards, NetworkPolicies)
+# Depends on monitoring Application for the actual stack
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-resources
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: monitoring-resources
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: parametric-suite
+    app.kubernetes.io/managed-by: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/bardiasamiee/Parametric_Portal.git
+    targetRevision: HEAD
+    path: infrastructure/platform/monitoring
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 5

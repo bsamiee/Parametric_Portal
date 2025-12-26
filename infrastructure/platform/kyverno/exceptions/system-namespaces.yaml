@@ -1,0 +1,45 @@
+# --- SYSTEM NAMESPACES EXCEPTION ----------------------------------------------
+# Exempt system namespaces from security policies (operators require privileges)
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: system-namespace-exception
+  namespace: kyverno
+spec:
+  exceptions:
+    - policyName: require-run-as-nonroot
+      ruleNames:
+        - run-as-non-root
+        - autogen-run-as-non-root
+    - policyName: disallow-privilege-escalation
+      ruleNames:
+        - privilege-escalation
+        - autogen-privilege-escalation
+    - policyName: require-ro-rootfs
+      ruleNames:
+        - validate-readOnlyRootFilesystem
+        - autogen-validate-readOnlyRootFilesystem
+    - policyName: require-requests-limits
+      ruleNames:
+        - validate-resources
+        - autogen-validate-resources
+    - policyName: restrict-image-registries
+      ruleNames:
+        - validate-registries
+        - autogen-validate-registries
+  match:
+    any:
+      - resources:
+          kinds:
+            - Pod
+            - Deployment
+            - StatefulSet
+            - DaemonSet
+            - ReplicaSet
+          namespaces:
+            - kube-system
+            - kube-public
+            - kube-node-lease
+            - kyverno
+            - argocd
+            - cnpg-system

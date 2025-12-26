@@ -136,7 +136,7 @@ const isInGamut = (color: OklchColor, gamut: Gamut = 'srgb'): boolean => toColor
 const gamutMap = (color: OklchColor, gamut: Gamut = 'srgb'): Effect.Effect<OklchColor, ParseError> => {
     const mapped = toColorJs(color).to(gamut).toGamut({ space: 'oklch' });
     const [l, c, h] = mapped.coords;
-    return create(l, c, h, mapped.alpha ?? 1);
+    return create(l ?? 0, c ?? 0, h ?? 0, mapped.alpha ?? 1);
 };
 
 /** Convert OKLCH to sRGB via Color.js. Grounding: CSS Color 4 spec-compliant gamut mapping. */

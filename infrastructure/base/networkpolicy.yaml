@@ -94,6 +94,39 @@ spec:
       ports:
         - protocol: TCP
           port: 443
+    # OTLP traces to Alloy collector
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alloy
+      ports:
+        - protocol: TCP
+          port: 4317
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-icons-to-api
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: security
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: icons
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: api
+      ports:
+        - protocol: TCP
+          port: 4000
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

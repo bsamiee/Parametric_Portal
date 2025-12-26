@@ -19,7 +19,6 @@ import type {
     SessionResult,
     TokenHash,
 } from '@parametric-portal/types/database';
-
 import { Context, Effect, Layer, Option, pipe, Redacted } from 'effect';
 import { hashString, validateTokenHash } from './crypto.ts';
 import {
@@ -35,24 +34,25 @@ import {
 // --- [TYPES] -----------------------------------------------------------------
 
 type CorsConfig = Partial<typeof B.cors>;
-
 type SecurityHeadersConfig = {
     readonly contentTypeOptions?: boolean;
     readonly frameOptions?: 'DENY' | 'SAMEORIGIN';
     readonly hsts?: { maxAge: number; includeSubDomains: boolean } | false;
     readonly referrerPolicy?: string;
 };
-
 type BasicCredentials = {
     readonly password: Redacted.Redacted<string>;
     readonly username: string;
 };
-
 type RequestIdConfig = {
     readonly headerName?: string;
 };
-
-type SqlErrorInput = { readonly code?: string; readonly constraint?: string; readonly message?: string };
+type SqlErrorInput = {
+    readonly code?: string;
+    readonly constraint?: string;
+    readonly message?: string;
+    readonly table?: string;
+};
 type SqlErrorCode = keyof typeof B.sqlCodes;
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -121,19 +121,16 @@ class ApiKeyAuth extends HttpApiMiddleware.Tag<ApiKeyAuth>()('ApiKeyAuth', {
     provides: ApiKeyContext,
     security: { apiKey: HttpApiSecurity.apiKey({ in: 'header', key: B.security.apiKeyHeader }) },
 }) {}
-
 class BearerAuth extends HttpApiMiddleware.Tag<BearerAuth>()('BearerAuth', {
     failure: UnauthorizedError,
     provides: BearerTokenContext,
     security: { bearer: HttpApiSecurity.bearer },
 }) {}
-
 class BasicAuth extends HttpApiMiddleware.Tag<BasicAuth>()('BasicAuth', {
     failure: UnauthorizedError,
     provides: BasicAuthContext,
     security: { basic: HttpApiSecurity.basic },
 }) {}
-
 class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
     failure: UnauthorizedError,
     provides: SessionContext,
@@ -144,18 +141,18 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
 
 const sqlErrorHandlers = {
     check: (e: SqlErrorInput) =>
-        new DatabaseConstraintError({ code: 'check', constraint: e.constraint ?? '', table: '' }),
+        new DatabaseConstraintError({ code: 'check', constraint: e.constraint ?? '', table: e.table ?? '' }),
     connectionLost: () => new DatabaseConnectionError({ reason: 'connection_lost' }),
     deadlock: (e: SqlErrorInput) => new DatabaseDeadlockError({ sqlState: e.code ?? '' }),
     foreignKey: (e: SqlErrorInput) =>
-        new DatabaseConstraintError({ code: 'foreign_key', constraint: e.constraint ?? '', table: '' }),
+        new DatabaseConstraintError({ code: 'foreign_key', constraint: e.constraint ?? '', table: e.table ?? '' }),
     lockTimeout: () => new DatabaseTimeoutError({ durationMs: 0, timeoutType: 'lock' }),
     notNull: (e: SqlErrorInput) =>
-        new DatabaseConstraintError({ code: 'not_null', constraint: e.constraint ?? '', table: '' }),
+        new DatabaseConstraintError({ code: 'not_null', constraint: e.constraint ?? '', table: e.table ?? '' }),
     poolExhausted: () => new DatabaseConnectionError({ reason: 'pool_exhausted' }),
     statementTimeout: () => new DatabaseTimeoutError({ durationMs: 0, timeoutType: 'statement' }),
     unique: (e: SqlErrorInput) =>
-        new DatabaseConstraintError({ code: 'unique', constraint: e.constraint ?? '', table: '' }),
+        new DatabaseConstraintError({ code: 'unique', constraint: e.constraint ?? '', table: e.table ?? '' }),
 } as const satisfies Record<(typeof B.sqlCodes)[SqlErrorCode], (e: SqlErrorInput) => unknown>;
 const mapSqlError = (error: SqlErrorInput) =>
     pipe(
@@ -322,4 +319,4 @@ export {
     SessionAuth,
     SessionContext,
 };
-export type { BasicCredentials, CorsConfig, RequestIdConfig, SecurityHeadersConfig };
+export type { BasicCredentials, CorsConfig, RequestIdConfig, SecurityHeadersConfig, SqlErrorInput };

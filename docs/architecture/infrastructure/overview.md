@@ -11,16 +11,22 @@ Production-grade Kubernetes infrastructure using K3s, Kustomize, ArgoCD, and Tra
 
 <br>
 
-| [INDEX] | [LAYER]         | [TOOL]         | [VERSION]    | [RATIONALE]                                 |
-| :-----: | --------------- | -------------- | ------------ | ------------------------------------------- |
-|   [1]   | Orchestration   | K3s            | v1.32.2+k3s1 | Single binary, 10s startup, Traefik bundled |
-|   [2]   | Ingress         | Traefik        | v3.3.5       | Auto SSL via ACME, CRD-based config         |
-|   [3]   | GitOps          | ArgoCD         | v7.8.28      | Auto-sync from git, prune orphaned          |
-|   [4]   | Manifests       | Kustomize      | v5.5         | Native ArgoCD, no templating language       |
-|   [5]   | Secrets         | Sealed Secrets | v2.17.1      | GitOps-native, encrypted in git             |
-|   [6]   | Task Runner     | mise           | latest       | Unified tool/env/task management            |
-|   [7]   | Container Build | @nx/docker     | 22.3.3       | Nx-native, affected-aware builds            |
-|   [8]   | Static Server   | spa-to-http    | latest       | 10MB image, Brotli, SPA mode                |
+| [INDEX] | [LAYER]         | [TOOL]         | [VERSION]     | [RATIONALE]                                 |
+| :-----: | --------------- | -------------- | ------------- | ------------------------------------------- |
+|   [1]   | Orchestration   | K3s            | v1.32.11+k3s1 | Single binary, 10s startup, Traefik bundled |
+|   [2]   | Ingress         | Traefik        | v3.3.5        | Auto SSL via ACME, CRD-based config         |
+|   [3]   | GitOps          | ArgoCD         | v7.8.28       | Auto-sync from git, prune orphaned          |
+|   [4]   | Manifests       | Kustomize      | v5.5          | Native ArgoCD, no templating language       |
+|   [5]   | Secrets         | Sealed Secrets | v2.17.1       | GitOps-native, encrypted in git             |
+|   [6]   | Database        | CloudNativePG  | v1.28.0       | K8s-native PostgreSQL 17, HA, S3 backup     |
+|   [7]   | Pod Security    | Kyverno        | v3.6.1        | Policy engine for PSS compliance            |
+|   [8]   | Task Runner     | mise           | latest        | Unified tool/env/task management            |
+|   [9]   | Dev Tooling     | Nix            | 24.05         | 20 CLIs (kubectl, k9s, argocd, stern)       |
+|  [10]   | Container Build | @nx/docker     | 22.3.3        | Nx-native, affected-aware builds            |
+|  [11]   | Static Server   | spa-to-http    | latest        | 10MB image, Brotli, SPA mode                |
+|  [12]   | Observability   | Grafana LGTM   | v3.0.1        | Mimir, Loki, Tempo, Alloy, Grafana          |
+|  [13]   | Build Analytics | Nx Cloud       | -             | Remote caching, CI task analytics           |
+|  [14]   | Quality         | knip, sherif   | latest        | Dead code detection, monorepo hygiene       |
 
 <br>
 
@@ -46,8 +52,8 @@ infrastructure/
 │   ├── kustomization.yaml          # Base configuration
 │   ├── namespace.yaml              # parametric-portal namespace
 │   ├── tlsoption.yaml              # TLS 1.2+ enforcement
-│   ├── networkpolicy.yaml          # 4 network isolation policies
-│   ├── poddisruptionbudget.yaml    # 2 PDBs (API, Icons)
+│   ├── networkpolicy.yaml          # 5 network isolation policies
+│   ├── poddisruptionbudget.yaml    # 3 PDBs (API, Icons, Postgres)
 │   └── shared-middleware.yaml      # Domain-agnostic middleware
 ├── apps/                           # Per-app configs (multi-domain ready)
 │   ├── api/                        # Domain: api.parametric-portal.com
@@ -69,8 +75,20 @@ infrastructure/
 │       ├── kustomization.yaml      # Imports apps, HPA patches
 │       ├── hpa-api.yaml            # Autoscaling (2-10 replicas)
 │       └── tlsstore.yaml           # Default certificate store
+├── platform/                       # Cluster-wide infrastructure
+│   ├── kyverno/                    # Security policies (PSS Restricted)
+│   │   ├── policies/               # 5 ClusterPolicies
+│   │   └── exceptions/             # PolicyExceptions for system components
+│   └── monitoring/                 # Observability stack resources
+│       ├── ingressroute.yaml       # Grafana access
+│       ├── podmonitor-argocd.yaml  # Prometheus scrape targets
+│       └── dashboard-*.yaml        # Grafana dashboards
 └── argocd/
-    └── application.yaml            # ApplicationSet (per-overlay)
+    ├── apps.yaml                   # ApplicationSet (per-overlay)
+    ├── kyverno.yaml                # Kyverno Helm chart
+    ├── kyverno-policies.yaml       # Kyverno policies from platform/
+    ├── monitoring.yaml             # LGTM Helm chart
+    └── monitoring-resources.yaml   # Monitoring supporting resources
 ```
 
 [IMPORTANT] Multi-domain architecture: each app folder owns its IngressRoute and Middleware. Adding a new app with a different domain requires only creating a new folder in `apps/`.
@@ -91,13 +109,15 @@ infrastructure/
 |   [4]   | NetworkPolicy       | allow-traefik     | Ingress from kube-system    |
 |   [5]   | NetworkPolicy       | allow-dns         | Egress to kube-dns          |
 |   [6]   | NetworkPolicy       | allow-api-egress  | PostgreSQL + external HTTPS |
-|   [7]   | PodDisruptionBudget | api-pdb           | Min 1 available             |
-|   [8]   | PodDisruptionBudget | icons-pdb         | Min 1 available             |
-|   [9]   | Middleware          | rate-limit-api    | Shared: 100-200 req/s       |
-|  [10]   | Middleware          | rate-limit-web    | Shared: 50-100 req/s        |
-|  [11]   | Middleware          | redirect-to-https | Shared: Force HTTPS         |
-|  [12]   | Middleware          | compress          | Shared: Gzip/Brotli         |
-|  [13]   | IngressRoute        | http-redirect     | Shared: HTTP → HTTPS        |
+|   [7]   | NetworkPolicy       | allow-cnpg        | CNPG operator → postgres    |
+|   [8]   | PodDisruptionBudget | api-pdb           | Min 1 available             |
+|   [9]   | PodDisruptionBudget | icons-pdb         | Min 1 available             |
+|  [10]   | PodDisruptionBudget | postgres-pdb      | Min 1 available             |
+|  [11]   | Middleware          | rate-limit-api    | Shared: 100-200 req/s       |
+|  [12]   | Middleware          | rate-limit-web    | Shared: 50-100 req/s        |
+|  [13]   | Middleware          | redirect-to-https | Shared: Force HTTPS         |
+|  [14]   | Middleware          | compress          | Shared: Gzip/Brotli         |
+|  [15]   | IngressRoute        | http-redirect     | Shared: HTTP → HTTPS        |
 
 ---
 ### [3.2][APPLICATION_RESOURCES]
@@ -175,8 +195,9 @@ Each app folder contains its own resources. Per-app ownership enables independen
 | [INDEX] | [SERVICE] | [URL]                                                       |
 | :-----: | --------- | ----------------------------------------------------------- |
 |   [1]   | ArgoCD UI | `kubectl port-forward svc/argocd-server -n argocd 8080:443` |
-|   [2]   | API       | `https://api.parametric-portal.com`                         |
-|   [3]   | Frontend  | `https://parametric-portal.com`                             |
+|   [2]   | Grafana   | `https://grafana.parametric-portal.com`                     |
+|   [3]   | API       | `https://api.parametric-portal.com`                         |
+|   [4]   | Frontend  | `https://parametric-portal.com`                             |
 
 ---
 ### [5.3][PORTS]
@@ -185,12 +206,25 @@ Each app folder contains its own resources. Per-app ownership enables independen
 | :-----: | ------------- | :--------: | :--------: |
 |   [1]   | API           |    4000    |    443     |
 |   [2]   | Icons         |    8080    |    443     |
-|   [3]   | PostgreSQL    |    5432    |     -      |
-|   [4]   | Traefik HTTP  |    8000    |     80     |
-|   [5]   | Traefik HTTPS |    8443    |    443     |
+|   [3]   | Grafana       |    3000    |    443     |
+|   [4]   | PostgreSQL    |    5432    |     -      |
+|   [5]   | Traefik HTTP  |    8000    |     80     |
+|   [6]   | Traefik HTTPS |    8443    |    443     |
 
 ---
-### [5.4][CONTAINER_IMAGES]
+### [5.4][CLI_TOOLS]
+
+| [INDEX] | [ALIAS] | [COMMAND]   | [PURPOSE]         |
+| :-----: | ------- | ----------- | ----------------- |
+|   [1]   | `k`     | `kubecolor` | Colorized kubectl |
+|   [2]   | `k9`    | `k9s`       | Cluster TUI       |
+|   [3]   | `argo`  | `argocd`    | GitOps CLI        |
+|   [4]   | `klog`  | `stern`     | Multi-pod logs    |
+
+[REFERENCE] See `docs/architecture/infrastructure/tooling.md` for full CLI reference.
+
+---
+### [5.5][CONTAINER_IMAGES]
 
 | [INDEX] | [IMAGE]                           | [PURPOSE]    |
 | :-----: | --------------------------------- | ------------ |

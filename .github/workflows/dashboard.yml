@@ -40,8 +40,6 @@ jobs:
             nx.json
 
       - uses: ./.github/actions/node-env
-        with:
-          node-version-file: package.json
 
       - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:

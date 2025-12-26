@@ -15,6 +15,15 @@ const Dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const B = Object.freeze({
     browser: {
+        expect: {
+            toMatchScreenshot: {
+                comparatorName: 'pixelmatch' as const,
+                comparatorOptions: {
+                    allowedMismatchedPixelRatio: 0.01,
+                    threshold: 0.2,
+                },
+            },
+        },
         headless: true,
         provider: playwright({
             actionTimeout: 5_000,
@@ -134,6 +143,7 @@ export default defineConfig({
                 test: {
                     browser: {
                         enabled: true,
+                        expect: B.browser.expect,
                         headless: B.browser.headless,
                         instances: [{ browser: 'chromium' }],
                         provider: B.browser.provider,

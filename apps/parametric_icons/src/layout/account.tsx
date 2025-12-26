@@ -12,7 +12,7 @@ import {
     type ApiKeyListItem,
     DATABASE_TUNING,
 } from '@parametric-portal/types/database';
-import { DateTime, Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import { apiFactory, asyncApi, auth } from '../infrastructure.ts';
@@ -34,7 +34,7 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const formatDate = (dt: DateTime.Utc): string => DateTime.formatLocal(dt, { dateStyle: 'medium' });
+const formatDate = (dt: Date): string => dt.toLocaleDateString(undefined, { dateStyle: 'medium' });
 
 // --- [COMPONENTS] ------------------------------------------------------------
 

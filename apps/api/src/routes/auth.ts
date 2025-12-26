@@ -15,11 +15,12 @@ import {
     database,
     type OAuthProvider,
 } from '@parametric-portal/types/database';
-import type { Uuidv7 } from '@parametric-portal/types/types';
-import { type Context, DateTime, Duration, Effect, Option, pipe } from 'effect';
+import { types, type Uuidv7 } from '@parametric-portal/types/types';
+import { type Context, DateTime, Duration, Effect, Option, pipe, Schema as S } from 'effect';
 import { AppApi } from '../api.ts';
 
 const db = database();
+const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -90,184 +91,188 @@ const handleOAuthCallback = (
     code: string,
     state: string,
 ) =>
-    pipe(
-        Effect.gen(function* () {
-            const tokens = yield* oauth.validateCallback(provider, code, state);
-            const userInfo = yield* oauth.getUserInfo(provider, tokens.accessToken);
-            const email = yield* Option.match(userInfo.email, {
-                onNone: () => Effect.fail(new OAuthError({ provider, reason: 'Email not provided' })),
-                onSome: Effect.succeed,
-            });
-            const existingUser = yield* repos.users.findByEmail(email);
-            const user = yield* Option.match(existingUser, {
-                onNone: () =>
-                    pipe(
-                        repos.users.insert({ email }),
-                        Effect.mapError(() => new OAuthError({ provider, reason: 'User insert failed' })),
-                    ),
-                onSome: Effect.succeed,
-            });
-            yield* repos.oauthAccounts.upsert({
+    Effect.gen(function* () {
+        const tokens = yield* oauth.validateCallback(provider, code, state);
+        const userInfo = yield* oauth.getUserInfo(provider, tokens.accessToken);
+        const emailRaw = yield* Option.match(userInfo.email, {
+            onNone: () => Effect.fail(new OAuthError({ provider, reason: 'Email not provided' })),
+            onSome: Effect.succeed,
+        });
+        const email = S.decodeSync(typesApi.schemas.Email)(emailRaw);
+        const existingUserOpt = yield* pipe(
+            repos.users.findByEmail(email),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'User lookup failed' })),
+        );
+        const user = yield* Option.match(existingUserOpt, {
+            onNone: () =>
+                pipe(
+                    repos.users.insert({ email }),
+                    Effect.mapError(() => new OAuthError({ provider, reason: 'User insert failed' })),
+                ),
+            onSome: Effect.succeed,
+        });
+        const userId = S.decodeSync(db.schemas.ids.UserId)(user.id);
+        yield* pipe(
+            repos.oauthAccounts.upsert({
                 accessToken: tokens.accessToken,
                 expiresAt: Option.getOrNull(tokens.expiresAt),
                 provider,
                 providerAccountId: userInfo.providerAccountId,
                 refreshToken: Option.getOrNull(tokens.refreshToken),
-                userId: user.id,
-            });
-            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
-            const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
-            yield* repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId: user.id });
-            yield* repos.refreshTokens.insert({
-                expiresAt: refreshExpiresAt,
-                tokenHash: refreshHash,
-                userId: user.id,
-            });
-            return yield* buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken);
-        }),
-        Effect.catchTags({
-            CookieError: () => Effect.fail(new OAuthError({ provider, reason: 'Cookie setting failed' })),
-            HashingError: () => Effect.fail(new OAuthError({ provider, reason: 'Token hashing failed' })),
-            HttpBodyError: () => Effect.fail(new OAuthError({ provider, reason: 'Response body error' })),
-            OAuthError: (err) => Effect.fail(err),
-            ParseError: () => Effect.fail(new OAuthError({ provider, reason: 'Data parse failed' })),
-            SqlError: () => Effect.fail(new OAuthError({ provider, reason: 'Database error' })),
-        }),
-    );
+                userId,
+            }),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'OAuth account upsert failed' })),
+        );
+        const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* pipe(
+            createAuthTokenPairs(),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'Token generation failed' })),
+        );
+        const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
+        const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
+        yield* pipe(
+            repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId }),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'Session insert failed' })),
+        );
+        yield* pipe(
+            repos.refreshTokens.insert({ expiresAt: refreshExpiresAt, tokenHash: refreshHash, userId }),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'Refresh token insert failed' })),
+        );
+        return yield* pipe(
+            buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'Response build failed' })),
+        );
+    });
 const handleRefresh = (repos: Repositories) =>
-    pipe(
-        Effect.gen(function* () {
-            const request = yield* HttpServerRequest.HttpServerRequest;
-            const refreshTokenInput = yield* pipe(
-                Option.fromNullable(request.cookies[B.cookie.name]),
-                Option.match({
-                    onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Missing refresh token cookie' })),
-                    onSome: Effect.succeed,
-                }),
-            );
-            const hashInput = yield* hashString(refreshTokenInput);
-            const tokenOpt = yield* repos.refreshTokens.findValidByTokenHash(hashInput);
-            const token = yield* Option.match(tokenOpt, {
-                onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
+    Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const refreshTokenInput = yield* pipe(
+            Option.fromNullable(request.cookies[B.cookie.name]),
+            Option.match({
+                onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Missing refresh token cookie' })),
                 onSome: Effect.succeed,
-            });
-            const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-            const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
-            const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
-            yield* repos.sessions.insert({
-                expiresAt: sessionExpiresAt,
-                tokenHash: sessionHash,
-                userId: token.userId,
-            });
-            yield* repos.refreshTokens.insert({
-                expiresAt: refreshExpiresAt,
-                tokenHash: refreshHash,
-                userId: token.userId,
-            });
-            yield* repos.refreshTokens.revoke(token.id);
-            return yield* buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken);
-        }),
-        Effect.catchTags({
-            CookieError: () => Effect.fail(new UnauthorizedError({ reason: 'Cookie setting failed' })),
-            HashingError: () => Effect.fail(new UnauthorizedError({ reason: 'Token hashing failed' })),
-            HttpBodyError: () => Effect.fail(new UnauthorizedError({ reason: 'Response body error' })),
-            ParseError: () => Effect.fail(new UnauthorizedError({ reason: 'Token parse failed' })),
-            SqlError: () => Effect.fail(new UnauthorizedError({ reason: 'Token refresh failed' })),
-            UnauthorizedError: (err) => Effect.fail(err),
-        }),
-    );
+            }),
+        );
+        const hashInput = yield* pipe(
+            hashString(refreshTokenInput),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Token hashing failed' })),
+        );
+        const tokenOpt = yield* pipe(
+            repos.refreshTokens.findValidByTokenHash(hashInput),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Token lookup failed' })),
+        );
+        const token = yield* Option.match(tokenOpt, {
+            onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
+            onSome: Effect.succeed,
+        });
+        const userId = S.decodeSync(db.schemas.ids.UserId)(token.userId);
+        const tokenId = S.decodeSync(db.schemas.ids.RefreshTokenId)(token.id);
+        const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* pipe(
+            createAuthTokenPairs(),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Token generation failed' })),
+        );
+        const sessionExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.session);
+        const refreshExpiresAt = db.expiry.computeFrom(DATABASE_TUNING.durations.refreshToken);
+        yield* pipe(
+            repos.sessions.insert({ expiresAt: sessionExpiresAt, tokenHash: sessionHash, userId }),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Session insert failed' })),
+        );
+        yield* pipe(
+            repos.refreshTokens.insert({ expiresAt: refreshExpiresAt, tokenHash: refreshHash, userId }),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Refresh token insert failed' })),
+        );
+        yield* pipe(
+            repos.refreshTokens.revoke(tokenId),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Token revocation failed' })),
+        );
+        return yield* pipe(
+            buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Response build failed' })),
+        );
+    });
 const handleLogout = (repos: Repositories) =>
-    pipe(
-        Effect.gen(function* () {
-            const session = yield* SessionContext;
-            yield* repos.sessions.revoke(session.sessionId);
-            yield* repos.refreshTokens.revokeAllByUserId(session.userId);
-            return yield* buildLogoutResponse();
-        }),
-        Effect.catchTags({
-            CookieError: () => Effect.fail(new InternalError({ cause: 'Cookie clearing failed' })),
-            HttpBodyError: () => Effect.fail(new InternalError({ cause: 'Response body error' })),
-            ParseError: () => Effect.fail(new InternalError({ cause: 'Session context parse failed' })),
-            SqlError: () => Effect.fail(new InternalError({ cause: 'Session revocation failed' })),
-        }),
-    );
+    Effect.gen(function* () {
+        const session = yield* SessionContext;
+        yield* pipe(
+            repos.sessions.revoke(session.sessionId),
+            Effect.mapError(() => new InternalError({ cause: 'Session revocation failed' })),
+        );
+        yield* pipe(
+            repos.refreshTokens.revokeAllByUserId(session.userId),
+            Effect.mapError(() => new InternalError({ cause: 'Refresh token revocation failed' })),
+        );
+        return yield* pipe(
+            buildLogoutResponse(),
+            Effect.mapError(() => new InternalError({ cause: 'Response build failed' })),
+        );
+    });
 const handleMe = (repos: Repositories) =>
-    pipe(
-        Effect.gen(function* () {
-            const session = yield* SessionContext;
-            const userOpt = yield* repos.users.findById(session.userId);
-            return yield* Option.match(userOpt, {
-                onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
-                onSome: (user) => Effect.succeed({ email: user.email, id: user.id }),
-            });
-        }),
-        Effect.catchTags({
-            NotFoundError: (err) => Effect.fail(err),
-            ParseError: () => Effect.fail(new InternalError({ cause: 'User data parse failed' })),
-            SqlError: () => Effect.fail(new InternalError({ cause: 'User lookup failed' })),
-        }),
-    );
+    Effect.gen(function* () {
+        const session = yield* SessionContext;
+        const userOpt = yield* pipe(
+            repos.users.findById(session.userId),
+            Effect.mapError(() => new InternalError({ cause: 'User lookup failed' })),
+        );
+        return yield* Option.match(userOpt, {
+            onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
+            onSome: (user) => Effect.succeed({ email: user.email, id: S.decodeSync(db.schemas.ids.UserId)(user.id) }),
+        });
+    });
 const handleListApiKeys = (repos: Repositories) =>
-    pipe(
-        Effect.gen(function* () {
-            const session = yield* SessionContext;
-            const keys = yield* repos.apiKeys.findAllByUserId(session.userId);
-            return { data: keys };
-        }),
-        Effect.catchTags({
-            ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
-            SqlError: () => Effect.fail(new InternalError({ cause: 'API key list failed' })),
-        }),
-    );
+    Effect.gen(function* () {
+        const session = yield* SessionContext;
+        const keys = yield* pipe(
+            repos.apiKeys.findAllByUserId(session.userId),
+            Effect.mapError(() => new InternalError({ cause: 'API key list failed' })),
+        );
+        return { data: keys };
+    });
 const handleCreateApiKey = (repos: Repositories, input: { key: string; name: string; provider: AiProvider }) =>
-    pipe(
-        Effect.gen(function* () {
-            const session = yield* SessionContext;
-            const keyHash = yield* hashString(input.key);
-            const encrypted = yield* encryptApiKey(input.key);
-            const keyEncrypted = new Uint8Array([...encrypted.iv, ...encrypted.ciphertext]);
-            const apiKey = yield* repos.apiKeys.insert({
+    Effect.gen(function* () {
+        const session = yield* SessionContext;
+        const keyHash = yield* pipe(
+            hashString(input.key),
+            Effect.mapError(() => new InternalError({ cause: 'API key hashing failed' })),
+        );
+        const encrypted = yield* pipe(
+            encryptApiKey(input.key),
+            Effect.mapError(() => new InternalError({ cause: 'API key encryption failed' })),
+        );
+        const keyEncrypted = new Uint8Array([...encrypted.iv, ...encrypted.ciphertext]);
+        const apiKey = yield* pipe(
+            repos.apiKeys.insert({
                 expiresAt: null,
                 keyEncrypted,
                 keyHash,
                 name: input.name,
                 provider: input.provider,
                 userId: session.userId,
-            });
-            return {
-                createdAt: apiKey.createdAt,
-                id: apiKey.id,
-                lastUsedAt: apiKey.lastUsedAt,
-                name: apiKey.name,
-                provider: apiKey.provider,
-            };
-        }),
-        Effect.catchTags({
-            EncryptionError: () => Effect.fail(new InternalError({ cause: 'API key encryption failed' })),
-            HashingError: () => Effect.fail(new InternalError({ cause: 'API key hashing failed' })),
-            NoSuchElementException: () => Effect.fail(new InternalError({ cause: 'API key insert returned no row' })),
-            ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
-            SqlError: () => Effect.fail(new InternalError({ cause: 'API key insert failed' })),
-        }),
-    );
+            }),
+            Effect.mapError(() => new InternalError({ cause: 'API key insert failed' })),
+        );
+        return {
+            createdAt: DateTime.toDateUtc(apiKey.createdAt),
+            id: apiKey.id,
+            lastUsedAt: Option.map(apiKey.lastUsedAt, DateTime.toDateUtc),
+            name: apiKey.name,
+            provider: apiKey.provider,
+        };
+    });
 const handleDeleteApiKey = (repos: Repositories, id: ApiKeyId) =>
-    pipe(
-        Effect.gen(function* () {
-            const session = yield* SessionContext;
-            const userKeys = yield* repos.apiKeys.findAllByUserId(session.userId);
-            const keyBelongsToUser = userKeys.some((k) => k.id === id);
-            yield* keyBelongsToUser
-                ? repos.apiKeys.delete(id)
-                : Effect.fail(new NotFoundError({ id, resource: 'apikey' }));
-            return { success: true };
-        }),
-        Effect.catchTags({
-            NotFoundError: (err) => Effect.fail(err),
-            ParseError: () => Effect.fail(new InternalError({ cause: 'API key data parse failed' })),
-            SqlError: () => Effect.fail(new InternalError({ cause: 'API key deletion failed' })),
-        }),
-    );
+    Effect.gen(function* () {
+        const session = yield* SessionContext;
+        const userKeys = yield* pipe(
+            repos.apiKeys.findAllByUserId(session.userId),
+            Effect.mapError(() => new InternalError({ cause: 'API key list failed' })),
+        );
+        const keyBelongsToUser = userKeys.some((k) => k.id === id);
+        yield* keyBelongsToUser
+            ? pipe(
+                  repos.apiKeys.delete(id),
+                  Effect.mapError(() => new InternalError({ cause: 'API key deletion failed' })),
+              )
+            : Effect.fail(new NotFoundError({ id, resource: 'apikey' }));
+        return { success: true };
+    });
 
 // --- [LAYER] -----------------------------------------------------------------
 

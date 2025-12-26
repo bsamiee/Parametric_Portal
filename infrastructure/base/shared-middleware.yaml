@@ -1,6 +1,27 @@
 # --- SHARED MIDDLEWARE --------------------------------------------------------
 # Domain-agnostic middleware used by all apps
-# Rate limiting, compression, HTTPS redirect
+# Base security headers, rate limiting, compression, HTTPS redirect
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: base-security-headers
+  labels:
+    app.kubernetes.io/name: parametric-portal
+    app.kubernetes.io/component: middleware
+spec:
+  headers:
+    contentTypeNosniff: true
+    browserXssFilter: true
+    referrerPolicy: "strict-origin-when-cross-origin"
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: true
+    forceSTSHeader: true
+    customResponseHeaders:
+      X-Robots-Tag: "noindex, nofollow"
+      X-Download-Options: "noopen"
+      X-Permitted-Cross-Domain-Policies: "none"
 ---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware

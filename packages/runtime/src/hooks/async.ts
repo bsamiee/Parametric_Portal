@@ -28,7 +28,6 @@ type MutationState<A, I, E> = {
     readonly reset: () => void;
     readonly state: AsyncState<A, E>;
 };
-type QueryState<A, E> = AsyncState<A, E>;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -36,7 +35,7 @@ const useQuery = <A, E, R>(
     effect: Effect.Effect<A, E, R>,
     deps: DependencyList,
     options: QueryOptions<A, E> = {},
-): QueryState<A, E> => {
+): AsyncState<A, E> => {
     const { enabled = true, onError, onSettled, onSuccess } = options;
     const runtime = useRuntime<R, never>();
     const [state, setState] = useState<AsyncState<A, E>>(asyncApi.idle);
@@ -65,7 +64,9 @@ const useQuery = <A, E, R>(
                           runtime.runFork(Fiber.interrupt(fiber));
                       };
                   })()
-                : void setState(asyncApi.idle()),
+                : (() => {
+                      setState(asyncApi.idle());
+                  })(),
         [enabled, ...deps, effect, onError, onSettled, onSuccess, runtime.runFork],
     );
     return state;
@@ -116,5 +117,5 @@ const useMutation = <A, I, E, R>(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { MutationOptions, MutationState, QueryOptions, QueryState };
+export type { MutationOptions, MutationState, QueryOptions };
 export { useMutation, useQuery };

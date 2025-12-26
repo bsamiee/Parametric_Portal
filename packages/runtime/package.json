@@ -125,6 +125,7 @@
   "scripts": {
     "build": "vite build",
     "check": "biome check .",
+    "fix": "biome check --write .",
     "test": "vitest run --config ../../vitest.config.ts --project runtime-browser",
     "test:coverage": "vitest run --config ../../vitest.config.ts --project runtime-browser --coverage",
     "typecheck": "tsc --project tsconfig.json --noEmit"

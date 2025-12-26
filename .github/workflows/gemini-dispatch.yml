@@ -45,12 +45,11 @@ jobs:
 
   dispatch:
     # For PRs: auto-review on open (skip drafts, only same-repo PRs)
-    # For comments: only if user types @gemini-cli and is OWNER/MEMBER/COLLABORATOR
+    # For comments: @gemini or @gemini-cli prefix, trusted associations only
     if: |-
       (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft) || (
-        github.event.sender.type == 'User' &&
-        startsWith(github.event.comment.body || github.event.review.body, '@gemini-cli') &&
-        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association)
+        (startsWith(github.event.comment.body || github.event.review.body, '@gemini-cli') || startsWith(github.event.comment.body || github.event.review.body, '@gemini ')) &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR", "CONTRIBUTOR"]'), github.event.comment.author_association || github.event.review.author_association)
       )
     runs-on: 'ubuntu-latest'
     permissions:
@@ -77,12 +76,12 @@ jobs:
 
             if (eventType === 'pull_request_target.opened' || eventType === 'pull_request_target.ready_for_review') {
               core.setOutput('command', 'review');
-            } else if (request.startsWith("@gemini-cli /review")) {
+            } else if (request.startsWith('@gemini-cli /review') || request.startsWith('@gemini /review')) {
               core.setOutput('command', 'review');
-              const additionalContext = request.replace(/^@gemini-cli \/review/, '').trim();
+              const additionalContext = request.replace(/^@gemini(?:-cli)? \/review/, '').trim();
               core.setOutput('additional_context', additionalContext);
-            } else if (request.startsWith("@gemini-cli")) {
-              const additionalContext = request.replace(/^@gemini-cli/, '').trim();
+            } else if (request.startsWith('@gemini-cli') || request.startsWith('@gemini ')) {
+              const additionalContext = request.replace(/^@gemini(?:-cli)?/, '').trim();
               core.setOutput('command', 'invoke');
               core.setOutput('additional_context', additionalContext);
             } else {

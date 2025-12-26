@@ -11,7 +11,7 @@ Security configuration reference for network isolation, TLS, secrets, and contai
 
 <br>
 
-Four NetworkPolicies implement zero-trust networking. Default deny blocks all traffic; explicit policies allow specific flows.
+Six NetworkPolicies in base namespace implement zero-trust networking. Default deny blocks all traffic; explicit policies allow specific flows. Additional monitoring namespace policies handle observability scraping.
 
 <br>
 
@@ -23,9 +23,22 @@ Four NetworkPolicies implement zero-trust networking. Default deny blocks all tr
 |   [2]   | `allow-traefik-ingress` | Ingress | kube-system/traefik → ports 4000, 8080             |
 |   [3]   | `allow-dns-egress`      | Egress  | All pods → kube-system DNS (53/UDP, 53/TCP)        |
 |   [4]   | `allow-api-egress`      | Egress  | API pod → PostgreSQL (5432) + external HTTPS (443) |
+|   [5]   | `allow-icons-to-api`    | Egress  | Icons pod → API pod (4000) for client-side calls   |
+|   [6]   | `allow-cnpg-operator`   | Ingress | cnpg-system → postgres pod (8000) for metrics      |
 
 ---
-### [1.2][TRAFFIC_FLOWS]
+### [1.2][MONITORING_POLICIES]
+
+Additional policies in monitoring namespace (`infrastructure/platform/monitoring/networkpolicy.yaml`):
+
+| [INDEX] | [POLICY]                   | [TYPE]  | [RULE]                                      |
+| :-----: | -------------------------- | ------- | ------------------------------------------- |
+|   [1]   | `allow-monitoring-egress`  | Egress  | Monitoring → all namespaces for scraping    |
+|   [2]   | `allow-traefik-ingress`    | Ingress | kube-system/traefik → Grafana (3000)        |
+|   [3]   | `allow-alloy-otlp-ingress` | Ingress | parametric-portal → Alloy OTLP (4317, 4318) |
+
+---
+### [1.3][TRAFFIC_FLOWS]
 
 ```
 Internet
@@ -47,7 +60,7 @@ PostgreSQL (5432)              External HTTPS (443)
 ```
 
 ---
-### [1.3][PRIVATE_CIDR_EXCLUSION]
+### [1.4][PRIVATE_CIDR_EXCLUSION]
 
 External HTTPS egress excludes private networks to prevent internal scanning:
 
@@ -183,13 +196,44 @@ Bitnami Sealed Secrets encrypts secrets with cluster-specific key. Encrypted sec
 ---
 ### [4.3][PROBES]
 
-| [INDEX] | [PROBE]   | [PATH]    | [INITIAL] | [PERIOD] | [TIMEOUT] |
-| :-----: | --------- | --------- | :-------: | :------: | :-------: |
-|   [1]   | Liveness  | `/health` |    10s    |   30s    |    10s    |
-|   [2]   | Readiness | `/health` |    5s     |   10s    |    5s     |
+| [INDEX] | [PROBE]   | [PATH]   | [INITIAL] | [PERIOD] | [TIMEOUT] |
+| :-----: | --------- | -------- | :-------: | :------: | :-------: |
+|   [1]   | Liveness  | `/live`  |    10s    |   30s    |    10s    |
+|   [2]   | Readiness | `/ready` |    5s     |   10s    |    5s     |
 
 ---
-## [5][HEADERS]
+## [5][KYVERNO]
+>**Dictum:** *Policy enforcement prevents security drift.*
+
+<br>
+
+Kyverno v3.6.1 enforces Pod Security Standards (Restricted) via cluster-wide policies.
+
+<br>
+
+### [5.1][POLICIES]
+
+| [INDEX] | [POLICY]                        | [RULE]                            | [RATIONALE]       |
+| :-----: | ------------------------------- | --------------------------------- | ----------------- |
+|   [1]   | `require-run-as-nonroot`        | `runAsNonRoot: true`              | PSS Restricted    |
+|   [2]   | `disallow-privilege-escalation` | `allowPrivilegeEscalation: false` | PSS Restricted    |
+|   [3]   | `require-ro-rootfs`             | `readOnlyRootFilesystem: true`    | Best Practice     |
+|   [4]   | `require-requests-limits`       | CPU/memory limits required        | Resource fairness |
+|   [5]   | `restrict-image-registries`     | Only `ghcr.io/*` allowed          | Supply chain      |
+
+---
+### [5.2][EXCEPTIONS]
+
+| [INDEX] | [EXCEPTION]                | [SCOPE]                             | [RATIONALE]               |
+| :-----: | -------------------------- | ----------------------------------- | ------------------------- |
+|   [1]   | system-namespace-exception | kube-system, argocd, kyverno, cnpg  | Operators need privileges |
+|   [2]   | cloudnativepg-exception    | `cnpg.io/podRole: instance` pods    | Database needs writes     |
+|   [3]   | lgtm-stack-exception       | `lgtm-*`, `grafana-*` pod patterns  | LGTM needs relaxed rules  |
+
+[REFERENCE] See `docs/architecture/infrastructure/kyverno.md` for operations guide.
+
+---
+## [6][HEADERS]
 >**Dictum:** *Response headers mitigate browser-based attacks.*
 
 <br>
@@ -198,7 +242,7 @@ Multi-domain architecture: each app defines its own security headers in `infrast
 
 <br>
 
-### [5.1][SECURITY_HEADERS]
+### [6.1][SECURITY_HEADERS]
 
 | [INDEX] | [HEADER]                 | [VALUE]                            |
 | :-----: | ------------------------ | ---------------------------------- |
@@ -211,7 +255,7 @@ Multi-domain architecture: each app defines its own security headers in `infrast
 |   [7]   | X-Permitted-Cross-Domain | none                               |
 
 ---
-### [5.2][HSTS]
+### [6.2][HSTS]
 
 | [INDEX] | [SETTING]            | [VALUE]  |
 | :-----: | -------------------- | -------- |
@@ -221,7 +265,7 @@ Multi-domain architecture: each app defines its own security headers in `infrast
 |   [4]   | forceSTSHeader       | true     |
 
 ---
-### [5.3][CONTENT_SECURITY_POLICY]
+### [6.3][CONTENT_SECURITY_POLICY]
 
 CSP is **per-app** to allow app-specific API connections via `connect-src`.
 
@@ -233,7 +277,7 @@ script-src 'self' 'unsafe-inline' 'unsafe-eval';
 style-src 'self' 'unsafe-inline';
 img-src 'self' data: https:;
 font-src 'self' data:;
-connect-src 'self' https://api.parametric-portal.com https://*.anthropic.com;
+connect-src 'self' https://api.parametric-portal.com https://api.anthropic.com;
 frame-ancestors 'none';
 base-uri 'self';
 form-action 'self';
@@ -242,14 +286,14 @@ form-action 'self';
 [IMPORTANT] Each app's CSP `connect-src` must include its API domain. New apps define their own CSP in their middleware.yaml.
 
 ---
-### [5.4][PERMISSIONS_POLICY]
+### [6.4][PERMISSIONS_POLICY]
 
 All browser APIs disabled:
 - accelerometer, camera, geolocation, gyroscope
 - magnetometer, microphone, payment, usb
 
 ---
-### [5.5][RATE_LIMITING]
+### [6.5][RATE_LIMITING]
 
 Shared middleware in `infrastructure/base/shared-middleware.yaml`:
 
@@ -261,17 +305,23 @@ Shared middleware in `infrastructure/base/shared-middleware.yaml`:
 [IMPORTANT] Rate limits use client IP with depth=1 (first X-Forwarded-For hop). Private CIDRs excluded from API limiter.
 
 ---
-### [5.6][MIDDLEWARE_CHAINS]
+### [6.6][MIDDLEWARE_CHAINS]
 
 Each app composes its middleware chain referencing shared + app-specific middleware:
 
 **API Chain** (`infrastructure/apps/api/middleware.yaml`):
-1. `api-security-headers` (app-specific)
-2. `rate-limit-api` (shared)
-3. `compress` (shared)
+1. `base-security-headers` (shared)
+2. `api-security-headers` (app-specific: frameDeny)
+3. `rate-limit-api` (shared)
+4. `compress` (shared)
 
 **Icons Chain** (`infrastructure/apps/icons/middleware.yaml`):
-1. `icons-security-headers` (app-specific, includes CSP)
-2. `rate-limit-web` (shared)
-3. `icons-www-redirect` (app-specific)
-4. `compress` (shared)
+1. `base-security-headers` (shared)
+2. `icons-security-headers` (app-specific: CSP, permissions)
+3. `rate-limit-web` (shared)
+4. `icons-www-redirect` (app-specific)
+5. `compress` (shared)
+
+**Grafana Chain** (`infrastructure/platform/monitoring/ingressroute.yaml`):
+1. `grafana-security-headers` (monitoring-specific)
+2. `compress` (shared)

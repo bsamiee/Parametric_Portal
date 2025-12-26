@@ -29,14 +29,6 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
-
-const errorFactories = {
-    clipboard: (def: { code: string; message: string }) => mkClipboardError(def),
-    download: (def: { code: string; message: string }) => mkDownloadError(def),
-    export: (def: { code: string; message: string }) => mkExportError(def),
-} as const;
-
 // --- [DESCRIBE] BROWSER_TUNING -----------------------------------------------
 
 describe('BROWSER_TUNING', () => {
@@ -133,44 +125,22 @@ describe('buildFilename', () => {
     });
 });
 
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const errorFactoryTests = [
+    { def: TEST_CONSTANTS.errors.clipboardRead, factory: mkClipboardError, tag: 'ClipboardError' },
+    { def: TEST_CONSTANTS.errors.downloadFailed, factory: mkDownloadError, tag: 'DownloadError' },
+    { def: TEST_CONSTANTS.errors.exportFailed, factory: mkExportError, tag: 'ExportError' },
+] as const;
+
 // --- [DESCRIBE] error factories ----------------------------------------------
 
-describe('mkClipboardError', () => {
-    it('creates error with correct _tag and code', () => {
-        const error = errorFactories.clipboard(TEST_CONSTANTS.errors.clipboardRead);
-        expect(error._tag).toBe('ClipboardError');
-        expect(error.code).toBe('CLIPBOARD_READ');
-        expect(error.message).toBe(TEST_CONSTANTS.errors.clipboardRead.message);
-    });
-    it('extends Error with proper prototype chain', () => {
-        const error = errorFactories.clipboard(TEST_CONSTANTS.errors.clipboardWrite);
-        expect(error).toBeInstanceOf(Error);
-        expect(typeof error.name).toBe('string');
-        expect(error.stack).toBeDefined();
-    });
-});
-describe('mkDownloadError', () => {
-    it('creates error with correct _tag and code', () => {
-        const error = errorFactories.download(TEST_CONSTANTS.errors.downloadFailed);
-        expect(error._tag).toBe('DownloadError');
-        expect(error.code).toBe('DOWNLOAD_FAILED');
-        expect(error.message).toBe(TEST_CONSTANTS.errors.downloadFailed.message);
-    });
-    it('extends Error with proper prototype chain', () => {
-        const error = errorFactories.download(TEST_CONSTANTS.errors.downloadFailed);
-        expect(error).toBeInstanceOf(Error);
-        expect(error.stack).toBeDefined();
-    });
-});
-describe('mkExportError', () => {
-    it('creates error with correct _tag and code', () => {
-        const error = errorFactories.export(TEST_CONSTANTS.errors.exportFailed);
-        expect(error._tag).toBe('ExportError');
-        expect(error.code).toBe('EXPORT_FAILED');
-        expect(error.message).toBe(TEST_CONSTANTS.errors.exportFailed.message);
-    });
-    it('extends Error with proper prototype chain', () => {
-        const error = errorFactories.export(TEST_CONSTANTS.errors.exportFailed);
+describe('error factories', () => {
+    it.each(errorFactoryTests)('$tag creates error with correct _tag, code, and stack', ({ def, factory, tag }) => {
+        const error = factory(def);
+        expect(error._tag).toBe(tag);
+        expect(error.code).toBe(def.code);
+        expect(error.message).toBe(def.message);
         expect(error).toBeInstanceOf(Error);
         expect(error.stack).toBeDefined();
     });
@@ -194,24 +164,10 @@ describe('exportHandlers', () => {
         expect(Object.isFrozen(exportHandlers)).toBe(true);
         expect(Object.keys(exportHandlers).sort((a, b) => a.localeCompare(b))).toEqual(['png', 'svg', 'zip']);
     });
-    it.each(['png', 'svg', 'zip'] as const)('%s handler returns Effect that can be executed', (format) => {
+    it.each(['png', 'svg', 'zip'] as const)('%s handler returns Effect (fails without DOM)', (format) => {
         const effect = exportHandlers[format]({ format });
         const result = Effect.runSyncExit(effect);
         expect(Exit.isExit(result)).toBe(true);
-    });
-    it('png handler accepts format config', () => {
-        const effect = exportHandlers.png({ format: 'png' });
-        const result = Effect.runSyncExit(effect);
-        expect(result).toBeFailure();
-    });
-    it('svg handler accepts format config', () => {
-        const effect = exportHandlers.svg({ format: 'svg' });
-        const result = Effect.runSyncExit(effect);
-        expect(result).toBeFailure();
-    });
-    it('zip handler accepts format config', () => {
-        const effect = exportHandlers.zip({ format: 'zip' });
-        const result = Effect.runSyncExit(effect);
         expect(result).toBeFailure();
     });
 });

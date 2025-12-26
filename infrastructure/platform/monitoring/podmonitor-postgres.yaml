@@ -1,0 +1,22 @@
+# --- CLOUDNATIVEPG POD MONITOR ------------------------------------------------
+# Scrape PostgreSQL metrics from CloudNativePG cluster pods
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: postgres
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: observability
+spec:
+  namespaceSelector:
+    matchNames:
+      - parametric-portal
+  selector:
+    matchLabels:
+      cnpg.io/cluster: parametric-portal-db
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
