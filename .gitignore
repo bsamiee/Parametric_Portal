@@ -116,3 +116,5 @@ infrastructure/kamal/.kamal/secrets
 infrastructure/traefik/acme/
 *.pem
 credentials.json
+
+.gemini/
