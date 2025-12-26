@@ -1,3 +1,14 @@
+## 1.0.7 (2025-12-26)
+
+### [BUG_FIXES]
+
+- Gemini workflow timeout and concurrency issues ([#123](https://github.com/bsamiee/Parametric_Portal/pull/123))
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+
 ## 1.0.6 (2025-12-25)
 
 ### [BUG_FIXES]
