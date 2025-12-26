@@ -106,9 +106,26 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t lint,typecheck,build --parallel=4
 
-      - name: Install Playwright Browsers
+      - name: Get Playwright version
         if: steps.auto-fix.outputs.has-changes != 'true'
+        id: playwright-version
+        run: echo "version=$(pnpm list @playwright/test --json 2>/dev/null | jq -r '.[0].dependencies["@playwright/test"].version // "1.57.0"')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        if: steps.auto-fix.outputs.has-changes != 'true'
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      - name: Install Playwright browsers (cache miss)
+        if: steps.auto-fix.outputs.has-changes != 'true' && steps.playwright-cache.outputs.cache-hit != 'true'
         run: pnpm exec playwright install chromium --with-deps
+
+      - name: Install Playwright deps (cache hit)
+        if: steps.auto-fix.outputs.has-changes != 'true' && steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps chromium
 
       - name: Test
         if: steps.auto-fix.outputs.has-changes != 'true'

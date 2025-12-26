@@ -385,7 +385,7 @@ depends = ["wf:static"]
 run = '''
 set -euo pipefail
 if docker info >/dev/null 2>&1; then
-  act {{vars.ACT_FLAGS}} --validate --strict -l 2>&1 | head -30
+  act {{vars.ACT_FLAGS}} --validate --strict -l
   echo '[OK] Dry-run validation complete'
 else
   echo '[SKIP] Docker not available, skipping dry-run'
