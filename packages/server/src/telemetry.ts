@@ -10,7 +10,9 @@ const OtelEndpoint = Schema.String.pipe(Schema.pattern(/^https?:\/\//), Schema.b
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    endpoint: Schema.decodeUnknownSync(OtelEndpoint)(process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://alloy:4317'),
+    endpoint: Schema.decodeUnknownSync(OtelEndpoint)(
+        process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://alloy.monitoring.svc.cluster.local:4317',
+    ),
     serviceName: Schema.decodeUnknownSync(ServiceName)(process.env['OTEL_SERVICE_NAME'] ?? 'api'),
 } as const);
 

@@ -15,7 +15,6 @@ resources:
   - ingressroute.yaml
   - podmonitor-argocd.yaml
   - podmonitor-api.yaml
-  - podmonitor-icons.yaml
   - podmonitor-postgres.yaml
   - prometheusrules.yaml
   - kyverno-exception.yaml

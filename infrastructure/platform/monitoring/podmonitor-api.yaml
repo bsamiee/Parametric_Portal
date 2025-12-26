@@ -16,6 +16,6 @@ spec:
       app.kubernetes.io/name: api
   podMetricsEndpoints:
     - port: http
-      path: /metrics
+      path: /api/metrics
       interval: 30s
       scrapeTimeout: 10s

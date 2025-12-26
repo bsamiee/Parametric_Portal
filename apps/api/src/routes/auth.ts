@@ -98,7 +98,10 @@ const handleOAuthCallback = (
             onNone: () => Effect.fail(new OAuthError({ provider, reason: 'Email not provided' })),
             onSome: Effect.succeed,
         });
-        const email = S.decodeSync(typesApi.schemas.Email)(emailRaw);
+        const email = yield* pipe(
+            S.decodeUnknown(typesApi.schemas.Email)(emailRaw),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'Invalid email format from provider' })),
+        );
         const existingUserOpt = yield* pipe(
             repos.users.findByEmail(email),
             Effect.mapError(() => new OAuthError({ provider, reason: 'User lookup failed' })),
@@ -111,7 +114,10 @@ const handleOAuthCallback = (
                 ),
             onSome: Effect.succeed,
         });
-        const userId = S.decodeSync(db.schemas.ids.UserId)(user.id);
+        const userId = yield* pipe(
+            S.decodeUnknown(db.schemas.ids.UserId)(user.id),
+            Effect.mapError(() => new OAuthError({ provider, reason: 'Invalid user ID format' })),
+        );
         yield* pipe(
             repos.oauthAccounts.upsert({
                 accessToken: tokens.accessToken,
@@ -164,8 +170,14 @@ const handleRefresh = (repos: Repositories) =>
             onNone: () => Effect.fail(new UnauthorizedError({ reason: 'Invalid refresh token' })),
             onSome: Effect.succeed,
         });
-        const userId = S.decodeSync(db.schemas.ids.UserId)(token.userId);
-        const tokenId = S.decodeSync(db.schemas.ids.RefreshTokenId)(token.id);
+        const userId = yield* pipe(
+            S.decodeUnknown(db.schemas.ids.UserId)(token.userId),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Invalid user ID format' })),
+        );
+        const tokenId = yield* pipe(
+            S.decodeUnknown(db.schemas.ids.RefreshTokenId)(token.id),
+            Effect.mapError(() => new UnauthorizedError({ reason: 'Invalid token ID format' })),
+        );
         const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* pipe(
             createAuthTokenPairs(),
             Effect.mapError(() => new UnauthorizedError({ reason: 'Token generation failed' })),
@@ -214,7 +226,12 @@ const handleMe = (repos: Repositories) =>
         );
         return yield* Option.match(userOpt, {
             onNone: () => Effect.fail(new NotFoundError({ id: session.userId, resource: 'user' })),
-            onSome: (user) => Effect.succeed({ email: user.email, id: S.decodeSync(db.schemas.ids.UserId)(user.id) }),
+            onSome: (user) =>
+                pipe(
+                    S.decodeUnknown(db.schemas.ids.UserId)(user.id),
+                    Effect.map((id) => ({ email: user.email, id })),
+                    Effect.mapError(() => new InternalError({ cause: 'Invalid user ID format' })),
+                ),
         });
     });
 const handleListApiKeys = (repos: Repositories) =>

@@ -18,22 +18,25 @@ type IconGenerationServiceType = Context.Tag.Service<typeof IconGenerationServic
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const getUserApiKey = (repos: Repositories, userId: UserId, provider: AiProvider) =>
-    pipe(
-        repos.apiKeys.findByUserIdAndProvider({ provider, userId }),
-        Effect.map(Option.flatMap((apiKey) => apiKey.keyEncrypted)),
-        Effect.flatMap(
-            Option.match({
-                onNone: () => Effect.succeed(Option.none<string>()),
-                onSome: (keyEncrypted) =>
-                    pipe(
-                        Crypto.decryptFromBytes(keyEncrypted),
-                        Effect.map(Option.some),
-                        Effect.mapError((e) => new InternalError({ cause: `Key decryption failed: ${String(e)}` })),
-                    ),
+    Effect.gen(function* () {
+        const apiKeyOpt = yield* pipe(
+            repos.apiKeys.findByUserIdAndProvider({ provider, userId }),
+            Effect.catchTags({
+                ParseError: () => Effect.succeed(Option.none()),
+                SqlError: () => Effect.succeed(Option.none()),
             }),
-        ),
-        Effect.catchAll(() => Effect.succeed(Option.none<string>())),
-    );
+        );
+        const keyEncryptedOpt = Option.flatMap(apiKeyOpt, (apiKey) => apiKey.keyEncrypted);
+        return yield* Option.match(keyEncryptedOpt, {
+            onNone: () => Effect.succeed(Option.none<string>()),
+            onSome: (keyEncrypted) =>
+                pipe(
+                    Crypto.decryptFromBytes(keyEncrypted),
+                    Effect.map(Option.some),
+                    Effect.mapError((e) => new InternalError({ cause: `Key decryption failed: ${String(e)}` })),
+                ),
+        });
+    });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
