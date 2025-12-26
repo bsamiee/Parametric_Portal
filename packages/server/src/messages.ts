@@ -20,6 +20,7 @@ const B = Object.freeze({
         hashingFailed: 'API key hashing failed',
         insertFailed: 'API key insert failed',
         listFailed: 'API key list failed',
+        lookupFailed: 'API key lookup failed',
     },
     auth: {
         invalidRefreshToken: 'Invalid refresh token',

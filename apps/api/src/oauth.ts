@@ -41,9 +41,9 @@ const OIDCUserInfoSchema = S.Struct({
 });
 /** Arctic library returns token objects with method accessors, not properties */
 const ArcticTokenMethodsSchema = S.Struct({
-    accessToken: S.Any,
-    accessTokenExpiresAt: S.optional(S.Any),
-    refreshToken: S.optional(S.Any),
+    accessToken: S.Unknown,
+    accessTokenExpiresAt: S.optional(S.Unknown),
+    refreshToken: S.optional(S.Unknown),
 });
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -141,15 +141,21 @@ const extractArcticTokens = (tokens: unknown, provider: OAuthProvider): Effect.E
         Effect.flatMap((validated) =>
             Effect.try({
                 catch: () => new OAuthError({ provider, reason: 'Token method invocation failed' }),
-                try: () =>
-                    ({
-                        accessToken: (validated.accessToken as () => string)(),
+                try: () => {
+                    const accessTokenFn = validated.accessToken as unknown;
+                    const expiresAtFn = validated.accessTokenExpiresAt as unknown;
+                    const refreshTokenFn = validated.refreshToken as unknown;
+                    return {
+                        accessToken: typeof accessTokenFn === 'function' ? (accessTokenFn as () => string)() : '',
                         expiresAt: Option.fromNullable(
-                            (validated.accessTokenExpiresAt as (() => Date) | undefined)?.(),
+                            typeof expiresAtFn === 'function' ? (expiresAtFn as () => Date)() : undefined,
                         ),
-                        refreshToken: Option.fromNullable((validated.refreshToken as (() => string) | undefined)?.()),
+                        refreshToken: Option.fromNullable(
+                            typeof refreshTokenFn === 'function' ? (refreshTokenFn as () => string)() : undefined,
+                        ),
                         scope: Option.none(),
-                    }) satisfies OAuthTokens,
+                    } satisfies OAuthTokens;
+                },
             }),
         ),
     );

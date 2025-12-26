@@ -63,6 +63,26 @@ type PullRequestReviewPayload = {
     readonly sender: User;
 };
 
+type PullRequestReviewCommentPayload = {
+    readonly action: 'created';
+    readonly comment: {
+        readonly author_association: string;
+        readonly body: string;
+        readonly diff_hunk: string;
+        readonly id: number;
+        readonly path: string;
+        readonly user: User;
+    };
+    readonly pull_request: {
+        readonly draft: boolean;
+        readonly head: { readonly ref: string; readonly repo: Repository; readonly sha: string };
+        readonly number: number;
+        readonly title: string;
+    };
+    readonly repository: Repository;
+    readonly sender: User;
+};
+
 type PullRequestTargetPayload = {
     readonly action: 'opened' | 'ready_for_review';
     readonly pull_request: {
@@ -75,7 +95,11 @@ type PullRequestTargetPayload = {
     readonly sender: User;
 };
 
-type EventPayload = IssueCommentPayload | PullRequestReviewPayload | PullRequestTargetPayload;
+type EventPayload =
+    | IssueCommentPayload
+    | PullRequestReviewCommentPayload
+    | PullRequestReviewPayload
+    | PullRequestTargetPayload;
 
 type FactoryOptions = {
     readonly body?: string;
@@ -126,8 +150,16 @@ const factories = {
         sender: B.user(opts.login ?? B.defaults.login),
     }),
 
-    'pull_request_review_comment.created': (opts: FactoryOptions): PullRequestReviewPayload => ({
-        action: 'submitted',
+    'pull_request_review_comment.created': (opts: FactoryOptions): PullRequestReviewCommentPayload => ({
+        action: 'created',
+        comment: {
+            author_association: B.defaults.author_association,
+            body: opts.body ?? B.defaults.body,
+            diff_hunk: '@@ -1,3 +1,4 @@',
+            id: 1,
+            path: 'src/index.ts',
+            user: B.user(opts.login ?? B.defaults.login),
+        },
         pull_request: {
             draft: false,
             head: {
@@ -139,13 +171,6 @@ const factories = {
             title: 'Test PR',
         },
         repository: B.repository(opts.repo ?? B.defaults.repo),
-        review: {
-            author_association: B.defaults.author_association,
-            body: opts.body ?? B.defaults.body,
-            id: 1,
-            state: 'commented',
-            user: B.user(opts.login ?? B.defaults.login),
-        },
         sender: B.user(opts.login ?? B.defaults.login),
     }),
 
@@ -236,6 +261,7 @@ export type {
     EventPayload,
     FactoryOptions,
     IssueCommentPayload,
+    PullRequestReviewCommentPayload,
     PullRequestReviewPayload,
     PullRequestTargetPayload,
 };

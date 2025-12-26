@@ -47,10 +47,10 @@ const TelemetryLive = Layer.effectDiscard(
                 process.on('SIGTERM', () =>
                     Effect.runPromise(
                         Effect.tryPromise({
-                            catch: (e) => new Error(`Telemetry shutdown failed: ${String(e)}`),
+                            catch: (e) => new TelemetryInitError({ cause: e }),
                             try: () => sdk.shutdown(),
-                        }),
-                    ).catch(console.error),
+                        }).pipe(Effect.catchAll((e) => Effect.logError(`Telemetry shutdown failed: ${String(e)}`))),
+                    ),
                 );
             },
         }).pipe(

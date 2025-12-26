@@ -280,7 +280,7 @@ const handleDeleteApiKey = (repos: Repositories, id: ApiKeyId) =>
         const session = yield* SessionContext;
         const keyOpt = yield* pipe(
             repos.apiKeys.findByIdAndUserId({ id, userId: session.userId }),
-            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.listFailed })),
+            Effect.mapError(() => new InternalError({ cause: AUTH_MESSAGES.apiKey.lookupFailed })),
         );
         yield* Option.match(keyOpt, {
             onNone: () => Effect.fail(new NotFoundError({ id, resource: 'apikey' })),
