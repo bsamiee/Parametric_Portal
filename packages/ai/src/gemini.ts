@@ -1,8 +1,11 @@
 /**
  * Effect AI Google Gemini integration layer.
  * Factory-based provider with consumer-defined model selection.
+ *
+ * Note: Gemini's @effect/ai-google does not support withConfigOverride.
+ * System prompts are prepended to the prompt content.
  */
-import { LanguageModel, type Prompt } from '@effect/ai';
+import { LanguageModel, Prompt } from '@effect/ai';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { FetchHttpClient } from '@effect/platform';
 import { Config, Effect, Layer, pipe } from 'effect';
@@ -11,16 +14,19 @@ import { Config, Effect, Layer, pipe } from 'effect';
 
 type ProviderConfig = {
     readonly model: string;
+    readonly maxTokens?: number;
 };
 
 type GenerateTextOptions = {
+    readonly maxTokens?: number;
     readonly prompt: Prompt.RawInput;
+    readonly system?: string;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    defaults: {},
+    defaults: { maxTokens: 4096 },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -34,6 +40,14 @@ const createLayers = (config: ProviderConfig) => {
     return { ClientLive, ModelLive };
 };
 
+const buildPrompt = (options: GenerateTextOptions): Prompt.Prompt =>
+    options.system !== undefined
+        ? Prompt.make([
+              Prompt.systemMessage({ content: options.system }),
+              ...Prompt.make(options.prompt).content,
+          ])
+        : Prompt.make(options.prompt);
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createProvider = (config: ProviderConfig) => {
@@ -41,7 +55,7 @@ const createProvider = (config: ProviderConfig) => {
     return {
         generateText: (options: GenerateTextOptions) =>
             pipe(
-                LanguageModel.generateText({ prompt: options.prompt }),
+                LanguageModel.generateText({ prompt: buildPrompt(options) }),
                 Effect.map((response) => response.text),
                 Effect.provide(ModelLive),
             ),

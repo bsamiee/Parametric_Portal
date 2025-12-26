@@ -11,9 +11,11 @@ import { Config, Effect, Layer, pipe } from 'effect';
 
 type ProviderConfig = {
     readonly model: string;
+    readonly maxTokens?: number;
 };
 
 type GenerateTextOptions = {
+    readonly maxTokens?: number;
     readonly prompt: Prompt.RawInput;
     readonly system?: string;
 };
@@ -21,7 +23,7 @@ type GenerateTextOptions = {
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    defaults: {},
+    defaults: { maxTokens: 4096 },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -31,7 +33,10 @@ const createLayers = (config: ProviderConfig) => {
     const ClientLive = OpenAiClient.layerConfig({
         apiKey: Config.redacted('OPENAI_API_KEY'),
     }).pipe(Layer.provide(HttpLive));
-    const ModelLive = OpenAiLanguageModel.model(config.model).pipe(Layer.provide(ClientLive));
+    const ModelLive = OpenAiLanguageModel.model(config.model, {
+        // biome-ignore lint/style/useNamingConvention: OpenAI SDK requires snake_case
+        max_output_tokens: config.maxTokens ?? B.defaults.maxTokens,
+    }).pipe(Layer.provide(ClientLive));
     return { ClientLive, ModelLive };
 };
 
@@ -43,9 +48,11 @@ const createProvider = (config: ProviderConfig) => {
         generateText: (options: GenerateTextOptions) =>
             pipe(
                 LanguageModel.generateText({ prompt: options.prompt }),
-                options.system
-                    ? OpenAiLanguageModel.withConfigOverride({ instructions: options.system })
-                    : (effect) => effect,
+                OpenAiLanguageModel.withConfigOverride({
+                    // biome-ignore lint/style/useNamingConvention: OpenAI SDK requires snake_case
+                    max_output_tokens: options.maxTokens ?? config.maxTokens ?? B.defaults.maxTokens,
+                    instructions: options.system,
+                }),
                 Effect.map((response) => response.text),
                 Effect.provide(ModelLive),
             ),
