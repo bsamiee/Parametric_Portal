@@ -2,11 +2,13 @@
  * URL state tests: branded parsers, options builder, nuqs integration.
  */
 import { it as itProp } from '@fast-check/vitest';
-import '@parametric-portal/test-utils/harness';
+import { types } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { createBrandedNumberParser, createBrandedStringParser, parsers, URL_TUNING } from '../src/url';
+
+const typesApi = types();
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -241,15 +243,15 @@ describe('branded parsers', () => {
 
 describe('serialization', () => {
     itProp.prop([fc.integer({ max: 1000, min: 1 })])('positiveInt serializes to string', (n) => {
-        // biome-ignore lint/suspicious/noExplicitAny: testing serialize with raw number
-        expect(parsers.positiveInt.serialize(n as any)).toBe(String(n));
+        const branded = S.decodeSync(typesApi.schemas.PositiveInt)(n);
+        expect(parsers.positiveInt.serialize(branded)).toBe(String(n));
     });
     it.each(B.samples.slugs)('slug serializes to itself: %s', (slug) => {
-        // biome-ignore lint/suspicious/noExplicitAny: testing serialize with raw string
-        expect(parsers.slug.serialize(slug as any)).toBe(slug);
+        const branded = S.decodeSync(typesApi.schemas.Slug)(slug);
+        expect(parsers.slug.serialize(branded)).toBe(slug);
     });
     it.each(B.samples.emails)('email serializes to itself: %s', (email) => {
-        // biome-ignore lint/suspicious/noExplicitAny: testing serialize with raw string
-        expect(parsers.email.serialize(email as any)).toBe(email);
+        const branded = S.decodeSync(typesApi.schemas.Email)(email);
+        expect(parsers.email.serialize(branded)).toBe(email);
     });
 });

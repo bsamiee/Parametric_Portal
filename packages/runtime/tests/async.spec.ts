@@ -42,14 +42,24 @@ describe('asyncApi.loading', () => {
         const state = asyncApi.loading();
         expect(state._tag).toBe('Loading');
     });
-    it('returns same structure on multiple calls', () => {
+    it('includes startedAt timestamp', () => {
+        const before = Date.now();
+        const state = asyncApi.loading();
+        const after = Date.now();
+        expect(state._tag === 'Loading' && state.startedAt).toBeGreaterThanOrEqual(before);
+        expect(state._tag === 'Loading' && state.startedAt).toBeLessThanOrEqual(after);
+    });
+    it('each call returns different startedAt', () => {
         const s1 = asyncApi.loading();
         const s2 = asyncApi.loading();
-        expect(s1).toEqual(s2);
+        expect(s1).not.toBe(s2);
+        expect(s1._tag).toBe('Loading');
+        expect(s2._tag).toBe('Loading');
     });
-    it('Loading state has _tag property', () => {
+    it('Loading state has _tag and startedAt properties', () => {
         const state = asyncApi.loading();
         expect(state).toHaveProperty('_tag', 'Loading');
+        expect(state).toHaveProperty('startedAt');
     });
 });
 
@@ -75,10 +85,18 @@ describe('asyncApi.success', () => {
         const state = asyncApi.success(s);
         expect(state._tag === 'Success' && state.data).toBe(s);
     });
-    it('Success state has _tag and data properties', () => {
+    it('Success state has _tag, data, and timestamp properties', () => {
         const state = asyncApi.success(42);
         expect(state).toHaveProperty('_tag', 'Success');
         expect(state).toHaveProperty('data', 42);
+        expect(state).toHaveProperty('timestamp');
+    });
+    it('includes timestamp on creation', () => {
+        const before = Date.now();
+        const state = asyncApi.success('value');
+        const after = Date.now();
+        expect(state._tag === 'Success' && state.timestamp).toBeGreaterThanOrEqual(before);
+        expect(state._tag === 'Success' && state.timestamp).toBeLessThanOrEqual(after);
     });
     it('handles null data', () => {
         const state = asyncApi.success(null);
@@ -106,10 +124,18 @@ describe('asyncApi.failure', () => {
         const state = asyncApi.failure(err);
         expect(state._tag === 'Failure' && state.error).toBe(err);
     });
-    it('Failure state has _tag and error properties', () => {
+    it('Failure state has _tag, error, and timestamp properties', () => {
         const state = asyncApi.failure('error');
         expect(state).toHaveProperty('_tag', 'Failure');
         expect(state).toHaveProperty('error', 'error');
+        expect(state).toHaveProperty('timestamp');
+    });
+    it('includes timestamp on creation', () => {
+        const before = Date.now();
+        const state = asyncApi.failure('error');
+        const after = Date.now();
+        expect(state._tag === 'Failure' && state.timestamp).toBeGreaterThanOrEqual(before);
+        expect(state._tag === 'Failure' && state.timestamp).toBeLessThanOrEqual(after);
     });
     it('handles Error object', () => {
         const error = new Error('test error');
@@ -204,8 +230,9 @@ describe('data access patterns', () => {
         expect('data' in state).toBe(false);
         expect('error' in state).toBe(false);
     });
-    it('Loading has no data property', () => {
+    it('Loading has startedAt but no data/error', () => {
         const state = asyncApi.loading();
+        expect('startedAt' in state).toBe(true);
         expect('data' in state).toBe(false);
         expect('error' in state).toBe(false);
     });
