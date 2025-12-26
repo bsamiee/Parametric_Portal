@@ -23,6 +23,8 @@ spec:
     metadata:
       name: 'parametric-portal-{{ .path.basename }}'
       namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: "2"
       finalizers:
         - resources-finalizer.argocd.argoproj.io
       labels:

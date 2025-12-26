@@ -75,13 +75,13 @@ command -v helm >/dev/null 2>&1 || {
 }
 
 log "Configuring kernel parameters..."
-sudo tee /etc/sysctl.d/90-kubelet.conf <<SYSCTL
+sudo tee /etc/sysctl.d/90-kubelet.conf >/dev/null <<SYSCTL || die "Failed to write sysctl config"
 vm.panic_on_oom=0
 vm.overcommit_memory=1
 kernel.panic=10
 kernel.panic_on_oops=1
 SYSCTL
-sudo sysctl -p /etc/sysctl.d/90-kubelet.conf
+sudo sysctl -p /etc/sysctl.d/90-kubelet.conf || die "Failed to apply sysctl config"
 
 log "Installing K3s {{vars.K3S_VERSION}}..."
 K3S_URL="https://github.com/k3s-io/k3s/releases/download/{{vars.K3S_VERSION_URL}}"
@@ -141,21 +141,22 @@ spec:
 EOF
 
 log "Installing ArgoCD {{vars.ARGOCD_VERSION}}..."
-helm repo list 2>/dev/null | grep -q "^argo[[:space:]]" || helm repo add argo https://argoproj.github.io/argo-helm
-helm repo update argo
+helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
+helm repo update argo || die "Failed to update argo helm repo"
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
 helm upgrade --install argocd argo/argo-cd --namespace argocd --version "{{vars.ARGOCD_VERSION}}" \
     --set configs.cm."kustomize\\.buildOptions"="--enable-helm" --set server.service.type=ClusterIP \
     --set crds.install=true --set crds.keep=true --wait
 
 log "Installing Sealed Secrets {{vars.SEALED_SECRETS_VERSION}}..."
-helm repo list 2>/dev/null | grep -q "^sealed-secrets[[:space:]]" || helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
-helm repo update sealed-secrets
+helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets 2>/dev/null || true
+helm repo update sealed-secrets || die "Failed to update sealed-secrets helm repo"
 helm upgrade --install sealed-secrets sealed-secrets/sealed-secrets --namespace kube-system \
     --version "{{vars.SEALED_SECRETS_VERSION}}" --set fullnameOverride=sealed-secrets-controller \
     --set keyrenewperiod=720h --set resources.requests.cpu=50m --set resources.requests.memory=64Mi \
     --set resources.limits.cpu=200m --set resources.limits.memory=256Mi --wait
 kubectl wait --for=condition=Available deployment/sealed-secrets-controller -n kube-system --timeout=60s
+command -v kubeseal >/dev/null 2>&1 || die "kubeseal required: https://github.com/bitnami-labs/sealed-secrets/releases"
 kubeseal --controller-name=sealed-secrets-controller --controller-namespace=kube-system --fetch-cert > /opt/sealed-secrets-cert.pem
 
 log "Creating namespace {{vars.NAMESPACE}}..."
@@ -188,16 +189,23 @@ log() { echo -e "\033[0;32m[INFO]\033[0m $1"; }
 err() { echo -e "\033[0;31m[ERROR]\033[0m $1" >&2; }
 die() { err "$1"; exit 1; }
 
+[[ -z "${1:-}" || -z "${2:-}" ]] && die "Usage: mise run seal-secret <name> <namespace>"
+
 CERT="${SEALED_SECRETS_CERT:-/opt/sealed-secrets-cert.pem}"
 OUT="${OUTPUT_DIR:-{{vars.KUSTOMIZE_OVERLAY}}}"
 SCOPE="${SEAL_SCOPE:-strict}"
 CERT_MAX_AGE="${CERT_MAX_AGE_DAYS:-7}"
 
-[[ -z "${1:-}" || -z "${2:-}" ]] && die "Usage: mise run seal-secret <name> <namespace>"
+mkdir -p "$OUT" || die "Failed to create output directory: $OUT"
 command -v kubeseal >/dev/null 2>&1 || die "kubeseal required"
 
 if [[ -f "$CERT" ]]; then
-    AGE=$(( ($(date +%s) - $(stat -c %Y "$CERT" 2>/dev/null || stat -f %m "$CERT")) / 86400 ))
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        MTIME=$(stat -f %m "$CERT")
+    else
+        MTIME=$(stat -c %Y "$CERT")
+    fi
+    AGE=$(( ($(date +%s) - MTIME) / 86400 ))
     [[ $AGE -gt $CERT_MAX_AGE ]] && {
         log "Certificate older than ${CERT_MAX_AGE}d, refreshing..."
         kubeseal --controller-name=sealed-secrets-controller --controller-namespace=kube-system --fetch-cert > "$CERT"
@@ -234,8 +242,14 @@ DIR="${BACKUP_DIR:-/opt/backups/postgres}"
 KEEP="${RETENTION_COUNT:-{{vars.RETENTION_COUNT}}}"
 DB="${DB_NAME:-parametric_portal}"
 USER="${DB_USER:-app}"
-FILE="${DIR}/${DB}_$(date +%Y%m%d_%H%M%S).sql.zst"
-mkdir -p "$DIR"
+SQL_FILE="${DIR}/${DB}_$(date +%Y%m%d_%H%M%S).sql"
+FILE="${SQL_FILE}.zst"
+
+# Validate KEEP is a positive integer
+[[ "$KEEP" =~ ^[0-9]+$ ]] || KEEP=10
+[[ "$KEEP" -ge 1 ]] || KEEP=10
+
+mkdir -p "$DIR" || die "Failed to create backup directory: $DIR"
 
 log "Backing up ${DB}..."
 if command -v kubectl &>/dev/null; then
@@ -250,12 +264,16 @@ if command -v kubectl &>/dev/null; then
     if [[ -n "$POD" ]]; then
         log "Using pod: $POD"
         kubectl exec -n "{{vars.NAMESPACE}}" "$POD" -c postgres -- \
-            pg_dump -U "$USER" -d "$DB" --clean --if-exists | zstd -1 > "$FILE"
+            pg_dump -U "$USER" -d "$DB" --clean --if-exists > "$SQL_FILE" || die "pg_dump failed"
+        zstd -1 --rm "$SQL_FILE" -o "$FILE" || die "Compression failed"
     else
-        docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists | zstd -1 > "$FILE"
+        log "[WARN] No PostgreSQL pod found, falling back to docker"
+        docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists > "$SQL_FILE" || die "pg_dump failed"
+        zstd -1 --rm "$SQL_FILE" -o "$FILE" || die "Compression failed"
     fi
 else
-    docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists | zstd -1 > "$FILE"
+    docker exec "${CONTAINER_NAME:-postgres}" pg_dump -U "$USER" -d "$DB" --clean --if-exists > "$SQL_FILE" || die "pg_dump failed"
+    zstd -1 --rm "$SQL_FILE" -o "$FILE" || die "Compression failed"
 fi
 
 zstd -t "$FILE" || { rm -f "$FILE"; die "Backup verification failed"; }
@@ -269,24 +287,36 @@ log "Backup: $FILE ($(du -h "$FILE" | cut -f1)), $(find "$DIR" -name "*.sql.zst"
 description = "Build Kustomize manifests"
 sources = ["infrastructure/**/*.yaml"]
 outputs = ["/tmp/k8s-manifests.yaml"]
-run = "kustomize build --output {{vars.MANIFEST_TMP}} --load-restrictor LoadRestrictionsNone {{vars.KUSTOMIZE_OVERLAY}}"
+run = '''
+set -euo pipefail
+kustomize build --output {{vars.MANIFEST_TMP}} --load-restrictor LoadRestrictionsNone {{vars.KUSTOMIZE_OVERLAY}} || { echo '[ERROR] kustomize build failed'; exit 1; }
+[[ -f {{vars.MANIFEST_TMP}} ]] || { echo '[ERROR] Build produced no output'; exit 1; }
+echo '[OK] Manifests built'
+'''
 
 [tasks."k8s:validate"]
 description = "Validate K8s manifests (schema + server)"
 depends = ["k8s:build"]
-run = """
+run = '''
+set -euo pipefail
 kubeconform -strict -ignore-missing-schemas -summary \
   -n 8 -cache {{vars.KUBECONFORM_CACHE}} \
   -kubernetes-version {{vars.K8S_VERSION}} \
-  {{vars.MANIFEST_TMP}} && \
-kubectl apply --dry-run=server -f {{vars.MANIFEST_TMP}} >/dev/null && \
+  {{vars.MANIFEST_TMP}} || { echo '[ERROR] kubeconform schema validation failed'; exit 1; }
+kubectl apply --dry-run=server -f {{vars.MANIFEST_TMP}} >/dev/null || { echo '[ERROR] server-side validation failed'; exit 1; }
 echo '[OK] Manifests valid (schema + server)'
-"""
+'''
 
 [tasks."k8s:diff"]
 description = "Show cluster state diff (semantic)"
 depends = ["k8s:build"]
-run = "KUBECTL_EXTERNAL_DIFF='dyff between --omit-header --set-exit-code -b' kubectl diff -f {{vars.MANIFEST_TMP}} || true"
+run = '''
+if command -v dyff >/dev/null 2>&1; then
+  KUBECTL_EXTERNAL_DIFF='dyff between --omit-header --set-exit-code -b' kubectl diff -f {{vars.MANIFEST_TMP}} || true
+else
+  kubectl diff -f {{vars.MANIFEST_TMP}} || true
+fi
+'''
 
 # --- [LINTING] ----------------------------------------------------------------
 
@@ -320,7 +350,14 @@ run = "colima status >/dev/null 2>&1 && colima stop && echo '[OK] Stopped' || ec
 
 [tasks."container:status"]
 description = "Show Colima status"
-run = "colima status 2>/dev/null || echo '[WARN] Not running'"
+run = '''
+if command -v colima >/dev/null 2>&1; then
+  colima status 2>/dev/null || echo '[WARN] Not running'
+else
+  echo '[ERROR] colima not installed'
+  exit 1
+fi
+'''
 
 # --- [WORKFLOW] ---------------------------------------------------------------
 
@@ -337,6 +374,7 @@ ratchet lint .github/workflows/*.yml && echo '[OK] ratchet'
 [tasks."wf:dry-run"]
 description = "Dry-run validation (job graph, no execution)"
 run = '''
+set -euo pipefail
 docker info >/dev/null 2>&1 || { echo '[SKIP] Docker not available'; exit 0; }
 act {{vars.ACT_FLAGS}} --validate --strict -l && echo '[OK] Dry-run valid'
 '''
@@ -345,6 +383,7 @@ act {{vars.ACT_FLAGS}} --validate --strict -l && echo '[OK] Dry-run valid'
 description = "Full validation: static + dry-run"
 depends = ["wf:static"]
 run = '''
+set -euo pipefail
 if docker info >/dev/null 2>&1; then
   act {{vars.ACT_FLAGS}} --validate --strict -l 2>&1 | head -30
   echo '[OK] Dry-run validation complete'
@@ -356,6 +395,7 @@ fi
 [tasks."wf:trigger"]
 description = "Trigger workflow on current branch"
 run = '''
+set -euo pipefail
 WORKFLOW="${1:-ci.yml}"
 gh workflow run "$WORKFLOW" --ref "$(git branch --show-current)"
 echo "[OK] Triggered $WORKFLOW"
@@ -388,6 +428,7 @@ run = "mkdir -p .artifacts && gh run download -D .artifacts"
 [tasks."wf:test"]
 description = "Test workflow: trigger + watch"
 run = '''
+set -euo pipefail
 WORKFLOW="${1:-ci.yml}"
 gh workflow run "$WORKFLOW" --ref "$(git branch --show-current)"
 sleep 3

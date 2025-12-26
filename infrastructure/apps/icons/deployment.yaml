@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: icons
@@ -17,6 +22,15 @@ spec:
         app.kubernetes.io/name: icons
         app.kubernetes.io/component: frontend
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: icons
+                topologyKey: kubernetes.io/hostname
       serviceAccountName: icons
       automountServiceAccountToken: false
       containers:
