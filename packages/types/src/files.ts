@@ -246,4 +246,4 @@ const files = (config: FilesConfig = {}): FilesApi => {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as FILES_TUNING, files };
-export type { FileError, FileMetadata, FilesApi, FilesConfig, MimeCategory, MimeType };
+export type { FileError, FileMetadata, MimeType };

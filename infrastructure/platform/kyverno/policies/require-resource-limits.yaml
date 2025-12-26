@@ -1,0 +1,54 @@
+# --- REQUIRE RESOURCE LIMITS --------------------------------------------------
+# Best Practices: Enforce CPU/memory requests and memory limits
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-requests-limits
+  annotations:
+    policies.kyverno.io/title: Require Limits and Requests
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/description: >-
+      Application workloads share cluster resources. Require resource requests
+      and limits per Pod, especially for memory and CPU. Memory limits prevent
+      OOM conditions; CPU requests ensure fair scheduling.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: CPU and memory resource requests and limits are required.
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    memory: '?*'
+                    cpu: '?*'
+                  limits:
+                    memory: '?*'
+                    cpu: '?*'
+            =(initContainers):
+              - resources:
+                  requests:
+                    memory: '?*'
+                    cpu: '?*'
+                  limits:
+                    memory: '?*'
+                    cpu: '?*'
+            =(ephemeralContainers):
+              - resources:
+                  requests:
+                    memory: '?*'
+                    cpu: '?*'
+                  limits:
+                    memory: '?*'
+                    cpu: '?*'

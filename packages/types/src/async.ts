@@ -127,4 +127,4 @@ const async = (config: AsyncConfig = {}): AsyncApi => {
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { async, B as ASYNC_TUNING };
-export type { AsyncApi, AsyncConfig, AsyncState, AsyncStateFold };
+export type { AsyncState };

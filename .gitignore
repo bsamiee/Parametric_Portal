@@ -61,6 +61,7 @@ stryker-tmp/
 
 # --- [CACHES] -----------------------------------------------------------------
 .cache/
+.artifacts/
 .nx/*
 .vite-inspect/
 .vite/
@@ -72,6 +73,7 @@ stryker-tmp/
 .env.*.local
 .env.development
 .env.production
+.secrets
 gha-creds-*.json
 
 # --- [LOGS] -------------------------------------------------------------------

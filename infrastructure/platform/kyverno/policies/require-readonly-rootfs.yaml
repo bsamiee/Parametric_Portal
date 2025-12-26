@@ -1,0 +1,39 @@
+# --- REQUIRE READ-ONLY ROOT FILESYSTEM ----------------------------------------
+# Best Practices: Enforce immutable infrastructure via read-only root filesystem
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-ro-rootfs
+  annotations:
+    policies.kyverno.io/title: Require Read-Only Root Filesystem
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/description: >-
+      A read-only root file system enforces immutable infrastructure. Containers
+      write only to mounted volumes that persist state. This prevents malicious
+      binaries from writing to the host system.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-readOnlyRootFilesystem
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: Root filesystem must be read-only.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true
+            =(initContainers):
+              - securityContext:
+                  readOnlyRootFilesystem: true
+            =(ephemeralContainers):
+              - securityContext:
+                  readOnlyRootFilesystem: true

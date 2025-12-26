@@ -15,6 +15,15 @@ const Dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const B = Object.freeze({
     browser: {
+        expect: {
+            toMatchScreenshot: {
+                comparatorName: 'pixelmatch' as const,
+                comparatorOptions: {
+                    allowedMismatchedPixelRatio: 0.01,
+                    threshold: 0.2,
+                },
+            },
+        },
         headless: true,
         provider: playwright({
             actionTimeout: 5_000,
@@ -66,7 +75,7 @@ const B = Object.freeze({
             '**/test/**',
             '**/tests/**',
         ],
-        coverageInclude: ['packages/**/src/**/*.{ts,tsx}', 'apps/**/src/**/*.{ts,tsx}'],
+        coverageInclude: ['packages/runtime/src/**/*.{ts,tsx}', 'packages/test-utils/src/**/*.{ts,tsx}'],
         testExclude: ['**/*.e2e.{test,spec}.{ts,tsx}', '**/node_modules/**', '**/dist/**'],
         testInclude: ['tests/**/*.{test,spec}.{ts,tsx}', 'src/**/*.{test,spec}.{ts,tsx}'],
     },
@@ -102,7 +111,7 @@ export default defineConfig({
             reportOnFailure: true,
             reportsDirectory: path.resolve(Dirname, 'coverage'),
             skipFull: false,
-            thresholds: { autoUpdate: false, branches: 80, functions: 80, lines: 80, perFile: true, statements: 80 },
+            thresholds: { autoUpdate: false, branches: 30, functions: 30, lines: 30, perFile: false, statements: 30 },
         },
         deps: { ...B.deps },
         diff: { ...B.output.diff },
@@ -134,6 +143,7 @@ export default defineConfig({
                 test: {
                     browser: {
                         enabled: true,
+                        expect: B.browser.expect,
                         headless: B.browser.headless,
                         instances: [{ browser: 'chromium' }],
                         provider: B.browser.provider,

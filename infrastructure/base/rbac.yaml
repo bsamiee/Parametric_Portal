@@ -1,0 +1,56 @@
+# --- RBAC CONFIGURATION -------------------------------------------------------
+# ServiceAccounts for API and Icons pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api
+  namespace: parametric-portal
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: parametric-portal
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: icons
+  namespace: parametric-portal
+  labels:
+    app.kubernetes.io/name: icons
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: parametric-portal
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-secrets-reader
+  namespace: parametric-portal
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: parametric-portal
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["api-secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-secrets-reader-binding
+  namespace: parametric-portal
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: parametric-portal
+subjects:
+  - kind: ServiceAccount
+    name: api
+    namespace: parametric-portal
+roleRef:
+  kind: Role
+  name: api-secrets-reader
+  apiGroup: rbac.authorization.k8s.io

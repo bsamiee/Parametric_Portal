@@ -24,31 +24,33 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const runEffect = <A, E>(effect: Effect.Effect<A, E, never>): Exit.Exit<A, E> => Effect.runSyncExit(effect);
+const run = <A, E>(eff: Effect.Effect<A, E, never>): Exit.Exit<A, E> => Effect.runSyncExit(eff);
 const mkDateTime = (date: Date): DateTime.DateTime => DateTime.unsafeMake(date);
 const extractMs = (exit: Exit.Exit<DateTime.DateTime, never>): number =>
     Exit.isSuccess(exit) ? DateTime.toEpochMillis(exit.value) : Number.NaN;
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const temporalApi = createTemporal();
-const temporalHandlers = {
-    addDays: (days: number, dt: DateTime.DateTime) => runEffect(temporalApi.addDays(days)(dt)),
-    addHours: (hours: number, dt: DateTime.DateTime) => runEffect(temporalApi.addHours(hours)(dt)),
-    addMinutes: (mins: number, dt: DateTime.DateTime) => runEffect(temporalApi.addMinutes(mins)(dt)),
-    addMonths: (months: number, dt: DateTime.DateTime) => runEffect(temporalApi.addMonths(months)(dt)),
-    daysBetween: (start: DateTime.DateTime, end: DateTime.DateTime) => runEffect(temporalApi.daysBetween(start, end)),
-    endOfDay: (dt: DateTime.DateTime) => runEffect(temporalApi.endOfDay(dt)),
-    format: (dt: DateTime.DateTime) => runEffect(temporalApi.format(dt)),
-    isAfter: (dt1: DateTime.DateTime, dt2: DateTime.DateTime) => runEffect(temporalApi.isAfter(dt1, dt2)),
-    isBefore: (dt1: DateTime.DateTime, dt2: DateTime.DateTime) => runEffect(temporalApi.isBefore(dt1, dt2)),
-    parseIso: (input: string) => runEffect(temporalApi.parseIso(input)),
-    startOfDay: (dt: DateTime.DateTime) => runEffect(temporalApi.startOfDay(dt)),
-} as const;
 const arithmeticOps = [
-    { arb: FC_ARB.days, handler: temporalHandlers.addDays, msPer: B.derived.msPerDay, name: 'addDays' },
-    { arb: FC_ARB.hours, handler: temporalHandlers.addHours, msPer: B.derived.msPerHour, name: 'addHours' },
-    { arb: FC_ARB.minutes, handler: temporalHandlers.addMinutes, msPer: B.derived.msPerMinute, name: 'addMinutes' },
+    {
+        arb: FC_ARB.days,
+        handler: (v: number, dt: DateTime.DateTime) => run(temporalApi.addDays(v)(dt)),
+        msPer: B.derived.msPerDay,
+        name: 'addDays',
+    },
+    {
+        arb: FC_ARB.hours,
+        handler: (v: number, dt: DateTime.DateTime) => run(temporalApi.addHours(v)(dt)),
+        msPer: B.derived.msPerHour,
+        name: 'addHours',
+    },
+    {
+        arb: FC_ARB.minutes,
+        handler: (v: number, dt: DateTime.DateTime) => run(temporalApi.addMinutes(v)(dt)),
+        msPer: B.derived.msPerMinute,
+        name: 'addMinutes',
+    },
 ] as const;
 
 // --- [DESCRIBE] TEMPORAL_TUNING + createTemporal -----------------------------
@@ -91,10 +93,10 @@ describe('createTemporal', () => {
 
 describe('parseIso', () => {
     it.prop([FC_ARB.isoDate()])('parses arbitrary valid ISO dates', (date) => {
-        expect(temporalHandlers.parseIso(date)).toBeSuccess();
+        expect(run(temporalApi.parseIso(date))).toBeSuccess();
     });
     it.each(B.invalidDates)('fails invalid date: %s', (date) => {
-        const result = temporalHandlers.parseIso(date);
+        const result = run(temporalApi.parseIso(date));
         expect(result).toBeFailure();
         Exit.isFailure(result) &&
             result.cause._tag === 'Fail' &&
@@ -126,10 +128,16 @@ describe('addMonths', () => {
     const baseDate = mkDateTime(B.frozenDate);
     const baseMonth = B.frozenDate.getMonth();
     it.prop([FC_ARB.months()])('produces valid DateTime with deterministic month delta', (months) => {
-        const result = temporalHandlers.addMonths(months, baseDate);
+        const result = run(temporalApi.addMonths(months)(baseDate));
         expect(result).toBeSuccess();
         Exit.isSuccess(result) &&
             expect(new Date(DateTime.toEpochMillis(result.value)).getMonth()).toBe((baseMonth + months + 12) % 12);
+    });
+    it('handles year boundary (Dec → Jan)', () => {
+        const dec31 = mkDateTime(new Date('2025-12-31'));
+        const result = run(temporalApi.addMonths(1)(dec31));
+        expect(result).toBeSuccess();
+        Exit.isSuccess(result) && expect(new Date(DateTime.toEpochMillis(result.value)).getMonth()).toBe(0);
     });
 });
 
@@ -139,13 +147,19 @@ describe('daysBetween', () => {
     const baseDate = mkDateTime(B.frozenDate);
     it('calculates exact difference and zero for same date', () => {
         const future = mkDateTime(new Date('2025-01-22'));
-        expect(temporalHandlers.daysBetween(baseDate, future)).toBeSuccess(7);
-        expect(temporalHandlers.daysBetween(baseDate, baseDate)).toBeSuccess(0);
+        expect(run(temporalApi.daysBetween(baseDate, future))).toBeSuccess(7);
+        expect(run(temporalApi.daysBetween(baseDate, baseDate))).toBeSuccess(0);
     });
     it.prop([FC_ARB.days()])('daysBetween(base, base+n) equals |n|', (days) => {
-        const added = temporalHandlers.addDays(days, baseDate);
+        const added = run(temporalApi.addDays(days)(baseDate));
         Exit.isSuccess(added) &&
-            expect(temporalHandlers.daysBetween(baseDate, added.value)).toBeSuccess(Math.abs(days));
+            expect(run(temporalApi.daysBetween(baseDate, added.value))).toBeSuccess(Math.abs(days));
+    });
+    it('handles leap year Feb 28 → Mar 1', () => {
+        const feb28 = mkDateTime(new Date('2024-02-28T12:00:00Z'));
+        const result = run(temporalApi.addDays(2)(feb28));
+        expect(result).toBeSuccess();
+        Exit.isSuccess(result) && expect(new Date(DateTime.toEpochMillis(result.value)).getUTCMonth()).toBe(2);
     });
 });
 
@@ -159,7 +173,7 @@ describe('day boundaries', () => {
         year: B.frozenDate.getUTCFullYear(),
     };
     it('startOfDay sets 00:00:00.000 and preserves YMD', () => {
-        const result = temporalHandlers.startOfDay(baseDate);
+        const result = run(temporalApi.startOfDay(baseDate));
         expect(result).toBeSuccess();
         Exit.isSuccess(result) &&
             (() => {
@@ -171,7 +185,7 @@ describe('day boundaries', () => {
             })();
     });
     it('endOfDay sets 23:59:59.999 and preserves YMD', () => {
-        const result = temporalHandlers.endOfDay(baseDate);
+        const result = run(temporalApi.endOfDay(baseDate));
         expect(result).toBeSuccess();
         Exit.isSuccess(result) &&
             (() => {
@@ -190,23 +204,23 @@ describe('comparisons', () => {
     const earlier = mkDateTime(new Date('2025-01-01'));
     const later = mkDateTime(new Date('2025-01-15'));
     it('isBefore: earlier < later, not later < earlier, not same < same', () => {
-        expect(temporalHandlers.isBefore(earlier, later)).toBeSuccess(true);
-        expect(temporalHandlers.isBefore(later, earlier)).toBeSuccess(false);
-        expect(temporalHandlers.isBefore(earlier, earlier)).toBeSuccess(false);
+        expect(run(temporalApi.isBefore(earlier, later))).toBeSuccess(true);
+        expect(run(temporalApi.isBefore(later, earlier))).toBeSuccess(false);
+        expect(run(temporalApi.isBefore(earlier, earlier))).toBeSuccess(false);
     });
     it('isAfter: later > earlier, not earlier > later, not same > same', () => {
-        expect(temporalHandlers.isAfter(later, earlier)).toBeSuccess(true);
-        expect(temporalHandlers.isAfter(earlier, later)).toBeSuccess(false);
-        expect(temporalHandlers.isAfter(earlier, earlier)).toBeSuccess(false);
+        expect(run(temporalApi.isAfter(later, earlier))).toBeSuccess(true);
+        expect(run(temporalApi.isAfter(earlier, later))).toBeSuccess(false);
+        expect(run(temporalApi.isAfter(earlier, earlier))).toBeSuccess(false);
     });
     it.prop([FC_ARB.days()])('isBefore and isAfter are inverses for non-equal dates', (days) => {
         fc.pre(days !== 0);
         const baseDate = mkDateTime(B.frozenDate);
-        const added = temporalHandlers.addDays(days, baseDate);
+        const added = run(temporalApi.addDays(days)(baseDate));
         Exit.isSuccess(added) &&
             (() => {
-                const before = temporalHandlers.isBefore(baseDate, added.value);
-                const after = temporalHandlers.isAfter(baseDate, added.value);
+                const before = run(temporalApi.isBefore(baseDate, added.value));
+                const after = run(temporalApi.isAfter(baseDate, added.value));
                 Exit.isSuccess(before) && Exit.isSuccess(after) && expect(before.value).toBe(!after.value);
             })();
     });
@@ -217,14 +231,14 @@ describe('comparisons', () => {
 describe('format', () => {
     const baseDate = mkDateTime(B.frozenDate);
     it('formats to yyyy-MM-dd pattern deterministically', () => {
-        const r1 = temporalHandlers.format(baseDate);
-        const r2 = temporalHandlers.format(baseDate);
+        const r1 = run(temporalApi.format(baseDate));
+        const r2 = run(temporalApi.format(baseDate));
         expect(r1).toBeSuccess('2025-01-15');
         expect(r2).toBeSuccess('2025-01-15');
         Exit.isSuccess(r1) && Exit.isSuccess(r2) && expect(r1.value).toBe(r2.value);
     });
     it('output matches ISO date regex', () => {
-        const result = temporalHandlers.format(baseDate);
+        const result = run(temporalApi.format(baseDate));
         Exit.isSuccess(result) && expect(result.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 });

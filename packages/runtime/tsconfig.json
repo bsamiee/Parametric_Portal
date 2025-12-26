@@ -3,7 +3,7 @@
         "outDir": "dist",
         "rootDir": ".",
         "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/runtime.tsbuildinfo",
-        "types": ["vite/client", "vitest/globals"]
+        "types": ["vitest/globals"]
     },
     "exclude": ["dist", "node_modules"],
     "extends": "../../tsconfig.base.json",

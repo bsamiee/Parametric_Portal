@@ -420,7 +420,18 @@ const config: {
         build: {
             lib: { entry: c.entry, fileName: 'main', formats: ['es'] as const, name: c.name },
             rollupOptions: {
-                external: [/^node:/, /^@effect/, /^effect/, /^arctic/, /^@anthropic-ai/, ...(c.external ?? [])],
+                external: [
+                    /^node:/,
+                    /^@effect/,
+                    /^effect/,
+                    /^arctic/,
+                    /^@anthropic-ai/,
+                    /^@opentelemetry/,
+                    /^@grpc/,
+                    /^prom-client/,
+                    /^drizzle-orm/,
+                    ...(c.external ?? []),
+                ],
                 output: { exports: 'named' as const },
             },
             sourcemap: true,

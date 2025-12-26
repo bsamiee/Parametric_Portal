@@ -1,12 +1,14 @@
 /**
  * OAuthService implementation using Arctic OAuth library.
  * Implements the OAuthService interface from @parametric-portal/server/middleware.
+ * PKCE code_verifier stored in encrypted state (RFC 7636 §7.2) - stateless, no in-memory Map.
  */
 
+import { Crypto } from '@parametric-portal/server/crypto';
 import { OAuthError } from '@parametric-portal/server/errors';
 import { OAuthService } from '@parametric-portal/server/middleware';
 import type { OAuthProvider, OAuthTokens, OAuthUserInfo } from '@parametric-portal/types/database';
-import { GitHub, Google, MicrosoftEntraId } from 'arctic';
+import { GitHub, Google, generateCodeVerifier, MicrosoftEntraId } from 'arctic';
 import { Config, Effect, Layer, Option, pipe, Redacted, Schema as S } from 'effect';
 import type { ParseError } from 'effect/ParseResult';
 
@@ -41,6 +43,9 @@ const OIDCUserInfoSchema = S.Struct({
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    pkce: {
+        expiryMs: 600_000, // 10 minutes TTL for PKCE state
+    },
     scopes: {
         github: ['user:email'],
         google: ['openid', 'profile', 'email'],
@@ -52,6 +57,42 @@ const B = Object.freeze({
         microsoft: 'https://graph.microsoft.com/oidc/userinfo',
     },
 } as const);
+
+// --- [PKCE_CRYPTO] -----------------------------------------------------------
+
+/** Encrypt PKCE state: {state, verifier, exp} → base64url string (RFC 7636 §7.2) */
+const encryptPkceState = (state: string, verifier: string): Effect.Effect<string, OAuthError> =>
+    pipe(
+        Crypto.encrypt(JSON.stringify({ exp: Date.now() + B.pkce.expiryMs, state, verifier })),
+        Effect.map(({ ciphertext, iv }) => Buffer.from(new Uint8Array([...iv, ...ciphertext])).toString('base64url')),
+        Effect.mapError(() => new OAuthError({ provider: 'google', reason: 'PKCE state encryption failed' })),
+    );
+
+/** Decrypt base64url → {state, verifier}, validates expiry */
+const decryptPkceState = (
+    encrypted: string,
+    provider: OAuthProvider,
+): Effect.Effect<{ state: string; verifier: string }, OAuthError> =>
+    pipe(
+        Effect.try(() => new Uint8Array(Buffer.from(encrypted, 'base64url'))),
+        Effect.flatMap((bytes) =>
+            pipe(
+                Crypto.decryptFromBytes(bytes),
+                Effect.mapError(() => new OAuthError({ provider, reason: 'PKCE decryption failed' })),
+            ),
+        ),
+        Effect.flatMap((json) =>
+            Effect.try(() => JSON.parse(json) as { exp: number; state: string; verifier: string }),
+        ),
+        Effect.flatMap((payload) =>
+            Date.now() > payload.exp
+                ? Effect.fail(new OAuthError({ provider, reason: 'PKCE state expired' }))
+                : Effect.succeed({ state: payload.state, verifier: payload.verifier }),
+        ),
+        Effect.mapError((e) =>
+            e instanceof OAuthError ? e : new OAuthError({ provider, reason: 'PKCE state invalid' }),
+        ),
+    );
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -153,55 +194,90 @@ const OAuthServiceLive = Layer.effect(
             Redacted.value(microsoftConfig.clientSecret),
             microsoftConfig.redirectUri,
         );
-        const codeVerifiers = new Map<string, string>();
+        // PKCE: Encrypted state replaces in-memory Map (RFC 7636 §7.2 - stateless servers)
         const createAuthUrl = {
-            github: (state: string, scopes: ReadonlyArray<string>) => github.createAuthorizationURL(state, [...scopes]),
-            google: (state: string, scopes: ReadonlyArray<string>) => {
-                const codeVerifier = crypto.randomUUID();
-                codeVerifiers.set(state, codeVerifier);
-                return google.createAuthorizationURL(state, codeVerifier, [...scopes]);
-            },
-            microsoft: (state: string, scopes: ReadonlyArray<string>) => {
-                const codeVerifier = crypto.randomUUID();
-                codeVerifiers.set(state, codeVerifier);
-                return microsoft.createAuthorizationURL(state, codeVerifier, [...scopes]);
-            },
-        } as const satisfies Record<OAuthProvider, (state: string, scopes: ReadonlyArray<string>) => URL>;
+            github: (state: string, scopes: ReadonlyArray<string>) =>
+                Effect.succeed(github.createAuthorizationURL(state, [...scopes])),
+            google: (state: string, scopes: ReadonlyArray<string>) =>
+                pipe(
+                    Effect.sync(generateCodeVerifier),
+                    Effect.flatMap((verifier) =>
+                        pipe(
+                            encryptPkceState(state, verifier),
+                            Effect.map((encryptedState) =>
+                                google.createAuthorizationURL(encryptedState, verifier, [...scopes]),
+                            ),
+                        ),
+                    ),
+                ),
+            microsoft: (state: string, scopes: ReadonlyArray<string>) =>
+                pipe(
+                    Effect.sync(generateCodeVerifier),
+                    Effect.flatMap((verifier) =>
+                        pipe(
+                            encryptPkceState(state, verifier),
+                            Effect.map((encryptedState) =>
+                                microsoft.createAuthorizationURL(encryptedState, verifier, [...scopes]),
+                            ),
+                        ),
+                    ),
+                ),
+        } as const satisfies Record<
+            OAuthProvider,
+            (state: string, scopes: ReadonlyArray<string>) => Effect.Effect<URL, OAuthError>
+        >;
         const validateToken = {
-            github: (code: string, _state: string) => github.validateAuthorizationCode(code),
-            google: (code: string, state: string) => {
-                const verifier = codeVerifiers.get(state) ?? '';
-                codeVerifiers.delete(state);
-                return google.validateAuthorizationCode(code, verifier);
-            },
-            microsoft: (code: string, state: string) => {
-                const verifier = codeVerifiers.get(state) ?? '';
-                codeVerifiers.delete(state);
-                return microsoft.validateAuthorizationCode(code, verifier);
-            },
-        } as const satisfies Record<OAuthProvider, (code: string, state: string) => Promise<unknown>>;
+            github: (code: string, _state: string) =>
+                Effect.tryPromise({
+                    catch: (e) => new OAuthError({ provider: 'github', reason: `Token exchange failed: ${String(e)}` }),
+                    try: () => github.validateAuthorizationCode(code),
+                }),
+            google: (code: string, encryptedState: string) =>
+                pipe(
+                    decryptPkceState(encryptedState, 'google'),
+                    Effect.flatMap(({ verifier }) =>
+                        Effect.tryPromise({
+                            catch: (e) =>
+                                new OAuthError({ provider: 'google', reason: `Token exchange failed: ${String(e)}` }),
+                            try: () => google.validateAuthorizationCode(code, verifier),
+                        }),
+                    ),
+                ),
+            microsoft: (code: string, encryptedState: string) =>
+                pipe(
+                    decryptPkceState(encryptedState, 'microsoft'),
+                    Effect.flatMap(({ verifier }) =>
+                        Effect.tryPromise({
+                            catch: (e) =>
+                                new OAuthError({
+                                    provider: 'microsoft',
+                                    reason: `Token exchange failed: ${String(e)}`,
+                                }),
+                            try: () => microsoft.validateAuthorizationCode(code, verifier),
+                        }),
+                    ),
+                ),
+        } as const satisfies Record<OAuthProvider, (code: string, state: string) => Effect.Effect<unknown, OAuthError>>;
         return OAuthService.of({
-            createAuthorizationUrl: (provider, state) =>
-                Effect.sync(() => createAuthUrl[provider](state, B.scopes[provider])),
+            createAuthorizationUrl: (provider, state) => createAuthUrl[provider](state, B.scopes[provider]),
             getUserInfo: fetchUserInfo,
             validateCallback: (provider, code, state) =>
-                Effect.gen(function* () {
-                    const tokens = yield* Effect.tryPromise({
-                        catch: (e) => new OAuthError({ provider, reason: `Token exchange failed: ${String(e)}` }),
-                        try: () => validateToken[provider](code, state),
-                    });
-                    const t = tokens as {
-                        accessToken: () => string;
-                        accessTokenExpiresAt?: () => Date;
-                        refreshToken?: () => string;
-                    };
-                    return {
-                        accessToken: t.accessToken(),
-                        expiresAt: Option.fromNullable(t.accessTokenExpiresAt?.()),
-                        refreshToken: Option.fromNullable(t.refreshToken?.()),
-                        scope: Option.none(),
-                    } satisfies OAuthTokens;
-                }),
+                pipe(
+                    validateToken[provider](code, state),
+                    Effect.map((tokens) => {
+                        const t = tokens as {
+                            accessToken: () => string;
+                            accessTokenExpiresAt?: () => Date;
+                            refreshToken?: () => string;
+                        };
+                        return {
+                            accessToken: t.accessToken(),
+                            expiresAt: Option.fromNullable(t.accessTokenExpiresAt?.()),
+                            refreshToken: Option.fromNullable(t.refreshToken?.()),
+                            scope: Option.none(),
+                        } satisfies OAuthTokens;
+                    }),
+                ),
         });
     }),
 );

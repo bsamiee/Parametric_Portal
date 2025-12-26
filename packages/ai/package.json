@@ -10,7 +10,9 @@
     }
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "catalog:",
+    "@effect/ai": "catalog:",
+    "@effect/ai-anthropic": "catalog:",
+    "@effect/platform": "catalog:",
     "@parametric-portal/server": "workspace:*",
     "effect": "catalog:"
   },
@@ -22,6 +24,7 @@
   "scripts": {
     "build": "vite build",
     "check": "biome check .",
+    "fix": "biome check --write .",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   }

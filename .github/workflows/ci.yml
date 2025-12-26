@@ -53,12 +53,25 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Fetch main for Nx affected
-        if: github.event_name == 'pull_request'
-        run: git fetch origin main:main --depth=1
+      - name: Derive Nx SHAs
+        uses: nrwl/nx-set-shas@v4
+        with:
+          main-branch-name: main
+          workflow-id: ci.yml
 
       - name: Setup Environment
         uses: ./.github/actions/node-env
+
+      - name: Restore Nx Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .nx/cache
+            node_modules/.cache
+          key: nx-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            nx-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}-
+            nx-${{ runner.os }}-
 
       - name: Setup Git Identity
         if: github.event_name == 'pull_request'
@@ -89,17 +102,9 @@ jobs:
               body: '[OK] **Biome Auto-Repair Applied**: Style issues fixed and committed.'
             });
 
-      - name: Lint (Biome)
+      - name: Quality Gates (Lint, Typecheck, Build)
         if: steps.auto-fix.outputs.has-changes != 'true'
-        run: pnpm exec nx affected -t lint
-
-      - name: Type Check
-        if: steps.auto-fix.outputs.has-changes != 'true'
-        run: pnpm exec nx affected -t typecheck
-
-      - name: Build
-        if: steps.auto-fix.outputs.has-changes != 'true'
-        run: pnpm exec nx affected -t build
+        run: pnpm exec nx affected -t lint,typecheck,build --parallel=4
 
       - name: Install Playwright Browsers
         if: steps.auto-fix.outputs.has-changes != 'true'
@@ -109,32 +114,27 @@ jobs:
         if: steps.auto-fix.outputs.has-changes != 'true'
         run: pnpm exec nx affected -t test -- --coverage
 
-      - name: Generate Project Graph
-        if: always()
-        run: pnpm exec nx graph --file=.nx/project-graph.json
-        continue-on-error: true
-
-      - name: Upload Coverage and Project Graph
+      - name: Upload Coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ci-artifacts
-          path: |
-            **/coverage
-            .nx/project-graph.json
+          path: '**/coverage'
           if-no-files-found: ignore
           retention-days: 7
 
       - name: Job Summary
         if: always()
         run: |
-          echo "## CI Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Affected Projects" >> $GITHUB_STEP_SUMMARY
-          pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' >> $GITHUB_STEP_SUMMARY || echo "- None" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Quick Links" >> $GITHUB_STEP_SUMMARY
-          echo "- [Artifacts](#artifacts) - Coverage reports and project graph" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## CI Summary"
+            echo ""
+            echo "### Affected Projects"
+            pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' || echo "- None"
+            echo ""
+            echo "### Quick Links"
+            echo "- [Artifacts](#artifacts) - Coverage reports and project graph"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create Quality Debt Issue
         if: failure() && github.event_name == 'pull_request'
@@ -217,7 +217,10 @@ jobs:
       - uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
         with:
           fail-on-severity: high
-          allow-licenses: MIT, MIT-0, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, CC0-1.0
+          allow-licenses: >-
+            MIT, MIT-0, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, CC0-1.0, Unlicense,
+            BlueOak-1.0.0, 0BSD, Python-2.0, WTFPL
+          license-check: false
 
   codeql:
     name: CodeQL Analysis

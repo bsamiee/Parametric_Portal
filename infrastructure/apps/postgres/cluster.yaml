@@ -1,6 +1,5 @@
 # --- CLOUDNATIVEPG CLUSTER ----------------------------------------------------
-# PostgreSQL 17 cluster with single instance for K3s single-node deployment
-# Scale instances: 3 for HA when multi-node cluster is available
+# PostgreSQL 17 HA cluster with 3 instances for multi-node deployment
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -9,7 +8,7 @@ metadata:
     app.kubernetes.io/name: postgres
     app.kubernetes.io/component: database
 spec:
-  instances: 1
+  instances: 3
 
   imageName: ghcr.io/cloudnative-pg/postgresql:17
 
@@ -31,6 +30,12 @@ spec:
       effective_io_concurrency: "200"
       log_statement: "ddl"
       log_min_duration_statement: "1000"
+      # --- MONITORING EXTENSIONS ---
+      pg_stat_statements.max: "10000"
+      pg_stat_statements.track: "all"
+      track_io_timing: "on"
+      track_activities: "on"
+      track_counts: "on"
 
   bootstrap:
     initdb:
@@ -46,10 +51,11 @@ spec:
       cpu: "1000m"
 
   affinity:
-    enablePodAntiAffinity: false
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
 
   monitoring:
-    enablePodMonitor: false
+    enablePodMonitor: true
 
   backup:
     barmanObjectStore:

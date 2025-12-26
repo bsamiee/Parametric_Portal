@@ -95,8 +95,6 @@ jobs:
                       pnpm-lock.yaml
 
             - uses: ./.github/actions/node-env
-              with:
-                  node-version-file: package.json
 
             - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
               env:
@@ -149,8 +147,6 @@ jobs:
                       pnpm-lock.yaml
 
             - uses: ./.github/actions/node-env
-              with:
-                  node-version-file: package.json
 
             - name: Branch Maintenance
               uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
@@ -189,12 +185,12 @@ jobs:
               run: |
                   echo "[INFO] Fetching cache entries older than 7 days..."
                   CUTOFF_DATE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
-                  
+
                   # List and delete caches older than retention period (no limit)
                   gh cache list --json id,createdAt --jq ".[] | select(.createdAt < \"$CUTOFF_DATE\") | .id" | while read -r cache_id; do
                     [ -n "$cache_id" ] && echo "[INFO] Deleting cache: $cache_id" && gh cache delete "$cache_id" || true
                   done
-                  
+
                   echo "[OK] Cache cleanup complete"
 
     maintenance-summary:
@@ -205,11 +201,13 @@ jobs:
         steps:
             - name: Generate Summary
               run: |
-                  echo "## Maintenance Summary" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "| Task | Status |" >> $GITHUB_STEP_SUMMARY
-                  echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-                  echo "| Branch Cleanup | ${{ needs.branch-cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
-                  echo "| Cache Cleanup | ${{ needs.cache-cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "_Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)_" >> $GITHUB_STEP_SUMMARY
+                  {
+                    echo "## Maintenance Summary"
+                    echo ""
+                    echo "| Task | Status |"
+                    echo "|------|--------|"
+                    echo "| Branch Cleanup | ${{ needs.branch-cleanup.result }} |"
+                    echo "| Cache Cleanup | ${{ needs.cache-cleanup.result }} |"
+                    echo ""
+                    echo "_Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)_"
+                  } >> "$GITHUB_STEP_SUMMARY"

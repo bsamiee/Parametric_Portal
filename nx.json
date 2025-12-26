@@ -4,7 +4,9 @@
     "extends": "nx/presets/npm.json",
     "installation": {
         "plugins": {
+            "@nx/docker": "22.3.3",
             "@nx/js": "22.3.3",
+            "@nx/playwright": "22.3.3",
             "@nx/react": "22.3.3",
             "@nx/vite": "22.3.3",
             "@nx/vitest": "22.3.3"
@@ -14,6 +16,11 @@
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
         "docker": ["{projectRoot}/Dockerfile", "{projectRoot}/.dockerignore", "production"],
+        "infrastructure": [
+            "{workspaceRoot}/infrastructure/**/*.yaml",
+            "{workspaceRoot}/.github/workflows/*.yml",
+            "{workspaceRoot}/apps/*/Dockerfile"
+        ],
         "lint": [
             "{projectRoot}/**/*.ts",
             "{projectRoot}/**/*.tsx",
@@ -41,6 +48,7 @@
             "{workspaceRoot}/nx.json",
             "{workspaceRoot}/tsconfig.base.json",
             "{workspaceRoot}/vite.config.ts",
+            "{workspaceRoot}/vite.factory.ts",
             "{workspaceRoot}/vitest.config.ts",
             "{workspaceRoot}/playwright.config.ts",
             "{workspaceRoot}/stryker.config.js",
@@ -67,6 +75,7 @@
     "parallel": 4,
     "plugins": [
         {
+            "exclude": ["tools/**/*"],
             "include": ["apps/**/*", "packages/**/*"],
             "options": {
                 "buildTargetName": "build",
@@ -77,6 +86,7 @@
             "plugin": "@nx/vite/plugin"
         },
         {
+            "exclude": ["tools/**/*"],
             "include": ["apps/**/*", "packages/**/*"],
             "options": {
                 "testTargetName": "test"
@@ -84,14 +94,34 @@
             "plugin": "@nx/vitest"
         },
         {
+            "exclude": ["tools/**/*"],
             "include": ["apps/**/*"],
             "options": {
                 "buildTargetName": "docker:build",
                 "defaultPlatform": "linux/amd64"
             },
             "plugin": "@nx/docker"
+        },
+        {
+            "options": {
+                "targetName": "e2e"
+            },
+            "plugin": "@nx/playwright/plugin"
+        },
+        {
+            "options": {
+                "checkTargetName": "check",
+                "formatTargetName": "format",
+                "lintTargetName": "lint"
+            },
+            "plugin": "@berenddeboer/nx-biome"
         }
     ],
+    "pluginsConfig": {
+        "@nx/js": {
+            "projectsAffectedByDependencyUpdates": "auto"
+        }
+    },
     "release": {
         "changelog": {
             "projectChangelogs": false,
@@ -108,16 +138,51 @@
         },
         "conventionalCommits": {
             "types": {
-                "build": { "changelog": false },
-                "chore": { "changelog": false },
-                "ci": { "changelog": false },
-                "docs": { "changelog": { "title": "[DOCUMENTATION]" }, "semverBump": "none" },
-                "feat": { "changelog": { "title": "[FEATURES]" }, "semverBump": "minor" },
-                "fix": { "changelog": { "title": "[BUG_FIXES]" }, "semverBump": "patch" },
-                "perf": { "changelog": { "title": "[PERFORMANCE]" }, "semverBump": "patch" },
-                "refactor": { "changelog": { "title": "[REFACTORING]" }, "semverBump": "patch" },
-                "style": { "changelog": false },
-                "test": { "changelog": false }
+                "build": {
+                    "changelog": false
+                },
+                "chore": {
+                    "changelog": false
+                },
+                "ci": {
+                    "changelog": false
+                },
+                "docs": {
+                    "changelog": {
+                        "title": "[DOCUMENTATION]"
+                    },
+                    "semverBump": "none"
+                },
+                "feat": {
+                    "changelog": {
+                        "title": "[FEATURES]"
+                    },
+                    "semverBump": "minor"
+                },
+                "fix": {
+                    "changelog": {
+                        "title": "[BUG_FIXES]"
+                    },
+                    "semverBump": "patch"
+                },
+                "perf": {
+                    "changelog": {
+                        "title": "[PERFORMANCE]"
+                    },
+                    "semverBump": "patch"
+                },
+                "refactor": {
+                    "changelog": {
+                        "title": "[REFACTORING]"
+                    },
+                    "semverBump": "patch"
+                },
+                "style": {
+                    "changelog": false
+                },
+                "test": {
+                    "changelog": false
+                }
             }
         },
         "git": {
@@ -149,15 +214,6 @@
             "inputs": ["production", "^production"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },
-        "check": {
-            "cache": true,
-            "executor": "nx:run-commands",
-            "inputs": ["lint"],
-            "options": {
-                "command": "biome check .",
-                "cwd": "{projectRoot}"
-            }
-        },
         "dev": {
             "cache": false,
             "configurations": {
@@ -185,7 +241,8 @@
                         "VITE_DEVTOOLS_PERFORMANCE": "false"
                     }
                 }
-            }
+            },
+            "continuous": true
         },
         "docker:build": {
             "cache": true,
@@ -193,21 +250,21 @@
             "inputs": ["docker"],
             "outputs": []
         },
-        "e2e": {
-            "cache": false,
-            "dependsOn": ["build"],
+        "hadolint": {
+            "cache": true,
             "executor": "nx:run-commands",
-            "inputs": ["default", "{workspaceRoot}/tests/e2e/**/*", "{workspaceRoot}/playwright.config.ts"],
+            "inputs": ["docker"],
             "options": {
-                "command": "playwright test"
-            },
-            "outputs": ["{workspaceRoot}/test-results/e2e"]
+                "command": "hadolint {projectRoot}/Dockerfile"
+            }
         },
-        "fix": {
-            "cache": false,
+        "infra:lint": {
+            "cache": true,
             "executor": "nx:run-commands",
+            "inputs": ["infrastructure"],
             "options": {
-                "command": "biome check --write {projectRoot}"
+                "command": "yamllint infrastructure/ .github/workflows/ && hadolint apps/api/Dockerfile apps/parametric_icons/Dockerfile && actionlint && kustomize build infrastructure/overlays/prod | kubeconform -strict -ignore-missing-schemas -summary && echo '[OK] Infrastructure valid'",
+                "cwd": "{workspaceRoot}"
             }
         },
         "inspect:build": {
@@ -223,14 +280,6 @@
             "executor": "nx:run-commands",
             "options": {
                 "command": "echo 'Open http://localhost:5173/__inspect/ in browser' && nx dev"
-            }
-        },
-        "lint": {
-            "cache": true,
-            "executor": "nx:run-commands",
-            "inputs": ["lint"],
-            "options": {
-                "command": "biome ci {projectRoot}"
             }
         },
         "mutate": {

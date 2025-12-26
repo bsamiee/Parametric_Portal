@@ -22,14 +22,14 @@ const B = Object.freeze({
 
 // --- [MOCK] ------------------------------------------------------------------
 
-const ctx = { spy: undefined as ReturnType<typeof vi.spyOn> | undefined };
+const spyRef = { current: null as ReturnType<typeof vi.spyOn> | null };
 beforeEach(() => {
-    ctx.spy = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
+    spyRef.current = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {});
 });
 afterEach(() => {
-    ctx.spy?.mockRestore();
+    spyRef.current?.mockRestore();
 });
-const postMessageSpy = (): ReturnType<typeof vi.spyOn> => ctx.spy as ReturnType<typeof vi.spyOn>;
+const postMessageSpy = (): ReturnType<typeof vi.spyOn> => spyRef.current!;
 
 // --- [DESCRIBE] MESSAGING_TUNING ---------------------------------------------
 

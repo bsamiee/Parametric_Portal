@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "biome check .",
+    "fix": "biome check --write .",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "sideEffects": [

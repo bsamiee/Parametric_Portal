@@ -13,12 +13,15 @@
     "scripts": {
         "build": "vite build",
         "check": "biome check .",
+        "fix": "biome check --write .",
         "dev": "tsx watch src/main.ts",
+        "hadolint": "hadolint Dockerfile",
         "migrate": "tsx src/migrate.ts",
         "start": "node dist/main.js",
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
+        "@effect/ai": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
         "@effect/sql": "catalog:",

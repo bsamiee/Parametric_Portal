@@ -11,7 +11,16 @@ export default defineConfig(
             entry: {
                 anthropic: './src/anthropic.ts',
             },
-            external: ['effect', '@effect/platform', '@anthropic-ai/sdk', '@parametric-portal/server'],
+            external: [
+                'effect',
+                '@effect/ai',
+                '@effect/ai-anthropic',
+                '@effect/platform',
+                '@anthropic-ai/sdk',
+                '@anthropic-ai/tokenizer',
+                '@parametric-portal/server',
+                'tiktoken',
+            ],
             mode: 'library',
             name: 'ParametricAI',
         }),

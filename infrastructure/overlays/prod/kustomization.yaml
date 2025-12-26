@@ -19,9 +19,9 @@ resources:
 
 images:
   - name: ghcr.io/parametric-portal/api
-    newTag: sha-00000000
+    newTag: latest
   - name: ghcr.io/parametric-portal/icons
-    newTag: sha-00000000
+    newTag: latest
 
 patches:
   - target:
@@ -34,3 +34,24 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits/cpu
         value: "1000m"
+  - target:
+      kind: PodDisruptionBudget
+      name: api-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: icons-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: postgres-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1

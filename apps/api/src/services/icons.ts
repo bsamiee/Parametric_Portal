@@ -2,7 +2,8 @@
  * Icon generation service: CAD-style SVG icons via Claude API.
  * Contains prompt engineering, palette management, and AI integration.
  */
-import { AnthropicClient } from '@parametric-portal/ai/anthropic';
+import { Prompt } from '@effect/ai';
+import { generateText } from '@parametric-portal/ai/anthropic';
 import { InternalError } from '@parametric-portal/server/errors';
 import type { ColorMode } from '@parametric-portal/types/database';
 import { type SvgAsset, svg } from '@parametric-portal/types/svg';
@@ -218,37 +219,37 @@ const buildContext = (input: ServiceInput): PromptContext => ({
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
+const buildPromptWithPrefill = (ctx: PromptContext): readonly Prompt.Message[] => [
+    Prompt.userMessage({ content: [Prompt.textPart({ text: buildUserMessage(ctx) })] }),
+    Prompt.assistantMessage({ content: [Prompt.textPart({ text: B.ai.prefill })] }),
+];
+
 class IconGenerationService extends Context.Tag('IconGenerationService')<
     IconGenerationService,
     IconGenerationServiceInterface
 >() {}
-const IconGenerationServiceLive = Layer.effect(
+const IconGenerationServiceLive = Layer.succeed(
     IconGenerationService,
-    Effect.gen(function* () {
-        const anthropic = yield* AnthropicClient;
-        return IconGenerationService.of({
-            generate: (input) =>
-                pipe(
-                    S.decodeUnknown(ServiceInputSchema)(input),
-                    Effect.mapError(() => new InternalError({ cause: B.errors.invalidInput.message })),
-                    Effect.map(buildContext),
-                    Effect.flatMap((ctx) =>
-                        anthropic.send(buildSystemPrompt(ctx), [{ content: buildUserMessage(ctx), role: 'user' }], {
-                            ...(input.apiKey && { apiKey: input.apiKey }),
+    IconGenerationService.of({
+        generate: (input) =>
+            pipe(
+                S.decodeUnknown(ServiceInputSchema)(input),
+                Effect.mapError(() => new InternalError({ cause: B.errors.invalidInput.message })),
+                Effect.map(buildContext),
+                Effect.flatMap((ctx) =>
+                    pipe(
+                        generateText({
                             maxTokens: B.ai.maxTokens,
-                            model: B.ai.model,
-                            prefill: B.ai.prefill,
-                            ...(input.signal && { signal: input.signal }),
+                            prompt: buildPromptWithPrefill(ctx),
+                            system: buildSystemPrompt(ctx),
                         }),
-                    ),
-                    Effect.flatMap(parseAiResponse),
-                    Effect.map(
-                        (response): ServiceOutput => ({
-                            variants: response.variants.map(svgApi.createSvgAsset),
-                        }),
+                        Effect.mapError((e) => new InternalError({ cause: `AI generation failed: ${e._tag}` })),
+                        Effect.map((text) => B.ai.prefill + text),
                     ),
                 ),
-        });
+                Effect.flatMap(parseAiResponse),
+                Effect.map((response): ServiceOutput => ({ variants: response.variants.map(svgApi.createSvgAsset) })),
+            ),
     }),
 );
 

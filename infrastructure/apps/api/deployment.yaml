@@ -17,17 +17,31 @@ spec:
         app.kubernetes.io/name: api
         app.kubernetes.io/component: backend
     spec:
+      serviceAccountName: api
       containers:
         - name: api
           image: ghcr.io/parametric-portal/api:v0.0.0
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 4000
+            - name: http
+              containerPort: 4000
               protocol: TCP
           env:
             - name: NODE_ENV
               value: "production"
             - name: API_PORT
               value: "4000"
+            - name: API_BASE_URL
+              value: "https://api.parametric-portal.com"
+            # --- OTEL CONFIGURATION ---
+            - name: OTEL_SERVICE_NAME
+              value: "api"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://alloy.monitoring.svc.cluster.local:4317"
+            - name: OTEL_TRACES_SAMPLER
+              value: "traceidratio"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
             - name: POSTGRES_HOST
               value: "parametric-portal-db-rw.parametric-portal.svc.cluster.local"
             - name: POSTGRES_PORT

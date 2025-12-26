@@ -8,7 +8,7 @@ ARG NODE_VERSION=22
 FROM node:${NODE_VERSION}-slim-bookworm AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates=20230311* \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable
 WORKDIR /app

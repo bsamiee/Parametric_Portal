@@ -18,6 +18,7 @@ Architecture Decision Records (ADRs) for infrastructure choices. Each record cap
 | 0006  | Mise                    | Accepted | 2025-01-15 |
 | 0007  | Network Policies        | Accepted | 2025-01-15 |
 | 0008  | Multi-Domain            | Accepted | 2025-12-25 |
+| 0009  | CloudNativePG           | Accepted | 2025-12-25 |
 
 ---
 ## [2][FORMAT]

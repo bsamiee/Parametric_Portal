@@ -1,0 +1,388 @@
+# --- MONITORING ARGOCD APPLICATION --------------------------------------------
+# Grafana LGTM stack (Mimir, Loki, Tempo, Alloy, Grafana) - Distributed HA mode
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: monitoring
+    app.kubernetes.io/component: observability
+    app.kubernetes.io/part-of: parametric-suite
+    app.kubernetes.io/managed-by: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: lgtm-distributed
+    targetRevision: 3.0.1
+    helm:
+      valuesObject:
+        # --- GLOBAL SETTINGS ---
+        global:
+          dnsService: kube-dns
+          dnsNamespace: kube-system
+
+        # --- MIMIR (METRICS) - Distributed HA Mode ---
+        mimir:
+          mimir:
+            structuredConfig:
+              common:
+                storage:
+                  backend: filesystem
+              blocks_storage:
+                backend: filesystem
+                filesystem:
+                  dir: /data/blocks
+              ruler_storage:
+                backend: filesystem
+                filesystem:
+                  dir: /data/ruler
+          # Distributed mode for multi-node HA
+          ingester:
+            replicas: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            persistence:
+              enabled: true
+              size: 10Gi
+              storageClass: local-path
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+          querier:
+            replicas: 2
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+          distributor:
+            replicas: 2
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 256Mi
+          compactor:
+            replicas: 1
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            persistence:
+              enabled: true
+              size: 10Gi
+              storageClass: local-path
+
+        # --- LOKI (LOGS) - Distributed HA Mode ---
+        loki:
+          deploymentMode: SimpleScalable
+          loki:
+            auth_enabled: false
+            commonConfig:
+              replication_factor: 3
+              path_prefix: /var/loki
+            storage:
+              type: filesystem
+            schemaConfig:
+              configs:
+                - from: "2024-01-01"
+                  store: tsdb
+                  object_store: filesystem
+                  schema: v13
+                  index:
+                    prefix: index_
+                    period: 24h
+          # Distributed mode with read/write separation
+          singleBinary:
+            replicas: 0
+          backend:
+            replicas: 2
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            persistence:
+              enabled: true
+              size: 10Gi
+              storageClass: local-path
+          read:
+            replicas: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+          write:
+            replicas: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            persistence:
+              enabled: true
+              size: 10Gi
+              storageClass: local-path
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+          gateway:
+            enabled: true
+            replicas: 2
+          chunksCache:
+            enabled: false
+          resultsCache:
+            enabled: false
+
+        # --- TEMPO (TRACES) - Distributed HA Mode ---
+        tempo:
+          tempo:
+            storage:
+              trace:
+                backend: local
+                local:
+                  path: /var/tempo/traces
+            receivers:
+              otlp:
+                protocols:
+                  grpc:
+                    endpoint: 0.0.0.0:4317
+                  http:
+                    endpoint: 0.0.0.0:4318
+          ingester:
+            replicas: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+            persistence:
+              enabled: true
+              size: 5Gi
+              storageClass: local-path
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+          distributor:
+            replicas: 2
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 250m
+                memory: 256Mi
+          querier:
+            replicas: 2
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 250m
+                memory: 256Mi
+          compactor:
+            replicas: 1
+            resources:
+              requests:
+                cpu: 50m
+                memory: 128Mi
+              limits:
+                cpu: 250m
+                memory: 256Mi
+
+        # --- ALLOY (OTEL COLLECTOR) - Log/Trace Pipelines ---
+        alloy:
+          alloy:
+            clustering:
+              enabled: true
+            stabilityLevel: generally-available
+            configMap:
+              content: |
+                // --- LOG COLLECTION PIPELINE ---
+                discovery.kubernetes "pods" {
+                  role = "pod"
+                }
+
+                discovery.relabel "pods" {
+                  targets = discovery.kubernetes.pods.targets
+                  rule {
+                    source_labels = ["__meta_kubernetes_namespace"]
+                    target_label  = "namespace"
+                  }
+                  rule {
+                    source_labels = ["__meta_kubernetes_pod_name"]
+                    target_label  = "pod"
+                  }
+                  rule {
+                    source_labels = ["__meta_kubernetes_pod_container_name"]
+                    target_label  = "container"
+                  }
+                }
+
+                loki.source.kubernetes "pods" {
+                  targets    = discovery.relabel.pods.output
+                  forward_to = [loki.write.default.receiver]
+                }
+
+                loki.write "default" {
+                  endpoint {
+                    url = "http://lgtm-loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/push"
+                  }
+                }
+
+                // --- TRACE COLLECTION PIPELINE ---
+                otelcol.receiver.otlp "default" {
+                  grpc {
+                    endpoint = "0.0.0.0:4317"
+                  }
+                  http {
+                    endpoint = "0.0.0.0:4318"
+                  }
+                  output {
+                    traces = [otelcol.exporter.otlp.tempo.input]
+                  }
+                }
+
+                otelcol.exporter.otlp "tempo" {
+                  client {
+                    endpoint = "lgtm-tempo.monitoring.svc.cluster.local:4317"
+                    tls {
+                      insecure = true
+                    }
+                  }
+                }
+          controller:
+            type: daemonset
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+        # --- GRAFANA (DASHBOARDS) - HA Mode ---
+        grafana:
+          replicas: 2
+          adminUser: admin
+          # Admin password should be set via secret in production
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  topologyKey: kubernetes.io/hostname
+          persistence:
+            enabled: true
+            size: 2Gi
+            storageClass: local-path
+          sidecar:
+            dashboards:
+              enabled: true
+              label: grafana_dashboard
+              labelValue: "1"
+              folderAnnotation: grafana_folder
+              provider:
+                foldersFromFilesStructure: true
+            datasources:
+              enabled: true
+          datasources:
+            datasources.yaml:
+              apiVersion: 1
+              datasources:
+                - name: Mimir
+                  type: prometheus
+                  url: http://lgtm-mimir:9009/prometheus
+                  isDefault: true
+                  editable: false
+                - name: Loki
+                  type: loki
+                  url: http://lgtm-loki-gateway:80
+                  editable: false
+                - name: Tempo
+                  type: tempo
+                  url: http://lgtm-tempo:3100
+                  editable: false
+          ingress:
+            enabled: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 472
+            runAsGroup: 472
+            fsGroup: 472
+          containerSecurityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+        # --- PROMETHEUS OPERATOR CRDS ---
+        prometheusOperatorCrds:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 5

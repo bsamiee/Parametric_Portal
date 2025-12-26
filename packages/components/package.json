@@ -94,6 +94,7 @@
   "scripts": {
     "build": "vite build",
     "check": "biome check .",
+    "fix": "biome check --write .",
     "dev": "vite dev --host",
     "preview": "vite preview --host",
     "test": "vitest run --passWithNoTests",

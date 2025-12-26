@@ -2,7 +2,7 @@
  * Test harness: setup/capture utilities for test isolation.
  */
 import './matchers/effect';
-import { Effect, type Exit } from 'effect';
+import { Effect, Exit } from 'effect';
 import { vi } from 'vitest';
 import { TEST_CONSTANTS } from './constants';
 
@@ -53,6 +53,16 @@ const Harness = Object.freeze({
         warn: <T>(fn: (spy: SpyInstance) => T): T => captureConsole('warn', fn),
     }),
     effect: Object.freeze({
+        /** Extracts value from Exit, optionally transforming with fn. Returns undefined on failure. */
+        extract: <A>(exit: Exit.Exit<A, unknown>, fn?: (v: A) => unknown): unknown =>
+            Exit.isSuccess(exit) ? (fn ? fn(exit.value) : exit.value) : undefined,
+        /** Pattern-matches Exit to success/failure branches. */
+        match: <A, E, R>(exit: Exit.Exit<A, E>, cases: { failure: (e: E) => R; success: (a: A) => R }): R =>
+            Exit.isSuccess(exit)
+                ? cases.success(exit.value)
+                : Exit.isFailure(exit) && exit.cause._tag === 'Fail'
+                  ? cases.failure(exit.cause.error)
+                  : cases.failure(undefined as E),
         /** Runs Effect synchronously, returning Exit for matcher assertions. */
         runSync: <A, E>(eff: Effect.Effect<A, E, never>): Exit.Exit<A, E> => Effect.runSyncExit(eff),
     }),

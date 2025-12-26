@@ -26,6 +26,8 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      attestations: write
+      security-events: write
     outputs:
       image-tag: ${{ steps.meta.outputs.tag }}
       affected: ${{ steps.affected.outputs.apps }}
@@ -46,17 +48,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
       - name: Determine Affected Apps
         id: affected
         run: |
           AFFECTED=$(pnpm exec nx show projects --affected --type=application --json 2>/dev/null || echo '[]')
-          echo "apps=${AFFECTED}" >> $GITHUB_OUTPUT
+          echo "apps=${AFFECTED}" >> "$GITHUB_OUTPUT"
 
       - name: Generate Image Tag
         id: meta
-        run: echo "tag=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        run: echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Build API
+        id: build-api
         if: contains(steps.affected.outputs.apps, 'api') || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
@@ -69,8 +75,38 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
           provenance: true
+          sbom: true
+
+      - name: Sign API Image
+        if: steps.build-api.outcome == 'success'
+        run: cosign sign --yes "${{ env.IMAGE_PREFIX }}/api@${{ steps.build-api.outputs.digest }}"
+
+      - name: Attest API Provenance
+        if: steps.build-api.outcome == 'success'
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}/api
+          subject-digest: ${{ steps.build-api.outputs.digest }}
+          push-to-registry: true
+
+      - name: Scan API Image
+        if: steps.build-api.outcome == 'success'
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: '${{ env.IMAGE_PREFIX }}/api@${{ steps.build-api.outputs.digest }}'
+          format: sarif
+          output: trivy-api.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload API Trivy Results
+        if: steps.build-api.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        with:
+          sarif_file: trivy-api.sarif
+          category: container-api
 
       - name: Build Icons
+        id: build-icons
         if: contains(steps.affected.outputs.apps, 'parametric_icons') || github.event_name == 'workflow_dispatch'
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
@@ -85,6 +121,35 @@ jobs:
           cache-from: type=gha,scope=icons
           cache-to: type=gha,mode=max,scope=icons
           provenance: true
+          sbom: true
+
+      - name: Sign Icons Image
+        if: steps.build-icons.outcome == 'success'
+        run: cosign sign --yes "${{ env.IMAGE_PREFIX }}/icons@${{ steps.build-icons.outputs.digest }}"
+
+      - name: Attest Icons Provenance
+        if: steps.build-icons.outcome == 'success'
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
+        with:
+          subject-name: ${{ env.IMAGE_PREFIX }}/icons
+          subject-digest: ${{ steps.build-icons.outputs.digest }}
+          push-to-registry: true
+
+      - name: Scan Icons Image
+        if: steps.build-icons.outcome == 'success'
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: '${{ env.IMAGE_PREFIX }}/icons@${{ steps.build-icons.outputs.digest }}'
+          format: sarif
+          output: trivy-icons.sarif
+          severity: CRITICAL,HIGH
+
+      - name: Upload Icons Trivy Results
+        if: steps.build-icons.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        with:
+          sarif_file: trivy-icons.sarif
+          category: container-icons
 
   # --- UPDATE MANIFESTS (GitOps) ----------------------------------------------
   update-manifests:

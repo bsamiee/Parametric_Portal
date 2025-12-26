@@ -1,7 +1,7 @@
 /**
- * Effect matchers: Option, Exit, and Either assertions for Vitest.
+ * Effect matchers: Option, Exit, Either, and Schema assertions for Vitest.
  */
-import { Either, Exit, Option } from 'effect';
+import { Either, Exit, Option, Schema } from 'effect';
 import { expect } from 'vitest';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -21,6 +21,7 @@ interface EffectMatchers<R = unknown> {
     toBeRight: (expected?: unknown) => R;
     toBeSome: (expected?: unknown) => R;
     toBeSuccess: (expected?: unknown) => R;
+    toDecodeAs: <T>(schema: Schema.Schema<T>, expected?: T) => R;
 }
 declare module 'vitest' {
     // biome-ignore lint/suspicious/noExplicitAny: Vitest Matchers interface uses T = any
@@ -97,5 +98,19 @@ expect.extend({
     toBeSuccess(received: Exit.Exit<unknown, unknown>, expected?: unknown): MatcherResult {
         const { check, value } = extractors.success(received);
         return matcherResult({ check, format: B.format('Success', value), negFormat: 'Failure', value }, expected);
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: Schema type requires flexibility for unknown inputs
+    toDecodeAs(received: unknown, schema: Schema.Schema<any>, expected?: unknown): MatcherResult {
+        const result = Schema.decodeUnknownEither(schema)(received);
+        const isRight = Either.isRight(result);
+        const value = isRight ? result.right : undefined;
+        const pass = isRight && (expected === undefined || JSON.stringify(value) === JSON.stringify(expected));
+        return {
+            message: () =>
+                pass
+                    ? `expected decode to fail but got Right(${JSON.stringify(value)})`
+                    : `expected Right(${JSON.stringify(expected)}) but got ${isRight ? `Right(${JSON.stringify(value)})` : 'Left'}`,
+            pass,
+        };
     },
 });
