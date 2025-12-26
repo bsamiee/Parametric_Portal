@@ -12,6 +12,7 @@ metadata:
     app.kubernetes.io/component: dashboard
   annotations:
     grafana_folder: CloudNativePG
+immutable: true
 data:
   cloudnativepg.json: |
     {

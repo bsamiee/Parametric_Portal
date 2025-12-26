@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: api
@@ -17,6 +22,15 @@ spec:
         app.kubernetes.io/name: api
         app.kubernetes.io/component: backend
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: api
+                topologyKey: kubernetes.io/hostname
       serviceAccountName: api
       containers:
         - name: api

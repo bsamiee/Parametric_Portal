@@ -22,6 +22,7 @@ spec:
             - Pod
           namespaces:
             - parametric-portal
+            - parametric-portal-dev
           selector:
             matchLabels:
               cnpg.io/podRole: instance
@@ -30,6 +31,7 @@ spec:
             - Pod
           namespaces:
             - parametric-portal
+            - parametric-portal-dev
           selector:
             matchLabels:
               cnpg.io/jobRole: join

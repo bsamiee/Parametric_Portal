@@ -2,8 +2,9 @@
  * Effect AI Google Gemini integration layer.
  * Factory-based provider with consumer-defined model selection.
  *
- * Note: Gemini's @effect/ai-google does not support withConfigOverride.
- * System prompts are prepended to the prompt content.
+ * Limitation: @effect/ai-google does not support withConfigOverride.
+ * - maxTokens: Set at provider creation only (not per-request)
+ * - system: Prepended to prompt content as workaround
  */
 import { LanguageModel, Prompt } from '@effect/ai';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
@@ -18,7 +19,6 @@ type ProviderConfig = {
 };
 
 type GenerateTextOptions = {
-    readonly maxTokens?: number;
     readonly prompt: Prompt.RawInput;
     readonly system?: string;
 };
@@ -26,7 +26,7 @@ type GenerateTextOptions = {
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    defaults: { maxTokens: 4096 },
+    defaults: { maxOutputTokens: 4096 },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -36,7 +36,12 @@ const createLayers = (config: ProviderConfig) => {
     const ClientLive = GoogleClient.layerConfig({
         apiKey: Config.redacted('GEMINI_API_KEY'),
     }).pipe(Layer.provide(HttpLive));
-    const ModelLive = GoogleLanguageModel.model(config.model).pipe(Layer.provide(ClientLive));
+    const ModelLive = GoogleLanguageModel.model(config.model, {
+        generationConfig: {
+            maxOutputTokens: config.maxTokens ?? B.defaults.maxOutputTokens,
+        },
+        toolConfig: {},
+    }).pipe(Layer.provide(ClientLive));
     return { ClientLive, ModelLive };
 };
 
