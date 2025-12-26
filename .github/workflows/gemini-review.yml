@@ -40,6 +40,39 @@ jobs:
       - name: 'Checkout repository'
         uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
 
+      - name: 'Debug: Environment and Authentication'
+        env:
+          GITHUB_TOKEN: '${{ steps.mint_identity_token.outputs.token || secrets.GITHUB_TOKEN || github.token }}'
+          GH_TOKEN: '${{ steps.mint_identity_token.outputs.token || secrets.GITHUB_TOKEN || github.token }}'
+          PULL_REQUEST_NUMBER: '${{ github.event.pull_request.number || github.event.issue.number }}'
+          REPOSITORY: '${{ github.repository }}'
+        run: |
+          echo "=== DEBUG: Environment Variables ==="
+          echo "REPOSITORY=${REPOSITORY}"
+          echo "PULL_REQUEST_NUMBER=${PULL_REQUEST_NUMBER}"
+          echo "GITHUB_TOKEN length: ${#GITHUB_TOKEN}"
+          echo "GH_TOKEN length: ${#GH_TOKEN}"
+          echo ""
+          echo "=== DEBUG: GitHub Event Context ==="
+          echo "github.event_name: ${{ github.event_name }}"
+          echo "github.event.pull_request.number: ${{ github.event.pull_request.number }}"
+          echo "github.event.issue.number: ${{ github.event.issue.number }}"
+          echo "github.repository: ${{ github.repository }}"
+          echo ""
+          echo "=== DEBUG: gh CLI Authentication ==="
+          gh auth status || echo "gh auth status failed"
+          echo ""
+          echo "=== DEBUG: Test PR Access ==="
+          gh pr view "${PULL_REQUEST_NUMBER}" --repo "${REPOSITORY}" --json number,title,state || echo "gh pr view failed"
+          echo ""
+          echo "=== DEBUG: Working Directory ==="
+          pwd
+          ls -la
+          echo ""
+          echo "=== DEBUG: .gemini directory ==="
+          ls -la .gemini/ 2>/dev/null || echo "No .gemini directory"
+          cat .gemini/GEMINI.md 2>/dev/null || echo "No .gemini/GEMINI.md"
+
       - name: 'Run Gemini pull request review'
         uses: 'google-github-actions/run-gemini-cli@v0.1.18' # ratchet:exclude
         id: 'gemini_pr_review'
