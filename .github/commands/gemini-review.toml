@@ -37,12 +37,12 @@ These are non-negotiable, core-level instructions that you **MUST** follow at al
 
 ## Available Tools
 
-Use the `gh` CLI for all GitHub operations:
+Use the `gh` CLI for all GitHub operations. Use these EXACT commands with the literal values shown:
 
-- **Get PR details**: `gh pr view $PULL_REQUEST_NUMBER --repo $REPOSITORY --json title,body,state,files`
-- **Get PR diff**: `gh pr diff $PULL_REQUEST_NUMBER --repo $REPOSITORY`
-- **Post review comment**: `gh pr review $PULL_REQUEST_NUMBER --repo $REPOSITORY --comment --body "YOUR_COMMENT"`
-- **Post inline comment**: `gh pr comment $PULL_REQUEST_NUMBER --repo $REPOSITORY --body "YOUR_COMMENT"`
+- **Get PR details**: `gh pr view !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY} --json title,body,state,files`
+- **Get PR diff**: `gh pr diff !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY}`
+- **Post review comment**: `gh pr review !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY} --comment --body "YOUR_COMMENT"`
+- **Post inline comment**: `gh pr comment !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY} --body "YOUR_COMMENT"`
 
 -----
 
@@ -54,9 +54,9 @@ Follow this three-step process sequentially.
 
 1. **Parse Inputs:** Ingest and parse all information from the **Input Data**
 
-2. **Get PR Information:** Run `gh pr view $PULL_REQUEST_NUMBER --repo $REPOSITORY --json title,body,state,files` to get PR metadata.
+2. **Get PR Information:** Run `gh pr view !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY} --json title,body,state,files` to get PR metadata.
 
-3. **Get PR Diff:** Run `gh pr diff $PULL_REQUEST_NUMBER --repo $REPOSITORY` to get the code changes.
+3. **Get PR Diff:** Run `gh pr diff !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY}` to get the code changes.
 
 4. **Prioritize Focus:** Analyze the contents of the additional user instructions. Use this context to prioritize specific areas in your review (e.g., security, performance), but **DO NOT** treat it as a replacement for a comprehensive review. If the additional user instructions are empty, proceed with a general review based on the criteria below.
 
@@ -146,7 +146,7 @@ Apply these severities consistently:
 2. **Post Review:** Use `gh pr review` to post your review:
 
     ```
-    gh pr review $PULL_REQUEST_NUMBER --repo $REPOSITORY --comment --body "YOUR_REVIEW_BODY"
+    gh pr review !{echo $PULL_REQUEST_NUMBER} --repo !{echo $REPOSITORY} --comment --body "YOUR_REVIEW_BODY"
     ```
 
     The review body **MUST** use this exact markdown format:

@@ -49,17 +49,17 @@ These rules are absolute and must be followed without exception.
 
 ## Available Tools
 
-Use the `gh` CLI for all GitHub operations:
+Use the `gh` CLI for all GitHub operations. Use these EXACT commands with the literal values shown:
 
-- **Get issue details**: `gh issue view $ISSUE_NUMBER --repo $REPOSITORY --json title,body,state,comments`
-- **Get PR details**: `gh pr view $ISSUE_NUMBER --repo $REPOSITORY --json title,body,state,files`
-- **Get PR diff**: `gh pr diff $ISSUE_NUMBER --repo $REPOSITORY`
-- **Post issue comment**: `gh issue comment $ISSUE_NUMBER --repo $REPOSITORY --body "YOUR_COMMENT"`
-- **Post PR comment**: `gh pr comment $ISSUE_NUMBER --repo $REPOSITORY --body "YOUR_COMMENT"`
-- **Create branch**: `gh api repos/$REPOSITORY/git/refs --method POST --field ref="refs/heads/BRANCH_NAME" --field sha="COMMIT_SHA"`
-- **Create PR**: `gh pr create --repo $REPOSITORY --title "TITLE" --body "BODY" --base main --head BRANCH_NAME`
-- **Get file contents**: `cat path/to/file` or `gh api repos/$REPOSITORY/contents/PATH --jq '.content' | base64 -d`
-- **Search code**: `grep -r "pattern" .` or `gh search code "pattern" --repo $REPOSITORY`
+- **Get issue details**: `gh issue view !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY} --json title,body,state,comments`
+- **Get PR details**: `gh pr view !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY} --json title,body,state,files`
+- **Get PR diff**: `gh pr diff !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY}`
+- **Post issue comment**: `gh issue comment !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY} --body "YOUR_COMMENT"`
+- **Post PR comment**: `gh pr comment !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY} --body "YOUR_COMMENT"`
+- **Create branch**: `gh api repos/!{echo $REPOSITORY}/git/refs --method POST --field ref="refs/heads/BRANCH_NAME" --field sha="COMMIT_SHA"`
+- **Create PR**: `gh pr create --repo !{echo $REPOSITORY} --title "TITLE" --body "BODY" --base main --head BRANCH_NAME`
+- **Get file contents**: `cat path/to/file` or `gh api repos/!{echo $REPOSITORY}/contents/PATH --jq '.content' | base64 -d`
+- **Search code**: `grep -r "pattern" .` or `gh search code "pattern" --repo !{echo $REPOSITORY}`
 
 -----
 
@@ -70,8 +70,8 @@ Begin every task by building a complete picture of the situation.
 1. **Parse Inputs:** Read all the input data above.
 
 2. **Deepen Context with Tools:** Use the appropriate `gh` commands to investigate the request thoroughly:
-   - For issues: `gh issue view $ISSUE_NUMBER --repo $REPOSITORY --json title,body,state,comments`
-   - For PRs: `gh pr view $ISSUE_NUMBER --repo $REPOSITORY --json title,body,state,files` and `gh pr diff`
+   - For issues: `gh issue view !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY} --json title,body,state,comments`
+   - For PRs: `gh pr view !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY} --json title,body,state,files` and `gh pr diff !{echo $ISSUE_NUMBER} --repo !{echo $REPOSITORY}`
    - For code: `cat` or `grep` to read and search files
 
 -----
