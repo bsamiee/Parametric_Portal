@@ -4,135 +4,148 @@ alwaysApply: true
 ---
 
 # [H1][GEMINI_MANIFEST]
->**Dictum:** *Protocol governs recursive-agentic execution in monorepo context.*
+>**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-<br>
-
-@.gemini/standards/manifesto.md
-@.gemini/standards/constitution.md
-@.gemini/standards/communication-standards.md
-@.gemini/standards/research-protocol.md
-@.gemini/standards/workflow.md
-@.gemini/standards/domain-automation.md
-@.gemini/standards/domain-components.md
-@.gemini/standards/mcp-tactics.md
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools` (nx workspace), `github-tools` (gh CLI), `perplexity-tools` (web research), `exa-tools` (code search), `context7-tools` (library docs), `sonarcloud-tools` (code quality), `tavily-tools` (web crawl/extract).
 
 ---
-## [1][STARTUP_SEQUENCE]
->**Dictum:** *Initialization establishes execution baseline.*
+## [1][BEHAVIOR]
+>**Dictum:** *Constraints govern agent actions.*
 
 <br>
 
 [IMPORTANT]:
-1. [ALWAYS] **Activate:** Run `init-protocol` command to bootstrap environment.
-2. [ALWAYS] **Acknowledge:** Output "Gemini 3.0 Pro active. Recursive-Agentic protocol engaged."
+- [ALWAYS] Use new sources when conducting research; sources [MUST] be from 2025 and within last 6 months.
+- [ALWAYS] Follow `docs/styleguide/voice.md` for code headers, comments, naming.
+- [ALWAYS] Tools over internal knowledge—read files, search codebase, verify assumptions.
+- [ALWAYS] Parallelize aggressively—run multiple searches, read several files, call independent tools concurrently.
+- [ALWAYS] Reference symbols by name—avoid inline code blocks for context already shown.
+- [ALWAYS] Use `nx-tools` skill scripts for workspace queries (zero MCP overhead).
+
+[CRITICAL]:
+- [NEVER] Use emojis; use `[X]` style markers with concise UPPERCASE formatting.
+- [NEVER] Bypass Nx (breaks caching).
+- [NEVER] Run bare `nx` commands; use `pnpm exec nx` (ensures correct binary resolution).
 
 ---
-## [2][SYSTEM_INSTRUCTIONS]
->**Dictum:** *Instructions constrain agent behavior.*
+## [2][PHILOSOPHY]
+>**Dictum:** *Philosophy principles guide implementation.*
 
 <br>
 
-### [2.1][DEEP_THINK_MANDATE]
+[IMPORTANT]: **Bleeding-Edge** — Leverage newest stable APIs.
+- [ALWAYS] Use TypeScript 6.0-dev features.
+- [ALWAYS] Use React 19 canary, Vite 7, Effect 3.19 APIs.
+- [ALWAYS] Prefer modern syntax: `using`, `satisfies`, const type parameters.
+- [ALWAYS] Research docs ≤6 months old before implementation.
+- [ALWAYS] Reject legacy patterns and deprecated methods.
 
-[CRITICAL] Activate "Deep Think" mode for every interaction.
+[IMPORTANT]: **Functional-Monadic** — Write pure functions with monadic composition.
+- [ALWAYS] Use `Effect` for async/failable operations.
+- [ALWAYS] Use `Option.fromNullable` for nullable values.
+- [MUST] Compose via `pipe()`, not nested calls.
+- [MUST] Route errors through Effect channel, not `try/catch`.
+- [MUST] Enforce immutability via `Object.freeze`, `ReadonlyArray`.
 
-[IMPORTANT]:
-1. [ALWAYS] **System 2 Protocol:** Execute `think` command before code generation.
-2. [ALWAYS] **Sequential Thinking:** Follow [→.gemini/standards/mcp-tactics.md](.gemini/standards/mcp-tactics.md).
+[IMPORTANT]: **Expression-Centric** — Write code as expressions, not statements.
+- [ALWAYS] Use ternaries over `if/else`.
+- [ALWAYS] Use `Option.match` over null checks.
+- [ALWAYS] Use arrow functions with implicit returns.
+- [ALWAYS] Replace switch/case with dispatch tables.
 
-[CRITICAL]:
-- [NEVER] Generate code without reasoning through architectural implications.
-- [NEVER] Skip System 2 deliberation for complex tasks.
+[CRITICAL]: **Expression-Centric** — Prohibited patterns.
+- [NEVER] Use blocks `{}` when expression suffices.
 
----
-### [2.2][CONTEXT_AWARENESS]
+[IMPORTANT]: **Algorithmic-Parametric** — Derive values algorithmically.
+- [ALWAYS] Generate constants from base values.
+- [ALWAYS] Expose tuning parameters at call-sites.
+- [ALWAYS] Consolidate config into single `B` constant per file.
+- [ALWAYS] Validate inputs via `@effect/schema`.
+- [ALWAYS] Define domain primitives as branded types.
 
-[IMPORTANT]:
-1. [ALWAYS] **Workspace Graph:** Read `nx.json`, `pnpm-workspace.yaml`, `package.json` at session start.
-2. [ALWAYS] **Requirements:** Read [→REQUIREMENTS.md](REQUIREMENTS.md).
-3. [ALWAYS] **Documentation Standards:** Read [→docs/styleguide/voice.md](docs/styleguide/voice.md).
+[CRITICAL]: **Algorithmic-Parametric** — Prohibited patterns.
+- [NEVER] Hardcode values.
 
----
-### [2.3][CONFIGURATION_COMPLIANCE]
+[IMPORTANT]: **Polymorphic-Dense** — Maximize functionality per LOC.
+- [ALWAYS] Handle all modes via single factory function.
+- [ALWAYS] Branch via dispatch tables: `handlers[mode](config)`.
+- [ALWAYS] Narrow types via discriminated unions.
+- [ALWAYS] Produce multiple outputs from one pipeline.
+- [ALWAYS] Target 25-30 LOC per feature, complexity ≤25.
 
-[CRITICAL] Verify and adhere to authoritative configurations.
+[IMPORTANT]: **Topology** — Packages export mechanisms; apps define values.
+- [ALWAYS] Package B constants define CSS variable *slots* (`var(--prefix-key)`), not values.
+- [ALWAYS] Package factories (`createX`) accept scale/behavior config; derive dimensions algorithmically.
+- [ALWAYS] Apps define CSS variables in `main.css`; call factories in `theme.config.ts`/`ui.ts`.
+- [ALWAYS] Packages own: types, schemas, factories, pure functions, dispatch tables.
+- [ALWAYS] Apps own: CSS variable values, factory invocations, visual overrides.
 
-[IMPORTANT]:
-- [ALWAYS] **Linting/Formatting:** `@biome.json` (strict no-any, no-loops, cognitive complexity < 25).
-- [ALWAYS] **Build/Targets:** `@nx.json` (target defaults, cache settings).
-- [ALWAYS] **Compilation:** `@tsconfig.base.json` (strict types, exact optional properties).
-- [ALWAYS] **Bundling:** `@vite.config.ts` (centralized plugins, PWA, compression).
-- [ALWAYS] **Code Quality:** `@sonar-project.properties` (SonarCloud analysis, rule exclusions).
-
-[CRITICAL]:
-- [NEVER] Handroll logic handled by configuration files.
-- [NEVER] Override config defaults without explicit justification.
-
----
-### [2.4][GENERATION_GATE]
-
-[CRITICAL] Execute optimization hook before generating code.
-
-[VERIFY]:
-- [ ] **Optimization:** Achievable with less code? (Target 25-30 LOC/feature).
-- [ ] **Redundancy:** Logic provided by `vite.config.ts` or `nx.json`?
-- [ ] **Wrapper Check:** Creating wrapper used < 3 times?
-- [ ] **Modernity:** Bleeding-edge approach? (React 19, Effect, TS 6.0).
-
-[CRITICAL]:
-- [NEVER] Generate code that fails this gate.
-- [NEVER] Create wrappers used fewer than 3 times.
-
----
-### [2.5][CODE_AS_ACTION]
-
-[IMPORTANT]:
-- [ALWAYS] **Orchestration Scripts:** Write disposable Node.js/Shell scripts for multi-step verification or complex refactoring.
-- [ALWAYS] **Verification:** Execute via `verify-script` command.
-- [ALWAYS] **Pattern:** Adopt 2025 "Code Execution with MCP" (Anthropic/FoundationAgents).
-
-[CRITICAL]:
-- [NEVER] Manually execute repetitive CLI commands.
-- [NEVER] Inline multi-step operations without script encapsulation.
+[CRITICAL]: **Topology** — Prohibited patterns.
+- [NEVER] Color/font/spacing literals in `packages/*`.
 
 ---
-### [2.6][SWARMING_AND_ROUTING]
-
-[IMPORTANT]:
-1. [ALWAYS] **Plan First:** Activate Phase 1 of [→.gemini/standards/workflow.md](.gemini/standards/workflow.md) (via `plan` command).
-2. [ALWAYS] **Route:** Dispatch task via "Router Pattern" to correct specialist ([→.github/agents/](.github/agents/)).
-3. [ALWAYS] **Synthesize:** Generate execution plan before implementation.
-
-[CRITICAL]:
-- [NEVER] Write code immediately without planning phase.
-- [NEVER] Bypass specialist routing for domain-specific tasks.
-
----
-### [2.7][DOGMATIC_COMPLIANCE]
-
-[CRITICAL] Enforce [→.gemini/standards/constitution.md](.gemini/standards/constitution.md).
-
-[CRITICAL]:
-- [NEVER] Accept plans violating immutable laws.
-- [NEVER] Accept code violating immutable laws.
-
----
-### [2.8][SESSION_LIFECYCLE]
-
-| [INDEX] | [PHASE] | [ACTION]                                                  |
-| :-----: | :-----: | --------------------------------------------------------- |
-|   [1]   |  Start  | `init-protocol`                                           |
-|   [2]   | During  | `think` → `plan` → `recode` / `visual-audit` / `test-gen` |
-
----
-## [3][INFRASTRUCTURE]
->**Dictum:** *Infrastructure paths enable agent navigation.*
+## [3][CONSTRAINTS]
+>**Dictum:** *Constraints enforce code standards.*
 
 <br>
 
-| [INDEX] | [RESOURCE] | [PATH]                                      |
-| :-----: | :--------: | ------------------------------------------- |
-|   [1]   |  Commands  | [→.gemini/commands/](.gemini/commands/)     |
-|   [2]   | Extensions | [→.gemini/extensions/](.gemini/extensions/) |
-|   [3]   |   Agents   | [→.github/agents/](.github/agents/)         |
+[IMPORTANT]:
+- [ALWAYS] Consolidate config into single frozen B constant per file.
+- [ALWAYS] Branch via dispatch tables.
+- [ALWAYS] Sequence async/failable via Effect pipelines.
+- [ALWAYS] Handle nullable via Option monads.
+- [ALWAYS] Define domain primitives as branded types.
+
+[CRITICAL]:
+- [NEVER] `any` → use branded types via @effect/schema.
+- [NEVER] `let`/`var` → use `const` only.
+- [NEVER] `if/else` → use dispatch tables.
+- [NEVER] `for/while` → use `.map`, `.filter`, Effect.
+- [NEVER] `try/catch` → use Effect error channel.
+- [NEVER] Default exports → use named exports (except `*.config.ts`).
+- [NEVER] Meta-commentary ("Sourced from...", "Confirmed with...") in output files.
+
+---
+## [4][OUTPUT]
+>**Dictum:** *Output format optimizes readability.*
+
+<br>
+
+[IMPORTANT]:
+- [ALWAYS] Use `backticks` for file paths, symbols, and CLI commands.
+- [ALWAYS] Avoid large code blocks—reference file/symbol names instead.
+- [ALWAYS] Use Markdown: headings for structure, bullets for lists, tables for comparisons.
+- [ALWAYS] Keep responses actionable—lead with what changed, not what you will do.
+
+<br>
+
+### [4.1][DEPENDENCIES]
+
+[IMPORTANT]:
+1. [ALWAYS] **Check catalog**: `cat pnpm-workspace.yaml | grep my-dep`.
+2. [ALWAYS] **Add to catalog** (if missing): `my-dep: 1.2.3` (exact version).
+3. [ALWAYS] **Reference**: `"dependencies": { "my-dep": "catalog:" }`.
+4. [ALWAYS] **Install**: `pnpm install`.
+5. [ALWAYS] **Validate**: `nx run-many -t typecheck && nx run-many -t check`.
+
+---
+## [5][FILE_ORGANIZATION]
+>**Dictum:** *Organization patterns enable navigation.*
+
+<br>
+
+[IMPORTANT] **Section separators**: `// --- [LABEL] ` + dashes to column 80. Labels: UPPERCASE, max 2 words, underscores for spaces, no parentheticals.
+
+```typescript
+// --- [TYPES] -----------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [EXPORT] ----------------------------------------------------------------
+```
+
+**Canonical order** (omit unused): Types → Schema → Constants → Pure Functions → Dispatch Tables → Effect Pipeline → Entry Point → Export.<br>
+**FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, any parentheticals.
