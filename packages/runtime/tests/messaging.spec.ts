@@ -5,7 +5,7 @@ import { it as itProp } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
 import { TEST_CONSTANTS } from '@parametric-portal/test-utils/constants';
 import { TEST_HARNESS } from '@parametric-portal/test-utils/harness';
-import { Schema as S } from 'effect';
+import { Option, Schema as S } from 'effect';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMessageChannel, createPayload, MESSAGING_TUNING } from '../src/messaging';
 
@@ -29,7 +29,8 @@ beforeEach(() => {
 afterEach(() => {
     spyRef.current?.mockRestore();
 });
-const postMessageSpy = (): ReturnType<typeof vi.spyOn> => spyRef.current!;
+const postMessageSpy = (): ReturnType<typeof vi.spyOn> =>
+    Option.getOrThrowWith(Option.fromNullable(spyRef.current), () => new Error('postMessageSpy called before setup'));
 
 // --- [DESCRIBE] MESSAGING_TUNING ---------------------------------------------
 

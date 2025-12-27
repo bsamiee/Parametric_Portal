@@ -2,7 +2,7 @@
  * Auth store tests: state transitions, actions, overlay management.
  */
 import { it as itProp } from '@fast-check/vitest';
-import { database, type ApiKeyListItem, type UserResponse } from '@parametric-portal/types/database';
+import { type ApiKeyListItem, database, type UserResponse } from '@parametric-portal/types/database';
 import { Option, Schema as S } from 'effect';
 import fc from 'fast-check';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -47,12 +47,12 @@ const B = Object.freeze({
                 name: 'Staging',
                 provider: 'anthropic',
             },
-        ] satisfies ReadonlyArray<ApiKeyListItem>,
+        ] as const satisfies readonly [ApiKeyListItem, ApiKeyListItem, ApiKeyListItem],
         tokens: ['eyJhbGciOiJIUzI1NiJ9.test1', 'eyJhbGciOiJIUzI1NiJ9.test2'] as const,
         users: [
             { email: 'alice@example.com', id: mkUserId('01932f5a-b7c1-7def-8a90-100000000001') },
             { email: 'bob@example.com', id: mkUserId('01932f5a-b7c1-7def-8a90-100000000002') },
-        ] satisfies ReadonlyArray<UserResponse>,
+        ] as const satisfies readonly [UserResponse, UserResponse],
     },
     storeName: 'parametric-portal:auth',
 } as const);
@@ -199,8 +199,8 @@ describe('addApiKey', () => {
     });
     itProp.prop([fc.integer({ max: 10, min: 1 })])('handles arbitrary number of keys', (count) => {
         useAuthStore.getState().clearAuth();
-        Array.from({ length: count }, (_, i) => {
-            useAuthStore.getState().addApiKey(createMockApiKey(String(i), `Key ${i}`));
+        Array.from({ length: count }, (_, i) => createMockApiKey(String(i), `Key ${i}`)).forEach((key) => {
+            useAuthStore.getState().addApiKey(key);
         });
         expect(useAuthStore.getState().apiKeys).toHaveLength(count);
     });
@@ -234,7 +234,10 @@ describe('removeApiKey', () => {
             useAuthStore.getState().addApiKey(key);
         });
         useAuthStore.getState().removeApiKey(B.samples.apiKeys[0].id);
-        expect(useAuthStore.getState().apiKeys.map((k) => k.id)).toEqual([B.samples.apiKeys[1].id, B.samples.apiKeys[2].id]);
+        expect(useAuthStore.getState().apiKeys.map((k) => k.id)).toEqual([
+            B.samples.apiKeys[1].id,
+            B.samples.apiKeys[2].id,
+        ]);
     });
 });
 
@@ -243,7 +246,10 @@ describe('setApiKeys', () => {
         useAuthStore.getState().addApiKey(B.samples.apiKeys[0]);
         useAuthStore.getState().setApiKeys([B.samples.apiKeys[1], B.samples.apiKeys[2]]);
         expect(useAuthStore.getState().apiKeys).toHaveLength(2);
-        expect(useAuthStore.getState().apiKeys.map((k) => k.id)).toEqual([B.samples.apiKeys[1].id, B.samples.apiKeys[2].id]);
+        expect(useAuthStore.getState().apiKeys.map((k) => k.id)).toEqual([
+            B.samples.apiKeys[1].id,
+            B.samples.apiKeys[2].id,
+        ]);
     });
     it('clears keys with empty array', () => {
         B.samples.apiKeys.forEach((key) => {
