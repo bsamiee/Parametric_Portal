@@ -263,7 +263,7 @@
             "executor": "nx:run-commands",
             "inputs": ["infrastructure"],
             "options": {
-                "command": "yamllint infrastructure/ .github/workflows/ && hadolint apps/api/Dockerfile apps/parametric_icons/Dockerfile && actionlint && kustomize build infrastructure/overlays/prod | kubeconform -strict -ignore-missing-schemas -summary && echo '[OK] Infrastructure valid'",
+                "command": "yamllint infrastructure/ .github/workflows/ && hadolint apps/api/Dockerfile apps/parametric_icons/Dockerfile && actionlint && for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; kustomize build \"$dir\" | kubeconform -strict -ignore-missing-schemas -summary || exit 1; done && echo '[OK] All projects valid'",
                 "cwd": "{workspaceRoot}"
             }
         },
@@ -286,7 +286,7 @@
             "cache": false,
             "executor": "nx:run-commands",
             "options": {
-                "command": "kubectl diff -k infrastructure/overlays/prod || true",
+                "command": "for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; echo \"[INFO] Diff for $(basename $(dirname $(dirname \"$dir\")))...\"; kubectl diff -k \"$dir\" || true; done",
                 "cwd": "{workspaceRoot}"
             }
         },
@@ -295,7 +295,7 @@
             "executor": "nx:run-commands",
             "inputs": ["infrastructure"],
             "options": {
-                "command": "kustomize build infrastructure/overlays/prod | kubeconform -strict -ignore-missing-schemas -summary",
+                "command": "for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; echo \"[INFO] Validating $(basename $(dirname $(dirname \"$dir\")))...\"; kustomize build \"$dir\" | kubeconform -strict -ignore-missing-schemas -summary || exit 1; done && echo '[OK] All projects validated'",
                 "cwd": "{workspaceRoot}"
             }
         },

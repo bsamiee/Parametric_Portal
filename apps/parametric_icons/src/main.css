@@ -19,7 +19,6 @@
         transform: rotate(360deg);
     }
 }
-
 @keyframes spinnerDash {
     0% {
         stroke-dasharray: 1, 150;
@@ -34,7 +33,6 @@
         stroke-dashoffset: -124;
     }
 }
-
 @keyframes pulse {
     0%,
     100% {
@@ -44,7 +42,6 @@
         opacity: 0.5;
     }
 }
-
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -55,7 +52,6 @@
         transform: translateY(0);
     }
 }
-
 @keyframes fadeOut {
     from {
         opacity: 1;
@@ -66,7 +62,6 @@
         transform: translateY(-4px);
     }
 }
-
 @keyframes scaleIn {
     from {
         opacity: 0;
@@ -86,30 +81,25 @@
     --panel-bg-medium: var(--color-surface-250);
     --panel-bg-light: var(--color-surface-350);
     --panel-bg-lighter: var(--color-surface-450);
-
     /* Borders — subtle separation */
     --panel-border-dark: var(--color-surface-300);
     --panel-border-light: var(--color-surface-550);
     --panel-border-preview: var(--color-muted-200);
-
     /* Text colors — reference generated text tokens */
     --panel-text-primary: var(--color-text-150);
     --panel-text-strong: var(--color-muted-500);
     --panel-text-secondary: var(--color-muted-350);
     --panel-text-muted: var(--color-muted-300);
     --panel-text-placeholder: var(--color-muted-250);
-
     /* Icon colors — derived from muted scale */
     --panel-icon-default: var(--color-muted-350);
     --panel-icon-hover: var(--color-muted-450);
     --panel-icon-muted: var(--color-muted-250);
     --panel-icon-active: var(--color-muted-400);
-
     /* Base colors — universal values */
     --white: oklch(98% 0.01 0);
     --white-10: oklch(100% 0 0 / 0.1);
     --white-05: oklch(100% 0 0 / 0.05);
-
     /* Control variants — button styling */
     --ctrl-destructive-bg: var(--color-destructive-200);
     --ctrl-destructive-text: var(--white);
@@ -125,21 +115,17 @@
     --ctrl-switch-thumb: var(--white);
     --ctrl-switch-track: currentColor / 0.2;
     --ctrl-switch-track-on: currentColor;
-
     /* Pressed/toggle state — derived from cyan scale */
     --ctrl-pressed-bg: color-mix(in oklch, var(--color-cyan-200) 18%, transparent);
     --ctrl-pressed-border: var(--color-cyan-200);
     --ctrl-pressed-text: var(--color-cyan-200);
-
     /* Solid button variant — matches input bar fill */
     --ctrl-solid-bg: var(--panel-bg-light);
     --ctrl-solid-text: var(--panel-text-secondary);
     --ctrl-solid-hover: var(--panel-bg-lighter);
-
     /* Card styling — transparent border for sidebar items */
     --data-card-border: transparent;
     --data-card-bg: transparent;
-
     /* Tooltip styling — light surface for contrast */
     --ov-tooltip-bg: var(--color-text-150);
     --ov-tooltip-font-family: var(--font-ui), system-ui, sans-serif;
@@ -162,13 +148,11 @@
     --menu-dropdown-padding: 0.375rem;
     --menu-dropdown-radius: 0.5rem;
     --menu-dropdown-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.3);
-
     /* Section headers — muted, uppercase */
     --menu-header-color: var(--color-muted-150);
     --menu-header-font-size: 0.6875rem;
     --menu-header-padding-x: 0.375rem;
     --menu-header-padding-y: 0.375rem;
-
     /* Menu items — progressive lightening for states */
     --menu-item-font-size: 0.8125rem;
     --menu-item-gap: 0.375rem;
@@ -181,19 +165,15 @@
     --menu-item-selected-bg: var(--color-surface-500);
     --menu-item-selected-text: var(--color-text-150);
     --menu-item-text: var(--color-muted-250);
-
     /* Checkmark — cyan accent */
     --menu-check-color: var(--color-cyan-150);
     --menu-check-size: 0.875rem;
-
     /* Icons */
     --menu-icon-opacity: 0.7;
     --menu-icon-size: 1rem;
-
     /* Separators */
     --menu-separator-bg: var(--panel-border-light);
     --menu-separator-spacing: 0.25rem;
-
     /* Trigger — dim labels, bright values */
     --menu-trigger-bg: transparent;
     --menu-trigger-font-size: 0.8125rem;
@@ -211,17 +191,14 @@
     --menu-trigger-padding-y: 0.375rem;
     --menu-trigger-radius: 0.5rem;
     --menu-trigger-value: var(--color-text-100);
-
     /* InputBar state slots — values for package-defined CSS variable slots */
     --bar-icon-opacity: 0.7;
     --bar-placeholder-opacity: 0.5;
     --bar-disabled-opacity: 0.4;
     --bar-loading-cursor: not-allowed;
-
     /* Submit button — deep magenta with cyan arrow */
     --submit-btn-bg: var(--color-pink-100);
     --submit-btn-text: var(--color-cyan-200);
-
     /* Thumb component — matches sidebar-item-thumb styling */
     --data-thumb-bg: var(--panel-bg-lighter);
     --data-thumb-radius: 0.5rem;
@@ -231,7 +208,6 @@
     --data-thumb-action-hover-bg: var(--panel-bg-dark);
     --data-thumb-action-hover-border: var(--ctrl-destructive-bg);
     --data-thumb-action-hover-color: var(--ctrl-destructive-bg);
-
     /* ListItem component — sidebar card styling */
     --data-listitem-gap: 0.75rem;
     --data-listitem-padding-x: 0.75rem;
@@ -243,7 +219,6 @@
     --data-listitem-thumb-radius: 0.5rem;
     --data-listitem-thumb-bg: var(--panel-bg-lighter);
     --data-listitem-thumb-padding: 0.375rem;
-
     /* Animation slots — values for package-defined CSS variable slots */
     --bar-spinner-animation: spin 0.8s ease-in-out infinite;
     --fb-spinner-animation: spin 1s linear infinite;
@@ -251,7 +226,6 @@
     --fb-exit-animation: fadeOut 150ms ease-in;
     --data-loading-animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     --menu-loading-animation: spin 1s linear infinite;
-
     /* Semantic intent/role colors — tuned for UI clarity */
     --intent-create: var(--color-highlight-150);
     --intent-refine: var(--color-cyan-150);
@@ -268,12 +242,10 @@
 [data-focused='true']:not([data-selected='true']) {
     background-color: var(--menu-item-hover-bg);
 }
-
 [data-selected='true'] {
     color: var(--menu-item-selected-text);
     background-color: var(--menu-item-selected-bg);
 }
-
 li:not([data-selected='true']) {
     color: var(--menu-item-text);
 }
@@ -323,8 +295,6 @@ li:not([data-selected='true']) {
     padding: 1.25rem;
     overflow-y: auto;
 }
-
-/* Rail button — sidebar rail icons */
 .rail-btn {
     display: flex;
     align-items: center;
@@ -342,8 +312,6 @@ li:not([data-selected='true']) {
     color: var(--panel-icon-hover);
     background: var(--panel-bg-lighter);
 }
-
-/* Command bar */
 .command-bar {
     display: flex;
     flex-direction: column;
@@ -377,8 +345,6 @@ li:not([data-selected='true']) {
     text-transform: uppercase;
     letter-spacing: 0.25em;
 }
-
-/* Input capsule */
 .input-capsule {
     width: 100%;
     background: var(--panel-bg-light);
@@ -390,14 +356,12 @@ li:not([data-selected='true']) {
 .input-capsule:hover {
     background: var(--panel-bg-lighter);
 }
-
 /* Input wrapper - groups attachments tray and input capsule with no gap */
 .input-wrapper {
     display: flex;
     flex-direction: column;
     width: 100%;
 }
-
 /* Attachments tray - dashed border with legend-style label */
 .attachments-tray {
     --attachment-border: var(--state-attachment);
@@ -425,7 +389,6 @@ li:not([data-selected='true']) {
     border-radius: 0.25rem;
     transform: translateY(-100%);
 }
-
 /* Sidebar item - alignment override (CSS variables handle gap/padding/radius) */
 .sidebar-item {
     align-items: flex-start;
@@ -442,7 +405,6 @@ li:not([data-selected='true']) {
     color: var(--ctrl-destructive-bg);
     background: color-mix(in oklch, var(--ctrl-destructive-bg) 10%, transparent);
 }
-
 /* Clear history button */
 .clear-history-btn {
     width: 100%;
@@ -460,7 +422,6 @@ li:not([data-selected='true']) {
 .clear-history-btn:hover {
     background: var(--panel-bg-lighter);
 }
-
 /* Context row */
 .context-row {
     display: flex;
@@ -486,7 +447,6 @@ li:not([data-selected='true']) {
     height: 1rem;
     background: var(--panel-border-light);
 }
-
 /* Stage */
 .stage {
     position: relative;
@@ -509,7 +469,6 @@ li:not([data-selected='true']) {
     border: 1px dashed color-mix(in oklch, var(--panel-border-preview) 40%, transparent);
     border-radius: 0.5rem;
 }
-
 /* HUD controls */
 .hud-controls {
     position: fixed;
@@ -541,7 +500,6 @@ li:not([data-selected='true']) {
     color: var(--panel-icon-hover);
     background: var(--panel-bg-lighter);
 }
-
 /* Viewport HUD (top-right actions) */
 .viewport-hud {
     position: absolute;
@@ -583,14 +541,12 @@ li:not([data-selected='true']) {
     color: var(--state-saved);
     fill: var(--state-saved);
 }
-
 /* CAD reticle corner marks */
 .cad-reticle-corner {
     border-color: var(--panel-border-preview);
     border-style: solid;
     border-width: 1px 0 0 1px;
 }
-
 /* Variant navigation (bottom-right, within-asset cycling) */
 .variant-nav {
     position: absolute;
@@ -631,7 +587,6 @@ li:not([data-selected='true']) {
     color: var(--panel-text-muted);
     letter-spacing: 0.05em;
 }
-
 /* Inspector */
 .inspector-section {
     display: flex;
@@ -665,7 +620,6 @@ li:not([data-selected='true']) {
 
 /* --- [VARIANT_STYLES] ------------------------------------------------------ */
 
-/* Intent badge variants */
 .intent-badge {
     padding: 0.125rem 0.375rem;
     font-size: 0.5625rem;
@@ -686,8 +640,6 @@ li:not([data-selected='true']) {
     color: var(--intent-upload);
     background: color-mix(in oklch, var(--intent-upload) 15%, transparent);
 }
-
-/* Session message - matches sidebar-item styling pattern */
 .session-message {
     display: flex;
     gap: 0.75rem;
@@ -730,8 +682,6 @@ li:not([data-selected='true']) {
 .session-message-label[data-role='assistant'] {
     color: var(--role-assistant);
 }
-
-/* Session thinking card */
 .session-thinking-card {
     display: flex;
     gap: 0.75rem;
@@ -740,16 +690,12 @@ li:not([data-selected='true']) {
     background: var(--panel-bg-medium);
     border-radius: 0.5rem;
 }
-
-/* Processing skeleton */
 .skeleton {
     height: 0.75rem;
     background: color-mix(in oklch, var(--color-muted-200) 50%, transparent);
     border-radius: 0.25rem;
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
-
-/* InputBar loading spinner — border-based visual */
 .input-capsule [data-loading='true'] button span {
     display: block;
     border: 2px solid var(--panel-icon-muted);
@@ -764,38 +710,28 @@ html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
-
 body {
     color: var(--panel-text-primary);
     background-color: var(--color-surface-300);
 }
-
-/* Scrollbar styling using generated surface tokens */
 ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
-
 ::-webkit-scrollbar-track {
     background: var(--color-surface-350);
 }
-
 ::-webkit-scrollbar-thumb {
     background: var(--color-surface-450);
     border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
     background: var(--color-surface-hover);
 }
-
-/* Focus visible outline using accent tokens */
 :focus-visible {
     outline: 2px solid var(--color-accent-300);
     outline-offset: 2px;
 }
-
-/* Selection highlight using accent with opacity */
 ::selection {
     background-color: color-mix(in oklch, var(--color-accent-300) 50%, transparent);
 }

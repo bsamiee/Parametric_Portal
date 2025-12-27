@@ -1,0 +1,41 @@
+# --- PROJECT METADATA ---------------------------------------------------------
+# Platform configuration for Parametric Portal project
+apiVersion: platform.parametric-portal.com/v1alpha1
+kind: Project
+metadata:
+  name: parametric-portal
+spec:
+  displayName: "Parametric Portal"
+  owner: "platform-team"
+
+  domain: "parametric-portal.com"
+  dnsProvider: clouddns
+
+  resources:
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      storage: "50Gi"
+    limits:
+      cpu: "8"
+      memory: "16Gi"
+      pods: "50"
+
+  services:
+    database:
+      enabled: true
+      name: "parametric_portal"
+
+    objectStorage:
+      enabled: true
+      bucketName: "parametric-portal-files"
+
+    redis:
+      enabled: true
+      database: 0
+
+  monitoring:
+    enabled: true
+    dashboards:
+      - api-metrics
+      - icons-metrics

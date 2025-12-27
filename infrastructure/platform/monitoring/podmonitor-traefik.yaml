@@ -1,0 +1,24 @@
+# --- TRAEFIK PODMONITOR -------------------------------------------------------
+# Prometheus scraping for Traefik ingress controller
+# Metrics: traefik_entrypoint_*, traefik_router_*, traefik_service_*
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: traefik
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: traefik
+    app.kubernetes.io/component: ingress
+spec:
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scrapeTimeout: 30s

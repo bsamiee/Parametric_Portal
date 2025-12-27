@@ -1,0 +1,57 @@
+# --- ICONS MIDDLEWARE ---------------------------------------------------------
+# App-specific middleware for parametric-portal.com
+# Extends base-security-headers with CSP and permissions policy
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: icons-security-headers
+  labels:
+    app.kubernetes.io/name: icons
+    app.kubernetes.io/component: middleware
+spec:
+  headers:
+    # Icons-specific: allow same-origin framing, add CSP
+    customFrameOptionsValue: "SAMEORIGIN"
+    contentSecurityPolicy: |
+      default-src 'self';
+      script-src 'self';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: https:;
+      font-src 'self' data:;
+      connect-src 'self' https://api.parametric-portal.com;
+      frame-ancestors 'none';
+      base-uri 'self';
+      form-action 'self';
+    permissionsPolicy: >-
+      accelerometer=(), camera=(), geolocation=(), gyroscope=(),
+      magnetometer=(), microphone=(), payment=(), usb=()
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: icons-www-redirect
+  labels:
+    app.kubernetes.io/name: icons
+    app.kubernetes.io/component: middleware
+spec:
+  redirectRegex:
+    regex: "^https://www\\.parametric-portal\\.com/(.*)"
+    replacement: "https://parametric-portal.com/${1}"
+    permanent: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: icons-middleware-chain
+  labels:
+    app.kubernetes.io/name: icons
+    app.kubernetes.io/component: middleware
+spec:
+  chain:
+    middlewares:
+      - name: base-security-headers
+      - name: icons-security-headers
+      - name: rate-limit-web
+      - name: icons-www-redirect
+      - name: compress

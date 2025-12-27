@@ -7,7 +7,6 @@ import { presets } from '@parametric-portal/theme/presets';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const p = presets();
-
 const B = Object.freeze({
     fonts: {
         geist: {

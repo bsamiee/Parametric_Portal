@@ -37,7 +37,6 @@ type PromptContext = {
 type IconGenerationServiceInterface = {
     readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InternalError>;
 };
-
 /** AI response wrapper: validates array of SvgAssetInput before transformation. */
 const AiResponseSchema = S.Struct({
     variants: S.Array(svgApi.schemas.SvgAssetInput).pipe(S.minItems(1)),
@@ -64,7 +63,6 @@ const B = Object.freeze({
         jsonExtract: /\{[\s\S]*"variants"[\s\S]*\}/,
     },
 } as const);
-
 const ai = createProvider({ maxTokens: B.ai.maxTokens, model: B.ai.model });
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -225,7 +223,6 @@ const buildPromptWithPrefill = (ctx: PromptContext): readonly Prompt.Message[] =
     Prompt.userMessage({ content: [Prompt.textPart({ text: buildUserMessage(ctx) })] }),
     Prompt.assistantMessage({ content: [Prompt.textPart({ text: B.ai.prefill })] }),
 ];
-
 class IconGenerationService extends Context.Tag('IconGenerationService')<
     IconGenerationService,
     IconGenerationServiceInterface

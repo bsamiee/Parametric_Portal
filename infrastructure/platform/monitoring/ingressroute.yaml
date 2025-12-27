@@ -24,9 +24,7 @@ spec:
           port: 80
           passHostHeader: true
   tls:
-    certResolver: letsencrypt
-    domains:
-      - main: grafana.parametric-portal.com
+    secretName: grafana-tls
 ---
 # --- GRAFANA SECURITY HEADERS -------------------------------------------------
 apiVersion: traefik.io/v1alpha1

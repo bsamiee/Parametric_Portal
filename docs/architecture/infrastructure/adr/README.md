@@ -10,15 +10,17 @@ Architecture Decision Records (ADRs) for infrastructure choices. Each record cap
 
 | [ADR] | [TITLE]                 | [STATUS] | [DATE]     |
 | :---: | ----------------------- | -------- | ---------- |
-| 0001  | K3s                     | Accepted | 2025-01-15 |
-| 0002  | Kustomize               | Accepted | 2025-01-15 |
-| 0003  | ArgoCD ApplicationSet   | Accepted | 2025-01-15 |
-| 0004  | Traefik HelmChartConfig | Accepted | 2025-01-15 |
-| 0005  | Sealed Secrets          | Accepted | 2025-01-15 |
-| 0006  | Mise                    | Accepted | 2025-01-15 |
-| 0007  | Network Policies        | Accepted | 2025-01-15 |
-| 0008  | Multi-Domain            | Accepted | 2025-12-25 |
-| 0009  | CloudNativePG           | Accepted | 2025-12-25 |
+| 0001  | K3s                     | Accepted | 2025-12-12 |
+| 0002  | Kustomize               | Accepted | 2025-12-12 |
+| 0003  | ArgoCD ApplicationSet   | Accepted | 2025-12-12 |
+| 0004  | Traefik HelmChartConfig | Accepted | 2025-12-12 |
+| 0005  | Sealed Secrets          | Accepted | 2025-12-12 |
+| 0006  | Mise                    | Accepted | 2025-12-12 |
+| 0007  | Network Policies        | Accepted | 2025-12-12 |
+| 0008  | Multi-Domain            | Accepted | 2025-12-12 |
+| 0009  | CloudNativePG           | Accepted | 2025-12-12 |
+| 0010  | Longhorn                | Accepted | 2025-12-12 |
+| 0011  | Multi-Project Platform  | Accepted | 2025-12-12 |
 
 ---
 ## [2][FORMAT]

@@ -60,6 +60,24 @@ spec:
             summary: "PostgreSQL disk usage exceeds 80%"
             description: "Database size is {{ $value | humanize1024 }}B"
 
+        - alert: PostgreSQLBackupAgeTooHigh
+          expr: time() - cnpg_pg_backup_last_successful_timestamp > 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "No successful PostgreSQL backup in 24 hours"
+            description: "Last successful backup was {{ $value | humanizeDuration }} ago"
+
+        - alert: PostgreSQLConnectionPoolNearExhaustion
+          expr: cnpg_backends_active / cnpg_backends_max > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PostgreSQL connection pool utilization exceeds 80%"
+            description: "Connection pool is at {{ $value | humanizePercentage }} capacity"
+
     # --- KUBERNETES ALERTS ---
     - name: kubernetes
       rules:

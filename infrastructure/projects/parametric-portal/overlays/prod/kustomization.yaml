@@ -1,0 +1,99 @@
+# --- PRODUCTION OVERLAY -------------------------------------------------------
+# Multi-domain architecture: each app in apps/ owns its IngressRoute + middleware
+# Adding new app = create folder in apps/ with deployment, service, ingressroute
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: parametric-portal-production
+
+namespace: parametric-portal
+
+resources:
+  - ../../../../platform/base
+  - ../../base
+  - ../../apps/api
+  - ../../apps/icons
+  - ../../../../platform/postgres
+  - hpa-api.yaml
+  - tlsstore.yaml
+
+images:
+  - name: ghcr.io/parametric-portal/api
+    newTag: latest
+  - name: ghcr.io/parametric-portal/icons
+    newTag: latest
+
+patches:
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1000m"
+  - target:
+      kind: PodDisruptionBudget
+      name: api-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: icons-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: postgres-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+
+# --- [DOMAIN_CONFIGURATION] ---------------------------------------------------
+# Domain values defined in base/domains.yaml ConfigMap
+# For multi-project platform: each project defines own domains
+# To change domains: edit infrastructure/projects/parametric-portal/base/domains.yaml
+# Then update hardcoded values in:
+#   - apps/api/ingressroute.yaml (lines 15, 30)
+#   - apps/api/deployment.yaml (API_BASE_URL env)
+#   - apps/icons/ingressroute.yaml (line 15)
+#   - apps/icons/middleware.yaml (lines 22, 39)
+#   - overlays/prod/tlsstore.yaml (lines 14, 16)
+
+  # --- [POD_ANTI_AFFINITY] ---------------------------------------------------
+  # Enforce hard pod anti-affinity for production HA
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution
+      - op: add
+        path: /spec/template/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution
+        value:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: api
+            topologyKey: kubernetes.io/hostname
+
+  - target:
+      kind: Deployment
+      name: icons
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution
+      - op: add
+        path: /spec/template/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution
+        value:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: icons
+            topologyKey: kubernetes.io/hostname

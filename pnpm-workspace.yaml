@@ -85,6 +85,7 @@ catalog:
   lightningcss: 1.30.2
   lucide-react: 0.562.0
   mermaid: 11.12.2
+  motion: 12.6.0
   msw: 2.12.4
   nuqs: 2.8.6
   nx: 22.3.3

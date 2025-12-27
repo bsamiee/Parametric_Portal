@@ -1,0 +1,24 @@
+# --- REDIS PODMONITOR ---------------------------------------------------------
+# Prometheus scraping for Redis cache (metrics-exporter sidecar)
+# Metrics: redis_connected_clients, redis_memory_*, redis_commands_*
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: redis
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+spec:
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector:
+    matchNames:
+      - redis-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scrapeTimeout: 30s

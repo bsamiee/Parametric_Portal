@@ -1,0 +1,24 @@
+# --- MINIO PODMONITOR ---------------------------------------------------------
+# Prometheus scraping for MinIO object storage
+# Metrics: minio_cluster_*, minio_bucket_*, minio_s3_requests_*
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: minio-platform-storage
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: storage
+spec:
+  jobLabel: v1.min.io/tenant
+  namespaceSelector:
+    matchNames:
+      - minio-system
+  selector:
+    matchLabels:
+      v1.min.io/tenant: platform-storage
+  podMetricsEndpoints:
+    - port: minio
+      path: /minio/v2/metrics/cluster
+      interval: 60s
+      scrapeTimeout: 30s

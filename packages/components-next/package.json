@@ -1,0 +1,83 @@
+{
+  "dependencies": {
+    "@radix-ui/react-slot": "catalog:",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "effect": "catalog:",
+    "motion": "catalog:",
+    "react": "catalog:",
+    "react-aria": "catalog:",
+    "react-aria-components": "catalog:",
+    "react-dom": "catalog:",
+    "react-stately": "catalog:",
+    "tailwind-merge": "catalog:"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "exports": {
+    "./provider": {
+      "types": "./src/core/context.ts",
+      "import": "./src/core/context.ts",
+      "default": "./src/core/context.ts"
+    },
+    "./button": {
+      "types": "./src/button/button.tsx",
+      "import": "./src/button/button.tsx",
+      "default": "./src/button/button.tsx"
+    },
+    "./input": {
+      "types": "./src/input/input.tsx",
+      "import": "./src/input/input.tsx",
+      "default": "./src/input/input.tsx"
+    },
+    "./select": {
+      "types": "./src/select/select.tsx",
+      "import": "./src/select/select.tsx",
+      "default": "./src/select/select.tsx"
+    },
+    "./layout": {
+      "types": "./src/layout/layout.tsx",
+      "import": "./src/layout/layout.tsx",
+      "default": "./src/layout/layout.tsx"
+    },
+    "./panel": {
+      "types": "./src/layout/panel.tsx",
+      "import": "./src/layout/panel.tsx",
+      "default": "./src/layout/panel.tsx"
+    },
+    "./sidebar": {
+      "types": "./src/layout/sidebar.tsx",
+      "import": "./src/layout/sidebar.tsx",
+      "default": "./src/layout/sidebar.tsx"
+    },
+    "./dialog": {
+      "types": "./src/overlay/dialog.tsx",
+      "import": "./src/overlay/dialog.tsx",
+      "default": "./src/overlay/dialog.tsx"
+    },
+    "./popover": {
+      "types": "./src/overlay/popover.tsx",
+      "import": "./src/overlay/popover.tsx",
+      "default": "./src/overlay/popover.tsx"
+    }
+  },
+  "name": "@parametric-portal/components-next",
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "dev": "vite dev --host",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "type": "module",
+  "version": "0.1.0"
+}

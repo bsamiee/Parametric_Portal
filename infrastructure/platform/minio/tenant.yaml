@@ -1,0 +1,158 @@
+# --- MINIO TENANT (PLATFORM STORAGE) ------------------------------------------
+# S3-compatible object storage for projects
+# Based on official example: github.com/minio/operator/examples/kustomization/base/tenant.yaml
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: platform-storage
+  namespace: minio-system
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: platform
+  annotations:
+    prometheus.io/path: /minio/v2/metrics/cluster
+    prometheus.io/port: "9000"
+    prometheus.io/scrape: "true"
+spec:
+  # --- [FEATURES] ------------------------------------------------------------
+  features:
+    bucketDNS: false
+    domains: {}
+
+  # --- [USERS] ---------------------------------------------------------------
+  users:
+    - name: platform-storage-user
+
+  # --- [CERTIFICATES] --------------------------------------------------------
+  certConfig: {}
+
+  # --- [POD_MANAGEMENT] ------------------------------------------------------
+  podManagementPolicy: Parallel
+
+  # --- [CONFIGURATION] -------------------------------------------------------
+  configuration:
+    name: platform-storage-config
+
+  # --- [ENVIRONMENT] ---------------------------------------------------------
+  env: []
+
+  # --- [SERVICE_METADATA] ----------------------------------------------------
+  serviceMetadata:
+    minioServiceLabels: {}
+    minioServiceAnnotations: {}
+    consoleServiceLabels: {}
+    consoleServiceAnnotations: {}
+
+  # --- [PRIORITY] ------------------------------------------------------------
+  priorityClassName: ""
+
+  # --- [CERTIFICATES] --------------------------------------------------------
+  externalCaCertSecret: []
+  externalCertSecret: []
+  externalClientCertSecrets: []
+
+  # --- [IMAGE] ---------------------------------------------------------------
+  image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+  imagePullSecret: {}
+
+  # --- [MOUNT] ---------------------------------------------------------------
+  mountPath: /export
+  subPath: ""
+
+  # --- [SERVICE_ACCOUNT] -----------------------------------------------------
+  serviceAccountName: ""
+
+  # --- [POOLS] ---------------------------------------------------------------
+  pools:
+    - servers: 4
+      name: pool-0
+      topologySpreadConstraints: []
+      volumesPerServer: 2
+      nodeSelector: {}
+      tolerations: []
+
+      # --- [AFFINITY] --------------------------------------------------------
+      affinity:
+        nodeAffinity: {}
+        podAffinity: {}
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  v1.min.io/tenant: platform-storage
+              topologyKey: kubernetes.io/hostname
+
+      # --- [RESOURCES] -------------------------------------------------------
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
+
+      # --- [VOLUME_CLAIM_TEMPLATE] -------------------------------------------
+      volumeClaimTemplate:
+        apiVersion: v1
+        kind: persistentvolumeclaims
+        metadata: {}
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 50Gi
+          storageClassName: longhorn
+        status: {}
+
+      # --- [SECURITY_CONTEXT] ------------------------------------------------
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+
+      # --- [CONTAINER_SECURITY_CONTEXT] --------------------------------------
+      containerSecurityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+
+  # --- [AUTO_CERT] -----------------------------------------------------------
+  requestAutoCert: true
+---
+# --- MINIO CONFIGURATION SECRET -----------------------------------------------
+# Root credentials for MinIO admin access
+apiVersion: v1
+kind: Secret
+metadata:
+  name: platform-storage-config
+  namespace: minio-system
+type: Opaque
+stringData:
+  config.env: |
+    export MINIO_ROOT_USER="${MINIO_ROOT_USER}"
+    export MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD}"
+    export MINIO_BROWSER="on"
+    export MINIO_PROMETHEUS_AUTH_TYPE="public"
+---
+# --- MINIO USER SECRET ---------------------------------------------------------
+# Additional user credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: platform-storage-user
+  namespace: minio-system
+type: Opaque
+stringData:
+  CONSOLE_ACCESS_KEY: "${MINIO_STORAGE_USER}"
+  CONSOLE_SECRET_KEY: "${MINIO_STORAGE_PASSWORD}"

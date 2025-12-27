@@ -1,0 +1,24 @@
+# --- METRICS-SERVER PODMONITOR ------------------------------------------------
+# Prometheus scraping for Kubernetes metrics-server
+# Metrics: metrics_server_manager_tick_duration_*
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: metrics-server
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: metrics-server
+    app.kubernetes.io/component: metrics
+spec:
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector:
+    matchNames:
+      - kube-system
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: metrics-server
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scrapeTimeout: 30s

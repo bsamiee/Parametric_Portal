@@ -63,6 +63,38 @@ spec:
       ports:
         - protocol: TCP
           port: 8000
+    # Scrape Longhorn metrics
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: longhorn-system
+      ports:
+        - protocol: TCP
+          port: 9500
+    # Scrape MinIO metrics
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio-system
+      ports:
+        - protocol: TCP
+          port: 9000
+    # Scrape Redis metrics
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: redis-system
+      ports:
+        - protocol: TCP
+          port: 9121
+    # Scrape cert-manager metrics
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cert-manager
+      ports:
+        - protocol: TCP
+          port: 9402
     # Internal monitoring namespace communication
     - to:
         - namespaceSelector:

@@ -18,7 +18,8 @@ spec:
         repoURL: https://github.com/bardiasamiee/Parametric_Portal.git
         revision: HEAD
         directories:
-          - path: infrastructure/overlays/*
+          - path: infrastructure/projects/*/overlays/*
+            exclude: infrastructure/projects/_template/**
   template:
     metadata:
       name: 'parametric-portal-{{ .path.basename }}'
@@ -32,7 +33,7 @@ spec:
         app.kubernetes.io/instance: '{{ .path.basename }}'
         app.kubernetes.io/managed-by: argocd
     spec:
-      project: default
+      project: platform
 
       source:
         repoURL: https://github.com/bardiasamiee/Parametric_Portal.git

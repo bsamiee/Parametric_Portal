@@ -1,0 +1,40 @@
+# --- TLS CERTIFICATE ----------------------------------------------------------
+# Automated TLS certificate via cert-manager Let's Encrypt
+# Certificate will be stored in Secret: ${PROJECT_NAME}-tls
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ${PROJECT_NAME}-tls
+  namespace: my-project
+  labels:
+    app.kubernetes.io/name: my-project
+    app.kubernetes.io/component: tls
+spec:
+  secretName: ${PROJECT_NAME}-tls
+
+  # --- [ISSUER] --------------------------------------------------------------
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+
+  # --- [DOMAINS] -------------------------------------------------------------
+  # Primary domain + wildcard for subdomains
+  dnsNames:
+    - "${PRIMARY_DOMAIN}"
+    - "*.${PRIMARY_DOMAIN}"
+
+  # --- [PRIVATE_KEY] ---------------------------------------------------------
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+
+  # --- [USAGES] --------------------------------------------------------------
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+
+  # --- [RENEWAL] -------------------------------------------------------------
+  # Auto-renew 30 days before expiration (Let's Encrypt default: 90-day validity)
+  renewBefore: 720h
