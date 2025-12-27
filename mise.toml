@@ -33,8 +33,8 @@ HELM_VERSION = "v3.17.0"
 TRAEFIK_VERSION = "3.3.5"
 NAMESPACE = "parametric-portal"
 
-# Kustomize paths
-KUSTOMIZE_OVERLAY = "infrastructure/overlays/prod"
+# Kustomize paths (multi-project)
+PROJECTS_DIR = "infrastructure/projects"
 MANIFEST_TMP = "/tmp/k8s-manifests.yaml"
 KUBECONFORM_CACHE = "/tmp/kubeconform-cache"
 
@@ -284,14 +284,28 @@ log "Backup: $FILE ($(du -h "$FILE" | cut -f1)), $(find "$DIR" -name "*.sql.zst"
 # --- [KUBERNETES] -------------------------------------------------------------
 
 [tasks."k8s:build"]
-description = "Build Kustomize manifests"
+description = "Build Kustomize manifests for ALL projects"
 sources = ["infrastructure/**/*.yaml"]
 outputs = ["/tmp/k8s-manifests.yaml"]
 run = '''
 set -euo pipefail
-kustomize build --output {{vars.MANIFEST_TMP}} --load-restrictor LoadRestrictionsNone {{vars.KUSTOMIZE_OVERLAY}} || { echo '[ERROR] kustomize build failed'; exit 1; }
+log() { echo -e "\\033[0;32m[INFO]\\033[0m $1"; }
+
+# Combine all project overlays into single manifest
+echo "---" > {{vars.MANIFEST_TMP}}
+
+for project_dir in {{vars.PROJECTS_DIR}}/*/overlays/prod; do
+  [[ "$project_dir" == *"_template"* ]] && continue  # Skip template
+  project_name=$(basename $(dirname $(dirname "$project_dir")))
+  log "Building $project_name..."
+  kustomize build --load-restrictor LoadRestrictionsNone "$project_dir" >> {{vars.MANIFEST_TMP}} || {
+    echo "[ERROR] kustomize build failed for $project_name"; exit 1;
+  }
+  echo "---" >> {{vars.MANIFEST_TMP}}
+done
+
 [[ -f {{vars.MANIFEST_TMP}} ]] || { echo '[ERROR] Build produced no output'; exit 1; }
-echo '[OK] Manifests built'
+log "All projects built successfully"
 '''
 
 [tasks."k8s:validate"]

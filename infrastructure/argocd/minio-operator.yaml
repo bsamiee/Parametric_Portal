@@ -1,0 +1,76 @@
+# --- MINIO OPERATOR -----------------------------------------------------------
+# MinIO Kubernetes Operator for managing object storage tenants
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: minio-operator
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: minio-operator
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: platform
+spec:
+  generators:
+    - list:
+        elements:
+          - cluster: in-cluster
+  template:
+    metadata:
+      name: minio-operator
+      namespace: argocd
+      annotations:
+        argocd.argoproj.io/sync-wave: "0"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: platform
+
+      source:
+        repoURL: https://operator.min.io
+        chart: operator
+        targetRevision: 6.0.4
+        helm:
+          releaseName: minio-operator
+          values: |
+            # --- [OPERATOR] ----------------------------------------------
+            operator:
+              replicaCount: 2
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+
+            # --- [CONSOLE] -----------------------------------------------
+            console:
+              replicaCount: 2
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: minio-operator
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+      revisionHistoryLimit: 10

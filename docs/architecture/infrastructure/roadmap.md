@@ -12,11 +12,16 @@ Scaling path from single-node MVP to high-availability production cluster.
 | ------------- | -------------------------------------- |
 | Nodes         | 1 (control + worker)                   |
 | Orchestration | K3s v1.32.11                           |
-| Database      | CloudNativePG PostgreSQL 17            |
+| Storage       | Longhorn v1.8.3 (distributed)          |
+| Database      | CloudNativePG v0.22.1, PostgreSQL 17   |
+| Object Storage| MinIO Operator v6.0.5                  |
+| Cache         | Redis v20.6.0 with Sentinel            |
+| TLS           | cert-manager v1.16.3                   |
 | Observability | Grafana LGTM v3.0.1 (Mimir/Loki/Tempo) |
-| Pod Security  | Kyverno v3.6.1 (PSS Restricted)        |
+| Pod Security  | Kyverno v3.6.1 (5 policies)            |
 | Dev Tooling   | 20 CLIs via Nix (k9s, stern, argocd)   |
-| HA            | None                                   |
+| Architecture  | Multi-project platform                 |
+| HA Readiness  | 95% (quorum failover configured)       |
 
 ---
 ## [2][SCALING_PATH]
@@ -168,29 +173,44 @@ curl -sfL https://get.k3s.io | K3S_URL=https://<control-plane>:6443 \
 - Team spending >20% time on operational issues
 
 ---
-## [6][PENDING_ITEMS]
+## [6][COMPLETED_ITEMS]
+
+| [INDEX] | [ITEM]             | [DESCRIPTION]                                        | [VERSION] |
+| :-----: | ------------------ | ---------------------------------------------------- | :-------: |
+|   [1]   | Platform Services  | Longhorn, cert-manager, MinIO, Redis                 | Dec 2025  |
+|   [2]   | Grafana Dashboards | 6 dashboards (API, ArgoCD, CNPG, Cluster, Kyverno, Traefik) | Dec 2025  |
+|   [3]   | PodMonitors        | 13 PodMonitors for all platform services             | Dec 2025  |
+|   [4]   | PostgreSQL HA      | Quorum failover + PgBouncer connection pooling       | Dec 2025  |
+|   [5]   | Storage HA         | Longhorn 3-replica distributed storage               | Dec 2025  |
+|   [6]   | Monitoring         | LGTM stack with Prometheus/Grafana/Loki/Tempo        | Dec 2025  |
+|   [7]   | Multi-Project Arch | Platform/projects folder structure                   | Dec 2025  |
+
+---
+## [7][PENDING_ITEMS]
 
 | [INDEX] | [ITEM]             | [DESCRIPTION]                                        | [PRIORITY] |
 | :-----: | ------------------ | ---------------------------------------------------- | :--------: |
-|   [1]   | SealedSecrets      | Migrate `secret.yaml` and `secret-s3.yaml` to sealed |    HIGH    |
-|   [2]   | Grafana Dashboards | API, Icons, Traefik, ArgoCD, Kyverno, Cluster        |   MEDIUM   |
-|   [3]   | KUBECONFIG Init    | Create `~/.config/kube/` directory on first deploy   |    LOW     |
+|   [1]   | SealedSecrets      | Seal credentials for platform services               |    HIGH    |
+|   [2]   | Domain Values      | Replace hardcoded domains with actual domains        |    HIGH    |
+|   [3]   | DNS Provider       | Configure GCP Cloud DNS or Azure DNS credentials     |    HIGH    |
+|   [4]   | S3 Bucket          | Create S3 bucket for PostgreSQL/Longhorn backups     |   MEDIUM   |
+|   [5]   | Multi-Node Deploy  | 3 server + 3 agent K3s cluster                       |   MEDIUM   |
+|   [6]   | PSS Policies       | Add 3 remaining Pod Security Standard policies       |    LOW     |
 
-### [6.1][DASHBOARDS]
+### [7.1][SECRETS]
 
-| [DASHBOARD]        | [SOURCE]          |
-| ------------------ | ----------------- |
-| API Node.js        | Custom            |
-| Icons Frontend     | Custom            |
-| Traefik Ingress    | grafana.com/14055 |
-| ArgoCD             | grafana.com/14584 |
-| Kyverno            | grafana.com/15987 |
-| Kubernetes Cluster | grafana.com/315   |
+Secret templates ready for sealing:
+- `infrastructure/platform/postgres/secret-s3.yaml`
+- `infrastructure/projects/parametric-portal/apps/api/secret.yaml`
+- Redis password secret
+- Longhorn backup secret
+- Grafana admin secret
+- ghcr.io registry credentials
 
-### [6.2][SECRETS]
+**Command:** `kubeseal --cert <cert> < secret.yaml > sealed-secret.yaml`
 
-Plain YAML secrets require SealedSecrets migration:
-- `infrastructure/apps/api/secret.yaml`
-- `infrastructure/apps/postgres/secret-s3.yaml`
+### [7.2][DOMAINS]
 
-**Command:** `mise run seal-secret <name> <namespace>`
+Hardcoded domains require replacement:
+- Update `infrastructure/projects/parametric-portal/base/domains.yaml` with actual domains
+- Update 17 locations: IngressRoutes, Middleware (CSP), TLSStore, Deployments

@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "outDir": "dist",
+        "rootDir": ".",
+        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/components-next.tsbuildinfo",
+        "types": ["vite/client", "vitest/globals"]
+    },
+    "exclude": ["dist", "node_modules"],
+    "extends": "../../tsconfig.base.json",
+    "include": ["src/**/*"],
+    "references": []
+}

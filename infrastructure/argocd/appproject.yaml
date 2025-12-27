@@ -1,0 +1,161 @@
+# --- PLATFORM APPPROJECT -------------------------------------------------------
+# ArgoCD project with RBAC for platform services and projects
+# Official docs: argo-cd.readthedocs.io/en/stable/user-guide/projects
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: platform
+    app.kubernetes.io/part-of: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Platform services and project applications
+
+  # --- [SOURCE_REPOS] ----------------------------------------------------------
+  sourceRepos:
+    - 'https://github.com/bardiasamiee/Parametric_Portal.git'
+    - 'https://charts.longhorn.io'
+    - 'https://charts.jetstack.io'
+    - 'https://operator.min.io'
+    - 'https://charts.bitnami.com/bitnami'
+    - 'https://cloudnative-pg.github.io/charts'
+    - 'https://kubernetes-sigs.github.io/metrics-server'
+    - 'https://kyverno.github.io/kyverno'
+    - 'https://grafana.github.io/helm-charts'
+
+  # --- [DESTINATIONS] ----------------------------------------------------------
+  destinations:
+    # Platform service namespaces
+    - namespace: 'longhorn-system'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'cert-manager'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'minio-operator'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'minio-system'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'redis-system'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'kyverno'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'monitoring'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'cnpg-system'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'kube-system'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    # Project namespaces (wildcard pattern for all projects)
+    - namespace: 'parametric-portal'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    - namespace: 'parametric-portal-dev'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+    # [SECURITY] Use prefix pattern instead of wildcard to restrict deployments
+    # Pattern matches: parametric-portal-staging, parametric-portal-prod, etc.
+    - namespace: 'parametric-portal-*'
+      server: 'https://kubernetes.default.svc'
+      name: 'in-cluster'
+
+  # --- [CLUSTER_RESOURCE_WHITELIST] --------------------------------------------
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: 'apiextensions.k8s.io'
+      kind: CustomResourceDefinition
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRole
+    - group: 'rbac.authorization.k8s.io'
+      kind: ClusterRoleBinding
+    - group: 'storage.k8s.io'
+      kind: StorageClass
+    - group: 'admissionregistration.k8s.io'
+      kind: ValidatingWebhookConfiguration
+    - group: 'admissionregistration.k8s.io'
+      kind: MutatingWebhookConfiguration
+    - group: 'cert-manager.io'
+      kind: ClusterIssuer
+    - group: 'kyverno.io'
+      kind: ClusterPolicy
+    - group: 'kyverno.io'
+      kind: PolicyException
+
+  # --- [NAMESPACE_RESOURCE_WHITELIST] ------------------------------------------
+  # Explicit allow list for namespace-scoped resources
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: Service
+    - group: ''
+      kind: ConfigMap
+    - group: ''
+      kind: Secret
+    - group: ''
+      kind: ServiceAccount
+    - group: ''
+      kind: PersistentVolumeClaim
+    - group: 'apps'
+      kind: Deployment
+    - group: 'apps'
+      kind: StatefulSet
+    - group: 'apps'
+      kind: DaemonSet
+    - group: 'batch'
+      kind: Job
+    - group: 'batch'
+      kind: CronJob
+    - group: 'rbac.authorization.k8s.io'
+      kind: Role
+    - group: 'rbac.authorization.k8s.io'
+      kind: RoleBinding
+    - group: 'networking.k8s.io'
+      kind: NetworkPolicy
+    - group: 'networking.k8s.io'
+      kind: Ingress
+    - group: 'policy'
+      kind: PodDisruptionBudget
+    - group: 'autoscaling'
+      kind: HorizontalPodAutoscaler
+    - group: 'traefik.io'
+      kind: IngressRoute
+    - group: 'traefik.io'
+      kind: Middleware
+    - group: 'traefik.io'
+      kind: TLSStore
+    - group: 'traefik.io'
+      kind: TLSOption
+    - group: 'postgresql.cnpg.io'
+      kind: Cluster
+    - group: 'postgresql.cnpg.io'
+      kind: Backup
+    - group: 'postgresql.cnpg.io'
+      kind: ScheduledBackup
+    - group: 'postgresql.cnpg.io'
+      kind: Pooler
+    - group: 'minio.min.io'
+      kind: Tenant
+    - group: 'cert-manager.io'
+      kind: Certificate
+    - group: 'cert-manager.io'
+      kind: CertificateRequest
+    - group: 'monitoring.coreos.com'
+      kind: ServiceMonitor
+    - group: 'monitoring.coreos.com'
+      kind: PodMonitor
+    - group: 'monitoring.coreos.com'
+      kind: PrometheusRule
+
+  # --- [ORPHANED_RESOURCES] ----------------------------------------------------
+  orphanedResources:
+    warn: true

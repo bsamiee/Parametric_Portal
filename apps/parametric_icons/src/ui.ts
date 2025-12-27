@@ -49,7 +49,6 @@ const B = Object.freeze({
         scale: 5,
     },
 } as const);
-
 const ICON_GAP = `${B.iconScale.scale * B.algo.iconGapMul * B.iconScale.density * B.iconScale.baseUnit}rem`;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

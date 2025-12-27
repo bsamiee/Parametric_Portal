@@ -14,19 +14,24 @@ Production-grade Kubernetes infrastructure using K3s, Kustomize, ArgoCD, and Tra
 | [INDEX] | [LAYER]         | [TOOL]         | [VERSION]     | [RATIONALE]                                 |
 | :-----: | --------------- | -------------- | ------------- | ------------------------------------------- |
 |   [1]   | Orchestration   | K3s            | v1.32.11+k3s1 | Single binary, 10s startup, Traefik bundled |
-|   [2]   | Ingress         | Traefik        | v3.3.5        | Auto SSL via ACME, CRD-based config         |
-|   [3]   | GitOps          | ArgoCD         | v7.8.28       | Auto-sync from git, prune orphaned          |
-|   [4]   | Manifests       | Kustomize      | v5.5          | Native ArgoCD, no templating language       |
-|   [5]   | Secrets         | Sealed Secrets | v2.17.1       | GitOps-native, encrypted in git             |
-|   [6]   | Database        | CloudNativePG  | v1.28.0       | K8s-native PostgreSQL 17, HA, S3 backup     |
-|   [7]   | Pod Security    | Kyverno        | v3.6.1        | Policy engine for PSS compliance            |
-|   [8]   | Task Runner     | mise           | latest        | Unified tool/env/task management            |
-|   [9]   | Dev Tooling     | Nix            | 24.05         | 20 CLIs (kubectl, k9s, argocd, stern)       |
-|  [10]   | Container Build | @nx/docker     | 22.3.3        | Nx-native, affected-aware builds            |
-|  [11]   | Static Server   | spa-to-http    | latest        | 10MB image, Brotli, SPA mode                |
+|   [2]   | Storage         | Longhorn       | v1.8.3        | Distributed, 3-replica, ReadWriteMany       |
+|   [3]   | Ingress         | Traefik        | v3.3.5        | Auto SSL via ACME, CRD-based config         |
+|   [4]   | TLS             | cert-manager   | v1.16.3       | DNS-01 challenge, wildcard certs, BYOD      |
+|   [5]   | GitOps          | ArgoCD         | v7.8.28       | Auto-sync from git, prune orphaned          |
+|   [6]   | Manifests       | Kustomize      | v5.5          | Native ArgoCD, no templating language       |
+|   [7]   | Secrets         | Sealed Secrets | v2.17.1       | GitOps-native, encrypted in git             |
+|   [8]   | Database        | CloudNativePG  | v0.22.1       | Operator for PostgreSQL 17, quorum failover |
+|   [9]   | Object Storage  | MinIO Operator | v6.0.5        | S3-compatible, distributed mode             |
+|  [10]   | Cache           | Redis          | v20.6.0       | Sentinel HA, replication mode               |
+|  [11]   | Pod Security    | Kyverno        | v3.6.1        | Policy engine, 5 policies enforced          |
 |  [12]   | Observability   | Grafana LGTM   | v3.0.1        | Mimir, Loki, Tempo, Alloy, Grafana          |
-|  [13]   | Build Analytics | Nx Cloud       | -             | Remote caching, CI task analytics           |
-|  [14]   | Quality         | knip, sherif   | latest        | Dead code detection, monorepo hygiene       |
+|  [13]   | Metrics         | metrics-server | v3.13.0       | HPA resource metrics, 2 replicas            |
+|  [14]   | Task Runner     | mise           | latest        | Unified tool/env/task management            |
+|  [15]   | Dev Tooling     | Nix            | 24.05         | 20 CLIs (kubectl, k9s, argocd, stern)       |
+|  [16]   | Container Build | @nx/docker     | 22.3.3        | Nx-native, affected-aware builds            |
+|  [17]   | Static Server   | spa-to-http    | latest        | 10MB image, Brotli, SPA mode                |
+|  [18]   | Build Analytics | Nx Cloud       | -             | Remote caching, CI task analytics           |
+|  [19]   | Quality         | knip, sherif   | latest        | Dead code detection, monorepo hygiene       |
 
 <br>
 
@@ -48,50 +53,75 @@ Production-grade Kubernetes infrastructure using K3s, Kustomize, ArgoCD, and Tra
 
 ```
 infrastructure/
-├── base/                           # Shared resources (all environments)
-│   ├── kustomization.yaml          # Base configuration
-│   ├── namespace.yaml              # parametric-portal namespace
-│   ├── tlsoption.yaml              # TLS 1.2+ enforcement
-│   ├── networkpolicy.yaml          # 5 network isolation policies
-│   ├── poddisruptionbudget.yaml    # 3 PDBs (API, Icons, Postgres)
-│   └── shared-middleware.yaml      # Domain-agnostic middleware
-├── apps/                           # Per-app configs (multi-domain ready)
-│   ├── api/                        # Domain: api.parametric-portal.com
-│   │   ├── deployment.yaml         # Node.js pod (port 4000)
-│   │   ├── service.yaml            # ClusterIP service
-│   │   ├── ingressroute.yaml       # App-specific routes + TLS
-│   │   ├── middleware.yaml         # App-specific CSP + headers
+├── argocd/                         # ArgoCD Applications (15 files)
+│   ├── appproject.yaml            # Platform RBAC (source repos, namespaces)
+│   ├── apps.yaml                  # Projects ApplicationSet (Git discovery)
+│   ├── longhorn.yaml              # Storage CSI (sync-wave: -2)
+│   ├── cert-manager.yaml          # TLS operator (sync-wave: -1)
+│   ├── cloudnativepg.yaml         # PostgreSQL operator (sync-wave: -1)
+│   ├── metrics-server.yaml        # HPA metrics (sync-wave: 0)
+│   ├── redis.yaml                 # Caching layer (sync-wave: 0)
+│   ├── minio-operator.yaml        # Object storage operator (sync-wave: 0)
+│   ├── kyverno.yaml               # Policy engine (sync-wave: 0)
+│   ├── minio-resources.yaml       # MinIO tenant (sync-wave: 1)
+│   ├── kyverno-policies.yaml      # Policy definitions (sync-wave: 1)
+│   ├── monitoring.yaml            # LGTM stack (sync-wave: 1)
+│   └── monitoring-resources.yaml  # PodMonitors + dashboards (sync-wave: 1)
+├── platform/                       # Shared platform services (6 folders)
+│   ├── base/                      # Core namespace resources (8 files)
+│   │   ├── namespace.yaml         # parametric-portal namespace
+│   │   ├── rbac.yaml              # ServiceAccounts, Roles
+│   │   ├── resourcequota.yaml     # 50 pods, 8 CPU, 16Gi memory
+│   │   ├── networkpolicy.yaml     # 6 policies (deny-all + allows)
+│   │   ├── poddisruptionbudget.yaml # 3 PDBs (API, Icons, Postgres)
+│   │   ├── tlsoption.yaml         # TLS 1.2-1.3, ECDHE ciphers
+│   │   ├── shared-middleware.yaml # Security headers, rate limiting
 │   │   └── kustomization.yaml
-│   └── icons/                      # Domain: parametric-portal.com
-│       ├── deployment.yaml         # spa-to-http pod (port 8080)
-│       ├── service.yaml            # ClusterIP service
-│       ├── ingressroute.yaml       # App-specific routes + TLS
-│       ├── middleware.yaml         # App-specific CSP + headers
-│       └── kustomization.yaml
-├── overlays/
-│   ├── dev/                        # Development environment
-│   │   └── kustomization.yaml      # 1 replica, dev tag, debug logging
-│   └── prod/                       # Production environment
-│       ├── kustomization.yaml      # Imports apps, HPA patches
-│       ├── hpa-api.yaml            # Autoscaling (2-10 replicas)
-│       └── tlsstore.yaml           # Default certificate store
-├── platform/                       # Cluster-wide infrastructure
-│   ├── kyverno/                    # Security policies (PSS Restricted)
-│   │   ├── policies/               # 5 ClusterPolicies
-│   │   └── exceptions/             # PolicyExceptions for system components
-│   └── monitoring/                 # Observability stack resources
-│       ├── ingressroute.yaml       # Grafana access
-│       ├── podmonitor-argocd.yaml  # Prometheus scrape targets
-│       └── dashboard-*.yaml        # Grafana dashboards
-└── argocd/
-    ├── apps.yaml                   # ApplicationSet (per-overlay)
-    ├── kyverno.yaml                # Kyverno Helm chart
-    ├── kyverno-policies.yaml       # Kyverno policies from platform/
-    ├── monitoring.yaml             # LGTM Helm chart
-    └── monitoring-resources.yaml   # Monitoring supporting resources
+│   ├── postgres/                  # CloudNativePG cluster (5 files)
+│   │   ├── cluster.yaml           # 3-instance HA, quorum failover
+│   │   ├── pooler.yaml            # PgBouncer connection pooling
+│   │   ├── backup-objectstore.yaml # On-demand S3 backups
+│   │   ├── scheduled-backup.yaml  # Daily backups, 7d retention
+│   │   └── secret-s3.yaml         # S3 credentials template
+│   ├── cert-manager/              # TLS automation (4 files)
+│   │   ├── clusterissuer-clouddns.yaml # Google Cloud DNS
+│   │   ├── clusterissuer-azuredns.yaml # Azure DNS
+│   │   ├── kustomization.yaml
+│   │   └── README.md
+│   ├── minio/                     # Object storage (2 files)
+│   │   ├── tenant.yaml            # 4-server MinIO cluster
+│   │   └── kustomization.yaml
+│   ├── kyverno/                   # Policy engine (3 folders)
+│   │   ├── policies/              # 5 ClusterPolicies (PSS)
+│   │   ├── exceptions/            # System + CNPG exceptions
+│   │   └── kustomization.yaml
+│   └── monitoring/                # LGTM stack resources (20 files)
+│       ├── podmonitor-*.yaml      # 13 PodMonitors (all services)
+│       ├── dashboard-*.yaml       # 6 Grafana dashboards
+│       ├── prometheusrules.yaml   # 9 alert rules
+│       ├── networkpolicy.yaml     # Monitoring egress/ingress
+│       └── ingressroute.yaml      # Grafana HTTPS access
+└── projects/                       # Project instances
+    ├── _template/                 # Project template + README
+    │   └── parametric-portal/     # Template structure
+    │       ├── base/              # PROJECT.yaml, domains, certificate
+    │       ├── apps/              # Application deployments
+    │       └── overlays/          # Dev + prod environments
+    └── parametric-portal/          # First project (API + Icons)
+        ├── base/
+        │   ├── PROJECT.yaml       # Project metadata
+        │   ├── domains.yaml       # Domain configuration
+        │   ├── certificate.yaml   # TLS certificate
+        │   └── kustomization.yaml
+        ├── apps/
+        │   ├── api/               # Backend (6 files)
+        │   └── icons/             # Frontend (5 files)
+        └── overlays/
+            ├── dev/               # Development (1 replica)
+            └── prod/              # Production (HPA, hard anti-affinity)
 ```
 
-[IMPORTANT] Multi-domain architecture: each app folder owns its IngressRoute and Middleware. Adding a new app with a different domain requires only creating a new folder in `apps/`.
+[IMPORTANT] Multi-project platform: teams copy `_template/` to create new projects with isolated namespaces, custom domains, and shared platform services (PostgreSQL, MinIO, Redis).
 
 ---
 ## [3][RESOURCES]

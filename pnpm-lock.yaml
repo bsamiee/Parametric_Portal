@@ -228,6 +228,9 @@ catalogs:
     lucide-react:
       specifier: 0.562.0
       version: 0.562.0
+    motion:
+      specifier: 12.6.0
+      version: 12.6.0
     msw:
       specifier: 2.12.4
       version: 2.12.4
@@ -741,6 +744,64 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 0.562.0(react@19.3.0-canary-f93b9fd4-20251217)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.0-canary-f93b9fd4-20251217
+      react-aria:
+        specifier: 'catalog:'
+        version: 3.45.0(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217)
+      react-aria-components:
+        specifier: 'catalog:'
+        version: 1.14.0(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217)
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217)
+      react-stately:
+        specifier: 'catalog:'
+        version: 3.43.0(react@19.3.0-canary-f93b9fd4-20251217)
+      tailwind-merge:
+        specifier: 'catalog:'
+        version: 3.4.0
+    devDependencies:
+      '@fast-check/vitest':
+        specifier: 'catalog:'
+        version: 0.2.4(vitest@4.0.16)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.7
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.7)
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.5.2
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.0-dev.20251125
+      vite:
+        specifier: 'catalog:'
+        version: 7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.21.0)(yaml@2.8.2)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.16(@opentelemetry/api@1.9.0)(@types/node@25.0.3)(@vitest/browser-playwright@4.0.16)(@vitest/ui@4.0.16)(happy-dom@20.0.11)(jiti@2.6.1)(jsdom@27.3.0)(lightningcss@1.30.2)(msw@2.12.4(@types/node@25.0.3)(typescript@6.0.0-dev.20251125))(terser@5.44.1)(tsx@4.21.0)(yaml@2.8.2)
+
+  packages/components-next:
+    dependencies:
+      '@radix-ui/react-slot':
+        specifier: 'catalog:'
+        version: 1.2.4(@types/react@19.2.7)(react@19.3.0-canary-f93b9fd4-20251217)
+      class-variance-authority:
+        specifier: 'catalog:'
+        version: 0.7.1
+      clsx:
+        specifier: 'catalog:'
+        version: 2.1.1
+      effect:
+        specifier: 'catalog:'
+        version: 3.19.13
+      motion:
+        specifier: 'catalog:'
+        version: 12.6.0(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217)
       react:
         specifier: 'catalog:'
         version: 19.3.0-canary-f93b9fd4-20251217
@@ -6914,6 +6975,20 @@ packages:
   fraction.js@5.3.4:
     resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
 
+  framer-motion@12.23.26:
+    resolution: {integrity: sha512-cPcIhgR42xBn1Uj+PzOyheMtZ73H927+uWPDVhUMqxy8UHt6Okavb6xIz9J/phFUHUj0OncR6UvMfJTXoc/LKA==}
+    peerDependencies:
+      '@emotion/is-prop-valid': '*'
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      '@emotion/is-prop-valid':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
+
   fresh@0.5.2:
     resolution: {integrity: sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==}
     engines: {node: '>= 0.6'}
@@ -8077,6 +8152,26 @@ packages:
 
   module-details-from-path@1.0.4:
     resolution: {integrity: sha512-EGWKgxALGMgzvxYF1UyGTy0HXX/2vHLkw6+NvDKW2jypWbHpjQuj4UMcqQWXHERJhVGKikolT06G3bcKe4fi7w==}
+
+  motion-dom@12.23.23:
+    resolution: {integrity: sha512-n5yolOs0TQQBRUFImrRfs/+6X4p3Q4n1dUEqt/H58Vx7OW6RF+foWEgmTVDhIWJIMXOuNNL0apKH2S16en9eiA==}
+
+  motion-utils@12.23.6:
+    resolution: {integrity: sha512-eAWoPgr4eFEOFfg2WjIsMoqJTW6Z8MTUCgn/GZ3VRpClWBdnbjryiA3ZSNLyxCTmCQx4RmYX6jX1iWHbenUPNQ==}
+
+  motion@12.6.0:
+    resolution: {integrity: sha512-YbwQAeVOhQwTi6I8iA+e8TfsduoV0cbE+k9MDeonlDyN04uz5jiVWKeBR0nXgGyGICnmcTaKe/wsQbHkkM3EMw==}
+    peerDependencies:
+      '@emotion/is-prop-valid': '*'
+      react: ^18.0.0 || ^19.0.0
+      react-dom: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      '@emotion/is-prop-valid':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
 
   mrmime@2.0.1:
     resolution: {integrity: sha512-Y3wQdFg2Va6etvQ5I82yUhGdsKrcYox6p7FfL1LbK2J4V01F9TGlepTIhnK24t7koZibmg82KGglhA1XK5IsLQ==}
@@ -17830,6 +17925,15 @@ snapshots:
 
   fraction.js@5.3.4: {}
 
+  framer-motion@12.23.26(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217):
+    dependencies:
+      motion-dom: 12.23.23
+      motion-utils: 12.23.6
+      tslib: 2.8.1
+    optionalDependencies:
+      react: 19.3.0-canary-f93b9fd4-20251217
+      react-dom: 19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217)
+
   fresh@0.5.2: {}
 
   front-matter@4.0.2:
@@ -18992,6 +19096,20 @@ snapshots:
       ufo: 1.6.1
 
   module-details-from-path@1.0.4: {}
+
+  motion-dom@12.23.23:
+    dependencies:
+      motion-utils: 12.23.6
+
+  motion-utils@12.23.6: {}
+
+  motion@12.6.0(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217):
+    dependencies:
+      framer-motion: 12.23.26(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217)
+      tslib: 2.8.1
+    optionalDependencies:
+      react: 19.3.0-canary-f93b9fd4-20251217
+      react-dom: 19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217)
 
   mrmime@2.0.1: {}
 

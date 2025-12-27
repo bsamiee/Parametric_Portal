@@ -15,6 +15,9 @@ pre-commit:
         - ".github/scripts/**"
         - "tools/scripts/**"
         - "**/suspense.ts"
+        - "**/*.spec.ts"
+        - "**/*.test.ts"
+        - "**/overlay/*.tsx"
       run: |
         violation=0
         for file in {staged_files}; do

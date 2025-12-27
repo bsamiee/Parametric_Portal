@@ -12,18 +12,25 @@ namespace: monitoring
 resources:
   - namespace.yaml
   - networkpolicy.yaml
+  - certificate-grafana.yaml
   - ingressroute.yaml
-  - podmonitor-argocd.yaml
   - podmonitor-api.yaml
+  - podmonitor-argocd.yaml
   - podmonitor-postgres.yaml
+  - podmonitor-longhorn.yaml
+  - podmonitor-minio.yaml
+  - podmonitor-redis.yaml
+  - podmonitor-certmanager.yaml
+  - podmonitor-traefik.yaml
+  - podmonitor-metricsserver.yaml
   - prometheusrules.yaml
   - kyverno-exception.yaml
-  - dashboard-cloudnativepg.yaml
-  - dashboard-traefik.yaml
-  - dashboard-argocd.yaml
-  - dashboard-kyverno.yaml
-  - dashboard-cluster.yaml
   - dashboard-api.yaml
+  - dashboard-argocd.yaml
+  - dashboard-cloudnativepg.yaml
+  - dashboard-cluster.yaml
+  - dashboard-kyverno.yaml
+  - dashboard-traefik.yaml
 
 labels:
   - pairs:

@@ -1,0 +1,17 @@
+# --- ICONS SERVICE ------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: icons
+  labels:
+    app.kubernetes.io/name: icons
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: icons
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP

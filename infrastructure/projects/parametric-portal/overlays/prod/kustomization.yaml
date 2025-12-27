@@ -1,0 +1,147 @@
+# --- PRODUCTION OVERLAY -------------------------------------------------------
+# Multi-domain architecture: each app in apps/ owns its IngressRoute + middleware
+# Adding new app = create folder in apps/ with deployment, service, ingressroute
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: parametric-portal-production
+
+namespace: parametric-portal
+
+resources:
+  - ../../../../platform/base
+  - ../../base
+  - ../../apps/api
+  - ../../apps/icons
+  - ../../../../platform/postgres
+  - hpa-api.yaml
+  - tlsstore.yaml
+
+images:
+  - name: ghcr.io/parametric-portal/api
+    newTag: latest
+  - name: ghcr.io/parametric-portal/icons
+    newTag: latest
+
+patches:
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1Gi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1000m"
+  - target:
+      kind: PodDisruptionBudget
+      name: api-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: icons-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: postgres-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
+
+# --- [DOMAIN_CONFIGURATION] ---------------------------------------------------
+# Domain values defined in base/domains.yaml ConfigMap
+# Kustomize replacements inject domain values into resources automatically
+# To change domains: edit infrastructure/projects/parametric-portal/base/domains.yaml
+replacements:
+  # API IngressRoute: Host match rule
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.api-domain
+    targets:
+      - select:
+          kind: IngressRoute
+          name: api-https
+        fieldPaths:
+          - spec.routes.0.match
+        options:
+          delimiter: '`'
+          index: 1
+  # API Deployment: API_BASE_URL environment variable
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.api-domain
+    targets:
+      - select:
+          kind: Deployment
+          name: api
+        fieldPaths:
+          - spec.template.spec.containers.0.env.[name=API_BASE_URL].value
+        options:
+          delimiter: '//'
+          index: 1
+  # Icons middleware CSP: connect-src API domain
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.api-domain
+    targets:
+      - select:
+          kind: Middleware
+          name: icons-security-headers
+        fieldPaths:
+          - spec.headers.contentSecurityPolicy
+        options:
+          delimiter: 'https://'
+          index: 1
+  # TLSStore: main domain
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.primary-domain
+    targets:
+      - select:
+          kind: TLSStore
+          name: default
+        fieldPaths:
+          - spec.defaultGeneratedCert.domain.main
+
+  # --- [POD_ANTI_AFFINITY] ---------------------------------------------------
+  # Enforce hard pod anti-affinity for production HA
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution
+      - op: add
+        path: /spec/template/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution
+        value:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: api
+            topologyKey: kubernetes.io/hostname
+
+  - target:
+      kind: Deployment
+      name: icons
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/affinity/podAntiAffinity/preferredDuringSchedulingIgnoredDuringExecution
+      - op: add
+        path: /spec/template/spec/affinity/podAntiAffinity/requiredDuringSchedulingIgnoredDuringExecution
+        value:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: icons
+            topologyKey: kubernetes.io/hostname

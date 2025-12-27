@@ -1,0 +1,30 @@
+# --- API MIDDLEWARE -----------------------------------------------------------
+# App-specific middleware for api.parametric-portal.com
+# Extends base-security-headers with API-specific frameDeny
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: api-security-headers
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: middleware
+spec:
+  headers:
+    # API-specific: deny framing entirely
+    frameDeny: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: api-middleware-chain
+  labels:
+    app.kubernetes.io/name: api
+    app.kubernetes.io/component: middleware
+spec:
+  chain:
+    middlewares:
+      - name: base-security-headers
+      - name: api-security-headers
+      - name: rate-limit-api
+      - name: compress

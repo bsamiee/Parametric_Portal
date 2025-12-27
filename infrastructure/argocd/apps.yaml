@@ -18,10 +18,14 @@ spec:
         repoURL: https://github.com/bardiasamiee/Parametric_Portal.git
         revision: HEAD
         directories:
-          - path: infrastructure/overlays/*
+          - path: infrastructure/projects/*/overlays/*
+            exclude: infrastructure/projects/_template/**
   template:
     metadata:
-      name: 'parametric-portal-{{ .path.basename }}'
+      # [GENERIC] Uses path segments for multi-project support (see ADR 0011)
+      # segments[2] = project name (e.g., "parametric-portal", "my-project")
+      # basename = environment (e.g., "dev", "prod")
+      name: '{{ index .path.segments 2 }}-{{ .path.basename }}'
       namespace: argocd
       annotations:
         argocd.argoproj.io/sync-wave: "2"
@@ -32,7 +36,7 @@ spec:
         app.kubernetes.io/instance: '{{ .path.basename }}'
         app.kubernetes.io/managed-by: argocd
     spec:
-      project: default
+      project: platform
 
       source:
         repoURL: https://github.com/bardiasamiee/Parametric_Portal.git
@@ -41,7 +45,8 @@ spec:
 
       destination:
         server: https://kubernetes.default.svc
-        namespace: 'parametric-portal{{ if eq .path.basename "dev" }}-dev{{ end }}'
+        # Namespace: project-name or project-name-dev for dev environment
+        namespace: '{{ index .path.segments 2 }}{{ if eq .path.basename "dev" }}-dev{{ end }}'
 
       syncPolicy:
         automated:
