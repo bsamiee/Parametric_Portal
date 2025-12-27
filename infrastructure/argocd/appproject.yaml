@@ -63,7 +63,9 @@ spec:
     - namespace: 'parametric-portal-dev'
       server: 'https://kubernetes.default.svc'
       name: 'in-cluster'
-    - namespace: '*'  # Allow other project namespaces
+    # [SECURITY] Use prefix pattern instead of wildcard to restrict deployments
+    # Pattern matches: parametric-portal-staging, parametric-portal-prod, etc.
+    - namespace: 'parametric-portal-*'
       server: 'https://kubernetes.default.svc'
       name: 'in-cluster'
 

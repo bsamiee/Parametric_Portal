@@ -59,14 +59,62 @@ patches:
 
 # --- [DOMAIN_CONFIGURATION] ---------------------------------------------------
 # Domain values defined in base/domains.yaml ConfigMap
-# For multi-project platform: each project defines own domains
+# Kustomize replacements inject domain values into resources automatically
 # To change domains: edit infrastructure/projects/parametric-portal/base/domains.yaml
-# Then update hardcoded values in:
-#   - apps/api/ingressroute.yaml (lines 15, 30)
-#   - apps/api/deployment.yaml (API_BASE_URL env)
-#   - apps/icons/ingressroute.yaml (line 15)
-#   - apps/icons/middleware.yaml (lines 22, 39)
-#   - overlays/prod/tlsstore.yaml (lines 14, 16)
+replacements:
+  # API IngressRoute: Host match rule
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.api-domain
+    targets:
+      - select:
+          kind: IngressRoute
+          name: api-https
+        fieldPaths:
+          - spec.routes.0.match
+        options:
+          delimiter: '`'
+          index: 1
+  # API Deployment: API_BASE_URL environment variable
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.api-domain
+    targets:
+      - select:
+          kind: Deployment
+          name: api
+        fieldPaths:
+          - spec.template.spec.containers.0.env.[name=API_BASE_URL].value
+        options:
+          delimiter: '//'
+          index: 1
+  # Icons middleware CSP: connect-src API domain
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.api-domain
+    targets:
+      - select:
+          kind: Middleware
+          name: icons-security-headers
+        fieldPaths:
+          - spec.headers.contentSecurityPolicy
+        options:
+          delimiter: 'https://'
+          index: 1
+  # TLSStore: main domain
+  - source:
+      kind: ConfigMap
+      name: project-domains
+      fieldPath: data.primary-domain
+    targets:
+      - select:
+          kind: TLSStore
+          name: default
+        fieldPaths:
+          - spec.defaultGeneratedCert.domain.main
 
   # --- [POD_ANTI_AFFINITY] ---------------------------------------------------
   # Enforce hard pod anti-affinity for production HA

@@ -24,7 +24,9 @@ import {
 type DialogContextValue = {
     readonly close: () => void;
     readonly isOpen: boolean;
+    readonly open: () => void;
     readonly titleId: string;
+    readonly toggle: () => void;
 };
 type DialogRootProps = {
     readonly children?: ReactNode;
@@ -83,11 +85,11 @@ const B = Object.freeze({
 // --- [CONTEXT] ---------------------------------------------------------------
 
 const DialogContext = createContext<DialogContextValue | null>(null);
-const useDialogContext = (): DialogContextValue => {
-    const ctx = useContext(DialogContext);
-    if (!ctx) throw new Error('Dialog.* must be used within Dialog');
-    return ctx;
-};
+const useDialogContext = (): DialogContextValue =>
+    useContext(DialogContext) ??
+    (() => {
+        throw new Error('Dialog.* must be used within Dialog');
+    })();
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -110,7 +112,7 @@ const DialogRoot: FC<DialogRootProps> = ({ children, defaultOpen = false, onOpen
     const titleId = `dialog-title-${Math.random().toString(36).slice(2, 9)}`;
     return createElement(
         DialogContext.Provider,
-        { value: { close: state.close, isOpen: state.isOpen, titleId } },
+        { value: { close: state.close, isOpen: state.isOpen, open: state.open, titleId, toggle: state.toggle } },
         children,
     );
 };
@@ -124,7 +126,8 @@ const DialogTrigger: FC<DialogTriggerProps> = ({ children, className }) => {
         {
             className,
             'data-state': isOpen ? 'open' : 'closed',
-            onClick: () => ctx && !ctx.isOpen,
+            // [FIX] Call toggle() to mutate state; previous code evaluated boolean without action
+            onClick: () => ctx?.toggle(),
             type: 'button',
         },
         children,

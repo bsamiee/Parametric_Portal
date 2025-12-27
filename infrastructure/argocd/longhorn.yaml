@@ -58,6 +58,8 @@ spec:
               # [IMPORTANT] Upgrade strategy
               upgradeChecker: true
               # [IMPORTANT] Backup target for disaster recovery
+              # [CONFIG] Update bucket/region at deployment time per environment
+              # Format: s3://<bucket>@<region>/<path>
               backupTarget: s3://parametric-portal-backups@us-east-1/longhorn
               backupTargetCredentialSecret: longhorn-backup-secret
               # [IMPORTANT] Fast failover on node failure

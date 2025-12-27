@@ -69,12 +69,16 @@ spec:
             exclude: infrastructure/projects/_template/**
   template:
     metadata:
-      name: 'parametric-portal-{{ .path.basename }}'
+      # [GENERIC] Uses path segments to derive project + environment names
+      # segments[2] = project name (e.g., "parametric-portal", "my-project")
+      # basename = environment (e.g., "dev", "prod")
+      name: '{{ .path.segments.2 }}-{{ .path.basename }}'
     spec:
       source:
         path: '{{ .path.path }}'
       destination:
-        namespace: 'parametric-portal{{ if eq .path.basename "dev" }}-dev{{ end }}'
+        # Namespace: project-name or project-name-dev for dev environment
+        namespace: '{{ .path.segments.2 }}{{ if eq .path.basename "dev" }}-dev{{ end }}'
 ```
 
 **Discovery:** ArgoCD watches `projects/*/overlays/*`, auto-creates Applications per project environment.

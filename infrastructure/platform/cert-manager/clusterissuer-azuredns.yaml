@@ -1,6 +1,14 @@
 # --- LETSENCRYPT CLUSTERISSUER (AZURE DNS) -----------------------------------
 # DNS-01 challenge solver for wildcard and custom domain certificates
 # Requires: Azure managed identity or service principal with DNS Zone Contributor
+#
+# [IMPORTANT] Configuration values below are non-sensitive Azure identifiers
+# Replace placeholders with actual values via:
+#   1. Kustomize patches in environment overlays
+#   2. ArgoCD valueFiles
+#   3. ConfigMap + Kustomize replacements
+#
+# Azure values are NOT secrets - they are public Azure resource identifiers
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -9,22 +17,29 @@ metadata:
     app.kubernetes.io/name: letsencrypt
     app.kubernetes.io/component: tls
     app.kubernetes.io/part-of: platform
+  annotations:
+    parametric-portal.com/config-source: "placeholder"
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: ${LETSENCRYPT_EMAIL}  # REPLACE: admin email for cert notifications
+    # [REPLACE] Admin email for certificate expiry notifications
+    email: admin@parametric-portal.com
     privateKeySecretRef:
       name: letsencrypt-prod-key
 
     solvers:
       - dns01:
           azureDNS:
-            subscriptionID: ${AZURE_SUBSCRIPTION_ID}  # REPLACE: Azure subscription
-            resourceGroupName: ${AZURE_RESOURCE_GROUP}  # REPLACE: Resource group containing DNS zone
-            hostedZoneName: ${AZURE_DNS_ZONE}  # REPLACE: DNS zone name (e.g., example.com)
+            # [REPLACE] Azure subscription ID (UUID)
+            subscriptionID: "00000000-0000-0000-0000-000000000000"
+            # [REPLACE] Resource group containing DNS zone
+            resourceGroupName: "parametric-portal-rg"
+            # [REPLACE] DNS zone name
+            hostedZoneName: "parametric-portal.com"
             environment: AzurePublicCloud
             managedIdentity:
-              clientID: ${AZURE_MANAGED_IDENTITY_CLIENT_ID}  # REPLACE: Managed identity client ID
+              # [REPLACE] Managed identity client ID for DNS access
+              clientID: "00000000-0000-0000-0000-000000000000"
 ---
 # --- LETSENCRYPT STAGING (FOR TESTING) ---------------------------------------
 apiVersion: cert-manager.io/v1
@@ -35,19 +50,21 @@ metadata:
     app.kubernetes.io/name: letsencrypt
     app.kubernetes.io/component: tls
     app.kubernetes.io/part-of: platform
+  annotations:
+    parametric-portal.com/config-source: "placeholder"
 spec:
   acme:
     server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: ${LETSENCRYPT_EMAIL}  # REPLACE: admin email
+    email: admin@parametric-portal.com
     privateKeySecretRef:
       name: letsencrypt-staging-key
 
     solvers:
       - dns01:
           azureDNS:
-            subscriptionID: ${AZURE_SUBSCRIPTION_ID}
-            resourceGroupName: ${AZURE_RESOURCE_GROUP}
-            hostedZoneName: ${AZURE_DNS_ZONE}
+            subscriptionID: "00000000-0000-0000-0000-000000000000"
+            resourceGroupName: "parametric-portal-rg"
+            hostedZoneName: "parametric-portal.com"
             environment: AzurePublicCloud
             managedIdentity:
-              clientID: ${AZURE_MANAGED_IDENTITY_CLIENT_ID}
+              clientID: "00000000-0000-0000-0000-000000000000"

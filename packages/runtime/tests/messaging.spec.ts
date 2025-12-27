@@ -29,6 +29,8 @@ beforeEach(() => {
 afterEach(() => {
     spyRef.current?.mockRestore();
 });
+// Access spy - tests guarantee initialization via beforeEach
+// biome-ignore lint/style/noNonNullAssertion: test helper with beforeEach guarantee
 const postMessageSpy = (): ReturnType<typeof vi.spyOn> => spyRef.current!;
 
 // --- [DESCRIBE] MESSAGING_TUNING ---------------------------------------------

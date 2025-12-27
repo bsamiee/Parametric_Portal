@@ -13,7 +13,6 @@ type ProviderConfig = {
     readonly model: string;
     readonly maxTokens?: number;
 };
-
 type GenerateTextOptions = {
     readonly maxTokens?: number;
     readonly prompt: Prompt.RawInput;

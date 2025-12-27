@@ -54,6 +54,9 @@ spec:
     stsSeconds: 31536000
     customResponseHeaders:
       X-Robots-Tag: "noindex, nofollow"
+    # [CSP] ArgoCD UI requires unsafe-inline/unsafe-eval for dynamic UI rendering
+    # See: github.com/argoproj/argo-cd/issues/9637
+    # Mitigated by: frame-ancestors 'self', form-action 'self', RBAC controls
     contentSecurityPolicy: |
       default-src 'self';
       script-src 'self' 'unsafe-inline' 'unsafe-eval';

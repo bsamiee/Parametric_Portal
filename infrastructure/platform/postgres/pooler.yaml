@@ -59,6 +59,16 @@ spec:
             limits:
               cpu: 500m
               memory: 256Mi
+          # [FIX] Container-level security context must be under container spec
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -66,19 +76,11 @@ spec:
                 matchLabels:
                   app.kubernetes.io/name: pgbouncer
               topologyKey: kubernetes.io/hostname
+      # Pod-level security context
       securityContext:
         runAsNonRoot: true
         fsGroup: 26
         fsGroupChangePolicy: OnRootMismatch
-      containerSecurityContext:
-        runAsNonRoot: true
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop:
-            - ALL
-        seccompProfile:
-          type: RuntimeDefault
 
   # --- [MONITORING] ----------------------------------------------------------
   monitoring:

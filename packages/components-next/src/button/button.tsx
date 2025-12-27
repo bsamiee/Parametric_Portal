@@ -13,11 +13,9 @@ import {
     type FC,
     forwardRef,
     type ReactNode,
-    type Ref,
-    useRef,
 } from 'react';
 import type { AriaButtonOptions } from 'react-aria';
-import { mergeProps, useButton, useFocusRing, useHover } from 'react-aria';
+import { mergeProps, useButton, useFocusRing, useHover, useObjectRef } from 'react-aria';
 import { getInteractionProps } from '../core/motion.ts';
 import { cn } from '../core/variants.ts';
 import { type ButtonVariants, buttonVariants } from './button.variants.ts';
@@ -59,9 +57,10 @@ const toMotionButtonProps = <T extends { style?: CSSProperties | undefined }>(
 
 const ButtonRoot = forwardRef<HTMLButtonElement, ButtonRootProps>(
     ({ animate = true, asChild = false, children, className, size, variant, ...ariaProps }, forwardedRef) => {
-        const internalRef = useRef<HTMLButtonElement>(null);
-        const ref = (forwardedRef ?? internalRef) as Ref<HTMLButtonElement>;
-        const { buttonProps, isPressed } = useButton(ariaProps, { current: ref as unknown as HTMLButtonElement });
+        // [FIX] Use useObjectRef to properly handle forwarded refs (callback or object)
+        // Previous code incorrectly wrapped the ref, breaking React Aria press/focus logic
+        const objRef = useObjectRef(forwardedRef);
+        const { buttonProps, isPressed } = useButton(ariaProps, objRef);
         const { hoverProps, isHovered } = useHover({ isDisabled: ariaProps.isDisabled ?? false });
         const { focusProps, isFocusVisible } = useFocusRing();
         const mergedProps = mergeProps(buttonProps, hoverProps, focusProps);
@@ -73,7 +72,7 @@ const ButtonRoot = forwardRef<HTMLButtonElement, ButtonRootProps>(
             'data-focus-visible': isFocusVisible || undefined,
             'data-hovered': isHovered || undefined,
             'data-pressed': isPressed || undefined,
-            ref,
+            ref: objRef,
             type: 'button' as const,
         };
         return (

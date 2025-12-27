@@ -1,25 +1,35 @@
 # --- LETSENCRYPT CLUSTERISSUER (GOOGLE CLOUD DNS) ----------------------------
 # DNS-01 challenge solver for wildcard and custom domain certificates
 # Requires: GCP service account with dns.admin role
+#
+# [IMPORTANT] This ClusterIssuer requires a secret containing GCP service account JSON
+# Create secret via ExternalSecrets or SealedSecrets:
+#   kubectl create secret generic clouddns-sa-secret \
+#     --from-file=key.json=path/to/service-account.json \
+#     -n cert-manager
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: letsencrypt-prod
+  name: letsencrypt-prod-gcp
   labels:
     app.kubernetes.io/name: letsencrypt
     app.kubernetes.io/component: tls
     app.kubernetes.io/part-of: platform
+  annotations:
+    parametric-portal.com/config-source: "placeholder"
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: ${LETSENCRYPT_EMAIL}  # REPLACE: admin email for cert notifications
+    # [REPLACE] Admin email for certificate expiry notifications
+    email: admin@parametric-portal.com
     privateKeySecretRef:
-      name: letsencrypt-prod-key
+      name: letsencrypt-prod-gcp-key
 
     solvers:
       - dns01:
           cloudDNS:
-            project: ${GCP_PROJECT_ID}  # REPLACE: GCP project ID
+            # [REPLACE] GCP project ID containing Cloud DNS zone
+            project: "parametric-portal-prod"
             serviceAccountSecretRef:
               name: clouddns-sa-secret
               key: key.json
@@ -28,22 +38,24 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
-  name: letsencrypt-staging
+  name: letsencrypt-staging-gcp
   labels:
     app.kubernetes.io/name: letsencrypt
     app.kubernetes.io/component: tls
     app.kubernetes.io/part-of: platform
+  annotations:
+    parametric-portal.com/config-source: "placeholder"
 spec:
   acme:
     server: https://acme-staging-v02.api.letsencrypt.org/directory
-    email: ${LETSENCRYPT_EMAIL}  # REPLACE: admin email
+    email: admin@parametric-portal.com
     privateKeySecretRef:
-      name: letsencrypt-staging-key
+      name: letsencrypt-staging-gcp-key
 
     solvers:
       - dns01:
           cloudDNS:
-            project: ${GCP_PROJECT_ID}  # REPLACE: GCP project ID
+            project: "parametric-portal-prod"
             serviceAccountSecretRef:
               name: clouddns-sa-secret
               key: key.json

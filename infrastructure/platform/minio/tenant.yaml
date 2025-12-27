@@ -54,7 +54,7 @@ spec:
   externalClientCertSecrets: []
 
   # --- [IMAGE] ---------------------------------------------------------------
-  image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+  image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
   imagePullSecret: {}
 
   # --- [MOUNT] ---------------------------------------------------------------
@@ -96,7 +96,7 @@ spec:
       # --- [VOLUME_CLAIM_TEMPLATE] -------------------------------------------
       volumeClaimTemplate:
         apiVersion: v1
-        kind: persistentvolumeclaims
+        kind: PersistentVolumeClaim
         metadata: {}
         spec:
           accessModes:
@@ -132,27 +132,35 @@ spec:
 ---
 # --- MINIO CONFIGURATION SECRET -----------------------------------------------
 # Root credentials for MinIO admin access
+# [IMPORTANT] Use ExternalSecrets Operator or SealedSecrets for production
+# This placeholder secret allows local development; replace with ESO in overlays
 apiVersion: v1
 kind: Secret
 metadata:
   name: platform-storage-config
   namespace: minio-system
+  annotations:
+    # Mark as placeholder - must be replaced by ESO/SealedSecrets before deployment
+    parametric-portal.com/secret-source: "placeholder"
 type: Opaque
 stringData:
   config.env: |
-    export MINIO_ROOT_USER="${MINIO_ROOT_USER}"
-    export MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD}"
+    export MINIO_ROOT_USER="minio-admin"
+    export MINIO_ROOT_PASSWORD="REPLACE_WITH_SEALED_SECRET"
     export MINIO_BROWSER="on"
     export MINIO_PROMETHEUS_AUTH_TYPE="public"
 ---
 # --- MINIO USER SECRET ---------------------------------------------------------
 # Additional user credentials
+# [IMPORTANT] Use ExternalSecrets Operator or SealedSecrets for production
 apiVersion: v1
 kind: Secret
 metadata:
   name: platform-storage-user
   namespace: minio-system
+  annotations:
+    parametric-portal.com/secret-source: "placeholder"
 type: Opaque
 stringData:
-  CONSOLE_ACCESS_KEY: "${MINIO_STORAGE_USER}"
-  CONSOLE_SECRET_KEY: "${MINIO_STORAGE_PASSWORD}"
+  CONSOLE_ACCESS_KEY: "storage-user"
+  CONSOLE_SECRET_KEY: "REPLACE_WITH_SEALED_SECRET"
