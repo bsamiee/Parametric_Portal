@@ -1,26 +1,18 @@
 /**
  * Account components: overlay, API key management, logout.
- * Uses useMutation/useQuery hooks with toEffectM for ApiResponse bridging.
+ * Uses useEffectMutate/useEffectRun hooks with HttpApiClient Effects.
  */
 
-import { useMutation, useQuery } from '@parametric-portal/runtime/hooks/async';
+import type { HttpClient } from '@effect/platform';
+import { useEffectMutate, useEffectRun } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
-import type { ApiError } from '@parametric-portal/types/api';
-import {
-    type AiProvider,
-    type ApiKeyId,
-    type ApiKeyListItem,
-    DATABASE_TUNING,
-} from '@parametric-portal/types/database';
+import { AsyncState } from '@parametric-portal/types/async';
+import { AiProvider, type ApiKey, type ApiKeyId } from '@parametric-portal/types/database';
 import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
-import { apiFactory, asyncApi, auth } from '../infrastructure.ts';
+import { auth } from '../infrastructure.ts';
 import { Button, Icon, Input, Modal, Select, Spinner, Stack } from '../ui.ts';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type CreateKeyInput = { readonly key: string; readonly name: string; readonly provider: AiProvider };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -29,7 +21,7 @@ const B = Object.freeze({
         size: 'md' as const,
         title: 'Account Settings',
     },
-    providers: DATABASE_TUNING.aiProviders,
+    providers: AiProvider.literals,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -43,28 +35,29 @@ const ApiKeyForm = (): ReactNode => {
     const addApiKey = useAuthStore((s) => s.addApiKey);
     const [name, setName] = useState('');
     const [key, setKey] = useState('');
-    const [provider, setProvider] = useState<AiProvider>(B.providers[0] as AiProvider);
+    const [provider, setProvider] = useState<AiProvider>(B.providers[0]);
     const [error, setError] = useState<string | null>(null);
-    const createMutation = useMutation<ApiKeyListItem, CreateKeyInput, ApiError, never>(
-        (input) =>
-            pipe(auth.createApiKey(accessToken ?? '', input), Effect.flatMap(apiFactory.toEffectM<ApiKeyListItem>())),
-        {
-            onError: () => setError('Failed to save API key'),
-            onSuccess: (apiKey) => {
-                addApiKey(apiKey);
-                setName('');
-                setKey('');
-                setError(null);
-            },
+    const createMutation = useEffectMutate<
+        typeof ApiKey.Type,
+        typeof ApiKey.CreateRequest.Type,
+        unknown,
+        HttpClient.HttpClient
+    >((input) => auth.createApiKey(accessToken ?? '', input), {
+        onError: () => setError('Failed to save API key'),
+        onSuccess: (apiKey) => {
+            addApiKey(apiKey);
+            setName('');
+            setKey('');
+            setError(null);
         },
-    );
+    });
     const handleSubmit = useCallback(() => {
         accessToken &&
             name.trim() &&
             key.trim() &&
             createMutation.mutate({ key: key.trim(), name: name.trim(), provider });
     }, [accessToken, name, key, provider, createMutation]);
-    const isSubmitting = asyncApi.isLoading(createMutation.state);
+    const isSubmitting = AsyncState.$is.Loading(createMutation.state);
     return (
         <Stack gap className='p-4 bg-neutral-800/50 rounded-lg'>
             <span className='text-sm font-medium opacity-70'>Add API Key</span>
@@ -76,7 +69,10 @@ const ApiKeyForm = (): ReactNode => {
                     className='text-sm'
                 />
                 <Select
-                    items={B.providers.map((p) => ({ key: p, label: p.charAt(0).toUpperCase() + p.slice(1) }))}
+                    items={B.providers.map((p: AiProvider) => ({
+                        key: p,
+                        label: p.charAt(0).toUpperCase() + p.slice(1),
+                    }))}
                     selectedKey={provider}
                     onSelectionChange={(k) => setProvider(k as AiProvider)}
                     className='w-32'
@@ -105,12 +101,8 @@ const ApiKeyList = (): ReactNode => {
     const apiKeys = useAuthStore((s) => s.apiKeys);
     const removeApiKey = useAuthStore((s) => s.removeApiKey);
     const [deletingId, setDeletingId] = useState<string | null>(null);
-    const deleteMutation = useMutation<{ success: boolean }, ApiKeyId, ApiError, never>(
-        (id) =>
-            pipe(
-                auth.deleteApiKey(accessToken ?? '', id),
-                Effect.flatMap(apiFactory.toEffectM<{ success: boolean }>()),
-            ),
+    const deleteMutation = useEffectMutate<{ success: boolean }, ApiKeyId, unknown, HttpClient.HttpClient>(
+        (id) => auth.deleteApiKey(accessToken ?? '', id),
         {
             onSettled: () => setDeletingId(null),
             onSuccess: (_, id: ApiKeyId) => removeApiKey(id),
@@ -163,8 +155,8 @@ const LogoutButton = (): ReactNode => {
     const accessToken = useAuthStore((s) => s.accessToken);
     const clearAuth = useAuthStore((s) => s.clearAuth);
     const closeAccountOverlay = useAuthStore((s) => s.closeAccountOverlay);
-    const logoutMutation = useMutation<{ success: boolean }, void, ApiError, never>(
-        () => pipe(auth.logout(accessToken ?? ''), Effect.flatMap(apiFactory.toEffectM<{ success: boolean }>())),
+    const logoutMutation = useEffectMutate<{ success: boolean }, void, unknown, HttpClient.HttpClient>(
+        () => auth.logout(accessToken ?? ''),
         {
             onSuccess: () => {
                 clearAuth();
@@ -175,7 +167,7 @@ const LogoutButton = (): ReactNode => {
     const handleLogout = useCallback(() => {
         accessToken && logoutMutation.mutate(undefined);
     }, [accessToken, logoutMutation]);
-    const isLoggingOut = asyncApi.isLoading(logoutMutation.state);
+    const isLoggingOut = AsyncState.$is.Loading(logoutMutation.state);
     return (
         <Button
             onPress={handleLogout}
@@ -197,18 +189,17 @@ const AccountOverlay = (): ReactNode => {
     const user = useAuthStore((s) => s.user);
     const closeAccountOverlay = useAuthStore((s) => s.closeAccountOverlay);
     const setApiKeys = useAuthStore((s) => s.setApiKeys);
-    const keysQuery = useQuery<{ data: ReadonlyArray<ApiKeyListItem> }, ApiError, never>(
-        pipe(
-            auth.listApiKeys(accessToken ?? ''),
-            Effect.flatMap(apiFactory.toEffectM<{ data: ReadonlyArray<ApiKeyListItem> }>()),
-        ),
+    const keysQuery = useEffectRun<{ data: ReadonlyArray<typeof ApiKey.Type> }, unknown, HttpClient.HttpClient>(
+        Effect.gen(function* () {
+            return yield* auth.listApiKeys(accessToken ?? '');
+        }),
         [accessToken],
         {
             enabled: isAccountOverlayOpen && !!accessToken,
             onSuccess: (result) => setApiKeys(result.data),
         },
     );
-    const isLoadingKeys = asyncApi.isLoading(keysQuery);
+    const isLoadingKeys = AsyncState.$is.Loading(keysQuery);
     return (
         <Modal
             isOpen={isAccountOverlayOpen}

@@ -1,64 +1,64 @@
 {
-  "name": "@parametric-portal/test-utils",
-  "version": "1.0.7",
-  "type": "module",
-  "scripts": {
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "sideEffects": [
-    "./src/setup.ts",
-    "./src/matchers/effect.ts"
-  ],
-  "exports": {
-    "./arbitraries": {
-      "types": "./src/arbitraries.ts",
-      "import": "./src/arbitraries.ts"
+    "name": "@parametric-portal/test-utils",
+    "version": "1.0.7",
+    "type": "module",
+    "sideEffects": [
+        "./src/setup.ts",
+        "./src/matchers/effect.ts"
+    ],
+    "exports": {
+        "./arbitraries": {
+            "types": "./src/arbitraries.ts",
+            "import": "./src/arbitraries.ts"
+        },
+        "./constants": {
+            "types": "./src/constants.ts",
+            "import": "./src/constants.ts"
+        },
+        "./harness": {
+            "types": "./src/harness.ts",
+            "import": "./src/harness.ts"
+        },
+        "./matchers/effect": {
+            "types": "./src/matchers/effect.ts",
+            "import": "./src/matchers/effect.ts"
+        },
+        "./mocks/fetch": {
+            "types": "./src/mocks/fetch.ts",
+            "import": "./src/mocks/fetch.ts"
+        },
+        "./mocks/github": {
+            "types": "./src/mocks/github/events.ts",
+            "import": "./src/mocks/github/events.ts"
+        },
+        "./mocks/msw": {
+            "types": "./src/mocks/msw.ts",
+            "import": "./src/mocks/msw.ts"
+        },
+        "./setup": {
+            "types": "./src/setup.ts",
+            "import": "./src/setup.ts"
+        }
     },
-    "./constants": {
-      "types": "./src/constants.ts",
-      "import": "./src/constants.ts"
+    "scripts": {
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./harness": {
-      "types": "./src/harness.ts",
-      "import": "./src/harness.ts"
+    "dependencies": {
+        "@effect/vitest": "catalog:",
+        "effect": "catalog:",
+        "fake-indexeddb": "catalog:",
+        "fast-check": "catalog:",
+        "msw": "catalog:"
     },
-    "./setup": {
-      "types": "./src/setup.ts",
-      "import": "./src/setup.ts"
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vitest": "catalog:"
     },
-    "./matchers/effect": {
-      "types": "./src/matchers/effect.ts",
-      "import": "./src/matchers/effect.ts"
-    },
-    "./mocks/fetch": {
-      "types": "./src/mocks/fetch.ts",
-      "import": "./src/mocks/fetch.ts"
-    },
-    "./mocks/msw": {
-      "types": "./src/mocks/msw.ts",
-      "import": "./src/mocks/msw.ts"
-    },
-    "./mocks/github": {
-      "types": "./src/mocks/github/events.ts",
-      "import": "./src/mocks/github/events.ts"
+    "peerDependencies": {
+        "@effect/vitest": ">=0.27.0",
+        "effect": ">=3.0.0",
+        "vitest": ">=4.0.0"
     }
-  },
-  "dependencies": {
-    "@effect/vitest": "catalog:",
-    "effect": "catalog:",
-    "fake-indexeddb": "catalog:",
-    "fast-check": "catalog:",
-    "msw": "catalog:"
-  },
-  "devDependencies": {
-    "typescript": "catalog:",
-    "vitest": "catalog:"
-  },
-  "peerDependencies": {
-    "@effect/vitest": ">=0.27.0",
-    "effect": ">=3.0.0",
-    "vitest": ">=4.0.0"
-  }
 }

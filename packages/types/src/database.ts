@@ -1,222 +1,164 @@
-/**
- * Define database entity identifiers, domain schemas, and auth response types.
- * Single import point for all domain primitives via @parametric-portal/types/database.
- */
-import { Duration, Option, pipe, type Redacted, Schema as S } from 'effect';
-import { type Hex64, types } from './types.ts';
-
-const typesApi = types();
+/** Domain primitives: branded IDs, enums, entity classes for auth/users/assets. */
+import { DateTime, Duration, Option, Schema as S } from 'effect';
+import { Url, Uuidv7 } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type DatabaseApi = ReturnType<typeof database>;
-type ApiKeyId = S.Schema.Type<typeof ApiKeyIdSchema>;
-type AssetId = S.Schema.Type<typeof AssetIdSchema>;
-type UserId = S.Schema.Type<typeof UserIdSchema>;
-type SessionId = S.Schema.Type<typeof SessionIdSchema>;
-type OAuthAccountId = S.Schema.Type<typeof OAuthAccountIdSchema>;
-type RefreshTokenId = S.Schema.Type<typeof RefreshTokenIdSchema>;
-type OrganizationId = S.Schema.Type<typeof OrganizationIdSchema>;
-type OrganizationMemberId = S.Schema.Type<typeof OrganizationMemberIdSchema>;
-type OAuthProvider = S.Schema.Type<typeof OAuthProviderSchema>;
-type OrganizationRole = S.Schema.Type<typeof OrganizationRoleSchema>;
-type SessionResult = S.Schema.Type<typeof SessionResultSchema>;
-type ApiKeyResult = S.Schema.Type<typeof ApiKeyResultSchema>;
-type TokenHash = Hex64;
-type Version = S.Schema.Type<typeof VersionSchema>;
-type ColorMode = S.Schema.Type<typeof ColorModeSchema>;
-type Intent = S.Schema.Type<typeof IntentSchema>;
-type OutputMode = S.Schema.Type<typeof OutputModeSchema>;
-type AssetMetadata = S.Schema.Type<typeof AssetMetadataSchema>;
-type AssetListItem = S.Schema.Type<typeof AssetListItemSchema>;
-type AssetCountResult = S.Schema.Type<typeof AssetCountResultSchema>;
-type AiProvider = S.Schema.Type<typeof AiProviderSchema>;
-type ApiKeyListItem = S.Schema.Type<typeof ApiKeyListItemSchema>;
-type OAuthStartResponse = S.Schema.Type<typeof OAuthStartResponseSchema>;
-type SessionResponse = S.Schema.Type<typeof SessionResponseSchema>;
-type UserResponse = S.Schema.Type<typeof UserResponseSchema>;
-type LogoutResponse = S.Schema.Type<typeof LogoutResponseSchema>;
-type OAuthTokens = S.Schema.Type<typeof OAuthTokensSchema>;
-type OAuthUserInfo = S.Schema.Type<typeof OAuthUserInfoSchema>;
-type OAuthProviderConfig = {
-    readonly clientId: string;
-    readonly clientSecret: Redacted.Redacted<string>;
-    readonly redirectUri: string;
-    readonly scopes: ReadonlyArray<string>;
-};
-type DatabaseConfig = {
-    readonly refreshBuffer?: Duration.Duration;
-};
+type ApiKeyId = S.Schema.Type<typeof ApiKeyId>
+type AssetId = S.Schema.Type<typeof AssetId>
+type OAuthAccountId = S.Schema.Type<typeof OAuthAccountId>
+type RefreshTokenId = S.Schema.Type<typeof RefreshTokenId>
+type SessionId = S.Schema.Type<typeof SessionId>
+type UserId = S.Schema.Type<typeof UserId>
+type AiProvider = S.Schema.Type<typeof AiProvider>
+type OAuthProvider = S.Schema.Type<typeof OAuthProvider>
+type Role = S.Schema.Type<typeof Role>
+type AssetType = S.Schema.Type<typeof AssetType>
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    aiProviders: ['anthropic'] as const,
-    durations: {
-        accessToken: Duration.minutes(15),
-        apiKey: Duration.days(365),
-        refreshBuffer: Duration.minutes(1),
-        refreshToken: Duration.days(30),
-        session: Duration.days(7),
-    },
-    providers: ['google', 'github', 'microsoft'] as const,
+	durations: {
+		refreshBuffer: Duration.minutes(5),
+		refreshToken: Duration.days(30),
+		session: Duration.days(7),
+		tokenRefreshBuffer: Duration.minutes(1),
+	},
+	roleLevels: {
+		admin: 3,
+		guest: 0,
+		member: 2,
+		owner: 4,
+		viewer: 1,
+	},
 } as const);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const brandedId = <T extends string>(label: T) => pipe(typesApi.schemas.Uuidv7, S.brand(label));
-const ApiKeyIdSchema = brandedId('ApiKeyId');
-const AssetIdSchema = brandedId('AssetId');
-const UserIdSchema = brandedId('UserId');
-const SessionIdSchema = brandedId('SessionId');
-const OAuthAccountIdSchema = brandedId('OAuthAccountId');
-const RefreshTokenIdSchema = brandedId('RefreshTokenId');
-const OrganizationIdSchema = brandedId('OrganizationId');
-const OrganizationMemberIdSchema = brandedId('OrganizationMemberId');
-const TokenHashSchema = typesApi.schemas.Hex64;
-const VersionSchema = pipe(S.Int, S.nonNegative(), S.brand('Version'));
-const OAuthProviderSchema = S.Literal(...B.providers);
-const OrganizationRoleSchema = S.Literal('owner', 'admin', 'member');
-const SessionResultSchema = S.Struct({
-    expiresAt: S.DateFromSelf,
-    sessionId: SessionIdSchema,
-    userId: UserIdSchema,
+const id = <T extends string>(brand: T) => Uuidv7.schema.pipe(S.brand(brand));
+const ApiKeyId = id('ApiKeyId');
+const AssetId = id('AssetId');
+const OAuthAccountId = id('OAuthAccountId');
+const RefreshTokenId = id('RefreshTokenId');
+const SessionId = id('SessionId');
+const UserId = id('UserId');
+const AiProvider = S.Literal('anthropic', 'openai', 'gemini');
+const OAuthProvider = S.Literal('google', 'github', 'microsoft');
+const Role = S.Literal('owner', 'admin', 'member', 'viewer', 'guest');
+const AssetType = S.Literal('icon', 'image', 'document');
+const ApiResponse = <A, I, R>(data: S.Schema<A, I, R>) => S.Struct({ data, success: S.Literal(true) });
+const OAuthProviderConfig = S.Struct({
+	clientId: S.NonEmptyTrimmedString,
+	clientSecret: S.Redacted(S.String),
+	redirectUri: Url.schema,
+	scopes: S.Array(S.String),
 });
-const ApiKeyResultSchema = S.Struct({
-    expiresAt: S.OptionFromNullOr(S.DateFromSelf),
-    id: ApiKeyIdSchema,
-    userId: UserIdSchema,
-});
-const ColorModeSchema = S.Literal('dark', 'light');
-const IntentSchema = S.Literal('create', 'refine');
-const OutputModeSchema = S.Literal('single', 'batch');
-const AssetMetadataSchema = S.Struct({ colorMode: ColorModeSchema, intent: IntentSchema });
-const AssetListItemSchema = S.Struct({ id: AssetIdSchema, prompt: S.NonEmptyTrimmedString });
-const AssetCountResultSchema = S.Struct({ count: S.NumberFromString });
-const AiProviderSchema = S.Literal(...B.aiProviders);
-const ApiKeyListItemSchema = S.Struct({
-    createdAt: S.DateFromSelf,
-    id: ApiKeyIdSchema,
-    lastUsedAt: S.OptionFromNullOr(S.DateFromSelf),
-    name: S.NonEmptyTrimmedString,
-    provider: AiProviderSchema,
-});
-const OAuthTokensSchema = S.Struct({
-    accessToken: S.String,
-    expiresAt: S.OptionFromNullOr(S.DateFromSelf),
-    refreshToken: S.OptionFromNullOr(S.String),
-    scope: S.OptionFromNullOr(S.String),
-});
-const OAuthUserInfoSchema = S.Struct({
-    avatarUrl: S.OptionFromNullOr(S.String),
-    email: S.OptionFromNullOr(S.String),
-    name: S.OptionFromNullOr(S.String),
-    providerAccountId: S.String,
-});
-const OAuthStartResponseSchema = S.Struct({ url: S.String });
-const SessionResponseSchema = S.Struct({ accessToken: typesApi.schemas.Uuidv7, expiresAt: S.DateTimeUtc });
-const UserResponseSchema = S.Struct({ email: S.String, id: UserIdSchema });
-const LogoutResponseSchema = S.Struct({ success: S.Boolean });
+
+// --- [CLASSES] ---------------------------------------------------------------
+
+class AuthContext extends S.Class<AuthContext>('AuthContext')({
+	sessionId: SessionId,
+	userId: UserId,
+}) {
+	static readonly Tokens = S.Struct({ accessToken: S.String, expiresAt: S.DateTimeUtc });
+	static readonly fromSession = (s: { readonly id: SessionId; readonly userId: UserId }) =>
+		new AuthContext({ sessionId: s.id, userId: s.userId });
+}
+class OAuthResult extends S.Class<OAuthResult>('OAuthResult')({
+	accessToken: S.String,
+	email: S.OptionFromSelf(S.String),
+	expiresAt: S.OptionFromSelf(S.DateFromSelf),
+	providerAccountId: S.String,
+	refreshToken: S.OptionFromSelf(S.String),
+}) {
+	get toNullableFields() {
+		return {
+			accessToken: this.accessToken,
+			expiresAt: Option.getOrNull(this.expiresAt),
+			providerAccountId: this.providerAccountId,
+			refreshToken: Option.getOrNull(this.refreshToken),
+		};
+	}
+	static readonly fromProvider = (
+		tokens: { readonly accessToken: string; readonly expiresAt?: Date | undefined; readonly refreshToken?: string | undefined },
+		user: { readonly providerAccountId: string; readonly email?: string | null | undefined },
+	) =>
+		new OAuthResult({
+			accessToken: tokens.accessToken,
+			email: Option.fromNullable(user.email),
+			expiresAt: Option.fromNullable(tokens.expiresAt),
+			providerAccountId: user.providerAccountId,
+			refreshToken: Option.fromNullable(tokens.refreshToken),
+		});
+}
+class User extends S.Class<User>('User')({
+	email: S.NonEmptyTrimmedString,
+	id: UserId,
+	role: Role,
+}) {
+	static readonly Response = S.Struct({ email: S.NonEmptyTrimmedString, id: UserId });
+	static readonly toResponse = (u: { readonly email: string; readonly id: UserId }) =>
+		({ email: u.email, id: u.id }) as S.Schema.Type<typeof User.Response>;
+	get response(): S.Schema.Type<typeof User.Response> { return User.toResponse(this); }
+	get emailDomain(): string { return UserUtils.emailDomain(this.email); }
+	hasMinRole(min: Role): boolean { return UserUtils.hasMinRole(this.role, min); }
+	get canManage(): boolean { return UserUtils.canManage(this.role); }
+}
+class ApiKey extends S.Class<ApiKey>('ApiKey')({
+	createdAt: S.DateFromSelf,
+	id: ApiKeyId,
+	lastUsedAt: S.OptionFromSelf(S.DateFromSelf),
+	name: S.NonEmptyTrimmedString,
+	provider: AiProvider,
+}) {
+	static readonly CreateRequest = S.Struct({
+		key: S.NonEmptyTrimmedString,
+		name: S.NonEmptyTrimmedString,
+		provider: AiProvider,
+	});
+	static readonly toResponse = (k: {
+		readonly createdAt: DateTime.Utc;
+		readonly id: ApiKeyId;
+		readonly lastUsedAt: Option.Option<DateTime.Utc>;
+		readonly name: string;
+		readonly provider: AiProvider;
+	}) =>
+		new ApiKey({
+			createdAt: DateTime.toDateUtc(k.createdAt),
+			id: k.id,
+			lastUsedAt: Option.map(k.lastUsedAt, DateTime.toDateUtc),
+			name: k.name,
+			provider: k.provider,
+		});
+}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const Expiry = Object.freeze({
-    check: (date: Date | null | undefined, bufferMs = Duration.toMillis(B.durations.refreshBuffer)) =>
-        pipe(
-            Option.fromNullable(date),
-            Option.match({
-                onNone: () => ({ delayMs: 0, expired: false, shouldRefresh: false }),
-                onSome: (d) => ({
-                    delayMs: Math.max(0, d.getTime() - Date.now() - bufferMs),
-                    expired: d.getTime() < Date.now(),
-                    shouldRefresh: d.getTime() - Date.now() - bufferMs <= 0,
-                }),
-            }),
-        ),
-    computeFrom: (duration: Duration.Duration): Date => new Date(Date.now() + Duration.toMillis(duration)),
-});
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-const database = (config: DatabaseConfig = {}) =>
-    Object.freeze({
-        expiry: Object.freeze({
-            check: (date: Date | null | undefined, bufferMs?: number) =>
-                Expiry.check(date, bufferMs ?? Duration.toMillis(config.refreshBuffer ?? B.durations.refreshBuffer)),
-            computeFrom: Expiry.computeFrom,
-        }),
-        providers: B.providers,
-        schemas: Object.freeze({
-            entities: Object.freeze({
-                AiProvider: AiProviderSchema,
-                ApiKeyListItem: ApiKeyListItemSchema,
-                ApiKeyResult: ApiKeyResultSchema,
-                AssetCountResult: AssetCountResultSchema,
-                AssetListItem: AssetListItemSchema,
-                AssetMetadata: AssetMetadataSchema,
-                ColorMode: ColorModeSchema,
-                Intent: IntentSchema,
-                OAuthProvider: OAuthProviderSchema,
-                OAuthTokens: OAuthTokensSchema,
-                OAuthUserInfo: OAuthUserInfoSchema,
-                OrganizationRole: OrganizationRoleSchema,
-                OutputMode: OutputModeSchema,
-                SessionResult: SessionResultSchema,
-                TokenHash: TokenHashSchema,
-                Version: VersionSchema,
-            }),
-            ids: Object.freeze({
-                ApiKeyId: ApiKeyIdSchema,
-                AssetId: AssetIdSchema,
-                OAuthAccountId: OAuthAccountIdSchema,
-                OrganizationId: OrganizationIdSchema,
-                OrganizationMemberId: OrganizationMemberIdSchema,
-                RefreshTokenId: RefreshTokenIdSchema,
-                SessionId: SessionIdSchema,
-                UserId: UserIdSchema,
-            }),
-            responses: Object.freeze({
-                LogoutResponse: LogoutResponseSchema,
-                OAuthStartResponse: OAuthStartResponseSchema,
-                SessionResponse: SessionResponseSchema,
-                UserResponse: UserResponseSchema,
-            }),
-        }),
-    });
+const UserUtils = Object.freeze({
+	canManage: (role: Role): boolean => B.roleLevels[role] >= B.roleLevels.admin,
+	emailDomain: (email: string): string => email.split('@')[1] ?? '',
+	hasMinRole: (role: Role, min: Role): boolean => B.roleLevels[role] >= B.roleLevels[min],
+} as const);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as DATABASE_TUNING, database };
-export type {
-    AiProvider,
-    ApiKeyId,
-    ApiKeyListItem,
-    ApiKeyResult,
-    AssetCountResult,
-    AssetId,
-    AssetListItem,
-    AssetMetadata,
-    ColorMode,
-    DatabaseApi,
-    DatabaseConfig,
-    Intent,
-    LogoutResponse,
-    OAuthAccountId,
-    OAuthProvider,
-    OAuthProviderConfig,
-    OAuthStartResponse,
-    OAuthTokens,
-    OAuthUserInfo,
-    OrganizationId,
-    OrganizationMemberId,
-    OrganizationRole,
-    OutputMode,
-    RefreshTokenId,
-    SessionId,
-    SessionResponse,
-    SessionResult,
-    TokenHash,
-    UserId,
-    UserResponse,
-    Version,
+export {
+	AiProvider,
+	ApiKey,
+	ApiKeyId,
+	ApiResponse,
+	AssetId,
+	AssetType,
+	AuthContext,
+	B,
+	OAuthAccountId,
+	OAuthProvider,
+	OAuthProviderConfig,
+	OAuthResult,
+	RefreshTokenId,
+	Role,
+	SessionId,
+	User,
+	UserId,
+	UserUtils,
 };

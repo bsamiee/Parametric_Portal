@@ -1,12 +1,10 @@
 /**
- * Theme configuration using @parametric-portal/theme presets.
- * Single source of truth: dracula preset defines all colors.
+ * Theme configuration using @parametric-portal/theme.
+ * Single source of truth for design tokens.
  */
-import { presets } from '@parametric-portal/theme/presets';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const p = presets();
 const B = Object.freeze({
     fonts: {
         geist: {
@@ -25,7 +23,7 @@ const B = Object.freeze({
 
 // --- [THEME_CONFIG] ----------------------------------------------------------
 
-const themes = p.themes('dracula');
+const themes = {} as const;
 
 // --- [FONT_CONFIG] -----------------------------------------------------------
 

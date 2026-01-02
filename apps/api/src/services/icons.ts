@@ -1,34 +1,25 @@
 /**
- * Icon generation service: CAD-style SVG icons via Claude API.
- * Contains prompt engineering, palette management, and AI integration.
+ * Icon generation service: CAD-style SVG icons via multi-provider AI.
+ * Contains prompt engineering, palette management, and provider-agnostic AI integration.
  */
-import { Prompt } from '@effect/ai';
-import { createProvider } from '@parametric-portal/ai/anthropic';
-import { InternalError } from '@parametric-portal/server/errors';
-import type { ColorMode } from '@parametric-portal/types/database';
-import { type SvgAsset, svg } from '@parametric-portal/types/svg';
+import { type AiProviderType, buildPrompt, getModel, LanguageModel } from '@parametric-portal/ai/registry';
+import { InternalError } from '@parametric-portal/server/domain-errors';
+import { Icons, IconServiceInput } from '@parametric-portal/types/icons';
+import { sanitizeSvg, SvgAsset, SvgAssetInputSchema, type SvgAssetData } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
-import { GenerateRequestSchema, ICON_DESIGN, type Palette } from '../contracts/icons.ts';
-
-const svgApi = svg();
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const ServiceInputSchema = S.extend(
-    GenerateRequestSchema,
-    S.Struct({
-        apiKey: S.optional(S.String),
-        signal: S.optional(S.instanceOf(AbortSignal)),
-    }),
-);
+const ServiceInputSchema = S.extend(IconServiceInput, S.Struct({ signal: S.optional(S.instanceOf(AbortSignal)) }));
+const AiResponseSchema = S.Struct({ variants: S.Array(SvgAssetInputSchema).pipe(S.minItems(1)) });
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type ServiceInput = S.Schema.Type<typeof ServiceInputSchema>;
-type ServiceOutput = { readonly variants: ReadonlyArray<SvgAsset> };
+type ServiceOutput = { readonly variants: ReadonlyArray<SvgAssetData> };
 type PromptContext = {
-    readonly attachments?: ReadonlyArray<SvgAsset>;
-    readonly colorMode: ColorMode;
+    readonly attachments?: ReadonlyArray<SvgAssetData>;
+    readonly colorMode: 'dark' | 'light';
     readonly intent: 'create' | 'refine';
     readonly prompt: string;
     readonly referenceSvg?: string;
@@ -37,42 +28,30 @@ type PromptContext = {
 type IconGenerationServiceInterface = {
     readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InternalError>;
 };
-/** AI response wrapper: validates array of SvgAssetInput before transformation. */
-const AiResponseSchema = S.Struct({
-    variants: S.Array(svgApi.schemas.SvgAssetInput).pipe(S.minItems(1)),
-});
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    ai: {
-        defaults: {
-            colorMode: 'dark' as ColorMode,
-            intent: 'create' as const,
-            variantCount: 1,
-        },
-        maxTokens: 6000,
-        model: 'claude-sonnet-4-20250514',
-        prefill: '{"variants":[',
+    defaults: {
+        colorMode: 'dark' as const,
+        intent: 'create' as const,
+        provider: 'anthropic' as AiProviderType,
+        variantCount: 1,
     },
     errors: {
-        invalidInput: { code: 'INVALID_INPUT', message: 'Invalid generation input' },
-        parseFailure: { cause: 'Failed to parse response' },
-    },
-    regex: {
-        jsonExtract: /\{[\s\S]*"variants"[\s\S]*\}/,
+        aiGeneration: (provider: string, e: unknown) => `AI generation failed (${provider}): ${String(e)}`,
     },
 } as const);
-const ai = createProvider({ maxTokens: B.ai.maxTokens, model: B.ai.model });
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const getPalette = (mode: ColorMode): Palette => ICON_DESIGN.palettes[mode];
+type Palette = (typeof Icons.design.palettes)['dark'];
+const getPalette = (mode: 'dark' | 'light'): Palette => Icons.design.palettes[mode];
 const minifySvgForPrompt = (svgContent: string): string =>
-    svgApi.sanitizeSvg(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
+    sanitizeSvg(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
-    const { layers } = ICON_DESIGN;
+    const { layers } = Icons.design;
     return `You generate professional Rhino/Grasshopper-style CAD toolbar icons as SVG.
 
 <canvas>
@@ -195,34 +174,31 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
     return parts.join('\n\n');
 };
 
-const extractJsonFromText = (text: string): string => B.regex.jsonExtract.exec(text)?.[0] ?? text;
-const parseAiResponse = (text: string): Effect.Effect<S.Schema.Type<typeof AiResponseSchema>, InternalError> =>
-    pipe(
-        Effect.try({
-            catch: () => new InternalError({ cause: B.errors.parseFailure.cause }),
-            try: () => JSON.parse(extractJsonFromText(B.ai.prefill + text)) as unknown,
-        }),
-        Effect.flatMap((parsed) =>
-            S.decodeUnknown(AiResponseSchema)(parsed).pipe(
-                Effect.mapError(() => new InternalError({ cause: B.errors.parseFailure.cause })),
-            ),
-        ),
-    );
 const buildContext = (input: ServiceInput): PromptContext => ({
     ...(input.attachments !== undefined && { attachments: input.attachments }),
-    colorMode: input.colorMode ?? B.ai.defaults.colorMode,
-    intent: input.intent ?? B.ai.defaults.intent,
+    colorMode: input.colorMode ?? B.defaults.colorMode,
+    intent: input.intent ?? B.defaults.intent,
     prompt: input.prompt,
     ...(input.referenceSvg !== undefined && { referenceSvg: input.referenceSvg }),
-    variantCount: input.variantCount ?? B.ai.defaults.variantCount,
+    variantCount: input.variantCount ?? B.defaults.variantCount,
 });
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
-const buildPromptWithPrefill = (ctx: PromptContext): readonly Prompt.Message[] => [
-    Prompt.userMessage({ content: [Prompt.textPart({ text: buildUserMessage(ctx) })] }),
-    Prompt.assistantMessage({ content: [Prompt.textPart({ text: B.ai.prefill })] }),
-];
+const generateWithAi = Effect.fn('icons.ai')((validInput: ServiceInput) => {
+    const provider = validInput.provider ?? B.defaults.provider;
+    const ctx = buildContext(validInput);
+    return pipe(
+        LanguageModel.generateObject({
+            prompt: buildPrompt(buildUserMessage(ctx), buildSystemPrompt(ctx)),
+            schema: AiResponseSchema,
+        }),
+        Effect.map((response) => response.value),
+        Effect.provide(getModel(provider)),
+        Effect.mapError((e) => new InternalError({ message: B.errors.aiGeneration(provider, e) })),
+    );
+});
+
 class IconGenerationService extends Context.Tag('IconGenerationService')<
     IconGenerationService,
     IconGenerationServiceInterface
@@ -230,24 +206,12 @@ class IconGenerationService extends Context.Tag('IconGenerationService')<
 const IconGenerationServiceLive = Layer.succeed(
     IconGenerationService,
     IconGenerationService.of({
-        generate: (input) =>
-            pipe(
-                S.decodeUnknown(ServiceInputSchema)(input),
-                Effect.mapError(() => new InternalError({ cause: B.errors.invalidInput.message })),
-                Effect.map(buildContext),
-                Effect.flatMap((ctx) =>
-                    pipe(
-                        ai.generateText({
-                            prompt: buildPromptWithPrefill(ctx),
-                            system: buildSystemPrompt(ctx),
-                        }),
-                        Effect.mapError((e) => new InternalError({ cause: `AI generation failed: ${e._tag}` })),
-                        Effect.map((text) => B.ai.prefill + text),
-                    ),
-                ),
-                Effect.flatMap(parseAiResponse),
-                Effect.map((response): ServiceOutput => ({ variants: response.variants.map(svgApi.createSvgAsset) })),
-            ),
+        generate: Effect.fn('icons.generate')((input: ServiceInput) =>
+            Effect.gen(function* () {
+                const response = yield* generateWithAi(input);
+                return { variants: response.variants.map(SvgAsset.create) } satisfies ServiceOutput;
+            }),
+        ),
     }),
 );
 

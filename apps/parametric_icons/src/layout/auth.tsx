@@ -1,16 +1,16 @@
 /**
  * Auth components: overlay, OAuth buttons, user avatar.
- * Uses existing Modal/Button/Avatar/Icon from ui.ts with auth dispatch from api.ts.
+ * Uses existing Modal/Button/Avatar/Icon from ui.ts with HttpApiClient auth dispatch.
  */
 
-import { useMutation } from '@parametric-portal/runtime/hooks/async';
+import type { HttpClient } from '@effect/platform';
+import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
-import type { ApiError } from '@parametric-portal/types/api';
-import type { OAuthProvider, OAuthStartResponse } from '@parametric-portal/types/database';
-import { Effect, Option, pipe } from 'effect';
+import type { OAuthProvider } from '@parametric-portal/types/database';
+import { Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
-import { apiFactory, auth } from '../infrastructure.ts';
+import { auth } from '../infrastructure.ts';
 import { Avatar, Button, Icon, Modal, Spinner, Stack } from '../ui.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -58,8 +58,8 @@ const getInitials = (email: string): string => {
 const OAuthButton = ({ provider }: { readonly provider: OAuthProvider }): ReactNode => {
     const setLoading = useAuthStore((s) => s.setLoading);
     const config = B.providers[provider];
-    const oauthMutation = useMutation<OAuthStartResponse, OAuthProvider, ApiError, never>(
-        (p) => pipe(auth.initiateOAuth(p), Effect.flatMap(apiFactory.toEffectM<OAuthStartResponse>())),
+    const oauthMutation = useEffectMutate<{ url: string }, OAuthProvider, unknown, HttpClient.HttpClient>(
+        (p) => auth.initiateOAuth(p),
         {
             onError: () => setLoading(false),
             onSuccess: (data) =>

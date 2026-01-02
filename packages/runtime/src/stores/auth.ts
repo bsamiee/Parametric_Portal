@@ -1,30 +1,30 @@
 /**
  * Shared authentication store for cross-app auth state. Tokens stored in HttpOnly cookies; state via Zustand with devtools.
  */
-import type { ApiKeyListItem, UserResponse } from '@parametric-portal/types/database';
+import type { ApiKey, User } from '@parametric-portal/types/database';
 import { createStore } from '../store/factory';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type UserResponse = typeof User.Response.Type;
 type AuthState = {
     readonly accessToken: string | null;
-    readonly apiKeys: ReadonlyArray<ApiKeyListItem>;
+    readonly apiKeys: ReadonlyArray<ApiKey>;
     readonly expiresAt: Date | null;
     readonly isAccountOverlayOpen: boolean;
     readonly isAuthOverlayOpen: boolean;
     readonly isLoading: boolean;
     readonly user: UserResponse | null;
 };
-
 type AuthActions = {
-    readonly addApiKey: (key: ApiKeyListItem) => void;
+    readonly addApiKey: (key: ApiKey) => void;
     readonly clearAuth: () => void;
     readonly closeAccountOverlay: () => void;
     readonly closeAuthOverlay: () => void;
     readonly openAccountOverlay: () => void;
     readonly openAuthOverlay: () => void;
     readonly removeApiKey: (id: string) => void;
-    readonly setApiKeys: (keys: ReadonlyArray<ApiKeyListItem>) => void;
+    readonly setApiKeys: (keys: ReadonlyArray<ApiKey>) => void;
     readonly setAuth: (token: string, expiresAt: Date, user: UserResponse) => void;
     readonly setLoading: (flag: boolean) => void;
 };
@@ -34,7 +34,7 @@ type AuthActions = {
 const B = Object.freeze({
     initial: {
         accessToken: null,
-        apiKeys: [] as ReadonlyArray<ApiKeyListItem>,
+        apiKeys: [] as ReadonlyArray<ApiKey>,
         expiresAt: null,
         isAccountOverlayOpen: false,
         isAuthOverlayOpen: false,

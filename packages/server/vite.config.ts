@@ -8,10 +8,11 @@ import { createConfig } from '../../vite.factory.ts';
 export default defineConfig(
     Effect.runSync(
         createConfig({
+            declaration: false,
             entry: {
                 api: './src/api.ts',
                 crypto: './src/crypto.ts',
-                errors: './src/errors.ts',
+                'domain-errors': './src/domain-errors.ts',
                 metrics: './src/metrics.ts',
                 middleware: './src/middleware.ts',
                 telemetry: './src/telemetry.ts',

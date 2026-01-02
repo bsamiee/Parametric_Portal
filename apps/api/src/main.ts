@@ -1,69 +1,80 @@
 /**
  * API server entry point with Layer composition.
- * Middleware composition + parallel health checks via Effect.all.
+ * Uses DatabaseService.layer and static layer patterns.
  */
-
 import { createServer } from 'node:http';
 import type { HttpApp } from '@effect/platform';
-import { HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
+import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
 import { PgLive } from '@parametric-portal/database/client';
-import { sessionToResult } from '@parametric-portal/database/models';
-import { makeRepositories } from '@parametric-portal/database/repositories';
-import { HttpApiBuilder } from '@parametric-portal/server/api';
-import { ServiceUnavailableError } from '@parametric-portal/server/errors';
-import { createMetricsMiddleware, registry } from '@parametric-portal/server/metrics';
-import {
-    createCorsLayer,
-    createRequestIdMiddleware,
-    createSecurityHeadersMiddleware,
-    createSessionAuthLayer,
-} from '@parametric-portal/server/middleware';
-import { TelemetryLive } from '@parametric-portal/server/telemetry';
-import type { SessionResult, TokenHash } from '@parametric-portal/types/database';
-import { Effect, Layer, Option, pipe } from 'effect';
-import { AppApi } from './api.ts';
-import { OAuthServiceLive } from './oauth.ts';
+import { DatabaseService } from '@parametric-portal/database/repos';
+import { EncryptionKeyService } from '@parametric-portal/server/crypto';
+import { ServiceUnavailable } from '@parametric-portal/server/domain-errors';
+import { createMetricsMiddleware, Metrics } from '@parametric-portal/server/metrics';
+import { Middleware } from '@parametric-portal/server/middleware';
+import { TelemetryService } from '@parametric-portal/server/telemetry';
+import { AuthContext } from '@parametric-portal/types/database';
+import { type Hex64 } from '@parametric-portal/types/types';
+import { Config, Effect, Layer, Option, pipe } from 'effect';
+import { ParametricApi } from '@parametric-portal/server/api';
+import { OAuthLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
+import { TelemetryRouteLive } from './routes/telemetry.ts';
 import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    cors: { allowedOrigins: ['*'] },
-    port: 4000,
+    defaults: {
+        corsOrigins: '*',
+        port: 4000,
+    },
 } as const);
+
+// --- [CONFIG] ----------------------------------------------------------------
+
+const ServerConfig = Config.all({
+    corsOrigins: pipe(
+        Config.string('CORS_ORIGINS'),
+        Config.withDefault(B.defaults.corsOrigins),
+        Config.map((s) => s.split(',') as ReadonlyArray<string>),
+    ),
+    port: pipe(Config.number('PORT'), Config.withDefault(B.defaults.port)),
+});
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const composeMiddleware = (app: HttpApp.Default): HttpApp.Default<never, never> =>
+const composeMiddleware = (app: HttpApp.Default): HttpApp.Default =>
     pipe(
         app,
+        Middleware.trace(),
         createMetricsMiddleware(),
-        createSecurityHeadersMiddleware(),
-        createRequestIdMiddleware(),
+        Middleware.security(),
+        Middleware.requestId(),
         HttpMiddleware.logger,
-    );
+    ) as HttpApp.Default;
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const SessionAuthLive = pipe(
-    Layer.unwrapEffect(
-        Effect.map(makeRepositories, (repos) =>
-            createSessionAuthLayer((tokenHash: TokenHash) =>
+const SessionLookupLive = Layer.effect(
+    Middleware.SessionLookup,
+    Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        return {
+            lookup: (tokenHash: Hex64): Effect.Effect<Option.Option<AuthContext>, never, never> =>
                 pipe(
-                    repos.sessions.findByTokenHash(tokenHash),
-                    Effect.map(Option.map(sessionToResult)),
-                    Effect.catchAll(() => Effect.succeed(Option.none<SessionResult>())),
+                    db.sessions.findValidByTokenHash(tokenHash),
+                    Effect.map(Option.map(AuthContext.fromSession)),
+                    Effect.catchAll(() => Effect.succeed(Option.none<AuthContext>())),
                 ),
-            ),
-        ),
-    ),
-    Layer.provide(PgLive),
+        };
+    }),
 );
-const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
+const DatabaseLive = DatabaseService.layer.pipe(Layer.provide(PgLive));
+const SessionAuthLive = Middleware.Auth.layer.pipe(Layer.provide(SessionLookupLive), Layer.provide(DatabaseLive));
+const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         const checkDatabase = () =>
@@ -80,34 +91,52 @@ const HealthLive = HttpApiBuilder.group(AppApi, 'health', (handlers) =>
                     Effect.flatMap((dbOk) =>
                         dbOk
                             ? Effect.succeed({ checks: { database: true }, status: 'ok' as const })
-                            : Effect.fail(new ServiceUnavailableError({ reason: 'Database check failed' })),
+                            : Effect.fail(
+                                  new ServiceUnavailable({
+                                      reason: 'Database check failed',
+                                      retryAfterSeconds: 30,
+                                  }),
+                              ),
                     ),
                 ),
             );
     }),
 );
-const MetricsLive = HttpApiBuilder.group(AppApi, 'metrics', (handlers) =>
+const MetricsRouteLive = HttpApiBuilder.group(ParametricApi, 'metrics', (handlers) =>
     Effect.gen(function* () {
-        return handlers.handle('list', () => Effect.promise(async () => await registry.metrics()));
+        const { registry } = yield* Metrics;
+        return handlers.handle('list', () => Effect.promise(() => registry.metrics()));
     }),
 );
-const ApiLive = HttpApiBuilder.api(AppApi).pipe(
-    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MetricsLive)),
-    Layer.provide(PgLive),
-    Layer.provide(OAuthServiceLive),
-    Layer.provide(IconGenerationServiceLive),
+const RouteDependencies = Layer.mergeAll(
+    DatabaseLive,
+    OAuthLive,
+    IconGenerationServiceLive,
+    EncryptionKeyService.layer,
 );
-const ServerLive = pipe(
-    HttpApiBuilder.serve(composeMiddleware),
-    Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
-    Layer.provide(ApiLive),
-    Layer.provide(createCorsLayer({ allowedOrigins: B.cors.allowedOrigins })),
-    Layer.provide(SessionAuthLive),
-    Layer.provide(TelemetryLive),
-    HttpServer.withLogAddress,
-    Layer.provide(NodeHttpServer.layer(createServer, { port: B.port })),
+const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
+    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MetricsRouteLive, TelemetryRouteLive)),
+    Layer.provide(RouteDependencies),
+    Layer.provide(PgLive),
+);
+const ServerLive = Layer.unwrapEffect(
+    Effect.map(ServerConfig, (config) => {
+        const httpServerLayer = NodeHttpServer.layer(createServer, { port: config.port }).pipe(
+            HttpServer.withLogAddress,
+        );
+        return pipe(
+            HttpApiBuilder.serve(composeMiddleware),
+            Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
+            Layer.provide(ApiLive),
+            Layer.provide(Middleware.cors({ allowedOrigins: config.corsOrigins })),
+            Layer.provide(SessionAuthLive),
+            Layer.provide(Metrics.layer),
+            Layer.provide(TelemetryService.layer),
+            Layer.provide(httpServerLayer),
+        );
+    }),
 );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-Layer.launch(ServerLive).pipe(NodeRuntime.runMain);
+NodeRuntime.runMain(Layer.launch(ServerLive));

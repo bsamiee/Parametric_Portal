@@ -160,9 +160,7 @@ describe('temporal', () => {
     });
     it('respects custom limit', () => {
         const store = valueStore({ enabled: true, limit: 2 });
-        [1, 2, 3].forEach((v) => {
-            store.getState().setN(v);
-        });
+        for (const v of [1, 2, 3]) store.getState().setN(v);
         expect(store.temporal.getState().pastStates.length).toBeLessThanOrEqual(2);
     });
     it('uses custom partialize', () => {
@@ -210,7 +208,6 @@ describe('persist', () => {
         expect(store.getState().x).toBe(5);
     });
     it('filters keys via exclude patterns', () => {
-        // biome-ignore lint/style/useNamingConvention: _private tests /^_/ pattern
         const store = createStore(() => ({ _private: 1, data: 2, secretKey: 3, setData: () => {} }), {
             name: uniqueName('exclude-patterns'),
             persist: { exclude: ['secretKey', /^_/, /^set/] },

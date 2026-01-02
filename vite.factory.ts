@@ -4,12 +4,15 @@
  * Import this in app/package configs. Root vite.config.ts imports and executes.
  */
 
+// --- [IMPORTS: node] ---------------------------------------------------------
 import { dirname, resolve as pathResolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// --- [IMPORTS: vite-ecosystem] -----------------------------------------------
 import typescript from '@rollup/plugin-typescript';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import browserslist from 'browserslist';
+// --- [IMPORTS: external] -----------------------------------------------------
 import { Effect, Option, pipe, Schema as S } from 'effect';
 import { visualizer } from 'rollup-plugin-visualizer';
 import type { Plugin, UserConfig, ViteBuilder } from 'vite';
@@ -28,7 +31,6 @@ type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 's
 type Cfg = S.Schema.Type<typeof CfgSchema>;
 type BuildStrategy = 'parallel' | 'serial';
 type Mode = Cfg['mode'];
-type Browsers = { readonly [K in 'chrome' | 'edge' | 'firefox' | 'safari']: number };
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -54,10 +56,13 @@ const CfgSchema = S.Union(
         webfonts: S.optional(S.Array(S.String)),
     }),
     S.Struct({
+        css: S.optional(S.String),
+        declaration: S.optional(S.Boolean),
         entry: S.Union(S.String, S.Record({ key: S.String, value: S.String })),
         external: S.optional(S.Array(S.String)),
         mode: S.Literal('library'),
         name: S.String,
+        react: S.optional(S.Boolean),
     }),
     S.Struct({
         entry: S.String,
@@ -71,11 +76,9 @@ const CfgSchema = S.Union(
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
-
 const B = Object.freeze({
     artifacts: { compression: { dir: 'entries', exts: ['.br', '.gz'] } },
     assets: ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'],
-    browsers: { chrome: 107, edge: 107, firefox: 104, safari: 16 } as Browsers,
     builder: { buildStrategy: 'parallel' as BuildStrategy, sharedConfigBuild: true, sharedPlugins: true },
     cache: { api: 300, cdn: 604800, max: 50 },
     chunks: [
@@ -111,8 +114,10 @@ const B = Object.freeze({
     svgr: { exportType: 'default', memo: true, ref: true, svgo: true, titleProp: true, typescript: true },
     treeshake: {
         moduleSideEffects: 'no-external' as const,
+        preset: 'smallest' as const,
         propertyReadSideEffects: false,
         tryCatchDeoptimization: false,
+        unknownGlobalSideEffects: false,
     },
     viz: {
         brotliSize: true,
@@ -128,26 +133,6 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const browsers = (): Browsers =>
-    pipe(
-        Option.fromNullable(browserslist.loadConfig({ path: '.' })),
-        Option.map(
-            (c) =>
-                Object.fromEntries(
-                    (Object.keys(B.browsers) as ReadonlyArray<keyof Browsers>).map((k) => [
-                        k,
-                        Math.max(
-                            B.browsers[k],
-                            ...browserslist(c)
-                                .map((q) => q.match(new RegExp(String.raw`^${k}\s+(\d+)`))?.[1])
-                                .filter((v): v is string => v !== undefined)
-                                .map(Number),
-                        ),
-                    ]),
-                ) as Browsers,
-        ),
-        Option.getOrElse(() => B.browsers),
-    );
 const chunk = (id: string) =>
     id.includes('node_modules')
         ? pipe(
@@ -159,6 +144,7 @@ const chunk = (id: string) =>
         : undefined;
 const css = (dev = false) => ({
     devSourcemap: dev,
+    transformer: 'lightningcss' as const,
 });
 const esbuild = (app: boolean, prod = false) => ({
     ...(app
@@ -302,8 +288,10 @@ const plugins = {
         // Inspect disabled in dev due to EEXIST race condition on HMR restart
         ...(prod ? [Inspect({ build: true, dev: false, outputDir: '.vite-inspect' })] : []),
     ],
-    library: () => [
+    library: (c: Extract<Cfg, { mode: 'library' }>) => [
         tsconfigPaths({ projects: ['./tsconfig.json'] }),
+        ...(c.react === true ? [react({ babel: { plugins: [['babel-plugin-react-compiler', {}]] } })] : []),
+        ...(c.css === undefined ? [] : [tailwindcss({ optimize: { minify: true } })]),
         Inspect({ build: true, dev: false, outputDir: '.vite-inspect' }),
     ],
     server: () => [tsconfigPaths({ projects: ['./tsconfig.json'] })],
@@ -311,16 +299,16 @@ const plugins = {
 const config: {
     readonly [M in Mode]: (
         c: Extract<Cfg, { mode: M }>,
-        b: Browsers,
         env: { prod: boolean; time: string; ver: string },
     ) => UserConfig;
 } = {
-    app: (c, _b, { prod, time, ver }) => ({
+    app: (c, { prod, time, ver }) => ({
         appType: 'spa',
         assetsInclude: (c.assetExts ?? B.assets).map((x) => `**/*.${x}`),
         ...(c.root ? { root: c.root } : {}),
         build: {
             cssCodeSplit: true,
+            cssMinify: 'lightningcss',
             emptyOutDir: true,
             manifest: true,
             minify: 'esbuild',
@@ -333,7 +321,7 @@ const config: {
             },
             sourcemap: true,
             ssrManifest: false,
-            target: 'esnext',
+            target: 'baseline-widely-available',
         },
         builder: pipe(
             Option.fromNullable(c.builder),
@@ -387,8 +375,9 @@ const config: {
             rollupOptions: { output: output('workers/') },
         },
     }),
-    library: (c, _b) => ({
+    library: (c) => ({
         build: {
+            cssCodeSplit: false,
             lib: {
                 entry: c.entry,
                 fileName: (f: string, n: string) => (f === 'es' ? `${n}.js` : `${n}.${f}.js`),
@@ -397,26 +386,38 @@ const config: {
             },
             rollupOptions: {
                 external: [/^node:/, ...(c.external ?? [])],
-                output: { exports: 'named', preserveModules: false },
-                plugins: [
-                    typescript({
-                        compilerOptions: { rewriteRelativeImportExtensions: true },
-                        declaration: true,
-                        declarationDir: 'dist',
-                        outputToFilesystem: true,
-                    }),
-                ],
+                output: {
+                    exports: 'named',
+                    generatedCode: {
+                        arrowFunctions: true,
+                        constBindings: true,
+                        objectShorthand: true,
+                        preset: 'es2015',
+                    },
+                    preserveModules: false,
+                },
+                plugins:
+                    c.declaration === false
+                        ? []
+                        : [
+                              typescript({
+                                  compilerOptions: { rewriteRelativeImportExtensions: true },
+                                  declaration: true,
+                                  declarationDir: 'dist',
+                                  outputToFilesystem: true,
+                              }),
+                          ],
             },
             sourcemap: true,
-            target: 'node22',
+            target: 'esnext',
         },
-        css: css(),
-        esbuild: esbuild(false),
-        plugins: plugins.library(),
-        resolve: resolve(),
+        css: css(c.css !== undefined),
+        esbuild: esbuild(c.react === true),
+        plugins: plugins.library(c),
+        resolve: resolve(c.react === true),
         ssr: { target: 'node' as const },
     }),
-    server: (c, _b) => ({
+    server: (c) => ({
         build: {
             lib: { entry: c.entry, fileName: 'main', formats: ['es'] as const, name: c.name },
             rollupOptions: {
@@ -452,12 +453,11 @@ const createConfig = (input: unknown): Effect.Effect<UserConfig, never, never> =
         Effect.flatMap((c) =>
             pipe(
                 Effect.all({
-                    b: Effect.sync(browsers),
                     p: Effect.sync(() => process.env['NODE_ENV'] === 'production'),
                     t: Effect.sync(() => new Date().toISOString()),
                     v: Effect.sync(() => process.env['npm_package_version'] ?? '0.0.0'),
                 }),
-                Effect.map(({ b, p, t, v }) => config[c.mode](c as never, b, { prod: p, time: t, ver: v })),
+                Effect.map(({ p, t, v }) => config[c.mode](c as never, { prod: p, time: t, ver: v })),
             ),
         ),
     );

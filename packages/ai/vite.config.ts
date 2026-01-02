@@ -9,17 +9,15 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
-                anthropic: './src/anthropic.ts',
+                registry: './src/registry.ts',
             },
             external: [
-                'effect',
                 '@effect/ai',
                 '@effect/ai-anthropic',
+                '@effect/ai-google',
+                '@effect/ai-openai',
                 '@effect/platform',
-                '@anthropic-ai/sdk',
-                '@anthropic-ai/tokenizer',
-                '@parametric-portal/server',
-                'tiktoken',
+                'effect',
             ],
             mode: 'library',
             name: 'ParametricAI',

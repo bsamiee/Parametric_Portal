@@ -3,7 +3,6 @@
  * All apps reference via tsconfig types field — eliminates per-app vite-env.d.ts files.
  * Values injected at build time via vite.factory.ts define block.
  */
-
 /// <reference types="vite/client" />
 
 declare global {

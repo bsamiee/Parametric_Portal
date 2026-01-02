@@ -1,8 +1,32 @@
 /**
  * URL state management via nuqs - type-safe search params with branded parsers.
  */
-import { database } from '@parametric-portal/types/database';
-import { types } from '@parametric-portal/types/types';
+import {
+    ApiKeyId,
+    AssetId,
+    OAuthAccountId,
+    RefreshTokenId,
+    SessionId,
+    UserId,
+} from '@parametric-portal/types/database';
+import {
+    Email,
+    Hex8,
+    Hex64,
+    HexColor,
+    HtmlId,
+    Index,
+    IsoDate,
+    NonNegativeInt,
+    Percentage,
+    PositiveInt,
+    SafeInteger,
+    Slug,
+    Url,
+    Uuidv7,
+    VariantCount,
+    ZoomFactor,
+} from '@parametric-portal/types/types';
 import { Option, Schema as S } from 'effect';
 import {
     createLoader,
@@ -20,13 +44,11 @@ import {
     parseAsStringLiteral,
     parseAsTimestamp,
     type SingleParserBuilder,
+    throttle,
     useQueryState,
     useQueryStates,
 } from 'nuqs';
 import { useMemo } from 'react';
-
-const typesApi = types();
-const dbApi = database();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -34,9 +56,9 @@ type UrlHistory = 'push' | 'replace';
 type UrlStateOptions = {
     readonly clearOnDefault?: boolean;
     readonly history?: UrlHistory;
+    readonly limitUrlUpdates?: ReturnType<typeof throttle>;
     readonly scroll?: boolean;
     readonly shallow?: boolean;
-    readonly throttleMs?: number;
 };
 type ParserType =
     | 'arrayOf'
@@ -72,47 +94,43 @@ const createBrandedStringParser = <A, I extends string>(schema: S.Schema<A, I>) 
     });
 const createBrandedNumberParser = <A, I extends number>(schema: S.Schema<A, I>) =>
     createParser<A>({
-        parse: (value) => {
-            const num = Number(value);
-            return Number.isNaN(num) ? null : Option.getOrNull(S.decodeUnknownOption(schema)(num));
-        },
+        parse: (value) =>
+            Number.isNaN(Number(value)) ? null : Option.getOrNull(S.decodeUnknownOption(schema)(Number(value))),
         serialize: String,
     });
 const buildOptions = (opts?: UrlStateOptions): Options => ({
     clearOnDefault: opts?.clearOnDefault ?? B.defaults.clearOnDefault,
     history: opts?.history ?? B.defaults.history,
+    limitUrlUpdates: opts?.limitUrlUpdates ?? throttle(B.defaults.throttleMs),
     scroll: opts?.scroll ?? B.defaults.scroll,
     shallow: opts?.shallow ?? B.defaults.shallow,
-    throttleMs: opts?.throttleMs ?? B.defaults.throttleMs,
 });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const brandedParsers = Object.freeze({
-    apiKeyId: createBrandedStringParser(dbApi.schemas.ids.ApiKeyId),
-    assetId: createBrandedStringParser(dbApi.schemas.ids.AssetId),
-    email: createBrandedStringParser(typesApi.schemas.Email),
-    hex8: createBrandedStringParser(typesApi.schemas.Hex8),
-    hex64: createBrandedStringParser(typesApi.schemas.Hex64),
-    hexColor: createBrandedStringParser(typesApi.schemas.HexColor),
-    htmlId: createBrandedStringParser(typesApi.schemas.HtmlId),
-    index: createBrandedNumberParser(typesApi.schemas.Index),
-    isoDate: createBrandedStringParser(typesApi.schemas.IsoDate),
-    nonNegativeInt: createBrandedNumberParser(typesApi.schemas.NonNegativeInt),
-    oauthAccountId: createBrandedStringParser(dbApi.schemas.ids.OAuthAccountId),
-    organizationId: createBrandedStringParser(dbApi.schemas.ids.OrganizationId),
-    organizationMemberId: createBrandedStringParser(dbApi.schemas.ids.OrganizationMemberId),
-    percentage: createBrandedNumberParser(typesApi.schemas.Percentage),
-    positiveInt: createBrandedNumberParser(typesApi.schemas.PositiveInt),
-    refreshTokenId: createBrandedStringParser(dbApi.schemas.ids.RefreshTokenId),
-    safeInteger: createBrandedNumberParser(typesApi.schemas.SafeInteger),
-    sessionId: createBrandedStringParser(dbApi.schemas.ids.SessionId),
-    slug: createBrandedStringParser(typesApi.schemas.Slug),
-    url: createBrandedStringParser(typesApi.schemas.Url),
-    userId: createBrandedStringParser(dbApi.schemas.ids.UserId),
-    uuidv7: createBrandedStringParser(typesApi.schemas.Uuidv7),
-    variantCount: createBrandedNumberParser(typesApi.schemas.VariantCount),
-    zoomFactor: createBrandedNumberParser(typesApi.schemas.ZoomFactor),
+    apiKeyId: createBrandedStringParser(ApiKeyId),
+    assetId: createBrandedStringParser(AssetId),
+    email: createBrandedStringParser(Email.schema),
+    hex8: createBrandedStringParser(Hex8.schema),
+    hex64: createBrandedStringParser(Hex64.schema),
+    hexColor: createBrandedStringParser(HexColor.schema),
+    htmlId: createBrandedStringParser(HtmlId.schema),
+    index: createBrandedNumberParser(Index.schema),
+    isoDate: createBrandedStringParser(IsoDate.schema),
+    nonNegativeInt: createBrandedNumberParser(NonNegativeInt.schema),
+    oauthAccountId: createBrandedStringParser(OAuthAccountId),
+    percentage: createBrandedNumberParser(Percentage.schema),
+    positiveInt: createBrandedNumberParser(PositiveInt.schema),
+    refreshTokenId: createBrandedStringParser(RefreshTokenId),
+    safeInteger: createBrandedNumberParser(SafeInteger.schema),
+    sessionId: createBrandedStringParser(SessionId),
+    slug: createBrandedStringParser(Slug.schema),
+    url: createBrandedStringParser(Url.schema),
+    userId: createBrandedStringParser(UserId),
+    uuidv7: createBrandedStringParser(Uuidv7.schema),
+    variantCount: createBrandedNumberParser(VariantCount.schema),
+    zoomFactor: createBrandedNumberParser(ZoomFactor.schema),
 } as const);
 const parsers = Object.freeze({
     arrayOf: <T>(itemParser: SingleParserBuilder<T>) => parseAsArrayOf(itemParser),
@@ -134,13 +152,16 @@ const parsers = Object.freeze({
 
 const useUrlState = <T>(key: string, parser: SingleParserBuilder<T>, options?: UrlStateOptions) =>
     useQueryState(key, parser.withOptions(buildOptions(options)));
-const useUrlStates = <T extends Record<string, SingleParserBuilder<unknown>>>(keyMap: T, options?: UrlStateOptions) => {
-    const keyMapWithOpts = useMemo(() => {
-        const opts = buildOptions(options);
-        return Object.fromEntries(Object.entries(keyMap).map(([k, parser]) => [k, parser.withOptions(opts)])) as T;
-    }, [keyMap, options]);
-    return useQueryStates(keyMapWithOpts);
-};
+const useUrlStates = <T extends Record<string, SingleParserBuilder<unknown>>>(keyMap: T, options?: UrlStateOptions) =>
+    useQueryStates(
+        useMemo(
+            () =>
+                Object.fromEntries(
+                    Object.entries(keyMap).map(([k, p]) => [k, p.withOptions(buildOptions(options))]),
+                ) as T,
+            [keyMap, options],
+        ),
+    );
 const createUrlLoader = <T extends Record<string, SingleParserBuilder<unknown>>>(keyMap: T) =>
     createLoader(keyMap as Parameters<typeof createLoader>[0]);
 

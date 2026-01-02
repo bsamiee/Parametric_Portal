@@ -1,42 +1,32 @@
 {
-  "name": "@parametric-portal/ai",
-  "version": "1.0.7",
-  "type": "module",
-  "exports": {
-    "./anthropic": {
-      "types": "./src/anthropic.ts",
-      "import": "./src/anthropic.ts",
-      "default": "./src/anthropic.ts"
+    "name": "@parametric-portal/ai",
+    "version": "1.0.7",
+    "type": "module",
+    "exports": {
+        "./registry": {
+            "types": "./src/registry.ts",
+            "import": "./src/registry.ts",
+            "default": "./src/registry.ts"
+        }
     },
-    "./openai": {
-      "types": "./src/openai.ts",
-      "import": "./src/openai.ts",
-      "default": "./src/openai.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./gemini": {
-      "types": "./src/gemini.ts",
-      "import": "./src/gemini.ts",
-      "default": "./src/gemini.ts"
+    "dependencies": {
+        "@effect/ai": "catalog:",
+        "@effect/ai-anthropic": "catalog:",
+        "@effect/ai-google": "catalog:",
+        "@effect/ai-openai": "catalog:",
+        "@effect/platform": "catalog:",
+        "effect": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "dependencies": {
-    "@effect/ai": "catalog:",
-    "@effect/ai-anthropic": "catalog:",
-    "@effect/ai-google": "catalog:",
-    "@effect/ai-openai": "catalog:",
-    "@effect/platform": "catalog:",
-    "effect": "catalog:"
-  },
-  "devDependencies": {
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  },
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  }
 }

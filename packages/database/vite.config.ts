@@ -12,7 +12,7 @@ export default defineConfig(
                 client: './src/client.ts',
                 migrator: './src/migrator.ts',
                 models: './src/models.ts',
-                repositories: './src/repositories.ts',
+                repos: './src/repos.ts',
             },
             external: ['effect', '@effect/experimental', '@effect/platform', '@effect/sql', '@effect/sql-pg'],
             mode: 'library',

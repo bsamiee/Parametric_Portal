@@ -103,6 +103,9 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [NEVER] `for/while` → use `.map`, `.filter`, Effect.
 - [NEVER] `try/catch` → use Effect error channel.
 - [NEVER] Default exports → use named exports (except `*.config.ts`).
+- [NEVER] Barrel files (`index.ts`) → consumers import directly from source.
+- [NEVER] Re-export symbols → each module owns its exports.
+- [NEVER] Inline exports → declare first, export at file end.
 - [NEVER] Meta-commentary ("Sourced from...", "Confirmed with...") in output files.
 
 ---

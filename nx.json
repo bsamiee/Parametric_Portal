@@ -7,7 +7,6 @@
             "@nx/docker": "22.3.3",
             "@nx/js": "22.3.3",
             "@nx/playwright": "22.3.3",
-            "@nx/react": "22.3.3",
             "@nx/vite": "22.3.3",
             "@nx/vitest": "22.3.3"
         },
@@ -55,7 +54,8 @@
             "{workspaceRoot}/biome.json",
             "{workspaceRoot}/package.json",
             "{workspaceRoot}/pnpm-lock.yaml",
-            "{workspaceRoot}/pnpm-workspace.yaml"
+            "{workspaceRoot}/pnpm-workspace.yaml",
+            { "runtime": "node --version" }
         ],
         "testing": [
             "{projectRoot}/src/**/*",
@@ -89,6 +89,7 @@
             "exclude": ["tools/**/*"],
             "include": ["apps/**/*", "packages/**/*"],
             "options": {
+                "testMode": "run",
                 "testTargetName": "test"
             },
             "plugin": "@nx/vitest"
@@ -110,9 +111,7 @@
         },
         {
             "options": {
-                "checkTargetName": "check",
-                "formatTargetName": "format",
-                "lintTargetName": "lint"
+                "targetName": "check"
             },
             "plugin": "@berenddeboer/nx-biome"
         }
@@ -209,7 +208,6 @@
             }
         },
         "build": {
-            "cache": true,
             "dependsOn": ["^build"],
             "inputs": ["production", "^production"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
@@ -245,17 +243,16 @@
             "continuous": true
         },
         "docker:build": {
-            "cache": true,
             "dependsOn": ["build"],
-            "inputs": ["docker"],
-            "outputs": []
+            "inputs": ["docker"]
         },
         "hadolint": {
             "cache": true,
             "executor": "nx:run-commands",
             "inputs": ["docker"],
             "options": {
-                "command": "hadolint {projectRoot}/Dockerfile"
+                "command": "hadolint Dockerfile",
+                "cwd": "{projectRoot}"
             }
         },
         "infra:lint": {
@@ -290,15 +287,6 @@
                 "cwd": "{workspaceRoot}"
             }
         },
-        "k8s:validate": {
-            "cache": true,
-            "executor": "nx:run-commands",
-            "inputs": ["infrastructure"],
-            "options": {
-                "command": "for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; echo \"[INFO] Validating $(basename $(dirname $(dirname \"$dir\")))...\"; kustomize build \"$dir\" | kubeconform -strict -ignore-missing-schemas -summary || exit 1; done && echo '[OK] All projects validated'",
-                "cwd": "{workspaceRoot}"
-            }
-        },
         "mutate": {
             "cache": true,
             "dependsOn": ["build"],
@@ -326,12 +314,7 @@
             }
         },
         "test": {
-            "cache": true,
-            "executor": "@nx/vite:test",
             "inputs": ["testing", "^production"],
-            "options": {
-                "configFile": "vitest.config.ts"
-            },
             "outputs": ["{projectRoot}/coverage", "{workspaceRoot}/test-results"]
         },
         "test:ui": {

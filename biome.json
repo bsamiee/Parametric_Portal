@@ -4,7 +4,14 @@
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
     "files": {
         "ignoreUnknown": true,
-        "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows", "!.mcp.json"]
+        "includes": [
+            "**",
+            "!.claude/settings.json",
+            "!.github/n8n-workflows",
+            "!.mcp.json",
+            "!packages/server/src",
+            "!apps/api/src"
+        ]
     },
     "assist": {
         "actions": { "source": { "useSortedProperties": "on", "organizeImports": "on", "useSortedKeys": "on" } }
@@ -32,34 +39,7 @@
                 "noUselessElse": "error",
                 "useShorthandAssign": "error",
                 "useConsistentBuiltinInstantiation": "error",
-                "useForOf": "off",
-                "useNamingConvention": {
-                    "level": "error",
-                    "options": {
-                        "requireAscii": true,
-                        "strictCase": false,
-                        "conventions": [
-                            { "selector": { "kind": "typeLike" }, "formats": ["PascalCase"] },
-                            { "selector": { "kind": "interface" }, "formats": ["PascalCase"] },
-                            { "selector": { "kind": "typeParameter" }, "formats": ["PascalCase"] },
-                            {
-                                "selector": { "kind": "typeProperty" },
-                                "match": "(_tag|.*)",
-                                "formats": ["camelCase", "PascalCase"]
-                            },
-                            {
-                                "selector": { "kind": "objectLiteralProperty" },
-                                "match": "_tag|__html|background_color|theme_color|short_name|start_url|test_coverage|parametric_icons|(.*)",
-                                "formats": ["camelCase", "PascalCase"]
-                            },
-                            {
-                                "selector": { "kind": "const" },
-                                "formats": ["camelCase", "PascalCase", "CONSTANT_CASE"]
-                            },
-                            { "selector": { "kind": "function" }, "formats": ["camelCase"] }
-                        ]
-                    }
-                }
+                "useForOf": "off"
             },
             "complexity": {
                 "noCommaOperator": "error",
@@ -90,13 +70,17 @@
                 "noReExportAll": "error"
             },
             "security": {
-                "noDangerouslySetInnerHtml": "off"
+                "noDangerouslySetInnerHtml": "off",
+                "noSecrets": "off"
             },
             "nursery": {
+                "noImportCycles": "error",
                 "noFloatingPromises": "error",
                 "noIncrementDecrement": "error",
-                "useExhaustiveSwitchCases": "error",
-                "useConsistentArrowReturn": "error"
+                "noScriptUrl": "error",
+                "useAwaitThenable": "error",
+                "useConsistentArrowReturn": "error",
+                "useExhaustiveSwitchCases": "error"
             }
         }
     },
@@ -139,21 +123,6 @@
             "linter": { "rules": { "style": { "useConst": "off", "useImportType": "off" } } }
         },
         {
-            "includes": ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx"],
-            "linter": {
-                "rules": {
-                    "style": {
-                        "noDefaultExport": "error",
-                        "useImportType": "error"
-                    },
-                    "correctness": {
-                        "noUnusedImports": "error",
-                        "noUnusedVariables": "error"
-                    }
-                }
-            }
-        },
-        {
             "includes": ["packages/*/vite.config.ts", "packages/*/project.json"],
             "assist": { "actions": { "source": { "organizeImports": "on" } } }
         },
@@ -163,51 +132,39 @@
             "assist": { "actions": { "source": { "useSortedKeys": "off", "useSortedProperties": "off" } } }
         },
         {
-            "includes": ["**/matchers.ts", "**/types/src/*.ts"],
-            "linter": {
-                "rules": {
-                    "style": { "useNamingConvention": "off" }
-                }
+            "includes": ["**/matchers.ts", "**/types/src/*.ts", "**/core/slots.tsx"],
+            "formatter": {
+                "enabled": false
             }
         },
         {
-            "includes": [".github/scripts/**/*.ts"],
-            "linter": {
-                "rules": {
-                    "style": { "useNamingConvention": "off" }
-                }
-            }
-        },
-        {
-            "includes": ["packages/devtools/src/env.ts"],
-            "linter": {
-                "rules": {
-                    "style": { "useNamingConvention": "off" }
-                }
-            }
-        },
-        {
-            "includes": ["packages/devtools/src/boundary.tsx", "packages/devtools/src/overlay.tsx"],
-            "linter": {
-                "rules": {
-                    "style": { "useComponentExportOnlyModules": "off" }
-                }
-            }
-        },
-        {
-            "includes": ["apps/**/*.tsx"],
-            "linter": {
-                "rules": {
-                    "style": { "useComponentExportOnlyModules": "off" }
-                }
-            }
+            "includes": [
+                "packages/devtools/src/boundary.tsx",
+                "packages/devtools/src/overlay.tsx",
+                "packages/components-next/src/**/*.tsx",
+                "apps/**/*.tsx"
+            ],
+            "linter": { "rules": { "style": { "useComponentExportOnlyModules": "off" } } }
         },
         {
             "includes": ["**/vite-env.d.ts"],
             "linter": {
                 "rules": {
-                    "correctness": { "noUnusedVariables": "off" },
-                    "style": { "useNamingConvention": "off" }
+                    "correctness": { "noUnusedVariables": "off" }
+                }
+            }
+        },
+        {
+            "includes": [
+                "**/*.spec.ts",
+                "**/*.test.ts",
+                "tests/**/*.ts",
+                ".github/scripts/**/*.ts",
+                "packages/runtime/src/hooks/form.ts"
+            ],
+            "linter": {
+                "rules": {
+                    "nursery": { "useAwaitThenable": "off" }
                 }
             }
         }

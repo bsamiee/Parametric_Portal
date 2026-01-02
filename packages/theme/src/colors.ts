@@ -1,168 +1,150 @@
 /**
- * Manipulate OKLCH colors at runtime via unified API.
- * Grounding: OKLCH preserves perceptual uniformity across lightness adjustments.
+ * OKLCH color class: validation + behavior + state derivation in single Schema.Class.
+ * Pattern: crypto.ts (Effect.fn tracing, static schemas, instance transforms).
+ * Grounding: Stevens' Power Law + Helmholtz-Kohlrausch effect govern perception.
  */
 
+import type { ColorCategory } from '@parametric-portal/types/ui';
 import Color from 'colorjs.io';
-import { Effect, pipe } from 'effect';
-import type { ParseError } from 'effect/ParseResult';
-import { type OklchColor, validate } from './schemas.ts';
+import { Data, Effect, ParseResult, Schema as S } from 'effect';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
-type HueInterpolation = 'longer' | 'shorter';
-type Gamut = 'p3' | 'srgb';
-type OklchAdjust = {
-    readonly alpha?: number;
-    readonly chroma?: number;
-    readonly hue?: number;
-    readonly lightness?: number;
-};
-type ColorsApi = {
-    readonly adjust: typeof adjust;
-    readonly contrast: typeof contrast;
-    readonly create: typeof create;
-    readonly gamutMap: typeof gamutMap;
-    readonly getVar: typeof getVar;
-    readonly isInGamut: typeof isInGamut;
-    readonly mix: typeof mix;
-    readonly parse: typeof parse;
-    readonly toCSS: typeof toCSS;
-    readonly toSRGB: typeof toSRGB;
-};
+class OklchColor extends S.Class<OklchColor>('OklchColor')({
+    a: S.Number.pipe(S.clamp(0, 1)),
+    c: S.Number.pipe(S.clamp(0, 0.4)),
+    h: S.transform(S.Number, S.Number, { decode: (h) => ((h % 360) + 360) % 360, encode: (h) => h }),
+    l: S.Number.pipe(S.clamp(0, 1)),
+}) {
+    // --- [FORMAT_DISPATCH] ---------------------------------------------------
+    private static readonly Regex = /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)\s*(?:\/\s*([\d.]+)(%?))?\)/i;
+    private toColorJs(): Color {
+        return new Color('oklch', [this.l, this.c, this.h], this.a);
+    }
+    to<F extends keyof typeof OklchColor.Format>(format: F): ReturnType<(typeof OklchColor.Format)[F]> {
+        return OklchColor.Format[format](this) as ReturnType<(typeof OklchColor.Format)[F]>;
+    }
+    private static readonly Format = {
+        colorjs: (c: OklchColor) => c.toColorJs(),
+        css: (c: OklchColor) => {
+            const a = c.a < 1 ? ` / ${c.a.toFixed(2)}` : '';
+            return `oklch(${(c.l * 100).toFixed(1)}% ${c.c.toFixed(3)} ${c.h.toFixed(1)}${a})`;
+        },
+        srgb: (c: OklchColor) =>
+            c
+                .toColorJs()
+                .to('srgb')
+                .toGamut()
+                .toString({ format: c.a < 1 ? 'rgba' : 'rgb' }),
+    } as const;
+    // --- [STATIC_SCHEMAS] ----------------------------------------------------
+    static readonly Gamut = S.Literal('srgb', 'p3');
+    static readonly RacState = S.Literal('disabled', 'focused', 'hovered', 'pressed', 'selected');
+    static readonly StateShift = S.Struct({ alphaShift: S.Number, chromaShift: S.Number, lightnessShift: S.Number });
+    // --- [STATE_DERIVATION] --------------------------------------------------
+    // (Stevens' Power Law + Helmholtz-Kohlrausch), Tuning: magnitude per state, intensity per category, adaptive factors for perceptual uniformity
+    private static readonly T = Object.freeze({
+        intensity: {
+            accent1: 1,
+            accent2: 1,
+            accent3: 1,
+            accent4: 1,
+            accent5: 1,
+            accent6: 1,
+            accent7: 1,
+            accent8: 1,
+            accent9: 1,
+            accent10: 1,
+            border: 0.5,
+            destructive: 0.9,
+            info: 0.9,
+            muted: 0.7,
+            success: 0.9,
+            surface: 0.7,
+            text: 0.6,
+            warning: 0.9,
+        } satisfies Record<ColorCategory, number>,
+        magnitudes: {
+            disabled: { a: -0.4, c: -0.08, l: 0.15 },
+            focused: { a: 0, c: 0.03, l: 0.048 },
+            hovered: { a: 0, c: 0.02, l: 0.06 },
+            pressed: { a: 0, c: 0.025, l: 0.08 },
+            selected: { a: 0, c: 0.01, l: 0.03 },
+        },
+    } as const);
+    // --- [LIGHTNESS_SHIFT] ---------------------------------------------------
+    // adaptiveFactor = (0.7 + min(l, 1-l)) × (1.5 - 0.5×min(c/0.2, 1)) — compensates for extremes, Stevens' Power Law — magnitude × adaptiveFactor × intensity × direction
+    deriveShift<S extends typeof OklchColor.RacState.Type>(state: S, category: ColorCategory) {
+        const m = OklchColor.T.magnitudes[state],
+            i = OklchColor.T.intensity[category];
+        const adaptive = (0.7 + Math.min(this.l, 1 - this.l)) * (1.5 - 0.5 * Math.min(this.c / 0.2, 1));
+        const dir = state === 'pressed' ? (this.l < 0.3 ? 1 : -1) : this.l < 0.5 ? 1 : -1;
+        return {
+            alphaShift: m.a,
+            chromaShift: state === 'disabled' ? m.c : m.c * i,
+            lightnessShift: m.l * adaptive * i * dir,
+        };
+    }
+    deriveAllShifts(category: ColorCategory) {
+        type M = typeof OklchColor.T.magnitudes;
+        return Object.freeze(
+            Object.fromEntries(
+                (Object.keys(OklchColor.T.magnitudes) as (keyof M)[]).map((s) => [s, this.deriveShift(s, category)]),
+            ),
+        ) as { readonly [K in keyof M]: typeof OklchColor.StateShift.Type };
+    }
+    // --- [CORE_METHODS] ------------------------------------------------------
+    contrast(bg: OklchColor): number {
+        return bg.toColorJs().contrastAPCA(this.toColorJs());
+    }
+    inGamut(gamut: typeof OklchColor.Gamut.Type = 'srgb'): boolean {
+        return this.toColorJs().inGamut(gamut);
+    }
+    // --- [FACTORIES] ---------------------------------------------------------
+    static readonly cssVar = (name: string, step: number | string): string => `var(--color-${name}-${step})`;
+    static readonly create = Effect.fn('oklch.create')((l: number, c: number, h: number, a = 1) =>
+        S.decodeUnknown(OklchColor)({ a, c, h, l }),
+    );
+    static readonly fromCSS = Effect.fn('oklch.fromCSS')((css: string) =>
+        Effect.gen(function* () {
+            const m = OklchColor.Regex.exec(css);
+            const p = (v: string, pct?: string) => Number.parseFloat(v) / (pct === '%' ? 100 : 1);
+            return yield* m?.[1] && m[3] && m[4]
+                ? OklchColor.create(
+                      p(m[1], m[2]),
+                      Number.parseFloat(m[3]),
+                      Number.parseFloat(m[4]),
+                      m[5] ? p(m[5], m[6]) : 1,
+                  )
+                : Effect.fail(new ParseResult.Type(S.String.ast, css, `Invalid OKLCH: ${css}`));
+        }),
+    );
+    static readonly adjust = Effect.fn('oklch.adjust')((c: OklchColor, dl = 0, dc = 0, dh = 0, da = 0) =>
+        OklchColor.create(c.l + dl, c.c + dc, c.h + dh, c.a + da),
+    );
+}
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [THEME_ERROR] -----------------------------------------------------------
 
-const B = Object.freeze({
-    regex: {
-        oklch: /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)\s*(?:\/\s*([\d.]+)(%?))?\)/i,
-    },
-} as const);
+type ThemeError = Data.TaggedEnum<{
+    Generation: { category: string; message: string; phase: 'color' | 'scale' | 'token' };
+    Plugin: { code: 'CONFIG_WATCH_FAILED' | 'HMR_FAILED' | 'GENERATION_FAILED'; message: string };
+    Validation: { field: string; message: string; received: unknown };
+}>;
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-/** Wrap hue to 0-360 range. Grounding: OKLCH hue wraps cylindrically. */
-const normalizeHue = (h: number): number => ((h % 360) + 360) % 360;
-
-const formatAlpha = (a: number): string => (a < 1 ? ` / ${a.toFixed(2)}` : '');
-
-const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
-
-const hueAdjust = {
-    neg: (h2: number) => h2 + 360,
-    none: (h2: number) => h2,
-    pos: (h2: number) => h2 - 360,
-} as const;
-
-/** Interpolate hue via shortest/longest arc. Grounding: Perceptual color mixing requires arc-aware interpolation. */
-const interpolateHue = (h1: number, h2: number, t: number, method: HueInterpolation): number => {
-    const diff = h2 - h1;
-    const absDiff = Math.abs(diff);
-    const useShort = method === 'shorter' ? absDiff <= 180 : absDiff > 180;
-    const signKey = diff > 0 ? 'pos' : 'neg';
-    const adjustKey = useShort ? 'none' : signKey;
-    return normalizeHue(lerp(h1, hueAdjust[adjustKey](h2), t));
-};
-
-/** Convert OklchColor to Color.js object. Grounding: Enables Color.js API usage with branded types. */
-const toColorJs = (color: OklchColor): Color => new Color('oklch', [color.l, color.c, color.h], color.a);
-
-/** Generate CSS custom property reference. Grounding: Standardized var() syntax for theme integration. */
-const getVar = (name: string, step: number | string): string => `var(--color-${name}-${step})`;
-
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
-
-const create = (l: number, c: number, h: number, a = 1): Effect.Effect<OklchColor, ParseError> =>
-    validate.oklchColor({ a, c, h, l });
-
-const toCSS = (color: OklchColor): string =>
-    `oklch(${(color.l * 100).toFixed(1)}% ${color.c.toFixed(3)} ${color.h.toFixed(1)}${formatAlpha(color.a)})`;
-
-const parse = (css: string): Effect.Effect<OklchColor, ParseError> => {
-    const match = B.regex.oklch.exec(css);
-    const lVal = match?.[1];
-    const lPercent = match?.[2];
-    const cVal = match?.[3];
-    const hVal = match?.[4];
-    const aVal = match?.[5];
-    const aPercent = match?.[6];
-
-    const parseAlpha = (val: string | undefined, isPercent: string | undefined): number => {
-        const divisor = isPercent === '%' ? 100 : 1;
-        return val ? Number.parseFloat(val) / divisor : 1;
+const ThemeError = (() => {
+    const taggedEnum = Data.taggedEnum<ThemeError>();
+    return {
+        ...taggedEnum,
+        getMessage: (e: ThemeError): string =>
+            taggedEnum.$match(e, {
+                Generation: (g) => `[${g.phase}] ${g.category}: ${g.message}`,
+                Plugin: (p) => `[${p.code}] ${p.message}`,
+                Validation: (v) => `${v.field}: ${v.message}`,
+            }),
     };
-
-    return match && lVal && cVal && hVal
-        ? pipe(
-              Effect.succeed({
-                  a: parseAlpha(aVal, aPercent),
-                  c: Number.parseFloat(cVal),
-                  h: Number.parseFloat(hVal),
-                  l: lPercent === '%' ? Number.parseFloat(lVal) / 100 : Number.parseFloat(lVal),
-              }),
-              Effect.flatMap((parsed) => validate.oklchColor(parsed)),
-          )
-        : Effect.fail({ _tag: 'ParseError', message: `Invalid OKLCH string: ${css}` } as ParseError);
-};
-
-const mix = (
-    a: OklchColor,
-    b: OklchColor,
-    ratio: number,
-    hueMethod: HueInterpolation = 'shorter',
-): Effect.Effect<OklchColor, ParseError> =>
-    create(
-        lerp(a.l, b.l, ratio),
-        lerp(a.c, b.c, ratio),
-        interpolateHue(a.h, b.h, ratio, hueMethod),
-        lerp(a.a, b.a, ratio),
-    );
-
-const adjust = (color: OklchColor, delta: OklchAdjust): Effect.Effect<OklchColor, ParseError> =>
-    create(
-        Math.max(0, Math.min(1, color.l + (delta.lightness ?? 0))),
-        Math.max(0, Math.min(0.4, color.c + (delta.chroma ?? 0))),
-        normalizeHue(color.h + (delta.hue ?? 0)),
-        Math.max(0, Math.min(1, color.a + (delta.alpha ?? 0))),
-    );
-
-/** Calculate APCA contrast score. Grounding: Color.js implements WCAG 3.0 APCA algorithm. */
-const contrast = (fg: OklchColor, bg: OklchColor): number => toColorJs(bg).contrastAPCA(toColorJs(fg));
-
-/** Check if color is within gamut. Grounding: Color.js uses proper gamut boundary detection. */
-const isInGamut = (color: OklchColor, gamut: Gamut = 'srgb'): boolean => toColorJs(color).inGamut(gamut);
-
-/** Map color to gamut using CSS Color 4 algorithm. Grounding: Preserves perceptual uniformity. */
-const gamutMap = (color: OklchColor, gamut: Gamut = 'srgb'): Effect.Effect<OklchColor, ParseError> => {
-    const mapped = toColorJs(color).to(gamut).toGamut({ space: 'oklch' });
-    const [l, c, h] = mapped.coords;
-    return create(l ?? 0, c ?? 0, h ?? 0, mapped.alpha ?? 1);
-};
-
-/** Convert OKLCH to sRGB via Color.js. Grounding: CSS Color 4 spec-compliant gamut mapping. */
-const toSRGB = (color: OklchColor): string =>
-    toColorJs(color)
-        .to('srgb')
-        .toGamut()
-        .toString({ format: color.a < 1 ? 'rgba' : 'rgb' });
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-const colors = (): ColorsApi =>
-    Object.freeze({
-        adjust,
-        contrast,
-        create,
-        gamutMap,
-        getVar,
-        isInGamut,
-        mix,
-        parse,
-        toCSS,
-        toSRGB,
-    });
+})();
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as COLOR_TUNING, colors };
-export type { ColorsApi, Gamut, HueInterpolation, OklchAdjust };
+export { OklchColor, ThemeError };

@@ -9,15 +9,17 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
-                api: './src/api.ts',
                 async: './src/async.ts',
+                browser: './src/browser.ts',
                 database: './src/database.ts',
                 files: './src/files.ts',
-                forms: './src/forms.ts',
+                icons: './src/icons.ts',
+                runtime: './src/runtime.ts',
                 svg: './src/svg.ts',
                 types: './src/types.ts',
+                ui: './src/ui.ts',
             },
-            external: ['effect', '@effect/schema', 'isomorphic-dompurify', 'uuid'],
+            external: ['@effect/experimental', 'effect', 'isomorphic-dompurify', 'uuid'],
             mode: 'library',
             name: 'ParametricTypes',
         }),

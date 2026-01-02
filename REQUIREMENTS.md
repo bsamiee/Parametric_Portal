@@ -14,7 +14,9 @@ alwaysApply: true
 - NEVER create helpers serving fewer than three call-sites
 - NEVER create separate single-item and array-item function variants
 - NEVER create factory patterns when single implementation exists
-- NEVER create barrel index files; import directly from source
+- NEVER create barrel files (`index.ts`); consumers import directly from source
+- NEVER re-export symbols; each module defines and exports its own
+- NEVER use inline exports; declare first, export at file end
 - NEVER create documentation files unless explicitly requested
 - NEVER write comments describing what; reserve for why
 
@@ -25,6 +27,7 @@ alwaysApply: true
 - Replace `for/while` with `.map`, `.filter`, or Effect
 - Replace `let`/`var` with `const`
 - Replace default exports with named exports (exception: `*.config.ts`)
+- Use explicit exports at file end; never inline `export const`/`export function`
 - Consolidate related logic into single polymorphic constructs
 - Accept `T | ReadonlyArray<T>` with `Array.isArray()` normalization
 - Verify sources within 6 months of current date

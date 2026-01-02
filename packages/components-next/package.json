@@ -1,83 +1,64 @@
 {
-  "dependencies": {
-    "@radix-ui/react-slot": "catalog:",
-    "class-variance-authority": "catalog:",
-    "clsx": "catalog:",
-    "effect": "catalog:",
-    "motion": "catalog:",
-    "react": "catalog:",
-    "react-aria": "catalog:",
-    "react-aria-components": "catalog:",
-    "react-dom": "catalog:",
-    "react-stately": "catalog:",
-    "tailwind-merge": "catalog:"
-  },
-  "devDependencies": {
-    "@fast-check/vitest": "catalog:",
-    "@types/react": "catalog:",
-    "@types/react-dom": "catalog:",
-    "fast-check": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  },
-  "exports": {
-    "./provider": {
-      "types": "./src/core/context.ts",
-      "import": "./src/core/context.ts",
-      "default": "./src/core/context.ts"
+    "name": "@parametric-portal/components-next",
+    "version": "0.1.0",
+    "type": "module",
+    "exports": {
+        "./button": {
+            "types": "./src/button/button.tsx",
+            "import": "./src/button/button.tsx",
+            "default": "./src/button/button.tsx"
+        },
+        "./core/generator": {
+            "types": "./src/core/generator.ts",
+            "import": "./src/core/generator.ts",
+            "default": "./src/core/generator.ts"
+        },
+        "./core/icons": {
+            "types": "./src/core/icons.tsx",
+            "import": "./src/core/icons.tsx",
+            "default": "./src/core/icons.tsx"
+        },
+        "./core/layout": {
+            "types": "./src/core/layout.ts",
+            "import": "./src/core/layout.ts",
+            "default": "./src/core/layout.ts"
+        },
+        "./core/slots": {
+            "types": "./src/core/slots.tsx",
+            "import": "./src/core/slots.tsx",
+            "default": "./src/core/slots.tsx"
+        }
     },
-    "./button": {
-      "types": "./src/button/button.tsx",
-      "import": "./src/button/button.tsx",
-      "default": "./src/button/button.tsx"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "fix": "biome check --write .",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./input": {
-      "types": "./src/input/input.tsx",
-      "import": "./src/input/input.tsx",
-      "default": "./src/input/input.tsx"
+    "dependencies": {
+        "@parametric-portal/theme": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
+        "@radix-ui/react-slot": "catalog:",
+        "clsx": "catalog:",
+        "lucide-react": "catalog:",
+        "react": "catalog:",
+        "react-aria-components": "catalog:",
+        "react-dom": "catalog:",
+        "tailwind-merge": "catalog:",
+        "tailwind-variants": "catalog:",
+        "tw-animate-css": "catalog:"
     },
-    "./select": {
-      "types": "./src/select/select.tsx",
-      "import": "./src/select/select.tsx",
-      "default": "./src/select/select.tsx"
-    },
-    "./layout": {
-      "types": "./src/layout/layout.tsx",
-      "import": "./src/layout/layout.tsx",
-      "default": "./src/layout/layout.tsx"
-    },
-    "./panel": {
-      "types": "./src/layout/panel.tsx",
-      "import": "./src/layout/panel.tsx",
-      "default": "./src/layout/panel.tsx"
-    },
-    "./sidebar": {
-      "types": "./src/layout/sidebar.tsx",
-      "import": "./src/layout/sidebar.tsx",
-      "default": "./src/layout/sidebar.tsx"
-    },
-    "./dialog": {
-      "types": "./src/overlay/dialog.tsx",
-      "import": "./src/overlay/dialog.tsx",
-      "default": "./src/overlay/dialog.tsx"
-    },
-    "./popover": {
-      "types": "./src/overlay/popover.tsx",
-      "import": "./src/overlay/popover.tsx",
-      "default": "./src/overlay/popover.tsx"
+    "devDependencies": {
+        "@types/react": "catalog:",
+        "@types/react-dom": "catalog:",
+        "effect": "catalog:",
+        "tailwindcss": "catalog:",
+        "tailwindcss-react-aria-components": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "name": "@parametric-portal/components-next",
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "dev": "vite dev --host",
-    "preview": "vite preview --host",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "type": "module",
-  "version": "0.1.0"
 }
