@@ -36,62 +36,54 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const encodeCookie = (value: string): string => encodeURIComponent(value);
-const decodeCookie = (value: string): string => decodeURIComponent(value);
 const getCookie = (name: string): string | null => {
-    const encoded = encodeCookie(name);
-    const regex = new RegExp(`(?:^|; )${encoded}=([^;]*)`);
-    const match = regex.exec(document.cookie);
-    return match?.[1] ? decodeCookie(match[1]) : null;
+    const match = new RegExp(`(?:^|; )${encodeURIComponent(name)}=([^;]*)`).exec(document.cookie);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
 };
-const setCookie = (name: string, value: string, options: CookieOptions = {}): void => {
-    const expires = new Date();
-    expires.setDate(expires.getDate() + (options.expires ?? B.cookie.expires));
-    const parts = [
-        `${encodeCookie(name)}=${encodeCookie(value)}`,
-        `expires=${expires.toUTCString()}`,
-        `path=${options.path ?? B.cookie.path}`,
-        `SameSite=${options.sameSite ?? B.cookie.sameSite}`,
-        (options.secure ?? B.cookie.secure) ? 'Secure' : '',
-    ].filter(Boolean);
+const setCookie = (name: string, value: string, opts: CookieOptions = {}): void => {
+    const exp = new Date();
+    exp.setDate(exp.getDate() + (opts.expires ?? B.cookie.expires));
     // biome-ignore lint/suspicious/noDocumentCookie: Standard DOM API required for cookie storage adapter
-    document.cookie = parts.join('; ');
+    document.cookie = [
+        `${encodeURIComponent(name)}=${encodeURIComponent(value)}`,
+        `expires=${exp.toUTCString()}`,
+        `path=${opts.path ?? B.cookie.path}`,
+        `SameSite=${opts.sameSite ?? B.cookie.sameSite}`,
+        (opts.secure ?? B.cookie.secure) ? 'Secure' : '',
+    ]
+        .filter(Boolean)
+        .join('; ');
 };
 const removeCookie = (name: string): void => {
     // biome-ignore lint/suspicious/noDocumentCookie: Standard DOM API required for cookie storage adapter
-    document.cookie = `${encodeCookie(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${B.cookie.path}`;
+    document.cookie = `${encodeURIComponent(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${B.cookie.path}`;
 };
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const storageBackends: Record<StorageType, StorageAdapter> = Object.freeze({
-    cookies: {
-        getItem: (name) => getCookie(name),
-        removeItem: (name) => removeCookie(name),
-        setItem: (name, value) => setCookie(name, value),
-    },
+    cookies: { getItem: getCookie, removeItem: removeCookie, setItem: setCookie },
     indexedDB: {
         getItem: async (name) => (await get(name)) ?? null,
-        removeItem: async (name) => del(name),
-        setItem: async (name, value) => set(name, value),
+        removeItem: del,
+        setItem: set,
     },
     localStorage: {
-        getItem: (name) => localStorage.getItem(name),
-        removeItem: (name) => localStorage.removeItem(name),
-        setItem: (name, value) => localStorage.setItem(name, value),
+        getItem: (n) => localStorage.getItem(n),
+        removeItem: (n) => localStorage.removeItem(n),
+        setItem: (n, v) => localStorage.setItem(n, v),
     },
     sessionStorage: {
-        getItem: (name) => sessionStorage.getItem(name),
-        removeItem: (name) => sessionStorage.removeItem(name),
-        setItem: (name, value) => sessionStorage.setItem(name, value),
+        getItem: (n) => sessionStorage.getItem(n),
+        removeItem: (n) => sessionStorage.removeItem(n),
+        setItem: (n, v) => sessionStorage.setItem(n, v),
     },
 });
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createStorageAdapter = (type: StorageType): ReturnType<typeof createJSONStorage> =>
+const createStorage = (type: StorageType = B.defaults.storage): ReturnType<typeof createJSONStorage> =>
     createJSONStorage(() => storageBackends[type] as StateStorage);
-const createStorage = (type: StorageType = B.defaults.storage) => createStorageAdapter(type);
 
 // --- [EXPORT] ----------------------------------------------------------------
 

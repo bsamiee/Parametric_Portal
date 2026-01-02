@@ -1,8 +1,8 @@
 /**
  * CSS variable synchronization for Tailwind v4 - syncs Zustand store state to DOM CSS variables via subscription.
  */
-import { types } from '@parametric-portal/types/types';
-import { Option, pipe } from 'effect';
+import { HtmlId } from '@parametric-portal/types/types';
+import { Option } from 'effect';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { StoreApi } from 'zustand';
 
@@ -18,11 +18,6 @@ type CssSyncConfig<T> = {
     readonly root?: () => HTMLElement;
     readonly selector?: (state: T) => Record<string, string>;
 };
-type SyncPayload = {
-    readonly entries: ReadonlyArray<readonly [string, string]>;
-    readonly prefix?: string;
-    readonly root: HTMLElement;
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -32,62 +27,40 @@ const B = Object.freeze({
         root: () => document.documentElement,
     },
 } as const);
-const typesApi = types();
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const validatePrefix = (prefix: string): string =>
-    pipe(
-        Option.liftPredicate(prefix, typesApi.guards.htmlId),
-        Option.getOrElse(() => {
-            console.warn(`[css-sync] Invalid prefix "${prefix}", using default`);
-            return B.defaults.prefix;
-        }),
-    );
-const toEntries = (classes: ReadonlyArray<string>): ReadonlyArray<readonly [string, string]> =>
-    classes.map((c) => [c, ''] as const);
+const validatePrefix = (prefix: string): string => {
+    HtmlId.is(prefix) || console.warn(`[css-sync] Invalid prefix "${prefix}", using default`);
+    return HtmlId.is(prefix) ? prefix : B.defaults.prefix;
+};
 const syncVariables = <T>(
     root: HTMLElement,
     state: T,
     prefix: string,
-    selector: Option.Option<(state: T) => Record<string, string>>,
-): void => {
-    pipe(
-        selector,
-        Option.map((sel) => syncHandlers.variables({ entries: Object.entries(sel(state)), prefix, root })),
-    );
-};
-const syncClassNames = <T>(
-    root: HTMLElement,
-    state: T,
-    classNames: Option.Option<(state: T) => ClassNameResult>,
-): void => {
-    pipe(
-        classNames,
-        Option.map((fn) => fn(state)),
-        Option.map((result) =>
-            (['add', 'remove'] as const).map((op) =>
-                pipe(
-                    Option.fromNullable(result[op]),
-                    Option.map((arr) => classNameDispatch[op]({ entries: toEntries(arr), prefix: '', root })),
-                ),
-            ),
-        ),
-    );
-};
-
-// --- [DISPATCH_TABLES] -------------------------------------------------------
-
-const syncHandlers = {
-    classesAdd: ({ entries, root }: SyncPayload) => entries.map(([cn]) => root.classList.add(cn)),
-    classesRemove: ({ entries, root }: SyncPayload) => entries.map(([cn]) => root.classList.remove(cn)),
-    variables: ({ entries, prefix = '', root }: SyncPayload) =>
-        entries.map(([key, value]) => root.style.setProperty(`--${prefix}-${key}`, value)),
-} as const;
-const classNameDispatch = {
-    add: syncHandlers.classesAdd,
-    remove: syncHandlers.classesRemove,
-} as const satisfies Record<keyof ClassNameResult, (payload: SyncPayload) => ReadonlyArray<void>>;
+    sel: Option.Option<(s: T) => Record<string, string>>,
+): void =>
+    Option.match(sel, {
+        onNone: () => {},
+        onSome: (fn) => {
+            Object.entries(fn(state)).forEach(([k, v]) => {
+                root.style.setProperty(`--${prefix}-${k}`, v);
+            });
+        },
+    });
+const syncClassNames = <T>(root: HTMLElement, state: T, classNames: Option.Option<(s: T) => ClassNameResult>): void =>
+    Option.match(classNames, {
+        onNone: () => {},
+        onSome: (fn) => {
+            const result = fn(state);
+            (result.add ?? []).forEach((c) => {
+                root.classList.add(c);
+            });
+            (result.remove ?? []).forEach((c) => {
+                root.classList.remove(c);
+            });
+        },
+    });
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

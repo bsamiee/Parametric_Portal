@@ -10,17 +10,14 @@ export default defineConfig(
         createConfig({
             entry: {
                 colors: './src/colors.ts',
-                fonts: './src/fonts.ts',
-                layouts: './src/layouts.ts',
                 plugin: './src/plugin.ts',
-                presets: './src/presets.ts',
-                schemas: './src/schemas.ts',
+                'scale-derivation': './src/scale-derivation.ts',
+                seed: './src/seed.ts',
                 theme: './src/theme.ts',
-                utils: './src/utils.ts',
             },
-            external: ['effect', '@effect/schema'], // Peer dependencies excluded from bundle
+            external: ['@parametric-portal/types', 'colorjs.io', 'effect'],
             mode: 'library',
             name: 'ParametricTheme',
         }),
-    ) as UserConfig, // Type assertion required: Effect.runSync returns unknown, defineConfig expects UserConfig
+    ) as UserConfig,
 );

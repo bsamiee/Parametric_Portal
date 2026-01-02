@@ -1,7 +1,7 @@
 /**
  * Store configuration types with middleware support (immer, persist, computed, temporal, devtools).
  */
-import { Either, pipe, Schema as S } from 'effect';
+import { Either, Schema as S } from 'effect';
 import type { StorageType } from './storage';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -36,10 +36,6 @@ type StoreConfig<T, C = object> = {
 type SlicedStoreConfig<T, C = object> = Omit<StoreConfig<T, C>, 'immer'> & {
     readonly immer?: boolean;
 };
-type ExtractState<S> = S extends { getState: () => infer T } ? T : never;
-type WithSelectors<S> = S & {
-    readonly use: { readonly [K in keyof ExtractState<S>]: () => ExtractState<S>[K] };
-};
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -47,15 +43,10 @@ const B = Object.freeze({
     bounds: { historyLimit: { max: 1000, min: 1 } },
     patterns: { storeName: /^[a-z0-9][a-z0-9:-]*$/ },
 } as const);
-
-const StoreNameSchema = pipe(
-    S.String,
-    S.pattern(B.patterns.storeName, {
-        message: () => 'Store name must be lowercase alphanumeric with hyphens/colons',
-    }),
+const StoreNameSchema = S.String.pipe(
+    S.pattern(B.patterns.storeName, { message: () => 'Store name must be lowercase alphanumeric with hyphens/colons' }),
 );
-
-const HistoryLimitSchema = pipe(S.Number, S.int(), S.between(B.bounds.historyLimit.min, B.bounds.historyLimit.max));
+const HistoryLimitSchema = S.Number.pipe(S.int(), S.between(B.bounds.historyLimit.min, B.bounds.historyLimit.max));
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -64,13 +55,4 @@ const validateStoreName = (name: string): boolean => Either.isRight(S.decodeUnkn
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as STORE_TYPES_TUNING, HistoryLimitSchema, StoreNameSchema, validateStoreName };
-export type {
-    ComputedConfig,
-    DevtoolsConfig,
-    ExtractState,
-    PersistConfig,
-    SlicedStoreConfig,
-    StoreConfig,
-    TemporalConfig,
-    WithSelectors,
-};
+export type { ComputedConfig, DevtoolsConfig, PersistConfig, SlicedStoreConfig, StoreConfig, TemporalConfig };

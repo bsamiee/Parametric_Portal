@@ -1,11 +1,25 @@
 {
+    "name": "@parametric-portal/parametric-icons",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "fix": "biome check --write .",
+        "hadolint": "hadolint Dockerfile",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
     "dependencies": {
         "@effect/platform": "catalog:",
         "@effect/platform-browser": "catalog:",
-        "@parametric-portal/api": "workspace:*",
         "@parametric-portal/components": "workspace:*",
         "@parametric-portal/devtools": "workspace:*",
         "@parametric-portal/runtime": "workspace:*",
+        "@parametric-portal/server": "workspace:*",
         "@parametric-portal/theme": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "effect": "catalog:",
@@ -20,19 +34,5 @@
         "typescript": "catalog:",
         "vite": "catalog:",
         "vitest": "catalog:"
-    },
-    "name": "@parametric-portal/parametric-icons",
-    "private": true,
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "fix": "biome check --write .",
-        "dev": "vite dev --host",
-        "hadolint": "hadolint Dockerfile",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
-    },
-    "type": "module",
-    "version": "0.1.0"
+    }
 }

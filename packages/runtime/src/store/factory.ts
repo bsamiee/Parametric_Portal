@@ -1,7 +1,7 @@
 /**
  * Zustand store factories with middleware: immer → computed → persist → temporal → subscribeWithSelector → devtools
  */
-import { Either, Schema as S } from 'effect';
+import { Either, Match, Schema as S } from 'effect';
 import { type TemporalState, temporal } from 'zundo';
 import { create, type StateCreator, type UseBoundStore, type StoreApi as ZustandStoreApi } from 'zustand';
 import { devtools, persist, subscribeWithSelector } from 'zustand/middleware';
@@ -9,25 +9,29 @@ import { immer } from 'zustand/middleware/immer';
 import { createComputed } from 'zustand-computed';
 import { type createSlice, withSlices } from 'zustand-slices';
 import { createStorage, type StorageType } from './storage';
-import type { SlicedStoreConfig, StoreConfig, WithSelectors } from './types';
+import type { SlicedStoreConfig, StoreConfig } from './types';
 import { validateStoreName } from './types';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type ExtractState<S> = S extends { getState: () => infer T } ? T : never;
+type WithSelectors<S> = S & {
+    readonly use: { readonly [K in keyof ExtractState<S>]: () => ExtractState<S>[K] };
+};
+// biome-ignore lint/suspicious/noExplicitAny: Zustand middleware typing
+type MiddlewareApplicator = (creator: any, ctx: MiddlewareContext) => any;
+// biome-ignore lint/suspicious/noExplicitAny: Slice type inference
+type AnySlice = ReturnType<typeof createSlice<any, any, any>>;
 type StoreApi<T, C = object> = WithSelectors<UseBoundStore<ZustandStoreApi<T & C>>>;
+type MiddlewareKey = 'immer' | 'computed' | 'persist' | 'temporal' | 'subscribeWithSelector' | 'devtools';
+type SliceStateUnion<S extends AnySlice[]> = S[number] extends { value: infer V } ? V : never;
+type SlicedStoreReturn<S extends AnySlice[], C extends object> = StoreApi<SliceStateUnion<S>, C> &
+    TemporalApi<SliceStateUnion<S> & C>;
 type TemporalApi<T> = {
     readonly temporal: {
         getState: () => TemporalState<Partial<T>>;
     };
 };
-type MiddlewareKey = 'immer' | 'computed' | 'persist' | 'temporal' | 'subscribeWithSelector' | 'devtools';
-// biome-ignore lint/suspicious/noExplicitAny: Zustand middleware typing
-type MiddlewareApplicator = (creator: any, ctx: MiddlewareContext) => any;
-// biome-ignore lint/suspicious/noExplicitAny: Slice type inference
-type AnySlice = ReturnType<typeof createSlice<any, any, any>>;
-type SliceStateUnion<S extends AnySlice[]> = S[number] extends { value: infer V } ? V : never;
-type SlicedStoreReturn<S extends AnySlice[], C extends object> = StoreApi<SliceStateUnion<S>, C> &
-    TemporalApi<SliceStateUnion<S> & C>;
 type MiddlewareContext = {
     readonly name: string;
     readonly immer: { readonly enabled: boolean };
@@ -90,21 +94,26 @@ const attachSelectors = <T extends object>(
 const normalizeConfig = <T extends { enabled?: boolean }>(
     value: boolean | T | undefined,
     defaults: T,
-): T & { enabled: boolean } => {
-    const handlers: Record<'undefined' | 'boolean' | 'object', () => T & { enabled: boolean }> = {
-        boolean: () => ({ ...defaults, enabled: value as boolean }),
-        object: () => ({ ...defaults, ...(value as T), enabled: (value as T).enabled ?? true }),
-        undefined: () => ({ ...defaults, enabled: defaults.enabled ?? true }),
-    };
-    const key = (value === undefined && 'undefined') || (typeof value === 'boolean' && 'boolean') || 'object';
-    return handlers[key]();
-};
+): T & { enabled: boolean } =>
+    Match.value(value).pipe(
+        Match.when(
+            (v): v is undefined => v === undefined,
+            () => ({ ...defaults, enabled: defaults.enabled ?? true }),
+        ),
+        Match.when(
+            (v): v is boolean => typeof v === 'boolean',
+            (v) => ({ ...defaults, enabled: v }),
+        ),
+        Match.orElse((v) => ({ ...defaults, ...v, enabled: v.enabled ?? true })),
+    ) as T & { enabled: boolean };
+const getEnvVar = (key: string): string | undefined =>
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[key];
 const warnInvalidConfig = (name: string): void => {
-    // biome-ignore lint/style/useNamingConvention: NODE_ENV standard
-    const nodeEnv = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV;
-    nodeEnv === 'production' ||
-        (!validateStoreName(name) &&
-            console.warn(`[Zustand] Invalid store name "${name}": must be lowercase alphanumeric with hyphens/colons`));
+    const isProd = getEnvVar('NODE_ENV') === 'production';
+    const isValid = validateStoreName(name);
+    isProd ||
+        isValid ||
+        console.warn(`[Zustand] Invalid store name "${name}": must be lowercase alphanumeric with hyphens/colons`);
 };
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
@@ -159,26 +168,24 @@ const buildMiddlewareChain = (
 
 const createStore = <T extends object, C extends object = object>(
     initializer: StateCreator<T, [], []>,
-    config: StoreConfig<T, C>,
+    cfg: StoreConfig<T, C>,
 ): StoreApi<T, C> & TemporalApi<T & C> => {
-    warnInvalidConfig(config.name);
-    const persistConfig = normalizeConfig(config.persist, B.defaults.persist);
-    const persistSchema =
-        typeof config.persist === 'object' && config.persist !== null ? config.persist.schema : undefined;
+    warnInvalidConfig(cfg.name);
     const ctx = {
-        computeFn: config.computed?.compute,
-        computeOpts: config.computed ? { keys: config.computed.keys as ReadonlyArray<unknown> } : undefined,
-        devtools: normalizeConfig(config.devtools, B.defaults.devtools),
-        immer: normalizeConfig(config.immer, B.defaults.immer),
-        name: config.name,
-        persist: { ...persistConfig, schema: persistSchema },
-        temporal: normalizeConfig(config.temporal, B.defaults.temporal),
+        computeFn: cfg.computed?.compute,
+        computeOpts: cfg.computed ? { keys: cfg.computed.keys as ReadonlyArray<unknown> } : undefined,
+        devtools: normalizeConfig(cfg.devtools, B.defaults.devtools),
+        immer: normalizeConfig(cfg.immer, B.defaults.immer),
+        name: cfg.name,
+        persist: {
+            ...normalizeConfig(cfg.persist, B.defaults.persist),
+            schema: typeof cfg.persist === 'object' && cfg.persist !== null ? cfg.persist.schema : undefined,
+        },
+        temporal: normalizeConfig(cfg.temporal, B.defaults.temporal),
     } as MiddlewareContext;
-    const creator = buildMiddlewareChain(initializer, ctx);
-    const store: UseBoundStore<ZustandStoreApi<T & C>> = create<T & C>()(creator);
-    return attachSelectors(store) as StoreApi<T, C> & TemporalApi<T & C>;
+    return attachSelectors(create<T & C>()(buildMiddlewareChain(initializer, ctx))) as StoreApi<T, C> &
+        TemporalApi<T & C>;
 };
-
 const createSlicedStore = <S extends AnySlice[], C extends object = object>(
     config: SlicedStoreConfig<object, C>,
     ...slices: S

@@ -23,6 +23,6 @@ uv run .claude/hooks/load-skill-index.py
 3. Read `REQUIREMENTS.md`, extract all standards, constraints, quality expectations, bleeding-edge approach, and file organization structure.
 4. Read `.claude/skills/style-standards/SKILL.md`
 5. Read `.claude/skills/parallel-dispatch/SKILL.md`
-6. [IMPORTANT] always do full refactoring/clean code implementation, never maintain legacy/stale code or patterns, never implement workarounds/hacky code.
+6. [IMPORTANT] always do full refactoring/clean code implementation, never maintain legacy/stale code or patterns, never implement workarounds/hacky code, never create barrel files (`index.ts`), never re-export symbols, always use explicit exports at file end.
 
 [CRITICAL] Summarize architecture, packages, tooling, style domains, code philosophy.

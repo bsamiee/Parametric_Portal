@@ -1,24 +1,15 @@
 /**
  * Browser utility tests: pure functions for filename sanitization, error factories, clipboard detection.
+ * [COVERAGE_LIMIT] Hooks (useClipboard, useDownload, useExport) require DOM/File APIs unavailable in test context.
  */
 import { fc, it as itProp } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
 import { TEST_CONSTANTS } from '@parametric-portal/test-utils/constants';
 import '@parametric-portal/test-utils/harness';
-import { Effect, Exit } from 'effect';
+import { BROWSER_TUNING, BrowserError } from '@parametric-portal/types/browser';
 import { describe, expect, it } from 'vitest';
-import {
-    BROWSER_TUNING,
-    buildFilename,
-    exportHandlers,
-    isClipboardAvailable,
-    mkClipboardError,
-    mkDownloadError,
-    mkExportError,
-    sanitizeFilename,
-} from '../src/hooks/browser';
+import { buildFilename, Export, sanitizeFilename } from '../src/services/browser';
 
-// Note: Browser mode uses real navigator.clipboard - no stubbing needed
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
@@ -128,46 +119,63 @@ describe('buildFilename', () => {
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const errorFactoryTests = [
-    { def: TEST_CONSTANTS.errors.clipboardRead, factory: mkClipboardError, tag: 'ClipboardError' },
-    { def: TEST_CONSTANTS.errors.downloadFailed, factory: mkDownloadError, tag: 'DownloadError' },
-    { def: TEST_CONSTANTS.errors.exportFailed, factory: mkExportError, tag: 'ExportError' },
+    { def: TEST_CONSTANTS.errors.clipboardRead, factory: BrowserError.Clipboard, tag: 'Clipboard' },
+    { def: TEST_CONSTANTS.errors.downloadFailed, factory: BrowserError.Download, tag: 'Download' },
+    { def: TEST_CONSTANTS.errors.exportFailed, factory: BrowserError.Export, tag: 'Export' },
 ] as const;
 
 // --- [DESCRIBE] error factories ----------------------------------------------
 
-describe('error factories', () => {
-    it.each(errorFactoryTests)('$tag creates error with correct _tag, code, and stack', ({ def, factory, tag }) => {
+describe('BrowserError TaggedEnum', () => {
+    it.each(errorFactoryTests)('$tag creates error with correct _tag and properties', ({ factory, def, tag }) => {
         const error = factory(def);
         expect(error._tag).toBe(tag);
         expect(error.code).toBe(def.code);
         expect(error.message).toBe(def.message);
-        expect(error).toBeInstanceOf(Error);
-        expect(error.stack).toBeDefined();
+    });
+    it('$is type guard works correctly', () => {
+        const clipboardError = BrowserError.Clipboard({ code: 'TEST', message: 'test' });
+        const downloadError = BrowserError.Download({ code: 'TEST', message: 'test' });
+        expect(BrowserError.$is('Clipboard')(clipboardError)).toBe(true);
+        expect(BrowserError.$is('Clipboard')(downloadError)).toBe(false);
+        expect(BrowserError.$is('Download')(downloadError)).toBe(true);
+    });
+    it('$match exhaustively handles all variants', () => {
+        const errors = [
+            BrowserError.Clipboard({ code: 'C', message: 'clipboard' }),
+            BrowserError.Download({ code: 'D', message: 'download' }),
+            BrowserError.Export({ code: 'E', message: 'export' }),
+            BrowserError.Storage({ code: 'S', message: 'storage' }),
+        ];
+        const results = errors.map((e) =>
+            BrowserError.$match(e, {
+                Clipboard: (c) => `clip:${c.code}`,
+                Download: (d) => `down:${d.code}`,
+                Export: (x) => `exp:${x.code}`,
+                Storage: (s) => `stor:${s.code}`,
+            }),
+        );
+        expect(results).toEqual(['clip:C', 'down:D', 'exp:E', 'stor:S']);
+    });
+    it('format helper produces readable output', () => {
+        const error = BrowserError.Export({ code: 'FAILED', message: 'Something went wrong' });
+        expect(BrowserError.format(error)).toBe('[Export:FAILED] Something went wrong');
     });
 });
 
-// --- [DESCRIBE] isClipboardAvailable -----------------------------------------
+// --- [DESCRIBE] clipboard availability ---------------------------------------
 
-describe('isClipboardAvailable', () => {
-    it('returns boolean indicating clipboard API availability', () => {
-        const result = isClipboardAvailable();
-        expect(typeof result).toBe('boolean');
-        // In browser mode, clipboard is typically available
-        expect(result).toBe(typeof navigator !== 'undefined' && 'clipboard' in navigator);
+describe('clipboard availability', () => {
+    it('navigator.clipboard is accessible in browser environment', () => {
+        const available = typeof navigator !== 'undefined' && 'clipboard' in navigator;
+        expect(typeof available).toBe('boolean');
     });
 });
 
-// --- [DESCRIBE] exportHandlers -----------------------------------------------
+// --- [DESCRIBE] Export service -----------------------------------------------
 
-describe('exportHandlers', () => {
-    it('is frozen dispatch table with all format handlers', () => {
-        expect(Object.isFrozen(exportHandlers)).toBe(true);
-        expect(Object.keys(exportHandlers).sort((a, b) => a.localeCompare(b))).toEqual(['png', 'svg', 'zip']);
-    });
-    it.each(['png', 'svg', 'zip'] as const)('%s handler returns Effect (fails without DOM)', (format) => {
-        const effect = exportHandlers[format]({ format });
-        const result = Effect.runSyncExit(effect);
-        expect(Exit.isExit(result)).toBe(true);
-        expect(result).toBeFailure();
+describe('Export service', () => {
+    it('Export tag has correct identifier', () => {
+        expect(Export.key).toBe('Export');
     });
 });

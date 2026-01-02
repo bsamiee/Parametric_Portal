@@ -1,9 +1,10 @@
 /**
  * Bridge file browser APIs with React state via Effect-wrapped operations.
+ * FileOps provided as Context.Tag service with Layer for dependency injection.
  */
-import { type AsyncState, async } from '@parametric-portal/types/async';
-import { type FileError, files } from '@parametric-portal/types/files';
-import { Effect, Fiber } from 'effect';
+import { AsyncState } from '@parametric-portal/types/async';
+import { FileError } from '@parametric-portal/types/files';
+import { Context, Effect, Fiber, Layer, Option, Schema as S } from 'effect';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRuntime } from '../runtime';
 
@@ -24,16 +25,24 @@ type FileDropState = {
     };
     readonly state: AsyncState<ReadonlyArray<File>, FileError>;
 };
-type FileInputOptions = {
-    readonly accept?: string;
-    readonly multiple?: boolean;
-};
+type FileInputOptions = S.Schema.Type<typeof FileInputOptionsSchema>;
 type StateSetter<A, E> = React.Dispatch<React.SetStateAction<AsyncState<A, E>>>;
+type FileOpsService = {
+    readonly fromDataTransfer: (dataTransfer: DataTransfer | null) => Option.Option<ReadonlyArray<File>>;
+    readonly fromFileList: (files: FileList | null) => Option.Option<ReadonlyArray<File>>;
+    readonly toArrayBuffer: (file: File) => Effect.Effect<ArrayBuffer, FileError>;
+    readonly toDataUrl: (file: File) => Effect.Effect<string, FileError>;
+    readonly toText: (file: File) => Effect.Effect<string, FileError>;
+};
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const FileInputOptionsSchema = S.Struct({
+    accept: S.optional(S.String),
+    multiple: S.optional(S.Boolean),
+});
 
 // --- [CONSTANTS] -------------------------------------------------------------
-
-const asyncApi = async();
-const filesApi = files();
 
 const B = Object.freeze({
     defaults: {
@@ -48,146 +57,136 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const interruptFiber =
-    <A, E, R>(
-        runtime: { runFork: (effect: Effect.Effect<unknown, unknown, R>) => Fiber.RuntimeFiber<unknown, unknown> },
-        fiber: Fiber.RuntimeFiber<A, E>,
-    ) =>
-    () => {
-        runtime.runFork(Fiber.interrupt(fiber));
-    };
-
-const FileOps = Object.freeze({
-    fromDataTransfer: (dataTransfer: DataTransfer | null): ReadonlyArray<File> =>
-        dataTransfer ? Array.from(dataTransfer.files) : [],
-    fromFileList: (fileList: FileList | null): ReadonlyArray<File> => (fileList ? Array.from(fileList) : []),
-    readAsArrayBuffer: (file: File): Effect.Effect<ArrayBuffer, FileError, never> =>
+const fileOpsImpl: FileOpsService = {
+    fromDataTransfer: (dataTransfer) =>
+        Option.fromNullable(dataTransfer).pipe(
+            Option.map((dt) => Array.from(dt.files)),
+            Option.filter((arr) => arr.length > 0),
+        ),
+    fromFileList: (files) =>
+        Option.fromNullable(files).pipe(
+            Option.map(Array.from<File>),
+            Option.filter((arr) => arr.length > 0),
+        ),
+    toArrayBuffer: (file) =>
         Effect.tryPromise({
-            catch: () => filesApi.mkFileError(B.errors.readFailed.code, B.errors.readFailed.message),
+            catch: () => new FileError(B.errors.readFailed),
             try: () => file.arrayBuffer(),
         }),
-    readAsDataUrl: (file: File): Effect.Effect<string, FileError, never> =>
+    toDataUrl: (file) =>
         Effect.async((resume) => {
             const reader = new FileReader();
             reader.onload = () => resume(Effect.succeed(reader.result as string));
-            reader.onerror = () =>
-                resume(Effect.fail(filesApi.mkFileError(B.errors.readFailed.code, B.errors.readFailed.message)));
+            reader.onerror = () => resume(Effect.fail(new FileError(B.errors.readFailed)));
             reader.readAsDataURL(file);
         }),
-    text: (file: File): Effect.Effect<string, FileError, never> =>
+    toText: (file) =>
         Effect.tryPromise({
-            catch: () => filesApi.mkFileError(B.errors.readFailed.code, B.errors.readFailed.message),
+            catch: () => new FileError(B.errors.readFailed),
             try: () => file.text(),
         }),
-});
+};
+const setStateEffect = <A, E>(
+    setState: StateSetter<A, E>,
+    files: Option.Option<ReadonlyArray<File>>,
+): Effect.Effect<void> =>
+    Effect.sync(() =>
+        setState(
+            Option.match(files, {
+                onNone: () => AsyncState.Failure(new FileError(B.errors.empty)) as AsyncState<A, E>,
+                onSome: (f) => AsyncState.Success(f) as AsyncState<A, E>,
+            }),
+        ),
+    );
 
-const StateCallbacks = Object.freeze({
-    onFailure:
-        <A, E>(setState: StateSetter<A, E>) =>
-        (error: E) =>
-            Effect.sync(() => setState(asyncApi.failure(error))),
-    onSuccess:
-        <A, E>(setState: StateSetter<A, E>) =>
-        (data: A) =>
-            Effect.sync(() => setState(asyncApi.success(data))),
-});
+// --- [SERVICES] --------------------------------------------------------------
 
-const createFileSelectionEffect = (
-    files: ReadonlyArray<File>,
-    setState: StateSetter<ReadonlyArray<File>, FileError>,
-): Effect.Effect<void, never, never> =>
-    files.length > 0
-        ? StateCallbacks.onSuccess<ReadonlyArray<File>, FileError>(setState)(files).pipe(Effect.asVoid)
-        : StateCallbacks.onFailure<ReadonlyArray<File>, FileError>(setState)(
-              filesApi.mkFileError(B.errors.empty.code, B.errors.empty.message),
-          ).pipe(Effect.asVoid);
+class FileOps extends Context.Tag('FileOps')<FileOps, FileOpsService>() {}
+const FileOpsLive = Layer.succeed(FileOps, fileOpsImpl);
 
-// --- [HOOKS] -----------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const useFileInput = <R>(options: FileInputOptions = {}): FileInputState => {
     const runtime = useRuntime<R, never>();
-    const [state, setState] = useState<AsyncState<ReadonlyArray<File>, FileError>>(asyncApi.idle);
-    const [files, setFiles] = useState<ReadonlyArray<File>>([]);
-    const inputRef = useRef<HTMLInputElement | null>(null);
-    const fiberRef = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
-    const resolvedAccept = options.accept ?? B.defaults.accept;
-    const resolvedMultiple = options.multiple ?? B.defaults.multiple;
+    const [state, setState] = useState<AsyncState<ReadonlyArray<File>, FileError>>(AsyncState.Idle);
+    const [selectedFiles, setSelectedFiles] = useState<ReadonlyArray<File>>([]);
+    const inputRef = useRef<Option.Option<HTMLInputElement>>(Option.none());
+    const fiberRef = useRef<Option.Option<Fiber.RuntimeFiber<unknown, unknown>>>(Option.none());
     useEffect(() => {
         const input = globalThis.document?.createElement('input');
         input &&
             Object.assign(
-                Object.assign(input, { accept: resolvedAccept, multiple: resolvedMultiple, type: 'file' }).style,
+                Object.assign(input, {
+                    accept: options.accept ?? B.defaults.accept,
+                    multiple: options.multiple ?? B.defaults.multiple,
+                    type: 'file',
+                }).style,
                 { display: 'none' },
             );
-        inputRef.current = input ?? null;
+        inputRef.current = Option.fromNullable(input);
         const handleChange = () => {
-            const selectedFiles = FileOps.fromFileList(inputRef.current?.files ?? null);
-            setFiles(selectedFiles);
-            setState(asyncApi.loading());
-            fiberRef.current = runtime.runFork(createFileSelectionEffect(selectedFiles, setState));
+            const newFiles = Option.flatMap(inputRef.current, (el) => fileOpsImpl.fromFileList(el.files));
+            setSelectedFiles(Option.getOrElse(newFiles, () => []));
+            setState(AsyncState.Loading());
+            fiberRef.current = Option.some(runtime.runFork(setStateEffect(setState, newFiles)));
         };
         input?.addEventListener('change', handleChange);
         globalThis.document?.body.appendChild(input);
-        const fiber = fiberRef.current;
-        const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
         return () => {
             input?.removeEventListener('change', handleChange);
             input?.remove();
-            cleanup?.();
+            Option.map(fiberRef.current, (fiber) => runtime.runFork(Fiber.interrupt(fiber)));
         };
-    }, [runtime, resolvedAccept, resolvedMultiple]);
-    const accept = useCallback(() => {
-        inputRef.current?.click();
-    }, []);
+    }, [runtime, options.accept, options.multiple]);
+    const accept = useCallback(() => Option.map(inputRef.current, (el) => el.click()), []);
     const reset = useCallback(() => {
-        fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
-        fiberRef.current = null;
-        inputRef.current && Object.assign(inputRef.current, { value: '' });
-        setFiles([]);
-        setState(asyncApi.idle());
+        Option.map(fiberRef.current, (fiber) => runtime.runFork(Fiber.interrupt(fiber)));
+        fiberRef.current = Option.none();
+        Option.map(inputRef.current, (el) => Object.assign(el, { value: '' }));
+        setSelectedFiles([]);
+        setState(AsyncState.Idle());
     }, [runtime]);
-    return { accept, files, reset, state };
+    return { accept, files: selectedFiles, reset, state };
 };
 const useFileDrop = <R>(): FileDropState => {
     const runtime = useRuntime<R, never>();
-    const [state, setState] = useState<AsyncState<ReadonlyArray<File>, FileError>>(asyncApi.idle);
+    const [state, setState] = useState<AsyncState<ReadonlyArray<File>, FileError>>(AsyncState.Idle);
     const [isDragOver, setIsDragOver] = useState(false);
-    const fiberRef = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
-    const onDragOver = useCallback((e: React.DragEvent) => {
+    const fiberRef = useRef<Option.Option<Fiber.RuntimeFiber<unknown, unknown>>>(Option.none());
+    const handleDrag = useCallback((e: React.DragEvent, over: boolean) => {
         e.preventDefault();
         e.stopPropagation();
-        setIsDragOver(true);
-    }, []);
-    const onDragLeave = useCallback((e: React.DragEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsDragOver(false);
+        setIsDragOver(over);
     }, []);
     const onDrop = useCallback(
         (e: React.DragEvent) => {
             e.preventDefault();
             e.stopPropagation();
             setIsDragOver(false);
-            const droppedFiles = FileOps.fromDataTransfer(e.dataTransfer);
-            setState(asyncApi.loading());
-            fiberRef.current = runtime.runFork(createFileSelectionEffect(droppedFiles, setState));
+            const droppedFiles = fileOpsImpl.fromDataTransfer(e.dataTransfer);
+            setState(AsyncState.Loading());
+            fiberRef.current = Option.some(runtime.runFork(setStateEffect(setState, droppedFiles)));
         },
         [runtime],
     );
-    useEffect(() => {
-        const fiber = fiberRef.current;
-        const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
-        return cleanup;
-    }, [runtime]);
+    useEffect(
+        () => () => {
+            Option.map(fiberRef.current, (fiber) => runtime.runFork(Fiber.interrupt(fiber)));
+        },
+        [runtime],
+    );
     return {
         isDragOver,
-        props: { onDragLeave, onDragOver, onDrop },
+        props: {
+            onDragLeave: (e: React.DragEvent) => handleDrag(e, false),
+            onDragOver: (e: React.DragEvent) => handleDrag(e, true),
+            onDrop,
+        },
         state,
     };
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { FileDropState, FileInputOptions, FileInputState };
-export type { FileError } from '@parametric-portal/types/files';
-export { B as FILE_TUNING, FileOps, interruptFiber, useFileDrop, useFileInput };
+export type { FileDropState, FileInputOptions, FileInputState, FileOpsService };
+export { B as FILE_TUNING, FileInputOptionsSchema, FileOps, FileOpsLive, fileOpsImpl, useFileDrop, useFileInput };

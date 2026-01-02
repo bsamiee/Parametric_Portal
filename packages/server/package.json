@@ -1,68 +1,64 @@
 {
-  "name": "@parametric-portal/server",
-  "version": "1.0.7",
-  "type": "module",
-  "exports": {
-    "./api": {
-      "types": "./src/api.ts",
-      "import": "./src/api.ts",
-      "default": "./src/api.ts"
+    "name": "@parametric-portal/server",
+    "version": "1.0.7",
+    "type": "module",
+    "exports": {
+        "./api": {
+            "types": "./src/api.ts",
+            "import": "./src/api.ts",
+            "default": "./src/api.ts"
+        },
+        "./crypto": {
+            "types": "./src/crypto.ts",
+            "import": "./src/crypto.ts",
+            "default": "./src/crypto.ts"
+        },
+        "./domain-errors": {
+            "types": "./src/domain-errors.ts",
+            "import": "./src/domain-errors.ts",
+            "default": "./src/domain-errors.ts"
+        },
+        "./metrics": {
+            "types": "./src/metrics.ts",
+            "import": "./src/metrics.ts",
+            "default": "./src/metrics.ts"
+        },
+        "./middleware": {
+            "types": "./src/middleware.ts",
+            "import": "./src/middleware.ts",
+            "default": "./src/middleware.ts"
+        },
+        "./telemetry": {
+            "types": "./src/telemetry.ts",
+            "import": "./src/telemetry.ts",
+            "default": "./src/telemetry.ts"
+        }
     },
-    "./errors": {
-      "types": "./src/errors.ts",
-      "import": "./src/errors.ts",
-      "default": "./src/errors.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "fix": "biome check --write .",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./middleware": {
-      "types": "./src/middleware.ts",
-      "import": "./src/middleware.ts",
-      "default": "./src/middleware.ts"
+    "dependencies": {
+        "@effect/opentelemetry": "catalog:",
+        "@effect/platform": "catalog:",
+        "@effect/sql": "catalog:",
+        "@opentelemetry/api": "catalog:",
+        "@opentelemetry/exporter-trace-otlp-grpc": "catalog:",
+        "@opentelemetry/resources": "catalog:",
+        "@opentelemetry/sdk-node": "catalog:",
+        "@opentelemetry/sdk-trace-base": "catalog:",
+        "@opentelemetry/semantic-conventions": "catalog:",
+        "@parametric-portal/database": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
+        "effect": "catalog:",
+        "prom-client": "catalog:"
     },
-    "./crypto": {
-      "types": "./src/crypto.ts",
-      "import": "./src/crypto.ts",
-      "default": "./src/crypto.ts"
-    },
-    "./telemetry": {
-      "types": "./src/telemetry.ts",
-      "import": "./src/telemetry.ts",
-      "default": "./src/telemetry.ts"
-    },
-    "./metrics": {
-      "types": "./src/metrics.ts",
-      "import": "./src/metrics.ts",
-      "default": "./src/metrics.ts"
-    },
-    "./messages": {
-      "types": "./src/messages.ts",
-      "import": "./src/messages.ts",
-      "default": "./src/messages.ts"
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "dependencies": {
-    "@effect/platform": "catalog:",
-    "@effect/sql": "catalog:",
-    "@opentelemetry/api": "catalog:",
-    "@opentelemetry/auto-instrumentations-node": "catalog:",
-    "@opentelemetry/exporter-trace-otlp-grpc": "catalog:",
-    "@opentelemetry/resources": "catalog:",
-    "@opentelemetry/sdk-node": "catalog:",
-    "@opentelemetry/semantic-conventions": "catalog:",
-    "@parametric-portal/database": "workspace:*",
-    "@parametric-portal/types": "workspace:*",
-    "effect": "catalog:",
-    "prom-client": "catalog:"
-  },
-  "devDependencies": {
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  },
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  }
 }

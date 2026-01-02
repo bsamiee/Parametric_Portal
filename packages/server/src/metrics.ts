@@ -1,10 +1,19 @@
 /**
- * Prometheus metrics middleware for HTTP request tracking.
- * Exports registry, counters, histograms for /metrics endpoint.
+ * Prometheus metrics service via Effect Layer.
+ * Context.Tag + static layer pattern following crypto.ts gold standard.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
+import { DurationMs, Timestamp } from '@parametric-portal/types/types';
 import { Context, Effect, Layer } from 'effect';
 import { Counter, collectDefaultMetrics, Histogram, Registry } from 'prom-client';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type MetricsShape = {
+    readonly httpRequestDuration: Histogram<'method' | 'path' | 'status'>;
+    readonly httpRequestsTotal: Counter<'method' | 'path' | 'status'>;
+    readonly registry: Registry;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -13,40 +22,46 @@ const B = Object.freeze({
     labelNames: ['method', 'path', 'status'] as const,
 } as const);
 
-// --- [CONTEXT] ---------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-class MetricsRegistry extends Context.Tag('MetricsRegistry')<MetricsRegistry, Registry>() {}
+const createMetrics = (): MetricsShape => {
+    const registry = new Registry();
+    collectDefaultMetrics({ register: registry });
+    const httpRequestsTotal = new Counter({
+        help: 'Total HTTP requests',
+        labelNames: [...B.labelNames],
+        name: 'http_requests_total',
+        registers: [registry],
+    });
+    const httpRequestDuration = new Histogram({
+        buckets: [...B.buckets],
+        help: 'HTTP request duration in seconds',
+        labelNames: [...B.labelNames],
+        name: 'http_request_duration_seconds',
+        registers: [registry],
+    });
+    return { httpRequestDuration, httpRequestsTotal, registry };
+};
 
-// --- [SCHEMA] ----------------------------------------------------------------
+// --- [SERVICE] ---------------------------------------------------------------
 
-const registry = new Registry();
-collectDefaultMetrics({ register: registry });
-const httpRequestsTotal = new Counter({
-    help: 'Total HTTP requests',
-    labelNames: [...B.labelNames],
-    name: 'http_requests_total',
-    registers: [registry],
-});
-const httpRequestDuration = new Histogram({
-    buckets: [...B.buckets],
-    help: 'HTTP request duration in seconds',
-    labelNames: [...B.labelNames],
-    name: 'http_request_duration_seconds',
-    registers: [registry],
-});
+class Metrics extends Context.Tag('server/Metrics')<Metrics, MetricsShape>() {
+    static readonly layer = Layer.sync(this, createMetrics);
+}
 
 // --- [MIDDLEWARE] ------------------------------------------------------------
 
 const createMetricsMiddleware = () =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
+            const { httpRequestDuration, httpRequestsTotal } = yield* Metrics;
             const request = yield* HttpServerRequest.HttpServerRequest;
             const method = request.method;
             const path = request.url;
-            const startTime = Date.now();
+            const startTime = Timestamp.nowSync();
             const response = yield* app;
             const status = String(response.status);
-            const duration = (Date.now() - startTime) / 1000;
+            const duration = DurationMs.toSeconds(Timestamp.diff(Timestamp.nowSync(), startTime));
             yield* Effect.sync(() => {
                 httpRequestsTotal.inc({ method, path, status });
                 httpRequestDuration.observe({ method, path, status }, duration);
@@ -55,10 +70,6 @@ const createMetricsMiddleware = () =>
         }),
     );
 
-// --- [LAYERS] ----------------------------------------------------------------
-
-const MetricsRegistryLive = Layer.succeed(MetricsRegistry, registry);
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { createMetricsMiddleware, MetricsRegistry, MetricsRegistryLive, registry };
+export { createMetricsMiddleware, Metrics };

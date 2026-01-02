@@ -1,15 +1,10 @@
 /**
  * Bridge React 19 useTransition/useOptimistic with Effect fiber execution.
  */
-import { type AsyncState, async } from '@parametric-portal/types/async';
-import { Effect, type Fiber } from 'effect';
+import { AsyncState } from '@parametric-portal/types/async';
+import { Effect, Fiber, type ManagedRuntime } from 'effect';
 import { useCallback, useEffect, useOptimistic, useRef, useState, useTransition } from 'react';
 import { useRuntime } from '../runtime';
-import { interruptFiber } from './file';
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const asyncApi = async();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -24,47 +19,40 @@ type OptimisticState<A, E> = {
     readonly state: AsyncState<A, E>;
 };
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const TransitionCallbacks = Object.freeze({
-    onFailure:
-        <A, E>(setState: React.Dispatch<React.SetStateAction<AsyncState<A, E>>>) =>
-        (error: E) => {
-            setState(asyncApi.failure(error));
+const cleanupFiber = <R, E>(
+    fiberRef: React.RefObject<Fiber.RuntimeFiber<unknown, unknown> | null>,
+    runtime: ManagedRuntime.ManagedRuntime<R, E>,
+): void => {
+    fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
+};
+const wrapEffect = <A, E, R>(
+    effect: Effect.Effect<A, E, R>,
+    setState: React.Dispatch<React.SetStateAction<AsyncState<A, E>>>,
+): Effect.Effect<A, E, R> =>
+    effect.pipe(
+        Effect.tap((data: A) => Effect.sync(() => setState(AsyncState.Success(data)))),
+        Effect.catchAll((error: E) => {
+            setState(AsyncState.Failure(error));
             return Effect.fail(error);
-        },
-    onSuccess:
-        <A, E>(setState: React.Dispatch<React.SetStateAction<AsyncState<A, E>>>) =>
-        (data: A) =>
-            Effect.sync(() => setState(asyncApi.success(data))),
-    wrap: <A, E, R>(
-        effect: Effect.Effect<A, E, R>,
-        setState: React.Dispatch<React.SetStateAction<AsyncState<A, E>>>,
-    ): Effect.Effect<A, E, R> =>
-        effect.pipe(
-            Effect.tap(TransitionCallbacks.onSuccess(setState)),
-            Effect.catchAll(TransitionCallbacks.onFailure<A, E>(setState)),
-        ),
-});
+        }),
+    );
 
 // --- [HOOKS] -----------------------------------------------------------------
 
 const useEffectTransition = <A, E, R>(effect: Effect.Effect<A, E, R>): TransitionState<A, E> => {
     const runtime = useRuntime<R, never>();
     const [isPending, startTransition] = useTransition();
-    const [state, setState] = useState<AsyncState<A, E>>(asyncApi.idle);
+    const [state, setState] = useState<AsyncState<A, E>>(AsyncState.Idle);
     const fiberRef = useRef<Fiber.RuntimeFiber<A, E> | null>(null);
     const start = useCallback(() => {
         startTransition(() => {
-            setState(asyncApi.loading());
-            fiberRef.current = runtime.runFork(TransitionCallbacks.wrap(effect, setState));
+            setState(AsyncState.Loading());
+            fiberRef.current = runtime.runFork(wrapEffect(effect, setState));
         });
     }, [runtime, effect]);
-    useEffect(() => {
-        const fiber = fiberRef.current;
-        const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
-        return cleanup;
-    }, [runtime]);
+    useEffect(() => () => cleanupFiber(fiberRef, runtime), [runtime]);
     return { isPending, start, state };
 };
 const useOptimisticEffect = <A, E, R>(
@@ -74,25 +62,17 @@ const useOptimisticEffect = <A, E, R>(
 ): OptimisticState<A, E> => {
     const runtime = useRuntime<R, never>();
     const [optimisticState, setOptimistic] = useOptimistic(currentState, updateFn);
-    const [state, setState] = useState<AsyncState<A, E>>(asyncApi.idle);
+    const [state, setState] = useState<AsyncState<A, E>>(AsyncState.Idle);
     const fiberRef = useRef<Fiber.RuntimeFiber<A, E> | null>(null);
     const addOptimistic = useCallback(
         (update: A) => {
             setOptimistic(update);
-            setState(asyncApi.loading());
-            const eff = effect(update).pipe(
-                Effect.tap(TransitionCallbacks.onSuccess(setState)),
-                Effect.catchAll(TransitionCallbacks.onFailure<A, E>(setState)),
-            );
-            fiberRef.current = runtime.runFork(eff);
+            setState(AsyncState.Loading());
+            fiberRef.current = runtime.runFork(wrapEffect(effect(update), setState));
         },
         [runtime, effect, setOptimistic],
     );
-    useEffect(() => {
-        const fiber = fiberRef.current;
-        const cleanup = fiber === null ? undefined : interruptFiber(runtime, fiber);
-        return cleanup;
-    }, [runtime]);
+    useEffect(() => () => cleanupFiber(fiberRef, runtime), [runtime]);
     return { addOptimistic, optimisticState, state };
 };
 

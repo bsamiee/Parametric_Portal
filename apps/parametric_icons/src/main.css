@@ -4,6 +4,7 @@
  * Each plugin injects its CSS after this @import via transform hook.
  */
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 /* Scan component library packages for Tailwind class detection */
 @source '../../../packages/components/src';

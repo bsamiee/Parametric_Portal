@@ -2,13 +2,9 @@
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { devtoolsPlugin } from '@parametric-portal/devtools/vite-plugin';
-import { defineFonts } from '@parametric-portal/theme/fonts';
-import { defineLayouts } from '@parametric-portal/theme/layouts';
-import { defineThemes } from '@parametric-portal/theme/theme';
 import { Effect } from 'effect';
 import { defineConfig } from 'vite';
 import { createConfig } from '../../vite.factory.ts';
-import { fonts, layouts, themes } from './src/theme.config.ts';
 
 const APP_ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -42,11 +38,5 @@ const baseConfig = Effect.runSync(
 
 export default defineConfig({
     ...baseConfig,
-    plugins: [
-        ...devtoolsPlugin({ app: B.app.name }),
-        defineLayouts(layouts),
-        defineFonts(fonts),
-        defineThemes(themes),
-        ...(baseConfig.plugins ?? []),
-    ],
+    plugins: [...devtoolsPlugin({ app: B.app.name }), ...(baseConfig.plugins ?? [])],
 });

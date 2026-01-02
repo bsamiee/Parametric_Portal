@@ -1,225 +1,231 @@
-/**
- * Define primitive types and branded schemas with runtime validation.
- * Effect Schema validation with runtime branding for domain primitives.
- */
-import { Effect, pipe, Schema as S } from 'effect';
-import type { ParseError } from 'effect/ParseResult';
+/** Branded primitives: unified type/value exports with schema, validation, and generation. */
+import { DateTime, Effect, pipe, Schema as S } from 'effect';
 import { v7 as uuidv7 } from 'uuid';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type BivariantFunction<T> = T extends (...args: infer A extends readonly unknown[]) => infer R
-    ? { bivarianceHack: (...args: A) => R }['bivarianceHack']
-    : never;
-type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>;
-type Email = S.Schema.Type<typeof EmailSchema>;
-type HexColor = S.Schema.Type<typeof HexColorSchema>;
-type Hex8 = S.Schema.Type<typeof Hex8Schema>;
-type Hex64 = S.Schema.Type<typeof Hex64Schema>;
-type HtmlId = S.Schema.Type<typeof HtmlIdSchema>;
-type IsoDate = S.Schema.Type<typeof IsoDateSchema>;
-type NonNegativeInt = S.Schema.Type<typeof NonNegativeIntSchema>;
-type Percentage = S.Schema.Type<typeof PercentageSchema>;
-type PositiveInt = S.Schema.Type<typeof PositiveIntSchema>;
-type SafeInteger = S.Schema.Type<typeof SafeIntegerSchema>;
-type Slug = S.Schema.Type<typeof SlugSchema>;
-type Url = S.Schema.Type<typeof UrlSchema>;
-type PaginationParams = S.Schema.Type<typeof PaginationParamsSchema>;
-type Index = S.Schema.Type<typeof IndexSchema>;
-type VariantCount = S.Schema.Type<typeof VariantCountSchema>;
-type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    bounds: {
-        index: { max: Number.MAX_SAFE_INTEGER, min: 0 },
-        variantCount: { max: 10, min: 1 },
-        zoomFactor: { max: 10, min: 0.1 },
-    },
-    hex: { length: 8, radix: 16 },
-    pagination: { defaultPageSize: 20, maxPageSize: 100 },
-    patterns: {
-        email: /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/,
-        hex8: /^[0-9a-f]{8}$/,
-        hex64: /^[0-9a-f]{64}$/i,
-        hexColor: /^#[0-9a-f]{6}$/i,
-        htmlId: /^[a-zA-Z_][a-zA-Z0-9_-]*$/,
-        isoDate: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/,
-        slug: /^[a-z0-9-]+$/,
-        url: /^https?:\/\/[^\s/$.?#].[^\s]*$/i,
-        uuidv7: /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    },
-    ranges: {
-        percentage: { max: 100, min: 0 },
-        safeInteger: { max: Number.MAX_SAFE_INTEGER, min: Number.MIN_SAFE_INTEGER },
-    },
-} as const);
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const baseSchemas = {
-    email: pipe(S.String, S.pattern(B.patterns.email)),
-    hex8: pipe(S.String, S.pattern(B.patterns.hex8)),
-    hex64: pipe(S.String, S.pattern(B.patterns.hex64)),
-    hexColor: pipe(S.String, S.pattern(B.patterns.hexColor)),
-    htmlId: pipe(S.String, S.pattern(B.patterns.htmlId)),
-    int: pipe(S.Number, S.int()),
-    isoDate: pipe(S.String, S.pattern(B.patterns.isoDate)),
-    nonNegativeInt: pipe(S.Number, S.int(), S.nonNegative()),
-    percentage: pipe(S.Number, S.between(B.ranges.percentage.min, B.ranges.percentage.max)),
-    positiveInt: pipe(S.Number, S.int(), S.positive()),
-    safeInteger: pipe(S.Number, S.int(), S.between(B.ranges.safeInteger.min, B.ranges.safeInteger.max)),
-    slug: pipe(S.String, S.pattern(B.patterns.slug)),
-    url: pipe(S.String, S.pattern(B.patterns.url)),
-    uuidv7: pipe(S.String, S.pattern(B.patterns.uuidv7)),
-} as const;
-const EmailSchema = pipe(baseSchemas.email, S.brand('Email'));
-const Hex8Schema = pipe(baseSchemas.hex8, S.brand('Hex8'));
-const Hex64Schema = pipe(baseSchemas.hex64, S.brand('Hex64'));
-const HexColorSchema = pipe(baseSchemas.hexColor, S.brand('HexColor'));
-const HtmlIdSchema = pipe(baseSchemas.htmlId, S.brand('HtmlId'));
-const IsoDateSchema = pipe(baseSchemas.isoDate, S.brand('IsoDate'));
-const NonNegativeIntSchema = pipe(baseSchemas.nonNegativeInt, S.brand('NonNegativeInt'));
-const PercentageSchema = pipe(baseSchemas.percentage, S.brand('Percentage'));
-const PositiveIntSchema = pipe(baseSchemas.positiveInt, S.brand('PositiveInt'));
-const SafeIntegerSchema = pipe(baseSchemas.safeInteger, S.brand('SafeInteger'));
-const SlugSchema = pipe(baseSchemas.slug, S.brand('Slug'));
-const UrlSchema = pipe(baseSchemas.url, S.brand('Url'));
-const Uuidv7Schema = pipe(baseSchemas.uuidv7, S.brand('Uuidv7'));
-const boundedInt = <T extends string>(label: T, min: number, max: number) =>
-    pipe(S.Number, S.int(), S.between(min, max), S.brand(label));
-const boundedNumber = <T extends string>(label: T, min: number, max: number) =>
-    pipe(S.Number, S.between(min, max), S.brand(label));
-const IndexSchema = boundedInt('Index', B.bounds.index.min, B.bounds.index.max);
-const VariantCountSchema = boundedInt('VariantCount', B.bounds.variantCount.min, B.bounds.variantCount.max);
-const ZoomFactorSchema = boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
-const patterns = Object.freeze(B.patterns);
-const PaginationParamsSchema = S.Struct({
-    limit: pipe(S.Int, S.between(1, B.pagination.maxPageSize)),
-    offset: pipe(S.Int, S.nonNegative()),
-});
-const schemas = Object.freeze({
-    ...baseSchemas,
-    nonEmptyTrimmedString: S.NonEmptyTrimmedString,
-    number: S.Number,
-    pagination: PaginationParamsSchema,
-    string: S.String,
-    uuid: S.UUID,
-} as const);
-const brands = Object.freeze({
-    email: EmailSchema,
-    hex8: Hex8Schema,
-    hex64: Hex64Schema,
-    hexColor: HexColorSchema,
-    htmlId: HtmlIdSchema,
-    index: IndexSchema,
-    isoDate: IsoDateSchema,
-    nonNegativeInt: NonNegativeIntSchema,
-    percentage: PercentageSchema,
-    positiveInt: PositiveIntSchema,
-    safeInteger: SafeIntegerSchema,
-    slug: SlugSchema,
-    url: UrlSchema,
-    uuidv7: Uuidv7Schema,
-    variantCount: VariantCountSchema,
-    zoomFactor: ZoomFactorSchema,
+	bounds: {
+		index: { max: Number.MAX_SAFE_INTEGER, min: 0 },
+		percentage: { max: 100, min: 0 },
+		safeInteger: { max: Number.MAX_SAFE_INTEGER, min: Number.MIN_SAFE_INTEGER },
+		variantCount: { max: 100, min: 1 },
+		zoomFactor: { max: 10, min: 0.1 },
+	},
+	hex: { length8: 8, length64: 64, radix: 16 },
+	patterns: {
+		email: /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/,
+		hex8: /^[0-9a-f]{8}$/,
+		hex64: /^[0-9a-f]{64}$/i,
+		hexColor: /^#[0-9a-f]{6}$/i,
+		htmlId: /^[a-zA-Z_][a-zA-Z0-9_-]*$/,
+		isoDate: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/,
+		slug: /^[a-z0-9-]+$/,
+		url: /^https?:\/\/[^\s/$.?#].[^\s]*$/i,
+		uuidv7: /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+	},
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const generateUuidv7Sync = (): Uuidv7 => S.decodeSync(Uuidv7Schema)(uuidv7());
-const generateHex8 = (): Hex8 =>
-    Array.from({ length: B.hex.length }, () => Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix)).join(
-        '',
-    ) as Hex8;
-const deriveHex8 = (seed: string): Hex8 => {
-    const modulo = B.hex.radix ** B.hex.length;
-    const hash = Array.from(seed).reduce<number>((acc, char) => (acc * 31 + (char.codePointAt(0) ?? 0)) % modulo, 0);
-    return hash.toString(B.hex.radix).padStart(B.hex.length, '0').slice(-B.hex.length) as Hex8;
+const sb = {
+	boundedInt: <T extends string>(label: T, min: number, max: number) =>
+		pipe(S.Number, S.int(), S.between(min, max), S.brand(label)),
+	boundedNumber: <T extends string>(label: T, min: number, max: number) =>
+		pipe(S.Number, S.between(min, max), S.brand(label)),
+	nonNegativeInt: <T extends string>(label: T) =>
+		pipe(S.Number, S.int(), S.nonNegative(), S.brand(label)),
+	nonNegativeNumber: <T extends string>(label: T) =>
+		pipe(S.Number, S.nonNegative(), S.brand(label)),
+	pattern: <T extends string>(label: T, regex: RegExp) =>
+		pipe(S.String, S.pattern(regex), S.brand(label)),
+	positiveInt: <T extends string>(label: T) =>
+		pipe(S.Number, S.int(), S.positive(), S.brand(label)),
+	positiveNumber: <T extends string>(label: T) =>
+		pipe(S.Number, S.positive(), S.brand(label)),
+} as const;
+const make = <A, I>(schema: S.Schema<A, I, never>) =>
+	Object.freeze({
+		decode: S.decodeUnknown(schema),
+		decodeEither: S.decodeUnknownEither(schema),
+		decodeSync: S.decodeUnknownSync(schema),
+		encode: S.encode(schema),
+		encodeSync: S.encodeSync(schema),
+		is: S.is(schema),
+		schema,
+	});
+const makeGeneratable = <A, I>(schema: S.Schema<A, I, never>, generateSync: () => A) =>
+	Object.freeze({ ...make(schema), generate: Effect.sync(generateSync), generateSync });
+
+// --- [DURATION_MS] -----------------------------------------------------------
+
+const DurationMsSchema = sb.nonNegativeNumber('DurationMs');
+type DurationMs = S.Schema.Type<typeof DurationMsSchema>
+const DurationMs = Object.freeze({
+	...make(DurationMsSchema),
+	add: (a: DurationMs, b: DurationMs): DurationMs => (a + b) as DurationMs,
+	clamp: (d: DurationMs, min: DurationMs, max: DurationMs): DurationMs =>
+		Math.max(min, Math.min(max, d)) as DurationMs,
+	fromMillis: (ms: number): DurationMs => ms as DurationMs,
+	fromSeconds: (s: number): DurationMs => (s * 1000) as DurationMs,
+	max: (a: DurationMs, b: DurationMs): DurationMs => Math.max(a, b) as DurationMs,
+	scale: (d: DurationMs, k: number): DurationMs => (d * k) as DurationMs,
+	sub: (a: DurationMs, b: DurationMs): DurationMs => (a - b) as DurationMs,
+	toSeconds: (d: DurationMs): number => d / 1000,
+	zero: 0 as DurationMs,
+});
+
+// --- [EMAIL] -----------------------------------------------------------------
+
+const EmailSchema = sb.pattern('Email', B.patterns.email);
+type Email = S.Schema.Type<typeof EmailSchema>
+const Email = Object.freeze(make(EmailSchema));
+
+// --- [HEX8] ------------------------------------------------------------------
+
+const Hex8Schema = sb.pattern('Hex8', B.patterns.hex8);
+type Hex8 = S.Schema.Type<typeof Hex8Schema>
+const hex8GenerateSync = (): Hex8 =>
+	Array.from({ length: B.hex.length8 }, () =>
+		Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix),
+	).join('') as Hex8;
+const hex8Derive = (seed: string): Hex8 => {
+	const mod = B.hex.radix ** B.hex.length8;
+	const hash = Array.from(seed).reduce<number>((a, c) => (a * 31 + (c.codePointAt(0) ?? 0)) % mod, 0);
+	return hash.toString(B.hex.radix).padStart(B.hex.length8, '0').slice(-B.hex.length8) as Hex8;
 };
+const Hex8 = Object.freeze({ ...makeGeneratable(Hex8Schema, hex8GenerateSync), derive: hex8Derive });
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [HEX64] -----------------------------------------------------------------
 
-const createIdGenerator = <A>(schema: S.Schema<A, string, never>): Effect.Effect<A, ParseError, never> =>
-    pipe(
-        Effect.sync(generateUuidv7Sync),
-        Effect.flatMap((uuid) => S.decode(schema)(uuid)),
-    );
-const types = () =>
-    Object.freeze({
-        brands,
-        createIdGenerator,
-        derive: Object.freeze({ hex8: deriveHex8 }),
-        factories: Object.freeze({ boundedInt, boundedNumber }),
-        generate: Object.freeze({
-            hex8: generateHex8,
-            uuidv7: Effect.sync(generateUuidv7Sync),
-            uuidv7Sync: generateUuidv7Sync,
-        }),
-        guards: Object.freeze({
-            email: S.is(EmailSchema),
-            hex8: S.is(Hex8Schema),
-            hex64: S.is(Hex64Schema),
-            hexColor: S.is(HexColorSchema),
-            htmlId: S.is(HtmlIdSchema),
-            index: S.is(IndexSchema),
-            isoDate: S.is(IsoDateSchema),
-            nonNegativeInt: S.is(NonNegativeIntSchema),
-            percentage: S.is(PercentageSchema),
-            positiveInt: S.is(PositiveIntSchema),
-            safeInteger: S.is(SafeIntegerSchema),
-            slug: S.is(SlugSchema),
-            url: S.is(UrlSchema),
-            uuidv7: S.is(Uuidv7Schema),
-            variantCount: S.is(VariantCountSchema),
-            zoomFactor: S.is(ZoomFactorSchema),
-        }),
-        patterns,
-        schemas: Object.freeze({
-            ...schemas,
-            Email: EmailSchema,
-            Hex8: Hex8Schema,
-            Hex64: Hex64Schema,
-            HexColor: HexColorSchema,
-            HtmlId: HtmlIdSchema,
-            Index: IndexSchema,
-            IsoDate: IsoDateSchema,
-            NonNegativeInt: NonNegativeIntSchema,
-            Pagination: PaginationParamsSchema,
-            Percentage: PercentageSchema,
-            PositiveInt: PositiveIntSchema,
-            SafeInteger: SafeIntegerSchema,
-            Slug: SlugSchema,
-            Url: UrlSchema,
-            Uuidv7: Uuidv7Schema,
-            VariantCount: VariantCountSchema,
-            ZoomFactor: ZoomFactorSchema,
-        }),
-    });
-type TypesApi = ReturnType<typeof types>;
+const Hex64Schema = sb.pattern('Hex64', B.patterns.hex64);
+type Hex64 = S.Schema.Type<typeof Hex64Schema>
+const Hex64 = Object.freeze({
+	...make(Hex64Schema),
+	fromBase64: (base64: string): Uint8Array =>
+		Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0),
+	fromBytes: (bytes: Uint8Array): Hex64 =>
+		S.decodeSync(Hex64Schema)([...bytes].map((b) => b.toString(B.hex.radix).padStart(2, '0')).join('')),
+});
+
+// --- [HEX_COLOR] -------------------------------------------------------------
+
+const HexColorSchema = sb.pattern('HexColor', B.patterns.hexColor);
+type HexColor = S.Schema.Type<typeof HexColorSchema>
+const HexColor = Object.freeze(make(HexColorSchema));
+
+// --- [HTML_ID] ---------------------------------------------------------------
+
+const HtmlIdSchema = sb.pattern('HtmlId', B.patterns.htmlId);
+type HtmlId = S.Schema.Type<typeof HtmlIdSchema>
+const HtmlId = Object.freeze(make(HtmlIdSchema));
+
+// --- [INDEX] -----------------------------------------------------------------
+
+const IndexSchema = sb.boundedInt('Index', B.bounds.index.min, B.bounds.index.max);
+type Index = S.Schema.Type<typeof IndexSchema>
+const Index = Object.freeze(make(IndexSchema));
+
+// --- [ISO_DATE] --------------------------------------------------------------
+
+const IsoDateSchema = sb.pattern('IsoDate', B.patterns.isoDate);
+type IsoDate = S.Schema.Type<typeof IsoDateSchema>
+const IsoDate = Object.freeze(make(IsoDateSchema));
+
+// --- [NON_NEGATIVE_INT] ------------------------------------------------------
+
+const NonNegativeIntSchema = sb.nonNegativeInt('NonNegativeInt');
+type NonNegativeInt = S.Schema.Type<typeof NonNegativeIntSchema>
+const NonNegativeInt = Object.freeze(make(NonNegativeIntSchema));
+
+// --- [PERCENTAGE] ------------------------------------------------------------
+
+const PercentageSchema = sb.boundedNumber('Percentage', B.bounds.percentage.min, B.bounds.percentage.max);
+type Percentage = S.Schema.Type<typeof PercentageSchema>
+const Percentage = Object.freeze(make(PercentageSchema));
+
+// --- [POSITIVE_INT] ----------------------------------------------------------
+
+const PositiveIntSchema = sb.positiveInt('PositiveInt');
+type PositiveInt = S.Schema.Type<typeof PositiveIntSchema>
+const PositiveInt = Object.freeze(make(PositiveIntSchema));
+
+// --- [SAFE_INTEGER] ----------------------------------------------------------
+
+const SafeIntegerSchema = sb.boundedInt('SafeInteger', B.bounds.safeInteger.min, B.bounds.safeInteger.max);
+type SafeInteger = S.Schema.Type<typeof SafeIntegerSchema>
+const SafeInteger = Object.freeze(make(SafeIntegerSchema));
+
+// --- [SLUG] ------------------------------------------------------------------
+
+const SlugSchema = sb.pattern('Slug', B.patterns.slug);
+type Slug = S.Schema.Type<typeof SlugSchema>
+const Slug = Object.freeze(make(SlugSchema));
+
+// --- [TIMESTAMP] -------------------------------------------------------------
+
+const TimestampSchema = sb.positiveNumber('Timestamp');
+type Timestamp = S.Schema.Type<typeof TimestampSchema>
+const timestampNowSync = (): Timestamp => Date.now() as Timestamp;
+const Timestamp = Object.freeze({
+	...makeGeneratable(TimestampSchema, timestampNowSync),
+	addDuration: (ts: Timestamp, d: DurationMs): Timestamp => (ts + d) as Timestamp,
+	diff: (later: Timestamp, earlier: Timestamp): DurationMs => (later - earlier) as DurationMs,
+	fromDate: S.transform(S.DateFromSelf, TimestampSchema, {
+		decode: (date) => date.getTime() as Timestamp,
+		encode: (ts) => new Date(ts),
+		strict: true,
+	}),
+	fromDateTime: (dt: DateTime.Utc): Timestamp => DateTime.toEpochMillis(dt) as Timestamp,
+	now: Effect.sync(timestampNowSync),
+	nowSync: timestampNowSync,
+});
+
+// --- [URL] -------------------------------------------------------------------
+
+const UrlSchema = sb.pattern('Url', B.patterns.url);
+type Url = S.Schema.Type<typeof UrlSchema>
+const Url = Object.freeze(make(UrlSchema));
+
+// --- [UUIDV7] ----------------------------------------------------------------
+
+const Uuidv7Schema = sb.pattern('Uuidv7', B.patterns.uuidv7);
+type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>
+const uuidv7GenerateSync = (): Uuidv7 => S.decodeSync(Uuidv7Schema)(uuidv7());
+const Uuidv7 = Object.freeze(makeGeneratable(Uuidv7Schema, uuidv7GenerateSync));
+
+// --- [VARIANT_COUNT] ---------------------------------------------------------
+
+const VariantCountSchema = sb.boundedInt('VariantCount', B.bounds.variantCount.min, B.bounds.variantCount.max);
+type VariantCount = S.Schema.Type<typeof VariantCountSchema>
+const VariantCount = Object.freeze(make(VariantCountSchema));
+
+// --- [ZOOM_FACTOR] -----------------------------------------------------------
+
+const ZoomFactorSchema = sb.boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
+type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>
+const ZoomFactor = Object.freeze(make(ZoomFactorSchema));
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TYPES_TUNING, types };
-export type {
-    BivariantFunction,
-    Email,
-    Hex64,
-    Hex8,
-    HexColor,
-    HtmlId,
-    Index,
-    IsoDate,
-    NonNegativeInt,
-    PaginationParams,
-    Percentage,
-    PositiveInt,
-    SafeInteger,
-    Slug,
-    TypesApi,
-    Url,
-    Uuidv7,
-    VariantCount,
-    ZoomFactor,
+export { B as TYPES_TUNING };
+export {
+	DurationMs,
+	Email,
+	Hex64,
+	Hex8,
+	HexColor,
+	HtmlId,
+	Index,
+	IsoDate,
+	NonNegativeInt,
+	Percentage,
+	PositiveInt,
+	SafeInteger,
+	Slug,
+	Timestamp,
+	Url,
+	Uuidv7,
+	VariantCount,
+	ZoomFactor,
 };

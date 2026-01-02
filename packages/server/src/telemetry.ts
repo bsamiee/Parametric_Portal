@@ -1,67 +1,64 @@
+/**
+ * OpenTelemetry integration via @effect/opentelemetry NodeSdk.
+ * Context.Tag + static layer pattern following crypto.ts gold standard.
+ */
+import { NodeSdk } from '@effect/opentelemetry';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { Config, Context, Effect, Layer, pipe } from 'effect';
+
 // --- [TYPES] -----------------------------------------------------------------
 
-import { Data, Duration, Effect, Layer, Schema } from 'effect';
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const ServiceName = Schema.String.pipe(Schema.minLength(1), Schema.brand('ServiceName'));
-const OtelEndpoint = Schema.String.pipe(Schema.pattern(/^https?:\/\//), Schema.brand('OtelEndpoint'));
+type TelemetryConfig = {
+    readonly endpoint: string;
+    readonly environment: string;
+    readonly serviceName: string;
+    readonly serviceVersion: string;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    endpoint: Schema.decodeUnknownSync(OtelEndpoint)(
-        process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://alloy.monitoring.svc.cluster.local:4317',
-    ),
-    initTimeoutMs: 5000,
-    serviceName: Schema.decodeUnknownSync(ServiceName)(process.env['OTEL_SERVICE_NAME'] ?? 'api'),
+    defaults: {
+        endpoint: 'http://alloy.monitoring.svc.cluster.local:4317',
+        environment: 'development',
+        serviceName: 'api',
+        serviceVersion: '0.0.0',
+    },
+    namespace: 'parametric-portal',
 } as const);
 
-// --- [ERRORS] ----------------------------------------------------------------
+// --- [CONFIG] ----------------------------------------------------------------
 
-class TelemetryInitError extends Data.TaggedError('TelemetryInitError')<{
-    readonly cause: unknown;
-}> {}
+const TelemetryConfigSchema = Config.all({
+    endpoint: pipe(Config.string('OTEL_EXPORTER_OTLP_ENDPOINT'), Config.withDefault(B.defaults.endpoint)),
+    environment: pipe(Config.string('NODE_ENV'), Config.withDefault(B.defaults.environment)),
+    serviceName: pipe(Config.string('OTEL_SERVICE_NAME'), Config.withDefault(B.defaults.serviceName)),
+    serviceVersion: pipe(Config.string('npm_package_version'), Config.withDefault(B.defaults.serviceVersion)),
+});
 
-// --- [LAYERS] ----------------------------------------------------------------
+// --- [SERVICE] ---------------------------------------------------------------
 
-const TelemetryLive = Layer.effectDiscard(
-    Effect.gen(function* () {
-        yield* Effect.tryPromise({
-            catch: (e) => new TelemetryInitError({ cause: e }),
-            try: async () => {
-                const { NodeSDK } = await import('@opentelemetry/sdk-node');
-                const { getNodeAutoInstrumentations } = await import('@opentelemetry/auto-instrumentations-node');
-                const { OTLPTraceExporter } = await import('@opentelemetry/exporter-trace-otlp-grpc');
-                const { resourceFromAttributes } = await import('@opentelemetry/resources');
-                const { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } = await import('@opentelemetry/semantic-conventions');
-                const sdk = new NodeSDK({
-                    instrumentations: [getNodeAutoInstrumentations()],
-                    resource: resourceFromAttributes({
-                        [ATTR_SERVICE_NAME]: B.serviceName,
-                        [ATTR_SERVICE_VERSION]: process.env['npm_package_version'] ?? '0.0.0',
-                    }),
-                    traceExporter: new OTLPTraceExporter({ url: B.endpoint }),
-                });
-                sdk.start();
-                process.on('SIGTERM', () =>
-                    Effect.runPromise(
-                        Effect.tryPromise({
-                            catch: (e) => new TelemetryInitError({ cause: e }),
-                            try: () => sdk.shutdown(),
-                        }).pipe(Effect.catchAll((e) => Effect.logError(`Telemetry shutdown failed: ${String(e)}`))),
-                    ),
-                );
-            },
-        }).pipe(
-            Effect.timeout(Duration.millis(B.initTimeoutMs)),
-            Effect.catchAll((e) =>
-                Effect.logWarning(`Telemetry initialization skipped: ${String(e)}`).pipe(Effect.as(undefined)),
+class TelemetryService extends Context.Tag('server/TelemetryService')<TelemetryService, TelemetryConfig>() {
+    static readonly layer = Layer.unwrapEffect(
+        Effect.map(TelemetryConfigSchema, (config) =>
+            Layer.merge(
+                Layer.succeed(TelemetryService, config),
+                NodeSdk.layer(() => ({
+                    resource: {
+                        'deployment.environment': config.environment,
+                        'service.namespace': B.namespace,
+                        serviceName: config.serviceName,
+                        serviceVersion: config.serviceVersion,
+                    },
+                    spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter({ url: config.endpoint })),
+                })),
             ),
-        );
-    }),
-);
+        ),
+    );
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { TelemetryLive };
+export { TelemetryService };
+export type { TelemetryConfig };

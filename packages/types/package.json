@@ -1,64 +1,82 @@
 {
-  "dependencies": {
-    "@effect/experimental": "catalog:",
-    "effect": "catalog:",
-    "isomorphic-dompurify": "catalog:",
-    "uuid": "catalog:"
-  },
-  "devDependencies": {
-    "@fast-check/vitest": "catalog:",
-    "fast-check": "catalog:",
-    "typescript": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:"
-  },
-  "exports": {
-    "./api": {
-      "types": "./src/api.ts",
-      "import": "./src/api.ts",
-      "default": "./src/api.ts"
+    "name": "@parametric-portal/types",
+    "version": "1.0.7",
+    "type": "module",
+    "exports": {
+        "./async": {
+            "types": "./src/async.ts",
+            "import": "./src/async.ts",
+            "default": "./src/async.ts"
+        },
+        "./browser": {
+            "types": "./src/browser.ts",
+            "import": "./src/browser.ts",
+            "default": "./src/browser.ts"
+        },
+        "./database": {
+            "types": "./src/database.ts",
+            "import": "./src/database.ts",
+            "default": "./src/database.ts"
+        },
+        "./files": {
+            "types": "./src/files.ts",
+            "import": "./src/files.ts",
+            "default": "./src/files.ts"
+        },
+        "./icons": {
+            "types": "./src/icons.ts",
+            "import": "./src/icons.ts",
+            "default": "./src/icons.ts"
+        },
+        "./runtime": {
+            "types": "./src/runtime.ts",
+            "import": "./src/runtime.ts",
+            "default": "./src/runtime.ts"
+        },
+        "./svg": {
+            "types": "./src/svg.ts",
+            "import": "./src/svg.ts",
+            "default": "./src/svg.ts"
+        },
+        "./types": {
+            "types": "./src/types.ts",
+            "import": "./src/types.ts",
+            "default": "./src/types.ts"
+        },
+        "./ui": {
+            "types": "./src/ui.ts",
+            "import": "./src/ui.ts",
+            "default": "./src/ui.ts"
+        },
+        "./units": {
+            "types": "./src/units.ts",
+            "import": "./src/units.ts",
+            "default": "./src/units.ts"
+        }
     },
-    "./async": {
-      "types": "./src/async.ts",
-      "import": "./src/async.ts",
-      "default": "./src/async.ts"
+    "scripts": {
+        "build": "vite build",
+        "check": "biome check .",
+        "dev": "vite dev --host",
+        "fix": "biome check --write .",
+        "preview": "vite preview --host",
+        "test": "vitest run --passWithNoTests",
+        "typecheck": "tsc --project tsconfig.json --noEmit"
     },
-    "./forms": {
-      "types": "./src/forms.ts",
-      "import": "./src/forms.ts",
-      "default": "./src/forms.ts"
+    "dependencies": {
+        "@effect/experimental": "catalog:",
+        "effect": "catalog:",
+        "isomorphic-dompurify": "catalog:",
+        "uuid": "catalog:"
     },
-    "./types": {
-      "types": "./src/types.ts",
-      "import": "./src/types.ts",
-      "default": "./src/types.ts"
-    },
-    "./files": {
-      "types": "./src/files.ts",
-      "import": "./src/files.ts",
-      "default": "./src/files.ts"
-    },
-    "./database": {
-      "types": "./src/database.ts",
-      "import": "./src/database.ts",
-      "default": "./src/database.ts"
-    },
-    "./svg": {
-      "types": "./src/svg.ts",
-      "import": "./src/svg.ts",
-      "default": "./src/svg.ts"
+    "devDependencies": {
+        "@fast-check/vitest": "catalog:",
+        "fast-check": "catalog:",
+        "ts-essentials": "catalog:",
+        "ts-toolbelt": "catalog:",
+        "type-fest": "catalog:",
+        "typescript": "catalog:",
+        "vite": "catalog:",
+        "vitest": "catalog:"
     }
-  },
-  "name": "@parametric-portal/types",
-  "scripts": {
-    "build": "vite build",
-    "check": "biome check .",
-    "fix": "biome check --write .",
-    "dev": "vite dev --host",
-    "preview": "vite preview --host",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.json --noEmit"
-  },
-  "type": "module",
-  "version": "1.0.7"
 }

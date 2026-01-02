@@ -1,19 +1,19 @@
 /**
  * Overlay system: export and upload dialog components with hooks.
  */
-import { useMutation } from '@parametric-portal/runtime/hooks/async';
-import { type ExportFormat, useExport } from '@parametric-portal/runtime/hooks/browser';
-import { FileOps } from '@parametric-portal/runtime/hooks/file';
-import { files } from '@parametric-portal/types/files';
-import { svg } from '@parametric-portal/types/svg';
-import { Effect } from 'effect';
+
+import { useExport } from '@parametric-portal/runtime/hooks/browser';
+import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
+import { fileOpsImpl } from '@parametric-portal/runtime/hooks/file';
+import { type ExportFormat, PngSizeSchema } from '@parametric-portal/types/browser';
+import { validateContent } from '@parametric-portal/types/files';
+import { sanitizeSvg } from '@parametric-portal/types/svg';
+import { Index, VariantCount } from '@parametric-portal/types/types';
+import { Effect, Schema as S } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
 import { type UploadState, useHistoryStore, usePreviewStore, useUiStore } from '../stores.ts';
 import { Button, Dialog, Icon, Spinner, Stack, SvgPreview, UploadTrigger, UploadZone } from '../ui.ts';
-
-const svgApi = svg();
-const filesApi = files();
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -91,7 +91,7 @@ const uploadStateRenderers = {
     preview: ({ fileName, previewSvg, reset }: StateRendererProps): ReactNode => (
         <Stack gap>
             <div className='w-full aspect-square max-h-64 bg-(--panel-bg-light) rounded-lg overflow-hidden border border-(--panel-border-dark)'>
-                {previewSvg && <SvgPreview svg={previewSvg} sanitize={svgApi.sanitizeSvg} className='w-full h-full' />}
+                {previewSvg && <SvgPreview svg={previewSvg} sanitize={sanitizeSvg} className='w-full h-full' />}
             </div>
             <Stack direction='row' justify='between' align='center'>
                 <span className='text-sm opacity-70'>{fileName}.svg</span>
@@ -126,14 +126,12 @@ const useExportDialog = (): ExportDialogProps => {
     const setFormat = setExportFormat;
     const handleExport = () => {
         const variants = currentAsset?.variants ?? [];
-        const variantCount = variants.length;
-        const variantIndex = currentAsset?.selectedVariantIndex ?? 0;
         exportAs({
             filename: currentAsset?.prompt ?? '',
             format,
-            pngSize: B.export.pngSize,
-            variantCount,
-            variantIndex,
+            pngSize: S.decodeUnknownSync(PngSizeSchema)(B.export.pngSize),
+            variantCount: VariantCount.decodeSync(variants.length),
+            variantIndex: Index.decodeSync(currentAsset?.selectedVariantIndex ?? 0),
             variants,
             ...(currentSvg !== null && { svg: currentSvg }),
         });
@@ -178,12 +176,12 @@ const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNo
         reset();
         onClose();
     }, [reset, onClose]);
-    const validateMutation = useMutation<string, File, { message: string }, never>(
+    const validateMutation = useEffectMutate<string, File, { message: string }, never>(
         (file) =>
             Effect.gen(function* () {
-                const content = yield* FileOps.text(file);
-                const validContent = yield* filesApi.validateContent('image/svg+xml', content);
-                return svgApi.sanitizeSvg(validContent);
+                const content = yield* fileOpsImpl.toText(file);
+                const validContent = yield* validateContent('image/svg+xml', content);
+                return sanitizeSvg(validContent);
             }),
         {
             onError: (err, file) => {

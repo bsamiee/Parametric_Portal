@@ -1,20 +1,13 @@
 {
     "name": "@parametric-portal/api",
     "version": "0.1.0",
-    "type": "module",
     "private": true,
-    "exports": {
-        "./contracts/icons": {
-            "types": "./src/contracts/icons.ts",
-            "import": "./src/contracts/icons.ts",
-            "default": "./src/contracts/icons.ts"
-        }
-    },
+    "type": "module",
     "scripts": {
         "build": "vite build",
         "check": "biome check .",
-        "fix": "biome check --write .",
         "dev": "tsx watch src/main.ts",
+        "fix": "biome check --write .",
         "hadolint": "hadolint Dockerfile",
         "migrate": "tsx src/migrate.ts",
         "start": "node dist/main.js",

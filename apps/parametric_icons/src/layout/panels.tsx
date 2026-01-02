@@ -3,17 +3,19 @@
  * Mirrors Arsenal architecture with rail + drawer sidebar, centered input, and preview viewport.
  */
 
-import type { GenerateResponse } from '@parametric-portal/api/contracts/icons';
-import { useMutation } from '@parametric-portal/runtime/hooks/async';
-import { sanitizeFilename, useClipboard, useExport } from '@parametric-portal/runtime/hooks/browser';
-import type { ApiError } from '@parametric-portal/types/api';
-import type { Intent } from '@parametric-portal/types/database';
-import { type SvgAsset, svg } from '@parametric-portal/types/svg';
-import { type Index, types, type Uuidv7, type VariantCount } from '@parametric-portal/types/types';
+import type { HttpClient } from '@effect/platform';
+import { useClipboard, useExport } from '@parametric-portal/runtime/hooks/browser';
+import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
+import { sanitizeFilename } from '@parametric-portal/runtime/services/browser';
+import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
+import { AsyncState } from '@parametric-portal/types/async';
+import type { IconResponse, Intent } from '@parametric-portal/types/icons';
+import { type SvgAssetData, sanitizeSvgScoped } from '@parametric-portal/types/svg';
+import { type Index, Uuidv7, type VariantCount } from '@parametric-portal/types/types';
 import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef } from 'react';
-import { apiFactory, asyncApi, type GenerateInput, generateIcon } from '../infrastructure.ts';
+import { type GenerateInput, generateIcon } from '../infrastructure.ts';
 import {
     type Asset,
     type ContextState,
@@ -48,9 +50,6 @@ import {
 import { UserAvatar } from './auth.tsx';
 import { UploadDialog } from './overlays.tsx';
 
-const svgApi = svg();
-const typesApi = types();
-
 // --- [TYPES] -----------------------------------------------------------------
 
 type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTerminal' | 'PanelLeft';
@@ -65,8 +64,8 @@ type HistoryPanelProps = {
     readonly onSelect: (id: string) => void;
 };
 type LibraryPanelProps = {
-    readonly customAssets: ReadonlyArray<SvgAsset>;
-    readonly onAddAttachment: (asset: SvgAsset) => void;
+    readonly customAssets: ReadonlyArray<SvgAssetData>;
+    readonly onAddAttachment: (asset: SvgAssetData) => void;
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
     readonly onRemoveSaved: (id: string) => void;
@@ -133,9 +132,7 @@ const derivePreviewRenderState = (isGenerating: boolean, hasSvg: boolean): Previ
     const stateMap = { '00': 'empty', '01': 'ready', '10': 'generating', '11': 'generating' } as const;
     return stateMap[stateKey];
 };
-const sanitizeSvgScoped = (svgContent: string, seed: string): string =>
-    svgApi.sanitizeSvg(svgContent, { scope: svgApi.deriveScope(seed) });
-const generateId = (): Uuidv7 => typesApi.generate.uuidv7Sync();
+const generateId = (): Uuidv7 => Uuidv7.generateSync();
 const CadReticle = (): ReactNode => (
     <div className='absolute inset-0 pointer-events-none z-10'>
         {B.reticle.map((pos) => (
@@ -598,19 +595,25 @@ const CommandBar = (): ReactNode => {
     const currentSvg = usePreviewStore((s) => s.currentSvg);
     const setSvg = usePreviewStore((s) => s.setSvg);
     const addAsset = useHistoryStore((s) => s.addAsset);
+    const accessToken = useAuthStore((s) => s.accessToken);
+    const openAuthOverlay = useAuthStore((s) => s.openAuthOverlay);
     const submittedContextRef = useRef(submittedContext);
     submittedContextRef.current = submittedContext;
-    const { mutate, state } = useMutation<GenerateResponse, GenerateInput, ApiError, never>(
-        (input) => pipe(generateIcon(input), Effect.flatMap(apiFactory.toEffectM<GenerateResponse>())),
+    const { mutate, state } = useEffectMutate<IconResponse, GenerateInput, unknown, HttpClient.HttpClient>(
+        (input) =>
+            accessToken === null
+                ? Effect.fail({ _tag: 'AuthError', reason: 'Not authenticated' } as const)
+                : generateIcon(accessToken, input),
         {
-            onError: (error) => {
-                error.code !== 'CANCELLED' &&
-                    addMessage({
-                        content: `Error: ${error.message}`,
-                        id: generateId(),
-                        role: 'assistant',
-                        timestamp: Date.now(),
-                    });
+            onError: (err) => {
+                const errorMessage =
+                    typeof err === 'object' && err !== null && 'reason' in err ? String(err.reason) : 'Unknown error';
+                addMessage({
+                    content: `Error: ${errorMessage}`,
+                    id: generateId(),
+                    role: 'assistant',
+                    timestamp: Date.now(),
+                });
                 setSubmittedContext(null);
                 abortControllerRef.current = null;
             },
@@ -622,7 +625,7 @@ const CommandBar = (): ReactNode => {
                         const firstVariant = variants[0];
                         firstVariant && setSvg(firstVariant.svg);
                         addMessage({
-                            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v) => v.name).join(', ')}`,
+                            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v: SvgAssetData) => v.name).join(', ')}`,
                             id: generateId(),
                             role: 'assistant',
                             timestamp: Date.now(),
@@ -634,7 +637,11 @@ const CommandBar = (): ReactNode => {
                             prompt: ctx.prompt,
                             selectedVariantIndex: 0 as Index,
                             timestamp: Date.now(),
-                            variants: variants.map((v) => ({ id: generateId(), name: v.name, svg: v.svg })),
+                            variants: variants.map((v: SvgAssetData) => ({
+                                id: generateId(),
+                                name: v.name,
+                                svg: v.svg,
+                            })),
                         });
                         setSubmittedContext(null);
                         abortControllerRef.current = null;
@@ -642,7 +649,7 @@ const CommandBar = (): ReactNode => {
             },
         },
     );
-    const isGenerating = asyncApi.isLoading(state);
+    const isGenerating = AsyncState.$is.Loading(state);
     const variantCount = output === 'batch' ? STORE_TUNING.variantCount.batch : STORE_TUNING.variantCount.single;
     const abortControllerRef = useRef<AbortController | null>(null);
     const handleOpenLibrary = useCallback(() => {
@@ -663,18 +670,29 @@ const CommandBar = (): ReactNode => {
         (prompt: string): void =>
             pipe(
                 Option.fromNullable(prompt.trim() || null),
-                Option.flatMap((trimmed) => {
-                    const isRefineWithoutSvg = intent === 'refine' && !currentSvg;
-                    isRefineWithoutSvg &&
-                        addMessage({
-                            content:
-                                'Cannot refine: No asset selected. Switch to Create mode or select an asset first.',
-                            id: generateId(),
-                            role: 'assistant',
-                            timestamp: Date.now(),
-                        });
-                    return isRefineWithoutSvg ? Option.none() : Option.some(trimmed);
-                }),
+                Option.flatMap((trimmed) =>
+                    pipe(
+                        Option.fromNullable(accessToken),
+                        Option.match({
+                            onNone: () => {
+                                openAuthOverlay();
+                                return Option.none<string>();
+                            },
+                            onSome: () => {
+                                const isRefineWithoutSvg = intent === 'refine' && !currentSvg;
+                                isRefineWithoutSvg &&
+                                    addMessage({
+                                        content:
+                                            'Cannot refine: No asset selected. Switch to Create mode or select an asset first.',
+                                        id: generateId(),
+                                        role: 'assistant',
+                                        timestamp: Date.now(),
+                                    });
+                                return isRefineWithoutSvg ? Option.none<string>() : Option.some(trimmed);
+                            },
+                        }),
+                    ),
+                ),
                 Option.match({
                     onNone: () => undefined,
                     onSome: (trimmed) => {
@@ -706,6 +724,7 @@ const CommandBar = (): ReactNode => {
                 }),
             ),
         [
+            accessToken,
             attachments,
             colorMode,
             intent,
@@ -716,6 +735,7 @@ const CommandBar = (): ReactNode => {
             setInput,
             output,
             setSubmittedContext,
+            openAuthOverlay,
         ],
     );
     return (
@@ -785,7 +805,7 @@ const CommandBar = (): ReactNode => {
     );
 };
 const ViewportHUD = ({ currentId, currentSvg, filename, isSaved, onToggleSave }: ViewportHUDProps): ReactNode => {
-    const { copy } = useClipboard<string, never>();
+    const { copy } = useClipboard<string>();
     const { exportAs } = useExport();
     const handleCopy = useCallback(() => {
         currentSvg && copy(currentSvg);

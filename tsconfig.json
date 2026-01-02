@@ -6,6 +6,7 @@
         { "path": "./apps/parametric_icons" },
         { "path": "./packages/ai" },
         { "path": "./packages/components" },
+        { "path": "./packages/components-next" },
         { "path": "./packages/database" },
         { "path": "./packages/devtools" },
         { "path": "./packages/runtime" },

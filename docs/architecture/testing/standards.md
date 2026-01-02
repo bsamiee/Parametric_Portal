@@ -111,8 +111,8 @@ Single assertion logic covers N behaviors via table iteration.
 
 ```typescript
 const errorFactories = [
-    { factory: mkClipboardError, def: TEST_CONSTANTS.errors.clipboardRead, tag: 'ClipboardError' },
-    { factory: mkDownloadError, def: TEST_CONSTANTS.errors.downloadFailed, tag: 'DownloadError' },
+    { factory: clipboardError, def: TEST_CONSTANTS.errors.clipboardRead, tag: 'ClipboardError' },
+    { factory: downloadError, def: TEST_CONSTANTS.errors.downloadFailed, tag: 'DownloadError' },
 ] as const;
 
 it.each(errorFactories)('$tag creates error with correct structure', ({ factory, def, tag }) => {

@@ -1,158 +1,164 @@
 /**
- * Shared cryptographic utilities for token hashing and generation.
- * Eliminates duplication between middleware and route handlers.
+ * Cryptographic utilities: hashing, encryption, token generation/validation.
+ * Effect.fn for tracing, Schema.Class for domain models, Layer.effect for services.
  */
-import { database, type TokenHash } from '@parametric-portal/types/database';
-import { types, type Uuidv7 } from '@parametric-portal/types/types';
-import { Config, Effect, Option, pipe, Redacted, Schema as S } from 'effect';
-import { EncryptionError, HashingError, UnauthorizedError } from './errors.ts';
-
-const db = database();
-const typesApi = types();
+import { Hex64, Uuidv7 } from '@parametric-portal/types/types';
+import { Config, Context, Effect, Layer, Option, ParseResult, Redacted, Schema as S } from 'effect';
+import { AuthError, InternalError } from './domain-errors.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type TokenPair = {
-    readonly hash: TokenHash;
-    readonly token: Uuidv7;
+type TokenValidation<T> = {
+    readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<T>, AuthError>;
+    readonly messages: { readonly notFound: string; readonly expired: string };
 };
-type EncryptedKey = {
-    readonly ciphertext: Uint8Array;
-    readonly iv: Uint8Array;
-};
-type TokenValidationMessages = {
-    readonly hashingFailed: string;
-    readonly notFound: string;
-    readonly expired: string;
-};
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const B = Object.freeze({
+    ivLength: 12,
+    keyAlgorithm: { length: 256, name: 'AES-GCM' },
+    minEncryptedLength: 13,
+} as const);
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+class TokenPair extends S.Class<TokenPair>('TokenPair')({
+    hash: Hex64.schema,
+    token: Uuidv7.schema,
+}) {
+    static readonly create = Effect.gen(function* () {
+        const token = Uuidv7.generateSync();
+        const hashBuffer = yield* Effect.tryPromise({
+            catch: (_cause) => new InternalError({ message: 'Hashing failed' }),
+            try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)),
+        });
+        return new TokenPair({ hash: Hex64.fromBytes(new Uint8Array(hashBuffer)), token });
+    });
+}
+class EncryptedKey extends S.Class<EncryptedKey>('EncryptedKey')({
+    ciphertext: S.Uint8ArrayFromSelf,
+    iv: S.Uint8ArrayFromSelf.pipe(
+        S.filter((arr) => arr.length === B.ivLength, { message: () => `IV must be ${B.ivLength} bytes` }),
+    ),
+}) {
+    /** Decode Uint8Array (iv || ciphertext) ↔ EncryptedKey. Encode receives struct shape, not instance. */
+    static readonly fromBytes = S.transformOrFail(S.Uint8ArrayFromSelf, EncryptedKey, {
+        decode: (bytes) =>
+            bytes.length < B.minEncryptedLength
+                ? ParseResult.fail(
+                      new ParseResult.Type(
+                          S.Uint8ArrayFromSelf.ast,
+                          bytes,
+                          `Expected at least ${B.minEncryptedLength} bytes`,
+                      ),
+                  )
+                : ParseResult.succeed(
+                      new EncryptedKey({ ciphertext: bytes.slice(B.ivLength), iv: bytes.slice(0, B.ivLength) }),
+                  ),
+        encode: ({ ciphertext, iv }) => ParseResult.succeed(new Uint8Array([...iv, ...ciphertext])),
+        strict: true,
+    });
+    /** Static: decrypt from raw bytes (parses then decrypts). */
+    static readonly decryptBytes = Effect.fn('crypto.decrypt.bytes')((bytes: Uint8Array) =>
+        Effect.gen(function* () {
+            const encrypted = yield* S.decodeUnknown(EncryptedKey.fromBytes)(bytes);
+            return yield* encrypted.decrypt();
+        }),
+    );
+    /** Instance: decrypt this encrypted key (requires EncryptionKeyService in context). */
+    decrypt(): Effect.Effect<string, InternalError, EncryptionKeyService> {
+        const { iv, ciphertext } = this;
+        return Effect.fn('crypto.decrypt')(() =>
+            Effect.gen(function* () {
+                const key = yield* EncryptionKeyService;
+                return yield* Effect.tryPromise({
+                    catch: (_cause) => new InternalError({ message: 'Encryption failed' }),
+                    try: () => crypto.subtle.decrypt({ iv: iv.slice(), name: 'AES-GCM' }, key, ciphertext.slice()),
+                }).pipe(Effect.map((buf) => new TextDecoder().decode(buf)));
+            }),
+        )();
+    }
+    /** Serialize to bytes (iv || ciphertext) for storage/transmission. */
+    toBytes(): Uint8Array {
+        return new Uint8Array([...this.iv, ...this.ciphertext]);
+    }
+}
+
+// --- [SERVICE] ---------------------------------------------------------------
+
+class EncryptionKeyService extends Context.Tag('crypto/EncryptionKey')<EncryptionKeyService, CryptoKey>() {
+    /** Layer fails as defect if ENCRYPTION_KEY missing/invalid - this is a startup configuration error, not runtime. */
+    static readonly layer = Layer.effect(
+        this,
+        Effect.gen(function* () {
+            const redacted = yield* Config.redacted('ENCRYPTION_KEY');
+            return yield* Effect.tryPromise({
+                catch: (cause) => cause,
+                try: () =>
+                    crypto.subtle.importKey(
+                        'raw',
+                        Hex64.fromBase64(Redacted.value(redacted)).slice(),
+                        B.keyAlgorithm,
+                        false,
+                        ['encrypt', 'decrypt'],
+                    ),
+            });
+        }).pipe(Effect.orDie),
+    );
+}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const hashString = (input: string): Effect.Effect<TokenHash, HashingError> =>
+const hash = Effect.fn('crypto.hash')((input: string) =>
     Effect.tryPromise({
-        catch: (cause) => new HashingError({ cause }),
-        try: async () => {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(input);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hex = [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
-            return S.decodeSync(db.schemas.entities.TokenHash)(hex);
-        },
+        catch: (_cause) => new InternalError({ message: 'Hashing failed' }),
+        try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
+    }).pipe(Effect.map((buf) => Hex64.fromBytes(new Uint8Array(buf)))),
+);
+const encrypt = Effect.fn('crypto.encrypt')(function* (plaintext: string) {
+    const key = yield* EncryptionKeyService;
+    const iv = crypto.getRandomValues(new Uint8Array(B.ivLength));
+    const ciphertext = yield* Effect.tryPromise({
+        catch: (_cause) => new InternalError({ message: 'Encryption failed' }),
+        try: () =>
+            crypto.subtle
+                .encrypt({ iv, name: 'AES-GCM' }, key, new TextEncoder().encode(plaintext))
+                .then((buf) => new Uint8Array(buf)),
     });
-const generateToken = (): Uuidv7 => typesApi.generate.uuidv7Sync();
-const createTokenPair = (): Effect.Effect<TokenPair, HashingError> =>
-    pipe(
-        Effect.sync(generateToken),
-        Effect.flatMap((token) =>
-            pipe(
-                hashString(token),
-                Effect.map((hash) => ({ hash, token })),
-            ),
-        ),
-    );
-
-const validateTokenHash =
-    <T extends { readonly expiresAt?: Date | Option.Option<Date> }>(
-        lookup: (hash: TokenHash) => Effect.Effect<Option.Option<T>, UnauthorizedError>,
-        messages: TokenValidationMessages,
-    ) =>
-    (hash: TokenHash): Effect.Effect<T, UnauthorizedError> =>
-        pipe(
-            lookup(hash),
+    return new EncryptedKey({ ciphertext, iv });
+});
+const validate =
+    <T extends { readonly expiresAt?: Date | Option.Option<Date> }>({ lookup, messages }: TokenValidation<T>) =>
+    (tokenHash: Hex64) =>
+        lookup(tokenHash).pipe(
             Effect.flatMap(
                 Option.match({
-                    onNone: () => Effect.fail(new UnauthorizedError({ reason: messages.notFound })),
-                    onSome: (result) =>
-                        pipe(
-                            result.expiresAt instanceof Date
-                                ? Option.some(result.expiresAt)
-                                : (result.expiresAt ?? Option.none<Date>()),
-                            Option.getOrUndefined,
-                            db.expiry.check,
-                            ({ expired }) =>
-                                expired
-                                    ? Effect.fail(new UnauthorizedError({ reason: messages.expired }))
-                                    : Effect.succeed(result),
-                        ),
+                    onNone: () => Effect.fail(new AuthError({ reason: messages.notFound })),
+                    onSome: Effect.succeed,
                 }),
             ),
+            Effect.filterOrFail(
+                (result) => {
+                    const expiresAt =
+                        result.expiresAt instanceof Date
+                            ? Option.some(result.expiresAt)
+                            : (result.expiresAt ?? Option.none<Date>());
+                    const exp = Option.getOrUndefined(expiresAt);
+                    return exp === undefined || exp > new Date();
+                },
+                () => new AuthError({ reason: messages.expired }),
+            ),
         );
-const importEncryptionKey = pipe(
-    Config.redacted('ENCRYPTION_KEY'),
-    Effect.mapError((cause) => new EncryptionError({ cause })),
-    Effect.flatMap((keyBase64Redacted) =>
-        Effect.tryPromise({
-            catch: (cause) => new EncryptionError({ cause }),
-            try: async () => {
-                const keyBase64 = Redacted.value(keyBase64Redacted);
-                const keyBytes = Buffer.from(keyBase64, 'base64');
-                return crypto.subtle.importKey('raw', keyBytes, { length: 256, name: 'AES-GCM' }, false, [
-                    'encrypt',
-                    'decrypt',
-                ]);
-            },
-        }),
-    ),
-    Effect.cached,
-);
-const getEncryptionKey = (): Effect.Effect<CryptoKey, EncryptionError> =>
-    Effect.flatMap(importEncryptionKey, (cached) => cached);
-const encryptApiKey = (plaintext: string): Effect.Effect<EncryptedKey, EncryptionError> =>
-    pipe(
-        getEncryptionKey(),
-        Effect.flatMap((key) =>
-            Effect.tryPromise({
-                catch: (cause) => new EncryptionError({ cause }),
-                try: async () => {
-                    const iv = crypto.getRandomValues(new Uint8Array(12));
-                    const encoded = new TextEncoder().encode(plaintext);
-                    const ciphertext = new Uint8Array(
-                        await crypto.subtle.encrypt({ iv, name: 'AES-GCM' }, key, encoded),
-                    );
-                    return { ciphertext, iv };
-                },
-            }),
-        ),
-    );
-const decryptApiKey = (encrypted: EncryptedKey): Effect.Effect<string, EncryptionError> =>
-    pipe(
-        getEncryptionKey(),
-        Effect.flatMap((key) =>
-            Effect.tryPromise({
-                catch: (cause) => new EncryptionError({ cause }),
-                try: async () => {
-                    const ivBuffer = new Uint8Array(encrypted.iv).buffer;
-                    const ciphertextBuffer = new Uint8Array(encrypted.ciphertext).buffer;
-                    const decrypted = await crypto.subtle.decrypt(
-                        { iv: ivBuffer, name: 'AES-GCM' },
-                        key,
-                        ciphertextBuffer,
-                    );
-                    return new TextDecoder().decode(decrypted);
-                },
-            }),
-        ),
-    );
-const decryptFromBytes = (keyEncrypted: Uint8Array): Effect.Effect<string, EncryptionError> =>
-    keyEncrypted.length < 12
-        ? Effect.fail(new EncryptionError({ cause: 'Invalid encrypted key: insufficient bytes for IV' }))
-        : decryptApiKey({ ciphertext: keyEncrypted.slice(12), iv: keyEncrypted.slice(0, 12) });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const Token = Object.freeze({
-    createPair: createTokenPair,
-    generate: generateToken,
-    hash: hashString,
-    validate: validateTokenHash,
-});
 const Crypto = Object.freeze({
-    decrypt: decryptApiKey,
-    decryptFromBytes,
-    encrypt: encryptApiKey,
-});
+    Key: { encrypt, Service: EncryptionKeyService },
+    Token: { generate: Uuidv7.generateSync, hash, Pair: TokenPair, validate },
+} as const);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Crypto, createTokenPair, decryptApiKey, encryptApiKey, generateToken, hashString, Token, validateTokenHash };
-export type { EncryptedKey, TokenPair, TokenValidationMessages };
+export { Crypto, EncryptedKey, EncryptionKeyService, TokenPair };
+export type { TokenValidation };

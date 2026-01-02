@@ -1,12 +1,16 @@
 {
     "compilerOptions": {
         "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
+        "noEmit": true,
         "outDir": "dist",
         "paths": {
-            "@parametric-portal/api/*": ["../../apps/api/src/*"],
             "@parametric-portal/components/*": ["../../packages/components/src/*"],
             "@parametric-portal/devtools/*": ["../../packages/devtools/src/*"],
             "@parametric-portal/runtime/*": ["../../packages/runtime/src/*"],
+            "@parametric-portal/server/*": ["../../packages/server/src/*"],
             "@parametric-portal/theme/*": ["../../packages/theme/src/*"],
             "@parametric-portal/types/*": ["../../packages/types/src/*"]
         },

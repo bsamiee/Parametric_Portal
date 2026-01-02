@@ -2,21 +2,16 @@
  * Application state stores via Zustand factory from @parametric-portal/runtime.
  */
 
-import type { ExportFormat } from '@parametric-portal/runtime/hooks/browser';
 import { createStore } from '@parametric-portal/runtime/store/factory';
-import { type ColorMode, database, type Intent, type OutputMode } from '@parametric-portal/types/database';
-import { type Svg, type SvgAsset, svg } from '@parametric-portal/types/svg';
-import { type Index, types, type ZoomFactor } from '@parametric-portal/types/types';
+import type { ExportFormat } from '@parametric-portal/types/browser';
+import { ColorMode, Intent, OutputMode } from '@parametric-portal/types/icons';
+import { type Svg, type SvgAssetData, SvgAssetSchema, sanitizeSvg } from '@parametric-portal/types/svg';
+import { Index, Uuidv7, ZoomFactor } from '@parametric-portal/types/types';
+import type { MessageRole, SidebarTab } from '@parametric-portal/types/ui';
 import { Schema as S } from 'effect';
-
-const db = database();
-const svgApi = svg();
-const typesApi = types();
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type MessageRole = 'assistant' | 'user';
-type SidebarTab = 'history' | 'inspector' | 'library' | 'session';
 type Message = S.Schema.Type<typeof MessageSchema>;
 type ChatState = S.Schema.Type<typeof ChatStateSchema>;
 type PreviewState = S.Schema.Type<typeof PreviewStateSchema>;
@@ -41,7 +36,7 @@ type PreviewActions = {
     readonly zoomOut: () => void;
 };
 type ContextActions = {
-    readonly addAttachment: (ref: SvgAsset) => void;
+    readonly addAttachment: (ref: SvgAssetData) => void;
     readonly clearAttachments: () => void;
     readonly removeAttachment: (id: string) => void;
     readonly setColorMode: (mode: ColorMode) => void;
@@ -69,7 +64,7 @@ type LibraryActions = {
     readonly removeCustomAsset: (id: string) => void;
 };
 type LibraryComputed = {
-    readonly getCustomAsset: (id: string) => SvgAsset | undefined;
+    readonly getCustomAsset: (id: string) => SvgAssetData | undefined;
     readonly isSaved: (id: string) => boolean;
 };
 type UiActions = {
@@ -92,7 +87,7 @@ type UiActions = {
 
 const MessageSchema = S.Struct({
     content: S.String,
-    id: S.typeSchema(typesApi.brands.uuidv7),
+    id: S.typeSchema(Uuidv7.schema),
     role: S.Literal('user', 'assistant'),
     timestamp: S.Number,
 });
@@ -103,17 +98,15 @@ const ChatStateSchema = S.Struct({
 });
 const PreviewStateSchema = S.Struct({
     currentSvg: S.NullOr(S.String),
-    zoom: typesApi.schemas.ZoomFactor,
+    zoom: ZoomFactor.schema,
 });
 const ContextStateSchema = S.Struct({
-    attachments: S.Array(svgApi.schemas.SvgAsset),
-    colorMode: db.schemas.entities.ColorMode,
-    intent: db.schemas.entities.Intent,
-    output: db.schemas.entities.OutputMode,
+    attachments: S.Array(SvgAssetSchema),
+    colorMode: ColorMode,
+    intent: Intent,
+    output: OutputMode,
 });
-const SubmittedContextSchema = S.NullOr(
-    S.Struct({ context: ContextStateSchema, intent: db.schemas.entities.Intent, prompt: S.String }),
-);
+const SubmittedContextSchema = S.NullOr(S.Struct({ context: ContextStateSchema, intent: Intent, prompt: S.String }));
 const UiStateSchema = S.Struct({
     activeTab: S.Literal('history', 'inspector', 'library', 'session'),
     exportFormat: S.Literal('png', 'svg', 'zip'),
@@ -130,19 +123,19 @@ const UiStateSchema = S.Struct({
 });
 const AssetSchema = S.Struct({
     context: ContextStateSchema,
-    id: S.typeSchema(typesApi.brands.uuidv7),
-    intent: db.schemas.entities.Intent,
+    id: S.typeSchema(Uuidv7.schema),
+    intent: Intent,
     prompt: S.String,
-    selectedVariantIndex: S.optional(typesApi.schemas.Index),
+    selectedVariantIndex: S.optional(Index.schema),
     timestamp: S.Number,
-    variants: S.Array(svgApi.schemas.SvgAsset),
+    variants: S.Array(SvgAssetSchema),
 });
 const HistoryStateSchema = S.Struct({
     assets: S.Array(AssetSchema),
     currentId: S.NullOr(S.String),
 });
 const LibraryStateSchema = S.Struct({
-    customAssets: S.Array(svgApi.schemas.SvgAsset),
+    customAssets: S.Array(SvgAssetSchema),
     savedAssets: S.Array(AssetSchema),
 });
 
@@ -265,8 +258,8 @@ const useLibraryStore = createStore<LibraryState & LibraryActions, LibraryComput
                     : [...get().savedAssets, asset],
             }),
         addCustomAsset: (name, svgContent) => {
-            const id = typesApi.generate.uuidv7Sync();
-            set({ customAssets: [...get().customAssets, { id, name, svg: svgApi.sanitizeSvg(svgContent) as Svg }] });
+            const id = Uuidv7.generateSync();
+            set({ customAssets: [...get().customAssets, { id, name, svg: sanitizeSvg(svgContent) as Svg }] });
         },
         clearAssets: () => set({ savedAssets: [] }),
         removeAsset: (id) => set({ savedAssets: get().savedAssets.filter((asset) => asset.id !== id) }),
