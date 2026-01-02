@@ -1,0 +1,46 @@
+# --- [TYPOS_CONFIG] -----------------------------------------------------------
+# Configuration for typos-cli spell checker.
+# https://github.com/crate-ci/typos
+# -----------------------------------------------------------------------------
+
+[default]
+extend-ignore-identifiers-re = [
+    # Common abbreviations in code
+    "tsc",
+    "tsx",
+    "mjs",
+    "cjs",
+    # Effect-ts patterns
+    "fo",  # Effect.fo* methods
+    # React patterns
+    "useMemo",
+    "useRef",
+]
+
+[default.extend-words]
+# Technical terms that are not typos
+ags = "ags"        # abbreviation
+nce = "nce"        # abbreviation
+sherif = "sherif"  # npm package name (monorepo dependency checker)
+
+[files]
+extend-exclude = [
+    "*.lock",
+    "pnpm-lock.yaml",
+    "*.svg",
+    "*.png",
+    "*.jpg",
+    "*.ico",
+    "*.woff",
+    "*.woff2",
+    "*.ttf",
+    "*.eot",
+    "node_modules/",
+    "dist/",
+    "coverage/",
+    ".nx/",
+    ".git/",
+    "test-results/",
+    "*.min.js",
+    "*.min.css",
+]

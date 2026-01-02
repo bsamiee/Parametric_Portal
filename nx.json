@@ -57,6 +57,7 @@
             "{workspaceRoot}/pnpm-lock.yaml",
             "{workspaceRoot}/pnpm-workspace.yaml"
         ],
+        "sonar": ["{projectRoot}/src/**/*", "{projectRoot}/coverage/**/*", "{workspaceRoot}/sonar-project.properties"],
         "testing": [
             "{projectRoot}/src/**/*",
             "{projectRoot}/tests/**/*",
@@ -323,6 +324,16 @@
             "options": {
                 "command": "tsx watch tools/scripts/generate-pwa-icons.ts",
                 "cwd": "{projectRoot}"
+            }
+        },
+        "sonar": {
+            "cache": false,
+            "dependsOn": ["test"],
+            "executor": "nx:run-commands",
+            "inputs": ["sonar"],
+            "options": {
+                "command": "npx @sonar/scan -Dsonar.projectKey=bsamiee_Parametric_Portal_{projectName} -Dsonar.organization=bsamiee -Dsonar.sources={projectRoot}/src -Dsonar.tests={projectRoot}/tests -Dsonar.javascript.lcov.reportPaths={projectRoot}/coverage/lcov.info",
+                "cwd": "{workspaceRoot}"
             }
         },
         "test": {
