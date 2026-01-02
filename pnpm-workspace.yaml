@@ -43,7 +43,11 @@ catalog:
   '@radix-ui/react-slot': 1.2.4
   '@rollup/plugin-typescript': 12.3.0
   '@rottitime/react-hook-message-event': 1.0.10
+  '@eslint/js': 9.28.0
   '@sonar/scan': 4.3.2
+  '@typescript-eslint/parser': 8.34.0
+  eslint: 9.28.0
+  eslint-plugin-sonarjs: 3.0.5
   '@stryker-mutator/core': 9.4.0
   '@stryker-mutator/vitest-runner': 9.4.0
   '@tailwindcss/vite': 4.1.18

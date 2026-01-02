@@ -1,12 +1,40 @@
 # --- [PRE_COMMIT_HOOKS] -------------------------------------------------------
 pre-commit:
   parallel: true
+  skip:
+    - merge
+    - rebase
   commands:
     biome:
       glob: "*"
       run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
       stage_fixed: true
-      skip: false
+
+    sonar-rules:
+      glob: "*.{ts,tsx}"
+      exclude:
+        - "*.d.ts"
+        - "**/node_modules/**"
+        - "**/*.spec.ts"
+        - "**/*.test.ts"
+        - "**/*.bench.ts"
+      run: pnpm exec eslint -c eslint.sonar.config.js --fix {staged_files}
+      stage_fixed: true
+      fail_text: "[SONARJS] Code smell detected - fix before committing"
+
+    typos:
+      glob: "*"
+      exclude:
+        - "**/node_modules/**"
+        - "**/*.lock"
+        - "**/pnpm-lock.yaml"
+        - "**/*.svg"
+        - "**/*.png"
+        - "**/*.jpg"
+        - "**/*.ico"
+      run: typos {staged_files}
+      fail_text: "[TYPOS] Spelling error detected - fix before committing"
+
     imperatives:
       glob: "*.{ts,tsx}"
       exclude:
@@ -29,14 +57,24 @@ pre-commit:
           fi
         done
         [ "$violation" -eq 0 ] || { echo "Use: Effect.try/fail, const, .map/.filter, ternary/dispatch"; exit 1; }
-      skip: false
 
 # --- [PRE_PUSH_HOOKS] ---------------------------------------------------------
 pre-push:
   parallel: false
+  skip:
+    - merge
+    - rebase
   commands:
     quality:
       env:
         NX_DAEMON: "false"
         FORCE_COLOR: "0"
       run: pnpm exec nx affected -t typecheck,check --base=origin/main --output-style=stream
+      fail_text: "[QUALITY] Type or lint errors detected - fix before pushing"
+
+    sonar:
+      env:
+        NX_DAEMON: "false"
+        FORCE_COLOR: "0"
+      run: pnpm exec nx affected -t sonar --base=origin/main --parallel=1
+      fail_text: "[SONAR] SonarQube analysis failed"

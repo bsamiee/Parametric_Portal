@@ -5,7 +5,7 @@
     "not ie <= 11"
   ],
   "knip": {
-    "ignoreBinaries": ["hadolint", "mise"],
+    "ignoreBinaries": ["hadolint", "mise", "typos"],
     "ignore": [".nx/**"],
     "workspaces": {
       ".": {
@@ -38,7 +38,11 @@
     "@radix-ui/react-separator": "catalog:",
     "@radix-ui/react-slot": "catalog:",
     "@rollup/plugin-typescript": "catalog:",
+    "@eslint/js": "catalog:",
     "@sonar/scan": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "eslint": "catalog:",
+    "eslint-plugin-sonarjs": "catalog:",
     "@stryker-mutator/core": "catalog:",
     "@stryker-mutator/vitest-runner": "catalog:",
     "@tailwindcss/vite": "catalog:",
@@ -138,7 +142,9 @@
     "reset": "pnpm clean && pnpm install && pnpm build:libs",
     "sherif": "sherif",
     "sherif:fix": "sherif --fix",
-    "sonar": "npx @sonar/scan",
+    "sonar": "pnpm exec nx run-many -t sonar --parallel=1",
+    "sonar:affected": "pnpm exec nx affected -t sonar --base=origin/main --parallel=1",
+    "sonar:lint": "pnpm exec eslint -c eslint.sonar.config.js .",
     "test:all": "nx run-many -t test",
     "tokens": "tsx tools/scripts/count-tokens.ts",
     "typecheck:all": "nx run-many -t typecheck"
