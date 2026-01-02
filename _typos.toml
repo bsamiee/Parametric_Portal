@@ -21,9 +21,6 @@ extend-ignore-identifiers-re = [
 # Technical terms that are not typos
 ags = "ags"        # abbreviation
 nce = "nce"        # abbreviation
-hte = "hte"        # can appear in variable names
-nad = "nad"        # can appear in variable names
-teh = "teh"        # can appear in variable names
 sherif = "sherif"  # npm package name (monorepo dependency checker)
 
 [files]

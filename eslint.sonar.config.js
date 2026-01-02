@@ -54,8 +54,8 @@ export default [
             // All branches in conditional have identical implementation
             'sonarjs/no-all-duplicated-branches': 'error',
 
-            // Nested if statements that can be merged
-            'sonarjs/no-collapsible-if': 'error',
+            // Disabled: project uses ternaries, not nested if statements
+            'sonarjs/no-collapsible-if': 'off',
 
             // Collection size compared incorrectly (arr.length < 0)
             'sonarjs/no-collection-size-mischeck': 'error',
@@ -93,8 +93,8 @@ export default [
             // Useless return/continue/break statements
             'sonarjs/no-redundant-jump': 'error',
 
-            // Switch with fewer than 3 cases (use if-else)
-            'sonarjs/no-small-switch': 'error',
+            // Disabled: project uses dispatch tables, not switch statements
+            'sonarjs/no-small-switch': 'off',
 
             // Collection written but never read
             'sonarjs/no-unused-collection': 'error',

@@ -18,8 +18,7 @@ pre-commit:
         - "**/*.spec.ts"
         - "**/*.test.ts"
         - "**/*.bench.ts"
-      run: pnpm exec eslint -c eslint.sonar.config.js --fix {staged_files}
-      stage_fixed: true
+      run: pnpm exec eslint -c eslint.sonar.config.js {staged_files}
       fail_text: "[SONARJS] Code smell detected - fix before committing"
 
     typos:
