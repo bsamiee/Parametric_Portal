@@ -33,7 +33,7 @@ const renderSlotContent = (input: SlotInput | undefined, className?: string): Re
             : (input as ReactNode);
 const createIconRenderer = (cls: string) => (input: SlotInput | undefined): ReactNode => renderSlotContent(input, cls);
 
-// --- [COMPONENTS] ------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const SlotWrapper: FC<{
     readonly input: SlotInput | undefined;

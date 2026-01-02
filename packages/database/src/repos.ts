@@ -97,8 +97,6 @@ const withRevocable = <Id, UserId>(
     }),
 });
 
-// --- [REPOSITORY_BUILDERS] ---------------------------------------------------
-
 const buildApiKeyRepo = (sql: SqlClient.SqlClient) =>
     Effect.map(makeRepo(ApiKey, 'apiKeys'), (base) => ({
         ...base,
@@ -203,7 +201,7 @@ const buildUserRepo = (sql: SqlClient.SqlClient) =>
         }),
     }));
 
-// --- [SERVICE_TYPES] ---------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 type ApiKeyRepository = Effect.Effect.Success<ReturnType<typeof buildApiKeyRepo>>;
 type AssetRepository = Effect.Effect.Success<ReturnType<typeof buildAssetRepo>>;
@@ -220,8 +218,6 @@ type DatabaseServiceShape = {
     readonly users: UserRepository;
     readonly withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SqlError, R>;
 };
-
-// --- [SERVICE] ---------------------------------------------------------------
 
 class DatabaseService extends Context.Tag('database/DatabaseService')<DatabaseService, DatabaseServiceShape>() {
     static readonly layer = Layer.effect(

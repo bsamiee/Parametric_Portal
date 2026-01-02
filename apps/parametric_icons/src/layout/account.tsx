@@ -7,7 +7,7 @@ import type { HttpClient } from '@effect/platform';
 import { useEffectMutate, useEffectRun } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import { AsyncState } from '@parametric-portal/types/async';
-import type { AiProvider, ApiKey, ApiKeyId } from '@parametric-portal/types/database';
+import { AiProvider, type ApiKey, type ApiKeyId } from '@parametric-portal/types/database';
 import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
@@ -21,7 +21,7 @@ const B = Object.freeze({
         size: 'md' as const,
         title: 'Account Settings',
     },
-    providers: ['anthropic', 'gemini', 'openai'] as const,
+    providers: AiProvider.literals,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------

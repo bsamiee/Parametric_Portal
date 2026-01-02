@@ -4,6 +4,7 @@
  * Config-driven: defers env reading to Layer build time.
  */
 import { HttpApiBuilder, HttpServerResponse } from '@effect/platform';
+import { InternalError, Validation } from '@parametric-portal/server/domain-errors';
 import { Config, Effect, pipe, Schema as S } from 'effect';
 import { ParametricApi } from '@parametric-portal/server/api';
 
@@ -26,10 +27,10 @@ const B = Object.freeze({
 const handleIngestTraces = Effect.fn('telemetry.ingest')((collectorEndpoint: string, body: unknown) =>
     Effect.gen(function* () {
         const payload = yield* S.decodeUnknown(OtlpTracePayload)(body).pipe(
-            Effect.mapError(() => new Error('Invalid OTLP payload')),
+            Effect.mapError(() => new Validation({ field: 'body', message: 'Invalid OTLP payload' })),
         );
         yield* Effect.tryPromise({
-            catch: (e) => new Error(`Collector unreachable: ${String(e)}`),
+            catch: (e) => new InternalError({ message: `Collector unreachable: ${String(e)}` }),
             try: () =>
                 fetch(`${collectorEndpoint}/v1/traces`, {
                     body: JSON.stringify(payload),
@@ -48,7 +49,7 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((collectorEndpoint: str
     ),
 );
 
-// --- [LAYERS] ----------------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const TelemetryRouteLive = HttpApiBuilder.group(ParametricApi, 'telemetry', (handlers) =>
     Effect.gen(function* () {
