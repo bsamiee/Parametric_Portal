@@ -1,75 +1,49 @@
 /**
- * Prometheus metrics service via Effect Layer.
- * Context.Tag + static layer pattern following crypto.ts gold standard.
+ * Effect native metrics with HTTP middleware instrumentation.
+ * Uses Metric module for counters/histograms, exported via OtlpMetrics in telemetry.ts.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { DurationMs, Timestamp } from '@parametric-portal/types/types';
-import { Context, Effect, Layer } from 'effect';
-import { Counter, collectDefaultMetrics, Histogram, Registry } from 'prom-client';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type MetricsShape = {
-    readonly httpRequestDuration: Histogram<'method' | 'path' | 'status'>;
-    readonly httpRequestsTotal: Counter<'method' | 'path' | 'status'>;
-    readonly registry: Registry;
-};
+import { Effect, Metric, MetricBoundaries, MetricLabel } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    buckets: [0.01, 0.05, 0.1, 0.5, 1, 5],
-    labelNames: ['method', 'path', 'status'] as const,
+    boundaries: MetricBoundaries.exponential({ count: 10, factor: 2, start: 0.005 }),
+    crypto: { boundaries: MetricBoundaries.exponential({ count: 6, factor: 2, start: 0.001 }) },
+    metrics: {
+        crypto: { description: 'Cryptographic operation duration', name: 'crypto_op_duration_seconds' },
+        duration: { description: 'HTTP request duration in seconds', name: 'http_request_duration_seconds' },
+        requests: { description: 'Total HTTP requests', name: 'http_requests_total' },
+    },
 } as const);
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const createMetrics = (): MetricsShape => {
-    const registry = new Registry();
-    collectDefaultMetrics({ register: registry });
-    const httpRequestsTotal = new Counter({
-        help: 'Total HTTP requests',
-        labelNames: [...B.labelNames],
-        name: 'http_requests_total',
-        registers: [registry],
-    });
-    const httpRequestDuration = new Histogram({
-        buckets: [...B.buckets],
-        help: 'HTTP request duration in seconds',
-        labelNames: [...B.labelNames],
-        name: 'http_request_duration_seconds',
-        registers: [registry],
-    });
-    return { httpRequestDuration, httpRequestsTotal, registry };
-};
-
-// --- [SERVICE] ---------------------------------------------------------------
-
-class Metrics extends Context.Tag('server/Metrics')<Metrics, MetricsShape>() {
-    static readonly layer = Layer.sync(this, createMetrics);
-}
+const httpRequestsTotal = Metric.counter(B.metrics.requests.name, { description: B.metrics.requests.description });
+const httpRequestDuration = Metric.histogram(B.metrics.duration.name, B.boundaries, B.metrics.duration.description);
+const cryptoOpDuration = Metric.histogram(B.metrics.crypto.name, B.crypto.boundaries, B.metrics.crypto.description);
 
 // --- [MIDDLEWARE] ------------------------------------------------------------
 
 const createMetricsMiddleware = () =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
-            const { httpRequestDuration, httpRequestsTotal } = yield* Metrics;
             const request = yield* HttpServerRequest.HttpServerRequest;
-            const method = request.method;
-            const path = request.url;
-            const startTime = Timestamp.nowSync();
+            const clock = yield* Effect.clock;
+            const start = yield* clock.currentTimeMillis;
             const response = yield* app;
-            const status = String(response.status);
-            const duration = DurationMs.toSeconds(Timestamp.diff(Timestamp.nowSync(), startTime));
-            yield* Effect.sync(() => {
-                httpRequestsTotal.inc({ method, path, status });
-                httpRequestDuration.observe({ method, path, status }, duration);
-            });
+            const end = yield* clock.currentTimeMillis;
+            const duration = (end - start) / 1000;
+            const labels = [
+                MetricLabel.make('method', request.method),
+                MetricLabel.make('path', request.url.split('?')[0] ?? '/'),
+                MetricLabel.make('status', String(response.status)),
+            ];
+            const taggedCounter = httpRequestsTotal.pipe(Metric.taggedWithLabels(labels));
+            const taggedHistogram = httpRequestDuration.pipe(Metric.taggedWithLabels(labels));
+            yield* Metric.increment(taggedCounter);
+            yield* Metric.update(taggedHistogram, duration);
             return response;
         }),
     );
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { createMetricsMiddleware, Metrics };
+export { B as METRICS_TUNING, createMetricsMiddleware, cryptoOpDuration };

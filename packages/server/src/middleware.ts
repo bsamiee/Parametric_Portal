@@ -12,11 +12,12 @@ import {
     HttpServerResponse,
     HttpTraceContext,
 } from '@effect/platform';
-import { AuthContext, OAuthResult, type OAuthProvider } from '@parametric-portal/types/database';
+import type { OAuthProvider } from '@parametric-portal/database/schema';
+import { AuthContext, OAuthResult } from './auth.ts';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { Effect, Layer, Option, Redacted } from 'effect';
 import { Crypto } from './crypto.ts';
-import { AuthError, type OAuthError } from './domain-errors.ts';
+import { AuthError, type OAuthError } from './http-errors.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -116,12 +117,20 @@ const security = (hsts: typeof B.security.hsts | false = B.security.hsts) =>
     );
 const trace = () =>
     HttpMiddleware.make((app) =>
-        Effect.flatMap(HttpServerRequest.HttpServerRequest, (req) =>
-            Option.match(HttpTraceContext.fromHeaders(req.headers), {
-                onNone: () => app,
-                onSome: (span) => Effect.withParentSpan(app, span),
-            }),
-        ),
+        Effect.gen(function* () {
+            const req = yield* HttpServerRequest.HttpServerRequest;
+            const parent = HttpTraceContext.fromHeaders(req.headers);
+            const spanOptions = { attributes: { 'http.method': req.method, 'http.target': req.url } };
+            const runApp = Option.isSome(parent)
+                ? Effect.withParentSpan(app, parent.value)
+                : Effect.withSpan(app, 'http.request', spanOptions);
+            const res = yield* runApp;
+            yield* Effect.annotateCurrentSpan('http.status_code', res.status);
+            const spanOpt = yield* Effect.optionFromOptional(Effect.currentSpan);
+            return Option.isSome(spanOpt)
+                ? HttpServerResponse.setHeaders(res, HttpTraceContext.toHeaders(spanOpt.value))
+                : res;
+        }),
     );
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------

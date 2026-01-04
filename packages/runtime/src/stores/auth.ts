@@ -1,31 +1,43 @@
 /**
- * Shared authentication store for cross-app auth state. Tokens stored in HttpOnly cookies; state via Zustand with devtools.
+ * Manage cross-app authentication state via Zustand store.
+ * Tokens persist in HttpOnly cookies; UI state in memory with devtools.
  */
-import type { ApiKey, User } from '@parametric-portal/types/database';
-import { createStore } from '../store/factory';
+import type { AiProvider, ApiKeyId, Role, UserId } from '@parametric-portal/database/schema';
+import { createStore } from '../store/factory.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type UserResponse = typeof User.Response.Type;
+type ApiKeyResponseType = {
+    readonly createdAt: Date;
+    readonly id: ApiKeyId;
+    readonly name: string;
+    readonly provider: AiProvider;
+};
+type UserResponseType = {
+    readonly createdAt: Date;
+    readonly email: string;
+    readonly id: UserId;
+    readonly role: Role;
+};
 type AuthState = {
     readonly accessToken: string | null;
-    readonly apiKeys: ReadonlyArray<ApiKey>;
+    readonly apiKeys: ReadonlyArray<ApiKeyResponseType>;
     readonly expiresAt: Date | null;
     readonly isAccountOverlayOpen: boolean;
     readonly isAuthOverlayOpen: boolean;
     readonly isLoading: boolean;
-    readonly user: UserResponse | null;
+    readonly user: UserResponseType | null;
 };
 type AuthActions = {
-    readonly addApiKey: (key: ApiKey) => void;
+    readonly addApiKey: (key: ApiKeyResponseType) => void;
     readonly clearAuth: () => void;
     readonly closeAccountOverlay: () => void;
     readonly closeAuthOverlay: () => void;
     readonly openAccountOverlay: () => void;
     readonly openAuthOverlay: () => void;
     readonly removeApiKey: (id: string) => void;
-    readonly setApiKeys: (keys: ReadonlyArray<ApiKey>) => void;
-    readonly setAuth: (token: string, expiresAt: Date, user: UserResponse) => void;
+    readonly setApiKeys: (keys: ReadonlyArray<ApiKeyResponseType>) => void;
+    readonly setAuth: (token: string, expiresAt: Date, user: UserResponseType) => void;
     readonly setLoading: (flag: boolean) => void;
 };
 
@@ -34,7 +46,7 @@ type AuthActions = {
 const B = Object.freeze({
     initial: {
         accessToken: null,
-        apiKeys: [] as ReadonlyArray<ApiKey>,
+        apiKeys: [] as ReadonlyArray<ApiKeyResponseType>,
         expiresAt: null,
         isAccountOverlayOpen: false,
         isAuthOverlayOpen: false,

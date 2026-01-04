@@ -1,6 +1,15 @@
-/** Branded primitives: unified type/value exports with schema, validation, and generation. */
+/**
+ * Export branded primitives with schema validation and generation.
+ * Unifies type/value exports via Effect Schema for domain safety.
+ */
 import { DateTime, Effect, pipe, Schema as S } from 'effect';
 import { v7 as uuidv7 } from 'uuid';
+
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+/** Return fallback when schema decode fails on partial objects. */
+const schemaDefaults = <T>(schema: S.Schema<T, unknown, never>, fallback: T): T =>
+	Effect.runSync(Effect.try({ catch: () => fallback, try: () => S.decodeUnknownSync(schema)({}) }));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -26,7 +35,7 @@ const B = Object.freeze({
 	},
 } as const);
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [SCHEMA_BUILDERS] -------------------------------------------------------
 
 const sb = {
 	boundedInt: <T extends string>(label: T, min: number, max: number) =>
@@ -44,6 +53,7 @@ const sb = {
 	positiveNumber: <T extends string>(label: T) =>
 		pipe(S.Number, S.positive(), S.brand(label)),
 } as const;
+/** Create branded type with standard schema operations. */
 const make = <A, I>(schema: S.Schema<A, I, never>) =>
 	Object.freeze({
 		decode: S.decodeUnknown(schema),
@@ -54,6 +64,7 @@ const make = <A, I>(schema: S.Schema<A, I, never>) =>
 		is: S.is(schema),
 		schema,
 	});
+/** Extend branded type with synchronous generation capability. */
 const makeGeneratable = <A, I>(schema: S.Schema<A, I, never>, generateSync: () => A) =>
 	Object.freeze({ ...make(schema), generate: Effect.sync(generateSync), generateSync });
 
@@ -85,10 +96,12 @@ const Email = Object.freeze(make(EmailSchema));
 
 const Hex8Schema = sb.pattern('Hex8', B.patterns.hex8);
 type Hex8 = S.Schema.Type<typeof Hex8Schema>
+/** Generate random 8-character hex string. */
 const hex8GenerateSync = (): Hex8 =>
 	Array.from({ length: B.hex.length8 }, () =>
 		Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix),
 	).join('') as Hex8;
+/** Derive deterministic 8-character hex from seed string. */
 const hex8Derive = (seed: string): Hex8 => {
 	const mod = B.hex.radix ** B.hex.length8;
 	const hash = Array.from(seed).reduce<number>((a, c) => (a * 31 + (c.codePointAt(0) ?? 0)) % mod, 0);
@@ -171,6 +184,8 @@ const Timestamp = Object.freeze({
 	...makeGeneratable(TimestampSchema, timestampNowSync),
 	addDuration: (ts: Timestamp, d: DurationMs): Timestamp => (ts + d) as Timestamp,
 	diff: (later: Timestamp, earlier: Timestamp): DurationMs => (later - earlier) as DurationMs,
+	expiresAt: (durationMs: DurationMs): Timestamp => (timestampNowSync() + durationMs) as Timestamp,
+	expiresAtDate: (durationMs: DurationMs): Date => new Date(timestampNowSync() + durationMs),
 	fromDate: S.transform(S.DateFromSelf, TimestampSchema, {
 		decode: (date) => date.getTime() as Timestamp,
 		encode: (ts) => new Date(ts),
@@ -204,11 +219,20 @@ const VariantCount = Object.freeze(make(VariantCountSchema));
 
 const ZoomFactorSchema = sb.boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
 type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>
-const ZoomFactor = Object.freeze(make(ZoomFactorSchema));
+const ZoomFactor = Object.freeze({
+	...make(ZoomFactorSchema),
+	clamp: (z: ZoomFactor, min: ZoomFactor, max: ZoomFactor): ZoomFactor =>
+		Math.max(min, Math.min(max, z)) as ZoomFactor,
+	max: B.bounds.zoomFactor.max as ZoomFactor,
+	min: B.bounds.zoomFactor.min as ZoomFactor,
+	one: 1 as ZoomFactor,
+	scale: (z: ZoomFactor, factor: number): ZoomFactor =>
+		S.decodeSync(ZoomFactorSchema)(z * factor),
+});
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TYPES_TUNING };
+export { B as TYPES_TUNING, schemaDefaults };
 export {
 	DurationMs,
 	Email,

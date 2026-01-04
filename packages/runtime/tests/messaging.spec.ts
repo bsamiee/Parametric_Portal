@@ -1,6 +1,6 @@
 /**
- * Messaging tests: payload creation, Effect-based send, schema validation.
- * Uses Effect Stream for continuous message listening with proper resource cleanup.
+ * Test messaging payload creation and Effect-based send operations.
+ * Validates schema enforcement and Stream-based message listening.
  */
 import { it as itProp } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
@@ -32,7 +32,7 @@ afterEach(() => {
 // biome-ignore lint/style/noNonNullAssertion: beforeEach guarantees initialization
 const postMessageSpy = (): ReturnType<typeof vi.spyOn> => spyRef.current!;
 
-// --- [DESCRIBE] MESSAGING_TUNING ---------------------------------------------
+// --- [DESCRIBE_MESSAGING_TUNING] ---------------------------------------------
 
 describe('MESSAGING_TUNING', () => {
     it('is frozen with expected defaults', () => {
@@ -41,7 +41,7 @@ describe('MESSAGING_TUNING', () => {
     });
 });
 
-// --- [DESCRIBE] createPayload ------------------------------------------------
+// --- [DESCRIBE_CREATE_PAYLOAD] -----------------------------------------------
 
 describe('createPayload', () => {
     itProp.prop([FC_ARB.eventName(), FC_ARB.messageData()])(
@@ -76,7 +76,7 @@ describe('createPayload', () => {
     });
 });
 
-// --- [DESCRIBE] sendMessage --------------------------------------------------
+// --- [DESCRIBE_SEND_MESSAGE] -------------------------------------------------
 
 describe('sendMessage', () => {
     it('posts message to parent with payload and default origin', async () => {
@@ -138,7 +138,7 @@ describe('sendMessage', () => {
     );
 });
 
-// --- [DESCRIBE] createMessageStream ------------------------------------------
+// --- [DESCRIBE_CREATE_MESSAGE_STREAM] ----------------------------------------
 
 describe('createMessageStream', () => {
     it('returns a Stream type', () => {

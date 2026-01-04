@@ -4,11 +4,12 @@
  */
 
 import type { HttpClient } from '@effect/platform';
+import { AiProvider, type ApiKeyId } from '@parametric-portal/database/schema';
 import { useEffectMutate, useEffectRun } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
+import type { ApiKeyCreateRequest, ApiKeyResponse } from '@parametric-portal/server/api';
 import { AsyncState } from '@parametric-portal/types/async';
-import { AiProvider, type ApiKey, type ApiKeyId } from '@parametric-portal/types/database';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe, type Schema, String as Str } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';
 import { auth } from '../infrastructure.ts';
@@ -38,8 +39,8 @@ const ApiKeyForm = (): ReactNode => {
     const [provider, setProvider] = useState<AiProvider>(B.providers[0]);
     const [error, setError] = useState<string | null>(null);
     const createMutation = useEffectMutate<
-        typeof ApiKey.Type,
-        typeof ApiKey.CreateRequest.Type,
+        Schema.Schema.Type<typeof ApiKeyResponse>,
+        Schema.Schema.Type<typeof ApiKeyCreateRequest>,
         unknown,
         HttpClient.HttpClient
     >((input) => auth.createApiKey(accessToken ?? '', input), {
@@ -57,7 +58,7 @@ const ApiKeyForm = (): ReactNode => {
             key.trim() &&
             createMutation.mutate({ key: key.trim(), name: name.trim(), provider });
     }, [accessToken, name, key, provider, createMutation]);
-    const isSubmitting = AsyncState.$is.Loading(createMutation.state);
+    const isSubmitting = AsyncState.isPending(createMutation.state);
     return (
         <Stack gap className='p-4 bg-neutral-800/50 rounded-lg'>
             <span className='text-sm font-medium opacity-70'>Add API Key</span>
@@ -71,7 +72,7 @@ const ApiKeyForm = (): ReactNode => {
                 <Select
                     items={B.providers.map((p: AiProvider) => ({
                         key: p,
-                        label: p.charAt(0).toUpperCase() + p.slice(1),
+                        label: Str.capitalize(p),
                     }))}
                     selectedKey={provider}
                     onSelectionChange={(k) => setProvider(k as AiProvider)}
@@ -135,7 +136,6 @@ const ApiKeyList = (): ReactNode => {
                         <span className='font-medium'>{k.name}</span>
                         <span className='text-xs opacity-50'>
                             {k.provider} | Added {formatDate(k.createdAt)}
-                            {Option.isSome(k.lastUsedAt) && ` | Last used ${formatDate(k.lastUsedAt.value)}`}
                         </span>
                     </Stack>
                     <Button
@@ -167,7 +167,7 @@ const LogoutButton = (): ReactNode => {
     const handleLogout = useCallback(() => {
         accessToken && logoutMutation.mutate(undefined);
     }, [accessToken, logoutMutation]);
-    const isLoggingOut = AsyncState.$is.Loading(logoutMutation.state);
+    const isLoggingOut = AsyncState.isPending(logoutMutation.state);
     return (
         <Button
             onPress={handleLogout}
@@ -189,7 +189,11 @@ const AccountOverlay = (): ReactNode => {
     const user = useAuthStore((s) => s.user);
     const closeAccountOverlay = useAuthStore((s) => s.closeAccountOverlay);
     const setApiKeys = useAuthStore((s) => s.setApiKeys);
-    const keysQuery = useEffectRun<{ data: ReadonlyArray<typeof ApiKey.Type> }, unknown, HttpClient.HttpClient>(
+    const keysQuery = useEffectRun<
+        { data: ReadonlyArray<Schema.Schema.Type<typeof ApiKeyResponse>> },
+        unknown,
+        HttpClient.HttpClient
+    >(
         Effect.gen(function* () {
             return yield* auth.listApiKeys(accessToken ?? '');
         }),
@@ -199,7 +203,7 @@ const AccountOverlay = (): ReactNode => {
             onSuccess: (result) => setApiKeys(result.data),
         },
     );
-    const isLoadingKeys = AsyncState.$is.Loading(keysQuery);
+    const isLoadingKeys = AsyncState.isPending(keysQuery);
     return (
         <Modal
             isOpen={isAccountOverlayOpen}

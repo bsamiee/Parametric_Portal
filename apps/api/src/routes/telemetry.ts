@@ -1,75 +1,48 @@
 /**
- * OTLP trace proxy for browser telemetry.
+ * OTLP proxy for browser telemetry (CORS bypass).
  * Browser POSTs to /api/v1/traces, API forwards to collector.
- * Config-driven: defers env reading to Layer build time.
  */
-import { HttpApiBuilder, HttpServerResponse } from '@effect/platform';
-import { InternalError, Validation } from '@parametric-portal/server/domain-errors';
-import { Config, Effect, pipe, Schema as S } from 'effect';
+import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const OtlpTracePayload = S.Struct({
-    resourceSpans: S.Array(S.Unknown),
-});
+import { TELEMETRY_TUNING } from '@parametric-portal/server/telemetry';
+import { Config, Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        collectorEndpoint: 'http://alloy.monitoring.svc.cluster.local:4318',
-    },
-} as const);
+const CollectorEndpoint = Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(
+    Config.withDefault(TELEMETRY_TUNING.defaults.endpointHttp),
+    Config.map((url) => url.replace(':4317', ':4318')),
+);
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
-const handleIngestTraces = Effect.fn('telemetry.ingest')((collectorEndpoint: string, body: unknown) =>
+const OtlpPayload = S.Struct({ resourceSpans: S.Array(S.Unknown) });
+
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerRequest.HttpServerRequest) =>
     Effect.gen(function* () {
-        const payload = yield* S.decodeUnknown(OtlpTracePayload)(body).pipe(
-            Effect.mapError(() => new Validation({ field: 'body', message: 'Invalid OTLP payload' })),
+        const endpoint = yield* CollectorEndpoint;
+        const json = yield* request.json;
+        const payload = yield* S.decodeUnknown(OtlpPayload)(json);
+        yield* Effect.tryPromise(() =>
+            fetch(`${endpoint}/v1/traces`, {
+                body: JSON.stringify(payload),
+                headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+            }),
         );
-        yield* Effect.tryPromise({
-            catch: (e) => new InternalError({ message: `Collector unreachable: ${String(e)}` }),
-            try: () =>
-                fetch(`${collectorEndpoint}/v1/traces`, {
-                    body: JSON.stringify(payload),
-                    headers: { 'Content-Type': 'application/json' },
-                    method: 'POST',
-                }),
-        });
         return HttpServerResponse.empty({ status: 202 });
     }).pipe(
-        Effect.catchAll((error) =>
-            Effect.gen(function* () {
-                yield* Effect.logWarning('Telemetry ingestion failed', { error: String(error) });
-                return HttpServerResponse.empty({ status: 202 });
-            }),
-        ),
+        Effect.tapError((e) => Effect.logWarning('Telemetry proxy failed', { error: String(e) })),
+        Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 202 })),
     ),
 );
 
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [LAYERS] ----------------------------------------------------------------
 
 const TelemetryRouteLive = HttpApiBuilder.group(ParametricApi, 'telemetry', (handlers) =>
-    Effect.gen(function* () {
-        const collectorEndpoint = yield* pipe(
-            Config.string('OTEL_EXPORTER_OTLP_ENDPOINT'),
-            Config.withDefault(B.defaults.collectorEndpoint),
-            Config.map((url) => url.replace(':4317', ':4318')),
-        );
-        return handlers.handle('ingestTraces', ({ request }) =>
-            request.json.pipe(
-                Effect.flatMap((body) => handleIngestTraces(collectorEndpoint, body)),
-                Effect.catchAll((error) =>
-                    Effect.gen(function* () {
-                        yield* Effect.logWarning('Telemetry request parse failed', { error: String(error) });
-                        return HttpServerResponse.empty({ status: 202 });
-                    }),
-                ),
-            ),
-        );
-    }),
+    handlers.handle('ingestTraces', ({ request }) => handleIngestTraces(request)),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

@@ -35,7 +35,6 @@ const captureConsole = <T>(method: ConsoleMethod, fn: (spy: SpyInstance) => T): 
 const withEnv = <T>(env: string, fn: () => T): T =>
     withCleanup(
         () => {
-            // biome-ignore lint/style/useNamingConvention: NODE_ENV is standard
             vi.stubGlobal('process', { env: { NODE_ENV: env } });
         },
         () => vi.unstubAllGlobals(),

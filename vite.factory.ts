@@ -29,7 +29,6 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 
 type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
 type Cfg = S.Schema.Type<typeof CfgSchema>;
-type BuildStrategy = 'parallel' | 'serial';
 type Mode = Cfg['mode'];
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -39,7 +38,6 @@ const CfgSchema = S.Union(
         assetExts: S.optional(S.Array(S.String)),
         builder: S.optional(
             S.Struct({
-                buildStrategy: S.optional(S.Literal('parallel', 'serial')),
                 sharedConfigBuild: S.optional(S.Boolean),
                 sharedPlugins: S.optional(S.Boolean),
             }),
@@ -79,7 +77,7 @@ const ROOT_DIR = dirname(fileURLToPath(import.meta.url));
 const B = Object.freeze({
     artifacts: { compression: { dir: 'entries', exts: ['.br', '.gz'] } },
     assets: ['bin', 'exr', 'fbx', 'glb', 'gltf', 'hdr', 'mtl', 'obj', 'wasm'],
-    builder: { buildStrategy: 'parallel' as BuildStrategy, sharedConfigBuild: true, sharedPlugins: true },
+    builder: { sharedConfigBuild: true, sharedPlugins: true },
     cache: { api: 300, cdn: 604800, max: 50 },
     chunks: [
         { n: 'vendor-react', p: 'react(?:-dom)?', w: 3 },
@@ -210,24 +208,14 @@ const clientOnly = (plugin: Plugin): Plugin => ({
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const buildAppHandlers: Record<BuildStrategy, (builder: ViteBuilder) => Promise<void>> = {
-    parallel: (builder) =>
-        pipe(
-            Option.fromNullable(builder.environments['client']),
-            Option.match({
-                onNone: () => Promise.resolve(),
-                onSome: (env) => builder.build(env).then(() => undefined),
-            }),
-        ),
-    serial: (builder) =>
-        pipe(
-            Option.fromNullable(builder.environments['client']),
-            Option.match({
-                onNone: () => Promise.resolve(),
-                onSome: (env) => builder.build(env).then(() => undefined),
-            }),
-        ),
-} as const;
+const buildApp = (builder: ViteBuilder): Promise<void> =>
+    pipe(
+        Option.fromNullable(builder.environments['client']),
+        Option.match({
+            onNone: () => Promise.resolve(),
+            onSome: (env) => builder.build(env).then(() => undefined),
+        }),
+    );
 const plugins = {
     app: (c: Extract<Cfg, { mode: 'app' }>, prod: boolean) => [
         tsconfigPaths({ root: c.root ?? ROOT_DIR }),
@@ -328,7 +316,7 @@ const config: {
             Option.map((builder) => ({ ...B.builder, ...builder })),
             Option.getOrElse(() => B.builder),
             (builder) => ({
-                buildApp: buildAppHandlers[builder.buildStrategy ?? B.builder.buildStrategy],
+                buildApp,
                 sharedConfigBuild: builder.sharedConfigBuild ?? B.builder.sharedConfigBuild,
                 sharedPlugins: builder.sharedPlugins ?? B.builder.sharedPlugins,
             }),

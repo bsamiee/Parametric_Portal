@@ -1,9 +1,11 @@
 /**
- * Universal Vite environment type augmentation.
- * All apps reference via tsconfig types field — eliminates per-app vite-env.d.ts files.
- * Values injected at build time via vite.factory.ts define block.
+ * Augment Vite environment with build-time values.
+ * Centralized type definitions eliminate per-app vite-env.d.ts duplication.
  */
+
 /// <reference types="vite/client" />
+
+// --- [TYPES] -----------------------------------------------------------------
 
 declare global {
     interface ImportMetaEnv {
@@ -16,5 +18,7 @@ declare global {
         readonly env: ImportMetaEnv;
     }
 }
+
+// --- [EXPORT] ----------------------------------------------------------------
 
 export {};

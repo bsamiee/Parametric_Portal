@@ -1,5 +1,6 @@
 /**
- * Storage adapter tests: property-based validation of localStorage, sessionStorage, cookies, indexedDB backends.
+ * Validate storage adapters via property-based testing.
+ * Covers localStorage, sessionStorage, cookies, and indexedDB backends.
  */
 import { it } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
@@ -29,7 +30,7 @@ const syncOps = (type: SyncStorageType) => ({
     set: (key: string, value: string) => storageBackends[type].setItem(key, value),
 });
 
-// --- [DESCRIBE] STORAGE_TUNING -----------------------------------------------
+// --- [DESCRIBE_STORAGE_TUNING] -----------------------------------------------
 
 describe('STORAGE_TUNING', () => {
     it('cookie defaults match expected values', () => {
@@ -43,7 +44,7 @@ describe('STORAGE_TUNING', () => {
     });
 });
 
-// --- [DESCRIBE] storageBackends ----------------------------------------------
+// --- [DESCRIBE_STORAGE_BACKENDS] ---------------------------------------------
 
 describe('storageBackends', () => {
     it('contains all 4 storage types', () => {
@@ -96,7 +97,7 @@ describe('storageBackends', () => {
     });
 });
 
-// --- [DESCRIBE] createStorage ------------------------------------------------
+// --- [DESCRIBE_CREATE_STORAGE] -----------------------------------------------
 
 describe('createStorage', () => {
     it('defaults to localStorage when no type specified', () => {
@@ -139,7 +140,7 @@ describe('createStorage', () => {
     });
 });
 
-// --- [DESCRIBE] adapter interface --------------------------------------------
+// --- [DESCRIBE_ADAPTER_INTERFACE] --------------------------------------------
 
 describe('adapter interface', () => {
     it.each(Object.keys(storageBackends) as StorageType[])('%s has complete StorageAdapter interface', (type) => {
@@ -156,7 +157,7 @@ describe('adapter interface', () => {
     });
 });
 
-// --- [DESCRIBE] edge cases ---------------------------------------------------
+// --- [DESCRIBE_EDGE_CASES] ---------------------------------------------------
 
 describe('edge cases', () => {
     it.prop([FC_ARB.storageKey()])('localStorage handles large JSON values', (key) => {

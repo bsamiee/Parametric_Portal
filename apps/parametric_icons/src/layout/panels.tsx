@@ -10,8 +10,8 @@ import { sanitizeFilename } from '@parametric-portal/runtime/services/browser';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import { AsyncState } from '@parametric-portal/types/async';
 import type { IconResponse, Intent } from '@parametric-portal/types/icons';
-import { type SvgAssetData, sanitizeSvgScoped } from '@parametric-portal/types/svg';
-import { type Index, Uuidv7, type VariantCount } from '@parametric-portal/types/types';
+import { Svg, type SvgAsset } from '@parametric-portal/types/svg';
+import { Index, Timestamp, Uuidv7, VariantCount, type ZoomFactor } from '@parametric-portal/types/types';
 import { Effect, Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef } from 'react';
@@ -54,7 +54,7 @@ import { UploadDialog } from './overlays.tsx';
 
 type SidebarIconName = 'History' | 'SlidersHorizontal' | 'Heart' | 'SquareTerminal' | 'PanelLeft';
 type PreviewRenderState = 'empty' | 'generating' | 'ready';
-type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: number };
+type PreviewRenderProps = { readonly sanitized: string | null; readonly zoom: ZoomFactor };
 type PanelContentProps = HistoryPanelProps & LibraryPanelProps;
 type HistoryPanelProps = {
     readonly assets: ReadonlyArray<Asset>;
@@ -64,8 +64,8 @@ type HistoryPanelProps = {
     readonly onSelect: (id: string) => void;
 };
 type LibraryPanelProps = {
-    readonly customAssets: ReadonlyArray<SvgAssetData>;
-    readonly onAddAttachment: (asset: SvgAssetData) => void;
+    readonly customAssets: ReadonlyArray<SvgAsset>;
+    readonly onAddAttachment: (asset: SvgAsset) => void;
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
     readonly onRemoveSaved: (id: string) => void;
@@ -87,7 +87,7 @@ type ViewportProps = {
     readonly sanitized: string | null;
     readonly showGrid: boolean;
     readonly showSafeArea: boolean;
-    readonly zoom: number;
+    readonly zoom: ZoomFactor;
 };
 type ViewportHUDProps = {
     readonly currentId: string | null;
@@ -152,7 +152,7 @@ const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProp
         },
         createElement(SvgPreview, {
             className: 'w-full h-full',
-            sanitize: (value: string) => sanitizeSvgScoped(value, scopeSeed),
+            sanitize: (value: string) => Svg.sanitize(value, scopeSeed),
             svg,
         }),
     );
@@ -193,7 +193,7 @@ const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: Hist
                                     asset.variants[0] ? (
                                         <SvgPreview
                                             svg={asset.variants[0].svg}
-                                            sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
+                                            sanitize={(value: string) => Svg.sanitize(value, asset.id)}
                                             className='w-full h-full'
                                         />
                                     ) : (
@@ -259,7 +259,7 @@ const LibraryContent = ({
                                         thumbnail={
                                             <SvgPreview
                                                 svg={asset.svg}
-                                                sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
+                                                sanitize={(value: string) => Svg.sanitize(value, asset.id)}
                                                 className='w-full h-full'
                                             />
                                         }
@@ -302,7 +302,7 @@ const LibraryContent = ({
                                                 svg ? (
                                                     <SvgPreview
                                                         svg={svg}
-                                                        sanitize={(value: string) => sanitizeSvgScoped(value, asset.id)}
+                                                        sanitize={(value: string) => Svg.sanitize(value, asset.id)}
                                                         className='w-full h-full'
                                                     />
                                                 ) : (
@@ -612,7 +612,7 @@ const CommandBar = (): ReactNode => {
                     content: `Error: ${errorMessage}`,
                     id: generateId(),
                     role: 'assistant',
-                    timestamp: Date.now(),
+                    timestamp: Timestamp.nowSync(),
                 });
                 setSubmittedContext(null);
                 abortControllerRef.current = null;
@@ -625,19 +625,19 @@ const CommandBar = (): ReactNode => {
                         const firstVariant = variants[0];
                         firstVariant && setSvg(firstVariant.svg);
                         addMessage({
-                            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v: SvgAssetData) => v.name).join(', ')}`,
+                            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v: SvgAsset) => v.name).join(', ')}`,
                             id: generateId(),
                             role: 'assistant',
-                            timestamp: Date.now(),
+                            timestamp: Timestamp.nowSync(),
                         });
                         addAsset({
                             context: ctx.context,
                             id: generateId(),
                             intent: ctx.intent,
                             prompt: ctx.prompt,
-                            selectedVariantIndex: 0 as Index,
-                            timestamp: Date.now(),
-                            variants: variants.map((v: SvgAssetData) => ({
+                            selectedVariantIndex: Index.decodeSync(0),
+                            timestamp: Timestamp.nowSync(),
+                            variants: variants.map((v: SvgAsset) => ({
                                 id: generateId(),
                                 name: v.name,
                                 svg: v.svg,
@@ -649,7 +649,7 @@ const CommandBar = (): ReactNode => {
             },
         },
     );
-    const isGenerating = AsyncState.$is.Loading(state);
+    const isGenerating = AsyncState.isPending(state);
     const variantCount = output === 'batch' ? STORE_TUNING.variantCount.batch : STORE_TUNING.variantCount.single;
     const abortControllerRef = useRef<AbortController | null>(null);
     const handleOpenLibrary = useCallback(() => {
@@ -686,7 +686,7 @@ const CommandBar = (): ReactNode => {
                                             'Cannot refine: No asset selected. Switch to Create mode or select an asset first.',
                                         id: generateId(),
                                         role: 'assistant',
-                                        timestamp: Date.now(),
+                                        timestamp: Timestamp.nowSync(),
                                     });
                                 return isRefineWithoutSvg ? Option.none<string>() : Option.some(trimmed);
                             },
@@ -708,7 +708,7 @@ const CommandBar = (): ReactNode => {
                             content: trimmed,
                             id: generateId(),
                             role: 'user',
-                            timestamp: Date.now(),
+                            timestamp: Timestamp.nowSync(),
                         });
                         mutate({
                             attachments: attachments.length > 0 ? attachments : undefined,
@@ -717,7 +717,7 @@ const CommandBar = (): ReactNode => {
                             prompt: trimmed,
                             referenceSvg: intent === 'refine' ? (currentSvg ?? undefined) : undefined,
                             signal: controller.signal,
-                            variantCount: variantCount as VariantCount,
+                            variantCount: VariantCount.decodeSync(variantCount),
                         });
                         setInput('');
                     },
@@ -925,7 +925,7 @@ const Stage = (): ReactNode => {
     const toggleGrid = useUiStore((s) => s.toggleGrid);
     const toggleSafeArea = useUiStore((s) => s.toggleSafeArea);
     const scopeSeed = currentId ?? currentSvg ?? '';
-    const sanitized = currentSvg ? sanitizeSvgScoped(currentSvg, scopeSeed) : null;
+    const sanitized = currentSvg ? Svg.sanitize(currentSvg, scopeSeed) : null;
     return (
         <div className='stage'>
             <Box className='preview-box'>

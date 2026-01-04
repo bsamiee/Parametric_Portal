@@ -13,10 +13,10 @@
             "import": "./src/migrator.ts",
             "default": "./src/migrator.ts"
         },
-        "./models": {
-            "types": "./src/models.ts",
-            "import": "./src/models.ts",
-            "default": "./src/models.ts"
+        "./schema": {
+            "types": "./src/schema.ts",
+            "import": "./src/schema.ts",
+            "default": "./src/schema.ts"
         },
         "./repos": {
             "types": "./src/repos.ts",
@@ -35,11 +35,14 @@
         "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/sql": "catalog:",
+        "@effect/sql-drizzle": "catalog:",
         "@effect/sql-pg": "catalog:",
         "@parametric-portal/types": "workspace:*",
+        "drizzle-orm": "catalog:",
         "effect": "catalog:"
     },
     "devDependencies": {
+        "drizzle-kit": "catalog:",
         "typescript": "catalog:",
         "vite": "catalog:",
         "vitest": "catalog:"

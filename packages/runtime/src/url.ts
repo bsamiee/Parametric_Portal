@@ -1,5 +1,6 @@
 /**
- * URL state management via nuqs - type-safe search params with branded parsers.
+ * Manage URL state with type-safe search params.
+ * Provides branded parsers for domain primitives and React hooks.
  */
 import {
     ApiKeyId,
@@ -8,7 +9,7 @@ import {
     RefreshTokenId,
     SessionId,
     UserId,
-} from '@parametric-portal/types/database';
+} from '@parametric-portal/database/schema';
 import {
     Email,
     Hex8,
@@ -45,7 +46,6 @@ import {
     parseAsTimestamp,
     type SingleParserBuilder,
     throttle,
-    useQueryState,
     useQueryStates,
 } from 'nuqs';
 import { useMemo } from 'react';
@@ -59,19 +59,8 @@ type UrlStateOptions = {
     readonly limitUrlUpdates?: ReturnType<typeof throttle>;
     readonly scroll?: boolean;
     readonly shallow?: boolean;
+    readonly urlKeys?: Record<string, string>;
 };
-type ParserType =
-    | 'arrayOf'
-    | 'boolean'
-    | 'float'
-    | 'integer'
-    | 'isoDateTime'
-    | 'json'
-    | 'numberLiteral'
-    | 'string'
-    | 'stringEnum'
-    | 'stringLiteral'
-    | 'timestamp';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -109,8 +98,8 @@ const buildOptions = (opts?: UrlStateOptions): Options => ({
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const brandedParsers = Object.freeze({
-    apiKeyId: createBrandedStringParser(ApiKeyId),
-    assetId: createBrandedStringParser(AssetId),
+    apiKeyId: createBrandedStringParser(ApiKeyId.schema),
+    assetId: createBrandedStringParser(AssetId.schema),
     email: createBrandedStringParser(Email.schema),
     hex8: createBrandedStringParser(Hex8.schema),
     hex64: createBrandedStringParser(Hex64.schema),
@@ -119,15 +108,15 @@ const brandedParsers = Object.freeze({
     index: createBrandedNumberParser(Index.schema),
     isoDate: createBrandedStringParser(IsoDate.schema),
     nonNegativeInt: createBrandedNumberParser(NonNegativeInt.schema),
-    oauthAccountId: createBrandedStringParser(OAuthAccountId),
+    oauthAccountId: createBrandedStringParser(OAuthAccountId.schema),
     percentage: createBrandedNumberParser(Percentage.schema),
     positiveInt: createBrandedNumberParser(PositiveInt.schema),
-    refreshTokenId: createBrandedStringParser(RefreshTokenId),
+    refreshTokenId: createBrandedStringParser(RefreshTokenId.schema),
     safeInteger: createBrandedNumberParser(SafeInteger.schema),
-    sessionId: createBrandedStringParser(SessionId),
+    sessionId: createBrandedStringParser(SessionId.schema),
     slug: createBrandedStringParser(Slug.schema),
     url: createBrandedStringParser(Url.schema),
-    userId: createBrandedStringParser(UserId),
+    userId: createBrandedStringParser(UserId.schema),
     uuidv7: createBrandedStringParser(Uuidv7.schema),
     variantCount: createBrandedNumberParser(VariantCount.schema),
     zoomFactor: createBrandedNumberParser(ZoomFactor.schema),
@@ -150,9 +139,7 @@ const parsers = Object.freeze({
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const useUrlState = <T>(key: string, parser: SingleParserBuilder<T>, options?: UrlStateOptions) =>
-    useQueryState(key, parser.withOptions(buildOptions(options)));
-const useUrlStates = <T extends Record<string, SingleParserBuilder<unknown>>>(keyMap: T, options?: UrlStateOptions) =>
+const useUrl = <T extends Record<string, SingleParserBuilder<unknown>>>(keyMap: T, options?: UrlStateOptions) =>
     useQueryStates(
         useMemo(
             () =>
@@ -161,19 +148,12 @@ const useUrlStates = <T extends Record<string, SingleParserBuilder<unknown>>>(ke
                 ) as T,
             [keyMap, options],
         ),
+        options?.urlKeys ? { urlKeys: options.urlKeys as Partial<Record<keyof T, string>> } : undefined,
     );
 const createUrlLoader = <T extends Record<string, SingleParserBuilder<unknown>>>(keyMap: T) =>
     createLoader(keyMap as Parameters<typeof createLoader>[0]);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    B as URL_TUNING,
-    createBrandedNumberParser,
-    createBrandedStringParser,
-    createUrlLoader,
-    parsers,
-    useUrlState,
-    useUrlStates,
-};
-export type { ParserType, UrlHistory, UrlStateOptions };
+export { B as URL_TUNING, createBrandedNumberParser, createBrandedStringParser, createUrlLoader, parsers, useUrl };
+export type { UrlHistory, UrlStateOptions };

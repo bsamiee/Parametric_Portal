@@ -5,16 +5,17 @@
  * Pattern: Consumers use `LanguageModel.generateObject()` directly,
  * then `Effect.provide(getModel(provider))` or `Effect.provide(createModelLayer(provider, config))`.
  */
-import { AiError, LanguageModel, Prompt } from '@effect/ai';
+import { Prompt } from '@effect/ai';
 import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
+import type { AiProvider } from '@parametric-portal/database/schema';
 import { Config, Layer } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type AiProviderType = 'anthropic' | 'gemini' | 'openai';
+type AiProviderType = typeof AiProvider.Type;
 type AiModelConfig = {
     readonly maxTokens?: number;
     readonly model?: string;
@@ -97,10 +98,9 @@ type AiModelLayer = ReturnType<typeof createAnthropicModel>;
 /** Create model Layer with optional config override. */
 const createModelLayer = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer =>
     modelCreators[provider](config);
-/** Default model Layer for provider (uses B.defaults). */
 const getModel = (provider: AiProviderType): AiModelLayer => createModelLayer(provider);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AiError, B as AI_TUNING, buildPrompt, createModelLayer, getModel, LanguageModel, Prompt };
+export { B as AI_TUNING, buildPrompt, createModelLayer, getModel };
 export type { AiModelConfig, AiModelLayer, AiProviderType };

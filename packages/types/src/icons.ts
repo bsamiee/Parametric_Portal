@@ -1,7 +1,9 @@
-/** Icon generation domain: request/response schemas with design configuration namespace. */
+/**
+ * Define icon generation request/response schemas and design configuration constants.
+ * Consolidates canvas/layer/palette specifications for AI provider consumption.
+ */
 import { Schema as S } from 'effect';
-import { AiProvider } from './database.ts';
-import { SvgAssetSchema } from './svg.ts';
+import { SvgAsset } from './svg.ts';
 import { HexColor, Uuidv7, VariantCount } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -12,6 +14,7 @@ type OutputMode = S.Schema.Type<typeof OutputMode>
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
+const AiProvider = S.Literal('anthropic', 'openai', 'gemini');
 const ColorMode = S.Literal('dark', 'light');
 const Intent = S.Literal('create', 'refine');
 const OutputMode = S.Literal('single', 'batch');
@@ -19,7 +22,7 @@ const OutputMode = S.Literal('single', 'batch');
 // --- [CLASSES] ---------------------------------------------------------------
 
 class IconRequest extends S.Class<IconRequest>('IconRequest')({
-	attachments: S.optional(S.Array(SvgAssetSchema)),
+	attachments: S.optional(S.Array(SvgAsset.schema)),
 	colorMode: S.optional(ColorMode),
 	intent: S.optional(Intent),
 	prompt: S.NonEmptyTrimmedString,
@@ -27,20 +30,20 @@ class IconRequest extends S.Class<IconRequest>('IconRequest')({
 	referenceSvg: S.optional(S.String),
 	variantCount: S.optional(VariantCount.schema),
 }) {}
-
 class IconResponse extends S.Class<IconResponse>('IconResponse')({
 	id: Uuidv7.schema,
-	variants: S.Array(SvgAssetSchema),
+	variants: S.Array(SvgAsset.schema),
 }) {}
-
 const IconServiceInput = S.extend(IconRequest, S.Struct({ apiKey: S.optional(S.String) }));
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+/** Decode hex string to branded HexColor type for palette definitions. */
 const hex = (value: string): HexColor => HexColor.decodeSync(value);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
+/** Freeze design constants to prevent runtime mutation. */
 const Icons = Object.freeze({
 	design: {
 		canvas: { center: { x: 16, y: 16 }, gridSize: 32, safeArea: 2, viewBox: '0 0 32 32' },

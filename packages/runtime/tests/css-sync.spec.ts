@@ -1,5 +1,6 @@
 /**
- * CSS sync tests: hook integration, prefix validation via console capture.
+ * Test CSS sync hook integration with prefix validation.
+ * Validates store-to-DOM variable synchronization via console capture.
  */
 import { it } from '@fast-check/vitest';
 import { TEST_HARNESS } from '@parametric-portal/test-utils/harness';
@@ -55,7 +56,7 @@ const mockElement = () =>
         style: { setProperty: vi.fn() },
     }) as unknown as HTMLElement;
 
-// --- [DESCRIBE] CSS_SYNC_TUNING ----------------------------------------------
+// --- [DESCRIBE_CSS_SYNC_TUNING] ----------------------------------------------
 
 describe('CSS_SYNC_TUNING', () => {
     it('is frozen with expected defaults', () => {
@@ -65,7 +66,7 @@ describe('CSS_SYNC_TUNING', () => {
     });
 });
 
-// --- [DESCRIBE] useCssSync ---------------------------------------------------
+// --- [DESCRIBE_USE_CSS_SYNC] -------------------------------------------------
 
 describe('useCssSync', () => {
     it('syncs CSS variables on mount', () => {

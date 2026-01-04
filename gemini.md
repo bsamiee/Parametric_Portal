@@ -141,12 +141,33 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 // --- [TYPES] -----------------------------------------------------------------
 // --- [SCHEMA] ----------------------------------------------------------------
 // --- [CONSTANTS] -------------------------------------------------------------
+// --- [CLASSES] ---------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [LAYERS] ----------------------------------------------------------------
 // --- [ENTRY_POINT] -----------------------------------------------------------
 // --- [EXPORT] ----------------------------------------------------------------
 ```
 
-**Canonical order** (omit unused): Types → Schema → Constants → Pure Functions → Dispatch Tables → Effect Pipeline → Entry Point → Export.<br>
-**FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, any parentheticals.
+**Canonical order** (omit unused): Types → Schema → Constants → Classes → Services → Pure Functions → Dispatch Tables → Effect Pipeline → Layers → Entry Point → Export.
+
+**Core Sections**:
+- `[TYPES]` — Type aliases, interfaces, unions, inferred types
+- `[SCHEMA]` — @effect/schema, branded types, enums
+- `[CONSTANTS]` — B constant, frozen config, derived values
+- `[CLASSES]` — S.Class, Data.TaggedError, Context.Tag
+- `[SERVICES]` — Effect services with Layer definitions
+- `[PURE_FUNCTIONS]` — Stateless helpers, transformers
+- `[DISPATCH_TABLES]` — Keyed handler objects
+- `[EFFECT_PIPELINE]` — Effect.gen, pipe chains
+- `[LAYERS]` — Layer.effect, Layer.mergeAll composition
+- `[ENTRY_POINT]` — run(), main(), createX(), API definition
+- `[EXPORT]` — Named exports
+
+**Domain Extensions** (insert after corresponding core section):
+- Database: `[TABLES]` (after SCHEMA), `[RELATIONS]` (after TABLES), `[REPOSITORIES]` (after SERVICES)
+- API: `[GROUPS]` (after SCHEMA), `[MIDDLEWARE]` (after SERVICES)
+
+**FORBIDDEN labels**: `Helpers`, `Handlers`, `Utils`, `Config`, `Context`, `Domain_Errors`, any parentheticals.

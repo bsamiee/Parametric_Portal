@@ -1,0 +1,38 @@
+{
+	"name": "@parametric-portal/test-harness",
+	"version": "0.0.1",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"build": "vite build",
+		"check": "biome check .",
+		"dev": "vite dev --host",
+		"fix": "biome check --write .",
+		"preview": "vite preview --host",
+		"test": "vitest run --passWithNoTests",
+		"typecheck": "tsc --project tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@parametric-portal/components-next": "workspace:*",
+		"@parametric-portal/devtools": "workspace:*",
+		"@parametric-portal/runtime": "workspace:*",
+		"@parametric-portal/theme": "workspace:*",
+		"@parametric-portal/types": "workspace:*",
+		"effect": "catalog:",
+		"lucide-react": "catalog:",
+		"react": "catalog:",
+		"react-dom": "catalog:"
+	},
+	"devDependencies": {
+		"@tailwindcss/vite": "catalog:",
+		"@types/react": "catalog:",
+		"@types/react-dom": "catalog:",
+		"@vitejs/plugin-react": "catalog:",
+		"tailwindcss": "catalog:",
+		"tailwindcss-react-aria-components": "catalog:",
+		"tw-animate-css": "catalog:",
+		"typescript": "catalog:",
+		"vite": "catalog:",
+		"vitest": "catalog:"
+	}
+}

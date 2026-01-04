@@ -3,10 +3,11 @@
  * Schema.Class for PKCE state, unified error factory, Arctic-native integration.
  */
 import { Crypto, EncryptedKey, EncryptionKeyService } from '@parametric-portal/server/crypto';
-import { OAuthError } from '@parametric-portal/server/domain-errors';
+import { HttpError } from '@parametric-portal/server/http-errors';
 import { OAuth } from '@parametric-portal/server/middleware';
-import { OAuthResult, type OAuthProvider } from '@parametric-portal/types/database';
-import { DurationMs, Timestamp } from '@parametric-portal/types/types';
+import type { OAuthProvider } from '@parametric-portal/database/schema';
+import { AUTH_TUNING, OAuthResult } from '@parametric-portal/server/auth';
+import { Timestamp } from '@parametric-portal/types/types';
 import {
     ArcticFetchError,
     decodeIdToken,
@@ -20,17 +21,7 @@ import {
     UnexpectedErrorResponseBodyError,
     UnexpectedResponseError,
 } from 'arctic';
-import { Config, type ConfigError, Duration, Effect, Layer, Redacted, Schema as S, Schedule } from 'effect';
-
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    gitHubApi: 'https://api.github.com/user',
-    pkceExpiry: DurationMs.fromSeconds(600),
-    retry: Schedule.exponential(Duration.millis(100)).pipe(Schedule.compose(Schedule.recurs(3))),
-    scopes: { github: ['user:email'], oidc: ['openid', 'profile', 'email'] },
-    timeout: Duration.seconds(10),
-} as const);
+import { Config, type ConfigError, Effect, Layer, Redacted, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -46,9 +37,12 @@ const OIDCClaims = S.Struct({
     picture: S.optional(S.String),
     sub: S.String,
 });
-class PkceState extends S.Class<PkceState>('PkceState')({ exp: S.Number, state: S.String, verifier: S.String }) {
+
+// --- [CLASSES] ---------------------------------------------------------------
+
+class PkceState extends S.Class<PkceState>('PkceState')({ exp: Timestamp.schema, state: S.String, verifier: S.String }) {
     static readonly encrypt = Effect.fn('pkce.encrypt')((provider: typeof OAuthProvider.Type, state: string, verifier: string) =>
-        Crypto.Key.encrypt(JSON.stringify({ exp: Timestamp.addDuration(Timestamp.nowSync(), B.pkceExpiry), state, verifier })).pipe(
+        Crypto.Key.encrypt(JSON.stringify({ exp: Timestamp.addDuration(Timestamp.nowSync(), AUTH_TUNING.durations.pkce), state, verifier })).pipe(
             Effect.flatMap((enc) => S.encode(EncryptedKey.fromBytes)(enc)),
             Effect.map((bytes) => Buffer.from(bytes).toString('base64url')),
             Effect.mapError(() => mkErr(provider, 'PKCE encryption failed', 'PKCE_ENCRYPT_FAILED')),
@@ -58,7 +52,7 @@ class PkceState extends S.Class<PkceState>('PkceState')({ exp: S.Number, state: 
         EncryptedKey.decryptBytes(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
             Effect.flatMap((json) => S.decodeUnknown(PkceState)(JSON.parse(json))),
             Effect.filterOrFail(
-                (p) => Date.now() <= p.exp,
+                (p) => Timestamp.nowSync() <= p.exp,
                 () => mkErr(provider, 'PKCE expired', 'PKCE_EXPIRED'),
             ),
             Effect.mapError(() => mkErr(provider, 'PKCE invalid', 'PKCE_INVALID')),
@@ -68,9 +62,9 @@ class PkceState extends S.Class<PkceState>('PkceState')({ exp: S.Number, state: 
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const mkErr = (provider: typeof OAuthProvider.Type, reason: string, _code: string, _cause?: unknown): OAuthError =>
-    new OAuthError({ provider, reason });
-const handler = <T>(guard: (e: unknown) => e is T, fn: (p: typeof OAuthProvider.Type, e: T) => OAuthError) => [guard, fn] as const;
+const mkErr = (provider: typeof OAuthProvider.Type, reason: string, _code: string, _cause?: unknown) =>
+    new HttpError.OAuth({ provider, reason });
+const handler = <T>(guard: (e: unknown) => e is T, fn: (p: typeof OAuthProvider.Type, e: T) => InstanceType<typeof HttpError.OAuth>) => [guard, fn] as const;
 const arcticHandlers = [
     handler(
         (e): e is OAuth2RequestError => e instanceof OAuth2RequestError,
@@ -89,9 +83,9 @@ const arcticHandlers = [
         (p, e) => mkErr(p, `Unexpected error: HTTP ${e.status}`, 'UNEXPECTED_ERROR_BODY'),
     ),
 ] as const;
-const mapArctic = (p: typeof OAuthProvider.Type, e: unknown): OAuthError =>
+const mapArctic = (p: typeof OAuthProvider.Type, e: unknown) =>
     arcticHandlers.find(([guard]) => guard(e))?.[1](p, e as never) ??
-    new OAuthError({
+    new HttpError.OAuth({
         provider: p,
         reason: e instanceof Error ? e.message : 'Unknown error',
     });
@@ -126,12 +120,12 @@ const githubResult = (tokens: OAuth2Tokens) =>
     Effect.tryPromise({
         catch: (e) => mapArctic('github', e),
         try: () =>
-            fetch(B.gitHubApi, {
+            fetch(AUTH_TUNING.endpoints.githubApi, {
                 headers: { Authorization: `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0' },
             }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
     }).pipe(
-        Effect.retry(B.retry),
-        Effect.timeoutFail({ duration: B.timeout, onTimeout: () => mkErr('github', 'Request timeout', 'TIMEOUT') }),
+        Effect.retry(AUTH_TUNING.oauth.retry),
+        Effect.timeoutFail({ duration: AUTH_TUNING.oauth.timeout, onTimeout: () => mkErr('github', 'Request timeout', 'TIMEOUT') }),
         Effect.flatMap((r) =>
             S.decodeUnknown(GitHubUser)(r).pipe(
                 Effect.mapError(() => mkErr('github', 'Invalid response', 'INVALID_RESPONSE')),
@@ -143,7 +137,7 @@ const extractAuth = Object.freeze({
     github: githubResult,
     google: (t: OAuth2Tokens) => oidcResult('google', t),
     microsoft: (t: OAuth2Tokens) => oidcResult('microsoft', t),
-} satisfies Record<typeof OAuthProvider.Type, (t: OAuth2Tokens) => Effect.Effect<OAuthResult, OAuthError>>);
+} satisfies Record<typeof OAuthProvider.Type, (t: OAuth2Tokens) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>>>);
 
 // --- [LAYER] -----------------------------------------------------------------
 
@@ -173,16 +167,16 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
         });
         const exchange = (provider: typeof OAuthProvider.Type, fn: () => Promise<OAuth2Tokens>) =>
             Effect.tryPromise({ catch: (e) => mapArctic(provider, e), try: fn }).pipe(
-                Effect.retry(B.retry),
+                Effect.retry(AUTH_TUNING.oauth.retry),
                 Effect.timeoutFail({
-                    duration: B.timeout,
+                    duration: AUTH_TUNING.oauth.timeout,
                     onTimeout: () => mkErr(provider, 'Token exchange timeout', 'TIMEOUT'),
                 }),
             );
         const refreshHandlers = Object.freeze({
             github: (token: string) => clients.github.refreshAccessToken(token),
             google: (token: string) => clients.google.refreshAccessToken(token),
-            microsoft: (token: string) => clients.microsoft.refreshAccessToken(token, [...B.scopes.oidc]),
+            microsoft: (token: string) => clients.microsoft.refreshAccessToken(token, [...AUTH_TUNING.oauth.scopes.oidc]),
         } satisfies Record<typeof OAuthProvider.Type, (token: string) => Promise<OAuth2Tokens>>);
         return OAuth.of({
             authenticate: (provider, code, state) =>
@@ -198,11 +192,11 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                     const state = generateState();
                     const verifier = generateCodeVerifier();
                     return provider === 'github'
-                        ? clients.github.createAuthorizationURL(state, [...B.scopes.github])
+                        ? clients.github.createAuthorizationURL(state, [...AUTH_TUNING.oauth.scopes.github])
                         : clients[provider].createAuthorizationURL(
                               yield* PkceState.encrypt(provider, state, verifier),
                               verifier,
-                              [...B.scopes.oidc],
+                              [...AUTH_TUNING.oauth.scopes.oidc],
                           );
                 }).pipe(Effect.provide(EncryptionKeyService.layer)),
             refreshToken: (provider, token) =>

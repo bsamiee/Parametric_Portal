@@ -1,8 +1,8 @@
 /**
- * CSS variable synchronization for Tailwind v4 - syncs Zustand store state to DOM CSS variables via subscription.
+ * Sync Zustand store state to DOM CSS variables.
+ * Subscribes to store changes and applies values to root element.
  */
 import { HtmlId } from '@parametric-portal/types/types';
-import { Option } from 'effect';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { StoreApi } from 'zustand';
 
@@ -38,29 +38,24 @@ const syncVariables = <T>(
     root: HTMLElement,
     state: T,
     prefix: string,
-    sel: Option.Option<(s: T) => Record<string, string>>,
-): void =>
-    Option.match(sel, {
-        onNone: () => {},
-        onSome: (fn) => {
-            Object.entries(fn(state)).forEach(([k, v]) => {
-                root.style.setProperty(`--${prefix}-${k}`, v);
-            });
-        },
-    });
-const syncClassNames = <T>(root: HTMLElement, state: T, classNames: Option.Option<(s: T) => ClassNameResult>): void =>
-    Option.match(classNames, {
-        onNone: () => {},
-        onSome: (fn) => {
-            const result = fn(state);
+    selector: ((s: T) => Record<string, string>) | undefined,
+): void => {
+    selector &&
+        Object.entries(selector(state)).forEach(([k, v]) => {
+            root.style.setProperty(`--${prefix}-${k}`, v);
+        });
+};
+const syncClassNames = <T>(root: HTMLElement, state: T, classNames: ((s: T) => ClassNameResult) | undefined): void => {
+    classNames &&
+        ((result: ClassNameResult) => {
             (result.add ?? []).forEach((c) => {
                 root.classList.add(c);
             });
             (result.remove ?? []).forEach((c) => {
                 root.classList.remove(c);
             });
-        },
-    });
+        })(classNames(state));
+};
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -70,18 +65,16 @@ const useCssSync = <T extends object>(
 ): void => {
     const { classNames, prefix = B.defaults.prefix, root = B.defaults.root, selector } = config;
     const validatedPrefix = useMemo(() => validatePrefix(prefix), [prefix]);
-    const selectorOpt = useMemo(() => Option.fromNullable(selector), [selector]);
-    const classNamesOpt = useMemo(() => Option.fromNullable(classNames), [classNames]);
     const rootStable = useCallback(root, []);
     useEffect(() => {
         const rootEl = rootStable();
         const sync = (state: T): void => {
-            syncVariables(rootEl, state, validatedPrefix, selectorOpt);
-            syncClassNames(rootEl, state, classNamesOpt);
+            syncVariables(rootEl, state, validatedPrefix, selector);
+            syncClassNames(rootEl, state, classNames);
         };
         sync(store.getState());
         return store.subscribe(sync);
-    }, [classNamesOpt, rootStable, selectorOpt, store, validatedPrefix]);
+    }, [classNames, rootStable, selector, store, validatedPrefix]);
 };
 
 // --- [EXPORT] ----------------------------------------------------------------

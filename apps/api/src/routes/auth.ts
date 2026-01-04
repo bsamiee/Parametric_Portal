@@ -4,47 +4,33 @@
  */
 import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/database/repos';
+import { AiProvider, ApiKeyId, OAuthProvider, type ApiKey, type RefreshTokenId as RefreshTokenIdType, type User, type UserId as UserIdType } from '@parametric-portal/database/schema';
+import { AUTH_TUNING } from '@parametric-portal/server/auth';
 import { Crypto, EncryptedKey, TokenPair } from '@parametric-portal/server/crypto';
-import { AuthError, InternalError, NotFound, OAuthError } from '@parametric-portal/server/domain-errors';
+import { HttpError } from '@parametric-portal/server/http-errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import {
-    AiProvider,
-    ApiKeyId,
-    OAuthProvider,
-    RefreshTokenId,
-    User,
-    UserId,
-} from '@parametric-portal/types/database';
-import { DurationMs, Email, Timestamp, type Uuidv7 } from '@parametric-portal/types/types';
-import { DateTime, Duration, Effect, Option, pipe, Schema as S } from 'effect';
+import { Email, Timestamp, Url, type Uuidv7 } from '@parametric-portal/types/types';
+import { DateTime, Effect, Option, pipe, Schema as S } from 'effect';
 import { ParametricApi } from '@parametric-portal/server/api';
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
-const B = Object.freeze({
-    cookie: {
-        maxAge: Duration.toSeconds(Duration.days(30)),
-        name: 'refreshToken',
-        path: '/api/auth',
-    },
-    durations: {
-        refreshToken: DurationMs.fromMillis(Duration.toMillis(Duration.days(30))),
-        session: DurationMs.fromMillis(Duration.toMillis(Duration.days(7))),
-    },
-} as const);
+type OAuthService = typeof Middleware.OAuth.Service;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const internal = (msg: string) => new InternalError({ message: msg });
-const authError = (reason: string) => new AuthError({ reason });
+const toUserResponse = (u: User) =>
+	Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
+const toApiKeyResponse = (k: ApiKey) =>
+	Object.freeze({ createdAt: k.createdAt, id: k.id, name: k.name, provider: k.provider });
 const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) =>
     pipe(
         HttpServerResponse.json({ accessToken, expiresAt: DateTime.unsafeFromDate(expiresAt) }),
         Effect.flatMap((response) =>
-            HttpServerResponse.setCookie(response, B.cookie.name, refreshToken, {
+            HttpServerResponse.setCookie(response, AUTH_TUNING.cookie.name, refreshToken, {
                 httpOnly: true,
-                maxAge: `${B.cookie.maxAge} seconds`,
-                path: B.cookie.path,
+                maxAge: `${AUTH_TUNING.cookie.maxAge} seconds`,
+                path: AUTH_TUNING.cookie.path,
                 sameSite: 'lax',
                 secure: true,
             }),
@@ -54,10 +40,10 @@ const buildLogoutResponse = () =>
     pipe(
         HttpServerResponse.json({ success: true }),
         Effect.flatMap((response) =>
-            HttpServerResponse.setCookie(response, B.cookie.name, '', {
+            HttpServerResponse.setCookie(response, AUTH_TUNING.cookie.name, '', {
                 httpOnly: true,
                 maxAge: '0 seconds',
-                path: B.cookie.path,
+                path: AUTH_TUNING.cookie.path,
                 sameSite: 'lax',
                 secure: true,
             }),
@@ -74,50 +60,45 @@ const createAuthTokenPairs = () =>
             sessionToken: session.token,
         };
     });
-const rotateTokens = (repos: DatabaseServiceShape, userId: typeof UserId.Type, revokeTokenId?: typeof RefreshTokenId.Type) =>
-    Effect.gen(function* () {
-        const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
-        const sessionExpiresAt = new Date(Timestamp.addDuration(Timestamp.nowSync(), B.durations.session));
-        const refreshExpiresAt = new Date(Timestamp.addDuration(Timestamp.nowSync(), B.durations.refreshToken));
-        yield* repos.withTransaction(
-            Effect.gen(function* () {
-                yield* repos.sessions.insertVoid({
-                    createdAt: undefined,
-                    expiresAt: DateTime.unsafeFromDate(sessionExpiresAt),
-                    ipAddress: Option.none(),
-                    lastActivityAt: undefined,
-                    revokedAt: Option.none(),
-                    tokenHash: sessionHash,
-                    userAgent: Option.none(),
-                    userId,
-                });
-                yield* repos.refreshTokens.insertVoid({
-                    createdAt: undefined,
-                    expiresAt: DateTime.unsafeFromDate(refreshExpiresAt),
-                    revokedAt: Option.none(),
-                    tokenHash: refreshHash,
-                    userId,
-                });
-                yield* revokeTokenId !== undefined
-                    ? repos.refreshTokens.revoke(revokeTokenId)
-                    : Effect.void;
-            }),
-        );
-        return { refreshToken, sessionExpiresAt, sessionToken };
-    });
+const rotateTokens = (repos: DatabaseServiceShape, userId: UserIdType, revokeTokenId?: RefreshTokenIdType) =>
+	Effect.gen(function* () {
+		const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
+		const sessionExpiresAt = Timestamp.expiresAtDate(AUTH_TUNING.durations.sessionMs);
+		const refreshExpiresAt = Timestamp.expiresAtDate(AUTH_TUNING.durations.refreshTokenMs);
+		yield* repos.withTransaction(
+			Effect.gen(function* () {
+				yield* repos.sessions.insert({
+					expiresAt: sessionExpiresAt,
+					ipAddress: null,
+					revokedAt: null,
+					tokenHash: sessionHash,
+					userAgent: null,
+					userId,
+				}).pipe(Effect.asVoid);
+				yield* repos.refreshTokens.insert({
+					expiresAt: refreshExpiresAt,
+					revokedAt: null,
+					tokenHash: refreshHash,
+					userId,
+				}).pipe(Effect.asVoid);
+				yield* revokeTokenId === undefined
+					? Effect.void
+					: repos.refreshTokens.revoke(revokeTokenId);
+			}),
+		);
+		return { refreshToken, sessionExpiresAt, sessionToken };
+	});
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
-
-type OAuthService = typeof Middleware.OAuth.Service;
 
 const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: OAuthService, provider: typeof OAuthProvider.Type) =>
     Effect.gen(function* () {
         const url = yield* oauth.createAuthorizationUrl(provider);
-        return { url: url.toString() };
+        return { url: Url.decodeSync(url.toString()) };
     }).pipe(
         Effect.mapError(
             (e) =>
-                new OAuthError({
+                new HttpError.OAuth({
                     provider: 'provider' in e ? e.provider : 'unknown',
                     reason: 'reason' in e ? e.reason : String(e),
                 }),
@@ -125,88 +106,79 @@ const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: OAuthService, pro
     ),
 );
 const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
-    (oauth: OAuthService, repos: DatabaseServiceShape, provider: typeof OAuthProvider.Type, code: string, state: string) =>
-        Effect.gen(function* () {
-            const httpErr = (reason: string) => new OAuthError({ provider, reason });
-            const result = yield* oauth.authenticate(provider, code, state);
-            const emailRaw = yield* Option.match(result.email, {
-                onNone: () => Effect.fail(httpErr('Email not provided by provider')),
-                onSome: Effect.succeed,
-            });
-            const email = yield* pipe(
-                S.decodeUnknown(Email.schema)(emailRaw),
-                Effect.mapError(() => httpErr('Invalid email format from provider')),
-            );
-            const userId = yield* repos
-                .withTransaction(
-                    Effect.gen(function* () {
-                        const existingUserOpt = yield* pipe(
-                            repos.users.findByEmail(email),
-                            Effect.mapError(() => httpErr('User lookup failed')),
-                        );
-                        const user = yield* Option.isSome(existingUserOpt)
-                            ? Effect.succeed(existingUserOpt.value)
-                            : pipe(
-                                  repos.users.insert({
-                                      createdAt: undefined,
-                                      deletedAt: Option.none(),
-                                      email,
-                                      role: 'member',
-                                  }),
-                                  Effect.mapError(() => httpErr('User creation failed')),
-                              );
-                        const uid = user.id;
-                        yield* pipe(
-                            repos.oauthAccounts.upsert({
-                                ...result.toNullableFields,
-                                provider,
-                                userId: uid,
-                            }),
-                            Effect.mapError(() => httpErr('OAuth account upsert failed')),
-                        );
-                        return uid;
-                    }),
-                )
-                .pipe(Effect.mapError(() => internal('User creation transaction failed')));
-            const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
-                rotateTokens(repos, userId),
-                Effect.mapError(() => httpErr('Token generation failed')),
-            );
-            return yield* pipe(
-                buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
-                Effect.mapError(() => httpErr('Response build failed')),
-            );
-        }),
+	(oauth: OAuthService, repos: DatabaseServiceShape, provider: typeof OAuthProvider.Type, code: string, state: string) =>
+		Effect.gen(function* () {
+			const httpErr = (reason: string) => new HttpError.OAuth({ provider, reason });
+			const result = yield* oauth.authenticate(provider, code, state);
+			const emailRaw = yield* Option.match(result.email, {
+				onNone: () => Effect.fail(httpErr('Email not provided by provider')),
+				onSome: Effect.succeed,
+			});
+			const email = yield* pipe(
+				S.decodeUnknown(Email.schema)(emailRaw),
+				Effect.mapError(() => httpErr('Invalid email format from provider')),
+			);
+			const userId = yield* repos
+				.withTransaction(
+					Effect.gen(function* () {
+						const existingUserOpt = yield* pipe(
+							repos.users.findByEmail(email),
+							Effect.mapError(() => httpErr('User lookup failed')),
+						);
+						const user = yield* Option.isSome(existingUserOpt)
+							? Effect.succeed(existingUserOpt.value)
+							: pipe(
+									repos.users.insert({ deletedAt: null, email, role: 'member' }),
+									Effect.mapError(() => httpErr('User creation failed')),
+								);
+						const uid = user.id;
+						yield* pipe(
+							repos.oauthAccounts.upsert({ ...result.toNullableFields, provider, userId: uid }),
+							Effect.mapError(() => httpErr('OAuth account upsert failed')),
+						);
+						return uid;
+					}),
+				)
+				.pipe(HttpError.chain(HttpError.Internal, { message: 'User creation transaction failed' }));
+			const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
+				rotateTokens(repos, userId),
+				Effect.mapError(() => httpErr('Token generation failed')),
+			);
+			return yield* pipe(
+				buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
+				Effect.mapError(() => httpErr('Response build failed')),
+			);
+		}),
 );
 const handleRefresh = Effect.fn('auth.refresh')((repos: DatabaseServiceShape) =>
     Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const refreshTokenInput = yield* pipe(
-            Option.fromNullable(request.cookies[B.cookie.name]),
+            Option.fromNullable(request.cookies[AUTH_TUNING.cookie.name]),
             Option.match({
-                onNone: () => Effect.fail(authError('Missing refresh token cookie')),
+                onNone: () => Effect.fail(new HttpError.Auth({ reason: 'Missing refresh token cookie' })),
                 onSome: Effect.succeed,
             }),
         );
         const hashInput = yield* pipe(
             Crypto.Token.hash(refreshTokenInput),
-            Effect.mapError(() => authError('Token hashing failed')),
+            HttpError.chain(HttpError.Auth, { reason: 'Token hashing failed' }),
         );
         const tokenOpt = yield* pipe(
             repos.refreshTokens.findValidByTokenHash(hashInput),
-            Effect.mapError(() => authError('Token lookup failed')),
+            HttpError.chain(HttpError.Auth, { reason: 'Token lookup failed' }),
         );
         const token = yield* Option.match(tokenOpt, {
-            onNone: () => Effect.fail(authError('Invalid refresh token')),
+            onNone: () => Effect.fail(new HttpError.Auth({ reason: 'Invalid refresh token' })),
             onSome: Effect.succeed,
         });
         const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
             rotateTokens(repos, token.userId, token.id),
-            Effect.mapError(() => authError('Token generation failed')),
+            HttpError.chain(HttpError.Auth, { reason: 'Token generation failed' }),
         );
         return yield* pipe(
             buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
-            Effect.mapError(() => authError('Response build failed')),
+            HttpError.chain(HttpError.Auth, { reason: 'Response build failed' }),
         );
     }),
 );
@@ -215,90 +187,90 @@ const handleLogout = Effect.fn('auth.logout')((repos: DatabaseServiceShape) =>
         const session = yield* Middleware.Session;
         yield* pipe(
             repos.sessions.revoke(session.sessionId),
-            Effect.mapError(() => internal('Session revocation failed')),
+            HttpError.chain(HttpError.Internal, { message: 'Session revocation failed' }),
         );
         yield* pipe(
             repos.refreshTokens.revokeAllByUserId(session.userId),
-            Effect.mapError(() => internal('Token revocation failed')),
+            HttpError.chain(HttpError.Internal, { message: 'Token revocation failed' }),
         );
         return yield* pipe(
             buildLogoutResponse(),
-            Effect.mapError(() => internal('Response build failed')),
+            HttpError.chain(HttpError.Internal, { message: 'Response build failed' }),
         );
     }),
 );
 const handleMe = Effect.fn('auth.me')((repos: DatabaseServiceShape) =>
-    Effect.gen(function* () {
-        const session = yield* Middleware.Session;
-        const userOpt = yield* pipe(
-            repos.users.findById(session.userId),
-            Effect.mapError(() => internal('User lookup failed')),
-        );
-        return yield* Option.match(userOpt, {
-            onNone: () => Effect.fail(new NotFound({ id: session.userId, resource: 'user' })),
-            onSome: (user) => Effect.succeed(User.toResponse(user)),
-        });
-    }),
+	Effect.gen(function* () {
+		const session = yield* Middleware.Session;
+		const userOpt = yield* pipe(
+			repos.users.findById(session.userId),
+			HttpError.chain(HttpError.Internal, { message: 'User lookup failed' }),
+		);
+		return yield* Option.match(userOpt, {
+			onNone: () => Effect.fail(new HttpError.NotFound({ id: session.userId, resource: 'user' })),
+			onSome: (user) => Effect.succeed(toUserResponse(user)),
+		});
+	}),
 );
 const handleListApiKeys = Effect.fn('auth.apiKeys.list')((repos: DatabaseServiceShape) =>
-    Effect.gen(function* () {
-        const session = yield* Middleware.Session;
-        const keys = yield* pipe(
-            repos.apiKeys.findAllByUserId(session.userId),
-            Effect.mapError(() => new InternalError({ message: 'API key list failed' })),
-        );
-        return { data: keys.map((k) => k.response) };
-    }),
+	Effect.gen(function* () {
+		const session = yield* Middleware.Session;
+		const keys = yield* pipe(
+			repos.apiKeys.findAllByUserId(session.userId),
+			HttpError.chain(HttpError.Internal, { message: 'API key list failed' }),
+		);
+		return { data: keys.map(toApiKeyResponse) };
+	}),
 );
 const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
-    (repos: DatabaseServiceShape, input: { key: string; name: string; provider: typeof AiProvider.Type }) =>
-        Effect.gen(function* () {
-            const session = yield* Middleware.Session;
-            const keyHash = yield* pipe(
-                Crypto.Token.hash(input.key),
-                Effect.mapError(() => internal('Key hashing failed')),
-            );
-            const encrypted = yield* pipe(
-                Crypto.Key.encrypt(input.key),
-                Effect.mapError(() => internal('Key encryption failed')),
-            );
-            const keyEncrypted = yield* pipe(
-                S.encode(EncryptedKey.fromBytes)(encrypted),
-                Effect.mapError(() => internal('Key encoding failed')),
-            );
-            const apiKey = yield* pipe(
-                repos.apiKeys.insert({
-                    createdAt: undefined,
-                    expiresAt: Option.none(),
-                    keyEncrypted,
-                    keyHash,
-                    lastUsedAt: Option.none(),
-                    name: input.name,
-                    provider: input.provider,
-                    userId: session.userId,
-                }),
-                Effect.mapError(() => internal('API key insert failed')),
-            );
-            return apiKey.response;
-        }),
+	(repos: DatabaseServiceShape, input: { key: string; name: string; provider: typeof AiProvider.Type }) =>
+		Effect.gen(function* () {
+			const session = yield* Middleware.Session;
+			const keyHash = yield* pipe(
+				Crypto.Token.hash(input.key),
+				HttpError.chain(HttpError.Internal, { message: 'Key hashing failed' }),
+			);
+			const encrypted = yield* pipe(
+				Crypto.Key.encrypt(input.key),
+				HttpError.chain(HttpError.Internal, { message: 'Key encryption failed' }),
+			);
+			const keyEncrypted = yield* pipe(
+				S.encode(EncryptedKey.fromBytes)(encrypted),
+				Effect.map((bytes) => Buffer.from(bytes)),
+				HttpError.chain(HttpError.Internal, { message: 'Key encoding failed' }),
+			);
+			const apiKey = yield* pipe(
+				repos.apiKeys.insert({
+					expiresAt: null,
+					keyEncrypted,
+					keyHash,
+					lastUsedAt: null,
+					name: input.name,
+					provider: input.provider,
+					userId: session.userId,
+				}),
+				HttpError.chain(HttpError.Internal, { message: 'API key insert failed' }),
+			);
+			return toApiKeyResponse(apiKey);
+		}),
 );
-const handleDeleteApiKey = Effect.fn('auth.apiKeys.delete')((repos: DatabaseServiceShape, id: typeof ApiKeyId.Type) =>
-    Effect.gen(function* () {
-        const session = yield* Middleware.Session;
-        const keyOpt = yield* pipe(
-            repos.apiKeys.findByIdAndUserId({ id, userId: session.userId }),
-            Effect.mapError(() => internal('API key lookup failed')),
-        );
-        yield* Option.match(keyOpt, {
-            onNone: () => Effect.fail(new NotFound({ id, resource: 'apikey' })),
-            onSome: () =>
-                pipe(
-                    repos.apiKeys.delete(id),
-                    Effect.mapError(() => internal('API key deletion failed')),
-                ),
-        });
-        return { success: true } as const;
-    }),
+const handleDeleteApiKey = Effect.fn('auth.apiKeys.delete')((repos: DatabaseServiceShape, id: ApiKeyId) =>
+	Effect.gen(function* () {
+		const session = yield* Middleware.Session;
+		const keyOpt = yield* pipe(
+			repos.apiKeys.findByIdAndUserId(id, session.userId),
+			HttpError.chain(HttpError.Internal, { message: 'API key lookup failed' }),
+		);
+		yield* Option.match(keyOpt, {
+			onNone: () => Effect.fail(new HttpError.NotFound({ id, resource: 'apikey' })),
+			onSome: () =>
+				pipe(
+					repos.apiKeys.delete(id),
+					HttpError.chain(HttpError.Internal, { message: 'API key deletion failed' }),
+				),
+		});
+		return { success: true } as const;
+	}),
 );
 
 // --- [LAYER] -----------------------------------------------------------------

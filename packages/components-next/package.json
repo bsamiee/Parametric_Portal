@@ -1,64 +1,71 @@
 {
-    "name": "@parametric-portal/components-next",
-    "version": "0.1.0",
-    "type": "module",
-    "exports": {
-        "./button": {
-            "types": "./src/button/button.tsx",
-            "import": "./src/button/button.tsx",
-            "default": "./src/button/button.tsx"
-        },
-        "./core/generator": {
-            "types": "./src/core/generator.ts",
-            "import": "./src/core/generator.ts",
-            "default": "./src/core/generator.ts"
-        },
-        "./core/icons": {
-            "types": "./src/core/icons.tsx",
-            "import": "./src/core/icons.tsx",
-            "default": "./src/core/icons.tsx"
-        },
-        "./core/layout": {
-            "types": "./src/core/layout.ts",
-            "import": "./src/core/layout.ts",
-            "default": "./src/core/layout.ts"
-        },
-        "./core/slots": {
-            "types": "./src/core/slots.tsx",
-            "import": "./src/core/slots.tsx",
-            "default": "./src/core/slots.tsx"
-        }
-    },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "fix": "biome check --write .",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
-    },
-    "dependencies": {
-        "@parametric-portal/theme": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
-        "@radix-ui/react-slot": "catalog:",
-        "clsx": "catalog:",
-        "lucide-react": "catalog:",
-        "react": "catalog:",
-        "react-aria-components": "catalog:",
-        "react-dom": "catalog:",
-        "tailwind-merge": "catalog:",
-        "tailwind-variants": "catalog:",
-        "tw-animate-css": "catalog:"
-    },
-    "devDependencies": {
-        "@types/react": "catalog:",
-        "@types/react-dom": "catalog:",
-        "effect": "catalog:",
-        "tailwindcss": "catalog:",
-        "tailwindcss-react-aria-components": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
-    }
+	"name": "@parametric-portal/components-next",
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		"./button": {
+			"types": "./src/button/button.tsx",
+			"import": "./src/button/button.tsx",
+			"default": "./src/button/button.tsx"
+		},
+		"./core/css-slots": {
+			"types": "./src/core/css-slots.ts",
+			"import": "./src/core/css-slots.ts",
+			"default": "./src/core/css-slots.ts"
+		},
+		"./core/layout": {
+			"types": "./src/core/layout.ts",
+			"import": "./src/core/layout.ts",
+			"default": "./src/core/layout.ts"
+		},
+		"./core/slots": {
+			"types": "./src/core/slots.ts",
+			"import": "./src/core/slots.ts",
+			"default": "./src/core/slots.ts"
+		},
+		"./file-preview": {
+			"types": "./src/file-preview/file-preview.tsx",
+			"import": "./src/file-preview/file-preview.tsx",
+			"default": "./src/file-preview/file-preview.tsx"
+		},
+		"./file-upload": {
+			"types": "./src/file-upload/file-upload.tsx",
+			"import": "./src/file-upload/file-upload.tsx",
+			"default": "./src/file-upload/file-upload.tsx"
+		}
+	},
+	"scripts": {
+		"build": "vite build",
+		"check": "biome check .",
+		"dev": "vite dev --host",
+		"fix": "biome check --write .",
+		"preview": "vite preview --host",
+		"test": "vitest run --passWithNoTests",
+		"typecheck": "tsc --project tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@parametric-portal/runtime": "workspace:*",
+		"@parametric-portal/theme": "workspace:*",
+		"@parametric-portal/types": "workspace:*",
+		"@radix-ui/react-slot": "catalog:",
+		"clsx": "catalog:",
+		"effect": "catalog:",
+		"lucide-react": "catalog:",
+		"react-aria": "catalog:",
+		"react-aria-components": "catalog:",
+		"tailwind-merge": "catalog:",
+		"tw-animate-css": "catalog:"
+	},
+	"devDependencies": {
+		"@types/react": "catalog:",
+		"@types/react-dom": "catalog:",
+		"tailwindcss": "catalog:",
+		"typescript": "catalog:",
+		"vite": "catalog:",
+		"vitest": "catalog:"
+	},
+	"peerDependencies": {
+		"react": "catalog:",
+		"react-dom": "catalog:"
+	}
 }

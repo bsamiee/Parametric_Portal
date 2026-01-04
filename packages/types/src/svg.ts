@@ -1,26 +1,25 @@
-/** SVG sanitization with DOMPurify and ID scoping for collision prevention. */
+/**
+ * Sanitize SVG markup with scoped ID rewriting.
+ * Prevents ID collisions across multiple SVG assets via DOMPurify hooks.
+ */
 import { ParseResult, pipe, Schema as S } from 'effect';
 import DOMPurify from 'isomorphic-dompurify';
-import { Hex8, HtmlId, Uuidv7 } from './types.ts';
+import { Hex8, Uuidv7 } from './types.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type Svg = S.Schema.Type<typeof SvgSchema>
-type SvgAssetInput = S.Schema.Type<typeof SvgAssetInputSchema>
-type SvgAssetData = S.Schema.Type<typeof SvgAssetSchema>
+type SvgAsset = S.Schema.Type<typeof SvgAssetSchema>
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-	patterns: {
-		idAttr: /\bid=['"]([^'"]+)['"]/g,
-		svgTag: /<svg[^>]*>/i,
-	},
 	purify: {
-		ADD_ATTR: ['xlink:href'],
+		ADD_ATTR: ['href', 'xlink:href'],
 		ADD_TAGS: ['use'],
 		USE_PROFILES: { svg: true },
 	},
+	xlinkNs: 'http://www.w3.org/1999/xlink',
 } as const);
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -30,77 +29,75 @@ const SvgSchema = pipe(
 	S.filter((s) => s.includes('<svg') && s.includes('</svg>'), { message: () => 'Invalid SVG markup' }),
 	S.brand('Svg'),
 );
-const SvgSanitizedSchema = S.transformOrFail(S.String, SvgSchema, {
-	decode: (raw, _, ast) => {
-		const sanitized = purifyInternal(raw);
-		return sanitized.includes('<svg') && sanitized.includes('</svg>')
-			? ParseResult.succeed(sanitized as typeof SvgSchema.Type)
-			: ParseResult.fail(new ParseResult.Type(ast, raw, 'SVG sanitization produced invalid output'));
-	},
-	encode: (svg) => ParseResult.succeed(svg),
-	strict: true,
-});
+const SvgAssetSchema = S.Struct({ id: Uuidv7.schema, name: S.NonEmptyTrimmedString, svg: SvgSchema });
 const SvgAssetInputSchema = S.Struct({ name: S.NonEmptyTrimmedString, svg: S.String });
-const SvgAssetFields = {
-	id: Uuidv7.schema,
-	name: S.NonEmptyTrimmedString,
-	svg: SvgSchema,
-} as const;
-const SvgAssetSchema = S.Struct(SvgAssetFields);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const purifyInternal = (svg: string): string =>
-	DOMPurify.sanitize(svg, {
+/** Rewrite url(#id) references using scoped ID map to prevent collisions. */
+const replaceUrlRefs = (val: string, idMap: Map<string, string>): string =>
+	val.replaceAll(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${idMap.get(id) ?? id})`);
+/** Mutate DOM node IDs and references in-place during sanitization. */
+const rewriteNode = (node: Element, idMap: Map<string, string>, scope: string): void => {
+	const oldId = node.getAttribute?.('id');
+	oldId && (() => { idMap.set(oldId, `${oldId}_${scope}`); node.setAttribute('id', `${oldId}_${scope}`); })();
+	['href', 'xlink:href'].forEach((attr) => {
+		const val = attr === 'xlink:href' ? node.getAttributeNS?.(B.xlinkNs, 'href') : node.getAttribute?.(attr);
+		const refId = val?.startsWith('#') ? val.slice(1) : undefined;
+		refId && idMap.has(refId) && (attr === 'xlink:href'
+			? node.setAttributeNS?.(B.xlinkNs, 'xlink:href', `#${idMap.get(refId)}`)
+			: node.setAttribute?.(attr, `#${idMap.get(refId)}`));
+	});
+	['fill', 'stroke', 'clip-path', 'mask', 'filter'].forEach((attr) => {
+		const val = node.getAttribute?.(attr);
+		val?.includes('url(#') && node.setAttribute?.(attr, replaceUrlRefs(val, idMap));
+	});
+	node.tagName?.toLowerCase() === 'style' && node.textContent?.includes('url(#') && (() => {
+		// biome-ignore lint/style/noParameterAssign: DOMPurify hooks require in-place DOM mutation
+		node.textContent = replaceUrlRefs(node.textContent as string, idMap);
+	})();
+};
+/** Sanitize SVG and scope all IDs to prevent collisions. */
+const sanitize = (raw: string, seed?: string): Svg => {
+	const scope = seed === undefined ? Hex8.generateSync() : Hex8.derive(seed);
+	const idMap = new Map<string, string>();
+	DOMPurify.addHook('afterSanitizeAttributes', (node) => rewriteNode(node, idMap, scope));
+	const result = DOMPurify.sanitize(raw, {
 		ADD_ATTR: [...B.purify.ADD_ATTR],
 		ADD_TAGS: [...B.purify.ADD_TAGS],
 		USE_PROFILES: B.purify.USE_PROFILES,
 	});
-const escapeRegExp = (str: string): string => str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-const scopeIds = (svg: string, scope: Hex8): string => {
-	const idMap = new Map<HtmlId, HtmlId>();
-	const withScopedIds = svg.replaceAll(B.patterns.idAttr, (_match, oldId: string) => {
-		const validatedId = S.decodeSync(HtmlId.schema)(oldId);
-		const newId = `${validatedId}_${scope}` as HtmlId;
-		idMap.set(validatedId, newId);
-		return `id="${newId}"`;
-	});
-	return idMap.size === 0
-		? withScopedIds
-		: [...idMap.entries()].reduce((result, [oldId, newId]) => {
-				const escaped = escapeRegExp(oldId);
-				return result
-					.replaceAll(new RegExp(String.raw`url\(#${escaped}\)`, 'g'), `url(#${newId})`)
-					.replaceAll(new RegExp(String.raw`href=['"]#${escaped}['"]`, 'g'), `href="#${newId}"`)
-					.replaceAll(new RegExp(String.raw`xlink:href=['"]#${escaped}['"]`, 'g'), `xlink:href="#${newId}"`);
-			}, withScopedIds);
+	DOMPurify.removeAllHooks();
+	return (result.includes('<svg') ? result : '') as Svg;
 };
-const sanitizeSvg = (svg: string, options?: { readonly scope?: Hex8 | undefined }): string =>
-	pipe(purifyInternal(svg), (sanitized) =>
-		sanitized ? scopeIds(sanitized, options?.scope ?? Hex8.generateSync()) : '',
-	);
-const sanitizeSvgScoped = (svg: string, seed: string): string =>
-	sanitizeSvg(svg, { scope: Hex8.derive(seed) });
+/** Create schema utilities object with common encode/decode/is helpers. */
+const make = <A, I>(schema: S.Schema<A, I, never>) => Object.freeze({
+	decode: S.decodeUnknown(schema),
+	decodeSync: S.decodeUnknownSync(schema),
+	encode: S.encode(schema),
+	encodeSync: S.encodeSync(schema),
+	is: S.is(schema),
+	schema,
+});
 
-// --- [CLASSES] ---------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
-class SvgAsset extends S.Class<SvgAsset>('SvgAsset')(SvgAssetFields) {
-	static create(input: SvgAssetInput): SvgAssetData {
-		return {
-			id: Uuidv7.generateSync(),
-			name: input.name,
-			svg: sanitizeSvg(input.svg) as Svg,
-		};
-	}
-	static sanitizeWithScope(asset: SvgAssetData, seed: string): string {
-		return sanitizeSvgScoped(asset.svg, seed);
-	}
-	sanitizeWithScope(seed: string): string {
-		return sanitizeSvgScoped(this.svg, seed);
-	}
-}
+const Svg = Object.freeze({
+	...make(SvgSchema),
+	sanitize,
+	sanitizedSchema: S.transformOrFail(S.String, SvgSchema, {
+		decode: (raw, _, ast) => pipe(sanitize(raw), (r) =>
+			r.includes('<svg') ? ParseResult.succeed(r) : ParseResult.fail(new ParseResult.Type(ast, raw, 'Invalid SVG'))),
+		encode: ParseResult.succeed,
+		strict: true,
+	}),
+});
+const SvgAsset = Object.freeze({
+	...make(SvgAssetSchema),
+	create: (name: string, svg: string): SvgAsset => ({ id: Uuidv7.generateSync(), name, svg: Svg.sanitize(svg) }),
+	inputSchema: SvgAssetInputSchema,
+});
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { sanitizeSvg, sanitizeSvgScoped, SvgAsset, SvgAssetInputSchema, SvgAssetSchema, SvgSchema, SvgSanitizedSchema };
-export type { Svg, SvgAssetData, SvgAssetInput };
+export { Svg, SvgAsset };

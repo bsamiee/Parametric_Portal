@@ -21,7 +21,6 @@ beforeEach(async () => {
     !isBrowser && (await import('fake-indexeddb/auto'));
     globalThis.localStorage?.clear();
     globalThis.sessionStorage?.clear();
-    // biome-ignore lint/style/useNamingConvention: _databases is fake-indexeddb private API
     globalThis.indexedDB && (indexedDB as unknown as { _databases: Map<string, unknown> })._databases?.clear();
     vi.useFakeTimers();
     vi.setSystemTime(TEST_CONSTANTS.frozenTime);

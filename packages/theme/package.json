@@ -3,25 +3,21 @@
     "version": "1.0.7",
     "type": "module",
     "exports": {
+        "./base.css": "./src/base.css",
         "./colors": {
             "types": "./src/colors.ts",
             "import": "./src/colors.ts",
             "default": "./src/colors.ts"
         },
+        "./component-wiring": {
+            "types": "./src/component-wiring.ts",
+            "import": "./src/component-wiring.ts",
+            "default": "./src/component-wiring.ts"
+        },
         "./plugin": {
             "types": "./src/plugin.ts",
             "import": "./src/plugin.ts",
             "default": "./src/plugin.ts"
-        },
-        "./scale-derivation": {
-            "types": "./src/scale-derivation.ts",
-            "import": "./src/scale-derivation.ts",
-            "default": "./src/scale-derivation.ts"
-        },
-        "./seed": {
-            "types": "./src/seed.ts",
-            "import": "./src/seed.ts",
-            "default": "./src/seed.ts"
         },
         "./theme": {
             "types": "./src/theme.ts",
@@ -37,6 +33,11 @@
         "preview": "vite preview --host",
         "test": "vitest run --passWithNoTests",
         "typecheck": "tsc --project tsconfig.json --noEmit"
+    },
+    "peerDependencies": {
+        "tailwindcss": "catalog:",
+        "tailwindcss-react-aria-components": "catalog:",
+        "tw-animate-css": "catalog:"
     },
     "dependencies": {
         "@parametric-portal/types": "workspace:*",

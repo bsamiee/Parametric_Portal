@@ -1,0 +1,23 @@
+{
+    "compilerOptions": {
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
+        "noEmit": true,
+        "outDir": "dist",
+        "paths": {
+            "@parametric-portal/components-next/*": ["../../packages/components-next/src/*"],
+            "@parametric-portal/devtools/*": ["../../packages/devtools/src/*"],
+            "@parametric-portal/runtime/*": ["../../packages/runtime/src/*"],
+            "@parametric-portal/theme/*": ["../../packages/theme/src/*"],
+            "@parametric-portal/types/*": ["../../packages/types/src/*"]
+        },
+        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/test-harness.tsbuildinfo",
+        "types": ["vite/client"]
+    },
+    "exclude": ["dist", "node_modules"],
+    "extends": "../../tsconfig.base.json",
+    "include": ["src/**/*", "*.config.ts", "../../packages/types/src/env.d.ts"],
+    "references": []
+}

@@ -2,7 +2,7 @@
  * Application shell: Sidebar rail + centered workspace (CommandBar + Stage).
  * Mirrors the Arsenal architecture: rail icons, collapsible drawer, centered content.
  */
-import { RuntimeProvider } from '@parametric-portal/runtime/runtime';
+import { Runtime } from '@parametric-portal/runtime/runtime';
 import type { ReactNode } from 'react';
 import { OverlayProvider } from 'react-aria';
 import { appRuntime, useAuthInit } from '../infrastructure.ts';
@@ -55,11 +55,11 @@ const AppContent = (): ReactNode => {
     );
 };
 const App = (): ReactNode => (
-    <RuntimeProvider runtime={appRuntime}>
+    <Runtime.Provider runtime={appRuntime}>
         <OverlayProvider>
             <AppContent />
         </OverlayProvider>
-    </RuntimeProvider>
+    </Runtime.Provider>
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

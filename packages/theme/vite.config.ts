@@ -10,9 +10,8 @@ export default defineConfig(
         createConfig({
             entry: {
                 colors: './src/colors.ts',
+                'component-wiring': './src/component-wiring.ts',
                 plugin: './src/plugin.ts',
-                'scale-derivation': './src/scale-derivation.ts',
-                seed: './src/seed.ts',
                 theme: './src/theme.ts',
             },
             external: ['@parametric-portal/types', 'colorjs.io', 'effect'],

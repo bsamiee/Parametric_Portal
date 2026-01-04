@@ -1,19 +1,24 @@
 /**
- * Provide PostgreSQL client layer with connection pooling via @effect/sql-pg.
+ * PostgreSQL client layer with schema-aware Drizzle via Effect.Service pattern.
+ * Enables relational query API (findFirst/findMany) with full type inference.
  */
 import type { SqlClient } from '@effect/sql/SqlClient';
 import type { SqlError } from '@effect/sql/SqlError';
+import { make as makeDrizzle } from '@effect/sql-drizzle/Pg';
 import { PgClient } from '@effect/sql-pg';
-import { Config, type ConfigError, Duration, type Layer, pipe } from 'effect';
+import { DurationMs, NonNegativeInt } from '@parametric-portal/types/types';
+import type { ConfigError, Layer } from 'effect';
+import { Config, Duration, Effect, Option, String as S } from 'effect';
+import * as schema from './schema.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type PoolConfig = {
-    readonly connectTimeoutMs: number;
-    readonly connectionTtlMs: number;
-    readonly idleTimeoutMs: number;
-    readonly max: number;
-    readonly min: number;
+    readonly connectTimeoutMs: DurationMs;
+    readonly connectionTtlMs: DurationMs;
+    readonly idleTimeoutMs: DurationMs;
+    readonly max: NonNegativeInt;
+    readonly min: NonNegativeInt;
 };
 type SslConfig = {
     readonly enabled: boolean;
@@ -21,6 +26,7 @@ type SslConfig = {
 };
 type TransformConfig = {
     readonly enabled: boolean;
+    readonly json: boolean;
 };
 type PgClientLayer = Layer.Layer<SqlClient | PgClient.PgClient, SqlError | ConfigError.ConfigError, never>;
 
@@ -37,70 +43,74 @@ const B = Object.freeze({
         username: 'postgres',
     },
     pool: {
-        connectionTtlMs: 900000,
-        connectTimeoutMs: 5000,
-        idleTimeoutMs: 30000,
-        max: 10,
-        min: 2,
+        connectionTtlMs: DurationMs.fromMillis(900000),
+        connectTimeoutMs: DurationMs.fromMillis(5000),
+        idleTimeoutMs: DurationMs.fromMillis(30000),
+        max: NonNegativeInt.decodeSync(10),
+        min: NonNegativeInt.decodeSync(2),
     } satisfies PoolConfig,
+    spanAttributes: [
+        ['service.name', 'database'],
+        ['db.system', 'postgresql'],
+    ] as const,
     ssl: {
         enabled: false,
         rejectUnauthorized: true,
     } satisfies SslConfig,
     transforms: {
         enabled: true,
+        json: true,
     } satisfies TransformConfig,
 } as const);
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
-const snakeToCamel = (s: string): string => s.replaceAll(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-const camelToSnake = (s: string): string => s.replaceAll(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+class Drizzle extends Effect.Service<Drizzle>()('database/Drizzle', {
+    dependencies: [],
+    effect: makeDrizzle({ schema }),
+}) {}
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const PgLive: PgClientLayer = PgClient.layerConfig({
-    applicationName: pipe(Config.string('POSTGRES_APP_NAME'), Config.withDefault(B.app.name)),
-    connectionTTL: pipe(
-        Config.integer('POSTGRES_CONNECTION_TTL_MS'),
+    applicationName: Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault(B.app.name)),
+    connectionTTL: Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(
         Config.withDefault(B.pool.connectionTtlMs),
         Config.map(Duration.millis),
     ),
-    connectTimeout: pipe(
-        Config.integer('POSTGRES_CONNECT_TIMEOUT_MS'),
+    connectTimeout: Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(
         Config.withDefault(B.pool.connectTimeoutMs),
         Config.map(Duration.millis),
     ),
-    database: pipe(Config.string('POSTGRES_DB'), Config.withDefault(B.defaults.database)),
-    host: pipe(Config.string('POSTGRES_HOST'), Config.withDefault(B.defaults.host)),
-    idleTimeout: pipe(
-        Config.integer('POSTGRES_IDLE_TIMEOUT_MS'),
+    database: Config.string('POSTGRES_DB').pipe(Config.withDefault(B.defaults.database)),
+    host: Config.string('POSTGRES_HOST').pipe(Config.withDefault(B.defaults.host)),
+    idleTimeout: Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(
         Config.withDefault(B.pool.idleTimeoutMs),
         Config.map(Duration.millis),
     ),
-    maxConnections: pipe(Config.integer('POSTGRES_POOL_MAX'), Config.withDefault(B.pool.max)),
-    minConnections: pipe(Config.integer('POSTGRES_POOL_MIN'), Config.withDefault(B.pool.min)),
+    maxConnections: Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(B.pool.max)),
+    minConnections: Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(B.pool.min)),
     password: Config.redacted('POSTGRES_PASSWORD'),
-    port: pipe(Config.integer('POSTGRES_PORT'), Config.withDefault(B.defaults.port)),
-    ssl: pipe(
-        Config.boolean('POSTGRES_SSL'),
+    port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(B.defaults.port)),
+    spanAttributes: Config.succeed(Object.fromEntries(B.spanAttributes)),
+    ssl: Config.boolean('POSTGRES_SSL').pipe(
         Config.withDefault(B.ssl.enabled),
         Config.map((enabled) => (enabled ? { rejectUnauthorized: B.ssl.rejectUnauthorized } : undefined)),
     ),
-    transformQueryNames: pipe(
-        Config.boolean('POSTGRES_TRANSFORM_NAMES'),
+    transformJson: Config.succeed(B.transforms.json),
+    transformQueryNames: Config.boolean('POSTGRES_TRANSFORM_NAMES').pipe(
         Config.withDefault(B.transforms.enabled),
-        Config.map((enabled) => (enabled ? camelToSnake : undefined)),
+        Config.map((enabled) => (enabled ? S.camelToSnake : undefined)),
     ),
-    transformResultNames: pipe(
-        Config.boolean('POSTGRES_TRANSFORM_NAMES'),
+    transformResultNames: Config.boolean('POSTGRES_TRANSFORM_NAMES').pipe(
         Config.withDefault(B.transforms.enabled),
-        Config.map((enabled) => (enabled ? snakeToCamel : undefined)),
+        Config.map((enabled) => (enabled ? S.snakeToCamel : undefined)),
     ),
-    username: pipe(Config.string('POSTGRES_USER'), Config.withDefault(B.defaults.username)),
+    url: Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
+    username: Config.string('POSTGRES_USER').pipe(Config.withDefault(B.defaults.username)),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as DATABASE_TUNING, camelToSnake, PgLive, snakeToCamel };
+export { B as DATABASE_TUNING, Drizzle, PgLive };
 export type { PgClientLayer, PoolConfig, SslConfig, TransformConfig };

@@ -1,5 +1,6 @@
 /**
- * URL state tests: branded parser factories, dispatch table coverage, hook integration.
+ * Test URL state branded parser factories and hook integration.
+ * Validates dispatch table coverage for parser types.
  */
 import { it } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
@@ -14,17 +15,15 @@ import {
     createUrlLoader,
     parsers,
     URL_TUNING,
-    useUrlState,
-    useUrlStates,
+    useUrl,
 } from '../src/url';
 
-// --- [MOCKS] -----------------------------------------------------------------
+// --- [MOCK] ------------------------------------------------------------------
 
 vi.mock('nuqs', async (importOriginal) => {
     const actual = await importOriginal<typeof import('nuqs')>();
     return {
         ...actual,
-        useQueryState: vi.fn(() => [null, vi.fn()]),
         useQueryStates: vi.fn(() => [{}, vi.fn()]),
     };
 });
@@ -47,7 +46,6 @@ const B = Object.freeze({
     },
     derived: {
         allParserKeys: Object.keys(parsers) as ReadonlyArray<keyof typeof parsers>,
-        defaultOptions: { clearOnDefault: true, history: 'replace', scroll: false, shallow: true, throttleMs: 50 },
     },
     samples: {
         enumValues: ['alpha', 'beta', 'gamma'] as const,
@@ -86,16 +84,20 @@ const brandedParserBehavior = [
     { expected: null, input: '', parser: 'isoDate' as const },
 ] as const;
 
-// --- [DESCRIBE] URL_TUNING ---------------------------------------------------
+// --- [DESCRIBE_URL_TUNING] ---------------------------------------------------
 
 describe('URL_TUNING', () => {
     it('is frozen with expected defaults', () => {
         expect(Object.isFrozen(URL_TUNING)).toBe(true);
-        expect(URL_TUNING.defaults).toEqual(B.derived.defaultOptions);
+        expect(URL_TUNING.defaults.clearOnDefault).toBe(true);
+        expect(URL_TUNING.defaults.history).toBe('replace');
+        expect(URL_TUNING.defaults.scroll).toBe(false);
+        expect(URL_TUNING.defaults.shallow).toBe(true);
+        expect(URL_TUNING.defaults.throttleMs).toBe(50);
     });
 });
 
-// --- [DESCRIBE] createBrandedStringParser ------------------------------------
+// --- [DESCRIBE_CREATE_BRANDED_STRING_PARSER] ---------------------------------
 
 describe('createBrandedStringParser', () => {
     const parser = createBrandedStringParser(B.schemas.string);
@@ -112,7 +114,7 @@ describe('createBrandedStringParser', () => {
     });
 });
 
-// --- [DESCRIBE] createBrandedNumberParser ------------------------------------
+// --- [DESCRIBE_CREATE_BRANDED_NUMBER_PARSER] ---------------------------------
 
 describe('createBrandedNumberParser', () => {
     const parser = createBrandedNumberParser(B.schemas.number);
@@ -132,7 +134,7 @@ describe('createBrandedNumberParser', () => {
     });
 });
 
-// --- [DESCRIBE] parsers ------------------------------------------------------
+// --- [DESCRIBE_PARSERS] ------------------------------------------------------
 
 describe('parsers', () => {
     it('is frozen with all keys defined', () => {
@@ -148,7 +150,7 @@ describe('parsers', () => {
     });
 });
 
-// --- [DESCRIBE] parser factories ---------------------------------------------
+// --- [DESCRIBE_PARSER_FACTORIES] ---------------------------------------------
 
 describe('parser factories', () => {
     it('arrayOf creates array parser', () => {
@@ -181,7 +183,7 @@ describe('parser factories', () => {
     });
 });
 
-// --- [DESCRIBE] createUrlLoader ----------------------------------------------
+// --- [DESCRIBE_CREATE_URL_LOADER] --------------------------------------------
 
 describe('createUrlLoader', () => {
     it('creates loader from parser map', () => {
@@ -192,34 +194,32 @@ describe('createUrlLoader', () => {
     });
 });
 
-// --- [DESCRIBE] useUrlState --------------------------------------------------
+// --- [DESCRIBE_USE_URL] ------------------------------------------------------
 
-describe('useUrlState', () => {
-    it('returns state tuple from hook', () => {
-        const { result } = renderHook(() => useUrlState('test', parsers.string));
+describe('useUrl', () => {
+    it('returns state tuple from hook with single key', () => {
+        // biome-ignore lint/suspicious/noExplicitAny: test type coercion
+        const { result } = renderHook(() => useUrl({ test: parsers.string } as any));
         expect(Array.isArray(result.current)).toBe(true);
         expect(result.current).toHaveLength(2);
     });
-    it('accepts options parameter', () => {
-        const { result } = renderHook(() => useUrlState('test', parsers.string, { history: 'push' }));
-        expect(result.current).toBeDefined();
-    });
-});
-
-// --- [DESCRIBE] useUrlStates -------------------------------------------------
-
-describe('useUrlStates', () => {
-    it('returns states object from hook', () => {
+    it('returns states object from hook with multiple keys', () => {
         // biome-ignore lint/suspicious/noExplicitAny: test type coercion
         const keyMap = { id: parsers.string, page: parsers.integer } as any;
-        const { result } = renderHook(() => useUrlStates(keyMap));
+        const { result } = renderHook(() => useUrl(keyMap));
         expect(Array.isArray(result.current)).toBe(true);
         expect(result.current).toHaveLength(2);
     });
     it('accepts options parameter', () => {
         // biome-ignore lint/suspicious/noExplicitAny: test type coercion
         const keyMap = { id: parsers.string } as any;
-        const { result } = renderHook(() => useUrlStates(keyMap, { shallow: false }));
+        const { result } = renderHook(() => useUrl(keyMap, { shallow: false }));
+        expect(result.current).toBeDefined();
+    });
+    it('accepts urlKeys option for key remapping', () => {
+        // biome-ignore lint/suspicious/noExplicitAny: test type coercion
+        const keyMap = { selectedId: parsers.string } as any;
+        const { result } = renderHook(() => useUrl(keyMap, { urlKeys: { selectedId: 'id' } }));
         expect(result.current).toBeDefined();
     });
 });

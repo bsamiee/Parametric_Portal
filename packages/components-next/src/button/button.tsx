@@ -1,145 +1,95 @@
 /**
- * Compose button via tailwind-variants slots and CSS variable contracts.
- * Apps customize via CSS variables; polymorphic via asChild.
+ * Button: Pure presentation component with theme-driven styling via CSS variable slots.
+ * Async state comes from external hooks (useEffectMutate) - no internal Effect execution.
+ * REQUIRED: color and size props - no defaults, no hardcoded mappings.
  */
-import type { AsyncState } from '@parametric-portal/types/async';
-import type { LucideIcon } from 'lucide-react';
+import { AsyncState } from '@parametric-portal/types/async';
 import type { FC, ReactNode, Ref } from 'react';
 import { Button as RACButton, type ButtonProps as RACButtonProps } from 'react-aria-components';
-import { getStateAnimation } from '../core/animation';
-import { renderSlotContent, Slot, type SlotInput, Slottable } from '../core/slots';
-import { cn } from '../core/utils';
-import { composeTailwindRenderProps, cssVarSlots, tv, type VariantProps } from '../core/variants';
+import { cn, composeTailwindRenderProps } from '../core/css-slots';
+import { type AsyncSlotConfig, deriveAsyncSlot, renderSlotContent, type SlotInput } from '../core/slots';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ButtonVariants = VariantProps<typeof buttonStyles>;
-type ButtonSlots = {
+type ButtonProps = Omit<RACButtonProps, 'children'> & {
+    readonly asyncState?: AsyncState<unknown, unknown>;
+    readonly children?: ReactNode;
+    readonly childrenAsync?: AsyncSlotConfig<ReactNode>;
+    readonly color: string;
     readonly prefix?: SlotInput;
+    readonly prefixAsync?: AsyncSlotConfig;
+    readonly ref?: Ref<HTMLButtonElement>;
+    readonly size: string;
     readonly suffix?: SlotInput;
-    readonly stateIcon?: LucideIcon;
+    readonly suffixAsync?: AsyncSlotConfig;
+    readonly variant?: string;
 };
-type ButtonBaseProps = ButtonSlots &
-    ButtonVariants & {
-        readonly state?: AsyncState<void, Error>;
-        readonly ref?: Ref<HTMLButtonElement>;
-        readonly children?: ReactNode;
-        readonly className?: string;
-        readonly isDisabled?: boolean;
-    };
-type ButtonProps =
-    | ({ readonly asChild?: false } & Omit<RACButtonProps, 'children'> & ButtonBaseProps)
-    | ({ readonly asChild: true; readonly children: ReactNode } & ButtonBaseProps);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-/** Visual values reference CSS custom properties—zero hardcoded literals. */
-const buttonStyles = tv({
-    slots: {
-        base: [
-            // Layout
+const B = Object.freeze({
+    slot: Object.freeze({
+        base: cn(
             'inline-flex items-center justify-center cursor-pointer',
-            // Sizing via CSS variables
-            cssVarSlots('button', {
-                gap: 'gap',
-                h: 'height',
-                'min-w': 'min-width',
-                px: 'padding-x',
-                py: 'padding-y',
-            }),
-            // Colors via CSS variables
-            cssVarSlots('button', {
-                bg: 'bg',
-                'border-[length:var(--button-border-width)]': 'border-width',
-                'border-color': 'border-color',
-                text: 'fg',
-            }),
-            // Typography
-            cssVarSlots('button', {
-                font: 'font-weight',
-                'text-[length:var(--button-font-size)]': 'font-size',
-            }),
-            // Visual effects
-            cssVarSlots('button', {
-                rounded: 'radius',
-                shadow: 'shadow',
-            }),
-            // Hover state
-            'hover:bg-(--button-hover-bg)',
-            // Focus state
-            'focus-visible:outline-none',
-            'focus-visible:ring-(--button-focus-ring)',
-            'focus-visible:ring-[length:var(--button-focus-ring-width)]',
-            'focus-visible:ring-offset-(--button-focus-ring-offset)',
-            // Transitions
-            'duration-(--button-transition-duration)',
-            'ease-(--button-transition-easing)',
-            // Disabled state
-            'data-[disabled]:pointer-events-none',
-            'data-[disabled]:opacity-(--button-disabled-opacity)',
-            // Pressed state
-            'active:scale-[var(--button-pressed-scale)]',
-        ],
-        icon: ['size-(--button-icon-size)', 'shrink-0'],
-        stateIndicator: ['size-(--button-icon-size)', 'shrink-0'],
-    },
+            'h-(--button-height) w-(--button-width) px-(--button-px) gap-(--button-gap)',
+            'text-(--button-font-size) rounded-(--button-radius)',
+            'bg-(--button-bg) text-(--button-fg)',
+            'border-solid [border-width:var(--button-border-width,0)] [border-color:var(--button-border-color,transparent)]',
+            'shadow-(--button-shadow) font-(--button-font-weight) whitespace-nowrap overflow-hidden',
+            'duration-(--button-transition-duration) ease-(--button-transition-easing)',
+            'hovered:bg-(--button-hover-bg)',
+            'pressed:bg-(--button-pressed-bg) pressed:scale-(--button-pressed-scale)',
+            'focused:outline-none focused:ring-(--button-focus-ring-width) focused:ring-(--button-focus-ring-color) focused:ring-offset-(--button-focus-ring-offset)',
+            'disabled:pointer-events-none disabled:opacity-(--button-disabled-opacity)',
+        ),
+        icon: cn('size-(--button-icon-size) shrink-0', '[animation:var(--button-icon-animation,none)]'),
+        text: 'truncate',
+    }),
 });
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
-const isLoadingState = (state: AsyncState<void, Error> | undefined): boolean => state?._tag === 'Loading';
-
-// --- [COMPONENTS] ------------------------------------------------------------
-
-const Button: FC<ButtonProps> = (props) => {
-    const {
-        state,
-        prefix,
-        suffix,
-        stateIcon: StateIconComponent,
-        className,
-        children,
-        isDisabled,
-        asChild,
-        ref,
-    } = props;
-    const { base, icon, stateIndicator } = buttonStyles();
-    const stateTag = state?._tag ?? 'Idle';
-    const isLoading = isLoadingState(state);
-    const animationClass = getStateAnimation(stateTag.toLowerCase() as 'failure' | 'idle' | 'loading' | 'success');
-    const disabled = isDisabled === true || isLoading;
-    const stateIndicatorEl =
-        StateIconComponent !== undefined && state !== undefined && stateTag !== 'Idle' ? (
-            <StateIconComponent className={cn(stateIndicator(), animationClass)} />
-        ) : null;
-    const content = (
-        <>
-            {stateIndicatorEl}
-            {renderSlotContent(prefix, icon())}
-            <Slottable>{children}</Slottable>
-            {renderSlotContent(suffix, icon())}
-        </>
-    );
-    const dataState = disabled ? 'disabled' : stateTag.toLowerCase();
-    return asChild === true ? (
-        <Slot className={cn(base(), className)} data-slot='button' data-state={dataState} ref={ref}>
-            {content}
-        </Slot>
-    ) : (
+const Button: FC<ButtonProps> = ({
+    asyncState,
+    children,
+    childrenAsync,
+    className,
+    color,
+    isDisabled,
+    prefix,
+    prefixAsync,
+    ref,
+    size,
+    suffix,
+    suffixAsync,
+    variant,
+    ...rest
+}) => {
+    const isPending = AsyncState.isPending(asyncState);
+    const activePrefix = deriveAsyncSlot(prefix, prefixAsync, asyncState);
+    const activeSuffix = deriveAsyncSlot(suffix, suffixAsync, asyncState);
+    const activeChildren = deriveAsyncSlot(children, childrenAsync, asyncState);
+    return (
         <RACButton
-            {...(({ asChild: _, ...rest }) => rest)(props)}
-            className={composeTailwindRenderProps(className, base())}
+            {...rest}
+            className={composeTailwindRenderProps(className, B.slot.base)}
+            data-async-state={AsyncState.toAttr(asyncState)}
+            data-color={color}
+            data-size={size}
             data-slot='button'
-            data-state={dataState}
-            isDisabled={disabled}
+            data-variant={variant}
+            isDisabled={isDisabled === true || isPending}
+            isPending={isPending}
             ref={ref}
         >
-            {content}
+            {renderSlotContent(activePrefix, B.slot.icon)}
+            <span className={B.slot.text}>{activeChildren}</span>
+            {renderSlotContent(activeSuffix, B.slot.icon)}
         </RACButton>
     );
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Button, buttonStyles };
-export type { ButtonProps, ButtonSlots, ButtonVariants };
+export { B as BUTTON_TUNING, Button };
+export type { ButtonProps };
