@@ -5,7 +5,7 @@
 import { SqlClient } from '@effect/sql/SqlClient';
 import type { SqlError } from '@effect/sql/SqlError';
 import type { Hex64 } from '@parametric-portal/types/types';
-import { and, count, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
     Context,
     Duration,
@@ -41,6 +41,12 @@ import {
     users,
 } from './schema.ts';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type DrizzleDb = Context.Tag.Service<typeof Drizzle>;
+type OpType = 'read' | 'write' | 'delete';
+type WithTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SqlError, R>;
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
@@ -59,12 +65,6 @@ const B = Object.freeze({
 } as const);
 const dbQueryDuration = Metric.histogram(B.metrics.dbQuery.name, B.metrics.boundaries, B.metrics.dbQuery.description);
 const dbQueryErrors = Metric.counter(B.metrics.dbErrors.name, { description: B.metrics.dbErrors.description });
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type DrizzleDb = Context.Tag.Service<typeof Drizzle>;
-type OpType = 'read' | 'write' | 'delete';
-type WithTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SqlError, R>;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -351,7 +351,7 @@ const buildAssetRepo = (db: DrizzleDb) => ({
             'db.assets.countByUserId',
             'read',
             db
-                .select({ count: count() })
+                .select({ count: sql<number>`count(*)::int` })
                 .from(assets)
                 .where(and(eq(assets.userId, userId), isNull(assets.deletedAt))),
         ).pipe(Effect.map((rows) => rows[0]?.count ?? 0)),
@@ -406,7 +406,7 @@ const buildAssetRepo = (db: DrizzleDb) => ({
         ).pipe(Effect.map((rows) => opt(rows[0]))),
 });
 
-// --- [INFERRED_TYPES] --------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
 type UserRepository = ReturnType<typeof buildUserRepo>;
 type SessionRepository = ReturnType<typeof buildSessionRepo>;

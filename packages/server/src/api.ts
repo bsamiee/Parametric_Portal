@@ -130,20 +130,16 @@ const HealthGroup = HttpApiGroup.make('health')
             .addSuccess(S.Struct({ checks: S.Struct({ database: S.Boolean }), status: S.Literal('ok') }))
             .addError(ServiceUnavailable, { status: 503 }),
     );
-const MetricsGroup = HttpApiGroup.make('metrics')
-    .prefix('/metrics')
-    .add(HttpApiEndpoint.get('list', '/').addSuccess(S.String));
 const TelemetryGroup = HttpApiGroup.make('telemetry')
     .prefix('/v1')
     .add(HttpApiEndpoint.post('ingestTraces', '/traces').addSuccess(S.Void));
 
-// --- [API] -------------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const ParametricApi = HttpApi.make('ParametricApi')
     .add(AuthGroup)
     .add(IconsGroup)
     .add(HealthGroup)
-    .add(MetricsGroup)
     .add(TelemetryGroup)
     .prefix('/api')
     .annotate(OpenApi.Title, 'Parametric Portal API');
@@ -159,7 +155,6 @@ export {
     AuthGroup,
     HealthGroup,
     IconsGroup,
-    MetricsGroup,
     Pagination,
     ParametricApi,
     TelemetryGroup,

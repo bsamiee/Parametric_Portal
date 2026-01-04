@@ -63,6 +63,13 @@ const B = Object.freeze({
     } satisfies TransformConfig,
 } as const);
 
+// --- [SERVICES] --------------------------------------------------------------
+
+class Drizzle extends Effect.Service<Drizzle>()('database/Drizzle', {
+    dependencies: [],
+    effect: makeDrizzle({ schema }),
+}) {}
+
 // --- [LAYERS] ----------------------------------------------------------------
 
 const PgLive: PgClientLayer = PgClient.layerConfig({
@@ -102,13 +109,6 @@ const PgLive: PgClientLayer = PgClient.layerConfig({
     url: Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
     username: Config.string('POSTGRES_USER').pipe(Config.withDefault(B.defaults.username)),
 });
-
-// --- [SERVICES] --------------------------------------------------------------
-
-class Drizzle extends Effect.Service<Drizzle>()('database/Drizzle', {
-    dependencies: [PgLive],
-    effect: makeDrizzle({ schema }),
-}) {}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

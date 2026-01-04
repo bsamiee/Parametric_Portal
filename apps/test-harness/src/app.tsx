@@ -21,7 +21,7 @@ const simulateAsync = (ms: number, fail: boolean) =>
         return fail ? yield* Effect.fail(new Error('Simulated failure')) : { success: true };
     });
 
-// --- [COMPONENTS] ------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Section: FC<{ readonly children: React.ReactNode; readonly title: string }> = ({ children, title }) => (
     <section className='flex flex-col gap-4'>

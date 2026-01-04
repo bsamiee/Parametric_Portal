@@ -16,7 +16,7 @@ import { Middleware } from '@parametric-portal/server/middleware';
 import { TelemetryLive } from '@parametric-portal/server/telemetry';
 import { AuthContext } from '@parametric-portal/server/auth';
 import { DurationMs, type Hex64 } from '@parametric-portal/types/types';
-import { Config, Effect, Layer, Metric, Option } from 'effect';
+import { Config, Effect, Layer, Option } from 'effect';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { OAuthLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
@@ -32,9 +32,6 @@ const B = Object.freeze({
         port: 4000,
     },
 } as const);
-
-// --- [CONFIG] ----------------------------------------------------------------
-
 const ServerConfig = Config.all({
     corsOrigins: Config.string('CORS_ORIGINS').pipe(
         Config.withDefault(B.defaults.corsOrigins),
@@ -97,19 +94,10 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
             );
     }),
 );
-const MetricsRouteLive = HttpApiBuilder.group(ParametricApi, 'metrics', (handlers) =>
-    handlers.handle('list', () =>
-        Effect.map(Metric.snapshot, (snapshot) =>
-            snapshot
-                .map((entry) => `${entry.metricKey.name}{} ${JSON.stringify(entry.metricState)}`)
-                .join('\n'),
-        ),
-    ),
-);
 const InfraLayers = Layer.mergeAll(TelemetryLive, EncryptionKeyService.layer);
 const RouteDependencies = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive);
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
-    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MetricsRouteLive, TelemetryRouteLive)),
+    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, TelemetryRouteLive)),
     Layer.provide(RouteDependencies),
     Layer.provide(InfraLayers),
     Layer.provide(PgLive),

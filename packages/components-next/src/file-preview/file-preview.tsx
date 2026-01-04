@@ -118,7 +118,7 @@ const renderModeContent = (
     return contentByMode[mode]();
 };
 
-// --- [COMPONENTS] ------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const FilePreview: FC<FilePreviewProps> = ({
     className,

@@ -23,7 +23,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- [DOMAIN_ERRORS] ---------------------------------------------------------
+// --- [CLASSES] ---------------------------------------------------------------
 
 class AuthError extends S.TaggedError<AuthError>()(
     'AuthError',

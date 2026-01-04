@@ -10,22 +10,14 @@ import { Effect, Metric, MetricBoundaries, MetricLabel } from 'effect';
 const B = Object.freeze({
     boundaries: MetricBoundaries.exponential({ count: 10, factor: 2, start: 0.005 }),
     crypto: { boundaries: MetricBoundaries.exponential({ count: 6, factor: 2, start: 0.001 }) },
-    db: { boundaries: MetricBoundaries.exponential({ count: 8, factor: 2, start: 0.01 }) },
     metrics: {
         crypto: { description: 'Cryptographic operation duration', name: 'crypto_op_duration_seconds' },
-        dbErrors: { description: 'Database query errors', name: 'db_query_errors_total' },
-        dbQuery: { description: 'Database query duration', name: 'db_query_duration_seconds' },
         duration: { description: 'HTTP request duration in seconds', name: 'http_request_duration_seconds' },
         requests: { description: 'Total HTTP requests', name: 'http_requests_total' },
     },
 } as const);
-
-// --- [METRICS] ---------------------------------------------------------------
-
 const httpRequestsTotal = Metric.counter(B.metrics.requests.name, { description: B.metrics.requests.description });
 const httpRequestDuration = Metric.histogram(B.metrics.duration.name, B.boundaries, B.metrics.duration.description);
-const dbQueryDuration = Metric.histogram(B.metrics.dbQuery.name, B.db.boundaries, B.metrics.dbQuery.description);
-const dbQueryErrors = Metric.counter(B.metrics.dbErrors.name, { description: B.metrics.dbErrors.description });
 const cryptoOpDuration = Metric.histogram(B.metrics.crypto.name, B.crypto.boundaries, B.metrics.crypto.description);
 
 // --- [MIDDLEWARE] ------------------------------------------------------------
@@ -54,12 +46,4 @@ const createMetricsMiddleware = () =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    B as METRICS_TUNING,
-    createMetricsMiddleware,
-    cryptoOpDuration,
-    dbQueryDuration,
-    dbQueryErrors,
-    httpRequestDuration,
-    httpRequestsTotal,
-};
+export { B as METRICS_TUNING, createMetricsMiddleware, cryptoOpDuration };

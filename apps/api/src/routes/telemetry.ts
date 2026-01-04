@@ -7,7 +7,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { TELEMETRY_TUNING } from '@parametric-portal/server/telemetry';
 import { Config, Effect, Schema as S } from 'effect';
 
-// --- [CONFIG] ----------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const CollectorEndpoint = Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(
     Config.withDefault(TELEMETRY_TUNING.defaults.endpointHttp),

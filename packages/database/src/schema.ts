@@ -24,6 +24,11 @@ const B = Object.freeze({
         viewer: 1,
     },
 } as const);
+const idBrands = ['ApiKeyId', 'AssetId', 'OAuthAccountId', 'RefreshTokenId', 'SessionId', 'UserId'] as const;
+const roleValues = ['guest', 'viewer', 'member', 'admin', 'owner'] as const;
+const oauthProviderValues = ['google', 'github', 'microsoft'] as const;
+const aiProviderValues = ['anthropic', 'openai', 'gemini'] as const;
+const assetTypeValues = ['icon', 'image', 'document'] as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -42,60 +47,28 @@ const makeId = <T extends string>(brand: T) => {
     });
 };
 
-// --- [ID_FACTORY] ------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
-const idBrands = ['ApiKeyId', 'AssetId', 'OAuthAccountId', 'RefreshTokenId', 'SessionId', 'UserId'] as const;
-type IdBrand = (typeof idBrands)[number];
 const IdFactory = Object.freeze(
     Object.fromEntries(idBrands.map((brand) => [brand, makeId(brand)])) as unknown as {
         readonly [K in IdBrand]: ReturnType<typeof makeId<K>>;
     },
 );
-
-// --- [BRANDED_IDS] -----------------------------------------------------------
-
 const ApiKeyId = IdFactory.ApiKeyId;
-type ApiKeyId = S.Schema.Type<typeof ApiKeyId.schema>;
 const AssetId = IdFactory.AssetId;
-type AssetId = S.Schema.Type<typeof AssetId.schema>;
 const OAuthAccountId = IdFactory.OAuthAccountId;
-type OAuthAccountId = S.Schema.Type<typeof OAuthAccountId.schema>;
 const RefreshTokenId = IdFactory.RefreshTokenId;
-type RefreshTokenId = S.Schema.Type<typeof RefreshTokenId.schema>;
 const SessionId = IdFactory.SessionId;
-type SessionId = S.Schema.Type<typeof SessionId.schema>;
 const UserId = IdFactory.UserId;
-type UserId = S.Schema.Type<typeof UserId.schema>;
-
-// --- [ENUM_VALUES] -----------------------------------------------------------
-
-const roleValues = ['guest', 'viewer', 'member', 'admin', 'owner'] as const;
-const oauthProviderValues = ['google', 'github', 'microsoft'] as const;
-const aiProviderValues = ['anthropic', 'openai', 'gemini'] as const;
-const assetTypeValues = ['icon', 'image', 'document'] as const;
-
-// --- [SCHEMA_ENUMS] ----------------------------------------------------------
-
 const Role = S.Literal(...roleValues);
-type Role = typeof Role.Type;
-type RoleKey = keyof typeof B.roleLevels;
 const OAuthProvider = S.Literal(...oauthProviderValues);
-type OAuthProvider = typeof OAuthProvider.Type;
 const AiProvider = S.Literal(...aiProviderValues);
-type AiProvider = typeof AiProvider.Type;
 const AssetType = S.Literal(...assetTypeValues);
-type AssetType = typeof AssetType.Type;
-
-// --- [CUSTOM_TYPES] ----------------------------------------------------------
-
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
     dataType: () => 'bytea',
     fromDriver: (value: Buffer): Buffer => value,
     toDriver: (value: Buffer): Buffer => value,
 });
-
-// --- [PG_ENUMS] --------------------------------------------------------------
-
 const roleEnum = pgEnum('role', [...roleValues]);
 const oauthProviderEnum = pgEnum('oauth_provider', [...oauthProviderValues]);
 const aiProviderEnum = pgEnum('ai_provider', [...aiProviderValues]);
@@ -201,8 +174,20 @@ const assetsRelations = relations(assets, ({ one }) => ({
     user: one(users, { fields: [assets.userId], references: [users.id] }),
 }));
 
-// --- [INFERRED_TYPES] --------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
+type IdBrand = (typeof idBrands)[number];
+type RoleKey = keyof typeof B.roleLevels;
+type ApiKeyId = S.Schema.Type<typeof ApiKeyId.schema>;
+type AssetId = S.Schema.Type<typeof AssetId.schema>;
+type OAuthAccountId = S.Schema.Type<typeof OAuthAccountId.schema>;
+type RefreshTokenId = S.Schema.Type<typeof RefreshTokenId.schema>;
+type SessionId = S.Schema.Type<typeof SessionId.schema>;
+type UserId = S.Schema.Type<typeof UserId.schema>;
+type Role = typeof Role.Type;
+type OAuthProvider = typeof OAuthProvider.Type;
+type AiProvider = typeof AiProvider.Type;
+type AssetType = typeof AssetType.Type;
 type User = typeof users.$inferSelect;
 type UserInsert = typeof users.$inferInsert;
 type Session = typeof sessions.$inferSelect;

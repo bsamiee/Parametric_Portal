@@ -50,7 +50,7 @@ const extractFilesFromDrop = async (event: DropEvent): Promise<ReadonlyArray<Fil
     return Promise.all(fileItems.map((item) => item.getFile()));
 };
 
-// --- [COMPONENTS] ------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const FileUpload: FC<FileUploadProps> = ({
     accept,
