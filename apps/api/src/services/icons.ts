@@ -2,23 +2,24 @@
  * Icon generation service: CAD-style SVG icons via multi-provider AI.
  * Contains prompt engineering, palette management, and provider-agnostic AI integration.
  */
-import { type AiProviderType, buildPrompt, getModel, LanguageModel } from '@parametric-portal/ai/registry';
-import { InternalError } from '@parametric-portal/server/domain-errors';
+import { LanguageModel } from '@effect/ai';
+import { type AiProviderType, buildPrompt, getModel } from '@parametric-portal/ai/registry';
+import { HttpError } from '@parametric-portal/server/http-errors';
 import { Icons, IconServiceInput } from '@parametric-portal/types/icons';
-import { sanitizeSvg, SvgAsset, SvgAssetInputSchema, type SvgAssetData } from '@parametric-portal/types/svg';
+import { Svg, SvgAsset } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const ServiceInputSchema = S.extend(IconServiceInput, S.Struct({ signal: S.optional(S.instanceOf(AbortSignal)) }));
-const AiResponseSchema = S.Struct({ variants: S.Array(SvgAssetInputSchema).pipe(S.minItems(1)) });
+const AiResponseSchema = S.Struct({ variants: S.Array(SvgAsset.inputSchema).pipe(S.minItems(1)) });
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type ServiceInput = S.Schema.Type<typeof ServiceInputSchema>;
-type ServiceOutput = { readonly variants: ReadonlyArray<SvgAssetData> };
+type ServiceOutput = { readonly variants: ReadonlyArray<SvgAsset> };
 type PromptContext = {
-    readonly attachments?: ReadonlyArray<SvgAssetData>;
+    readonly attachments?: ReadonlyArray<SvgAsset>;
     readonly colorMode: 'dark' | 'light';
     readonly intent: 'create' | 'refine';
     readonly prompt: string;
@@ -26,7 +27,7 @@ type PromptContext = {
     readonly variantCount: number;
 };
 type IconGenerationServiceInterface = {
-    readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InternalError>;
+    readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InstanceType<typeof HttpError.Internal>>;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -48,7 +49,7 @@ const B = Object.freeze({
 type Palette = (typeof Icons.design.palettes)['dark'];
 const getPalette = (mode: 'dark' | 'light'): Palette => Icons.design.palettes[mode];
 const minifySvgForPrompt = (svgContent: string): string =>
-    sanitizeSvg(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
+    Svg.sanitize(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
     const { layers } = Icons.design;
@@ -195,7 +196,7 @@ const generateWithAi = Effect.fn('icons.ai')((validInput: ServiceInput) => {
         }),
         Effect.map((response) => response.value),
         Effect.provide(getModel(provider)),
-        Effect.mapError((e) => new InternalError({ message: B.errors.aiGeneration(provider, e) })),
+        Effect.mapError((e) => new HttpError.Internal({ message: B.errors.aiGeneration(provider, e) })),
     );
 });
 
@@ -209,7 +210,7 @@ const IconGenerationServiceLive = Layer.succeed(
         generate: Effect.fn('icons.generate')((input: ServiceInput) =>
             Effect.gen(function* () {
                 const response = yield* generateWithAi(input);
-                return { variants: response.variants.map(SvgAsset.create) } satisfies ServiceOutput;
+                return { variants: response.variants.map((v) => SvgAsset.create(v.name, v.svg)) } satisfies ServiceOutput;
             }),
         ),
     }),

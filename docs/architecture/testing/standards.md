@@ -29,14 +29,16 @@ import { describe, expect, it } from 'vitest';
 import { FunctionUnderTest, TUNING } from '../src/module';
 
 // --- [TYPES] -----------------------------------------------------------------
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
 // --- [CONSTANTS] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 // --- [MOCK] ------------------------------------------------------------------
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 // --- [DESCRIBE] --------------------------------------------------------------
 ```
 
 **Import Order:** fast-check → test-utils → vitest → source module.
+
+**Test File Sections** (omit unused): Types → Constants → Pure Functions → Mock → Dispatch Tables → Describe.
 
 [IMPORTANT]:
 - [ALWAYS] Use `// --- [LABEL] ` separator format padded to 80 columns.

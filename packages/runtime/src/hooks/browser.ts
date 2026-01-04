@@ -1,19 +1,20 @@
 /**
- * Browser API hooks consuming Effect services.
- * Thin wrappers over @effect/platform-browser Clipboard + custom services.
+ * Expose browser APIs through React hooks with Effect-based error handling.
+ * Bridges Clipboard, Download, and Export services for declarative UI consumption.
  */
 import { Clipboard } from '@effect/platform-browser';
-import { BROWSER_TUNING as B, BrowserError } from '@parametric-portal/types/browser';
+import { AppError } from '@parametric-portal/types/app-error';
+import { FILES_TUNING } from '@parametric-portal/types/files';
 import { Effect } from 'effect';
 import { useCallback, useState } from 'react';
-import { useRuntime } from '../runtime';
+import { Runtime } from '../runtime';
 import { Download, Export, type ExportInput } from '../services/browser';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type ClipboardState<V> = {
     readonly copy: (value: V) => void;
-    readonly error: BrowserError | null;
+    readonly error: AppError<'Browser'> | null;
     readonly isPending: boolean;
     readonly paste: () => void;
     readonly reset: () => void;
@@ -21,12 +22,12 @@ type ClipboardState<V> = {
 };
 type DownloadState = {
     readonly download: (data: Blob | string, filename: string, mimeType?: string) => void;
-    readonly error: BrowserError | null;
+    readonly error: AppError<'Browser'> | null;
     readonly isPending: boolean;
     readonly reset: () => void;
 };
 type ExportState = {
-    readonly error: BrowserError | null;
+    readonly error: AppError<'Browser'> | null;
     readonly exportAs: (input: ExportInput) => void;
     readonly isPending: boolean;
     readonly progress: number;
@@ -35,10 +36,10 @@ type ExportState = {
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const clipboardWriteError = (e: Clipboard.ClipboardError): BrowserError =>
-    BrowserError.Clipboard({ code: B.errors.clipboardWrite.code, message: e.message });
-const clipboardReadError = (e: Clipboard.ClipboardError): BrowserError =>
-    BrowserError.Clipboard({ code: B.errors.clipboardRead.code, message: e.message });
+const clipboardWriteError = (e: Clipboard.ClipboardError): AppError<'Browser'> =>
+    AppError.from('Browser', 'CLIPBOARD_WRITE', AppError.withApi(e.message, 'navigator.clipboard'));
+const clipboardReadError = (e: Clipboard.ClipboardError): AppError<'Browser'> =>
+    AppError.from('Browser', 'CLIPBOARD_READ', AppError.withApi(e.message, 'navigator.clipboard'));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -46,9 +47,9 @@ const useClipboard = <V>(
     serializer: (value: V) => string = String,
     deserializer: (text: string) => V = (text) => text as V,
 ): ClipboardState<V> => {
-    const runtime = useRuntime<Clipboard.Clipboard, never>();
+    const runtime = Runtime.use<Clipboard.Clipboard, never>();
     const [value, setValue] = useState<V | null>(null);
-    const [error, setError] = useState<BrowserError | null>(null);
+    const [error, setError] = useState<AppError<'Browser'> | null>(null);
     const [isPending, setIsPending] = useState(false);
     const copy = useCallback(
         (v: V) => {
@@ -89,11 +90,11 @@ const useClipboard = <V>(
     return { copy, error, isPending, paste, reset, value };
 };
 const useDownload = (): DownloadState => {
-    const runtime = useRuntime<Download, never>();
-    const [error, setError] = useState<BrowserError | null>(null);
+    const runtime = Runtime.use<Download, never>();
+    const [error, setError] = useState<AppError<'Browser'> | null>(null);
     const [isPending, setIsPending] = useState(false);
     const download = useCallback(
-        (data: Blob | string, filename: string, mimeType: string = B.defaults.mimeType) => {
+        (data: Blob | string, filename: string, mimeType: string = FILES_TUNING.defaults.mimeType) => {
             setIsPending(true);
             setError(null);
             runtime.runFork(
@@ -101,7 +102,7 @@ const useDownload = (): DownloadState => {
                     const svc = yield* Download;
                     yield* svc.download(data, filename, mimeType);
                 }).pipe(
-                    Effect.tapError(() => Effect.sync(() => setError(BrowserError.Download(B.errors.downloadFailed)))),
+                    Effect.tapError(() => Effect.sync(() => setError(AppError.from('Browser', 'DOWNLOAD_FAILED')))),
                     Effect.ensuring(Effect.sync(() => setIsPending(false))),
                 ),
             );
@@ -115,8 +116,8 @@ const useDownload = (): DownloadState => {
     return { download, error, isPending, reset };
 };
 const useExport = (): ExportState => {
-    const runtime = useRuntime<Export, never>();
-    const [error, setError] = useState<BrowserError | null>(null);
+    const runtime = Runtime.use<Export, never>();
+    const [error, setError] = useState<AppError<'Browser'> | null>(null);
     const [isPending, setIsPending] = useState(false);
     const [progress, setProgress] = useState(0);
     const exportAs = useCallback(

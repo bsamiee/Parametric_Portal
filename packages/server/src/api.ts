@@ -3,11 +3,33 @@
  * ParametricApi definition enables type-safe HttpApiClient derivation.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from '@effect/platform';
-import { ApiKey, AssetId, AuthContext, OAuthProvider, User } from '@parametric-portal/types/database';
+import { AiProvider, ApiKeyId, AssetId, OAuthProvider, Role, UserId } from '@parametric-portal/database/schema';
+import { AuthContext } from './auth.ts';
 import { IconRequest, IconResponse } from '@parametric-portal/types/icons';
+import { Email, Url } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
-import { AuthError, InternalError, NotFound, OAuthError, ServiceUnavailable } from './domain-errors.ts';
+import { AuthError, InternalError, NotFound, OAuthError, ServiceUnavailable } from './http-errors.ts';
 import { Middleware } from './middleware.ts';
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const UserResponse = S.Struct({
+	createdAt: S.DateFromSelf,
+	email: Email.schema,
+	id: UserId.schema,
+	role: Role,
+});
+const ApiKeyResponse = S.Struct({
+	createdAt: S.DateFromSelf,
+	id: ApiKeyId.schema,
+	name: S.NonEmptyTrimmedString,
+	provider: AiProvider,
+});
+const ApiKeyCreateRequest = S.Struct({
+	key: S.NonEmptyTrimmedString,
+	name: S.NonEmptyTrimmedString,
+	provider: AiProvider,
+});
 
 // --- [CLASSES] ---------------------------------------------------------------
 
@@ -34,7 +56,7 @@ const AuthGroup = HttpApiGroup.make('auth')
     .add(
         HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
             .setPath(S.Struct({ provider: OAuthProvider }))
-            .addSuccess(S.Struct({ url: S.String }))
+            .addSuccess(S.Struct({ url: Url.schema }))
             .addError(OAuthError, { status: 400 }),
     )
     .add(
@@ -59,27 +81,27 @@ const AuthGroup = HttpApiGroup.make('auth')
     .add(
         HttpApiEndpoint.get('me', '/me')
             .middleware(Middleware.Auth)
-            .addSuccess(User.Response)
+            .addSuccess(UserResponse)
             .addError(NotFound, { status: 404 })
             .addError(InternalError, { status: 500 }),
     )
     .add(
         HttpApiEndpoint.get('listApiKeys', '/apikeys')
             .middleware(Middleware.Auth)
-            .addSuccess(S.Struct({ data: S.Array(ApiKey) }))
+            .addSuccess(S.Struct({ data: S.Array(ApiKeyResponse) }))
             .addError(InternalError, { status: 500 }),
     )
     .add(
         HttpApiEndpoint.post('createApiKey', '/apikeys')
             .middleware(Middleware.Auth)
-            .setPayload(ApiKey.CreateRequest)
-            .addSuccess(ApiKey)
+            .setPayload(ApiKeyCreateRequest)
+            .addSuccess(ApiKeyResponse)
             .addError(InternalError, { status: 500 }),
     )
     .add(
         HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
             .middleware(Middleware.Auth)
-            .setPath(S.Struct({ id: S.typeSchema(ApiKey.fields.id) }))
+            .setPath(S.Struct({ id: ApiKeyId.schema }))
             .addSuccess(S.Struct({ success: S.Literal(true) }))
             .addError(NotFound, { status: 404 })
             .addError(InternalError, { status: 500 }),
@@ -90,7 +112,7 @@ const IconsGroup = HttpApiGroup.make('icons')
         HttpApiEndpoint.get('list', '/')
             .middleware(Middleware.Auth)
             .setUrlParams(Pagination.Query)
-            .addSuccess(Pagination.Response(S.Struct({ id: AssetId })))
+            .addSuccess(Pagination.Response(S.Struct({ id: AssetId.schema })))
             .addError(InternalError, { status: 500 }),
     )
     .add(
@@ -132,6 +154,8 @@ const ParametricApi = HttpApi.make('ParametricApi')
 export type { TagTypeId } from 'effect/Context';
 export type { TypeId } from '@effect/platform/HttpApiMiddleware';
 export {
+    ApiKeyCreateRequest,
+    ApiKeyResponse,
     AuthGroup,
     HealthGroup,
     IconsGroup,
@@ -139,4 +163,5 @@ export {
     Pagination,
     ParametricApi,
     TelemetryGroup,
+    UserResponse,
 };

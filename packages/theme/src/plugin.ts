@@ -2,7 +2,7 @@
  * Shared Vite plugin factory for parametric CSS generation with HMR support.
  * Grounding: Effect-based generation with proper error channel, file watching, and hot reload.
  */
-import { Effect, Exit, Match, Option, pipe } from 'effect';
+import { Effect, Match, Option } from 'effect';
 import type { HmrContext, ModuleNode, Plugin, ViteDevServer } from 'vite';
 import type { ThemeError } from './colors.ts';
 
@@ -22,13 +22,12 @@ type PluginState = { css: string; error: ThemeError | null };
 
 const B = Object.freeze({
     nullPrefix: '\0',
-    tailwindMarker: '@import "tailwindcss";',
+    tailwindMarkerCanonical: '@import "tailwindcss";',
+    tailwindMarkerPattern: /@import\s+['"]tailwindcss['"];?/,
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const normalizeInputs = <T>(input: T | ReadonlyArray<T>): ReadonlyArray<T> =>
-    Array.isArray(input) ? (input as ReadonlyArray<T>) : [input as T];
 const formatError = (error: ThemeError): string =>
     Match.value(error).pipe(
         Match.tag('Validation', (e) => `Validation failed for ${e.field}: ${e.message}`),
@@ -48,20 +47,22 @@ const createParametricPlugin =
             virtual: `virtual:parametric-${config.virtualId}` as const,
         });
         const state: PluginState = { css: '', error: null };
-        const regenerate = (): void =>
-            Exit.match(Effect.runSyncExit(config.generate(inputs)), {
-                onFailure: (cause) => {
-                    const error = cause._tag === 'Fail' ? cause.error : null;
-                    state.error = error;
-                    state.css = error
-                        ? `/* Theme generation failed: ${formatError(error)} */`
-                        : '/* Theme generation failed: Unknown error */';
-                },
-                onSuccess: (result) => {
-                    state.css = result;
-                    state.error = null;
-                },
-            });
+        const regenerate = (): void => {
+            Effect.runSync(
+                config.generate(inputs).pipe(
+                    Effect.match({
+                        onFailure: (error) => {
+                            state.error = error;
+                            state.css = `/* Theme generation failed: ${formatError(error)} */`;
+                        },
+                        onSuccess: (css) => {
+                            state.error = null;
+                            state.css = css;
+                        },
+                    }),
+                ),
+            );
+        };
         const logResult = (server: ViteDevServer): void => {
             state.error
                 ? server.config.logger.error(`[${config.name}] ${formatError(state.error)}`, { timestamp: true })
@@ -74,37 +75,24 @@ const createParametricPlugin =
             server.ws.send({ path: '*', type: 'full-reload' });
             logResult(server);
         };
-        const isWatchedFile = (file: string): boolean =>
-            pipe(
-                Option.fromNullable(config.watchFiles),
-                Option.map((wf) => wf.includes(file)),
-                Option.getOrElse(() => false),
-            );
-        const setupWatcher = (server: ViteDevServer): void =>
-            pipe(
-                Option.fromNullable(config.watchFiles),
-                Option.filter((files) => files.length > 0),
-                Option.map((files) => {
-                    files.forEach((file) => {
-                        server.watcher.add(file);
-                    });
-                    server.watcher.on('change', (file) => {
-                        isWatchedFile(file) && invalidateAndReload(server);
-                    });
-                    return undefined;
-                }),
-                Option.getOrElse(() => undefined),
-            );
+        const setupWatcher = (server: ViteDevServer): void => {
+            config.watchFiles?.forEach((file) => {
+                server.watcher.add(file);
+            });
+            config.watchFiles?.length &&
+                server.watcher.on('change', (f) => config.watchFiles?.includes(f) && invalidateAndReload(server));
+        };
         const handleHotUpdate = (ctx: HmrContext): ModuleNode[] | undefined =>
-            pipe(
-                Option.fromNullable(config.watchFiles),
-                Option.filter((wf) => wf.includes(ctx.file)),
-                Option.map(() => {
-                    regenerate();
-                    state.error && ctx.server.config.logger.error(`[${config.name}] ${formatError(state.error)}`);
-                    return [] as ModuleNode[];
-                }),
-                Option.getOrElse(() => undefined as ModuleNode[] | undefined),
+            Option.match(
+                Option.filter(Option.fromNullable(config.watchFiles), (wf) => wf.includes(ctx.file)),
+                {
+                    onNone: () => undefined,
+                    onSome: () => {
+                        regenerate();
+                        state.error && ctx.server.config.logger.error(`[${config.name}] ${formatError(state.error)}`);
+                        return [] as ModuleNode[];
+                    },
+                },
             );
         regenerate();
         return {
@@ -112,22 +100,22 @@ const createParametricPlugin =
             configureServer: setupWatcher,
             enforce: 'pre',
             handleHotUpdate,
-            load: (id) => (id === vmid.resolved ? `${B.tailwindMarker}\n\n${state.css}` : undefined),
+            load: (id) => (id === vmid.resolved ? `${B.tailwindMarkerCanonical}\n\n${state.css}` : undefined),
             name: `parametric-${config.name}`,
             resolveId: (id) => (id === vmid.virtual ? vmid.resolved : undefined),
             transform: (code, id) =>
-                !id.endsWith('main.css') || !code.includes(B.tailwindMarker)
+                !id.endsWith('main.css') || !B.tailwindMarkerPattern.test(code)
                     ? undefined
                     : code
                           .replaceAll(vmid.pattern, '')
                           .replace(
-                              B.tailwindMarker,
-                              `${B.tailwindMarker}\n\n/* --- [${config.sectionLabel}] --- */\n${state.css}`,
+                              B.tailwindMarkerPattern,
+                              `${B.tailwindMarkerCanonical}\n\n/* --- [${config.sectionLabel}] --- */\n${state.css}`,
                           ),
         };
     };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { createParametricPlugin, normalizeInputs };
+export { createParametricPlugin };
 export type { PluginConfig };

@@ -1,12 +1,12 @@
 /**
- * Browser utility tests: pure functions for filename sanitization, error factories, clipboard detection.
- * [COVERAGE_LIMIT] Hooks (useClipboard, useDownload, useExport) require DOM/File APIs unavailable in test context.
+ * Test browser utility pure functions and error factories.
+ * Covers filename sanitization, AppError creation, and Export service tag.
  */
 import { fc, it as itProp } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
-import { TEST_CONSTANTS } from '@parametric-portal/test-utils/constants';
 import '@parametric-portal/test-utils/harness';
-import { BROWSER_TUNING, BrowserError } from '@parametric-portal/types/browser';
+import { APP_ERROR_TUNING, AppError } from '@parametric-portal/types/app-error';
+import { FILES_TUNING } from '@parametric-portal/types/files';
 import { describe, expect, it } from 'vitest';
 import { buildFilename, Export, sanitizeFilename } from '../src/services/browser';
 
@@ -20,22 +20,29 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- [DESCRIBE] BROWSER_TUNING -----------------------------------------------
+// --- [DESCRIBE_TUNING_CONSTANTS] ---------------------------------------------
 
-describe('BROWSER_TUNING', () => {
+describe('APP_ERROR_TUNING', () => {
     it('is frozen with correct structure', () => {
-        expect(Object.isFrozen(BROWSER_TUNING)).toBe(true);
-        expect(BROWSER_TUNING.defaults).toEqual({ mimeType: 'text/plain', pngSize: 512 });
+        expect(Object.isFrozen(APP_ERROR_TUNING)).toBe(true);
+        expect(APP_ERROR_TUNING.Browser).toBeDefined();
+        expect(APP_ERROR_TUNING.Messaging).toBeDefined();
+        expect(APP_ERROR_TUNING.File).toBeDefined();
     });
-    it('contains error definitions', () => {
-        expect(BROWSER_TUNING.errors.clipboardRead).toBeDefined();
-        expect(BROWSER_TUNING.errors.clipboardWrite).toBeDefined();
-        expect(BROWSER_TUNING.errors.downloadFailed).toBeDefined();
-        expect(BROWSER_TUNING.errors.exportFailed).toBeDefined();
+    it('contains browser error definitions', () => {
+        expect(APP_ERROR_TUNING.Browser.CLIPBOARD_READ).toBeDefined();
+        expect(APP_ERROR_TUNING.Browser.CLIPBOARD_WRITE).toBeDefined();
+        expect(APP_ERROR_TUNING.Browser.DOWNLOAD_FAILED).toBeDefined();
+        expect(APP_ERROR_TUNING.Browser.EXPORT_FAILED).toBeDefined();
+    });
+});
+describe('FILES_TUNING', () => {
+    it('contains defaults', () => {
+        expect(FILES_TUNING.defaults).toEqual({ mimeType: 'text/plain', pngSize: 512 });
     });
 });
 
-// --- [DESCRIBE] sanitizeFilename ---------------------------------------------
+// --- [DESCRIBE_SANITIZE_FILENAME] --------------------------------------------
 
 describe('sanitizeFilename', () => {
     itProp.prop([FC_ARB.safeFilename()])('returns non-empty string', (input) => {
@@ -76,7 +83,7 @@ describe('sanitizeFilename', () => {
     });
 });
 
-// --- [DESCRIBE] buildFilename ------------------------------------------------
+// --- [DESCRIBE_BUILD_FILENAME] -----------------------------------------------
 
 describe('buildFilename', () => {
     itProp.prop([FC_ARB.safeFilename(), FC_ARB.fileExtension()])('builds simple filename', (base, ext) => {
@@ -116,54 +123,33 @@ describe('buildFilename', () => {
     });
 });
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [DESCRIBE_APP_ERROR] ----------------------------------------------------
 
-const errorFactoryTests = [
-    { def: TEST_CONSTANTS.errors.clipboardRead, factory: BrowserError.Clipboard, tag: 'Clipboard' },
-    { def: TEST_CONSTANTS.errors.downloadFailed, factory: BrowserError.Download, tag: 'Download' },
-    { def: TEST_CONSTANTS.errors.exportFailed, factory: BrowserError.Export, tag: 'Export' },
-] as const;
-
-// --- [DESCRIBE] error factories ----------------------------------------------
-
-describe('BrowserError TaggedEnum', () => {
-    it.each(errorFactoryTests)('$tag creates error with correct _tag and properties', ({ factory, def, tag }) => {
-        const error = factory(def);
-        expect(error._tag).toBe(tag);
-        expect(error.code).toBe(def.code);
-        expect(error.message).toBe(def.message);
+describe('AppError Data.TaggedError', () => {
+    it('creates error with correct _tag, domain, and properties', () => {
+        const error = new AppError({ code: 'CLIPBOARD_READ', domain: 'Browser', message: 'Failed' });
+        expect(error._tag).toBe('AppError');
+        expect(error.domain).toBe('Browser');
+        expect(error.code).toBe('CLIPBOARD_READ');
+        expect(error.message).toBe('Failed');
     });
-    it('$is type guard works correctly', () => {
-        const clipboardError = BrowserError.Clipboard({ code: 'TEST', message: 'test' });
-        const downloadError = BrowserError.Download({ code: 'TEST', message: 'test' });
-        expect(BrowserError.$is('Clipboard')(clipboardError)).toBe(true);
-        expect(BrowserError.$is('Clipboard')(downloadError)).toBe(false);
-        expect(BrowserError.$is('Download')(downloadError)).toBe(true);
+    it('is an instance of Error', () => {
+        const error = new AppError({ code: 'DOWNLOAD_FAILED', domain: 'Browser', message: 'test' });
+        expect(error).toBeInstanceOf(Error);
     });
-    it('$match exhaustively handles all variants', () => {
-        const errors = [
-            BrowserError.Clipboard({ code: 'C', message: 'clipboard' }),
-            BrowserError.Download({ code: 'D', message: 'download' }),
-            BrowserError.Export({ code: 'E', message: 'export' }),
-            BrowserError.Storage({ code: 'S', message: 'storage' }),
-        ];
-        const results = errors.map((e) =>
-            BrowserError.$match(e, {
-                Clipboard: (c) => `clip:${c.code}`,
-                Download: (d) => `down:${d.code}`,
-                Export: (x) => `exp:${x.code}`,
-                Storage: (s) => `stor:${s.code}`,
-            }),
-        );
-        expect(results).toEqual(['clip:C', 'down:D', 'exp:E', 'stor:S']);
-    });
-    it('format helper produces readable output', () => {
-        const error = BrowserError.Export({ code: 'FAILED', message: 'Something went wrong' });
-        expect(BrowserError.format(error)).toBe('[Export:FAILED] Something went wrong');
+    it('can be created from APP_ERROR_TUNING constants', () => {
+        const error = new AppError({
+            code: APP_ERROR_TUNING.Browser.CLIPBOARD_READ.code,
+            domain: 'Browser',
+            message: APP_ERROR_TUNING.Browser.CLIPBOARD_READ.message,
+        });
+        expect(error.code).toBe('CLIPBOARD_READ');
+        expect(error.message).toBe('Failed to read from clipboard');
+        expect(error.domain).toBe('Browser');
     });
 });
 
-// --- [DESCRIBE] clipboard availability ---------------------------------------
+// --- [DESCRIBE_CLIPBOARD_AVAILABILITY] ---------------------------------------
 
 describe('clipboard availability', () => {
     it('navigator.clipboard is accessible in browser environment', () => {
@@ -172,7 +158,7 @@ describe('clipboard availability', () => {
     });
 });
 
-// --- [DESCRIBE] Export service -----------------------------------------------
+// --- [DESCRIBE_EXPORT_SERVICE] -----------------------------------------------
 
 describe('Export service', () => {
     it('Export tag has correct identifier', () => {

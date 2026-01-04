@@ -1,13 +1,15 @@
 /**
- * Store factory tests: property-based + dispatch-driven middleware composition.
- * Browser mode compatible: uses unique store names per test for isolation.
+ * Test store factory middleware composition via property-based and dispatch-driven patterns.
+ * Uses unique store names per test for browser mode isolation.
  */
 import { fc, it as itProp } from '@fast-check/vitest';
 import { TEST_HARNESS } from '@parametric-portal/test-utils/harness';
+import { PositiveInt } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { createSlice, createSlicedStore, createStore, STORE_FACTORY_TUNING } from '../src/store/factory';
-import type { DevtoolsConfig, PersistConfig, TemporalConfig } from '../src/store/types';
+import { createSlice } from 'zustand-slices';
+import type { DevtoolsConfig, PersistConfig, TemporalConfig } from '../src/store/factory';
+import { createSlicedStore, createStore, STORE_FACTORY_TUNING } from '../src/store/factory';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -62,7 +64,7 @@ const valueStore = (cfg: boolean | TemporalConfig<ValueState>) =>
         temporal: cfg,
     });
 
-// --- [DESCRIBE] STORE_FACTORY_TUNING -----------------------------------------
+// --- [DESCRIBE_STORE_FACTORY_TUNING] -----------------------------------------
 
 describe('STORE_FACTORY_TUNING', () =>
     it('is frozen with correct structure', () => {
@@ -79,7 +81,7 @@ describe('STORE_FACTORY_TUNING', () =>
         expect(STORE_FACTORY_TUNING.defaults.temporal.limit).toBe(100);
     }));
 
-// --- [DESCRIBE] normalizeConfig ----------------------------------------------
+// --- [DESCRIBE_NORMALIZE_CONFIG] ---------------------------------------------
 
 describe('normalizeConfig', () => {
     itProp.prop([B.arb.immer])('immer', (cfg) => configTests.immer(cfg).getState().v === 1);
@@ -88,7 +90,7 @@ describe('normalizeConfig', () => {
     itProp.prop([B.arb.devtools])('devtools', (cfg) => configTests.devtools(cfg).getState().v === 1);
 });
 
-// --- [DESCRIBE] warnInvalidConfig --------------------------------------------
+// --- [DESCRIBE_WARN_INVALID_CONFIG] ------------------------------------------
 
 describe('warnInvalidConfig', () => {
     it.each(['INVALID!', '@invalid', 'has spaces'])('warns on invalid name: %s', (name) =>
@@ -110,7 +112,7 @@ describe('warnInvalidConfig', () => {
         }));
 });
 
-// --- [DESCRIBE] attachSelectors ----------------------------------------------
+// --- [DESCRIBE_ATTACH_SELECTORS] ---------------------------------------------
 
 describe('attachSelectors', () =>
     it('creates use property with state selectors', () => {
@@ -119,7 +121,7 @@ describe('attachSelectors', () =>
         expect(typeof store.use.b).toBe('function');
     }));
 
-// --- [DESCRIBE] middleware ---------------------------------------------------
+// --- [DESCRIBE_MIDDLEWARE] ---------------------------------------------------
 
 const incReducer = (s: { count: number }) => ({ count: s.count + 1 });
 describe('immer', () => {
@@ -159,7 +161,7 @@ describe('temporal', () => {
         expect(store.getState().n).toBe(20);
     });
     it('respects custom limit', () => {
-        const store = valueStore({ enabled: true, limit: 2 });
+        const store = valueStore({ enabled: true, limit: PositiveInt.decodeSync(2) });
         for (const v of [1, 2, 3]) store.getState().setN(v);
         expect(store.temporal.getState().pastStates.length).toBeLessThanOrEqual(2);
     });
@@ -218,7 +220,7 @@ describe('persist', () => {
         expect(createStore(B.init, { name: uniqueName('persist-disabled'), persist: false }).getState().v).toBe(1));
 });
 
-// --- [DESCRIBE] slices -------------------------------------------------------
+// --- [DESCRIBE_SLICES] -------------------------------------------------------
 
 const counterSlice = createSlice({
     actions: { inc: () => (s) => ({ count: s.count + 1 }) },

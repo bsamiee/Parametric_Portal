@@ -3,7 +3,7 @@
  * Apps compose this layer to enable Effect span export to API proxy.
  */
 
-import { Otlp } from '@effect/opentelemetry';
+import { layer } from '@effect/opentelemetry/Otlp';
 import { Layer } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -14,11 +14,11 @@ type BrowserTelemetryConfig = {
     readonly serviceName: string;
 };
 
-// --- [FACTORIES] -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const createBrowserTelemetryLayer = (config: BrowserTelemetryConfig) =>
     config.enabled
-        ? Otlp.layer({
+        ? layer({
               baseUrl: `${config.apiUrl}/v1`,
               resource: { serviceName: config.serviceName },
           })

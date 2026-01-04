@@ -77,6 +77,9 @@ class _B:
 
 B: Final[_B] = _B()
 
+# --- [PURE_FUNCTIONS] ---------------------------------------------------------
+# (stateless utilities would go here)
+
 # --- [DISPATCH_TABLES] --------------------------------------------------------
 handlers: dict[str, Handler] = {
     "upper": lambda d: {k: (v.upper() if isinstance(v, str) else v) for k, v in d.items()},

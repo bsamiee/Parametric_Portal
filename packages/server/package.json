@@ -13,10 +13,15 @@
             "import": "./src/crypto.ts",
             "default": "./src/crypto.ts"
         },
-        "./domain-errors": {
-            "types": "./src/domain-errors.ts",
-            "import": "./src/domain-errors.ts",
-            "default": "./src/domain-errors.ts"
+        "./auth": {
+            "types": "./src/auth.ts",
+            "import": "./src/auth.ts",
+            "default": "./src/auth.ts"
+        },
+        "./http-errors": {
+            "types": "./src/http-errors.ts",
+            "import": "./src/http-errors.ts",
+            "default": "./src/http-errors.ts"
         },
         "./metrics": {
             "types": "./src/metrics.ts",
@@ -45,16 +50,11 @@
         "@effect/opentelemetry": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/sql": "catalog:",
-        "@opentelemetry/api": "catalog:",
         "@opentelemetry/exporter-trace-otlp-grpc": "catalog:",
-        "@opentelemetry/resources": "catalog:",
-        "@opentelemetry/sdk-node": "catalog:",
         "@opentelemetry/sdk-trace-base": "catalog:",
-        "@opentelemetry/semantic-conventions": "catalog:",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/types": "workspace:*",
-        "effect": "catalog:",
-        "prom-client": "catalog:"
+        "effect": "catalog:"
     },
     "devDependencies": {
         "typescript": "catalog:",

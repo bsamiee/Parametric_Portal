@@ -338,9 +338,12 @@ export default defineConfig({
 // --- [TYPES] -----------------------------------------------------------------
 // --- [SCHEMA] ----------------------------------------------------------------
 // --- [CONSTANTS] -------------------------------------------------------------
+// --- [CLASSES] ---------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [LAYERS] ----------------------------------------------------------------
 // --- [ENTRY_POINT] -----------------------------------------------------------
 // --- [EXPORT] ----------------------------------------------------------------
 ```
@@ -352,19 +355,43 @@ export default defineConfig({
 - `---...---` = padding dashes to reach 80 chars total
 
 **Canonical Sections** (order is mandatory, omit unused):
-1. `[TYPES]` — type aliases, interfaces, discriminated unions
-2. `[SCHEMA]` — @effect/schema definitions
-3. `[CONSTANTS]` — B constant, frozen config objects
-4. `[PURE_FUNCTIONS]` — stateless utilities
-5. `[DISPATCH_TABLES]` — keyed handler objects
-6. `[EFFECT_PIPELINE]` — Effect.gen, pipe chains
-7. `[ENTRY_POINT]` — run(), main(), createX()
-8. `[EXPORT]` — named exports
 
-**Domain-Specific Sections** (insert between Constants and Pure Functions when required):
-- `[MARKDOWN]` — md.* generators (schema.ts only)
-- `[PROVIDERS]` — external API adapters
-- `[RENDERERS]` — output formatters
+| [INDEX] | [SECTION] | [PURPOSE] | [CONTAINS] |
+| :-----: | --------- | --------- | ---------- |
+| [1] | `[TYPES]` | Shape definitions | Type aliases, interfaces, unions, inferred types |
+| [2] | `[SCHEMA]` | Validation rules | @effect/schema, branded types, enums |
+| [3] | `[CONSTANTS]` | Immutable values | B constant, frozen config, derived values |
+| [4] | `[CLASSES]` | Typed structures | S.Class, Data.TaggedError, Context.Tag |
+| [5] | `[SERVICES]` | Dependency injection | Effect services with Layer definitions |
+| [6] | `[PURE_FUNCTIONS]` | Stateless logic | Helpers, transformers, validators |
+| [7] | `[DISPATCH_TABLES]` | Polymorphic handlers | Keyed dispatch objects |
+| [8] | `[EFFECT_PIPELINE]` | Effect composition | Effect.gen, pipe chains |
+| [9] | `[LAYERS]` | Infrastructure wiring | Layer.effect, Layer.mergeAll |
+| [10] | `[ENTRY_POINT]` | Execution start | run(), main(), createX(), API definition |
+| [11] | `[EXPORT]` | Public interface | Named exports |
+
+**Domain Extensions** (insert after corresponding core section):
+
+| [INDEX] | [DOMAIN] | [EXTENSION] | [INSERT_AFTER] | [PURPOSE] |
+| :-----: | -------- | ----------- | -------------- | --------- |
+| [1] | Database | `[TABLES]` | SCHEMA | Drizzle table definitions |
+| [2] | Database | `[RELATIONS]` | TABLES | Drizzle relations |
+| [3] | Database | `[REPOSITORIES]` | SERVICES | Data access patterns |
+| [4] | API | `[GROUPS]` | SCHEMA | HttpApiGroup definitions |
+| [5] | API | `[MIDDLEWARE]` | SERVICES | Request middleware |
+
+**Consolidation Rules** (absorb into core sections):
+
+| [INDEX] | [FOUND] | [ABSORB_INTO] | [RATIONALE] |
+| :-----: | ------- | ------------- | ----------- |
+| [1] | `[CONFIG]` | `[CONSTANTS]` | Config is runtime constants |
+| [2] | `[CONTEXT]` | `[CLASSES]` | Context.Tag is class pattern |
+| [3] | `[DOMAIN_ERRORS]` | `[CLASSES]` | Errors are TaggedError classes |
+| [4] | `[ERROR_MAPPERS]` | `[PURE_FUNCTIONS]` | Mappers are pure functions |
+| [5] | `[SCHEMA_UTILS]` | `[PURE_FUNCTIONS]` | Utils are pure functions |
+| [6] | `[INFERRED_TYPES]` | `[TYPES]` | Inferred types are still types |
+| [7] | `[DERIVED]` | `[CONSTANTS]` | Derived values are constants |
+| [8] | `[FACTORIES]` | `[ENTRY_POINT]` | Factories create entry instances |
 
 **FORBIDDEN**:
 - Parentheticals in labels: `[CONSTANTS] (B)` → `[CONSTANTS]`

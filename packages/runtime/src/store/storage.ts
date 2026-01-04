@@ -1,5 +1,6 @@
 /**
- * Storage adapters (cookies|localStorage|sessionStorage|indexedDB) for Zustand persist middleware.
+ * Provide storage adapters for Zustand persist middleware.
+ * Supports cookies, localStorage, sessionStorage, and indexedDB backends.
  */
 
 import { del, get, set } from 'idb-keyval';

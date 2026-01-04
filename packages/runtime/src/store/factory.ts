@@ -1,6 +1,9 @@
 /**
- * Zustand store factories with middleware: immer → computed → persist → temporal → subscribeWithSelector → devtools
+ * Create Zustand stores with composable middleware chain.
+ * Applies immer → computed → persist → temporal → subscribeWithSelector → devtools in canonical order.
  */
+import type { XOR } from '@parametric-portal/types/props';
+import { PositiveInt } from '@parametric-portal/types/types';
 import { Either, Match, Schema as S } from 'effect';
 import { type TemporalState, temporal } from 'zundo';
 import { create, type StateCreator, type UseBoundStore, type StoreApi as ZustandStoreApi } from 'zustand';
@@ -9,11 +12,41 @@ import { immer } from 'zustand/middleware/immer';
 import { createComputed } from 'zustand-computed';
 import { type createSlice, withSlices } from 'zustand-slices';
 import { createStorage, type StorageType } from './storage';
-import type { SlicedStoreConfig, StoreConfig } from './types';
-import { validateStoreName } from './types';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type PersistFilter = XOR<
+    { readonly exclude: ReadonlyArray<string | RegExp> },
+    { readonly include: ReadonlyArray<string | RegExp> }
+>;
+type PersistConfig<T = unknown> = {
+    readonly enabled?: boolean;
+    readonly schema?: S.Schema<T, T>;
+    readonly storage?: StorageType;
+} & Partial<PersistFilter>;
+type ComputedConfig<T, C> = {
+    readonly compute: (state: T) => C;
+    readonly keys?: ReadonlyArray<keyof T>;
+};
+type TemporalConfig<T> = {
+    readonly enabled?: boolean;
+    readonly limit?: PositiveInt;
+    readonly partialize?: (state: T) => Partial<T>;
+};
+type DevtoolsConfig = {
+    readonly enabled?: boolean;
+};
+type StoreConfig<T, C = object> = {
+    readonly computed?: ComputedConfig<T, C>;
+    readonly devtools?: boolean | DevtoolsConfig;
+    readonly immer?: boolean;
+    readonly name: string;
+    readonly persist?: boolean | PersistConfig<T>;
+    readonly temporal?: boolean | TemporalConfig<T>;
+};
+type SlicedStoreConfig<T, C = object> = Omit<StoreConfig<T, C>, 'immer'> & {
+    readonly immer?: boolean;
+};
 type ExtractState<S> = S extends { getState: () => infer T } ? T : never;
 type WithSelectors<S> = S & {
     readonly use: { readonly [K in keyof ExtractState<S>]: () => ExtractState<S>[K] };
@@ -37,15 +70,13 @@ type MiddlewareContext = {
     readonly immer: { readonly enabled: boolean };
     readonly persist: {
         readonly enabled: boolean;
-        readonly exclude?: ReadonlyArray<string | RegExp>;
-        readonly include?: ReadonlyArray<string | RegExp>;
         // biome-ignore lint/suspicious/noExplicitAny: Schema generic typing
         readonly schema?: S.Schema<any, any>;
         readonly storage?: StorageType;
-    };
+    } & Partial<PersistFilter>;
     readonly temporal: {
         readonly enabled: boolean;
-        readonly limit?: number;
+        readonly limit?: PositiveInt;
         readonly partialize?: <T>(s: T) => Partial<T>;
     };
     readonly devtools: { readonly enabled: boolean };
@@ -53,6 +84,16 @@ type MiddlewareContext = {
     readonly computeFn?: (state: any) => any;
     readonly computeOpts?: { keys?: ReadonlyArray<unknown> };
 };
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const StoreNameSchema = S.String.pipe(
+    S.pattern(/^[a-z0-9][a-z0-9:-]*$/, {
+        message: () => 'Store name must be lowercase alphanumeric with hyphens/colons',
+    }),
+);
+const HistoryLimitSchema = S.Number.pipe(S.int(), S.between(1, 1000));
+const validateStoreName = (name: string): boolean => Either.isRight(S.decodeUnknownEither(StoreNameSchema)(name));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -72,7 +113,7 @@ const B = Object.freeze({
                 /^reset/,
             ] as const satisfies ReadonlyArray<RegExp>,
         },
-        temporal: { enabled: true, limit: 100 },
+        temporal: { enabled: true, limit: PositiveInt.decodeSync(100) },
     },
     order: ['immer', 'computed', 'persist', 'temporal', 'subscribeWithSelector', 'devtools'] as const,
 } as const);
@@ -138,12 +179,16 @@ const middlewareApplicators: Record<MiddlewareKey, MiddlewareApplicator> = {
                             })
                           : { ...current, ...(persisted as object) },
                   name: ctx.name,
-                  partialize: (state: Record<string, unknown>) =>
-                      Object.fromEntries(
-                          Object.entries(state).filter(
-                              ([k]) => !ctx.persist.exclude?.some((p) => (typeof p === 'string' ? k === p : p.test(k))),
-                          ),
-                      ),
+                  partialize: (state: Record<string, unknown>) => {
+                      const match = (k: string, p: string | RegExp): boolean =>
+                          typeof p === 'string' ? k === p : p.test(k);
+                      const entries = Object.entries(state);
+                      return Object.fromEntries(
+                          ctx.persist.include
+                              ? entries.filter(([k]) => ctx.persist.include?.some((p) => match(k, p)))
+                              : entries.filter(([k]) => !ctx.persist.exclude?.some((p) => match(k, p))),
+                      );
+                  },
                   storage: createStorage(ctx.persist.storage ?? 'localStorage'),
               })
             : creator,
@@ -197,10 +242,38 @@ const createSlicedStore = <S extends AnySlice[], C extends object = object>(
         immer: false,
     }) as SlicedStoreReturn<S, C>;
 };
+const createSchemaStore = <T extends object, C extends object = object>(
+    schema: S.Schema<T, T>,
+    initialState: T,
+    cfg: Omit<StoreConfig<T, C>, 'persist'> & { readonly persist?: boolean | Omit<PersistConfig<T>, 'schema'> },
+): StoreApi<T, C> & TemporalApi<T & C> =>
+    createStore<T, C>(() => initialState, {
+        ...cfg,
+        persist: Match.value({ kind: typeof cfg.persist, value: cfg.persist }).pipe(
+            Match.when({ kind: 'object' }, ({ value }) => ({ ...(value as Omit<PersistConfig<T>, 'schema'>), schema })),
+            Match.when({ kind: 'boolean', value: false }, () => ({ enabled: false })),
+            Match.orElse(() => ({ enabled: true, schema })),
+        ),
+    } as StoreConfig<T, C>);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-// biome-ignore lint/performance/noBarrelFile: Intentional re-export for unified API
-export { createSlice } from 'zustand-slices';
-export { B as STORE_FACTORY_TUNING, createSlicedStore, createStore };
-export type { StoreApi, TemporalApi };
+export {
+    B as STORE_FACTORY_TUNING,
+    createSchemaStore,
+    createSlicedStore,
+    createStore,
+    HistoryLimitSchema,
+    StoreNameSchema,
+    validateStoreName,
+};
+export type {
+    ComputedConfig,
+    DevtoolsConfig,
+    PersistConfig,
+    SlicedStoreConfig,
+    StoreApi,
+    StoreConfig,
+    TemporalApi,
+    TemporalConfig,
+};

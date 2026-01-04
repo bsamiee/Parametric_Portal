@@ -4,10 +4,9 @@
 
 import { useExport } from '@parametric-portal/runtime/hooks/browser';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
-import { fileOpsImpl } from '@parametric-portal/runtime/hooks/file';
-import { type ExportFormat, PngSizeSchema } from '@parametric-portal/types/browser';
-import { validateContent } from '@parametric-portal/types/files';
-import { sanitizeSvg } from '@parametric-portal/types/svg';
+import { fileOpsImpl } from '@parametric-portal/runtime/services/file';
+import { type ExportFormat, PngSizeSchema, validateContent } from '@parametric-portal/types/files';
+import { Svg } from '@parametric-portal/types/svg';
 import { Index, VariantCount } from '@parametric-portal/types/types';
 import { Effect, Schema as S } from 'effect';
 import type { ReactNode } from 'react';
@@ -91,7 +90,7 @@ const uploadStateRenderers = {
     preview: ({ fileName, previewSvg, reset }: StateRendererProps): ReactNode => (
         <Stack gap>
             <div className='w-full aspect-square max-h-64 bg-(--panel-bg-light) rounded-lg overflow-hidden border border-(--panel-border-dark)'>
-                {previewSvg && <SvgPreview svg={previewSvg} sanitize={sanitizeSvg} className='w-full h-full' />}
+                {previewSvg && <SvgPreview svg={previewSvg} sanitize={Svg.sanitize} className='w-full h-full' />}
             </div>
             <Stack direction='row' justify='between' align='center'>
                 <span className='text-sm opacity-70'>{fileName}.svg</span>
@@ -181,7 +180,7 @@ const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNo
             Effect.gen(function* () {
                 const content = yield* fileOpsImpl.toText(file);
                 const validContent = yield* validateContent('image/svg+xml', content);
-                return sanitizeSvg(validContent);
+                return Svg.sanitize(validContent);
             }),
         {
             onError: (err, file) => {

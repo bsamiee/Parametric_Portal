@@ -132,7 +132,7 @@
             "assist": { "actions": { "source": { "useSortedKeys": "off", "useSortedProperties": "off" } } }
         },
         {
-            "includes": ["**/matchers.ts", "**/types/src/*.ts", "**/core/slots.tsx"],
+            "includes": ["**/matchers.ts", "**/types/src/*.ts", "**/core/slots.ts"],
             "formatter": {
                 "enabled": false
             }

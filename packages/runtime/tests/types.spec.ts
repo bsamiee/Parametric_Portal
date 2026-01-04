@@ -1,12 +1,13 @@
 /**
- * Store types tests: schema validation for store names and history limits.
+ * Validate store type schemas for names and history limits.
+ * Tests schema decode behavior and validator function consistency.
  */
 import { it } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
 import '@parametric-portal/test-utils/harness';
 import { Schema as S } from 'effect';
 import { describe, expect } from 'vitest';
-import { HistoryLimitSchema, STORE_TYPES_TUNING, StoreNameSchema, validateStoreName } from '../src/store/types';
+import { HistoryLimitSchema, StoreNameSchema, validateStoreName } from '../src/store/factory';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -19,23 +20,7 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- [DESCRIBE] STORE_TYPES_TUNING -------------------------------------------
-
-describe('STORE_TYPES_TUNING', () => {
-    it('history bounds match expected values', () => {
-        expect(STORE_TYPES_TUNING.bounds.historyLimit.min).toBe(B.bounds.historyLimit.min);
-        expect(STORE_TYPES_TUNING.bounds.historyLimit.max).toBe(B.bounds.historyLimit.max);
-    });
-    it('store name pattern matches expected regex', () => {
-        expect(STORE_TYPES_TUNING.patterns.storeName.source).toBe(B.pattern.source);
-    });
-    it('history bounds are positive integers with max > min', () => {
-        expect(STORE_TYPES_TUNING.bounds.historyLimit.min).toBeGreaterThan(0);
-        expect(STORE_TYPES_TUNING.bounds.historyLimit.max).toBeGreaterThan(STORE_TYPES_TUNING.bounds.historyLimit.min);
-    });
-});
-
-// --- [DESCRIBE] validateStoreName --------------------------------------------
+// --- [DESCRIBE_VALIDATE_STORE_NAME] ------------------------------------------
 
 describe('validateStoreName', () => {
     it.prop([FC_ARB.storeName()])('accepts valid names matching pattern', (name) => {
@@ -71,7 +56,7 @@ describe('validateStoreName', () => {
     });
 });
 
-// --- [DESCRIBE] StoreNameSchema ----------------------------------------------
+// --- [DESCRIBE_STORE_NAME_SCHEMA] --------------------------------------------
 
 describe('StoreNameSchema', () => {
     it.prop([FC_ARB.storeName()])('decodes valid names to Right with preserved value', (name) => {
@@ -92,7 +77,7 @@ describe('StoreNameSchema', () => {
     });
 });
 
-// --- [DESCRIBE] HistoryLimitSchema -------------------------------------------
+// --- [DESCRIBE_HISTORY_LIMIT_SCHEMA] -----------------------------------------
 
 describe('HistoryLimitSchema', () => {
     it.prop([FC_ARB.historyLimit()])('decodes valid limits to Right with preserved value', (n) => {
@@ -126,7 +111,7 @@ describe('HistoryLimitSchema', () => {
     });
 });
 
-// --- [DESCRIBE] schema and validator consistency -----------------------------
+// --- [DESCRIBE_SCHEMA_VALIDATOR_CONSISTENCY] ---------------------------------
 
 describe('schema and validator consistency', () => {
     it.prop([FC_ARB.storeName()])('validateStoreName and StoreNameSchema agree on valid names', (name) => {
@@ -140,12 +125,5 @@ describe('schema and validator consistency', () => {
         const schemaResult = S.decodeUnknownEither(StoreNameSchema)(name);
         const schemaValid = schemaResult._tag === 'Right';
         expect(validatorResult).toBe(schemaValid);
-    });
-    it('TUNING pattern source matches local pattern', () => {
-        expect(STORE_TYPES_TUNING.patterns.storeName.source).toBe(B.pattern.source);
-    });
-    it('TUNING bounds match local bounds', () => {
-        expect(STORE_TYPES_TUNING.bounds.historyLimit.min).toBe(B.bounds.historyLimit.min);
-        expect(STORE_TYPES_TUNING.bounds.historyLimit.max).toBe(B.bounds.historyLimit.max);
     });
 });

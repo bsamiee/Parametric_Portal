@@ -5,13 +5,14 @@
 import { HttpApiClient, HttpClient, HttpClientRequest } from '@effect/platform';
 // biome-ignore lint/style/useImportType: Clipboard namespace needed for Clipboard.Clipboard type
 import { BrowserHttpClient, Clipboard } from '@effect/platform-browser';
-import { createAppRuntime, useRuntime } from '@parametric-portal/runtime/runtime';
+import type { ApiKeyId, OAuthProvider } from '@parametric-portal/database/schema';
+import { Runtime } from '@parametric-portal/runtime/runtime';
 import { BrowserServicesLive, type Download, type Export } from '@parametric-portal/runtime/services/browser';
 import { createBrowserTelemetryLayer } from '@parametric-portal/runtime/services/telemetry';
 import { type AuthState, useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import { ParametricApi } from '@parametric-portal/server/api';
-import type { ApiKeyId, OAuthProvider } from '@parametric-portal/types/database';
 import type { IconRequest } from '@parametric-portal/types/icons';
+import { DurationMs } from '@parametric-portal/types/types';
 import { DateTime, Duration, Effect, Fiber, Layer, Option } from 'effect';
 import { useEffect } from 'react';
 
@@ -28,7 +29,7 @@ type AuthResult = {
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    auth: { refreshBuffer: 60_000 },
+    auth: { refreshBuffer: DurationMs.fromMillis(60_000) },
     baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
     otel: {
         enabled: import.meta.env['VITE_OTEL_ENABLED'] === 'true',
@@ -148,7 +149,7 @@ const handleAuthResult = (
 // --- [HOOKS] -----------------------------------------------------------------
 
 const useAuthInit = (): void => {
-    const runtime = useRuntime();
+    const runtime = Runtime.use();
     const setLoading = useAuthStore((s) => s.setLoading);
     const clearAuth = useAuthStore((s) => s.clearAuth);
     const setAuth = useAuthStore((s) => s.setAuth);
@@ -191,7 +192,7 @@ const useAuthInit = (): void => {
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const appRuntime = createAppRuntime<AppServices, never>(AppLayer);
+const appRuntime = Runtime.make<AppServices, never>(AppLayer);
 
 // --- [EXPORT] ----------------------------------------------------------------
 

@@ -200,7 +200,8 @@
     },
     "targetDefaults": {
         "analyze": {
-            "cache": true,
+            "cache": false,
+            "continuous": true,
             "dependsOn": ["build"],
             "executor": "nx:run-commands",
             "options": {
@@ -336,7 +337,6 @@
             }
         }
     },
-    "useDaemonProcess": false,
     "useInferencePlugins": true,
     "workspaceLayout": {
         "appsDir": "apps",

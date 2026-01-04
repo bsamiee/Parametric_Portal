@@ -2,6 +2,7 @@
  * Utility components: render scroll area with customizable overflow behavior.
  * Uses B, utilities, resolve from schema.ts with CSS overflow customization.
  */
+import { Svg } from '@parametric-portal/types/svg';
 import type { CSSProperties, ForwardedRef, HTMLAttributes, ReactNode } from 'react';
 import { createElement, forwardRef } from 'react';
 import type { Inputs, TuningFor } from './schema.ts';
@@ -77,14 +78,12 @@ const createScrollAreaComponent = (input: UtilityInput) => {
     return Component;
 };
 
-const defaultSanitize = (svg: string): string => svg;
-
 const createSvgPreviewComponent = (input: {
     readonly className?: string;
     readonly sanitize?: (svg: string) => string;
 }) => {
     const Component = forwardRef((props: SvgPreviewProps, fRef: ForwardedRef<HTMLDivElement>) => {
-        const { className, sanitize = input.sanitize ?? defaultSanitize, style, svg, ...rest } = props;
+        const { className, sanitize = input.sanitize ?? Svg.sanitize, style, svg, ...rest } = props;
         const ref = useForwardedRef(fRef);
         return createElement('div', {
             ...rest,

@@ -8,15 +8,15 @@
             "import": "./src/async.ts",
             "default": "./src/async.ts"
         },
-        "./browser": {
-            "types": "./src/browser.ts",
-            "import": "./src/browser.ts",
-            "default": "./src/browser.ts"
+        "./props": {
+            "types": "./src/props.ts",
+            "import": "./src/props.ts",
+            "default": "./src/props.ts"
         },
-        "./database": {
-            "types": "./src/database.ts",
-            "import": "./src/database.ts",
-            "default": "./src/database.ts"
+        "./app-error": {
+            "types": "./src/app-error.ts",
+            "import": "./src/app-error.ts",
+            "default": "./src/app-error.ts"
         },
         "./files": {
             "types": "./src/files.ts",
@@ -27,11 +27,6 @@
             "types": "./src/icons.ts",
             "import": "./src/icons.ts",
             "default": "./src/icons.ts"
-        },
-        "./runtime": {
-            "types": "./src/runtime.ts",
-            "import": "./src/runtime.ts",
-            "default": "./src/runtime.ts"
         },
         "./svg": {
             "types": "./src/svg.ts",
@@ -66,6 +61,7 @@
     "dependencies": {
         "@effect/experimental": "catalog:",
         "effect": "catalog:",
+        "happy-dom": "catalog:",
         "isomorphic-dompurify": "catalog:",
         "uuid": "catalog:"
     },

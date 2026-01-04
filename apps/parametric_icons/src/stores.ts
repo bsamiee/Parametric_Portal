@@ -3,15 +3,25 @@
  */
 
 import { createStore } from '@parametric-portal/runtime/store/factory';
-import type { ExportFormat } from '@parametric-portal/types/browser';
+import type { ExportFormat } from '@parametric-portal/types/files';
 import { ColorMode, Intent, OutputMode } from '@parametric-portal/types/icons';
-import { type Svg, type SvgAssetData, SvgAssetSchema, sanitizeSvg } from '@parametric-portal/types/svg';
-import { Index, Uuidv7, ZoomFactor } from '@parametric-portal/types/types';
-import type { MessageRole, SidebarTab } from '@parametric-portal/types/ui';
+import { Svg, SvgAsset } from '@parametric-portal/types/svg';
+import {
+    Index,
+    PositiveInt,
+    Timestamp,
+    TYPES_TUNING,
+    Uuidv7,
+    VariantCount,
+    ZoomFactor,
+} from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type SidebarTab = 'history' | 'inspector' | 'library' | 'session';
+type UploadState = 'error' | 'idle' | 'preview' | 'validating';
+type MessageRole = 'assistant' | 'user';
 type Message = S.Schema.Type<typeof MessageSchema>;
 type ChatState = S.Schema.Type<typeof ChatStateSchema>;
 type PreviewState = S.Schema.Type<typeof PreviewStateSchema>;
@@ -20,7 +30,6 @@ type UiState = S.Schema.Type<typeof UiStateSchema>;
 type Asset = S.Schema.Type<typeof AssetSchema>;
 type HistoryState = S.Schema.Type<typeof HistoryStateSchema>;
 type LibraryState = S.Schema.Type<typeof LibraryStateSchema>;
-type UploadState = 'error' | 'idle' | 'preview' | 'validating';
 type SubmittedContext = { readonly context: ContextState; readonly intent: Intent; readonly prompt: string } | null;
 type ChatActions = {
     readonly addMessage: (msg: Message) => void;
@@ -36,7 +45,7 @@ type PreviewActions = {
     readonly zoomOut: () => void;
 };
 type ContextActions = {
-    readonly addAttachment: (ref: SvgAssetData) => void;
+    readonly addAttachment: (ref: SvgAsset) => void;
     readonly clearAttachments: () => void;
     readonly removeAttachment: (id: string) => void;
     readonly setColorMode: (mode: ColorMode) => void;
@@ -64,7 +73,7 @@ type LibraryActions = {
     readonly removeCustomAsset: (id: string) => void;
 };
 type LibraryComputed = {
-    readonly getCustomAsset: (id: string) => SvgAssetData | undefined;
+    readonly getCustomAsset: (id: string) => SvgAsset | undefined;
     readonly isSaved: (id: string) => boolean;
 };
 type UiActions = {
@@ -89,7 +98,7 @@ const MessageSchema = S.Struct({
     content: S.String,
     id: S.typeSchema(Uuidv7.schema),
     role: S.Literal('user', 'assistant'),
-    timestamp: S.Number,
+    timestamp: Timestamp.schema,
 });
 const ChatStateSchema = S.Struct({
     input: S.String,
@@ -101,7 +110,7 @@ const PreviewStateSchema = S.Struct({
     zoom: ZoomFactor.schema,
 });
 const ContextStateSchema = S.Struct({
-    attachments: S.Array(SvgAssetSchema),
+    attachments: S.Array(SvgAsset.schema),
     colorMode: ColorMode,
     intent: Intent,
     output: OutputMode,
@@ -127,15 +136,15 @@ const AssetSchema = S.Struct({
     intent: Intent,
     prompt: S.String,
     selectedVariantIndex: S.optional(Index.schema),
-    timestamp: S.Number,
-    variants: S.Array(SvgAssetSchema),
+    timestamp: Timestamp.schema,
+    variants: S.Array(SvgAsset.schema),
 });
 const HistoryStateSchema = S.Struct({
     assets: S.Array(AssetSchema),
     currentId: S.NullOr(S.String),
 });
 const LibraryStateSchema = S.Struct({
-    customAssets: S.Array(SvgAssetSchema),
+    customAssets: S.Array(SvgAsset.schema),
     savedAssets: S.Array(AssetSchema),
 });
 
@@ -149,9 +158,9 @@ const B = Object.freeze({
         intent: 'create',
         output: 'single',
     } as ContextState,
-    history: { assets: [], currentId: null, maxItems: 64 },
+    history: { assets: [], currentId: null, maxItems: PositiveInt.decodeSync(64) },
     library: { customAssets: [], savedAssets: [] } as LibraryState,
-    preview: { currentSvg: null, zoom: 1 as ZoomFactor } as PreviewState,
+    preview: { currentSvg: null, zoom: ZoomFactor.one } as PreviewState,
     ui: {
         activeTab: 'history',
         exportFormat: 'svg',
@@ -166,8 +175,8 @@ const B = Object.freeze({
         uploadPreviewSvg: null,
         uploadState: 'idle',
     } as UiState,
-    variantCount: { batch: 3, single: 1 },
-    zoom: { factor: 1.25, max: 10, min: 0.1 },
+    variantCount: { batch: VariantCount.decodeSync(3), single: VariantCount.decodeSync(1) },
+    zoom: { factor: 1.25, max: TYPES_TUNING.bounds.zoomFactor.max, min: TYPES_TUNING.bounds.zoomFactor.min },
 } as const);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -185,13 +194,25 @@ const useChatStore = createStore<ChatState & ChatActions>(
 const usePreviewStore = createStore<PreviewState & PreviewActions>(
     (set, get) => ({
         ...B.preview,
-        resetZoom: () => set({ zoom: 1 as ZoomFactor }),
+        resetZoom: () => set({ zoom: ZoomFactor.one }),
         setSvg: (svg) => set({ currentSvg: svg }),
-        setZoom: (value) => set({ zoom: Math.max(B.zoom.min, Math.min(B.zoom.max, value)) as ZoomFactor }),
-        zoomIn: () => set({ zoom: Math.min(B.zoom.max, get().zoom * B.zoom.factor) as ZoomFactor }),
-        zoomOut: () => set({ zoom: Math.max(B.zoom.min, get().zoom / B.zoom.factor) as ZoomFactor }),
+        setZoom: (value) =>
+            set({ zoom: ZoomFactor.clamp(ZoomFactor.decodeSync(value), ZoomFactor.min, ZoomFactor.max) }),
+        zoomIn: () =>
+            set({
+                zoom: ZoomFactor.clamp(ZoomFactor.scale(get().zoom, B.zoom.factor), ZoomFactor.min, ZoomFactor.max),
+            }),
+        zoomOut: () =>
+            set({
+                zoom: ZoomFactor.clamp(ZoomFactor.scale(get().zoom, 1 / B.zoom.factor), ZoomFactor.min, ZoomFactor.max),
+            }),
     }),
-    { immer: false, name: 'parametric-icons:preview', persist: false, temporal: { enabled: true, limit: 50 } },
+    {
+        immer: false,
+        name: 'parametric-icons:preview',
+        persist: false,
+        temporal: { enabled: true, limit: PositiveInt.decodeSync(50) },
+    },
 );
 const useContextStore = createStore<ContextState & ContextActions>(
     (set, get) => ({
@@ -218,7 +239,10 @@ const useHistoryStore = createStore<HistoryState & HistoryActions, HistoryComput
         ...B.history,
         addAsset: (asset) =>
             set({
-                assets: [{ ...asset, selectedVariantIndex: 0 as Index }, ...get().assets].slice(0, B.history.maxItems),
+                assets: [{ ...asset, selectedVariantIndex: Index.decodeSync(0) }, ...get().assets].slice(
+                    0,
+                    B.history.maxItems,
+                ),
                 currentId: asset.id,
             }),
         clearAll: () => set({ assets: [], currentId: null }),
@@ -231,7 +255,7 @@ const useHistoryStore = createStore<HistoryState & HistoryActions, HistoryComput
         setSelectedVariantIndex: (assetId, index) =>
             set({
                 assets: get().assets.map((a) =>
-                    a.id === assetId ? { ...a, selectedVariantIndex: index as Index } : a,
+                    a.id === assetId ? { ...a, selectedVariantIndex: Index.decodeSync(index) } : a,
                 ),
             }),
     }),
@@ -259,7 +283,7 @@ const useLibraryStore = createStore<LibraryState & LibraryActions, LibraryComput
             }),
         addCustomAsset: (name, svgContent) => {
             const id = Uuidv7.generateSync();
-            set({ customAssets: [...get().customAssets, { id, name, svg: sanitizeSvg(svgContent) as Svg }] });
+            set({ customAssets: [...get().customAssets, { id, name, svg: Svg.sanitize(svgContent) }] });
         },
         clearAssets: () => set({ savedAssets: [] }),
         removeAsset: (id) => set({ savedAssets: get().savedAssets.filter((asset) => asset.id !== id) }),

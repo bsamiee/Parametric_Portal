@@ -80,16 +80,15 @@
     },
     "dependencies": {
         "@floating-ui/react-dom": "catalog:",
+        "@parametric-portal/types": "workspace:*",
         "@radix-ui/react-slot": "catalog:",
         "class-variance-authority": "catalog:",
         "clsx": "catalog:",
         "cmdk": "catalog:",
         "effect": "catalog:",
         "lucide-react": "catalog:",
-        "react": "catalog:",
         "react-aria": "catalog:",
         "react-aria-components": "catalog:",
-        "react-dom": "catalog:",
         "react-stately": "catalog:",
         "tailwind-merge": "catalog:"
     },
@@ -101,5 +100,9 @@
         "typescript": "catalog:",
         "vite": "catalog:",
         "vitest": "catalog:"
+    },
+    "peerDependencies": {
+        "react": "catalog:",
+        "react-dom": "catalog:"
     }
 }

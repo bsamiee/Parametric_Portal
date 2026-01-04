@@ -8,6 +8,7 @@
         "outDir": "dist",
         "paths": {
             "@parametric-portal/components/*": ["../../packages/components/src/*"],
+            "@parametric-portal/database/*": ["../../packages/database/src/*"],
             "@parametric-portal/devtools/*": ["../../packages/devtools/src/*"],
             "@parametric-portal/runtime/*": ["../../packages/runtime/src/*"],
             "@parametric-portal/server/*": ["../../packages/server/src/*"],

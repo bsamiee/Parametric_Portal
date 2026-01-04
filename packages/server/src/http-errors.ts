@@ -4,7 +4,7 @@
  */
 import { HttpApiSchema } from '@effect/platform';
 import { DurationMs } from '@parametric-portal/types/types';
-import { Schema as S } from 'effect';
+import { Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -81,8 +81,35 @@ class GatewayTimeout extends S.TaggedError<GatewayTimeout>()(
     HttpApiSchema.annotations({ description: 'Upstream timeout', status: B.status.gatewayTimeout }),
 ) {}
 
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+/** Generic error chain - maps any error to specified HTTP error type. */
+const chain = <C extends new (props: never) => unknown>(
+    ErrorClass: C,
+    props: ConstructorParameters<C>[0],
+): (<A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, InstanceType<C>, R>) =>
+    Effect.mapError(() => new ErrorClass(props) as InstanceType<C>);
+
+// --- [DISPATCH_TABLES] -------------------------------------------------------
+
+const HttpError = Object.freeze({
+    Auth: AuthError,
+    Conflict: Conflict,
+    Forbidden: Forbidden,
+    GatewayTimeout: GatewayTimeout,
+    Gone: Gone,
+    Internal: InternalError,
+    NotFound: NotFound,
+    OAuth: OAuthError,
+    RateLimit: RateLimit,
+    ServiceUnavailable: ServiceUnavailable,
+    Validation: Validation,
+    chain,
+} as const);
+
 // --- [EXPORT] ----------------------------------------------------------------
 
+export { HttpError };
 export {
     AuthError,
     Conflict,

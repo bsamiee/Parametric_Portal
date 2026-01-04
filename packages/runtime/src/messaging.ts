@@ -1,17 +1,15 @@
 /**
- * Cross-origin iframe/window messaging with Effect Stream for continuous listening and Schema validation.
- * Replaces @rottitime/react-hook-message-event with native browser APIs + Effect.
+ * Handle cross-origin iframe/window messaging with type safety.
+ * Provides Effect Stream for continuous listening with Schema validation.
  */
-import { AppError } from '@parametric-portal/types/runtime';
-import { Timestamp } from '@parametric-portal/types/types';
+import { AppError } from '@parametric-portal/types/app-error';
+import { DurationMs, Timestamp } from '@parametric-portal/types/types';
 import { Effect, Either, Fiber, type ParseResult, Schema as S, Stream } from 'effect';
 import { useEffect, useRef } from 'react';
 import type { StoreApi } from 'zustand';
-import { useRuntime } from './runtime';
+import { Runtime } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
-
-type MessagingError = Extract<AppError, { readonly _tag: 'Messaging' }>;
 type MessagePayload<T = unknown> = {
     readonly data: T;
     readonly timestamp: Timestamp;
@@ -24,7 +22,7 @@ type MessageListenerOptions<T = unknown> = {
     readonly typeFilter?: string;
 };
 type StoreSyncConfig<T> = {
-    readonly debounceMs?: number;
+    readonly debounceMs?: DurationMs;
     readonly keys?: ReadonlyArray<keyof T>;
 };
 
@@ -32,7 +30,7 @@ type StoreSyncConfig<T> = {
 
 const B = Object.freeze({
     defaults: {
-        debounceMs: 100,
+        debounceMs: DurationMs.fromMillis(100),
         targetOrigin: '*',
     },
 } as const);
@@ -44,13 +42,6 @@ const createPayload = <T>(type: string, data: T): MessagePayload<T> => ({
     timestamp: Timestamp.nowSync(),
     type,
 });
-const debounce = <T extends (...args: Parameters<T>) => void>(fn: T, ms: number): T => {
-    const state = { timeout: null as ReturnType<typeof setTimeout> | null };
-    return ((...args: Parameters<T>) => {
-        state.timeout && clearTimeout(state.timeout);
-        state.timeout = setTimeout(() => fn(...args), ms);
-    }) as T;
-};
 const validateData = <T>(
     schema: S.Schema<T, unknown> | undefined,
     data: unknown,
@@ -62,40 +53,35 @@ const sendMessage = <T>(
     type: string,
     data: T,
     options?: { schema?: S.Schema<T, unknown>; targetOrigin?: string },
-): Effect.Effect<void, MessagingError> =>
+): Effect.Effect<void, AppError<'Messaging'>> =>
     Effect.gen(function* () {
         const { schema, targetOrigin = B.defaults.targetOrigin } = options ?? {};
         const validated = schema
             ? yield* S.decodeUnknown(schema)(data).pipe(
-                  Effect.mapError(() =>
-                      AppError.Messaging({ code: 'VALIDATION_FAILED', message: 'Send validation failed' }),
-                  ),
+                  Effect.mapError(() => AppError.from('Messaging', 'VALIDATION_FAILED', 'Send validation failed')),
               )
             : data;
         yield* Effect.sync(() => window.parent?.postMessage(createPayload(type, validated), targetOrigin));
     });
 const createMessageStream = <T>(
     options?: MessageListenerOptions<T>,
-): Stream.Stream<MessagePayload<T>, MessagingError> =>
-    Stream.asyncScoped<MessagePayload<T>, MessagingError>((emit) =>
+): Stream.Stream<MessagePayload<T>, AppError<'Messaging'>> =>
+    Stream.asyncScoped<MessagePayload<T>, AppError<'Messaging'>>((emit) =>
         Effect.acquireRelease(
             Effect.sync(() => {
                 const { schema, targetOrigin = B.defaults.targetOrigin, typeFilter } = options ?? {};
                 const handler = (event: MessageEvent) => {
-                    (targetOrigin === '*' || event.origin === targetOrigin) &&
-                        (!typeFilter || event.data?.type === typeFilter) &&
-                        Either.match(validateData(schema, event.data?.data), {
-                            onLeft: () =>
-                                void emit.fail(
-                                    AppError.Messaging({ code: 'VALIDATION_FAILED', message: 'Invalid message data' }),
-                                ),
-                            onRight: (data) =>
-                                void emit.single({
-                                    data,
-                                    timestamp: event.data?.timestamp ?? Timestamp.nowSync(),
-                                    type: event.data?.type ?? 'message',
-                                }),
-                        });
+                    const isOriginValid = targetOrigin === '*' || event.origin === targetOrigin;
+                    const isTypeValid = !typeFilter || event.data?.type === typeFilter;
+                    const result = isOriginValid && isTypeValid ? validateData(schema, event.data?.data) : undefined;
+                    result &&
+                        (Either.isLeft(result)
+                            ? void emit.fail(AppError.from('Messaging', 'VALIDATION_FAILED', 'Invalid message data'))
+                            : void emit.single({
+                                  data: result.right,
+                                  timestamp: event.data?.timestamp ?? Timestamp.nowSync(),
+                                  type: event.data?.type ?? 'message',
+                              }));
                 };
                 window.addEventListener('message', handler);
                 return handler;
@@ -110,7 +96,7 @@ const useMessageListener = <T, R = never>(
     handler: (payload: MessagePayload<T>) => void,
     options?: MessageListenerOptions<T>,
 ): void => {
-    const runtime = useRuntime<R, never>();
+    const runtime = Runtime.use<R, never>();
     const handlerRef = useRef(handler);
     handlerRef.current = handler;
     // biome-ignore lint/correctness/useExhaustiveDependencies: handlerRef pattern for stable callback
@@ -129,15 +115,30 @@ const useStoreSync = <T extends object, R = never>(
     store: { getState: () => T; subscribe: StoreApi<T>['subscribe'] },
     config?: StoreSyncConfig<T>,
 ): void => {
-    const runtime = useRuntime<R, never>();
+    const runtime = Runtime.use<R, never>();
     const { keys, debounceMs = B.defaults.debounceMs } = config ?? {};
     useEffect(() => {
-        const send = debounce((state: T) => {
-            const payload = keys ? Object.fromEntries(keys.map((k) => [k, state[k]])) : state;
-            runtime.runFork(sendMessage('state-sync', payload));
-        }, debounceMs);
-        send(store.getState());
-        return store.subscribe(send);
+        const storeStream = Stream.asyncScoped<T, never>((emit) =>
+            Effect.acquireRelease(
+                Effect.sync(() => {
+                    emit.single(store.getState());
+                    return store.subscribe(emit.single);
+                }),
+                (unsubscribe) => Effect.sync(unsubscribe),
+            ),
+        );
+        const fiber = runtime.runFork(
+            storeStream.pipe(
+                Stream.debounce(debounceMs),
+                Stream.runForEach((state) => {
+                    const payload = keys ? Object.fromEntries(keys.map((k) => [k, state[k]])) : state;
+                    return sendMessage('state-sync', payload).pipe(Effect.ignore);
+                }),
+            ),
+        );
+        return () => {
+            runtime.runFork(Fiber.interrupt(fiber));
+        };
     }, [runtime, store, debounceMs, keys]);
 };
 const useStoreReceiver = <T, R = never>(onReceive: (state: T) => void): void =>
@@ -147,7 +148,7 @@ const useStoreReceiver = <T, R = never>(onReceive: (state: T) => void): void =>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { MessageListenerOptions, MessagePayload, MessagingError, StoreSyncConfig };
+export type { MessageListenerOptions, MessagePayload, StoreSyncConfig };
 export {
     B as MESSAGING_TUNING,
     createMessageStream,

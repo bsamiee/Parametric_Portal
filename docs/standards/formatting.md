@@ -160,7 +160,7 @@ description: Whitespace and separator rules for document structure
 |   [1]   | Sigil Content | UPPERCASE  | `[IMPORTANT]`, `[CODE_FLOW]`        |
 |   [2]   | Keyword       | UPPERCASE  | `MUST`, `NEVER`, `ALWAYS`           |
 |   [3]   | Table Rubric  | UPPERCASE  | `[INDEX]`, `[TERM]`, `[DEFINITION]` |
-|   [4]   | Section Label | UPPERCASE  | `// --- [PURE_FUNCTIONS] ---`       |
+|   [4]   | Section Label | UPPERCASE  | `// --- [CLASSES] ---`              |
 |   [5]   | Table Cell    | Title Case | `Sigil Content`, `Factory Function` |
 |   [6]   | File Name     | kebab-case | `voice.md`, `pr-hygiene.ts`         |
 
