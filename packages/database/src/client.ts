@@ -57,6 +57,7 @@ const configBuilders = Object.freeze({
     boolXform: (k: string, f: boolean, fn: ((s: string) => string) | undefined) => Config.boolean(k).pipe(Config.withDefault(f), Config.map((e) => (e ? fn : undefined))),
     int: (k: string, f: number) => Config.integer(k).pipe(Config.withDefault(f)),
     intMs: (k: string, f: number) => Config.integer(k).pipe(Config.withDefault(f), Config.map(Duration.millis)),
+    ssl: (k: string, defaults: SslConfig) => Config.boolean(k).pipe(Config.withDefault(defaults.enabled), Config.map((e) => (e ? { rejectUnauthorized: defaults.rejectUnauthorized } : undefined))),
     str: (k: string, f: string) => Config.string(k).pipe(Config.withDefault(f)),
 } as const);
 const checkHealth: Effect.Effect<HealthStatus, never, SqlClient> = Effect.gen(function* () {
@@ -80,7 +81,7 @@ const PgLive: PgClientLayer = PgClient.layerConfig({
     password: Config.redacted('POSTGRES_PASSWORD'),
     port: configBuilders.int('POSTGRES_PORT', B.defaults.port),
     spanAttributes: Config.succeed(Object.fromEntries(B.spanAttributes)),
-    ssl: configBuilders.bool('POSTGRES_SSL', B.ssl.enabled).pipe(Config.map((e) => (e ? { rejectUnauthorized: B.ssl.rejectUnauthorized } : undefined))),
+    ssl: configBuilders.ssl('POSTGRES_SSL', B.ssl),
     transformJson: Config.succeed(B.transforms.json),
     transformQueryNames: configBuilders.boolXform('POSTGRES_TRANSFORM_NAMES', B.transforms.enabled, S.camelToSnake),
     transformResultNames: configBuilders.boolXform('POSTGRES_TRANSFORM_NAMES', B.transforms.enabled, S.snakeToCamel),
