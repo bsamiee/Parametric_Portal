@@ -108,17 +108,4 @@ const HttpError = Object.freeze({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { HttpError };
-export {
-    AuthError,
-    Conflict,
-    Forbidden,
-    GatewayTimeout,
-    Gone,
-    InternalError,
-    NotFound,
-    OAuthError,
-    RateLimit,
-    ServiceUnavailable,
-    Validation,
-};
+export { B as HTTP_ERROR_TUNING, HttpError };
