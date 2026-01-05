@@ -4,14 +4,18 @@
  *
  * Pattern: Consumers use `LanguageModel.generateObject()` directly,
  * then `Effect.provide(getModel(provider))` or `Effect.provide(createModelLayer(provider, config))`.
+ *
+ * Tool/Toolkit: Structured function calling with typed handlers.
+ * - Tool.make() defines callable functions with Schema-validated parameters
+ * - Toolkit.make() composes tools for LanguageModel.generateText({ toolkit })
  */
-import { Prompt } from '@effect/ai';
+import { Prompt, Tool, Toolkit } from '@effect/ai';
 import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
 import type { AiProvider } from '@parametric-portal/types/schema';
-import { Config, Layer } from 'effect';
+import { Config, type Effect, Layer, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -93,6 +97,64 @@ const buildPrompt = (userPrompt: Prompt.RawInput, system?: string): Prompt.Promp
 /** Model Layer type inferred from factory functions. Provides LanguageModel, may fail with ConfigError. */
 type AiModelLayer = ReturnType<typeof createAnthropicModel>;
 
+// --- [TOOL_BUILDERS] ---------------------------------------------------------
+
+/**
+ * Create a typed tool definition for AI function calling.
+ * Tools are invoked by the model when relevant to the prompt.
+ *
+ * @example
+ * const GetWeather = createTool('GetWeather', {
+ *   description: 'Get current weather for a location',
+ *   parameters: { location: S.String },
+ *   success: S.Struct({ temp: S.Number, conditions: S.String }),
+ * });
+ */
+const createTool = <
+    N extends string,
+    P extends Record<string, S.Schema.Any>,
+    Success extends S.Schema.Any = typeof S.Void,
+    Failure extends S.Schema.Any = typeof S.Never,
+>(
+    name: N,
+    options: {
+        readonly description: string;
+        readonly failure?: Failure;
+        readonly parameters?: P;
+        readonly success?: Success;
+    },
+) =>
+    Tool.make(name, {
+        description: options.description,
+        failure: options.failure ?? S.Never,
+        parameters: options.parameters ?? {},
+        success: options.success ?? S.Void,
+    });
+
+/**
+ * Compose multiple tools into a Toolkit for use with LanguageModel.generateText().
+ * The model can call any tool in the toolkit based on the prompt.
+ *
+ * @example
+ * const toolkit = composeToolkit(GetWeather, SearchDocs);
+ * const result = yield* LanguageModel.generateText({ prompt, toolkit });
+ */
+const composeToolkit = <T extends ReadonlyArray<Tool.AnyTool>>(...tools: T) => Toolkit.make(...tools);
+
+/**
+ * Create a tool handler Layer for a single tool.
+ * Handlers define the actual implementation that runs when the model calls a tool.
+ *
+ * @example
+ * const handlers = createToolHandlers(toolkit, Effect.gen(function*() {
+ *   return { GetWeather: ({ location }) => fetchWeather(location) };
+ * }));
+ */
+const createToolHandlers = <T extends Toolkit.AnyToolkit>(
+    toolkit: T,
+    build: Effect.Effect<Toolkit.Handlers<T>, never, never> | Toolkit.Handlers<T>,
+) => toolkit.toLayer(build);
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 /** Create model Layer with optional config override. */
@@ -102,5 +164,5 @@ const getModel = (provider: AiProviderType): AiModelLayer => createModelLayer(pr
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as AI_TUNING, buildPrompt, createModelLayer, getModel };
+export { B as AI_TUNING, buildPrompt, composeToolkit, createModelLayer, createTool, createToolHandlers, getModel };
 export type { AiModelConfig, AiModelLayer, AiProviderType };

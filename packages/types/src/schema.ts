@@ -22,7 +22,7 @@ const B = Object.freeze({
         assetType: ['icon', 'image', 'document'] as const,
         auditOperation: ['create', 'update', 'delete', 'revoke'] as const,
         idBrands: ['ApiKeyId', 'AssetId', 'OAuthAccountId', 'RefreshTokenId', 'SessionId', 'UserId'] as const,
-        oauthProvider: ['google', 'github', 'microsoft'] as const,
+        oauthProvider: ['google', 'github', 'microsoft', 'apple'] as const,
         role: ['guest', 'viewer', 'member', 'admin', 'owner'] as const,
     },
     roleLevels: { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 },

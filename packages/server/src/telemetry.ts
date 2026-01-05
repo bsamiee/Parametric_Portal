@@ -27,9 +27,6 @@ const B = Object.freeze({
     },
     sdk: { language: 'nodejs', name: 'opentelemetry' },
 } as const);
-
-// --- [CONFIG] ----------------------------------------------------------------
-
 const TelemetryConfig = Config.all({
     endpointHttp: Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(Config.withDefault(B.defaults.endpointHttp), Config.map((url) => (url.includes(':4317') ? url.replace(':4317', ':4318') : url))),
     environment: Config.string('NODE_ENV').pipe(Config.withDefault(B.defaults.environment), Config.map((env): Environment => (env === 'production' ? 'production' : 'development'))),

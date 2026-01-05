@@ -4,12 +4,6 @@
  */
 import { DateTime, Effect, pipe, Schema as S } from 'effect';
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-/** Return fallback when schema decode fails on partial objects. */
-const schemaDefaults = <T>(schema: S.Schema<T, unknown, never>, fallback: T): T =>
-	Effect.runSync(Effect.try({ catch: () => fallback, try: () => S.decodeUnknownSync(schema)({}) }));
-
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
@@ -34,9 +28,10 @@ const B = Object.freeze({
 	},
 } as const);
 
-// --- [SCHEMA_BUILDERS] -------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const sb = {
+/** Schema builder utilities for creating branded types. */
+const sb = Object.freeze({
 	boundedInt: <T extends string>(label: T, min: number, max: number) =>
 		pipe(S.Number, S.int(), S.between(min, max), S.brand(label)),
 	boundedNumber: <T extends string>(label: T, min: number, max: number) =>
@@ -51,7 +46,10 @@ const sb = {
 		pipe(S.Number, S.int(), S.positive(), S.brand(label)),
 	positiveNumber: <T extends string>(label: T) =>
 		pipe(S.Number, S.positive(), S.brand(label)),
-} as const;
+} as const);
+/** Return fallback when schema decode fails on partial objects. */
+const schemaDefaults = <T>(schema: S.Schema<T, unknown, never>, fallback: T): T =>
+	Effect.runSync(Effect.try({ catch: () => fallback, try: () => S.decodeUnknownSync(schema)({}) }));
 /** Create branded type with standard schema operations. */
 const make = <A, I>(schema: S.Schema<A, I, never>) =>
 	Object.freeze({

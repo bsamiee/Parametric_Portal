@@ -50,32 +50,45 @@ class Database extends Effect.Service<Database>()('database/Database', {
     }),
 }) {}
 
-// --- [LAYERS] ----------------------------------------------------------------
-
-const intMs = (k: string, f: number) => Config.integer(k).pipe(Config.withDefault(f), Config.map(Duration.millis));
-const boolXform = (k: string, f: boolean, fn: ((s: string) => string) | undefined) => Config.boolean(k).pipe(Config.withDefault(f), Config.map((e) => (e ? fn : undefined)));
-const str = (k: string, f: string) => Config.string(k).pipe(Config.withDefault(f));
-const int = (k: string, f: number) => Config.integer(k).pipe(Config.withDefault(f));
-const PgLive: PgClientLayer = PgClient.layerConfig({
-    applicationName: str('POSTGRES_APP_NAME', B.app.name),
-    connectionTTL: intMs('POSTGRES_CONNECTION_TTL_MS', B.pool.connectionTtlMs), connectTimeout: intMs('POSTGRES_CONNECT_TIMEOUT_MS', B.pool.connectTimeoutMs), database: str('POSTGRES_DB', B.defaults.database), host: str('POSTGRES_HOST', B.defaults.host), idleTimeout: intMs('POSTGRES_IDLE_TIMEOUT_MS', B.pool.idleTimeoutMs),
-    maxConnections: int('POSTGRES_POOL_MAX', B.pool.max), minConnections: int('POSTGRES_POOL_MIN', B.pool.min),
-    password: Config.redacted('POSTGRES_PASSWORD'), port: int('POSTGRES_PORT', B.defaults.port),
-    spanAttributes: Config.succeed(Object.fromEntries(B.spanAttributes)),
-    ssl: Config.boolean('POSTGRES_SSL').pipe(Config.withDefault(B.ssl.enabled), Config.map((e) => (e ? { rejectUnauthorized: B.ssl.rejectUnauthorized } : undefined))),transformJson: Config.succeed(B.transforms.json),
-    transformQueryNames: boolXform('POSTGRES_TRANSFORM_NAMES', B.transforms.enabled, S.camelToSnake),
-    transformResultNames: boolXform('POSTGRES_TRANSFORM_NAMES', B.transforms.enabled, S.snakeToCamel),url: Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),username: str('POSTGRES_USER', B.defaults.username),
-});
-const PgLiveWithRetry: PgClientLayer = PgLive.pipe(Layer.retry(B.retry.startup));
-
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
+const configBuilders = Object.freeze({
+    bool: (k: string, f: boolean) => Config.boolean(k).pipe(Config.withDefault(f)),
+    boolXform: (k: string, f: boolean, fn: ((s: string) => string) | undefined) => Config.boolean(k).pipe(Config.withDefault(f), Config.map((e) => (e ? fn : undefined))),
+    int: (k: string, f: number) => Config.integer(k).pipe(Config.withDefault(f)),
+    intMs: (k: string, f: number) => Config.integer(k).pipe(Config.withDefault(f), Config.map(Duration.millis)),
+    ssl: (k: string, defaults: SslConfig) => Config.boolean(k).pipe(Config.withDefault(defaults.enabled), Config.map((e) => (e ? { rejectUnauthorized: defaults.rejectUnauthorized } : undefined))),
+    str: (k: string, f: string) => Config.string(k).pipe(Config.withDefault(f)),
+} as const);
 const checkHealth: Effect.Effect<HealthStatus, never, SqlClient> = Effect.gen(function* () {
     const sql = yield* SqlClient;
     const database = yield* sql`SELECT 1`.pipe(Effect.as(true), Effect.timeout(B.durations.healthTimeout), Effect.catchAll(() => Effect.succeed(false)));
     const pool = yield* sql.reserve.pipe(Effect.flatMap((c) => c.execute('SELECT 1', [], undefined)), Effect.scoped, Effect.as(true), Effect.timeout(B.durations.poolReserveTimeout), Effect.catchAll(() => Effect.succeed(false)));
     return { database, pool, ready: database && pool };
 });
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const PgLive: PgClientLayer = PgClient.layerConfig({
+    applicationName: configBuilders.str('POSTGRES_APP_NAME', B.app.name),
+    connectionTTL: configBuilders.intMs('POSTGRES_CONNECTION_TTL_MS', B.pool.connectionTtlMs),
+    connectTimeout: configBuilders.intMs('POSTGRES_CONNECT_TIMEOUT_MS', B.pool.connectTimeoutMs),
+    database: configBuilders.str('POSTGRES_DB', B.defaults.database),
+    host: configBuilders.str('POSTGRES_HOST', B.defaults.host),
+    idleTimeout: configBuilders.intMs('POSTGRES_IDLE_TIMEOUT_MS', B.pool.idleTimeoutMs),
+    maxConnections: configBuilders.int('POSTGRES_POOL_MAX', B.pool.max),
+    minConnections: configBuilders.int('POSTGRES_POOL_MIN', B.pool.min),
+    password: Config.redacted('POSTGRES_PASSWORD'),
+    port: configBuilders.int('POSTGRES_PORT', B.defaults.port),
+    spanAttributes: Config.succeed(Object.fromEntries(B.spanAttributes)),
+    ssl: configBuilders.ssl('POSTGRES_SSL', B.ssl),
+    transformJson: Config.succeed(B.transforms.json),
+    transformQueryNames: configBuilders.boolXform('POSTGRES_TRANSFORM_NAMES', B.transforms.enabled, S.camelToSnake),
+    transformResultNames: configBuilders.boolXform('POSTGRES_TRANSFORM_NAMES', B.transforms.enabled, S.snakeToCamel),
+    url: Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
+    username: configBuilders.str('POSTGRES_USER', B.defaults.username),
+});
+const PgLiveWithRetry: PgClientLayer = PgLive.pipe(Layer.retry(B.retry.startup));
 
 // --- [EXPORT] ----------------------------------------------------------------
 

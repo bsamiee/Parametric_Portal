@@ -8,11 +8,12 @@ import type { Hex64 } from '@parametric-portal/types/types';
 import { Effect, Layer, Option, Redacted } from 'effect';
 import type { AuthContext, OAuthResult } from './auth.ts';
 import { Crypto } from './crypto.ts';
-import { HttpError, type OAuthError } from './http-errors.ts';
+import { HttpError } from './http-errors.ts';
 import { MetricsService } from './metrics.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type OAuthError = InstanceType<typeof HttpError.OAuth>;
 type OAuthService = {
     readonly authenticate: (
         provider: typeof OAuthProvider.Type,
@@ -37,12 +38,13 @@ const B = Object.freeze({
         credentials: true,
         maxAge: 86400,
     },
-    requestId: 'x-request-id',
+    headers: { requestId: 'x-request-id' },
     security: {
         frameOptions: 'DENY',
         hsts: { includeSubDomains: true, maxAge: 31536000 },
         referrerPolicy: 'strict-origin-when-cross-origin',
     },
+    tracerDisabledUrls: ['/health', '/ready', '/metrics'],
 } as const);
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -81,7 +83,7 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
         ),
     );
 }
-const requestId = (header = B.requestId) =>
+const requestId = (header = B.headers.requestId) =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
             const req = yield* HttpServerRequest.HttpServerRequest;
@@ -92,35 +94,34 @@ const requestId = (header = B.requestId) =>
         }),
     );
 const applySecurityHeaders = (response: HttpServerResponse.HttpServerResponse, hsts: typeof B.security.hsts | false = B.security.hsts): HttpServerResponse.HttpServerResponse => {
-    const headers: Array<readonly [string, string]> = [
+    const baseHeaders: ReadonlyArray<readonly [string, string]> = [
         ['x-content-type-options', 'nosniff'],
         ['x-frame-options', B.security.frameOptions],
         ['referrer-policy', B.security.referrerPolicy],
     ];
-    hsts && headers.unshift(['strict-transport-security', `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`]);
+    const headers: ReadonlyArray<readonly [string, string]> = hsts
+        ? [['strict-transport-security', `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`], ...baseHeaders]
+        : baseHeaders;
     return headers.reduce((acc, [k, v]) => HttpServerResponse.setHeader(acc, k, v), response);
 };
 const security = (hsts: typeof B.security.hsts | false = B.security.hsts) =>
     HttpMiddleware.make((app) => Effect.map(app, (r) => applySecurityHeaders(r, hsts)));
-const trace = () =>
-    HttpMiddleware.make((app) =>
-        Effect.gen(function* () {
-            const req = yield* HttpServerRequest.HttpServerRequest;
-            const parent = HttpTraceContext.fromHeaders(req.headers);
-            const spanOptions = { attributes: { 'http.method': req.method, 'http.target': req.url } };
-            const runApp = Option.isSome(parent)
-                ? Effect.withParentSpan(app, parent.value)
-                : Effect.withSpan(app, 'http.request', spanOptions);
-            const res = yield* runApp;
-            yield* Effect.annotateCurrentSpan('http.status_code', res.status);
-            const spanOpt = yield* Effect.optionFromOptional(Effect.currentSpan);
-            return Option.isSome(spanOpt)
-                ? HttpServerResponse.setHeaders(res, HttpTraceContext.toHeaders(spanOpt.value))
-                : res;
-        }),
-    );
-const withTracerDisabledForHealthChecks = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
-    HttpMiddleware.withTracerDisabledForUrls(layer, ['/health', '/ready', '/metrics']);
+const trace = HttpMiddleware.make((app) =>
+    Effect.gen(function* () {
+        const req = yield* HttpServerRequest.HttpServerRequest;
+        const parent = HttpTraceContext.fromHeaders(req.headers);
+        const spanOptions = { attributes: { 'http.method': req.method, 'http.target': req.url } };
+        const runApp = Option.isSome(parent)
+            ? Effect.withParentSpan(app, parent.value)
+            : Effect.withSpan(app, 'http.request', spanOptions);
+        const res = yield* runApp;
+        yield* Effect.annotateCurrentSpan('http.status_code', res.status);
+        const spanOpt = yield* Effect.optionFromOptional(Effect.currentSpan);
+        return Option.isSome(spanOpt) ? HttpServerResponse.setHeaders(res, HttpTraceContext.toHeaders(spanOpt.value)) : res;
+    }),
+);
+const withTracerDisabled = <A, E, R>(layer: Layer.Layer<A, E, R>, urls = B.tracerDisabledUrls) =>
+    HttpMiddleware.withTracerDisabledForUrls(layer, urls);
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -139,7 +140,7 @@ const Middleware = Object.freeze({
     SessionLookup,
     security,
     trace,
-    withTracerDisabledForHealthChecks,
+    withTracerDisabled,
     xForwardedHeaders: HttpMiddleware.xForwardedHeaders,
 } as const);
 

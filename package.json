@@ -55,6 +55,8 @@
         "@sonar/scan": "catalog:",
         "@stryker-mutator/core": "catalog:",
         "@stryker-mutator/vitest-runner": "catalog:",
+        "@swc-node/register": "catalog:",
+        "@swc/core": "catalog:",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/react-table": "catalog:",
         "@tanstack/react-virtual": "catalog:",
@@ -114,14 +116,24 @@
         "node": "25.2.1"
     },
     "knip": {
-        "ignoreBinaries": ["hadolint", "mise"],
-        "ignore": [".nx/**"],
+        "ignoreBinaries": [
+            "hadolint",
+            "mise"
+        ],
+        "ignore": [
+            ".nx/**"
+        ],
         "workspaces": {
             ".": {
-                "entry": [".github/scripts/*.ts", "tools/scripts/*.ts"]
+                "entry": [
+                    ".github/scripts/*.ts",
+                    "tools/scripts/*.ts"
+                ]
             },
             "packages/database": {
-                "entry": ["migrations/*.ts"]
+                "entry": [
+                    "migrations/*.ts"
+                ]
             }
         }
     },

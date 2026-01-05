@@ -9,12 +9,13 @@ import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLi
 import { Headers, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { DurationMs } from '@parametric-portal/types/types';
 import { Config, Duration, Effect, Layer, Metric, Option } from 'effect';
-import { RateLimit as RateLimitError } from './http-errors.ts';
+import { HttpError } from './http-errors.ts';
 import { MetricsService } from './metrics.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type Preset = keyof typeof B.presets;
+type RateLimitError = InstanceType<typeof HttpError.RateLimit>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -73,7 +74,7 @@ const applyRateLimit = <A, E, R>(
             (e): e is RateLimitExceeded => e instanceof RateLimitExceeded,
             (e) =>
                 MetricsService.track({ _tag: 'RateLimitRejection', preset, remaining: e.remaining }).pipe(
-                    Effect.zipRight(Effect.fail(new RateLimitError({
+                    Effect.zipRight(Effect.fail(new HttpError.RateLimit({
                         limit: B.presets[preset].limit,
                         remaining: e.remaining,
                         resetAfterMs: DurationMs.fromMillis(Duration.toMillis(e.retryAfter)),
