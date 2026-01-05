@@ -1,7 +1,4 @@
-/**
- * PgMigrator layer for database schema migrations.
- * Uses file-system loader to run migrations from ../migrations directory.
- */
+/** PgMigrator layer: file-system loader for ../migrations directory. */
 import '@effect/platform';
 import { fileURLToPath } from 'node:url';
 import { PgMigrator } from '@effect/sql-pg';
@@ -10,9 +7,7 @@ import { PgLive } from './client.ts';
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const MigratorLive = PgMigrator.layer({
-    loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))),
-}).pipe(Layer.provide(PgLive));
+const MigratorLive = PgMigrator.layer({ loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))) }).pipe(Layer.provide(PgLive));
 
 // --- [EXPORT] ----------------------------------------------------------------
 

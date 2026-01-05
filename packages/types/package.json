@@ -47,6 +47,11 @@
             "types": "./src/units.ts",
             "import": "./src/units.ts",
             "default": "./src/units.ts"
+        },
+        "./schema": {
+            "types": "./src/schema.ts",
+            "import": "./src/schema.ts",
+            "default": "./src/schema.ts"
         }
     },
     "scripts": {
@@ -60,13 +65,14 @@
     },
     "dependencies": {
         "@effect/experimental": "catalog:",
+        "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "happy-dom": "catalog:",
-        "isomorphic-dompurify": "catalog:",
-        "uuid": "catalog:"
+        "isomorphic-dompurify": "catalog:"
     },
     "devDependencies": {
         "@fast-check/vitest": "catalog:",
+        "@types/node": "catalog:",
         "fast-check": "catalog:",
         "ts-essentials": "catalog:",
         "ts-toolbelt": "catalog:",

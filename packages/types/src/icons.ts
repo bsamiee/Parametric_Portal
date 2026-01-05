@@ -3,6 +3,7 @@
  * Consolidates canvas/layer/palette specifications for AI provider consumption.
  */
 import { Schema as S } from 'effect';
+import { AiProvider } from './schema.ts';
 import { SvgAsset } from './svg.ts';
 import { HexColor, Uuidv7, VariantCount } from './types.ts';
 
@@ -14,7 +15,6 @@ type OutputMode = S.Schema.Type<typeof OutputMode>
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const AiProvider = S.Literal('anthropic', 'openai', 'gemini');
 const ColorMode = S.Literal('dark', 'light');
 const Intent = S.Literal('create', 'refine');
 const OutputMode = S.Literal('single', 'batch');
@@ -43,7 +43,6 @@ const hex = (value: string): HexColor => HexColor.decodeSync(value);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-/** Freeze design constants to prevent runtime mutation. */
 const Icons = Object.freeze({
 	design: {
 		canvas: { center: { x: 16, y: 16 }, gridSize: 32, safeArea: 2, viewBox: '0 0 32 32' },

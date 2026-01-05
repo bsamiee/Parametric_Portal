@@ -52,14 +52,10 @@ const B = Object.freeze({
 const clampLightness = (v: number): number => Math.max(B.lightnessClamp.min, Math.min(B.lightnessClamp.max, v));
 const formatVar = (prefix: string, segments: readonly (string | number)[], value: string): string =>
     `  --${[prefix, ...segments.map(String)].join('-')}: ${value};`;
-const computeStepLightness = (base: number, idx: number, total: number): number => {
-    const mid = Math.floor(total / 2);
-    return clampLightness(base + (idx - mid) * (B.scaleRange.targetRange / Math.max(1, mid)));
-};
-const computeStepChroma = (base: number, idx: number, total: number): number => {
-    const mid = Math.floor(total / 2);
-    return Math.max(0, base * (1 - (Math.abs(idx - mid) / Math.max(1, mid)) * B.scaleRange.chromaDecay));
-};
+const computeStepLightness = (base: number, idx: number, total: number): number =>
+    clampLightness(base + (idx - Math.floor(total / 2)) * (B.scaleRange.targetRange / Math.max(1, Math.floor(total / 2))));
+const computeStepChroma = (base: number, idx: number, total: number): number =>
+    Math.max(0, base * (1 - (Math.abs(idx - Math.floor(total / 2)) / Math.max(1, Math.floor(total / 2))) * B.scaleRange.chromaDecay));
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -93,10 +89,7 @@ const deriveStates = (name: string, spec: ColorSpec, stateShifts: StateShifts) =
 const deriveTextOn = (name: string, spec: ColorSpec) =>
     Effect.gen(function* () {
         const base = yield* OklchColor.create(spec.l, spec.c, spec.h, 1);
-        const { black, white } = yield* Effect.all({
-            black: OklchColor.create(0, 0, 0, 1),
-            white: OklchColor.create(1, 0, 0, 1),
-        });
+        const [black, white] = yield* Effect.all([OklchColor.create(0, 0, 0, 1), OklchColor.create(1, 0, 0, 1)]);
         const textOn = Math.abs(white.contrast(base)) >= Math.abs(black.contrast(base)) ? white : black;
         return formatVar('color', ['text-on', name], textOn.to('css'));
     });

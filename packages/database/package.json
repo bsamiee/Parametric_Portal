@@ -13,11 +13,6 @@
             "import": "./src/migrator.ts",
             "default": "./src/migrator.ts"
         },
-        "./schema": {
-            "types": "./src/schema.ts",
-            "import": "./src/schema.ts",
-            "default": "./src/schema.ts"
-        },
         "./repos": {
             "types": "./src/repos.ts",
             "import": "./src/repos.ts",
@@ -37,6 +32,7 @@
         "@effect/sql": "catalog:",
         "@effect/sql-drizzle": "catalog:",
         "@effect/sql-pg": "catalog:",
+        "@parametric-portal/server": "workspace:*",
         "@parametric-portal/types": "workspace:*",
         "drizzle-orm": "catalog:",
         "effect": "catalog:"

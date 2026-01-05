@@ -3,7 +3,6 @@
  * Unifies type/value exports via Effect Schema for domain safety.
  */
 import { DateTime, Effect, pipe, Schema as S } from 'effect';
-import { v7 as uuidv7 } from 'uuid';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -31,7 +30,7 @@ const B = Object.freeze({
 		isoDate: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/,
 		slug: /^[a-z0-9-]+$/,
 		url: /^https?:\/\/[^\s/$.?#].[^\s]*$/i,
-		uuidv7: /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		uuidv7: /^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
 	},
 } as const);
 
@@ -206,7 +205,8 @@ const Url = Object.freeze(make(UrlSchema));
 
 const Uuidv7Schema = sb.pattern('Uuidv7', B.patterns.uuidv7);
 type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>
-const uuidv7GenerateSync = (): Uuidv7 => S.decodeSync(Uuidv7Schema)(uuidv7());
+/** Generate token-safe UUID via crypto.randomUUID(). DB IDs use PostgreSQL uuidv7(). */
+const uuidv7GenerateSync = (): Uuidv7 => crypto.randomUUID() as Uuidv7;
 const Uuidv7 = Object.freeze(makeGeneratable(Uuidv7Schema, uuidv7GenerateSync));
 
 // --- [VARIANT_COUNT] ---------------------------------------------------------

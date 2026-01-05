@@ -33,6 +33,11 @@
             "import": "./src/middleware.ts",
             "default": "./src/middleware.ts"
         },
+        "./rate-limit": {
+            "types": "./src/rate-limit.ts",
+            "import": "./src/rate-limit.ts",
+            "default": "./src/rate-limit.ts"
+        },
         "./telemetry": {
             "types": "./src/telemetry.ts",
             "import": "./src/telemetry.ts",
@@ -47,14 +52,13 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
+        "@effect/experimental": "catalog:",
         "@effect/opentelemetry": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/sql": "catalog:",
-        "@opentelemetry/exporter-trace-otlp-grpc": "catalog:",
-        "@opentelemetry/sdk-trace-base": "catalog:",
-        "@parametric-portal/database": "workspace:*",
         "@parametric-portal/types": "workspace:*",
-        "effect": "catalog:"
+        "effect": "catalog:",
+        "ioredis": "catalog:"
     },
     "devDependencies": {
         "typescript": "catalog:",

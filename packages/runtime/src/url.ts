@@ -2,14 +2,7 @@
  * Manage URL state with type-safe search params.
  * Provides branded parsers for domain primitives and React hooks.
  */
-import {
-    ApiKeyId,
-    AssetId,
-    OAuthAccountId,
-    RefreshTokenId,
-    SessionId,
-    UserId,
-} from '@parametric-portal/database/schema';
+import { ApiKeyId, AssetId, OAuthAccountId, RefreshTokenId, SessionId, UserId } from '@parametric-portal/types/schema';
 import {
     Email,
     Hex8,

@@ -2,7 +2,7 @@
  * Manage cross-app authentication state via Zustand store.
  * Tokens persist in HttpOnly cookies; UI state in memory with devtools.
  */
-import type { AiProvider, ApiKeyId, Role, UserId } from '@parametric-portal/database/schema';
+import type { AiProvider, ApiKeyId, Role, UserId } from '@parametric-portal/types/schema';
 import { createStore } from '../store/factory.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
