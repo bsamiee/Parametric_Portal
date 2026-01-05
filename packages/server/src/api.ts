@@ -3,32 +3,31 @@
  * ParametricApi definition enables type-safe HttpApiClient derivation.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from '@effect/platform';
-import { AiProvider, ApiKeyId, AssetId, OAuthProvider, Role, UserId } from '@parametric-portal/database/schema';
-import { AuthContext } from './auth.ts';
 import { IconRequest, IconResponse } from '@parametric-portal/types/icons';
+import { AiProvider, ApiKeyId, AssetId, OAuthProvider, Role, UserId } from '@parametric-portal/types/schema';
 import { Email, Url } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
-import { AuthError, InternalError, NotFound, OAuthError, ServiceUnavailable } from './http-errors.ts';
+import { AuthContext } from './auth.ts';
+import { AuthError, InternalError, NotFound, OAuthError, RateLimit, ServiceUnavailable } from './http-errors.ts';
 import { Middleware } from './middleware.ts';
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _B = Object.freeze({ pagination: { defaultLimit: 20, defaultOffset: 0, maxLimit: 100, minLimit: 1 } } as const);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const UserResponse = S.Struct({
-	createdAt: S.DateFromSelf,
-	email: Email.schema,
-	id: UserId.schema,
-	role: Role,
-});
+const UserResponse = S.Struct({ createdAt: S.DateFromSelf, email: Email.schema, id: UserId.schema, role: Role });
 const ApiKeyResponse = S.Struct({
-	createdAt: S.DateFromSelf,
-	id: ApiKeyId.schema,
-	name: S.NonEmptyTrimmedString,
-	provider: AiProvider,
+    createdAt: S.DateFromSelf,
+    id: ApiKeyId.schema,
+    name: S.NonEmptyTrimmedString,
+    provider: AiProvider,
 });
 const ApiKeyCreateRequest = S.Struct({
-	key: S.NonEmptyTrimmedString,
-	name: S.NonEmptyTrimmedString,
-	provider: AiProvider,
+    key: S.NonEmptyTrimmedString,
+    name: S.NonEmptyTrimmedString,
+    provider: AiProvider,
 });
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -57,7 +56,8 @@ const AuthGroup = HttpApiGroup.make('auth')
         HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
             .setPath(S.Struct({ provider: OAuthProvider }))
             .addSuccess(S.Struct({ url: Url.schema }))
-            .addError(OAuthError, { status: 400 }),
+            .addError(OAuthError, { status: 400 })
+            .addError(RateLimit, { status: 429 }),
     )
     .add(
         HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
@@ -65,12 +65,14 @@ const AuthGroup = HttpApiGroup.make('auth')
             .setUrlParams(S.Struct({ code: S.String, state: S.String }))
             .addSuccess(AuthContext.Tokens)
             .addError(OAuthError, { status: 400 })
-            .addError(InternalError, { status: 500 }),
+            .addError(InternalError, { status: 500 })
+            .addError(RateLimit, { status: 429 }),
     )
     .add(
         HttpApiEndpoint.post('refresh', '/refresh')
             .addSuccess(AuthContext.Tokens)
-            .addError(AuthError, { status: 401 }),
+            .addError(AuthError, { status: 401 })
+            .addError(RateLimit, { status: 429 }),
     )
     .add(
         HttpApiEndpoint.post('logout', '/logout')
@@ -125,8 +127,7 @@ const IconsGroup = HttpApiGroup.make('icons')
 const HealthGroup = HttpApiGroup.make('health')
     .prefix('/health')
     .add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(S.Struct({ status: S.Literal('ok') })))
-    .add(
-        HttpApiEndpoint.get('readiness', '/readiness')
+    .add(HttpApiEndpoint.get('readiness', '/readiness')
             .addSuccess(S.Struct({ checks: S.Struct({ database: S.Boolean }), status: S.Literal('ok') }))
             .addError(ServiceUnavailable, { status: 503 }),
     );
@@ -146,9 +147,9 @@ const ParametricApi = HttpApi.make('ParametricApi')
 
 // --- [EXPORT] ----------------------------------------------------------------
 
+export type { TypeId } from '@effect/platform/HttpApiMiddleware';
 // Re-export internal symbols for declaration emit compatibility
 export type { TagTypeId } from 'effect/Context';
-export type { TypeId } from '@effect/platform/HttpApiMiddleware';
 export {
     ApiKeyCreateRequest,
     ApiKeyResponse,

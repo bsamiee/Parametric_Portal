@@ -2,22 +2,30 @@
  * HTTP middleware: session auth, CORS, logging, request ID, security headers.
  * Effect.Tag + HttpApiMiddleware.Tag + frozen dispatch table.
  */
-import {
-    Headers,
-    HttpApiBuilder,
-    HttpApiMiddleware,
-    HttpApiSecurity,
-    HttpMiddleware,
-    HttpServerRequest,
-    HttpServerResponse,
-    HttpTraceContext,
-} from '@effect/platform';
-import type { OAuthProvider } from '@parametric-portal/database/schema';
-import { AuthContext, OAuthResult } from './auth.ts';
+import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
+import type { OAuthProvider } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { Effect, Layer, Option, Redacted } from 'effect';
+import type { AuthContext, OAuthResult } from './auth.ts';
 import { Crypto } from './crypto.ts';
-import { AuthError, type OAuthError } from './http-errors.ts';
+import { HttpError, type OAuthError } from './http-errors.ts';
+import { MetricsService } from './metrics.ts';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type OAuthService = {
+    readonly authenticate: (
+        provider: typeof OAuthProvider.Type,
+        code: string,
+        state: string,
+    ) => Effect.Effect<OAuthResult, OAuthError>;
+    readonly createAuthorizationUrl: (provider: typeof OAuthProvider.Type) => Effect.Effect<URL, OAuthError>;
+    readonly refreshToken: (
+        provider: typeof OAuthProvider.Type,
+        refreshToken: string,
+    ) => Effect.Effect<OAuthResult, OAuthError>;
+};
+type SessionLookupService = { readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<AuthContext>> };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -37,53 +45,39 @@ const B = Object.freeze({
     },
 } as const);
 
-// --- [CONTEXT] ---------------------------------------------------------------
+// --- [CLASSES] ---------------------------------------------------------------
 
+class OAuth extends Effect.Tag('server/OAuth')<OAuth, OAuthService>() {}
 class RequestId extends Effect.Tag('server/RequestId')<RequestId, string>() {}
 class Session extends Effect.Tag('server/Session')<Session, AuthContext>() {}
-class SessionLookup extends Effect.Tag('server/SessionLookup')<
-    SessionLookup,
-    { readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<AuthContext>> }
->() {}
-class OAuth extends Effect.Tag('server/OAuth')<
-    OAuth,
-    {
-        readonly authenticate: (
-            provider: typeof OAuthProvider.Type,
-            code: string,
-            state: string,
-        ) => Effect.Effect<OAuthResult, OAuthError>;
-        readonly createAuthorizationUrl: (provider: typeof OAuthProvider.Type) => Effect.Effect<URL, OAuthError>;
-        readonly refreshToken: (
-            provider: typeof OAuthProvider.Type,
-            refreshToken: string,
-        ) => Effect.Effect<OAuthResult, OAuthError>;
-    }
->() {}
+class SessionLookup extends Effect.Tag('server/SessionLookup')<SessionLookup, SessionLookupService>() {}
 
 // --- [MIDDLEWARE] ------------------------------------------------------------
 
 class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
-    failure: AuthError,
+    failure: HttpError.Auth,
     provides: Session,
     security: { bearer: HttpApiSecurity.bearer },
 }) {
     static readonly layer = Layer.effect(
         this,
-        Effect.map(SessionLookup, ({ lookup }) =>
-            SessionAuth.of({
-                bearer: (token: Redacted.Redacted<string>) =>
-                    Crypto.Token.hash(Redacted.value(token)).pipe(
-                        Effect.mapError(() => new AuthError({ reason: 'Token hashing failed' })),
-                        Effect.flatMap(lookup),
-                        Effect.flatMap(
-                            Option.match({
-                                onNone: () => Effect.fail(new AuthError({ reason: 'Invalid session' })),
-                                onSome: Effect.succeed,
-                            }),
+        Effect.all([SessionLookup, MetricsService]).pipe(
+            Effect.map(([{ lookup }, metrics]) =>
+                SessionAuth.of({
+                    bearer: (token: Redacted.Redacted<string>) =>
+                        Crypto.Token.hash(Redacted.value(token)).pipe(
+                            Effect.mapError(() => new HttpError.Auth({ reason: 'Token hashing failed' })),
+                            Effect.flatMap(lookup),
+                            Effect.flatMap(
+                                Option.match({
+                                    onNone: () => Effect.fail(new HttpError.Auth({ reason: 'Invalid session' })),
+                                    onSome: Effect.succeed,
+                                }),
+                            ),
+                            Effect.provideService(MetricsService, metrics),
                         ),
-                    ),
-            }),
+                }),
+            ),
         ),
     );
 }
@@ -97,24 +91,17 @@ const requestId = (header = B.requestId) =>
             );
         }),
     );
+const applySecurityHeaders = (response: HttpServerResponse.HttpServerResponse, hsts: typeof B.security.hsts | false = B.security.hsts): HttpServerResponse.HttpServerResponse => {
+    const headers: Array<readonly [string, string]> = [
+        ['x-content-type-options', 'nosniff'],
+        ['x-frame-options', B.security.frameOptions],
+        ['referrer-policy', B.security.referrerPolicy],
+    ];
+    hsts && headers.unshift(['strict-transport-security', `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`]);
+    return headers.reduce((acc, [k, v]) => HttpServerResponse.setHeader(acc, k, v), response);
+};
 const security = (hsts: typeof B.security.hsts | false = B.security.hsts) =>
-    HttpMiddleware.make((app) =>
-        Effect.map(app, (r) =>
-            [
-                ...(hsts
-                    ? [
-                          [
-                              'strict-transport-security',
-                              `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`,
-                          ] as const,
-                      ]
-                    : []),
-                ['x-content-type-options', 'nosniff'] as const,
-                ['x-frame-options', B.security.frameOptions] as const,
-                ['referrer-policy', B.security.referrerPolicy] as const,
-            ].reduce((acc, [k, v]) => HttpServerResponse.setHeader(acc, k, v), r),
-        ),
-    );
+    HttpMiddleware.make((app) => Effect.map(app, (r) => applySecurityHeaders(r, hsts)));
 const trace = () =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
@@ -132,6 +119,8 @@ const trace = () =>
                 : res;
         }),
     );
+const withTracerDisabledForHealthChecks = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
+    HttpMiddleware.withTracerDisabledForUrls(layer, ['/health', '/ready', '/metrics']);
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -150,8 +139,11 @@ const Middleware = Object.freeze({
     SessionLookup,
     security,
     trace,
+    withTracerDisabledForHealthChecks,
+    xForwardedHeaders: HttpMiddleware.xForwardedHeaders,
 } as const);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as MIDDLEWARE_TUNING, Middleware, OAuth };
+export type { OAuthService, SessionLookupService };

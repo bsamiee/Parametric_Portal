@@ -54,7 +54,7 @@ const rewriteNode = (node: Element, idMap: Map<string, string>, scope: string): 
 	});
 	node.tagName?.toLowerCase() === 'style' && node.textContent?.includes('url(#') && (() => {
 		// biome-ignore lint/style/noParameterAssign: DOMPurify hooks require in-place DOM mutation
-		node.textContent = replaceUrlRefs(node.textContent as string, idMap);
+		node.textContent = replaceUrlRefs(node.textContent, idMap);
 	})();
 };
 /** Sanitize SVG and scope all IDs to prevent collisions. */

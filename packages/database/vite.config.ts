@@ -12,7 +12,6 @@ export default defineConfig(
                 client: './src/client.ts',
                 migrator: './src/migrator.ts',
                 repos: './src/repos.ts',
-                schema: './src/schema.ts',
             },
             external: [
                 '@effect/experimental',
@@ -20,6 +19,7 @@ export default defineConfig(
                 '@effect/sql',
                 '@effect/sql-drizzle',
                 '@effect/sql-pg',
+                '@parametric-portal/server',
                 '@parametric-portal/types',
                 'drizzle-orm',
                 'effect',

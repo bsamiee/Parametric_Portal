@@ -4,9 +4,9 @@
  */
 
 import type { HttpClient } from '@effect/platform';
-import type { OAuthProvider } from '@parametric-portal/database/schema';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
+import type { OAuthProvider } from '@parametric-portal/types/schema';
 import { Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';

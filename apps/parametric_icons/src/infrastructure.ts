@@ -5,13 +5,13 @@
 import { HttpApiClient, HttpClient, HttpClientRequest } from '@effect/platform';
 // biome-ignore lint/style/useImportType: Clipboard namespace needed for Clipboard.Clipboard type
 import { BrowserHttpClient, Clipboard } from '@effect/platform-browser';
-import type { ApiKeyId, OAuthProvider } from '@parametric-portal/database/schema';
 import { Runtime } from '@parametric-portal/runtime/runtime';
 import { BrowserServicesLive, type Download, type Export } from '@parametric-portal/runtime/services/browser';
 import { createBrowserTelemetryLayer } from '@parametric-portal/runtime/services/telemetry';
 import { type AuthState, useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import { ParametricApi } from '@parametric-portal/server/api';
 import type { IconRequest } from '@parametric-portal/types/icons';
+import type { ApiKeyId, OAuthProvider } from '@parametric-portal/types/schema';
 import { DurationMs } from '@parametric-portal/types/types';
 import { DateTime, Duration, Effect, Fiber, Layer, Option } from 'effect';
 import { useEffect } from 'react';

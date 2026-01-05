@@ -17,7 +17,7 @@ export default defineConfig(
                 '@effect/ai-google',
                 '@effect/ai-openai',
                 '@effect/platform',
-                '@parametric-portal/database',
+                '@parametric-portal/types',
                 'effect',
             ],
             mode: 'library',

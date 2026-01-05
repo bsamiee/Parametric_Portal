@@ -9,15 +9,16 @@ import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
 import { PgLive } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
+import { ParametricApi } from '@parametric-portal/server/api';
+import { AuthContext } from '@parametric-portal/server/auth';
 import { EncryptionKeyService } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { createMetricsMiddleware } from '@parametric-portal/server/metrics';
+import { createMetricsMiddleware, MetricsService } from '@parametric-portal/server/metrics';
 import { Middleware } from '@parametric-portal/server/middleware';
+import { RateLimit } from '@parametric-portal/server/rate-limit';
 import { TelemetryLive } from '@parametric-portal/server/telemetry';
-import { AuthContext } from '@parametric-portal/server/auth';
 import { DurationMs, type Hex64 } from '@parametric-portal/types/types';
 import { Config, Effect, Layer, Option } from 'effect';
-import { ParametricApi } from '@parametric-portal/server/api';
 import { OAuthLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
@@ -26,12 +27,7 @@ import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: {
-        corsOrigins: '*',
-        port: 4000,
-    },
-} as const);
+const B = Object.freeze({ defaults: { corsOrigins: '*', port: 4000 } } as const);
 const ServerConfig = Config.all({
     corsOrigins: Config.string('CORS_ORIGINS').pipe(
         Config.withDefault(B.defaults.corsOrigins),
@@ -42,8 +38,9 @@ const ServerConfig = Config.all({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const composeMiddleware = (app: HttpApp.Default): HttpApp.Default =>
+const composeMiddleware = (app: HttpApp.Default) =>
     app.pipe(
+        Middleware.xForwardedHeaders,
         Middleware.trace(),
         createMetricsMiddleware(),
         Middleware.security(),
@@ -57,17 +54,19 @@ const SessionLookupLive = Layer.effect(
     Middleware.SessionLookup,
     Effect.gen(function* () {
         const db = yield* DatabaseService;
+        const metrics = yield* MetricsService;
         return {
             lookup: (tokenHash: Hex64) =>
                 db.sessions.findValidByTokenHash(tokenHash).pipe(
                     Effect.map(Option.map(AuthContext.fromSession)),
                     Effect.catchAll(() => Effect.succeed(Option.none<AuthContext>())),
+                    Effect.provideService(MetricsService, metrics),
                 ),
         };
     }),
 );
 const DatabaseLive = DatabaseService.layer;
-const SessionAuthLive = Middleware.Auth.layer.pipe(Layer.provide(SessionLookupLive), Layer.provide(DatabaseLive));
+const SessionAuthLive = Middleware.Auth.layer.pipe(Layer.provide(SessionLookupLive), Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
     Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -94,13 +93,13 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
             );
     }),
 );
-const InfraLayers = Layer.mergeAll(TelemetryLive, EncryptionKeyService.layer);
+const RateLimitLive = RateLimit.layer;
+const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyService.layer, RateLimitLive);
 const RouteDependencies = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive);
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
     Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, TelemetryRouteLive)),
     Layer.provide(RouteDependencies),
     Layer.provide(InfraLayers),
-    Layer.provide(PgLive),
 );
 const ServerLive = Layer.unwrapEffect(
     Effect.map(ServerConfig, (config) =>
@@ -109,6 +108,7 @@ const ServerLive = Layer.unwrapEffect(
             Layer.provide(ApiLive),
             Layer.provide(Middleware.cors({ allowedOrigins: config.corsOrigins })),
             Layer.provide(SessionAuthLive),
+            Layer.provide(MetricsService.layer),
             Layer.provide(NodeHttpServer.layer(createServer, { port: config.port }).pipe(HttpServer.withLogAddress)),
         ),
     ),

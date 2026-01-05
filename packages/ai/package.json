@@ -22,7 +22,7 @@
         "@effect/ai-google": "catalog:",
         "@effect/ai-openai": "catalog:",
         "@effect/platform": "catalog:",
-        "@parametric-portal/database": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
         "effect": "catalog:"
     },
     "devDependencies": {

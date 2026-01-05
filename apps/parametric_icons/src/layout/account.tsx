@@ -4,11 +4,11 @@
  */
 
 import type { HttpClient } from '@effect/platform';
-import { AiProvider, type ApiKeyId } from '@parametric-portal/database/schema';
 import { useEffectMutate, useEffectRun } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import type { ApiKeyCreateRequest, ApiKeyResponse } from '@parametric-portal/server/api';
 import { AsyncState } from '@parametric-portal/types/async';
+import { AiProvider, type ApiKeyId } from '@parametric-portal/types/schema';
 import { Effect, Option, pipe, type Schema, String as Str } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback, useState } from 'react';

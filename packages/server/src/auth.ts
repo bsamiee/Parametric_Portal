@@ -2,9 +2,9 @@
  * Auth domain: Session context, OAuth result, API response schemas.
  * Uses S.Class for types with behavior, S.Struct for pure data shapes.
  */
-import { SessionId, UserId } from '@parametric-portal/database/schema';
+import { SessionId, UserId } from '@parametric-portal/types/schema';
 import { DurationMs, Url } from '@parametric-portal/types/types';
-import { Duration, Option, Schedule, Schema as S } from 'effect';
+import { Duration, Option, Schema as S, Schedule } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -19,7 +19,10 @@ const B = Object.freeze({
     },
     endpoints: { githubApi: 'https://api.github.com/user' },
     oauth: {
-        retry: Schedule.exponential(Duration.millis(100)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3))),
+        retry: Schedule.exponential(Duration.millis(100)).pipe(
+            Schedule.jittered,
+            Schedule.intersect(Schedule.recurs(3)),
+        ),
         scopes: { github: ['user:email'], oidc: ['openid', 'profile', 'email'] },
         timeout: Duration.seconds(10),
     },
@@ -37,10 +40,7 @@ const OAuthProviderConfig = S.Struct({
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class AuthContext extends S.Class<AuthContext>('AuthContext')({
-    sessionId: SessionId.schema,
-    userId: UserId.schema,
-}) {
+class AuthContext extends S.Class<AuthContext>('AuthContext')({ sessionId: SessionId.schema, userId: UserId.schema }) {
     static readonly Tokens = S.Struct({ accessToken: S.String, expiresAt: S.DateTimeUtc });
     static readonly fromSession = (s: { readonly id: SessionId; readonly userId: UserId }) =>
         new AuthContext({ sessionId: s.id, userId: s.userId });

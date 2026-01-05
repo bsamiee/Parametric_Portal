@@ -2,7 +2,7 @@
  * OTLP proxy for browser telemetry (CORS bypass).
  * Browser POSTs to /api/v1/traces, API forwards to collector.
  */
-import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import { HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { TELEMETRY_TUNING } from '@parametric-portal/server/telemetry';
 import { Config, Effect, Schema as S } from 'effect';

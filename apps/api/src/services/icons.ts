@@ -1,11 +1,11 @@
 /**
- * Icon generation service: CAD-style SVG icons via multi-provider AI.
+ * Icon generation service: Rhino/Grasshopper/CAD SVG icons via multi-provider AI.
  * Contains prompt engineering, palette management, and provider-agnostic AI integration.
  */
 import { LanguageModel } from '@effect/ai';
 import { type AiProviderType, buildPrompt, getModel } from '@parametric-portal/ai/registry';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { Icons, IconServiceInput } from '@parametric-portal/types/icons';
+import { IconServiceInput, Icons } from '@parametric-portal/types/icons';
 import { Svg, SvgAsset } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
 
@@ -39,9 +39,7 @@ const B = Object.freeze({
         provider: 'anthropic' as AiProviderType,
         variantCount: 1,
     },
-    errors: {
-        aiGeneration: (provider: string, e: unknown) => `AI generation failed (${provider}): ${String(e)}`,
-    },
+    errors: { aiGeneration: (provider: string, e: unknown) => `AI generation failed (${provider}): ${String(e)}` },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -200,6 +198,8 @@ const generateWithAi = Effect.fn('icons.ai')((validInput: ServiceInput) => {
     );
 });
 
+// --- [CLASSES] ---------------------------------------------------------------
+
 class IconGenerationService extends Context.Tag('IconGenerationService')<
     IconGenerationService,
     IconGenerationServiceInterface
@@ -210,7 +210,9 @@ const IconGenerationServiceLive = Layer.succeed(
         generate: Effect.fn('icons.generate')((input: ServiceInput) =>
             Effect.gen(function* () {
                 const response = yield* generateWithAi(input);
-                return { variants: response.variants.map((v) => SvgAsset.create(v.name, v.svg)) } satisfies ServiceOutput;
+                return {
+                    variants: response.variants.map((v) => SvgAsset.create(v.name, v.svg)),
+                } satisfies ServiceOutput;
             }),
         ),
     }),

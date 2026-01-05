@@ -3,9 +3,9 @@
  * Effect.fn for tracing, Schema.Class for domain models, Layer.effect for services.
  */
 import { Hex64, Uuidv7 } from '@parametric-portal/types/types';
-import { Config, Context, Duration, Effect, Layer, Metric, Option, ParseResult, Redacted, Schema as S } from 'effect';
+import { Config, Context, Effect, Layer, Metric, Option, ParseResult, Redacted, Schema as S } from 'effect';
 import { HttpError } from './http-errors.ts';
-import { cryptoOpDuration } from './metrics.ts';
+import { MetricsService } from './metrics.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -24,10 +24,7 @@ const B = Object.freeze({
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class TokenPair extends S.Class<TokenPair>('TokenPair')({
-    hash: Hex64.schema,
-    token: Uuidv7.schema,
-}) {
+class TokenPair extends S.Class<TokenPair>('TokenPair')({ hash: Hex64.schema, token: Uuidv7.schema }) {
     static readonly create = Effect.gen(function* () {
         const token = Uuidv7.generateSync();
         const hashBuffer = yield* Effect.tryPromise({
@@ -108,29 +105,29 @@ class EncryptionKeyService extends Context.Tag('crypto/EncryptionKey')<Encryptio
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const recordCryptoMetric = (operation: string, duration: Duration.Duration) =>
-    Metric.update(cryptoOpDuration.pipe(Metric.tagged('operation', operation)), Duration.toSeconds(duration));
 const hash = Effect.fn('crypto.hash')((input: string) =>
-    Effect.tryPromise({
-        catch: (_cause) => new HttpError.Internal({ message: 'Hashing failed' }),
-        try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
-    }).pipe(
-        Effect.timed,
-        Effect.tap(([duration]) => recordCryptoMetric('hash', duration)),
-        Effect.map(([_, buf]) => Hex64.fromBytes(new Uint8Array(buf))),
-    ),
+    Effect.gen(function* () {
+        const metrics = yield* MetricsService;
+        return yield* Effect.tryPromise({
+            catch: (_cause) => new HttpError.Internal({ message: 'Hashing failed' }),
+            try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
+        }).pipe(
+            Effect.map((buf) => Hex64.fromBytes(new Uint8Array(buf))),
+            Metric.trackDuration(metrics.crypto.duration.pipe(Metric.tagged('operation', 'hash'))),
+        );
+    }),
 );
 const encrypt = Effect.fn('crypto.encrypt')(function* (plaintext: string) {
+    const metrics = yield* MetricsService;
     const key = yield* EncryptionKeyService;
     const iv = crypto.getRandomValues(new Uint8Array(B.ivLength));
-    const [duration, ciphertext] = yield* Effect.tryPromise({
+    const ciphertext = yield* Effect.tryPromise({
         catch: (_cause) => new HttpError.Internal({ message: 'Encryption failed' }),
         try: () =>
             crypto.subtle
                 .encrypt({ iv, name: 'AES-GCM' }, key, new TextEncoder().encode(plaintext))
                 .then((buf) => new Uint8Array(buf)),
-    }).pipe(Effect.timed);
-    yield* recordCryptoMetric('encrypt', duration);
+    }).pipe(Metric.trackDuration(metrics.crypto.duration.pipe(Metric.tagged('operation', 'encrypt'))));
     return new EncryptedKey({ ciphertext, iv });
 });
 const validate =

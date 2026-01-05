@@ -1,5 +1,6 @@
 # --- CLOUDNATIVEPG CLUSTER ----------------------------------------------------
-# PostgreSQL 17 HA cluster with 3 instances for multi-node deployment
+# PostgreSQL 18 HA cluster with 3 instances for multi-node deployment
+# PG 18.1 provides native uuidv7() - no extension required
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -10,7 +11,7 @@ metadata:
 spec:
   instances: 3
 
-  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
 
   primaryUpdateMethod: switchover
   primaryUpdateStrategy: unsupervised

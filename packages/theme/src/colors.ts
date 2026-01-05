@@ -17,32 +17,19 @@ class OklchColor extends S.Class<OklchColor>('OklchColor')({
     // --- [CONSTANTS] ---------------------------------------------------------
     static readonly Step = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
     // --- [FORMAT_DISPATCH] ---------------------------------------------------
-    private toColorJs(): Color {
-        return new Color('oklch', [this.l, this.c, this.h], this.a);
-    }
-    to<F extends keyof typeof OklchColor.Format>(format: F): ReturnType<(typeof OklchColor.Format)[F]> {
-        return OklchColor.Format[format](this) as ReturnType<(typeof OklchColor.Format)[F]>;
-    }
+    private toColorJs(): Color { return new Color('oklch', [this.l, this.c, this.h], this.a); }
+    to<F extends keyof typeof OklchColor.Format>(format: F): ReturnType<(typeof OklchColor.Format)[F]> { return OklchColor.Format[format](this) as ReturnType<(typeof OklchColor.Format)[F]>; }
     private static readonly Format = {
         colorjs: (c: OklchColor) => c.toColorJs(),
         css: (c: OklchColor) => {
             const a = c.a < 1 ? ` / ${c.a.toFixed(2)}` : '';
             return `oklch(${(c.l * 100).toFixed(1)}% ${c.c.toFixed(3)} ${c.h.toFixed(1)}${a})`;
         },
-        srgb: (c: OklchColor) =>
-            c
-                .toColorJs()
-                .to('srgb')
-                .toGamut()
-                .toString({ format: c.a < 1 ? 'rgba' : 'rgb' }),
+        srgb: (c: OklchColor) => c.toColorJs().to('srgb').toGamut().toString({ format: c.a < 1 ? 'rgba' : 'rgb' }),
     } as const;
     // --- [CORE_METHODS] ------------------------------------------------------
-    contrast(bg: OklchColor): number {
-        return bg.toColorJs().contrastAPCA(this.toColorJs());
-    }
-    withAdjustment(dl = 0, dc = 0, dh = 0, da = 0) {
-        return OklchColor.create(this.l + dl, this.c + dc, this.h + dh, this.a + da);
-    }
+    contrast(bg: OklchColor): number { return bg.toColorJs().contrastAPCA(this.toColorJs()); }
+    withAdjustment(dl = 0, dc = 0, dh = 0, da = 0) { return OklchColor.create(this.l + dl, this.c + dc, this.h + dh, this.a + da); }
     // --- [FACTORIES] ---------------------------------------------------------
     static readonly create = (l: number, c: number, h: number, a = 1) => S.decodeUnknown(OklchColor)({ a, c, h, l });
 }

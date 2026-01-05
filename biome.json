@@ -4,14 +4,7 @@
     "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "main" },
     "files": {
         "ignoreUnknown": true,
-        "includes": [
-            "**",
-            "!.claude/settings.json",
-            "!.github/n8n-workflows",
-            "!.mcp.json",
-            "!packages/server/src",
-            "!apps/api/src"
-        ]
+        "includes": ["**", "!.claude/settings.json", "!.github/n8n-workflows", "!.mcp.json"]
     },
     "assist": {
         "actions": { "source": { "useSortedProperties": "on", "organizeImports": "on", "useSortedKeys": "on" } }
@@ -133,9 +126,7 @@
         },
         {
             "includes": ["**/matchers.ts", "**/types/src/*.ts", "**/core/slots.ts"],
-            "formatter": {
-                "enabled": false
-            }
+            "formatter": { "enabled": false }
         },
         {
             "includes": [
@@ -148,11 +139,7 @@
         },
         {
             "includes": ["**/vite-env.d.ts"],
-            "linter": {
-                "rules": {
-                    "correctness": { "noUnusedVariables": "off" }
-                }
-            }
+            "linter": { "rules": { "correctness": { "noUnusedVariables": "off" } } }
         },
         {
             "includes": [
@@ -162,11 +149,21 @@
                 ".github/scripts/**/*.ts",
                 "packages/runtime/src/hooks/form.ts"
             ],
-            "linter": {
-                "rules": {
-                    "nursery": { "useAwaitThenable": "off" }
-                }
-            }
+            "linter": { "rules": { "nursery": { "useAwaitThenable": "off" } } }
+        },
+        {
+            "includes": [
+                "packages/server/src/**/*.ts",
+                "packages/database/src/**/*.ts",
+                "apps/api/src/**/*.ts",
+                "packages/theme/src/**/*.ts",
+                "packages/types/src/**/*.ts"
+            ],
+            "formatter": { "enabled": false }
+        },
+        {
+            "includes": ["packages/theme/**/*.css"],
+            "css": { "formatter": { "enabled": false } }
         }
     ]
 }

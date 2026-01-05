@@ -9,18 +9,17 @@ import { Effect, Schema as S } from 'effect';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    status: {
-        authError: 401,
-        badRequest: 400,
-        conflict: 409,
-        forbidden: 403,
-        gatewayTimeout: 504,
-        gone: 410,
-        internal: 500,
-        notFound: 404,
-        rateLimit: 429,
-        serviceUnavailable: 503,
-    },
+    AuthError: { description: 'Authentication required', status: 401 },
+    Conflict: { description: 'Resource conflict', status: 409 },
+    Forbidden: { description: 'Access denied', status: 403 },
+    GatewayTimeout: { description: 'Upstream timeout', status: 504 },
+    Gone: { description: 'Resource gone', status: 410 },
+    InternalError: { description: 'Internal server error', status: 500 },
+    NotFound: { description: 'Resource not found', status: 404 },
+    OAuthError: { description: 'OAuth provider error', status: 400 },
+    RateLimit: { description: 'Rate limit exceeded', status: 429 },
+    ServiceUnavailable: { description: 'Service unavailable', status: 503 },
+    Validation: { description: 'Validation failed', status: 400 },
 } as const);
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -28,57 +27,57 @@ const B = Object.freeze({
 class AuthError extends S.TaggedError<AuthError>()(
     'AuthError',
     { reason: S.String },
-    HttpApiSchema.annotations({ description: 'Authentication required', status: B.status.authError }),
-) {}
-class Forbidden extends S.TaggedError<Forbidden>()(
-    'Forbidden',
-    { reason: S.String },
-    HttpApiSchema.annotations({ description: 'Access denied', status: B.status.forbidden }),
-) {}
-class NotFound extends S.TaggedError<NotFound>()(
-    'NotFound',
-    { id: S.optional(S.String), resource: S.String },
-    HttpApiSchema.annotations({ description: 'Resource not found', status: B.status.notFound }),
+    HttpApiSchema.annotations(B.AuthError),
 ) {}
 class Conflict extends S.TaggedError<Conflict>()(
     'Conflict',
     { message: S.String, resource: S.String },
-    HttpApiSchema.annotations({ description: 'Resource conflict', status: B.status.conflict }),
+    HttpApiSchema.annotations(B.Conflict),
 ) {}
-class Gone extends S.TaggedError<Gone>()(
-    'Gone',
-    { id: S.String, resource: S.String },
-    HttpApiSchema.annotations({ description: 'Resource gone', status: B.status.gone }),
-) {}
-class Validation extends S.TaggedError<Validation>()(
-    'Validation',
-    { field: S.String, message: S.String },
-    HttpApiSchema.annotations({ description: 'Validation failed', status: B.status.badRequest }),
-) {}
-class RateLimit extends S.TaggedError<RateLimit>()(
-    'RateLimit',
-    { retryAfterMs: DurationMs.schema },
-    HttpApiSchema.annotations({ description: 'Rate limit exceeded', status: B.status.rateLimit }),
-) {}
-class OAuthError extends S.TaggedError<OAuthError>()(
-    'OAuthError',
-    { provider: S.String, reason: S.String },
-    HttpApiSchema.annotations({ description: 'OAuth provider error', status: B.status.badRequest }),
-) {}
-class InternalError extends S.TaggedError<InternalError>()(
-    'InternalError',
-    { message: S.String },
-    HttpApiSchema.annotations({ description: 'Internal server error', status: B.status.internal }),
-) {}
-class ServiceUnavailable extends S.TaggedError<ServiceUnavailable>()(
-    'ServiceUnavailable',
-    { reason: S.String, retryAfterMs: DurationMs.schema },
-    HttpApiSchema.annotations({ description: 'Service unavailable', status: B.status.serviceUnavailable }),
+class Forbidden extends S.TaggedError<Forbidden>()(
+    'Forbidden',
+    { reason: S.String },
+    HttpApiSchema.annotations(B.Forbidden),
 ) {}
 class GatewayTimeout extends S.TaggedError<GatewayTimeout>()(
     'GatewayTimeout',
     { durationMs: DurationMs.schema, upstream: S.String },
-    HttpApiSchema.annotations({ description: 'Upstream timeout', status: B.status.gatewayTimeout }),
+    HttpApiSchema.annotations(B.GatewayTimeout),
+) {}
+class Gone extends S.TaggedError<Gone>()(
+    'Gone',
+    { id: S.String, resource: S.String },
+    HttpApiSchema.annotations(B.Gone),
+) {}
+class InternalError extends S.TaggedError<InternalError>()(
+    'InternalError',
+    { message: S.String },
+    HttpApiSchema.annotations(B.InternalError),
+) {}
+class NotFound extends S.TaggedError<NotFound>()(
+    'NotFound',
+    { id: S.optional(S.String), resource: S.String },
+    HttpApiSchema.annotations(B.NotFound),
+) {}
+class OAuthError extends S.TaggedError<OAuthError>()(
+    'OAuthError',
+    { provider: S.String, reason: S.String },
+    HttpApiSchema.annotations(B.OAuthError),
+) {}
+class RateLimit extends S.TaggedError<RateLimit>()(
+    'RateLimit',
+    { limit: S.optional(S.Number), remaining: S.optional(S.Number), resetAfterMs: S.optional(DurationMs.schema), retryAfterMs: DurationMs.schema },
+    HttpApiSchema.annotations(B.RateLimit),
+) {}
+class ServiceUnavailable extends S.TaggedError<ServiceUnavailable>()(
+    'ServiceUnavailable',
+    { reason: S.String, retryAfterMs: DurationMs.schema },
+    HttpApiSchema.annotations(B.ServiceUnavailable),
+) {}
+class Validation extends S.TaggedError<Validation>()(
+    'Validation',
+    { field: S.String, message: S.String },
+    HttpApiSchema.annotations(B.Validation),
 ) {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -95,6 +94,7 @@ const chain = <C extends new (props: never) => unknown>(
 const HttpError = Object.freeze({
     Auth: AuthError,
     Conflict: Conflict,
+    chain,
     Forbidden: Forbidden,
     GatewayTimeout: GatewayTimeout,
     Gone: Gone,
@@ -104,7 +104,6 @@ const HttpError = Object.freeze({
     RateLimit: RateLimit,
     ServiceUnavailable: ServiceUnavailable,
     Validation: Validation,
-    chain,
 } as const);
 
 // --- [EXPORT] ----------------------------------------------------------------

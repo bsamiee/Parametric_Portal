@@ -10,7 +10,7 @@ import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
-import type { AiProvider } from '@parametric-portal/database/schema';
+import type { AiProvider } from '@parametric-portal/types/schema';
 import { Config, Layer } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
