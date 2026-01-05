@@ -10,7 +10,7 @@ import { MetricsService } from '@parametric-portal/server/metrics';
 import { OAuth } from '@parametric-portal/server/middleware';
 import type { OAuthProvider } from '@parametric-portal/types/schema';
 import { Timestamp } from '@parametric-portal/types/types';
-import { ArcticFetchError, decodeIdToken, GitHub, Google, generateCodeVerifier, generateState, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, } from 'arctic';
+import { ArcticFetchError, Apple, decodeIdToken, GitHub, Google, generateCodeVerifier, generateState, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, } from 'arctic';
 import { Config, type ConfigError, Effect, Layer, Redacted, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -135,6 +135,7 @@ const githubResult = (tokens: OAuth2Tokens) =>
         Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: String(d.id) })),
     );
 const extractAuth = Object.freeze({
+    apple: (t: OAuth2Tokens) => oidcResult('apple', t),
     github: githubResult,
     google: (t: OAuth2Tokens) => oidcResult('google', t),
     microsoft: (t: OAuth2Tokens) => oidcResult('microsoft', t),
@@ -154,12 +155,21 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                 id: Config.string(`OAUTH_${k}_CLIENT_ID`).pipe(Config.withDefault('')),
                 secret: Config.redacted(`OAUTH_${k}_CLIENT_SECRET`).pipe(Config.withDefault(Redacted.make(''))),
             });
-        const [creds, tenant] = yield* Effect.all([
+        const loadAppleCreds = Effect.all({
+            clientId: Config.string('OAUTH_APPLE_CLIENT_ID').pipe(Config.withDefault('')),
+            keyId: Config.string('OAUTH_APPLE_KEY_ID').pipe(Config.withDefault('')),
+            privateKey: Config.redacted('OAUTH_APPLE_PRIVATE_KEY').pipe(Config.withDefault(Redacted.make(''))),
+            teamId: Config.string('OAUTH_APPLE_TEAM_ID').pipe(Config.withDefault('')),
+        });
+        const [creds, appleCreds, tenant] = yield* Effect.all([
             Effect.all({ github: loadCreds('GITHUB'), google: loadCreds('GOOGLE'), microsoft: loadCreds('MICROSOFT') }),
+            loadAppleCreds,
             Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common')),
         ]);
         const redirect = (p: typeof OAuthProvider.Type) => `${baseUrl}/api/auth/oauth/${p}/callback`;
+        const applePrivateKey = new TextEncoder().encode(Redacted.value(appleCreds.privateKey));
         const clients = Object.freeze({
+            apple: new Apple(appleCreds.clientId, appleCreds.teamId, appleCreds.keyId, applePrivateKey, redirect('apple')),
             github: new GitHub(creds.github.id, Redacted.value(creds.github.secret), redirect('github')),
             google: new Google(creds.google.id, Redacted.value(creds.google.secret), redirect('google')),
             microsoft: new MicrosoftEntraId(
@@ -178,6 +188,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                 }),
             );
         const refreshHandlers = Object.freeze({
+            apple: (_token: string) => Promise.reject(new Error('Apple does not support refresh tokens')),
             github: (token: string) => clients.github.refreshAccessToken(token),
             google: (token: string) => clients.google.refreshAccessToken(token),
             microsoft: (token: string) =>

@@ -115,6 +115,26 @@ spec:
                 secretKeyRef:
                   name: api-secrets
                   key: OAUTH_MICROSOFT_CLIENT_SECRET
+            - name: OAUTH_APPLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: OAUTH_APPLE_CLIENT_ID
+            - name: OAUTH_APPLE_TEAM_ID
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: OAUTH_APPLE_TEAM_ID
+            - name: OAUTH_APPLE_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: OAUTH_APPLE_KEY_ID
+            - name: OAUTH_APPLE_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: OAUTH_APPLE_PRIVATE_KEY
           resources:
             requests:
               cpu: "100m"
