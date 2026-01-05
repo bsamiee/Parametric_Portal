@@ -10,7 +10,7 @@ import { MetricsService } from '@parametric-portal/server/metrics';
 import { OAuth } from '@parametric-portal/server/middleware';
 import type { OAuthProvider } from '@parametric-portal/types/schema';
 import { Timestamp } from '@parametric-portal/types/types';
-import { ArcticFetchError, Apple, decodeIdToken, GitHub, Google, generateCodeVerifier, generateState, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, } from 'arctic';
+import { Apple, ArcticFetchError, decodeIdToken, GitHub, Google, generateCodeVerifier, generateState, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, } from 'arctic';
 import { Config, type ConfigError, Effect, Layer, Redacted, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------

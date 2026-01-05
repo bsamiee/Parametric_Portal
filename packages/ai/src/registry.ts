@@ -15,7 +15,7 @@ import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
 import type { AiProvider } from '@parametric-portal/types/schema';
-import { Config, Effect, Layer, Schema as S } from 'effect';
+import { Config, type Effect, Layer, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -139,8 +139,7 @@ const createTool = <
  * const toolkit = composeToolkit(GetWeather, SearchDocs);
  * const result = yield* LanguageModel.generateText({ prompt, toolkit });
  */
-const composeToolkit = <T extends ReadonlyArray<Tool.AnyTool>>(...tools: T) =>
-    Toolkit.make(...tools);
+const composeToolkit = <T extends ReadonlyArray<Tool.AnyTool>>(...tools: T) => Toolkit.make(...tools);
 
 /**
  * Create a tool handler Layer for a single tool.
