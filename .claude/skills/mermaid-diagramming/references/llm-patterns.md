@@ -5,6 +5,9 @@
 
 Best practices for LLM/agent consumption of Mermaid diagrams; covers terminology, prompt engineering, validation loops, and complexity thresholds.
 
+[REFERENCE] Validation anti-patterns: [→validation.md](./validation.md)<br>
+[REFERENCE] Accessibility directives: [→styling.md§6](./styling.md#6accessibility)
+
 ---
 ## [1][TERMINOLOGY]
 >**Dictum:** *Domain-specific vocabulary improves generation accuracy.*

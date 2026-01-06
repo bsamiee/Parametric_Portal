@@ -13,3 +13,5 @@
 |   [6]   | Modeling      | [→modeling.md](modeling.md)           | State, ER, class, requirement for structure.       |
 |   [7]   | Charts        | [→charts.md](charts.md)               | Pie, quadrant, sankey, xy, radar, gantt for data.  |
 |   [8]   | Architecture  | [→architecture.md](architecture.md)   | C4, infrastructure, packet, timeline, git, kanban. |
+|   [9]   | LLM Patterns  | [→llm-patterns.md](llm-patterns.md)   | Agent prompting, validation loops, complexity.     |
+|  [10]   | Examples      | [→examples.md](examples.md)           | End-to-end diagrams with config and output.        |

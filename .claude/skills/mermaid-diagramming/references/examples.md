@@ -5,6 +5,10 @@
 
 Complete working examples from configuration to rendered output; one example per diagram family.
 
+[REFERENCE] Configuration options: [→global-config.md](./global-config.md)<br>
+[REFERENCE] Styling and themes: [→styling.md](./styling.md)<br>
+[REFERENCE] Validation checklists: [→validation.md](./validation.md)
+
 ---
 ## [1][FLOWCHART]
 >**Dictum:** *Node-edge topology with styling and accessibility.*
