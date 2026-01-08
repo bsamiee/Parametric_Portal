@@ -80,7 +80,8 @@ const Email = Object.freeze(make(EmailSchema));
 const Hex8Schema = sb.pattern('Hex8', B.patterns.hex8);
 type Hex8 = S.Schema.Type<typeof Hex8Schema>
 const hex8GenerateSync = (): Hex8 => Array.from({ length: B.hex.length8 }, () => Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix), ).join('') as Hex8;
-const hex8Derive = (seed: string): Hex8 => { /** Derive deterministic 8-character hex from seed string. */
+/** Derive deterministic 8-character hex from seed string. */
+const hex8Derive = (seed: string): Hex8 => {
 	const mod = B.hex.radix ** B.hex.length8;
 	const hash = Array.from(seed).reduce<number>((a, c) => (a * 31 + (c.codePointAt(0) ?? 0)) % mod, 0);
 	return hash.toString(B.hex.radix).padStart(B.hex.length8, '0').slice(-B.hex.length8) as Hex8;

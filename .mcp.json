@@ -5,12 +5,12 @@
             "args": ["playwright", "run-test-mcp-server"]
         },
         "React Aria": {
-        "command": "npx",
-        "args": ["@react-aria/mcp@latest"]
+            "command": "npx",
+            "args": ["@react-aria/mcp@latest"]
         },
         "tailwindcss-server": {
-        "command": "npx",
-        "args": ["-y", "tailwindcss-mcp-server"]
+            "command": "npx",
+            "args": ["-y", "tailwindcss-mcp-server"]
         }
     }
 }
