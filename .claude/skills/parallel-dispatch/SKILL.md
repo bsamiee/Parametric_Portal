@@ -2,7 +2,15 @@
 name: parallel-dispatch
 type: simple
 depth: base
-description: Orchestrates concurrent workstreams via Task tool for non-trivial requests. Decomposes complex tasks into 3-10 parallel agents with independent scopes and synthesizes results. Use when requests involve: (1) multiple investigative paths or validation layers, (2) research, analysis, or debugging exceeding trivial scope, (3) implementation planning requiring facet exploration, or (4) any moderate+ complexity task benefiting from parallel execution.
+context: fork
+user-invocable: false
+description: >-
+  Orchestrates concurrent workstreams via Task tool for non-trivial requests.
+  Decomposes complex tasks into 3-10 parallel agents with independent scopes
+  and synthesizes results. Use when requests involve: (1) multiple investigative
+  paths or validation layers, (2) research, analysis, or debugging exceeding
+  trivial scope, (3) implementation planning requiring facet exploration, or
+  (4) any moderate+ complexity task benefiting from parallel execution.
 ---
 
 # [H1][PARALLEL-DISPATCH]
@@ -99,15 +107,16 @@ Context: [Relevant background—agents execute statelessly]
 [CRITICAL] Dispatch ALL agents in ONE message block:
 
 ```text
-Task("Agent A: [scope, objective, output format]")
-Task("Agent B: [scope, objective, output format]")
-Task("Agent C: [scope, objective, output format]")
-Task("Agent D: [scope, objective, output format]")
-Task("Agent E: [scope, objective, output format]")
+Task("Agent A: [scope, objective, output format]", subagent_type="Explore")
+Task("Agent B: [scope, objective, output format]", subagent_type="Explore")
+Task("Agent C: [scope, objective, output format]", subagent_type="general-purpose")
+Task("Agent D: [scope, objective, output format]", run_in_background=true)
 ```
 
 [IMPORTANT]:
 - [ALWAYS] Include complete context per agent—stateless execution.
+- [ALWAYS] Specify `subagent_type` for optimal agent selection.
+- [ALWAYS] Use `run_in_background=true` for long-running tasks.
 - [NEVER] Chain agent outputs—parallel means independent.
 
 ---

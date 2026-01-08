@@ -8,7 +8,7 @@ import { Button } from '@parametric-portal/components-next/button';
 import { FilePreview } from '@parametric-portal/components-next/file-preview';
 import { FileUpload } from '@parametric-portal/components-next/file-upload';
 import { Menu, MenuItem, MenuSection, MenuSeparator } from '@parametric-portal/components-next/menu';
-import { Select, SelectItem } from '@parametric-portal/components-next/select';
+import { Select, SelectItem, SelectSection, SelectSeparator } from '@parametric-portal/components-next/select';
 import { Tab, TabList, TabPanel, Tabs } from '@parametric-portal/components-next/tabs';
 import { Checkbox, CheckboxGroup, Switch } from '@parametric-portal/components-next/toggle';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
@@ -119,31 +119,62 @@ const ToggleDemo: FC = () => {
         </>
     );
 };
-const SelectDemo: FC = () => {
-    const items = [
-        { id: 'home', label: 'Home' },
-        { id: 'profile', label: 'Profile' },
-        { id: 'settings', label: 'Settings' },
-    ];
-    return (
-        <>
-            <Select color='primary' items={items} placeholder='Select page...' size='md' suffix={ChevronDown}>
-                {(item) => (
-                    <SelectItem icon={item.id === 'home' ? Home : item.id === 'profile' ? User : Settings}>
-                        {{ default: item.label }}
-                    </SelectItem>
-                )}
-            </Select>
-            <Select color='secondary' placeholder='Small variant' size='sm' suffix={ChevronDown}>
-                <SelectItem children={{ default: 'First' }} />
-                <SelectItem children={{ default: 'Second' }} />
-            </Select>
-            <Select color='primary' isDisabled placeholder='Disabled' size='md' suffix={ChevronDown}>
-                <SelectItem children={{ default: 'Item' }} />
-            </Select>
-        </>
-    );
-};
+const SelectDemo: FC = () => (
+    <>
+        {/* Basic Select with sections */}
+        <Select color='primary' placeholder='Select page...' size='md' suffix={ChevronDown}>
+            <SelectSection title='Navigation'>
+                <SelectItem icon={{ default: Home }}>Home</SelectItem>
+                <SelectItem icon={{ default: User }}>Profile</SelectItem>
+                <SelectItem icon={{ default: Settings }} isDisabled>
+                    Settings
+                </SelectItem>
+            </SelectSection>
+            <SelectSeparator />
+            <SelectSection title='Actions'>
+                <SelectItem icon={{ default: Copy }}>Copy</SelectItem>
+                <SelectItem icon={{ default: Download }}>Download</SelectItem>
+            </SelectSection>
+            <SelectSeparator />
+            <SelectItem destructive icon={{ default: Trash2 }}>
+                Delete Account
+            </SelectItem>
+        </Select>
+        {/* Select with badges */}
+        <Select color='secondary' placeholder='With badges' size='md' suffix={ChevronDown}>
+            <SelectItem badge={5} description='5 unread messages' icon={{ default: Mail }}>
+                Inbox
+            </SelectItem>
+            <SelectItem badge={12} icon={{ default: Edit }}>
+                Drafts
+            </SelectItem>
+            <SelectItem badge={100} icon={{ default: FolderOpen }}>
+                Archive
+            </SelectItem>
+        </Select>
+        {/* Select with item tooltips */}
+        <Select color='primary' placeholder='With tooltips' size='md' suffix={ChevronDown}>
+            <SelectItem
+                description='Navigate to home page'
+                icon={{ default: Home }}
+                tooltip={{ content: 'Go to dashboard' }}
+            >
+                Home
+            </SelectItem>
+            <SelectItem description='View your profile' icon={{ default: User }} tooltip={{ content: 'Edit settings' }}>
+                Profile
+            </SelectItem>
+        </Select>
+        {/* Sizes */}
+        <Select color='secondary' placeholder='Small' size='sm' suffix={ChevronDown}>
+            <SelectItem>First</SelectItem>
+            <SelectItem>Second</SelectItem>
+        </Select>
+        <Select color='primary' isDisabled placeholder='Disabled' size='md' suffix={ChevronDown}>
+            <SelectItem>Item</SelectItem>
+        </Select>
+    </>
+);
 const TabsDemo: FC = () => (
     <div className='flex flex-col gap-4 w-full max-w-md'>
         <Tabs color='primary' defaultSelectedKey='tab1' size='md'>

@@ -2,6 +2,9 @@
 name: ${kebab-case-name}
 type: standard
 depth: ${base|extended|full}
+# context: fork
+# user-invocable: false
+# agent: Explore
 description: ${action-verb-capability}. Use when ${scenario-1}, ${scenario-2}, or ${scenario-3}.
 ---
 

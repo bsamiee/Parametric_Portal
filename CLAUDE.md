@@ -6,7 +6,7 @@ alwaysApply: true
 # [H1][CLAUDE_MANIFEST]
 >**Dictum:** *Protocol governs agent execution in monorepo context.*
 
-Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools` (nx workspace), `github-tools` (gh CLI), `perplexity-tools` (web research), `exa-tools` (code search), `context7-tools` (library docs), `sonarcloud-tools` (code quality), `tavily-tools` (web crawl/extract).
+Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workflow-driven agentic automation (10 specialists). Align with `REQUIREMENTS.md` standards. Workspace queries via skill scripts: `nx-tools` (nx workspace), `github-tools` (gh CLI), `greptile-tools` (codebase Q&A), `perplexity-tools` (web research), `exa-tools` (code search), `context7-tools` (library docs), `sonarcloud-tools` (code quality), `tavily-tools` (web crawl/extract).
 
 ---
 ## [1][BEHAVIOR]
@@ -48,13 +48,9 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 - [MUST] Enforce immutability via `Object.freeze`, `ReadonlyArray`.
 
 [IMPORTANT]: **Expression-Centric** — Write code as expressions, not statements.
-- [ALWAYS] Use ternaries over `if/else`.
 - [ALWAYS] Use `Option.match` over null checks.
 - [ALWAYS] Use arrow functions with implicit returns.
 - [ALWAYS] Replace switch/case with dispatch tables.
-
-[CRITICAL]: **Expression-Centric** — Prohibited patterns.
-- [NEVER] Use blocks `{}` when expression suffices.
 
 [IMPORTANT]: **Algorithmic-Parametric** — Derive values algorithmically.
 - [ALWAYS] Generate constants from base values.
@@ -66,22 +62,22 @@ Operate as senior developer in bleeding-edge Nx/Vite/Effect monorepo with workfl
 [CRITICAL]: **Algorithmic-Parametric** — Prohibited patterns.
 - [NEVER] Hardcode values.
 
-[IMPORTANT]: **Polymorphic-Dense** — Maximize functionality per LOC.
+[IMPORTANT]: **Polymorphic-Dense** — Maximize functionality per construct.
 - [ALWAYS] Handle all modes via single factory function.
 - [ALWAYS] Branch via dispatch tables: `handlers[mode](config)`.
 - [ALWAYS] Narrow types via discriminated unions.
-- [ALWAYS] Produce multiple outputs from one pipeline.
-- [ALWAYS] Target 25-30 LOC per feature, complexity ≤25.
 
 [IMPORTANT]: **Topology** — Packages export mechanisms; apps define values.
-- [ALWAYS] Package B constants define CSS variable *slots* (`var(--prefix-key)`), not values.
-- [ALWAYS] Package factories (`createX`) accept scale/behavior config; derive dimensions algorithmically.
-- [ALWAYS] Apps define CSS variables in `main.css`; call factories in `theme.config.ts`/`ui.ts`.
-- [ALWAYS] Packages own: types, schemas, factories, pure functions, dispatch tables.
-- [ALWAYS] Apps own: CSS variable values, factory invocations, visual overrides.
-
-[CRITICAL]: **Topology** — Prohibited patterns.
+- [ALWAYS] Packages own: types, schemas, factories, CSS variable slots.
+- [ALWAYS] Apps own: CSS variable values, factory invocations.
 - [NEVER] Color/font/spacing literals in `packages/*`.
+
+[IMPORTANT]: **Infrastructure** — Use existing code; never duplicate.
+- [ALWAYS] Read `pnpm-workspace.yaml` for catalog versions before adding deps.
+- [ALWAYS] Use `types/app-error.ts` for client errors, `server/http-errors.ts` for HTTP errors.
+- [ALWAYS] Use `types/types.ts` for branded primitives (`DurationMs`, `Timestamp`, `Uuidv7`).
+- [ALWAYS] Use `types/schema.ts` for database entities (`UserId`, `SessionId`, tables).
+- [ALWAYS] Expand infrastructure at root package, not inline.
 
 ---
 ## [3][CONSTRAINTS]

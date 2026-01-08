@@ -2,6 +2,8 @@
 name: deep-research
 type: simple
 depth: extended
+context: fork
+user-invocable: false
 description: >-
   Orchestrates two-round parallel agent research for comprehensive topic exploration.
   Use when conducting research, exploring complex topics, gathering multi-faceted

@@ -408,6 +408,7 @@ Tokens injected via `op inject` during shell startup:
 |   [4]   | `EXA_API_KEY`        | Code search         |
 |   [5]   | `PERPLEXITY_API_KEY` | AI research         |
 |   [6]   | `TAVILY_API_KEY`     | Web crawl           |
+|   [7]   | `GREPTILE_TOKEN`     | Codebase indexing   |
 
 SSH keys served via 1Password agent socket (no disk keys).
 

@@ -5,6 +5,8 @@ description: >-
   ${scenario-2}, or ${scenario-3}.
 tools: ${tool-list}
 model: ${model-choice|inherit}
+# skills: ${skill-name}
+# color: "#RRGGBB"
 ---
 
 ${role-line-imperative-single-sentence}.

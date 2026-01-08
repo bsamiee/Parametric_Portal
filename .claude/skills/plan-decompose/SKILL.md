@@ -2,6 +2,7 @@
 name: plan-decompose
 type: simple
 depth: extended
+user-invocable: false
 description: >-
   Extracts work units from plan artifacts and creates sequenced GitHub issues.
   Use when (1) decomposing plan.md into actionable issues, (2) creating issues

@@ -19,6 +19,7 @@
 |   [4]   | `model`       | enum   |  No   | `haiku`, `sonnet`, `opus`, `inherit`.    |
 |   [5]   | `skills`      | list   |  No   | Skill names for progressive loading.     |
 |   [6]   | `color`       | string |  No   | Hex color `#RRGGBB` for terminal output. |
+|   [7]   | `hooks`       | object |  No   | Scoped PreToolUse, PostToolUse, Stop.    |
 
 <br>
 
