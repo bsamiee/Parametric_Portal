@@ -8,25 +8,45 @@
 			"import": "./src/button/button.tsx",
 			"default": "./src/button/button.tsx"
 		},
-		"./core/css-slots": {
-			"types": "./src/core/css-slots.ts",
-			"import": "./src/core/css-slots.ts",
-			"default": "./src/core/css-slots.ts"
+		"./core/animate": {
+			"types": "./src/core/animate.ts",
+			"import": "./src/core/animate.ts",
+			"default": "./src/core/animate.ts"
+		},
+		"./core/announce": {
+			"types": "./src/core/announce.tsx",
+			"import": "./src/core/announce.tsx",
+			"default": "./src/core/announce.tsx"
+		},
+		"./core/floating": {
+			"types": "./src/core/floating.tsx",
+			"import": "./src/core/floating.tsx",
+			"default": "./src/core/floating.tsx"
+		},
+		"./core/focus": {
+			"types": "./src/core/focus.tsx",
+			"import": "./src/core/focus.tsx",
+			"default": "./src/core/focus.tsx"
+		},
+		"./core/gesture": {
+			"types": "./src/core/gesture.ts",
+			"import": "./src/core/gesture.ts",
+			"default": "./src/core/gesture.ts"
 		},
 		"./core/layout": {
 			"types": "./src/core/layout.ts",
 			"import": "./src/core/layout.ts",
 			"default": "./src/core/layout.ts"
 		},
-		"./core/slots": {
-			"types": "./src/core/slots.ts",
-			"import": "./src/core/slots.ts",
-			"default": "./src/core/slots.ts"
+		"./core/props": {
+			"types": "./src/core/props.ts",
+			"import": "./src/core/props.ts",
+			"default": "./src/core/props.ts"
 		},
-		"./core/announce": {
-			"types": "./src/core/announce.tsx",
-			"import": "./src/core/announce.tsx",
-			"default": "./src/core/announce.tsx"
+		"./core/utils": {
+			"types": "./src/core/utils.ts",
+			"import": "./src/core/utils.ts",
+			"default": "./src/core/utils.ts"
 		},
 		"./file-preview": {
 			"types": "./src/file-preview/file-preview.tsx",
@@ -38,25 +58,20 @@
 			"import": "./src/file-upload/file-upload.tsx",
 			"default": "./src/file-upload/file-upload.tsx"
 		},
-		"./core/animate": {
-			"types": "./src/core/animate.ts",
-			"import": "./src/core/animate.ts",
-			"default": "./src/core/animate.ts"
+		"./menu": {
+			"types": "./src/menu/menu.tsx",
+			"import": "./src/menu/menu.tsx",
+			"default": "./src/menu/menu.tsx"
 		},
-		"./core/focus": {
-			"types": "./src/core/focus.tsx",
-			"import": "./src/core/focus.tsx",
-			"default": "./src/core/focus.tsx"
+		"./menu/confirm": {
+			"types": "./src/menu/confirm.tsx",
+			"import": "./src/menu/confirm.tsx",
+			"default": "./src/menu/confirm.tsx"
 		},
-		"./core/floating": {
-			"types": "./src/core/floating.tsx",
-			"import": "./src/core/floating.tsx",
-			"default": "./src/core/floating.tsx"
-		},
-		"./toggle": {
-			"types": "./src/toggle/toggle.tsx",
-			"import": "./src/toggle/toggle.tsx",
-			"default": "./src/toggle/toggle.tsx"
+		"./radio": {
+			"types": "./src/radio/radio.tsx",
+			"import": "./src/radio/radio.tsx",
+			"default": "./src/radio/radio.tsx"
 		},
 		"./select": {
 			"types": "./src/select/select.tsx",
@@ -68,15 +83,10 @@
 			"import": "./src/tabs/tabs.tsx",
 			"default": "./src/tabs/tabs.tsx"
 		},
-		"./menu": {
-			"types": "./src/menu/menu.tsx",
-			"import": "./src/menu/menu.tsx",
-			"default": "./src/menu/menu.tsx"
-		},
-		"./radio": {
-			"types": "./src/radio/radio.tsx",
-			"import": "./src/radio/radio.tsx",
-			"default": "./src/radio/radio.tsx"
+		"./toggle": {
+			"types": "./src/toggle/toggle.tsx",
+			"import": "./src/toggle/toggle.tsx",
+			"default": "./src/toggle/toggle.tsx"
 		}
 	},
 	"scripts": {

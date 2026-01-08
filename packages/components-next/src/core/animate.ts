@@ -29,7 +29,6 @@ const phaseForTransition = (wasOpen: boolean, isOpen: boolean, rm: boolean): Ani
     !wasOpen && isOpen ? (rm ? 'entered' : 'entering') :
     wasOpen && !isOpen ? (rm ? 'idle' : 'exiting') :
     null;
-
 const useAnimationPhase = (isOpen: boolean, durationMs: number): AnimationPhase => {
     const [phase, setPhase] = useState<AnimationPhase>('idle');
     const prevRef = useRef(isOpen);

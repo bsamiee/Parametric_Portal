@@ -21,7 +21,7 @@
 |   [2]   | **passive-qc.yml**     | Passive | 6h + daily schedule | Stale management, aging reports, branch/cache cleanup      |
 |   [3]   | **ai-maintenance.yml** | AI      | Weekly Monday 09:00 | Claude-powered PR review, dependency audit, code quality   |
 |   [4]   | **ci.yml**             | CI      | Push/PR + weekly    | Quality gates, security scans, Biome auto-fix, Nx release  |
-|   [5]   | sonarcloud.yml         | CI      | CI completion       | SonarCloud analysis (triggered by ci.yml workflow_run)     |
+|   [5]   | sonarcloud.yml         | CI      | PR/Push + dispatch  | SonarCloud analysis with PR decoration + job summary       |
 |   [6]   | dashboard.yml          | Passive | 6h schedule         | Repository metrics dashboard                               |
 |   [7]   | claude.yml             | Agent   | @claude mention     | Interactive Claude Code with 4 specialist agents           |
 |   [8]   | claude-code-review.yml | Agent   | PR opened/sync      | Automated PR review against REQUIREMENTS.md                |
@@ -118,8 +118,7 @@ graph TD
     PR --> CI[ci.yml]
     PR --> ClaudeReview[claude-code-review.yml]
     PR --> Gemini[gemini-dispatch.yml]
-
-    CI -->|workflow_run| Sonar[sonarcloud.yml]
+    PR --> Sonar[sonarcloud.yml]
 
     Gemini -->|workflow_call| GeminiReview[gemini-review.yml]
     Gemini -->|workflow_call| GeminiInvoke[gemini-invoke.yml]
@@ -133,6 +132,7 @@ graph TD
     Push[Push to main] --> ActiveQC
     Push --> CI
     Push --> N8N[n8n-sync.yml]
+    Push --> Sonar
 
     Comment[@claude/@gemini-cli] --> Claude[claude.yml]
     Comment --> Gemini

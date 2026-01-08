@@ -26,8 +26,7 @@ type SlotDef<T extends Renderable = Renderable> = {
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const cn = (...inputs: readonly ClassValue[]): string => twMerge(clsx(inputs));
-const composeTailwindRenderProps = <T,>(cls: RenderPropsClassName<T>, tw: ClassNameValue): ((v: T) => string) | string =>
-	composeRenderProps(cls, (prev) => twMerge(tw, prev));
+const composeTailwindRenderProps = <T,>(cls: RenderPropsClassName<T>, tw: ClassNameValue): ((v: T) => string) | string => composeRenderProps(cls, (prev) => twMerge(tw, prev));
 /** Filter object to entries where value is not undefined. Optional mapper transforms values. */
 function defined<T extends Record<string, unknown>>(obj: T): { [K in keyof T as T[K] extends undefined ? never : K]: Exclude<T[K], undefined> };
 function defined<T extends Record<string, unknown>, R>(obj: T, map: (v: Exclude<T[keyof T], undefined>) => R): { [K in keyof T as T[K] extends undefined ? never : K]: R };
@@ -46,7 +45,6 @@ const isLucide = (v: unknown): v is LucideIcon =>
 	typeof v === 'function' &&
 	typeof (v as { displayName?: unknown }).displayName === 'string' &&
 	typeof (v as { render?: unknown }).render === 'function';
-
 const resolve = <T extends Renderable>(
 	def: SlotDef<T> | undefined,
 	state: AsyncState<unknown, unknown> | undefined,
@@ -54,7 +52,6 @@ const resolve = <T extends Renderable>(
 	const key = (state?._tag.toLowerCase() ?? 'default') as keyof SlotDef;
 	return def === undefined ? undefined : (def[key] ?? def.default);
 };
-
 const content = (slotContent: Renderable | null | undefined, className?: string): ReactNode =>
 	Match.value(slotContent).pipe(
 		Match.when(Predicate.isNullable, () => null),
@@ -62,13 +59,11 @@ const content = (slotContent: Renderable | null | undefined, className?: string)
 		Match.when(isValidElement<{ className?: string }>, (el) => cloneElement(el, { className: cn(el.props.className, className) })),
 		Match.orElse((node) => node),
 	);
-
 const render = (
 	def: SlotDef | undefined,
 	state: AsyncState<unknown, unknown> | undefined,
 	className?: string,
 ): ReactNode => content(resolve(def, state), className);
-
 const bind = (state: AsyncState<unknown, unknown> | undefined) =>
 	Object.freeze({
 		attr: AsyncState.toAttr(state),
@@ -77,8 +72,6 @@ const bind = (state: AsyncState<unknown, unknown> | undefined) =>
 		render: (def: SlotDef | undefined, className?: string) => render(def, state, className),
 		resolve: <T extends Renderable>(def: SlotDef<T> | undefined) => resolve(def, state),
 	});
-
-/** Slot namespace for resolving and rendering async-aware slot content */
 const Slot = Object.freeze({ bind, content, render, resolve });
 
 // --- [EXPORT] ----------------------------------------------------------------

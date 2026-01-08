@@ -194,7 +194,7 @@ const SelectItem: FC<SelectItemProps> = ({ children, className, icon, ...rest })
 							isPressed: renderProps.isPressed,
 							isSelected: renderProps.isSelected,
 						})
-						: Slot.resolve(children as SlotDef<ReactNode> | undefined, undefined)}
+						: Slot.resolve(children, undefined)}
 				</>
 			)}
 		</ListBoxItem>

@@ -2,10 +2,16 @@ name: Gemini Code Review
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: gemini-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   gemini-review:
+    # Skip draft PRs (will run on ready_for_review), skip if title starts with WIP
+    if: github.event.pull_request.draft != true && !startsWith(github.event.pull_request.title, 'WIP')
     runs-on: ubuntu-latest
     permissions:
       contents: read

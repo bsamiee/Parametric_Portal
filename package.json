@@ -25,7 +25,9 @@
         "quality": "pnpm exec nx run-many -t typecheck,check,infra:lint && knip && sherif",
         "quality:affected": "pnpm exec nx affected -t typecheck,check,infra:lint --base=origin/main && knip && sherif",
         "reset": "pnpm clean && pnpm install && pnpm nx:build:libs",
-        "sonar": "npx @sonar/scan",
+        "sonar": "pnpm nx affected -t test -- --coverage && npx @sonar/scan",
+        "sonar:scan": "npx @sonar/scan",
+        "sonar:status": "curl -sf -u \"${SONAR_TOKEN}:\" 'https://sonarcloud.io/api/qualitygates/project_status?projectKey=bsamiee_Parametric_Portal' | jq -r '.projectStatus.status'",
         "tools:knip": "knip",
         "tools:sherif": "sherif",
         "tools:tokens": "tsx tools/scripts/count-tokens.ts"

@@ -2,27 +2,42 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review (manual trigger)'
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  cancel-in-progress: true
 
 jobs:
   claude-review:
+    # Skip draft PRs (will run on ready_for_review), skip if title starts with WIP
+    if: |
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.pull_request.draft != true && !startsWith(github.event.pull_request.title, 'WIP'))
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-      actions: read
-      id-token: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@7145c3e0510bcdbdd29f67cc4a8c1958f1acfa2f # v1
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           track_progress: true
@@ -42,8 +57,11 @@ jobs:
             [REQUIRED]: Create a single OVERVIEW comment, NEST all findings/suggestions/fixes underneath this comment as individual comments, with proper formatting for PR reviews.
 
             [CONTEXT]
-            Repository: ${{ github.repository }} | PR: ${{ github.event.pull_request.number }}
-            Base: ${{ github.base_ref }} | Head: ${{ github.head_ref }}
+            Repository: ${{ github.repository }}
+            PR Number: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+            Base: ${{ github.base_ref || 'main' }}
+            Head: ${{ github.head_ref || github.ref_name }}
+            Trigger: ${{ github.event_name }}.${{ github.event.action || 'dispatch' }}
 
             [PHASE_1] Load Standards
             1. Read CLAUDE.md — agent behavior, philosophy, constraints
@@ -53,15 +71,15 @@ jobs:
             5. Read .claude/skills/parallel-dispatch/SKILL.md - parallel dispatching rules
 
             [PHASE_2] Get Changes
-            1. gh pr diff ${{ github.event.pull_request.number }} --name-only
-            2. gh pr diff ${{ github.event.pull_request.number }}
+            1. gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }} --name-only
+            2. gh pr diff ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
             3. Read each changed file for full context
 
             [PHASE_3] Analysis
             - >5 files: Use parallel-dispatch skill — each agent reviews assigned files + relevant context
             - ≤5 files: Analyze sequentially
             - Context per file: imports/dependencies, sibling files in folder, root configs (tsconfig, vite, nx)
-            - CI status: gh pr checks ${{ github.event.pull_request.number }} — if failures, gh run view <run-id> --log-failed
+            - CI status: gh pr checks ${{ github.event.pull_request.number || github.event.inputs.pr_number }} — if failures, gh run view <run-id> --log-failed
             - Apply standards; flag violations, anti-patterns, improvements
             - Reject band-aids — require proper solutions
 

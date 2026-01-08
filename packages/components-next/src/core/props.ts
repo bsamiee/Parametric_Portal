@@ -46,10 +46,8 @@ const H = Object.freeze({
 });
 const PROP_SCHEMAS = Object.freeze({
 	accessibility: S.Struct({
-		'aria-describedby': S.optional(S.String),
-		'aria-details': S.optional(S.String),
-		'aria-label': S.optional(S.String),
-		'aria-labelledby': S.optional(S.String),
+		'aria-describedby': S.optional(S.String), 'aria-details': S.optional(S.String),
+		'aria-label': S.optional(S.String), 'aria-labelledby': S.optional(S.String),
 	}),
 	accessibilityExtended: S.Struct({
 		'aria-controls': S.optional(S.String),
@@ -64,12 +62,8 @@ const PROP_SCHEMAS = Object.freeze({
 	disabledKeys: S.Struct({ disabledKeys: H.disabledKeys }),
 	focusWrap: S.Struct({ shouldFocusWrap: S.optional(S.Boolean) }),
 	form: S.Struct({
-		form: S.optional(S.String),
-		isDisabled: S.optional(S.Boolean),
-		isInvalid: S.optional(S.Boolean),
-		isReadOnly: S.optional(S.Boolean),
-		isRequired: S.optional(S.Boolean),
-		name: S.optional(S.String),
+		form: S.optional(S.String), isDisabled: S.optional(S.Boolean), isInvalid: S.optional(S.Boolean),
+		isReadOnly: S.optional(S.Boolean), isRequired: S.optional(S.Boolean), name: S.optional(S.String),
 	}),
 	formField: S.Struct({ autoFocus: S.optional(S.Boolean), excludeFromTabOrder: S.optional(S.Boolean) }),
 	formFieldFocus: S.Struct({ autoFocus: H.autoFocusStrategy, excludeFromTabOrder: S.optional(S.Boolean) }),
@@ -80,12 +74,8 @@ const PROP_SCHEMAS = Object.freeze({
 	id: S.Struct({ id: H.id }),
 	inputRef: S.Struct({ inputRef: H.inputRef }),
 	interactions: S.Struct({
-		onBlur: H.focus,
-		onFocus: H.focus,
-		onFocusChange: H.bool,
-		onHoverChange: H.bool,
-		onKeyDown: H.key,
-		onKeyUp: H.key,
+		onBlur: H.focus, onFocus: H.focus, onFocusChange: H.bool,
+		onHoverChange: H.bool, onKeyDown: H.key, onKeyUp: H.key,
 	}),
 	link: S.Struct({
 		download: S.optional(S.Union(S.Boolean, S.String)),
@@ -96,11 +86,8 @@ const PROP_SCHEMAS = Object.freeze({
 	orientation: S.Struct({ orientation: S.optional(S.Literal('horizontal', 'vertical')) }),
 	overlay: S.Struct({ onClose: H.close, onOpenChange: H.bool }),
 	press: S.Struct({
-		onPress: H.press,
-		onPressChange: H.bool,
-		onPressEnd: H.press,
-		onPressStart: H.press,
-		onPressUp: H.press,
+		onPress: H.press, onPressChange: H.bool, onPressEnd: H.press,
+		onPressStart: H.press, onPressUp: H.press,
 	}),
 	refs: S.Struct({ ref: H.ref }),
 	slot: S.Struct({ slot: S.optional(S.NullOr(S.String)) }),
