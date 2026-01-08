@@ -27,8 +27,11 @@ const B = Object.freeze({ ...DATABASE_TUNING } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const first = <T>(rows: readonly T[]): T => Option.getOrThrow(Option.fromNullable(rows[0]));
 const opt = <T>(row: T | undefined): Option.Option<T> => Option.fromNullable(row);
+/** Extract first row from INSERT RETURNING (always non-empty for single-row insert); throws if empty (programming error) */
+const first = <T>(rows: readonly T[]): T => Option.getOrThrow(Option.fromNullable(rows[0]));
+/** SqlResolver.grouped requires sync callback; getOrThrow is data integrity guard (userId filtered in WHERE clause) */
+const userIdOrThrow = (asset: Asset): User['id'] => Option.getOrThrow(Option.fromNullable(asset.userId));
 const withDbOps = <A, E, R>(opName: string, opType: OpType, effect: Effect.Effect<A, E, R>) =>
     Effect.fn(opName)(() =>
         effect.pipe(
@@ -76,7 +79,7 @@ const makeResolvers = (db: DrizzleDb) =>
             Request: IdFactory.UserId.schema,
             RequestGroupKey: (userId) => userId,
             Result: AssetRowSchema,
-            ResultGroupKey: (asset) => Option.getOrThrow(Option.fromNullable(asset.userId)),
+            ResultGroupKey: userIdOrThrow,
             withContext: true,
         }),
         // WRITE: ordered resolvers (INSERT RETURNING - auto-batched)
@@ -263,13 +266,6 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 
 export { DatabaseService };
 export type {
-    ApiKeyRepository,
-    AssetRepository,
-    AuditRepository,
-    DatabaseServiceShape,
-    OAuthAccountRepository,
-    RefreshTokenRepository,
-    SessionRepository,
-    UserRepository,
-    WithTransaction,
+    ApiKeyRepository, AssetRepository, AuditRepository, DatabaseServiceShape, OAuthAccountRepository, RefreshTokenRepository, SessionRepository,
+    UserRepository, WithTransaction,
 };

@@ -64,7 +64,6 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
-        "@effect/experimental": "catalog:",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "happy-dom": "catalog:",

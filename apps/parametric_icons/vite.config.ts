@@ -20,6 +20,7 @@ const B = Object.freeze({
         themeColor: '#1a1a2e',
     },
     theme: {
+        animation: { enterScale: 0.95, exitScale: 0.95 },
         colors: {
             accent: { c: 0.2, h: 280, l: 0.55 },
             cyan: { c: 0.15, h: 195, l: 0.6 },
@@ -34,7 +35,9 @@ const B = Object.freeze({
             warning: { c: 0.15, h: 45, l: 0.7 },
         },
         components: [],
-        fonts: {},
+        focus: { color: { name: 'accent', step: 6 }, offset: '2px', width: '2px', z: '50' },
+        fonts: { mono: 'monospace', ui: 'system-ui' },
+        interaction: { announceDuration: 3000, haptic: true, hapticDuration: 200, longPressThreshold: 500 },
         stateShifts: {
             disabled: { alpha: -0.5, chroma: -0.1, hue: 0, lightness: 0 },
             focused: { alpha: 0, chroma: 0.05, hue: 0, lightness: 0.05 },
@@ -42,6 +45,7 @@ const B = Object.freeze({
             pressed: { alpha: 0, chroma: 0.02, hue: 0, lightness: -0.05 },
             selected: { alpha: 0, chroma: 0.05, hue: 0, lightness: 0.1 },
         },
+        tooltipGroup: { closeDelay: 0, openDelay: 300, timeout: 200 },
     },
 } as const);
 

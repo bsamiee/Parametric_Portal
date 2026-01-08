@@ -22,14 +22,11 @@ type DeepPath<T, MaxDepth extends number = 4> = Paths<T, { maxRecursionDepth: Ma
 
 const Controlled = Object.freeze({
 	is: <T>(props: object): props is ControlledProps<T> => 'value' in props && 'onChange' in props,
-	resolve: <T>(props: ControlledMode<T>, fallback: T): T =>
-		'value' in props ? (props as ControlledProps<T>).value : (props.defaultValue ?? fallback),
+	resolve: <T>(props: ControlledMode<T>, fallback: T): T => 'value' in props ? (props as ControlledProps<T>).value : (props.defaultValue ?? fallback),
 });
 const Selection = Object.freeze({
-	is: <K>(props: object): props is SelectionControlled<K> =>
-		'selectedKey' in props && 'onSelectionChange' in props,
-	resolve: <K>(props: SelectionMode<K>, fallback: K): K =>
-		'selectedKey' in props ? (props as SelectionControlled<K>).selectedKey : (props.defaultSelectedKey ?? fallback),
+	is: <K>(props: object): props is SelectionControlled<K> => 'selectedKey' in props && 'onSelectionChange' in props,
+	resolve: <K>(props: SelectionMode<K>, fallback: K): K => 'selectedKey' in props ? (props as SelectionControlled<K>).selectedKey : (props.defaultSelectedKey ?? fallback),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------

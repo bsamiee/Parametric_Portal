@@ -4,11 +4,10 @@
 
 import { useExport } from '@parametric-portal/runtime/hooks/browser';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
-import { fileOpsImpl } from '@parametric-portal/runtime/services/file';
-import { type ExportFormat, PngSizeSchema, validateContent } from '@parametric-portal/types/files';
-import { Svg } from '@parametric-portal/types/svg';
+import type { ExportFormat } from '@parametric-portal/runtime/services/browser';
+import { validateContent } from '@parametric-portal/runtime/services/file';
 import { Index, VariantCount } from '@parametric-portal/types/types';
-import { Effect, Schema as S } from 'effect';
+import { Effect } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
 import { type UploadState, useHistoryStore, usePreviewStore, useUiStore } from '../stores.ts';
@@ -90,7 +89,7 @@ const uploadStateRenderers = {
     preview: ({ fileName, previewSvg, reset }: StateRendererProps): ReactNode => (
         <Stack gap>
             <div className='w-full aspect-square max-h-64 bg-(--panel-bg-light) rounded-lg overflow-hidden border border-(--panel-border-dark)'>
-                {previewSvg && <SvgPreview svg={previewSvg} sanitize={Svg.sanitize} className='w-full h-full' />}
+                {previewSvg && <SvgPreview svg={previewSvg} className='w-full h-full' />}
             </div>
             <Stack direction='row' justify='between' align='center'>
                 <span className='text-sm opacity-70'>{fileName}.svg</span>
@@ -124,11 +123,12 @@ const useExportDialog = (): ExportDialogProps => {
     const close = closeExportDialog;
     const setFormat = setExportFormat;
     const handleExport = () => {
-        const variants = currentAsset?.variants ?? [];
+        const variantAssets = currentAsset?.variants ?? [];
+        const variants = variantAssets.map((v) => v.svg);
         exportAs({
             filename: currentAsset?.prompt ?? '',
             format,
-            pngSize: S.decodeUnknownSync(PngSizeSchema)(B.export.pngSize),
+            pngSize: B.export.pngSize,
             variantCount: VariantCount.decodeSync(variants.length),
             variantIndex: Index.decodeSync(currentAsset?.selectedVariantIndex ?? 0),
             variants,
@@ -178,9 +178,14 @@ const UploadDialog = ({ isOpen, onClose, onUpload }: UploadDialogProps): ReactNo
     const validateMutation = useEffectMutate<string, File, { message: string }, never>(
         (file) =>
             Effect.gen(function* () {
-                const content = yield* fileOpsImpl.toText(file);
-                const validContent = yield* validateContent('image/svg+xml', content);
-                return Svg.sanitize(validContent);
+                const content = yield* Effect.tryPromise({
+                    catch: () => ({ message: 'Failed to read file' }),
+                    try: () => file.text(),
+                });
+                const validContent = yield* validateContent('image/svg+xml', content).pipe(
+                    Effect.mapError((e) => ({ message: e.message })),
+                );
+                return validContent;
             }),
         {
             onError: (err, file) => {

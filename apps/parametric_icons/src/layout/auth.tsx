@@ -36,6 +36,7 @@ const B = Object.freeze({
         title: 'Sign in to continue',
     },
     providers: {
+        apple: { bg: 'bg-black', icon: 'Apple', label: 'Continue with Apple', text: 'text-white' },
         github: { bg: 'bg-neutral-800', icon: 'Github', label: 'Continue with GitHub', text: 'text-white' },
         google: { bg: 'bg-white', icon: 'Globe', label: 'Continue with Google', text: 'text-neutral-800' },
         microsoft: { bg: 'bg-blue-600', icon: 'Laptop', label: 'Continue with Microsoft', text: 'text-white' },

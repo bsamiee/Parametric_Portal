@@ -6,26 +6,21 @@
  *   @import 'tailwindcss';
  *   @import '@parametric-portal/theme/base.css';
  */
-/* Animation utilities: animate-in, fade-in, slide-in-from-*, etc. */
-@import 'tw-animate-css';
-/* RAC data-* attribute variants: hovered:, pressed:, focused:, disabled:, etc. */
-@plugin 'tailwindcss-react-aria-components';
-/* Shake animation for failure states */
-@keyframes shake {
+@import 'tw-animate-css';                       /* Animation utilities: animate-in, fade-in, slide-in-from-*, etc. */
+@plugin 'tailwindcss-react-aria-components';    /* RAC data-* attribute variants: hovered:, pressed:, focused:, disabled:, etc. */
+@keyframes shake {                              /* Shake animation for failure states */
     0%, 100% { transform: translateX(0); }
     20%, 60% { transform: translateX(-2px); }
     40%, 80% { transform: translateX(2px); }
 }
-/* Reduced motion: accessibility requirement */
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: reduce) {       /* Reduced motion: accessibility requirement */
     *, *::before, *::after {
         transition-duration: 0.01ms;
         animation-duration: 0.01ms;
         animation-iteration-count: 1;
     }
 }
-/* Inert state styling: non-interactive sections */
-[inert] {
+[inert] {                                       /* Inert state styling: non-interactive sections */
     pointer-events: none;
     user-select: none;
     opacity: 0.5;

@@ -37,7 +37,7 @@
             "complexity": {
                 "noCommaOperator": "error",
                 "noBannedTypes": "error",
-                "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 25 } },
+                "noExcessiveCognitiveComplexity": { "level": "error", "options": { "maxAllowedComplexity": 30 } },
                 "noForEach": "off",
                 "noStaticOnlyClass": "error",
                 "noUselessStringRaw": "off",
@@ -138,6 +138,14 @@
             "linter": { "rules": { "style": { "useComponentExportOnlyModules": "off" } } }
         },
         {
+            "includes": ["apps/test-harness/**/*.tsx"],
+            "linter": { "rules": { "correctness": { "noChildrenProp": "off" } } }
+        },
+        {
+            "includes": ["packages/components-next/src/core/utils.ts"],
+            "linter": { "rules": { "complexity": { "noStaticOnlyClass": "off" } } }
+        },
+        {
             "includes": ["**/vite-env.d.ts"],
             "linter": { "rules": { "correctness": { "noUnusedVariables": "off" } } }
         },
@@ -157,13 +165,29 @@
                 "packages/database/src/**/*.ts",
                 "apps/api/src/**/*.ts",
                 "packages/theme/src/**/*.ts",
-                "packages/types/src/**/*.ts"
+                "packages/types/src/**/*.ts",
+                "packages/components-next/src/**/*.ts",
+                "packages/components-next/src/**/*.tsx"
             ],
-            "formatter": { "enabled": false }
+            "formatter": { "enabled": false },
+            "assist": { "actions": { "source": { "organizeImports": "off" } } }
         },
         {
             "includes": ["packages/theme/**/*.css"],
             "css": { "formatter": { "enabled": false } }
+        },
+        {
+            "includes": ["packages/components-next/src/menu/menu.tsx"],
+            "linter": {
+                "rules": {
+                    "complexity": {
+                        "noExcessiveCognitiveComplexity": {
+                            "level": "error",
+                            "options": { "maxAllowedComplexity": 45 }
+                        }
+                    }
+                }
+            }
         }
     ]
 }

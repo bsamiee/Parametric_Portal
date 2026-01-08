@@ -1,97 +1,96 @@
 /**
- * Validate and process uploaded files with type checking and content sanitization.
- * Composes FileOps service with validation rules to return AsyncState for component consumption.
+ * Bridge file upload to React state with auto-wired props.
+ * Uses FileOps service for processing, returns component-ready props.
  */
-import { AppError } from '@parametric-portal/types/app-error';
+import type { AppError } from '@parametric-portal/types/app-error';
 import { AsyncState, type AsyncStateType } from '@parametric-portal/types/async';
-import {
-    FILES_TUNING,
-    type FileMetadata,
-    type MimeType,
-    validateContent,
-    validateFile,
-} from '@parametric-portal/types/files';
-import { Effect, pipe } from 'effect';
+import type { FileUploadConfig, MimeType, ValidatedFile } from '@parametric-portal/types/files';
+import { Effect } from 'effect';
 import { useMemo } from 'react';
-import { fileOpsImpl } from '../services/file';
+import { FileOps } from '../services/file';
 import { useEffectMutate } from './effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ValidatedFile<T extends MimeType = MimeType> = {
-    readonly content: string;
-    readonly dataUrl: string;
-    readonly file: File;
-    readonly metadata: FileMetadata & { readonly mimeType: T };
+type FileValidationResult<T extends MimeType> =
+    | { readonly status: 'success'; readonly file: ValidatedFile<T> }
+    | { readonly status: 'error'; readonly name: string; readonly error: AppError<'File'> };
+type FileUploadHookConfig<T extends MimeType> = FileUploadConfig<T> & {
+    readonly acceptDirectory?: boolean;
+    readonly defaultCamera?: 'environment' | 'user';
+    readonly multiple?: boolean;
 };
-type FileUploadConfig<T extends MimeType = MimeType> = {
-    readonly allowedTypes?: ReadonlyArray<T>;
-    readonly maxSizeBytes?: number;
+type FileUploadProps<T extends MimeType> = {
+    readonly accept: ReadonlyArray<T>;
+    readonly acceptDirectory?: boolean;
+    readonly asyncState: AsyncStateType<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>;
+    readonly defaultCamera?: 'environment' | 'user';
+    readonly multiple?: boolean;
+    readonly onFilesChange: (files: ReadonlyArray<File>) => void;
 };
-type FileUploadState<T extends MimeType = MimeType> = {
+type FileUploadReturn<T extends MimeType> = {
     readonly error: AppError<'File'> | null;
+    readonly fileResults: ReadonlyArray<FileValidationResult<T>>;
     readonly isPending: boolean;
+    readonly props: FileUploadProps<T>;
     readonly reset: () => void;
-    readonly result: ValidatedFile<T> | null;
-    readonly state: AsyncStateType<ValidatedFile<T>, AppError<'File'>>;
-    readonly upload: (file: File) => void;
+    readonly results: ReadonlyArray<ValidatedFile<T>>;
 };
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const processFile = <T extends MimeType>(
-    file: File,
-    allowedTypes: ReadonlyArray<T> | undefined,
-    maxSizeBytes: number,
-): Effect.Effect<ValidatedFile<T>, AppError<'File'>, never> =>
-    pipe(
-        validateFile(file, maxSizeBytes),
-        Effect.filterOrFail(
-            (m): m is FileMetadata & { readonly mimeType: T } =>
-                allowedTypes == null || allowedTypes.includes(m.mimeType as T),
-            () => AppError.from('File', 'INVALID_TYPE', `Allowed types: ${allowedTypes?.join(', ') ?? 'any'}`),
-        ),
-        Effect.flatMap((metadata) =>
-            Effect.all(
-                {
-                    content: pipe(
-                        fileOpsImpl.toText(file),
-                        Effect.flatMap((text) => validateContent(metadata.mimeType, text)),
-                    ),
-                    dataUrl: fileOpsImpl.toDataUrl(file),
-                },
-                { concurrency: 'unbounded' },
-            ).pipe(Effect.map(({ content, dataUrl }) => ({ content, dataUrl, file, metadata }))),
-        ),
-    );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const useFileUpload = <T extends MimeType = MimeType>(config: FileUploadConfig<T> = {}): FileUploadState<T> => {
-    const allowedTypes = config.allowedTypes;
-    const maxSizeBytes = config.maxSizeBytes ?? FILES_TUNING.limits.maxSizeBytes;
-    const effectFn = useMemo(
-        () => (file: File) => processFile<T>(file, allowedTypes, maxSizeBytes),
-        [allowedTypes, maxSizeBytes],
+const useFileUpload = <T extends MimeType = MimeType>(config: FileUploadHookConfig<T> = {}): FileUploadReturn<T> => {
+    const processEffect = useMemo(
+        () => (files: ReadonlyArray<File>) =>
+            FileOps.pipe(Effect.flatMap((ops) => ops.processUpload<T>(files, config))),
+        [config],
     );
-    const { isPending, mutate, reset, state } = useEffectMutate(effectFn);
-    const { error, result } = useMemo(
+    const { mutate, reset, state } = useEffectMutate(processEffect);
+    const isPending = AsyncState.isPending(state);
+    const { error, fileResults, results } = useMemo(
         () =>
             AsyncState.$match(state, {
-                Failure: (f) => ({ error: f.error, result: null }),
-                Idle: () => ({ error: null, result: null }),
-                Loading: () => ({ error: null, result: null }),
-                Success: (s) => ({ error: null, result: s.data }),
+                Failure: (f) => ({
+                    error: f.error,
+                    fileResults: [] as ReadonlyArray<FileValidationResult<T>>,
+                    results: [] as ReadonlyArray<ValidatedFile<T>>,
+                }),
+                Idle: () => ({
+                    error: null,
+                    fileResults: [] as ReadonlyArray<FileValidationResult<T>>,
+                    results: [] as ReadonlyArray<ValidatedFile<T>>,
+                }),
+                Loading: () => ({
+                    error: null,
+                    fileResults: [] as ReadonlyArray<FileValidationResult<T>>,
+                    results: [] as ReadonlyArray<ValidatedFile<T>>,
+                }),
+                Success: (s) => ({
+                    error: null,
+                    fileResults: s.data.map((file) => ({ file, status: 'success' as const })),
+                    results: s.data,
+                }),
             }),
         [state],
     );
+    const props = useMemo<FileUploadProps<T>>(
+        () => ({
+            accept: config.allowedTypes ?? ([] as ReadonlyArray<T>),
+            ...(config.acceptDirectory != null && { acceptDirectory: config.acceptDirectory }),
+            asyncState: state,
+            ...(config.defaultCamera != null && { defaultCamera: config.defaultCamera }),
+            ...(config.multiple != null && { multiple: config.multiple }),
+            onFilesChange: (files) => files.length > 0 && mutate(files),
+        }),
+        [config.allowedTypes, config.acceptDirectory, config.defaultCamera, config.multiple, state, mutate],
+    );
     return useMemo(
-        () => ({ error, isPending, reset, result, state, upload: mutate }),
-        [error, isPending, reset, result, state, mutate],
+        () => ({ error, fileResults, isPending, props, reset, results }),
+        [error, fileResults, isPending, props, reset, results],
     );
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { FileUploadConfig, FileUploadState, ValidatedFile };
+export type { FileUploadProps, FileUploadReturn, FileValidationResult };
 export { useFileUpload };

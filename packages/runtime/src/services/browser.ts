@@ -1,29 +1,33 @@
 /**
  * Provide browser services for download and export operations.
- * Defines Context.Tag services with Layer implementations for file export pipelines.
+ * Single polymorphic service with dispatch table for export formats.
  */
 import { Clipboard } from '@effect/platform-browser';
 import { AppError } from '@parametric-portal/types/app-error';
-import { type ExportInput as ExportInputBase, type ExportVariant, FILES_TUNING } from '@parametric-portal/types/files';
 import { Svg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, Option, Stream } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ExportInput = ExportInputBase & { readonly onProgress?: (progress: number) => void };
-type DownloadService = {
-    readonly download: (data: Blob | string, filename: string, mimeType?: string) => Effect.Effect<void>;
+type ExportFormat = 'png' | 'svg' | 'zip';
+type ExportInput = {
+    readonly filename?: string;
+    readonly format: ExportFormat;
+    readonly onProgress?: (progress: number) => void;
+    readonly pngSize?: number;
+    readonly svg?: string;
+    readonly variantCount?: number;
+    readonly variantIndex?: number;
+    readonly variants?: ReadonlyArray<string>;
 };
-type ExportService = {
-    readonly png: (input: ExportInput) => Effect.Effect<void, AppError<'Browser'>>;
-    readonly svg: (input: ExportInput) => Effect.Effect<void, AppError<'Browser'>>;
-    readonly zip: (input: ExportInput) => Effect.Effect<void, AppError<'Browser'>>;
+type BrowserService = {
+    readonly download: (data: Blob | string, filename: string, mimeType?: string) => Effect.Effect<void>;
+    readonly export: (input: ExportInput) => Effect.Effect<void, AppError<'Browser'>>;
 };
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class Download extends Context.Tag('Download')<Download, DownloadService>() {}
-class Export extends Context.Tag('Export')<Export, ExportService>() {}
+class Browser extends Context.Tag('Browser')<Browser, BrowserService>() {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -54,11 +58,11 @@ const buildFilename = (base: string, ext: string, variantIndex?: number, variant
 const pngEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>> =>
     Effect.gen(function* () {
         const svg = yield* Option.fromNullable(input.svg).pipe(
-            Option.map(Svg.sanitize),
+            Option.flatMap(Svg.sanitize),
             Effect.mapError(() => AppError.from('Browser', 'NO_SVG')),
         );
         const canvas = globalThis.document.createElement('canvas');
-        const size = input.pngSize ?? FILES_TUNING.defaults.pngSize;
+        const size = input.pngSize ?? 512;
         canvas.width = size;
         canvas.height = size;
         const ctx = yield* Option.fromNullable(canvas.getContext('2d')).pipe(
@@ -82,14 +86,10 @@ const pngEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>>
             };
             img.src = url;
         });
-    }).pipe(
-        Effect.withSpan('export.png', {
-            attributes: { format: 'png', size: input.pngSize ?? FILES_TUNING.defaults.pngSize },
-        }),
-    );
+    }).pipe(Effect.withSpan('export.png', { attributes: { format: 'png', size: input.pngSize ?? 512 } }));
 const svgEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>> =>
     Option.fromNullable(input.svg).pipe(
-        Option.map(Svg.sanitize),
+        Option.flatMap(Svg.sanitize),
         Effect.mapError(() => AppError.from('Browser', 'NO_SVG')),
         Effect.tap((svg) =>
             Effect.sync(() =>
@@ -117,9 +117,12 @@ const zipEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>>
         const total = variants.length;
         yield* Stream.fromIterable(variants).pipe(
             Stream.zipWithIndex,
-            Stream.mapEffect(([variant, index]: readonly [ExportVariant, number]) =>
+            Stream.mapEffect(([svg, index]: readonly [string, number]) =>
                 Effect.sync(() => {
-                    zip.file(`${base}_variant_${index + 1}.svg`, Svg.sanitize(variant.svg));
+                    Option.match(Svg.sanitize(svg), {
+                        onNone: () => {},
+                        onSome: (sanitized) => zip.file(`${base}_variant_${index + 1}.svg`, sanitized),
+                    });
                     input.onProgress?.((index + 1) / total);
                 }),
             ),
@@ -136,18 +139,14 @@ const zipEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>>
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const DownloadLive = Layer.succeed(Download, {
-    download: (data, filename, mimeType = FILES_TUNING.defaults.mimeType) =>
+const BrowserLive = Layer.succeed(Browser, {
+    download: (data, filename, mimeType = 'application/octet-stream') =>
         Effect.sync(() => downloadBlob(data instanceof Blob ? data : new Blob([data], { type: mimeType }), filename)),
+    export: (input) => ({ png: pngEffect, svg: svgEffect, zip: zipEffect })[input.format](input),
 });
-const ExportLive = Layer.succeed(Export, {
-    png: pngEffect,
-    svg: svgEffect,
-    zip: zipEffect,
-});
-const BrowserServicesLive = Layer.mergeAll(Clipboard.layer, DownloadLive, ExportLive);
+const BrowserServicesLive = Layer.mergeAll(Clipboard.layer, BrowserLive);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { BrowserServicesLive, buildFilename, Download, DownloadLive, Export, ExportLive, sanitizeFilename };
-export type { DownloadService, ExportInput, ExportService };
+export { Browser, BrowserServicesLive, buildFilename, sanitizeFilename };
+export type { BrowserService, ExportFormat, ExportInput };

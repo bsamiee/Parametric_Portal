@@ -1,6 +1,6 @@
 /**
  * Test browser utility pure functions and error factories.
- * Covers filename sanitization, AppError creation, and Export service tag.
+ * Covers filename sanitization, AppError creation, and Browser service tag.
  */
 import { fc, it as itProp } from '@fast-check/vitest';
 import { FC_ARB } from '@parametric-portal/test-utils/arbitraries';
@@ -8,7 +8,7 @@ import '@parametric-portal/test-utils/harness';
 import { APP_ERROR_TUNING, AppError } from '@parametric-portal/types/app-error';
 import { FILES_TUNING } from '@parametric-portal/types/files';
 import { describe, expect, it } from 'vitest';
-import { buildFilename, Export, sanitizeFilename } from '../src/services/browser';
+import { Browser, buildFilename, sanitizeFilename } from '../src/services/browser';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -37,8 +37,8 @@ describe('APP_ERROR_TUNING', () => {
     });
 });
 describe('FILES_TUNING', () => {
-    it('contains defaults', () => {
-        expect(FILES_TUNING.defaults).toEqual({ mimeType: 'text/plain', pngSize: 512 });
+    it('contains limits', () => {
+        expect(FILES_TUNING.limits).toEqual({ maxSizeBytes: 512 * 1024 });
     });
 });
 
@@ -158,10 +158,10 @@ describe('clipboard availability', () => {
     });
 });
 
-// --- [DESCRIBE_EXPORT_SERVICE] -----------------------------------------------
+// --- [DESCRIBE_BROWSER_SERVICE] ----------------------------------------------
 
-describe('Export service', () => {
-    it('Export tag has correct identifier', () => {
-        expect(Export.key).toBe('Export');
+describe('Browser service', () => {
+    it('Browser tag has correct identifier', () => {
+        expect(Browser.key).toBe('Browser');
     });
 });

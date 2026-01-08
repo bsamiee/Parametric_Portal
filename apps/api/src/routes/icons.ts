@@ -9,7 +9,7 @@ import { EncryptedKey } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { Middleware } from '@parametric-portal/server/middleware';
 import type { AiProvider, ApiKey, UserId } from '@parametric-portal/types/schema';
-import { type Context, Effect, Option } from 'effect';
+import { Config, type Context, Effect, Option } from 'effect';
 import { IconGenerationService, type ServiceInput } from '../services/icons.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -24,7 +24,7 @@ const getUserApiKey = Effect.fn('icons.apiKey.get')(
             const apiKeyOpt = yield* repos.apiKeys.findByUserIdAndProvider(userId, provider).pipe(
                 Effect.tapError((e) =>
                     Effect.logWarning('API key lookup failed, using default key', {
-                        error: String(e),
+                        error: e instanceof Error ? { message: e.message, name: e.name } : e,
                         provider,
                         userId,
                     }),
@@ -58,14 +58,17 @@ const handleList = Effect.fn('icons.list')((repos: DatabaseServiceShape, params:
     }),
 );
 const handleGenerate = Effect.fn('icons.generate')(
-    (repos: DatabaseServiceShape, iconService: IconGenerationServiceType, input: ServiceInput) =>
+    (repos: DatabaseServiceShape, iconService: IconGenerationServiceType, input: ServiceInput, allowEnvKeys: boolean) =>
         Effect.gen(function* () {
             const session = yield* Middleware.Session;
             const provider = input.provider ?? 'anthropic';
             const userApiKeyOpt = yield* getUserApiKey(repos, session.userId, provider);
-            const generateInput: ServiceInput = Option.match(userApiKeyOpt, {
-                onNone: () => ({ ...input, provider }),
-                onSome: (apiKey) => ({ ...input, apiKey, provider }),
+            const generateInput: ServiceInput = yield* Option.match(userApiKeyOpt, {
+                onNone: () =>
+                    allowEnvKeys
+                        ? Effect.succeed({ ...input, provider })
+                        : Effect.fail(new HttpError.Internal({ message: `Missing ${provider} API key` })),
+                onSome: (apiKey) => Effect.succeed({ ...input, apiKey, provider }),
             });
             const result = yield* iconService.generate(generateInput).pipe(
                 Effect.filterOrFail(
@@ -77,7 +80,6 @@ const handleGenerate = Effect.fn('icons.generate')(
                 result.variants.map((variant) => ({
                     assetType: 'icon' as const,
                     content: variant.svg,
-                    id: undefined,
                     userId: session.userId,
                 })),
             ).pipe(Effect.catchAll(() => Effect.fail(new HttpError.Internal({ message: 'Asset storage failed' }))));
@@ -94,9 +96,13 @@ const IconsLive = HttpApiBuilder.group(ParametricApi, 'icons', (handlers) =>
     Effect.gen(function* () {
         const repos = yield* DatabaseService;
         const iconService = yield* IconGenerationService;
+        const allowEnvKeys = yield* Config.string('NODE_ENV').pipe(
+            Config.withDefault('development'),
+            Config.map((env) => env !== 'production'),
+        );
         return handlers
             .handle('list', ({ urlParams }) => handleList(repos, urlParams))
-            .handle('generate', ({ payload }) => handleGenerate(repos, iconService, payload));
+            .handle('generate', ({ payload }) => handleGenerate(repos, iconService, payload, allowEnvKeys));
     }),
 );
 

@@ -24,6 +24,7 @@ const B = Object.freeze({
             Schedule.intersect(Schedule.recurs(3)),
         ),
         scopes: { github: ['user:email'], oidc: ['openid', 'profile', 'email'] },
+        stateCookie: { maxAge: 600, name: 'oauthState', path: '/api/auth/oauth' },
         timeout: Duration.seconds(10),
     },
 } as const);

@@ -30,27 +30,15 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-/** Schema builder utilities for creating branded types. */
 const sb = Object.freeze({
-	boundedInt: <T extends string>(label: T, min: number, max: number) =>
-		pipe(S.Number, S.int(), S.between(min, max), S.brand(label)),
-	boundedNumber: <T extends string>(label: T, min: number, max: number) =>
-		pipe(S.Number, S.between(min, max), S.brand(label)),
-	nonNegativeInt: <T extends string>(label: T) =>
-		pipe(S.Number, S.int(), S.nonNegative(), S.brand(label)),
-	nonNegativeNumber: <T extends string>(label: T) =>
-		pipe(S.Number, S.nonNegative(), S.brand(label)),
-	pattern: <T extends string>(label: T, regex: RegExp) =>
-		pipe(S.String, S.pattern(regex), S.brand(label)),
-	positiveInt: <T extends string>(label: T) =>
-		pipe(S.Number, S.int(), S.positive(), S.brand(label)),
-	positiveNumber: <T extends string>(label: T) =>
-		pipe(S.Number, S.positive(), S.brand(label)),
+	boundedInt: <T extends string>(label: T, min: number, max: number) => pipe(S.Number, S.int(), S.between(min, max), S.brand(label)),
+	boundedNumber: <T extends string>(label: T, min: number, max: number) => pipe(S.Number, S.between(min, max), S.brand(label)),
+	nonNegativeInt: <T extends string>(label: T) => pipe(S.Number, S.int(), S.nonNegative(), S.brand(label)),
+	nonNegativeNumber: <T extends string>(label: T) => pipe(S.Number, S.nonNegative(), S.brand(label)),
+	pattern: <T extends string>(label: T, regex: RegExp) => pipe(S.String, S.pattern(regex), S.brand(label)),
+	positiveInt: <T extends string>(label: T) => pipe(S.Number, S.int(), S.positive(), S.brand(label)),
+	positiveNumber: <T extends string>(label: T) => pipe(S.Number, S.positive(), S.brand(label)),
 } as const);
-/** Return fallback when schema decode fails on partial objects. */
-const schemaDefaults = <T>(schema: S.Schema<T, unknown, never>, fallback: T): T =>
-	Effect.runSync(Effect.try({ catch: () => fallback, try: () => S.decodeUnknownSync(schema)({}) }));
-/** Create branded type with standard schema operations. */
 const make = <A, I>(schema: S.Schema<A, I, never>) =>
 	Object.freeze({
 		decode: S.decodeUnknown(schema),
@@ -61,9 +49,8 @@ const make = <A, I>(schema: S.Schema<A, I, never>) =>
 		is: S.is(schema),
 		schema,
 	});
-/** Extend branded type with synchronous generation capability. */
-const makeGeneratable = <A, I>(schema: S.Schema<A, I, never>, generateSync: () => A) =>
-	Object.freeze({ ...make(schema), generate: Effect.sync(generateSync), generateSync });
+const schemaDefaults = <T>(schema: S.Schema<T, unknown, never>, fallback: T): T => Effect.runSync(Effect.try({ catch: () => fallback, try: () => S.decodeUnknownSync(schema)({}) }));
+const makeGeneratable = <A, I>(schema: S.Schema<A, I, never>, generateSync: () => A) => Object.freeze({ ...make(schema), generate: Effect.sync(generateSync), generateSync });
 
 // --- [DURATION_MS] -----------------------------------------------------------
 
@@ -72,8 +59,7 @@ type DurationMs = S.Schema.Type<typeof DurationMsSchema>
 const DurationMs = Object.freeze({
 	...make(DurationMsSchema),
 	add: (a: DurationMs, b: DurationMs): DurationMs => (a + b) as DurationMs,
-	clamp: (d: DurationMs, min: DurationMs, max: DurationMs): DurationMs =>
-		Math.max(min, Math.min(max, d)) as DurationMs,
+	clamp: (d: DurationMs, min: DurationMs, max: DurationMs): DurationMs => Math.max(min, Math.min(max, d)) as DurationMs,
 	fromMillis: (ms: number): DurationMs => ms as DurationMs,
 	fromSeconds: (s: number): DurationMs => (s * 1000) as DurationMs,
 	max: (a: DurationMs, b: DurationMs): DurationMs => Math.max(a, b) as DurationMs,
@@ -93,13 +79,8 @@ const Email = Object.freeze(make(EmailSchema));
 
 const Hex8Schema = sb.pattern('Hex8', B.patterns.hex8);
 type Hex8 = S.Schema.Type<typeof Hex8Schema>
-/** Generate random 8-character hex string. */
-const hex8GenerateSync = (): Hex8 =>
-	Array.from({ length: B.hex.length8 }, () =>
-		Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix),
-	).join('') as Hex8;
-/** Derive deterministic 8-character hex from seed string. */
-const hex8Derive = (seed: string): Hex8 => {
+const hex8GenerateSync = (): Hex8 => Array.from({ length: B.hex.length8 }, () => Math.trunc(Math.random() * B.hex.radix).toString(B.hex.radix), ).join('') as Hex8;
+const hex8Derive = (seed: string): Hex8 => { /** Derive deterministic 8-character hex from seed string. */
 	const mod = B.hex.radix ** B.hex.length8;
 	const hash = Array.from(seed).reduce<number>((a, c) => (a * 31 + (c.codePointAt(0) ?? 0)) % mod, 0);
 	return hash.toString(B.hex.radix).padStart(B.hex.length8, '0').slice(-B.hex.length8) as Hex8;
@@ -112,10 +93,8 @@ const Hex64Schema = sb.pattern('Hex64', B.patterns.hex64);
 type Hex64 = S.Schema.Type<typeof Hex64Schema>
 const Hex64 = Object.freeze({
 	...make(Hex64Schema),
-	fromBase64: (base64: string): Uint8Array =>
-		Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0),
-	fromBytes: (bytes: Uint8Array): Hex64 =>
-		S.decodeSync(Hex64Schema)([...bytes].map((b) => b.toString(B.hex.radix).padStart(2, '0')).join('')),
+	fromBase64: (base64: string): Uint8Array => Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0),
+	fromBytes: (bytes: Uint8Array): Hex64 => S.decodeSync(Hex64Schema)([...bytes].map((b) => b.toString(B.hex.radix).padStart(2, '0')).join('')),
 });
 
 // --- [HEX_COLOR] -------------------------------------------------------------
@@ -219,35 +198,17 @@ const ZoomFactorSchema = sb.boundedNumber('ZoomFactor', B.bounds.zoomFactor.min,
 type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>
 const ZoomFactor = Object.freeze({
 	...make(ZoomFactorSchema),
-	clamp: (z: ZoomFactor, min: ZoomFactor, max: ZoomFactor): ZoomFactor =>
-		Math.max(min, Math.min(max, z)) as ZoomFactor,
+	clamp: (z: ZoomFactor, min: ZoomFactor, max: ZoomFactor): ZoomFactor => Math.max(min, Math.min(max, z)) as ZoomFactor,
 	max: B.bounds.zoomFactor.max as ZoomFactor,
 	min: B.bounds.zoomFactor.min as ZoomFactor,
 	one: 1 as ZoomFactor,
-	scale: (z: ZoomFactor, factor: number): ZoomFactor =>
-		S.decodeSync(ZoomFactorSchema)(z * factor),
+	scale: (z: ZoomFactor, factor: number): ZoomFactor => S.decodeSync(ZoomFactorSchema)(z * factor),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as TYPES_TUNING, schemaDefaults };
 export {
-	DurationMs,
-	Email,
-	Hex64,
-	Hex8,
-	HexColor,
-	HtmlId,
-	Index,
-	IsoDate,
-	NonNegativeInt,
-	Percentage,
-	PositiveInt,
-	SafeInteger,
-	Slug,
-	Timestamp,
-	Url,
-	Uuidv7,
-	VariantCount,
-	ZoomFactor,
+	DurationMs, Email, Hex64, Hex8, HexColor, HtmlId, Index, IsoDate, NonNegativeInt, Percentage, PositiveInt, SafeInteger, Slug,
+	Timestamp, Url, Uuidv7, VariantCount, ZoomFactor,
 };

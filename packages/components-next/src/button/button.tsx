@@ -3,93 +3,115 @@
  * Async state comes from external hooks (useEffectMutate) - no internal Effect execution.
  * REQUIRED: color and size props - no defaults, no hardcoded mappings.
  */
-import { AsyncState } from '@parametric-portal/types/async';
-import type { FC, ReactNode, Ref } from 'react';
+import { useMergeRefs } from '@floating-ui/react';
+import { readCssMs } from '@parametric-portal/runtime/runtime';
+import type { CSSProperties, FC, ReactNode, Ref } from 'react';
+import { useMemo, useRef } from 'react';
 import { Button as RACButton, type ButtonProps as RACButtonProps } from 'react-aria-components';
-import { cn, composeTailwindRenderProps } from '../core/css-slots';
-import { type AsyncSlotConfig, deriveAsyncSlot, renderSlotContent, type SlotInput } from '../core/slots';
+import { AsyncAnnouncer } from '../core/announce';
+import { useTooltip } from '../core/floating';
+import { type LongPressProps, useLongPressGesture } from '../core/gesture';
+import type { BasePropsFor } from '../core/props';
+import { cn, composeTailwindRenderProps, Slot, type SlotDef } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ButtonProps = Omit<RACButtonProps, 'children'> & {
-    readonly asyncState?: AsyncState<unknown, unknown>;
-    readonly children?: ReactNode;
-    readonly childrenAsync?: AsyncSlotConfig<ReactNode>;
-    readonly color: string;
-    readonly prefix?: SlotInput;
-    readonly prefixAsync?: AsyncSlotConfig;
-    readonly ref?: Ref<HTMLButtonElement>;
-    readonly size: string;
-    readonly suffix?: SlotInput;
-    readonly suffixAsync?: AsyncSlotConfig;
-    readonly variant?: string;
+type ButtonSpecificProps = {
+	readonly bgOpacity?: number;
+	readonly children?: SlotDef<ReactNode>;
+	readonly className?: RACButtonProps['className'];
+	readonly formAction?: string;
+	readonly formEncType?: string;
+	readonly formMethod?: string;
+	readonly formNoValidate?: boolean;
+	readonly formTarget?: string;
+	readonly isPending?: boolean;
+	readonly longPress?: LongPressProps;
+	readonly prefix?: SlotDef;
+	readonly preventFocusOnPress?: boolean;
+	readonly ref?: Ref<HTMLButtonElement>;
+	readonly suffix?: SlotDef;
+	readonly type?: 'button' | 'reset' | 'submit';
+	readonly value?: string;
 };
+type ButtonProps = BasePropsFor<'button'> & ButtonSpecificProps;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    slot: Object.freeze({
-        base: cn(
-            'inline-flex items-center justify-center cursor-pointer',
-            'h-(--button-height) w-(--button-width) px-(--button-px) gap-(--button-gap)',
-            'text-(--button-font-size) rounded-(--button-radius)',
-            'bg-(--button-bg) text-(--button-fg)',
-            'border-solid [border-width:var(--button-border-width,0)] [border-color:var(--button-border-color,transparent)]',
-            'shadow-(--button-shadow) font-(--button-font-weight) whitespace-nowrap overflow-hidden',
-            'duration-(--button-transition-duration) ease-(--button-transition-easing)',
-            'hovered:bg-(--button-hover-bg)',
-            'pressed:bg-(--button-pressed-bg) pressed:scale-(--button-pressed-scale)',
-            'focused:outline-none focused:ring-(--button-focus-ring-width) focused:ring-(--button-focus-ring-color) focused:ring-offset-(--button-focus-ring-offset)',
-            'disabled:pointer-events-none disabled:opacity-(--button-disabled-opacity)',
-        ),
-        icon: cn('size-(--button-icon-size) shrink-0', '[animation:var(--button-icon-animation,none)]'),
-        text: 'truncate',
-    }),
+	cssVars: Object.freeze({
+		hapticDuration: '--interaction-haptic-duration',
+		longPressThreshold: '--interaction-long-press-threshold',
+	}),
+	slot: Object.freeze({
+		base: cn(
+			'inline-flex items-center justify-center cursor-pointer',
+			'h-(--button-height) w-(--button-width) px-(--button-px) gap-(--button-gap)',
+			'text-(--button-font-size) rounded-(--button-radius)',
+			'[background-color:color-mix(in_oklch,var(--button-bg)_calc(var(--button-bg-opacity,1)*100%),transparent)]',
+			'text-(--button-fg)',
+			'border-solid [border-width:var(--button-border-width,0)] [border-color:var(--button-border-color,transparent)]',
+			'shadow-(--button-shadow) font-(--button-font-weight) whitespace-nowrap overflow-hidden',
+			'duration-(--button-transition-duration) ease-(--button-transition-easing)',
+			'hovered:bg-(--button-hover-bg)',
+			'pressed:bg-(--button-pressed-bg) pressed:scale-(--button-pressed-scale)',
+			'focused:outline-none focused:ring-(--focus-ring-width) focused:ring-(--focus-ring-color) focused:ring-offset-(--focus-ring-offset)',
+			'disabled:pointer-events-none disabled:opacity-(--button-disabled-opacity)',
+		),
+		icon: cn('size-(--button-icon-size) shrink-0', '[animation:var(--button-icon-animation,none)]'),
+		text: 'truncate',
+	}),
 });
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Button: FC<ButtonProps> = ({
-    asyncState,
-    children,
-    childrenAsync,
-    className,
-    color,
-    isDisabled,
-    prefix,
-    prefixAsync,
-    ref,
-    size,
-    suffix,
-    suffixAsync,
-    variant,
-    ...rest
+	asyncState, bgOpacity, children, className, color, isDisabled,
+	longPress, prefix, ref, size, suffix, tooltip, variant,
+	...rest
 }) => {
-    const isPending = AsyncState.isPending(asyncState);
-    const activePrefix = deriveAsyncSlot(prefix, prefixAsync, asyncState);
-    const activeSuffix = deriveAsyncSlot(suffix, suffixAsync, asyncState);
-    const activeChildren = deriveAsyncSlot(children, childrenAsync, asyncState);
-    return (
-        <RACButton
-            {...rest}
-            className={composeTailwindRenderProps(className, B.slot.base)}
-            data-async-state={AsyncState.toAttr(asyncState)}
-            data-color={color}
-            data-size={size}
-            data-slot='button'
-            data-variant={variant}
-            isDisabled={isDisabled === true || isPending}
-            isPending={isPending}
-            ref={ref}
-        >
-            {renderSlotContent(activePrefix, B.slot.icon)}
-            <span className={B.slot.text}>{activeChildren}</span>
-            {renderSlotContent(activeSuffix, B.slot.icon)}
-        </RACButton>
-    );
+	const slot = Slot.bind(asyncState);
+	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
+	const buttonRef = useRef<HTMLButtonElement>(null);
+	const { hapticMs, defaultThresholdMs } = useMemo(
+		() => ({ defaultThresholdMs: readCssMs(B.cssVars.longPressThreshold), hapticMs: readCssMs(B.cssVars.hapticDuration) }),
+		[],
+	);
+	const { props: longPressProps } = useLongPressGesture({
+		cssVar: '--button-longpress-progress',
+		defaultThresholdMs,
+		hapticMs,
+		isDisabled: isDisabled || slot.pending,
+		props: longPress,
+		ref: buttonRef,
+	});
+	const mergedRef = useMergeRefs([ref, buttonRef, tooltipProps.ref as Ref<HTMLButtonElement>]);
+	return (
+		<>
+			<RACButton
+				{...({ ...rest, ...tooltipProps, ...longPressProps } as unknown as RACButtonProps)}
+				className={composeTailwindRenderProps(className, B.slot.base)}
+				data-async-state={slot.attr}
+				data-color={color}
+				data-size={size}
+				data-slot='button'
+				data-variant={variant}
+				isDisabled={isDisabled || slot.pending}
+				isPending={slot.pending}
+				ref={mergedRef}
+				{...(bgOpacity !== undefined && { style: { '--button-bg-opacity': bgOpacity } as CSSProperties })}
+			>
+				{slot.render(prefix, B.slot.icon)}
+				<span className={B.slot.text}>{slot.resolve(children)}</span>
+				{slot.render(suffix, B.slot.icon)}
+			</RACButton>
+			<AsyncAnnouncer asyncState={asyncState} />
+			{renderTooltip?.()}
+		</>
+	);
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as BUTTON_TUNING, Button };
+export { Button };
 export type { ButtonProps };

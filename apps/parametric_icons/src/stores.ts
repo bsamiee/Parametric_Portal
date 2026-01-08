@@ -2,8 +2,8 @@
  * Application state stores via Zustand factory from @parametric-portal/runtime.
  */
 
+import type { ExportFormat } from '@parametric-portal/runtime/services/browser';
 import { createStore } from '@parametric-portal/runtime/store/factory';
-import type { ExportFormat } from '@parametric-portal/types/files';
 import { ColorMode, Intent, OutputMode } from '@parametric-portal/types/icons';
 import { Svg, SvgAsset } from '@parametric-portal/types/svg';
 import {
@@ -15,7 +15,7 @@ import {
     VariantCount,
     ZoomFactor,
 } from '@parametric-portal/types/types';
-import { Schema as S } from 'effect';
+import { Option, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -281,10 +281,14 @@ const useLibraryStore = createStore<LibraryState & LibraryActions, LibraryComput
                     ? get().savedAssets
                     : [...get().savedAssets, asset],
             }),
-        addCustomAsset: (name, svgContent) => {
-            const id = Uuidv7.generateSync();
-            set({ customAssets: [...get().customAssets, { id, name, svg: Svg.sanitize(svgContent) }] });
-        },
+        addCustomAsset: (name, svgContent) =>
+            Option.match(Svg.sanitize(svgContent), {
+                onNone: () => {},
+                onSome: (svg) => {
+                    const id = Uuidv7.generateSync();
+                    set({ customAssets: [...get().customAssets, { id, name, svg }] });
+                },
+            }),
         clearAssets: () => set({ savedAssets: [] }),
         removeAsset: (id) => set({ savedAssets: get().savedAssets.filter((asset) => asset.id !== id) }),
         removeCustomAsset: (id) => set({ customAssets: get().customAssets.filter((a) => a.id !== id) }),

@@ -1,8 +1,12 @@
 /**
  * Sanitize SVG markup with scoped ID rewriting.
  * Prevents ID collisions across multiple SVG assets via DOMPurify hooks.
+ *
+ * - Pure constructors (*At) require explicit IDs/scopes for referential transparency
+ * - Option-returning variants (*Option) for strict FP composition
+ * - Convenience variants use generateSync() internally (pragmatic for React)
  */
-import { ParseResult, pipe, Schema as S } from 'effect';
+import { Option, ParseResult, pipe, Schema as S } from 'effect';
 import DOMPurify from 'isomorphic-dompurify';
 import { Hex8, Uuidv7 } from './types.ts';
 
@@ -35,8 +39,7 @@ const SvgAssetInputSchema = S.Struct({ name: S.NonEmptyTrimmedString, svg: S.Str
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 /** Rewrite url(#id) references using scoped ID map to prevent collisions. */
-const replaceUrlRefs = (val: string, idMap: Map<string, string>): string =>
-	val.replaceAll(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${idMap.get(id) ?? id})`);
+const replaceUrlRefs = (val: string, idMap: Map<string, string>): string => val.replaceAll(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${idMap.get(id) ?? id})`);
 /** Mutate DOM node IDs and references in-place during sanitization. */
 const rewriteNode = (node: Element, idMap: Map<string, string>, scope: string): void => {
 	const oldId = node.getAttribute?.('id');
@@ -57,8 +60,7 @@ const rewriteNode = (node: Element, idMap: Map<string, string>, scope: string): 
 		node.textContent = replaceUrlRefs(node.textContent, idMap);
 	})();
 };
-/** Sanitize SVG and scope all IDs to prevent collisions. */
-const sanitize = (raw: string, seed?: string): Svg => {
+const sanitize = (raw: string, seed?: string): Option.Option<Svg> => { 	/** Sanitize SVG and scope all IDs to prevent collisions. Pure when seed provided, uses generateSync otherwise. */
 	const scope = seed === undefined ? Hex8.generateSync() : Hex8.derive(seed);
 	const idMap = new Map<string, string>();
 	DOMPurify.addHook('afterSanitizeAttributes', (node) => rewriteNode(node, idMap, scope));
@@ -68,10 +70,9 @@ const sanitize = (raw: string, seed?: string): Svg => {
 		USE_PROFILES: B.purify.USE_PROFILES,
 	});
 	DOMPurify.removeAllHooks();
-	return (result.includes('<svg') ? result : '') as Svg;
+	return result.includes('<svg') && result.includes('</svg>') ? Option.some(result as Svg) : Option.none();
 };
-/** Create schema utilities object with common encode/decode/is helpers. */
-const make = <A, I>(schema: S.Schema<A, I, never>) => Object.freeze({
+const make = <A, I>(schema: S.Schema<A, I, never>) => Object.freeze({ 	/** Create schema utilities object with common encode/decode/is helpers. */
 	decode: S.decodeUnknown(schema),
 	decodeSync: S.decodeUnknownSync(schema),
 	encode: S.encode(schema),
@@ -86,15 +87,18 @@ const Svg = Object.freeze({
 	...make(SvgSchema),
 	sanitize,
 	sanitizedSchema: S.transformOrFail(S.String, SvgSchema, {
-		decode: (raw, _, ast) => pipe(sanitize(raw), (r) =>
-			r.includes('<svg') ? ParseResult.succeed(r) : ParseResult.fail(new ParseResult.Type(ast, raw, 'Invalid SVG'))),
+		decode: (raw, _, ast) => Option.match(sanitize(raw), {
+			onNone: () => ParseResult.fail(new ParseResult.Type(ast, raw, 'Invalid SVG')),
+			onSome: ParseResult.succeed,
+		}),
 		encode: ParseResult.succeed,
 		strict: true,
 	}),
 });
 const SvgAsset = Object.freeze({
 	...make(SvgAssetSchema),
-	create: (name: string, svg: string): SvgAsset => ({ id: Uuidv7.generateSync(), name, svg: Svg.sanitize(svg) }),
+	/** Create new asset with generated ID. Returns None if SVG sanitization fails. */
+	create: (name: string, svg: string): Option.Option<SvgAsset> => Option.map(Svg.sanitize(svg), (sanitized) => ({ id: Uuidv7.generateSync(), name, svg: sanitized })),
 	inputSchema: SvgAssetInputSchema,
 });
 

@@ -152,7 +152,7 @@ const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProp
         },
         createElement(SvgPreview, {
             className: 'w-full h-full',
-            sanitize: (value: string) => Svg.sanitize(value, scopeSeed),
+            sanitize: (value: string) => Option.getOrElse(Svg.sanitize(value, scopeSeed), () => ''),
             svg,
         }),
     );
@@ -193,7 +193,9 @@ const HistoryContent = ({ assets, currentId, onSelect, onDelete, onClear }: Hist
                                     asset.variants[0] ? (
                                         <SvgPreview
                                             svg={asset.variants[0].svg}
-                                            sanitize={(value: string) => Svg.sanitize(value, asset.id)}
+                                            sanitize={(value: string) =>
+                                                Option.getOrElse(Svg.sanitize(value, asset.id), () => '')
+                                            }
                                             className='w-full h-full'
                                         />
                                     ) : (
@@ -259,7 +261,9 @@ const LibraryContent = ({
                                         thumbnail={
                                             <SvgPreview
                                                 svg={asset.svg}
-                                                sanitize={(value: string) => Svg.sanitize(value, asset.id)}
+                                                sanitize={(value: string) =>
+                                                    Option.getOrElse(Svg.sanitize(value, asset.id), () => '')
+                                                }
                                                 className='w-full h-full'
                                             />
                                         }
@@ -302,7 +306,9 @@ const LibraryContent = ({
                                                 svg ? (
                                                     <SvgPreview
                                                         svg={svg}
-                                                        sanitize={(value: string) => Svg.sanitize(value, asset.id)}
+                                                        sanitize={(value: string) =>
+                                                            Option.getOrElse(Svg.sanitize(value, asset.id), () => '')
+                                                        }
                                                         className='w-full h-full'
                                                     />
                                                 ) : (
@@ -925,7 +931,7 @@ const Stage = (): ReactNode => {
     const toggleGrid = useUiStore((s) => s.toggleGrid);
     const toggleSafeArea = useUiStore((s) => s.toggleSafeArea);
     const scopeSeed = currentId ?? currentSvg ?? '';
-    const sanitized = currentSvg ? Svg.sanitize(currentSvg, scopeSeed) : null;
+    const sanitized = currentSvg ? Option.getOrNull(Svg.sanitize(currentSvg, scopeSeed)) : null;
     return (
         <div className='stage'>
             <Box className='preview-box'>

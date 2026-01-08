@@ -1,123 +1,128 @@
 /**
  * Bridge Effect execution with React state via managed fibers.
- * Enables declarative effect runs with auto-cleanup and imperative mutations with manual triggers.
+ * Unified fiber execution pipeline with auto-cleanup.
  */
 import { type AsyncHookReturn, AsyncState, type MutateActions } from '@parametric-portal/types/async';
-import { Effect, Fiber } from 'effect';
+import { Effect, Fiber, type ManagedRuntime } from 'effect';
 import { type DependencyList, type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { Runtime } from '../runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type FiberRef = RefObject<Fiber.RuntimeFiber<unknown, unknown> | null>;
+type MutateState<A, I, E> = AsyncHookReturn<A, E, MutateActions<I>>;
 type RunOptions<A, E> = {
     readonly enabled?: boolean;
-    readonly onError?: (error: E) => void;
+    readonly onError?: (e: E) => void;
     readonly onSettled?: () => void;
-    readonly onSuccess?: (data: A) => void;
+    readonly onSuccess?: (a: A) => void;
 };
 type MutateOptions<A, I, E> = {
-    readonly onError?: (error: E, input: I) => void;
-    readonly onSettled?: (input: I) => void;
-    readonly onSuccess?: (data: A, input: I) => void;
+    readonly onError?: (e: E, i: I) => void;
+    readonly onSettled?: (i: I) => void;
+    readonly onSuccess?: (a: A, i: I) => void;
 };
-type MutateState<A, I, E> = AsyncHookReturn<A, E, MutateActions<I>> & { readonly isPending: boolean };
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const B = Object.freeze({
-    spans: {
-        mutate: 'effect-mutate',
-        run: 'effect-run',
-    },
-} as const);
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-const useFiberCleanup = <R>(fiberRef: RefObject<Fiber.RuntimeFiber<unknown, unknown> | null>): void => {
-    const runtime = Runtime.use<R, never>();
-    useEffect(
-        () => () => {
-            fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
+const makeCallbacks = <A, E>(
+    set: (state: AsyncState<A, E>) => void,
+    onSuccess?: (a: A) => void,
+    onError?: (e: E) => void,
+    onSettled?: () => void,
+) =>
+    Object.freeze({
+        onErr: (e: E): void => {
+            onError?.(e);
+            set(AsyncState.Failure(e));
+            onSettled?.();
         },
-        [runtime, fiberRef],
+        onOk: (a: A): void => {
+            onSuccess?.(a);
+            set(AsyncState.Success(a));
+            onSettled?.();
+        },
+    });
+const runFiber = <A, E, R>(
+    rt: ManagedRuntime.ManagedRuntime<R, never>,
+    ref: FiberRef,
+    effect: Effect.Effect<A, E, R>,
+    onOk: (a: A) => void,
+    onErr: (e: E) => void,
+    span: string,
+): void => {
+    // biome-ignore lint/style/noParameterAssign: React ref mutation pattern
+    ref.current = rt.runFork(
+        effect.pipe(
+            Effect.tap((a) => Effect.sync(() => onOk(a))),
+            Effect.withSpan(span),
+            Effect.catchAll((e: E) => Effect.sync(() => onErr(e))),
+        ),
     );
 };
+
+// --- [HOOKS] -----------------------------------------------------------------
+
 const useEffectRun = <A, E, R>(
     effect: Effect.Effect<A, E, R>,
     deps: DependencyList,
-    options: RunOptions<A, E> = {},
+    opts: RunOptions<A, E> = {},
 ): AsyncState<A, E> => {
-    const { enabled = true, onError, onSettled, onSuccess } = options;
-    const runtime = Runtime.use<R, never>();
-    const [state, setState] = useState<AsyncState<A, E>>(AsyncState.Idle());
-    const fiberRef = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
-    useFiberCleanup<R>(fiberRef);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: effect/callbacks intentionally excluded (identity changes on every render)
+    const { enabled = true, onError, onSettled, onSuccess } = opts;
+    const rt = Runtime.use<R, never>();
+    const [asyncState, setAsyncState] = useState<AsyncState<A, E>>(AsyncState.Idle());
+    const ref = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
+    useEffect(
+        () => () => {
+            ref.current && rt.runFork(Fiber.interrupt(ref.current));
+        },
+        [rt],
+    );
+    // biome-ignore lint/correctness/useExhaustiveDependencies: effect/callbacks identity changes
     useEffect(() => {
-        setState(enabled ? AsyncState.Loading() : AsyncState.Idle());
-        fiberRef.current = enabled
-            ? runtime.runFork(
-                  Effect.gen(function* () {
-                      const data = yield* effect;
-                      onSuccess?.(data);
-                      setState(AsyncState.Success(data));
-                      onSettled?.();
-                      return data;
-                  }).pipe(
-                      Effect.withSpan(B.spans.run),
-                      Effect.catchAll((error: E) => {
-                          onError?.(error);
-                          setState(AsyncState.Failure(error));
-                          onSettled?.();
-                          return Effect.void;
-                      }),
-                  ),
-              )
-            : null;
-    }, [enabled, ...deps, runtime]);
-    return state;
+        ref.current && rt.runFork(Fiber.interrupt(ref.current));
+        setAsyncState(enabled ? AsyncState.Loading() : AsyncState.Idle());
+        const cbs = enabled ? makeCallbacks(setAsyncState, onSuccess, onError, onSettled) : null;
+        cbs && runFiber(rt, ref, effect, cbs.onOk, cbs.onErr, 'effect-run');
+    }, [enabled, ...deps, rt]);
+    return asyncState;
 };
 const useEffectMutate = <A, I, E, R>(
-    fn: (input: I) => Effect.Effect<A, E, R>,
-    options: MutateOptions<A, I, E> = {},
+    fn: (i: I) => Effect.Effect<A, E, R>,
+    opts: MutateOptions<A, I, E> = {},
 ): MutateState<A, I, E> => {
-    const { onError, onSettled, onSuccess } = options;
-    const runtime = Runtime.use<R, never>();
-    const [state, setState] = useState<AsyncState<A, E>>(AsyncState.Idle);
-    const fiberRef = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
-    useFiberCleanup<R>(fiberRef);
-    const mutate = useCallback(
-        (input: I) => {
-            setState(AsyncState.Loading());
-            fiberRef.current = runtime.runFork(
-                Effect.gen(function* () {
-                    const data = yield* fn(input);
-                    onSuccess?.(data, input);
-                    setState(AsyncState.Success(data));
-                    onSettled?.(input);
-                    return data;
-                }).pipe(
-                    Effect.withSpan(B.spans.mutate),
-                    Effect.catchAll((error: E) => {
-                        onError?.(error, input);
-                        setState(AsyncState.Failure(error));
-                        onSettled?.(input);
-                        return Effect.void;
-                    }),
-                ),
-            );
+    const { onError, onSettled, onSuccess } = opts;
+    const rt = Runtime.use<R, never>();
+    const [asyncState, setAsyncState] = useState<AsyncState<A, E>>(AsyncState.Idle());
+    const ref = useRef<Fiber.RuntimeFiber<unknown, unknown> | null>(null);
+    useEffect(
+        () => () => {
+            ref.current && rt.runFork(Fiber.interrupt(ref.current));
         },
-        [runtime, fn, onError, onSettled, onSuccess],
+        [rt],
+    );
+    const mutate = useCallback(
+        (i: I) => {
+            setAsyncState(AsyncState.Loading());
+            const { onErr, onOk } = makeCallbacks(
+                setAsyncState,
+                onSuccess ? (a: A) => onSuccess(a, i) : undefined,
+                onError ? (e: E) => onError(e, i) : undefined,
+                onSettled ? () => onSettled(i) : undefined,
+            );
+            runFiber(rt, ref, fn(i), onOk, onErr, 'effect-mutate');
+        },
+        [rt, fn, onError, onSettled, onSuccess],
     );
     const reset = useCallback(() => {
-        fiberRef.current && runtime.runFork(Fiber.interrupt(fiberRef.current));
-        fiberRef.current = null;
-        setState(AsyncState.Idle());
-    }, [runtime]);
-    return { isPending: AsyncState.isPending(state), mutate, reset, state };
+        ref.current && rt.runFork(Fiber.interrupt(ref.current));
+        ref.current = null;
+        setAsyncState(AsyncState.Idle());
+    }, [rt]);
+    return { mutate, reset, state: asyncState };
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { MutateOptions, MutateState, RunOptions };
-export { useEffectMutate, useEffectRun, useFiberCleanup };
+export { useEffectMutate, useEffectRun };

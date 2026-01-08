@@ -23,6 +23,11 @@
 			"import": "./src/core/slots.ts",
 			"default": "./src/core/slots.ts"
 		},
+		"./core/announce": {
+			"types": "./src/core/announce.tsx",
+			"import": "./src/core/announce.tsx",
+			"default": "./src/core/announce.tsx"
+		},
 		"./file-preview": {
 			"types": "./src/file-preview/file-preview.tsx",
 			"import": "./src/file-preview/file-preview.tsx",
@@ -32,6 +37,46 @@
 			"types": "./src/file-upload/file-upload.tsx",
 			"import": "./src/file-upload/file-upload.tsx",
 			"default": "./src/file-upload/file-upload.tsx"
+		},
+		"./core/animate": {
+			"types": "./src/core/animate.ts",
+			"import": "./src/core/animate.ts",
+			"default": "./src/core/animate.ts"
+		},
+		"./core/focus": {
+			"types": "./src/core/focus.tsx",
+			"import": "./src/core/focus.tsx",
+			"default": "./src/core/focus.tsx"
+		},
+		"./core/floating": {
+			"types": "./src/core/floating.tsx",
+			"import": "./src/core/floating.tsx",
+			"default": "./src/core/floating.tsx"
+		},
+		"./toggle": {
+			"types": "./src/toggle/toggle.tsx",
+			"import": "./src/toggle/toggle.tsx",
+			"default": "./src/toggle/toggle.tsx"
+		},
+		"./select": {
+			"types": "./src/select/select.tsx",
+			"import": "./src/select/select.tsx",
+			"default": "./src/select/select.tsx"
+		},
+		"./tabs": {
+			"types": "./src/tabs/tabs.tsx",
+			"import": "./src/tabs/tabs.tsx",
+			"default": "./src/tabs/tabs.tsx"
+		},
+		"./menu": {
+			"types": "./src/menu/menu.tsx",
+			"import": "./src/menu/menu.tsx",
+			"default": "./src/menu/menu.tsx"
+		},
+		"./radio": {
+			"types": "./src/radio/radio.tsx",
+			"import": "./src/radio/radio.tsx",
+			"default": "./src/radio/radio.tsx"
 		}
 	},
 	"scripts": {
@@ -44,10 +89,12 @@
 		"typecheck": "tsc --project tsconfig.json --noEmit"
 	},
 	"dependencies": {
+		"@floating-ui/react": "catalog:",
+		"@formkit/auto-animate": "catalog:",
 		"@parametric-portal/runtime": "workspace:*",
 		"@parametric-portal/theme": "workspace:*",
 		"@parametric-portal/types": "workspace:*",
-		"@radix-ui/react-slot": "catalog:",
+		"@radix-ui/react-visually-hidden": "catalog:",
 		"clsx": "catalog:",
 		"effect": "catalog:",
 		"lucide-react": "catalog:",
