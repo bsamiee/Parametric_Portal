@@ -38,7 +38,7 @@ const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: U
                 maxAge: `${AUTH_TUNING.cookie.maxAge} seconds`,
                 path: AUTH_TUNING.cookie.path,
                 sameSite: 'lax',
-                secure: true,
+                secure: AUTH_TUNING.cookie.secure,
             }),
         ),
     );
@@ -51,7 +51,7 @@ const buildLogoutResponse = () =>
                 maxAge: '0 seconds',
                 path: AUTH_TUNING.cookie.path,
                 sameSite: 'lax',
-                secure: true,
+                secure: AUTH_TUNING.cookie.secure,
             }),
         ),
     );
@@ -110,7 +110,7 @@ const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: OAuthService, pro
             maxAge: `${AUTH_TUNING.oauth.stateCookie.maxAge} seconds`,
             path: AUTH_TUNING.oauth.stateCookie.path,
             sameSite: 'lax',
-            secure: true,
+            secure: AUTH_TUNING.oauth.stateCookie.secure,
         });
     }).pipe(
         Effect.mapError((e) => {
@@ -198,7 +198,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                     maxAge: '0 seconds',
                     path: AUTH_TUNING.oauth.stateCookie.path,
                     sameSite: 'lax',
-                    secure: true,
+                    secure: AUTH_TUNING.oauth.stateCookie.secure,
                 }),
                 Effect.mapError(() => httpErr('Cookie clear failed')),
             );
