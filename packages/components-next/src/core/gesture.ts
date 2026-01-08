@@ -79,7 +79,7 @@ type GestureProps = SimplifyDeep<{
 	readonly onWheel?: (e: Extract<GestureEventDef, { _tag: 'Wheel' }>, phase: Phase) => void;
 	readonly onMove?: (e: Extract<GestureEventDef, { _tag: 'Move' }>, phase: Phase) => void;
 	readonly onHover?: (e: Extract<GestureEventDef, { _tag: 'Hover' }>, phase: Phase) => void;
-	readonly onLongPressEvent?: (e: Extract<GestureEventDef, { _tag: 'LongPress' }>, phase: Phase) => void;
+	readonly onLongPress?: (e: Extract<GestureEventDef, { _tag: 'LongPress' }>, phase: Phase) => void;
 	readonly bounds?: BoundsConfig;
 	readonly snap?: SnapConfig;
 	readonly physics?: PhysicsConfig;
@@ -184,7 +184,7 @@ const isIntentional = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? 
 const useGesture = (config: GestureConfig): GestureResult => {
 	const {
 		bounds, cssVars, drag, eventOptions, hover, isDisabled = false, longPress, mobile, move,
-		onDrag: onDragCb, onGesture, onHover: onHoverCb, onLongPressEvent, onMove: onMoveCb,
+		onDrag: onDragCb, onGesture, onHover: onHoverCb, onLongPress, onMove: onMoveCb,
 		onPinch: onPinchCb, onScroll: onScrollCb, onSwipe, onWheel: onWheelCb,
 		physics, pinch, ref, scroll, snap, transform, wheel,
 	} = config;
@@ -193,7 +193,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 	const swipeCfg = useMemo(() => ({ distance: readCssPx(B.css.swipeDistance), duration: readCssMs(B.css.swipeDuration), velocity: readCssPx(B.css.swipeVelocity) / 1000 }), []);
 	const inertiaRef = useRef<{ active: boolean; position: V2; velocity: V2 }>({ active: false, position: [0, 0], velocity: [0, 0] });
 	const physicsRafRef = useRef<number | null>(null);
-	const typedCallbacks = useMemo(() => ({ drag: onDragCb, hover: onHoverCb, longpress: onLongPressEvent, move: onMoveCb, pinch: onPinchCb, scroll: onScrollCb, wheel: onWheelCb }) as const, [onDragCb, onHoverCb, onLongPressEvent, onMoveCb, onPinchCb, onScrollCb, onWheelCb]);
+	const typedCallbacks = useMemo(() => ({ drag: onDragCb, hover: onHoverCb, longpress: onLongPress, move: onMoveCb, pinch: onPinchCb, scroll: onScrollCb, wheel: onWheelCb }) as const, [onDragCb, onHoverCb, onLongPress, onMoveCb, onPinchCb, onScrollCb, onWheelCb]);
 	// RAF required for frame-synced animations in React hooks (Effect.repeatWhile incompatible with React render cycle)
 	const startInertia = useCallback((startPos: V2, startVel: V2): void => {
 		const decay = physics?.decay;
@@ -267,9 +267,9 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		rafRef.current = requestAnimationFrame(tick);
 		const evt = LongPress({ pointerType: pointerTypeRef.current, progress: 0 });
 		setState((s) => ({ ...s, longpress: evt }));
-		onLongPressEvent?.(evt, 'start');
+		onLongPress?.(evt, 'start');
 		onGesture?.(evt, 'start');
-	}, [cssVars?.progress, lpThreshold, onGesture, onLongPressEvent, ref]);
+	}, [cssVars?.progress, lpThreshold, onGesture, onLongPress, ref]);
 	const lpEnd = useCallback(() => {
 		rafRef.current !== null && cancelAnimationFrame(rafRef.current);
 		repeatRef.current !== null && clearInterval(repeatRef.current);
@@ -278,19 +278,19 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		ref.current?.removeAttribute('data-longpress-progress');
 		const evt = LongPress({ pointerType: pointerTypeRef.current, progress: 1 });
 		setState((s) => ({ ...s, longpress: evt }));
-		onLongPressEvent?.(evt, 'end');
+		onLongPress?.(evt, 'end');
 		onGesture?.(evt, 'end');
-	}, [cssVars?.progress, onGesture, onLongPressEvent, ref]);
+	}, [cssVars?.progress, onGesture, onLongPress, ref]);
 	const lpComplete = useCallback(() => {
 		lpHapticMs > 0 && vibrate(lpHapticMs);
 		const evt = LongPress({ pointerType: pointerTypeRef.current, progress: 1 });
-		onLongPressEvent?.(evt, 'move');
+		onLongPress?.(evt, 'move');
 		onGesture?.(evt, 'move');
 		const interval = longPress?.repeatInterval && longPress.repeatInterval > 0
-			? setInterval(() => { lpHapticMs > 0 && vibrate(lpHapticMs); onLongPressEvent?.(evt, 'move'); onGesture?.(evt, 'move'); }, longPress.repeatInterval)
+			? setInterval(() => { lpHapticMs > 0 && vibrate(lpHapticMs); onLongPress?.(evt, 'move'); onGesture?.(evt, 'move'); }, longPress.repeatInterval)
 			: null;
 		repeatRef.current = interval;
-	}, [longPress?.repeatInterval, lpHapticMs, onGesture, onLongPressEvent]);
+	}, [longPress?.repeatInterval, lpHapticMs, onGesture, onLongPress]);
 	useEffect(() => longPress?.cancelOnMove
 		? (() => {
 			const onMove = (e: PointerEvent): void => {

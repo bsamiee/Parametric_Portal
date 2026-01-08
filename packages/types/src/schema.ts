@@ -66,13 +66,16 @@ const oauthProviderEnum = pgEnum('oauth_provider', [...B.enums.oauthProvider]);
 const aiProviderEnum = pgEnum('ai_provider', [...B.enums.aiProvider]);
 const assetTypeEnum = pgEnum('asset_type', [...B.enums.assetType]);
 const auditOperationEnum = pgEnum('audit_operation', [...B.enums.auditOperation]);
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+// Server-only: Buffer type guarded for browser import safety
+// biome-ignore lint/suspicious/noExplicitAny: Buffer only available in Node.js
+const BufferType = globalThis.Buffer ?? (class BufferPolyfill { private readonly _brand = 'BufferPolyfill' as const; } as any);
+const bytea = customType<{ data: typeof BufferType; driverData: typeof BufferType }>({
     dataType: () => 'bytea',
-    fromDriver: (value: Buffer): Buffer => value,
-    toDriver: (value: Buffer): Buffer => value,
+    fromDriver: (value): typeof BufferType => value,
+    toDriver: (value): typeof BufferType => value,
 });
 const NullableDate = S.NullOr(S.DateFromSelf);
-const BufferSchema = S.instanceOf(Buffer);
+const BufferSchema = S.instanceOf(BufferType);
 
 // --- [ROW_SCHEMAS] -----------------------------------------------------------
 
