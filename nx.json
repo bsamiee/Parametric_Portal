@@ -136,6 +136,10 @@
             }
         },
         "conventionalCommits": {
+            "parserOpts": {
+                "headerCorrespondence": ["type", "scope", "subject"],
+                "headerPattern": "^\\[?([A-Za-z]+)!?\\]?!?(?:\\(([^)]*)\\))?:\\s*(.+)$"
+            },
             "types": {
                 "build": {
                     "changelog": false

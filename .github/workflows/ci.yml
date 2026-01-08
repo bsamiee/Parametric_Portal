@@ -20,21 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # --- Normalize Commit (Independent) ---------------------------------------
-  normalize-commit:
-    name: Normalize Commit
-    if: github.event_name == 'push' && startsWith(github.event.head_commit.message, '[')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-      - uses: ./.github/actions/node-env
-      - uses: ./.github/actions/normalize-commit
-
   # --- Quality Gate ---------------------------------------------------------
   quality:
     name: Code Quality

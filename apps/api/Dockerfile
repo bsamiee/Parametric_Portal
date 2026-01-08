@@ -19,7 +19,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch --frozen-lockfile
 COPY package.json ./
 COPY packages/*/package.json ./packages/
 COPY apps/api/package.json ./apps/api/
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline --ignore-scripts
 
 FROM deps AS build
 COPY packages ./packages
@@ -37,7 +37,7 @@ RUN groupadd -g 1001 appgroup && \
 
 WORKDIR /app
 
-COPY --link --from=build --chown=appuser:appgroup /prod/api ./
+COPY --link --from=build --chown=appuser:appgroup --chmod=555 /prod/api ./
 
 ENV NODE_ENV=production
 ENV NODE_OPTIONS="--enable-source-maps"

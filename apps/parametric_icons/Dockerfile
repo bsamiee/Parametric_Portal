@@ -19,7 +19,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch --frozen-lockfile
 COPY package.json ./
 COPY packages/*/package.json ./packages/
 COPY apps/parametric_icons/package.json ./apps/parametric_icons/
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --offline --ignore-scripts
 
 FROM deps AS build
 ARG VITE_API_URL
@@ -32,9 +32,12 @@ RUN pnpm exec nx run @parametric-portal/parametric-icons:build
 
 # --- RUNTIME (spa-to-http) ----------------------------------------------------
 FROM devforth/spa-to-http@sha256:f6e18f2ae51fd95f7f53808d8f4dad2e0ee874b70ae83fc79c872da89d2ddeb7 AS runtime
+
+RUN addgroup -g 1001 appgroup && adduser -u 1001 -G appgroup -D -H appuser
+
 WORKDIR /code
 
-COPY --link --from=build /app/apps/parametric_icons/dist .
+COPY --link --from=build --chown=appuser:appgroup --chmod=555 /app/apps/parametric_icons/dist .
 
 ENV ADDRESS=0.0.0.0
 ENV PORT=8080
@@ -47,6 +50,8 @@ ENV LOGGER=true
 ENV LOG_PRETTY=false
 ENV CACHE=true
 ENV CACHE_BUFFER=51200
+
+USER appuser
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "require('http').get('http://localhost:8080/', r => process.exit(r.statusCode < 400 ? 0 : 1))" || exit 1

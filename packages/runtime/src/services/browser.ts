@@ -42,7 +42,7 @@ const downloadBlob = (blob: Blob, filename: string): void => {
 const sanitizeFilename = (text: string): string =>
     text
         .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
-        .replaceAll(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replaceAll(/([A-Z])(?=[A-Z][a-z])/g, '$1 ')
         .toLowerCase()
         .trim()
         .replaceAll(/[^a-z0-9 -]/g, '')
@@ -119,10 +119,8 @@ const zipEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>>
             Stream.zipWithIndex,
             Stream.mapEffect(([svg, index]: readonly [string, number]) =>
                 Effect.sync(() => {
-                    Option.match(Svg.sanitize(svg), {
-                        onNone: () => {},
-                        onSome: (sanitized) => zip.file(`${base}_variant_${index + 1}.svg`, sanitized),
-                    });
+                    const sanitized = Option.getOrNull(Svg.sanitize(svg));
+                    sanitized && zip.file(`${base}_variant_${index + 1}.svg`, sanitized);
                     input.onProgress?.((index + 1) / total);
                 }),
             ),

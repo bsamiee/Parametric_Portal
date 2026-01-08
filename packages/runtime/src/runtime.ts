@@ -51,7 +51,15 @@ const Provider = <R, E>({ children, disposeOnUnmount, runtime }: ProviderProps<R
         }),
         [],
     );
-    useEffect(() => (disposeOnUnmount ? () => void runtime.dispose() : undefined), [disposeOnUnmount, runtime]);
+    useEffect(
+        () =>
+            disposeOnUnmount
+                ? () => {
+                      runtime.dispose();
+                  }
+                : undefined,
+        [disposeOnUnmount, runtime],
+    );
     return createElement(
         ctx.Provider,
         { value: runtime },

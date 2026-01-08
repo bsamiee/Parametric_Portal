@@ -75,13 +75,13 @@ const createMessageStream = <T>(
                     const isTypeValid = !typeFilter || event.data?.type === typeFilter;
                     const result = isOriginValid && isTypeValid ? validateData(schema, event.data?.data) : undefined;
                     result &&
-                        (Either.isLeft(result)
-                            ? void emit.fail(AppError.from('Messaging', 'VALIDATION_FAILED', 'Invalid message data'))
-                            : void emit.single({
+                        (Either.isRight(result)
+                            ? emit.single({
                                   data: result.right,
                                   timestamp: event.data?.timestamp ?? Timestamp.nowSync(),
                                   type: event.data?.type ?? 'message',
-                              }));
+                              })
+                            : emit.fail(AppError.from('Messaging', 'VALIDATION_FAILED', 'Invalid message data')));
                 };
                 window.addEventListener('message', handler);
                 return handler;

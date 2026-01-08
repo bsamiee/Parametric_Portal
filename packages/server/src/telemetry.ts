@@ -15,7 +15,7 @@ type Environment = 'production' | 'development';
 
 const B = Object.freeze({
     defaults: {
-        endpointHttp: 'http://alloy.monitoring.svc.cluster.local:4318',
+        endpointHttp: 'https://alloy.monitoring.svc.cluster.local:4318',
         environment: 'development' as Environment,
         namespace: 'parametric-portal',
         serviceName: 'api',

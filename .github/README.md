@@ -42,8 +42,7 @@
 |   [5]   | `pr-hygiene`       | Resolve outdated review threads, cleanup prompts            |
 |   [6]   | `auto-fix`         | Run fixers (Biome), commit, push                            |
 |   [7]   | `git-identity`     | Configure git user for commits                              |
-|   [8]   | `normalize-commit` | Transform `[TYPE!]:` to `type!:` format                     |
-|   [9]   | `slash-dispatch`   | Slash command dispatcher (prepared, not active)             |
+|   [8]   | `slash-dispatch`   | Slash command dispatcher (prepared, not active)             |
 
 ---
 ### [1.3][SCRIPTS]
