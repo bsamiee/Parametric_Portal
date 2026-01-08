@@ -116,3 +116,4 @@ infrastructure/kamal/.kamal/secrets
 infrastructure/traefik/acme/
 *.pem
 credentials.json
+.automaker-claude-backup.md
