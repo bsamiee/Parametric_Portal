@@ -28,6 +28,11 @@
 			"import": "./src/core/focus.tsx",
 			"default": "./src/core/focus.tsx"
 		},
+		"./core/dnd": {
+			"types": "./src/core/dnd.ts",
+			"import": "./src/core/dnd.ts",
+			"default": "./src/core/dnd.ts"
+		},
 		"./core/gesture": {
 			"types": "./src/core/gesture.ts",
 			"import": "./src/core/gesture.ts",
@@ -105,13 +110,17 @@
 		"@parametric-portal/theme": "workspace:*",
 		"@parametric-portal/types": "workspace:*",
 		"@radix-ui/react-visually-hidden": "catalog:",
+		"@use-gesture/react": "catalog:",
 		"clsx": "catalog:",
 		"effect": "catalog:",
 		"lucide-react": "catalog:",
 		"react-aria": "catalog:",
 		"react-aria-components": "catalog:",
 		"tailwind-merge": "catalog:",
-		"tw-animate-css": "catalog:"
+		"ts-essentials": "catalog:",
+		"ts-toolbelt": "catalog:",
+		"tw-animate-css": "catalog:",
+		"type-fest": "catalog:"
 	},
 	"devDependencies": {
 		"@types/react": "catalog:",

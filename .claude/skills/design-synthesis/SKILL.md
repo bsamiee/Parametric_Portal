@@ -2,6 +2,8 @@
 name: design-synthesis
 type: simple
 depth: extended
+context: fork
+user-invocable: false
 description: >-
   Synthesizes research findings into design decisions via codebase investigation.
   Use when (1) translating research into implementation approaches, (2) selecting

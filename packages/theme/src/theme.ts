@@ -30,19 +30,10 @@ const ThemeConfigSchema = S.Struct({
     }),
     colors: S.Record({
         key: S.String,
-        value: S.Struct({
-            c: S.Number.pipe(S.clamp(0, 0.4)),
-            h: S.Number.pipe(S.clamp(0, 360)),
-            l: S.Number.pipe(S.clamp(0, 1)),
-        }),
+        value: S.Struct({ c: S.Number.pipe(S.clamp(0, 0.4)), h: S.Number.pipe(S.clamp(0, 360)), l: S.Number.pipe(S.clamp(0, 1)), }),
     }),
     components: S.Array(ComponentSpecSchema),
-    focus: S.Struct({
-        color: FocusColorRefSchema,
-        offset: S.String,
-        width: S.String,
-        z: S.String,
-    }),
+    focus: S.Struct({ color: FocusColorRefSchema, offset: S.String, width: S.String, z: S.String, }),
     fonts: S.Record({ key: S.String, value: S.String }),
     interaction: S.Struct({
         announceDuration: S.Number.pipe(S.positive()),

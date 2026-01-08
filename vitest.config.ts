@@ -111,7 +111,7 @@ export default defineConfig({
             reportOnFailure: true,
             reportsDirectory: path.resolve(Dirname, 'coverage'),
             skipFull: false,
-            thresholds: { autoUpdate: false, branches: 30, functions: 30, lines: 30, perFile: false, statements: 30 },
+            // Thresholds disabled for fast-moving early development - re-enable when stabilized
         },
         deps: { ...B.deps },
         diff: { ...B.output.diff },

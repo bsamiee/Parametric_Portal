@@ -11,13 +11,17 @@
 
 <br>
 
-| [INDEX] | [FIELD]       | [TYPE] | [REQ]  | [CONSTRAINT]                                              |
-| :-----: | ------------- | ------ | :----: | --------------------------------------------------------- |
-|   [1]   | `name`        | string |  Yes   | Lowercase+numbers+hyphens, max 64, no XML, no reserved^1^ |
-|   [2]   | `description` | string |  Yes   | Non-empty, max 1024 chars, no XML tags                    |
-|   [3]   | `type`        | enum   | Yes^2^ | `simple`, `standard`,`complex` — see structure.md         |
-|   [4]   | `depth`       | enum   | Yes^2^ | `base`,`extended`,`full` — see depth.md                   |
-|   [5]   | `model`       | string |   No   | `opus*`, `sonnet`, `haiku`, or `inherit`                  |
+| [INDEX] | [FIELD]          | [TYPE]  | [REQ]  | [CONSTRAINT]                                              |
+| :-----: | ---------------- | ------- | :----: | --------------------------------------------------------- |
+|   [1]   | `name`           | string  |  Yes   | Lowercase+numbers+hyphens, max 64, no XML, no reserved^1^ |
+|   [2]   | `description`    | string  |  Yes   | Non-empty, max 1024 chars, no XML tags                    |
+|   [3]   | `type`           | enum    | Yes^2^ | `simple`, `standard`, `complex` — see structure.md        |
+|   [4]   | `depth`          | enum    | Yes^2^ | `base`, `extended`, `full` — see depth.md                 |
+|   [5]   | `model`          | string  |   No   | `opus*`, `sonnet`, `haiku`, or `inherit`                  |
+|   [6]   | `context`        | enum    |   No   | `fork` — isolated execution, no shared parent state       |
+|   [7]   | `agent`          | string  |   No   | Execution agent type override                             |
+|   [8]   | `user-invocable` | boolean |   No   | `false` hides from slash menu                             |
+|   [9]   | `hooks`          | object  |   No   | Scoped PreToolUse, PostToolUse, Stop hooks                |
 
 ^1^Reserved: "anthropic", "claude" — registration fails.
 ^2^Required by skill-builder for refine workflow.

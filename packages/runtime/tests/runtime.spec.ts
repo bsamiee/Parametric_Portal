@@ -3,9 +3,8 @@
  * Validates make, Provider, and use hook behavior.
  */
 import '@parametric-portal/test-utils/harness';
-import { renderHook } from '@testing-library/react';
+import { render, renderHook } from '@testing-library/react';
 import { Layer, ManagedRuntime } from 'effect';
-import type { ReactElement } from 'react';
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { Runtime } from '../src/runtime';
@@ -44,11 +43,13 @@ describe('Runtime', () => {
 
 describe('Runtime.Provider', () => {
     it('renders children in context', () => {
-        const runtime = ManagedRuntime.make(Layer.empty);
-        const child = React.createElement('div', null, 'Test');
-        const element = Runtime.Provider({ children: child, runtime }) as ReactElement<{ children: typeof child }>;
-        expect(React.isValidElement(element)).toBe(true);
-        expect(element.props.children).toBe(child);
+        // biome-ignore lint/suspicious/noExplicitAny: test type coercion for generic runtime
+        const runtime = ManagedRuntime.make(Layer.empty) as any;
+        const child = React.createElement('div', { 'data-testid': 'child' }, 'Test');
+        // biome-ignore lint/correctness/noChildrenProp: Runtime.Provider requires children in props
+        const { container } = render(React.createElement(Runtime.Provider, { children: child, runtime }));
+        expect(container.querySelector('[data-testid="child"]')).toBeTruthy();
+        expect(container.textContent).toContain('Test');
     });
 });
 
@@ -56,9 +57,12 @@ describe('Runtime.Provider', () => {
 
 describe('Runtime.use', () => {
     it('returns runtime inside provider', () => {
-        const runtime = ManagedRuntime.make(Layer.empty);
+        // biome-ignore lint/suspicious/noExplicitAny: test type coercion for generic runtime
+        const runtime = ManagedRuntime.make(Layer.empty) as any;
         const { result } = renderHook(() => Runtime.use(), {
-            wrapper: ({ children }) => Runtime.Provider({ children, runtime }),
+            // biome-ignore lint/correctness/noChildrenProp: Runtime.Provider requires children in props
+            // biome-ignore lint/suspicious/noExplicitAny: wrapper props require type coercion
+            wrapper: ({ children }) => React.createElement(Runtime.Provider, { children, runtime } as any),
         });
         expect(result.current).toBe(runtime);
     });

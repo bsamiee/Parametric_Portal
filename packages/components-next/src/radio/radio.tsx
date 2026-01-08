@@ -6,7 +6,6 @@
  * REQUIRED: color, size, icon props - no defaults.
  */
 import { useMergeRefs } from '@floating-ui/react';
-import { readCssMs } from '@parametric-portal/runtime/runtime';
 import { createContext, type FC, type ReactNode, type Ref, useContext, useMemo, useRef } from 'react';
 import {
 	FieldError, Label, Radio as RACRadio, RadioGroup as RACRadioGroup, type RadioGroupProps as RACRadioGroupProps,
@@ -14,7 +13,7 @@ import {
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip } from '../core/floating';
-import { type LongPressProps, useLongPressGesture } from '../core/gesture';
+import { useGesture, type GestureProps } from '../core/gesture';
 import type { BasePropsFor } from '../core/props';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
 
@@ -50,8 +49,8 @@ type RadioSpecificProps = {
 	readonly card?: boolean;
 	readonly children?: SlotDef<ReactNode> | ((state: RadioState) => ReactNode);
 	readonly className?: RACRadioProps['className'];
+	readonly gesture?: GestureProps;
 	readonly id?: string;
-	readonly longPress?: LongPressProps;
 	readonly ref?: Ref<HTMLLabelElement>;
 	readonly value: string;
 };
@@ -61,10 +60,6 @@ type RadioProps = BasePropsFor<'radio'> & RadioSpecificProps;
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-	cssVars: Object.freeze({
-		hapticDuration: '--interaction-haptic-duration',
-		longPressThreshold: '--interaction-long-press-threshold',
-	}),
 	slot: {
 		description: cn('text-(--radio-group-description-size) text-(--radio-group-description-color)'),
 		fieldError: cn('text-(--radio-group-error-size) text-(--radio-group-error-color)'),
@@ -150,25 +145,20 @@ const RadioGroup: FC<RadioGroupProps> = ({
 	);
 };
 const Radio: FC<RadioProps> = ({
-	asyncState, autoFocus, card, children, className, color, icon, inputRef, isDisabled,
-	longPress, onBlur, onFocus, onFocusChange, onHoverEnd, onHoverStart, onKeyDown, onKeyUp, ref, size, slot: slotProp, tooltip,
+	asyncState, autoFocus, card, children, className, color, gesture, icon, inputRef, isDisabled,
+	onBlur, onFocus, onFocusChange, onHoverEnd, onHoverStart, onKeyDown, onKeyUp, ref, size, slot: slotProp, tooltip,
 	...rest
 }) => {
 	const groupCtx = useRadioGroupContext();
 	const slot = Slot.bind(asyncState);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const radioRef = useRef<HTMLLabelElement>(null);
-	const { hapticMs, defaultThresholdMs } = useMemo(
-		() => ({ defaultThresholdMs: readCssMs(B.cssVars.longPressThreshold), hapticMs: readCssMs(B.cssVars.hapticDuration) }),
-		[],
-	);
-	const { props: longPressProps } = useLongPressGesture({
-		cssVar: '--radio-longpress-progress',
-		defaultThresholdMs,
-		hapticMs,
+	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
-		props: longPress,
 		ref: radioRef,
+		...gesture,
+		cssVars: { progress: '--radio-longpress-progress', ...gesture?.cssVars },
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
 	});
 	const mergedRef = useMergeRefs([ref, radioRef, tooltipProps.ref as Ref<HTMLLabelElement>]);
 	const isSegmented = groupCtx?.segmented ?? false;
@@ -178,7 +168,7 @@ const Radio: FC<RadioProps> = ({
 	return (
 		<>
 			<RACRadio
-				{...({ ...rest, ...tooltipProps, ...longPressProps } as unknown as RACRadioProps)}
+				{...({ ...rest, ...tooltipProps, ...gestureProps } as unknown as RACRadioProps)}
 				className={composeTailwindRenderProps(className, baseSlot)}
 				data-async-state={slot.attr}
 				data-card={card || undefined}

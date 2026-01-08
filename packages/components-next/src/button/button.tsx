@@ -4,13 +4,12 @@
  * REQUIRED: color and size props - no defaults, no hardcoded mappings.
  */
 import { useMergeRefs } from '@floating-ui/react';
-import { readCssMs } from '@parametric-portal/runtime/runtime';
 import type { CSSProperties, FC, ReactNode, Ref } from 'react';
-import { useMemo, useRef } from 'react';
+import { useRef } from 'react';
 import { Button as RACButton, type ButtonProps as RACButtonProps } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip } from '../core/floating';
-import { type LongPressProps, useLongPressGesture } from '../core/gesture';
+import { useGesture, type GestureProps } from '../core/gesture';
 import type { BasePropsFor } from '../core/props';
 import { cn, composeTailwindRenderProps, Slot, type SlotDef } from '../core/utils';
 
@@ -25,8 +24,8 @@ type ButtonSpecificProps = {
 	readonly formMethod?: string;
 	readonly formNoValidate?: boolean;
 	readonly formTarget?: string;
+	readonly gesture?: GestureProps;
 	readonly isPending?: boolean;
-	readonly longPress?: LongPressProps;
 	readonly prefix?: SlotDef;
 	readonly preventFocusOnPress?: boolean;
 	readonly ref?: Ref<HTMLButtonElement>;
@@ -39,10 +38,6 @@ type ButtonProps = BasePropsFor<'button'> & ButtonSpecificProps;
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-	cssVars: Object.freeze({
-		hapticDuration: '--interaction-haptic-duration',
-		longPressThreshold: '--interaction-long-press-threshold',
-	}),
 	slot: Object.freeze({
 		base: cn(
 			'inline-flex items-center justify-center cursor-pointer',
@@ -66,30 +61,25 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Button: FC<ButtonProps> = ({
-	asyncState, bgOpacity, children, className, color, isDisabled,
-	longPress, prefix, ref, size, suffix, tooltip, variant,
+	asyncState, bgOpacity, children, className, color, gesture, isDisabled,
+	prefix, ref, size, suffix, tooltip, variant,
 	...rest
 }) => {
 	const slot = Slot.bind(asyncState);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const buttonRef = useRef<HTMLButtonElement>(null);
-	const { hapticMs, defaultThresholdMs } = useMemo(
-		() => ({ defaultThresholdMs: readCssMs(B.cssVars.longPressThreshold), hapticMs: readCssMs(B.cssVars.hapticDuration) }),
-		[],
-	);
-	const { props: longPressProps } = useLongPressGesture({
-		cssVar: '--button-longpress-progress',
-		defaultThresholdMs,
-		hapticMs,
+	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
-		props: longPress,
 		ref: buttonRef,
+		...gesture,
+		cssVars: { progress: '--button-longpress-progress', ...gesture?.cssVars },
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
 	});
 	const mergedRef = useMergeRefs([ref, buttonRef, tooltipProps.ref as Ref<HTMLButtonElement>]);
 	return (
 		<>
 			<RACButton
-				{...({ ...rest, ...tooltipProps, ...longPressProps } as unknown as RACButtonProps)}
+				{...({ ...rest, ...tooltipProps, ...gestureProps } as unknown as RACButtonProps)}
 				className={composeTailwindRenderProps(className, B.slot.base)}
 				data-async-state={slot.attr}
 				data-color={color}

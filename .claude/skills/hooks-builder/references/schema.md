@@ -22,12 +22,13 @@ Matchers filter events; commands execute automation.
 }
 ```
 
-| [INDEX] | [FIELD]   | [TYPE] | [REQ] | [DEFAULT] | [CONSTRAINT]                         |
-| :-----: | --------- | ------ | :---: | :-------: | ------------------------------------ |
-|   [1]   | `matcher` | string |  No   |   `""`    | Regex or exact tool name             |
-|   [2]   | `type`    | string |  Yes  |     —     | `"command"` or `"prompt"`            |
-|   [3]   | `command` | string |  Yes  |     —     | Shell command or script path         |
-|   [4]   | `timeout` | number |  No   |  `60000`  | ms, max 600000; prompt default 30000 |
+| [INDEX] | [FIELD]   | [TYPE]  | [REQ] | [DEFAULT] | [CONSTRAINT]                          |
+| :-----: | --------- | ------- | :---: | :-------: | ------------------------------------- |
+|   [1]   | `matcher` | string  |  No   |   `""`    | Regex or exact tool name              |
+|   [2]   | `type`    | string  |  Yes  |     —     | `"command"` or `"prompt"`             |
+|   [3]   | `command` | string  |  Yes  |     —     | Shell command or script path          |
+|   [4]   | `timeout` | number  |  No   |  `60000`  | ms, max 600000; prompt default 30000  |
+|   [5]   | `once`    | boolean |  No   |  `false`  | Execute once per session, skip resume |
 
 ---
 ## [2][MATCHERS]

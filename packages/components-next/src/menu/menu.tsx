@@ -9,14 +9,14 @@ import { useClipboard } from '@parametric-portal/runtime/hooks/browser';
 import { readCssMs, readCssPx } from '@parametric-portal/runtime/runtime';
 import { AsyncState } from '@parametric-portal/types/async';
 import { ChevronRight, Clipboard, Copy, Trash2 } from 'lucide-react';
-import { createContext, createElement, type FC, type ReactElement, type ReactNode, type Ref, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, createElement, type FC, type ReactElement, type ReactNode, type Ref, useCallback, useContext, useMemo, useRef } from 'react';
 import {
 	type Key, Header, MenuTrigger, Popover, Menu as RACMenu, MenuItem as RACMenuItem, type MenuItemProps as RACMenuItemProps, type MenuProps as RACMenuProps,
 	MenuSection as RACMenuSection, type MenuSectionProps as RACMenuSectionProps, Separator, type Selection, SubmenuTrigger as RACSubmenuTrigger,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip } from '../core/floating';
-import { type LongPressProps, useLongPressGesture } from '../core/gesture';
+import { useGesture, type GestureProps } from '../core/gesture';
 import type { BasePropsFor } from '../core/props';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
 import { type ConfirmConfig, ConfirmDialog, useConfirm } from './confirm';
@@ -35,13 +35,6 @@ type MenuItemState = {
 	readonly isPressed: boolean;
 	readonly isSelected: boolean;
 	readonly selectionMode: SelectionMode;
-};
-type UseMenuReturn = {
-	readonly close: () => void;
-	readonly isOpen: boolean;
-	readonly menuProps: { readonly onOpenChange: (open: boolean) => void };
-	readonly open: () => void;
-	readonly toggle: () => void;
 };
 type MenuSpecificProps<T extends object> = {
 	readonly children: ReactNode | ((item: T) => ReactNode);
@@ -67,8 +60,8 @@ type MenuItemSpecificProps = {
 	readonly copy?: boolean | string;
 	readonly delete?: boolean;
 	readonly destructive?: boolean;
+	readonly gesture?: GestureProps;
 	readonly isDisabled?: boolean;
-	readonly longPress?: LongPressProps;
 	readonly onAction?: () => void;
 	readonly paste?: boolean;
 	readonly shortcut?: string;
@@ -102,8 +95,6 @@ type MenuSectionProps<T extends object = object> = BasePropsFor<'menuSection'> &
 const B = Object.freeze({
 	cssVars: Object.freeze({
 		badgeMax: '--menu-item-badge-max',
-		hapticDuration: '--menu-item-longpress-haptic-duration',
-		longPressThreshold: '--menu-item-longpress-threshold',
 		offset: '--menu-popover-offset',
 		submenuDelay: '--menu-submenu-delay',
 		submenuOffset: '--menu-submenu-offset',
@@ -229,8 +220,8 @@ const Menu = <T extends object>({
 	);
 };
 const MenuItem: FC<MenuItemProps> = ({
-	asyncState, badge, children, className, confirm, copy, delete: deletePreset, destructive, download, href,
-	icon: iconProp, isDisabled, longPress, paste, ref, rel, shortcut: shortcutProp, submenu, submenuAsyncState,
+	asyncState, badge, children, className, confirm, copy, delete: deletePreset, destructive, download, gesture, href,
+	icon: iconProp, isDisabled, paste, ref, rel, shortcut: shortcutProp, submenu, submenuAsyncState,
 	submenuDelay, submenuIndicator, submenuOffset, submenuSize, submenuSkeletonCount, target, textValue, tooltip,
 	...rest
 }) => {
@@ -260,17 +251,13 @@ const MenuItem: FC<MenuItemProps> = ({
 		() => hasSubmenu ? ({ delay: submenuDelay ?? readCssMs(B.cssVars.submenuDelay), offset: submenuOffset ?? readCssPx(B.cssVars.submenuOffset) }) : null,
 		[hasSubmenu, submenuDelay, submenuOffset],
 	);
-	const { badgeMax, hapticMs, defaultThresholdMs } = useMemo(
-		() => ({ badgeMax: readCssPx(B.cssVars.badgeMax) || 99, defaultThresholdMs: readCssMs(B.cssVars.longPressThreshold), hapticMs: readCssMs(B.cssVars.hapticDuration) }),
-		[],
-	);
-	const { props: longPressProps } = useLongPressGesture({
-		cssVar: '--menu-item-longpress-progress',
-		defaultThresholdMs,
-		hapticMs,
+	const badgeMax = useMemo(() => readCssPx(B.cssVars.badgeMax) || 99, []);
+	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
-		props: longPress,
 		ref: itemRef,
+		...gesture,
+		cssVars: { progress: '--menu-item-longpress-progress', ...gesture?.cssVars },
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
 	});
 	const mergedRef = useMergeRefs([ref, itemRef, tooltipProps.ref as Ref<HTMLDivElement>]);
 	const { onAction: originalOnAction, ...restWithoutAction } = rest as { onAction?: () => void };
@@ -285,7 +272,7 @@ const MenuItem: FC<MenuItemProps> = ({
 	const isRenderFn = typeof children === 'function';
 	const itemContent = (
 		<RACMenuItem
-			{...({ ...restWithoutAction, ...tooltipProps, ...longPressProps } as unknown as RACMenuItemProps)}
+			{...({ ...restWithoutAction, ...tooltipProps, ...gestureProps } as unknown as RACMenuItemProps)}
 			className={composeTailwindRenderProps(className, B.slot.item)}
 			data-async-state={slot.attr}
 			data-destructive={destructive || undefined}
@@ -326,9 +313,7 @@ const MenuItem: FC<MenuItemProps> = ({
 		<>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
-			{confirmState.isOpen && confirm && (
-				<ConfirmDialog config={confirm} onCancel={confirmState.cancel} onConfirm={confirmState.confirm} />
-			)}
+			{confirmState.isOpen && confirm && (<ConfirmDialog config={confirm} onCancel={confirmState.cancel} onConfirm={confirmState.confirm} /> )}
 		</>
 	);
 	return hasSubmenu ? (
@@ -372,20 +357,7 @@ const MenuSeparator: FC<{ readonly className?: string }> = ({ className }) => (
 	<Separator className={cn(B.slot.separator, className)} data-slot='menu-separator' />
 );
 
-// --- [HOOKS] -----------------------------------------------------------------
-
-const useMenu = (defaultOpen = false): UseMenuReturn => {
-	const [isOpen, setIsOpen] = useState(defaultOpen);
-	return useMemo(() => ({
-		close: () => setIsOpen(false),
-		isOpen,
-		menuProps: { onOpenChange: setIsOpen },
-		open: () => setIsOpen(true),
-		toggle: () => setIsOpen((v) => !v),
-	}), [isOpen]);
-};
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Menu, MenuItem, MenuSection, MenuSeparator, useMenu };
-export type { MenuItemProps, MenuItemState, MenuProps, MenuSectionProps, SelectionMode, UseMenuReturn };
+export { Menu, MenuItem, MenuSection, MenuSeparator };
+export type { MenuItemProps, MenuItemState, MenuProps, MenuSectionProps, SelectionMode };

@@ -1,7 +1,8 @@
 /**
  * Arbitraries: reusable fast-check generators for property-based tests.
+ * Note: Effect's Arbitrary.make uses Node Buffer internally - browser-incompatible.
+ * All arbitraries here use pure fast-check for browser test compatibility.
  */
-import { Arbitrary, type Schema } from 'effect';
 import fc from 'fast-check';
 
 // --- [TYPES] ----------------------------------------------------------------
@@ -114,7 +115,6 @@ const Arbitraries = Object.freeze({
     eventName: () => generators.pattern('eventName'),
     fileExtension: () => generators.enum('fileExtensions'),
     filename: () => fc.string({ maxLength: 100, minLength: B.strings.min }),
-    fromSchema: <A, I, R>(schema: Schema.Schema<A, I, R>): fc.Arbitrary<A> => Arbitrary.make(schema),
     historyLimit: () => generators.bounded('historyLimit'),
     hours: () => generators.temporal('hours'),
     invalidHistoryLimit: (): fc.Arbitrary<number> => generators.invalid<'historyLimit', number>('historyLimit'),
