@@ -1,0 +1,1 @@
+I'll analyze this project for you. Let me start by exploring the codebase to understand its structure and components.
