@@ -1,0 +1,213 @@
+/**
+ * Floating utilities with @floating-ui/react integration.
+ * Tooltip hook with delay group coordination, tree wrapper, and integration utilities.
+ * Behavior defaults in B constant; props override for escape hatch.
+ */
+import {
+    arrow, autoUpdate, flip, hide, offset, type Placement, safePolygon, shift, type Strategy,
+    FloatingArrow, FloatingNode, FloatingPortal, useClick, useDelayGroup, useDismiss,
+    useFloating, useFloatingNodeId, useFocus, useHover, useInteractions, useMergeRefs, useRole, useTransitionStatus,
+} from '@floating-ui/react';
+import { readCssMs, readCssPx } from '@parametric-portal/runtime/runtime';
+import type { ReactNode, Ref, RefObject } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
+import { cn, defined } from './utils';
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type ArrowConfig = {
+    readonly color?: string;
+    readonly d?: string;
+    readonly height?: number | string;
+    readonly staticOffset?: number | string;
+    readonly stroke?: string;
+    readonly strokeWidth?: number;
+    readonly tipRadius?: number;
+    readonly width?: number | string;
+};
+type TooltipConfig = {
+    readonly arrow?: ArrowConfig;
+    readonly arrowPadding?: number;
+    readonly boundary?: Element | 'clippingAncestors';
+    readonly content: ReactNode;
+    readonly delay?: { readonly close?: number; readonly open?: number };
+    readonly fallbackPlacements?: readonly Placement[];
+    readonly interactions?: {
+        readonly click?: boolean;
+        readonly dismissOnEscape?: boolean;
+        readonly dismissOnOutsidePress?: boolean;
+    };
+    readonly offset?: number;
+    readonly onOpenChange?: (open: boolean) => void;
+    readonly open?: boolean;
+    readonly placement?: Placement;
+    readonly portalRoot?: HTMLElement | null;
+    readonly shiftPadding?: number;
+    readonly strategy?: Strategy;
+    readonly style?: string;
+    readonly transitionDuration?: number;
+};
+type TooltipResult<P extends object = object> = {
+    readonly isOpen: boolean;
+    readonly props: P & { readonly ref: Ref<HTMLElement> };
+    readonly ref: RefObject<HTMLElement | null>;
+    readonly render: (() => ReactNode) | null;
+};
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const B = Object.freeze({
+    behavior: Object.freeze({
+        placement: 'top' as Placement,
+        strategy: 'absolute' as Strategy,
+    }),
+    cssVar: Object.freeze({
+        arrowPadding: '--tooltip-arrow-padding',
+        boundary: '--tooltip-boundary',
+        offset: '--tooltip-offset',
+        shiftPadding: '--tooltip-shift-padding',
+        transitionDuration: '--tooltip-transition-duration',
+    }),
+});
+
+// --- [SLOTS] -----------------------------------------------------------------
+
+const slot = Object.freeze({
+    arrow: cn(
+        'fill-(--tooltip-arrow-color)',
+        '[width:var(--tooltip-arrow-width)]',
+        '[height:var(--tooltip-arrow-height)]',
+        '[stroke:var(--tooltip-arrow-stroke)]',
+        '[stroke-width:var(--tooltip-arrow-stroke-width)]',
+    ),
+    content: cn(
+        'bg-(--tooltip-bg) text-(--tooltip-fg)',
+        'rounded-(--tooltip-radius) shadow-(--tooltip-shadow)',
+        'border-(--tooltip-border-width) border-(--tooltip-border-color)',
+        'px-(--tooltip-padding-x) py-(--tooltip-padding-y)',
+        'text-(--tooltip-font-size) max-w-(--tooltip-max-width)',
+        'z-(--tooltip-z-index)',
+        '[transition-property:opacity,transform]',
+        'duration-(--tooltip-transition-duration)',
+        'ease-(--tooltip-transition-easing)',
+    ),
+});
+
+// --- [HOOK] ------------------------------------------------------------------
+
+const useTooltip = <P extends object = object>(
+    cfg: TooltipConfig | undefined,
+    baseRef?: Ref<HTMLElement>,
+    baseProps?: P,
+): TooltipResult<P> => {
+    const id = useId();
+    const has = cfg?.content != null;
+    const nodeId = useFloatingNodeId();
+    const [internalOpen, setInternalOpen] = useState(false);
+    const arrowRef = useRef<SVGSVGElement>(null);
+    const resolvedOffset = cfg?.offset ?? readCssPx(B.cssVar.offset);
+    const resolvedArrowPadding = cfg?.arrowPadding ?? readCssPx(B.cssVar.arrowPadding);
+    const resolvedShiftPadding = cfg?.shiftPadding ?? readCssPx(B.cssVar.shiftPadding);
+    const resolvedTransitionDuration = cfg?.transitionDuration ?? readCssMs(B.cssVar.transitionDuration);
+    const placement = cfg?.placement ?? B.behavior.placement;
+    const strategy = cfg?.strategy ?? B.behavior.strategy;
+    const isOpen = cfg?.open ?? internalOpen;
+    const readBoundary = (): Element | 'clippingAncestors' => {
+        const v = globalThis.document?.documentElement
+            ? getComputedStyle(globalThis.document.documentElement).getPropertyValue(B.cssVar.boundary).trim()
+            : '';
+        return v === 'viewport' ? globalThis.document?.body ?? 'clippingAncestors' : 'clippingAncestors';
+    };
+    const resolvedBoundary = cfg?.boundary ?? readBoundary();
+    const shiftPad = { padding: resolvedShiftPadding };
+    const middleware = has && [
+        offset(resolvedOffset),
+        flip({
+            ...shiftPad,
+            boundary: resolvedBoundary,
+            ...(cfg?.fallbackPlacements && { fallbackPlacements: [...cfg.fallbackPlacements] }),
+        }),
+        shift({ ...shiftPad, boundary: resolvedBoundary, crossAxis: true }),
+        arrow({ element: arrowRef as RefObject<SVGSVGElement>, padding: resolvedArrowPadding }),
+        hide({ strategy: 'referenceHidden' }),
+    ];
+    const { context, floatingStyles, refs } = useFloating({
+        middleware: middleware || [],
+        ...(nodeId && { nodeId }),
+        onOpenChange: (open: boolean) => {
+            setInternalOpen(open);
+            cfg?.onOpenChange?.(open);
+        },
+        open: isOpen,
+        placement,
+        strategy,
+        whileElementsMounted: (r, f, u) => autoUpdate(r, f, u, { ancestorResize: true, ancestorScroll: true, elementResize: true }),
+    });
+    const { delay: groupDelay, isInstantPhase, currentId } = useDelayGroup(context, { id });
+    const { click = false, dismissOnEscape = true, dismissOnOutsidePress = true } = cfg?.interactions ?? {};
+    const { getFloatingProps, getReferenceProps } = useInteractions([
+        useHover(context, { delay: cfg?.delay ?? groupDelay, enabled: has, handleClose: safePolygon({ blockPointerEvents: true }) }),
+        useFocus(context, { enabled: has }),
+        useClick(context, { enabled: click }),
+        useDismiss(context, { escapeKey: dismissOnEscape, outsidePress: dismissOnOutsidePress }),
+        useRole(context, { role: 'tooltip' }),
+    ]);
+    const dur = has ? resolvedTransitionDuration : 0;
+    const instantDur = has ? { close: currentId === context.floatingId ? resolvedTransitionDuration : 0, open: 0 } : 0;
+    const { isMounted, status } = useTransitionStatus(context, { duration: isInstantPhase ? instantDur : dur });
+    const arrowProps = useMemo(() =>
+        cfg?.arrow
+            ? (() => {
+                  const { height, staticOffset, tipRadius, width, ...rest } = cfg.arrow;
+                  return {
+                      ...defined(rest),
+                      ...(width !== undefined && { width: typeof width === 'string' ? Number.parseFloat(width) : width }),
+                      ...(height !== undefined && { height: typeof height === 'string' ? Number.parseFloat(height) : height }),
+                      ...(tipRadius !== undefined && { tipRadius: typeof tipRadius === 'string' ? Number.parseFloat(tipRadius) : tipRadius }),
+                      ...(staticOffset !== undefined && { staticOffset: typeof staticOffset === 'string' ? Number.parseFloat(staticOffset) : staticOffset }),
+                  };
+              })()
+            : undefined
+    , [cfg?.arrow]);
+    const mergedRef = useMergeRefs([baseRef, has ? refs.setReference : undefined]);
+    const mergedProps = {
+        ...(baseProps ?? ({} as P)),
+        ...(has && getReferenceProps()),
+        ...(has && isOpen && { 'aria-describedby': id }),
+        ref: mergedRef,
+    } as P & { ref: Ref<HTMLElement> };
+    return {
+        isOpen: has && isOpen,
+        props: mergedProps,
+        ref: refs.domReference as RefObject<HTMLElement | null>,
+        render: (has && isMounted && (() => (
+            <FloatingNode id={nodeId}>
+                <FloatingPortal root={cfg.portalRoot ?? null}>
+                    <div
+                        {...getFloatingProps()}
+                        className={slot.content}
+                        data-slot='tooltip'
+                        data-status={status}
+                        data-style={cfg.style}
+                        id={id}
+                        ref={refs.setFloating}
+                        style={floatingStyles}
+                    >
+                        {cfg.content}
+                        <FloatingArrow
+                            {...arrowProps}
+                            className={slot.arrow}
+                            context={context}
+                            ref={arrowRef}
+                        />
+                    </div>
+                </FloatingPortal>
+            </FloatingNode>
+        ))) || null,
+    };
+};
+
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { useTooltip };
+export type { TooltipConfig, TooltipResult };

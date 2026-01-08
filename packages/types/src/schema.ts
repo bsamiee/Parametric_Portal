@@ -48,9 +48,7 @@ const makeId = <T extends string>(brand: T) => {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const IdFactory = Object.freeze(
-    Object.fromEntries(B.enums.idBrands.map((brand) => [brand, makeId(brand)])) as unknown as {
-        readonly [K in IdBrand]: ReturnType<typeof makeId<K>>;
-    },
+    Object.fromEntries(B.enums.idBrands.map((brand) => [brand, makeId(brand)])) as unknown as { readonly [K in IdBrand]: ReturnType<typeof makeId<K>>; },
 );
 const ApiKeyId = IdFactory.ApiKeyId;
 const AssetId = IdFactory.AssetId;
@@ -151,13 +149,13 @@ const AuditLogRowSchema = S.Struct({
 // --- [INSERT_SCHEMAS] --------------------------------------------------------
 // Derived from RowSchemas - omit DB-generated fields for insert operations
 
-const UserInsertSchema = UserRowSchema.pipe(S.omit('createdAt', 'deletedAt'));
-const SessionInsertSchema = SessionRowSchema.pipe(S.omit('createdAt', 'revokedAt', 'lastActivityAt'));
-const RefreshTokenInsertSchema = RefreshTokenRowSchema.pipe(S.omit('createdAt', 'revokedAt'));
-const AssetInsertSchema = AssetRowSchema.pipe(S.omit('createdAt', 'updatedAt', 'deletedAt'));
-const OAuthAccountInsertSchema = OAuthAccountRowSchema.pipe(S.omit('createdAt', 'updatedAt'));
+const UserInsertSchema = UserRowSchema.pipe(S.omit('createdAt', 'deletedAt', 'id'));
+const SessionInsertSchema = SessionRowSchema.pipe(S.omit('createdAt', 'id', 'revokedAt', 'lastActivityAt'));
+const RefreshTokenInsertSchema = RefreshTokenRowSchema.pipe(S.omit('createdAt', 'id', 'revokedAt'));
+const AssetInsertSchema = AssetRowSchema.pipe(S.omit('createdAt', 'deletedAt', 'id', 'updatedAt'));
+const OAuthAccountInsertSchema = OAuthAccountRowSchema.pipe(S.omit('createdAt', 'id', 'updatedAt'));
+const ApiKeyInsertSchema = ApiKeyRowSchema.pipe(S.omit('createdAt', 'id', 'lastUsedAt'));
 const AuditLogInsertSchema = AuditLogRowSchema.pipe(S.omit('id', 'createdAt'));
-const ApiKeyInsertSchema = ApiKeyRowSchema.pipe(S.omit('createdAt', 'lastUsedAt'));
 
 // --- [TABLES] ----------------------------------------------------------------
 
@@ -314,31 +312,7 @@ export { apiKeysRelations, assetsRelations, auditLogsRelations, oauthAccountsRel
 export { ApiKeyRowSchema, AssetRowSchema, AuditLogRowSchema, OAuthAccountRowSchema, RefreshTokenRowSchema, SessionRowSchema, UserRowSchema };
 export { ApiKeyInsertSchema, AssetInsertSchema, AuditLogInsertSchema, OAuthAccountInsertSchema, RefreshTokenInsertSchema, SessionInsertSchema, UserInsertSchema };
 export type {
-    IdBrand,
-    ApiKey,
-    ApiKeyInsert,
-    ApiKeyRow,
-    Asset,
-    AssetInsert,
-    AssetRow,
-    AuditLog,
-    AuditLogInsert,
-    AuditLogRow,
-    OAuthAccount,
-    OAuthAccountInsert,
-    OAuthAccountRow,
-    RefreshToken,
-    RefreshTokenInsert,
-    RefreshTokenRow,
-    RoleKey,
-    Session,
-    SessionInsert,
-    SessionRow,
-    SessionWithUser,
-    User,
-    UserInsert,
-    UserRow,
-    UserWithApiKeys,
-    UserWithOAuthAccounts,
-    UserWithSessions,
+    IdBrand, ApiKey, ApiKeyInsert, ApiKeyRow, Asset, AssetInsert, AssetRow, AuditLog, AuditLogInsert, AuditLogRow, OAuthAccount,
+    OAuthAccountInsert, OAuthAccountRow, RefreshToken, RefreshTokenInsert, RefreshTokenRow, RoleKey, Session, SessionInsert,
+    SessionRow, SessionWithUser, User, UserInsert, UserRow, UserWithApiKeys, UserWithOAuthAccounts, UserWithSessions,
 };

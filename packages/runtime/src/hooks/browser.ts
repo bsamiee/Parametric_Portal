@@ -1,14 +1,15 @@
 /**
  * Expose browser APIs through React hooks with Effect-based error handling.
- * Bridges Clipboard, Download, and Export services for declarative UI consumption.
+ * Bridges Clipboard and Browser services for declarative UI consumption.
+ * Uses AsyncState for unified lifecycle management.
  */
 import { Clipboard } from '@effect/platform-browser';
 import { AppError } from '@parametric-portal/types/app-error';
-import { FILES_TUNING } from '@parametric-portal/types/files';
-import { Effect } from 'effect';
+import { AsyncState } from '@parametric-portal/types/async';
+import { Effect, Option } from 'effect';
 import { useCallback, useState } from 'react';
 import { Runtime } from '../runtime';
-import { Download, Export, type ExportInput } from '../services/browser';
+import { Browser, type ExportInput } from '../services/browser';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -18,6 +19,7 @@ type ClipboardState<V> = {
     readonly isPending: boolean;
     readonly paste: () => void;
     readonly reset: () => void;
+    readonly state: AsyncState<V, AppError<'Browser'>>;
     readonly value: V | null;
 };
 type DownloadState = {
@@ -25,6 +27,7 @@ type DownloadState = {
     readonly error: AppError<'Browser'> | null;
     readonly isPending: boolean;
     readonly reset: () => void;
+    readonly state: AsyncState<void, AppError<'Browser'>>;
 };
 type ExportState = {
     readonly error: AppError<'Browser'> | null;
@@ -32,6 +35,7 @@ type ExportState = {
     readonly isPending: boolean;
     readonly progress: number;
     readonly reset: () => void;
+    readonly state: AsyncState<void, AppError<'Browser'>>;
 };
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -48,102 +52,109 @@ const useClipboard = <V>(
     deserializer: (text: string) => V = (text) => text as V,
 ): ClipboardState<V> => {
     const runtime = Runtime.use<Clipboard.Clipboard, never>();
-    const [value, setValue] = useState<V | null>(null);
-    const [error, setError] = useState<AppError<'Browser'> | null>(null);
-    const [isPending, setIsPending] = useState(false);
+    const [state, setState] = useState<AsyncState<V, AppError<'Browser'>>>(AsyncState.Idle());
     const copy = useCallback(
         (v: V) => {
-            setIsPending(true);
-            setError(null);
+            setState(AsyncState.Loading());
             runtime.runFork(
                 Effect.gen(function* () {
                     const svc = yield* Clipboard.Clipboard;
                     yield* svc.writeString(serializer(v));
-                    setValue(v);
+                    return v;
                 }).pipe(
-                    Effect.tapError((e) => Effect.sync(() => setError(clipboardWriteError(e)))),
-                    Effect.ensuring(Effect.sync(() => setIsPending(false))),
+                    Effect.tap((data) => Effect.sync(() => setState(AsyncState.Success(data)))),
+                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(clipboardWriteError(e))))),
                 ),
             );
         },
         [runtime, serializer],
     );
     const paste = useCallback(() => {
-        setIsPending(true);
-        setError(null);
+        setState(AsyncState.Loading());
         runtime.runFork(
             Effect.gen(function* () {
                 const svc = yield* Clipboard.Clipboard;
                 const text = yield* svc.readString;
-                setValue(deserializer(text));
+                return deserializer(text);
             }).pipe(
-                Effect.tapError((e) => Effect.sync(() => setError(clipboardReadError(e)))),
-                Effect.ensuring(Effect.sync(() => setIsPending(false))),
+                Effect.tap((data) => Effect.sync(() => setState(AsyncState.Success(data)))),
+                Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(clipboardReadError(e))))),
             ),
         );
     }, [runtime, deserializer]);
-    const reset = useCallback(() => {
-        setValue(null);
-        setError(null);
-        setIsPending(false);
-    }, []);
-    return { copy, error, isPending, paste, reset, value };
+    const reset = useCallback(() => setState(AsyncState.Idle()), []);
+    return {
+        copy,
+        error: Option.getOrNull(AsyncState.getError(state)),
+        isPending: AsyncState.isPending(state),
+        paste,
+        reset,
+        state,
+        value: Option.getOrNull(AsyncState.getData(state)),
+    };
 };
 const useDownload = (): DownloadState => {
-    const runtime = Runtime.use<Download, never>();
-    const [error, setError] = useState<AppError<'Browser'> | null>(null);
-    const [isPending, setIsPending] = useState(false);
+    const runtime = Runtime.use<Browser, never>();
+    const [state, setState] = useState<AsyncState<void, AppError<'Browser'>>>(AsyncState.Idle());
     const download = useCallback(
-        (data: Blob | string, filename: string, mimeType: string = FILES_TUNING.defaults.mimeType) => {
-            setIsPending(true);
-            setError(null);
+        (data: Blob | string, filename: string, mimeType?: string) => {
+            setState(AsyncState.Loading());
             runtime.runFork(
                 Effect.gen(function* () {
-                    const svc = yield* Download;
+                    const svc = yield* Browser;
                     yield* svc.download(data, filename, mimeType);
                 }).pipe(
-                    Effect.tapError(() => Effect.sync(() => setError(AppError.from('Browser', 'DOWNLOAD_FAILED')))),
-                    Effect.ensuring(Effect.sync(() => setIsPending(false))),
+                    Effect.tap(() => Effect.sync(() => setState(AsyncState.Success(undefined)))),
+                    Effect.tapError(() =>
+                        Effect.sync(() => setState(AsyncState.Failure(AppError.from('Browser', 'DOWNLOAD_FAILED')))),
+                    ),
                 ),
             );
         },
         [runtime],
     );
-    const reset = useCallback(() => {
-        setError(null);
-        setIsPending(false);
-    }, []);
-    return { download, error, isPending, reset };
+    const reset = useCallback(() => setState(AsyncState.Idle()), []);
+    return {
+        download,
+        error: Option.getOrNull(AsyncState.getError(state)),
+        isPending: AsyncState.isPending(state),
+        reset,
+        state,
+    };
 };
 const useExport = (): ExportState => {
-    const runtime = Runtime.use<Export, never>();
-    const [error, setError] = useState<AppError<'Browser'> | null>(null);
-    const [isPending, setIsPending] = useState(false);
+    const runtime = Runtime.use<Browser, never>();
+    const [state, setState] = useState<AsyncState<void, AppError<'Browser'>>>(AsyncState.Idle());
     const [progress, setProgress] = useState(0);
     const exportAs = useCallback(
         (input: ExportInput) => {
-            setIsPending(true);
-            setError(null);
+            setState(AsyncState.Loading());
             setProgress(0);
             runtime.runFork(
                 Effect.gen(function* () {
-                    const svc = yield* Export;
-                    yield* svc[input.format]({ ...input, onProgress: setProgress });
+                    const svc = yield* Browser;
+                    yield* svc.export({ ...input, onProgress: setProgress });
                     setProgress(1);
                 }).pipe(
-                    Effect.tapError((e) => Effect.sync(() => setError(e))),
-                    Effect.ensuring(Effect.sync(() => setIsPending(false))),
+                    Effect.tap(() => Effect.sync(() => setState(AsyncState.Success(undefined)))),
+                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(e)))),
                 ),
             );
         },
         [runtime],
     );
     const reset = useCallback(() => {
-        setError(null);
-        setIsPending(false);
+        setState(AsyncState.Idle());
         setProgress(0);
     }, []);
-    return { error, exportAs, isPending, progress, reset };
+    return {
+        error: Option.getOrNull(AsyncState.getError(state)),
+        exportAs,
+        isPending: AsyncState.isPending(state),
+        progress,
+        reset,
+        state,
+    };
 };
 
 // --- [EXPORT] ----------------------------------------------------------------

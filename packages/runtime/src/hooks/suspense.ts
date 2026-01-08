@@ -1,6 +1,11 @@
 /**
  * Bridge React 19 Suspense with Effect execution via stable client-side caching.
  * Provides direct suspension with use() hook and resource pattern with preload/read/status APIs.
+ *
+ * Note: Status type ('idle'|'pending'|'resolved'|'rejected') is intentionally distinct from AsyncState.
+ * - AsyncState: React hook state management with timestamps, monadic ops, ROP bridges
+ * - Status: Suspense promise cache state for React's use() hook and throw-promise semantics
+ * These patterns are complementary: AsyncState for UI state, Status for Suspense coordination.
  */
 import { Timestamp } from '@parametric-portal/types/types';
 import { Duration, type Effect } from 'effect';
@@ -24,17 +29,11 @@ type Cache<A, E> = {
     value?: A;
 };
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const B = Object.freeze({
-    defaults: { ttl: Duration.infinity },
-} as const);
-
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const useEffectSuspense = <A, E, R>(effect: Effect.Effect<A, E, R>, options?: CacheOptions): A => {
     const runtime = Runtime.use<R, never>();
-    const ttl = Duration.decode(options?.ttl ?? B.defaults.ttl);
+    const ttl = Duration.decode(options?.ttl ?? Duration.infinity);
     const ttlMs = Duration.toMillis(ttl);
     const cache = useRef<Cache<A, E>>({ status: 'idle' });
     cache.current =
@@ -63,7 +62,7 @@ const useEffectSuspense = <A, E, R>(effect: Effect.Effect<A, E, R>, options?: Ca
 };
 const useEffectResource = <A, E, R>(effect: Effect.Effect<A, E, R>, options?: CacheOptions): EffectResource<A> => {
     const runtime = Runtime.use<R, never>();
-    const ttl = Duration.decode(options?.ttl ?? B.defaults.ttl);
+    const ttl = Duration.decode(options?.ttl ?? Duration.infinity);
     const ttlMs = Duration.toMillis(ttl);
     const cache = useRef<Cache<A, E>>({ status: 'idle' });
     const getCache = (): Cache<A, E> => {
@@ -108,4 +107,4 @@ const useEffectResource = <A, E, R>(effect: Effect.Effect<A, E, R>, options?: Ca
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { CacheOptions, EffectResource };
-export { B as SUSPENSE_TUNING, useEffectResource, useEffectSuspense };
+export { useEffectResource, useEffectSuspense };

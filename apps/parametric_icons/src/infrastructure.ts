@@ -6,7 +6,7 @@ import { HttpApiClient, HttpClient, HttpClientRequest } from '@effect/platform';
 // biome-ignore lint/style/useImportType: Clipboard namespace needed for Clipboard.Clipboard type
 import { BrowserHttpClient, Clipboard } from '@effect/platform-browser';
 import { Runtime } from '@parametric-portal/runtime/runtime';
-import { BrowserServicesLive, type Download, type Export } from '@parametric-portal/runtime/services/browser';
+import { type Browser, BrowserServicesLive } from '@parametric-portal/runtime/services/browser';
 import { createBrowserTelemetryLayer } from '@parametric-portal/runtime/services/telemetry';
 import { type AuthState, useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import { ParametricApi } from '@parametric-portal/server/api';
@@ -18,7 +18,7 @@ import { useEffect } from 'react';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type AppServices = Clipboard.Clipboard | Download | Export | HttpClient.HttpClient;
+type AppServices = Browser | Clipboard.Clipboard | HttpClient.HttpClient;
 type GenerateInput = IconRequest & { readonly signal?: AbortSignal };
 type AuthResult = {
     readonly accessToken: string;

@@ -19,8 +19,11 @@ type OAuthService = {
         provider: typeof OAuthProvider.Type,
         code: string,
         state: string,
+        stateCookie: string,
     ) => Effect.Effect<OAuthResult, OAuthError>;
-    readonly createAuthorizationUrl: (provider: typeof OAuthProvider.Type) => Effect.Effect<URL, OAuthError>;
+    readonly createAuthorizationUrl: (
+        provider: typeof OAuthProvider.Type,
+    ) => Effect.Effect<{ readonly stateCookie: string; readonly url: URL }, OAuthError>;
     readonly refreshToken: (
         provider: typeof OAuthProvider.Type,
         refreshToken: string,
@@ -127,11 +130,17 @@ const withTracerDisabled = <A, E, R>(layer: Layer.Layer<A, E, R>, urls = B.trace
 
 const Middleware = Object.freeze({
     Auth: SessionAuth,
-    cors: (config?: { readonly allowedOrigins?: ReadonlyArray<string> }) =>
-        HttpApiBuilder.middlewareCors({
+    cors: (config?: { readonly allowedOrigins?: ReadonlyArray<string> }) => {
+        const allowedOrigins = (config?.allowedOrigins ?? B.cors.allowedOrigins)
+            .map((origin) => origin.trim())
+            .filter((origin) => origin.length > 0);
+        const hasWildcard = allowedOrigins.includes('*');
+        return HttpApiBuilder.middlewareCors({
             ...B.cors,
-            ...(config?.allowedOrigins ? { allowedOrigins: config.allowedOrigins } : {}),
-        }),
+            allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : B.cors.allowedOrigins,
+            credentials: hasWildcard ? false : B.cors.credentials,
+        });
+    },
     log: HttpMiddleware.logger,
     OAuth,
     RequestId,

@@ -1,50 +1,157 @@
-name: SonarCloud analysis
+name: SonarCloud
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to analyze (manual trigger)'
+        required: false
+        type: number
 
 permissions:
-  pull-requests: read
-  actions: read
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: sonar-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  Analysis:
+  analyze:
+    name: SonarCloud Analysis
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Check for source changes
-        id: changes
-        run: |
-          # Check if any TypeScript/JavaScript source files changed
-          if git diff --name-only HEAD~1 HEAD | grep -qE '\.(ts|tsx|js|jsx)$'; then
-            echo "has_source_changes=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_source_changes=false" >> "$GITHUB_OUTPUT"
-            echo "[SKIP] No source files changed - skipping analysis"
-          fi
+      - name: Wait for CI coverage artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        id: wait-ci
+        with:
+          script: |
+            const maxWait = 300000; // 5 minutes
+            const pollInterval = 15000; // 15 seconds
+            const startTime = Date.now();
+            const sha = context.payload.pull_request.head.sha;
+
+            while (Date.now() - startTime < maxWait) {
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head_sha: sha,
+                status: 'completed',
+              });
+
+              const ciRun = runs.workflow_runs.find(r => r.name === 'CI' && r.conclusion === 'success');
+              if (ciRun) {
+                core.info(`[OK] CI completed: ${ciRun.html_url}`);
+                core.setOutput('run_id', ciRun.id);
+                return;
+              }
+
+              core.info(`[WAIT] CI not ready, polling in ${pollInterval/1000}s...`);
+              await new Promise(r => setTimeout(r, pollInterval));
+            }
+
+            core.warning('[WARN] CI coverage not available within timeout - proceeding without coverage');
+            core.setOutput('run_id', '');
 
       - name: Download coverage artifacts
-        if: steps.changes.outputs.has_source_changes == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: github.event_name == 'pull_request' && steps.wait-ci.outputs.run_id != ''
+        uses: actions/download-artifact@v4
         with:
           name: ci-artifacts
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ steps.wait-ci.outputs.run_id }}
         continue-on-error: true
 
-      - name: Analyze with SonarCloud
-        if: steps.changes.outputs.has_source_changes == 'true'
-        uses: SonarSource/sonarcloud-github-action@ba3875ecf642b2129de2b589510c81a8b53dbf4e
+      - name: Analyze with SonarCloud (PR)
+        if: github.event_name == 'pull_request'
+        uses: SonarSource/sonarcloud-github-action@v3
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          projectBaseDir: .
+          args: >
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref }}
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+
+      - name: Analyze with SonarCloud (Main)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: SonarSource/sonarcloud-github-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Generate Job Summary
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          script: |
+            const projectKey = 'bsamiee_Parametric_Portal';
+            const baseUrl = 'https://sonarcloud.io/api';
+            const token = process.env.SONAR_TOKEN;
+
+            const fetchMetric = async (endpoint, params = {}) => {
+              const url = new URL(`${baseUrl}/${endpoint}`);
+              Object.entries({ ...params, projectKey }).forEach(([k, v]) => url.searchParams.set(k, v));
+              try {
+                const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+                return res.ok ? res.json() : null;
+              } catch { return null; }
+            };
+
+            const [measures, status] = await Promise.all([
+              fetchMetric('measures/component', {
+                metricKeys: 'bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,ncloc'
+              }),
+              fetchMetric('qualitygates/project_status'),
+            ]);
+
+            const getMetric = (key) => {
+              const m = measures?.component?.measures?.find(m => m.metric === key);
+              return m?.value ?? 'N/A';
+            };
+
+            const gate = status?.projectStatus?.status ?? 'UNKNOWN';
+            const gateIcon = { OK: '[PASS]', ERROR: '[FAIL]', WARN: '[WARN]' }[gate] || '[?]';
+
+            const dashboardUrl = `https://sonarcloud.io/summary/new_code?id=${projectKey}`;
+            const prUrl = github.event_name === 'pull_request'
+              ? `https://sonarcloud.io/summary/new_code?id=${projectKey}&pullRequest=${context.payload.pull_request.number}`
+              : dashboardUrl;
+
+            const rows = [
+              '## SonarCloud Analysis',
+              '',
+              '| Metric | Value |',
+              '|--------|-------|',
+              `| **Quality Gate** | ${gateIcon} ${gate} |`,
+              `| **Bugs** | ${getMetric('bugs')} |`,
+              `| **Vulnerabilities** | ${getMetric('vulnerabilities')} |`,
+              `| **Code Smells** | ${getMetric('code_smells')} |`,
+              `| **Coverage** | ${getMetric('coverage')}% |`,
+              `| **Duplication** | ${getMetric('duplicated_lines_density')}% |`,
+              `| **Lines of Code** | ${getMetric('ncloc')} |`,
+              '',
+              `[View in SonarCloud](${prUrl})`,
+              '',
+              `_Generated: ${new Date().toISOString()}_`,
+            ];
+
+            await core.summary.addRaw(rows.join('\n')).write();
+
+            if (gate === 'ERROR') {
+              core.setFailed('[FAIL] SonarCloud quality gate failed');
+            }
+

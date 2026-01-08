@@ -30,33 +30,39 @@ const OIDCClaims = S.Struct({
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class PkceState extends S.Class<PkceState>('PkceState')({
+class OAuthState extends S.Class<OAuthState>('OAuthState')({
     exp: Timestamp.schema,
+    provider: S.String,
     state: S.String,
-    verifier: S.String,
+    verifier: S.optional(S.String),
 }) {
-    static readonly encrypt = Effect.fn('pkce.encrypt')(
-        (provider: typeof OAuthProvider.Type, state: string, verifier: string) =>
+    static readonly encrypt = Effect.fn('oauth.state.encrypt')(
+        (provider: typeof OAuthProvider.Type, state: string, verifier?: string) =>
             Crypto.Key.encrypt(
                 JSON.stringify({
                     exp: Timestamp.addDuration(Timestamp.nowSync(), AUTH_TUNING.durations.pkce),
+                    provider,
                     state,
-                    verifier,
+                    ...(verifier === undefined ? {} : { verifier }),
                 }),
             ).pipe(
                 Effect.flatMap((enc) => S.encode(EncryptedKey.fromBytes)(enc)),
                 Effect.map((bytes) => Buffer.from(bytes).toString('base64url')),
-                Effect.mapError(() => mkErr(provider, 'PKCE encryption failed', 'PKCE_ENCRYPT_FAILED')),
+                Effect.mapError(() => mkErr(provider, 'OAuth state encryption failed', 'STATE_ENCRYPT_FAILED')),
             ),
     );
-    static readonly decrypt = Effect.fn('pkce.decrypt')((provider: typeof OAuthProvider.Type, encrypted: string) =>
+    static readonly decrypt = Effect.fn('oauth.state.decrypt')((provider: typeof OAuthProvider.Type, encrypted: string) =>
         EncryptedKey.decryptBytes(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
-            Effect.flatMap((json) => S.decodeUnknown(PkceState)(JSON.parse(json))),
+            Effect.flatMap((json) => S.decodeUnknown(OAuthState)(JSON.parse(json))),
             Effect.filterOrFail(
                 (p) => Timestamp.nowSync() <= p.exp,
-                () => mkErr(provider, 'PKCE expired', 'PKCE_EXPIRED'),
+                () => mkErr(provider, 'OAuth state expired', 'STATE_EXPIRED'),
             ),
-            Effect.mapError(() => mkErr(provider, 'PKCE invalid', 'PKCE_INVALID')),
+            Effect.filterOrFail(
+                (p) => p.provider === provider,
+                () => mkErr(provider, 'OAuth state provider mismatch', 'STATE_PROVIDER'),
+            ),
+            Effect.mapError(() => mkErr(provider, 'OAuth state invalid', 'STATE_INVALID')),
         ),
     );
 }
@@ -90,6 +96,8 @@ const arcticHandlers = [
 const mapArctic = (p: typeof OAuthProvider.Type, e: unknown) =>
     arcticHandlers.find(([guard]) => guard(e))?.[1](p, e as never) ??
     new HttpError.OAuth({ provider: p, reason: e instanceof Error ? e.message : 'Unknown error' });
+const isPkceProvider = (p: typeof OAuthProvider.Type): p is 'google' | 'microsoft' =>
+    p === 'google' || p === 'microsoft';
 const extractResult = (t: OAuth2Tokens, user: { readonly id: string; readonly email?: string | null }) =>
     OAuthResult.fromProvider(
         {
@@ -143,6 +151,13 @@ const extractAuth = Object.freeze({
     typeof OAuthProvider.Type,
     (t: OAuth2Tokens) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>>
 >);
+const validateState = (provider: typeof OAuthProvider.Type, state: string, stateCookie: string) =>
+    OAuthState.decrypt(provider, stateCookie).pipe(
+        Effect.filterOrFail(
+            (p) => p.state === state,
+            () => mkErr(provider, 'OAuth state mismatch', 'STATE_MISMATCH'),
+        ),
+    );
 
 // --- [LAYER] -----------------------------------------------------------------
 
@@ -194,26 +209,34 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
             microsoft: (token: string) =>
                 clients.microsoft.refreshAccessToken(token, [...AUTH_TUNING.oauth.scopes.oidc]),
         } satisfies Record<typeof OAuthProvider.Type, (token: string) => Promise<OAuth2Tokens>>);
+        const createAuthUrl = (provider: typeof OAuthProvider.Type, state: string, verifier: string | undefined, scopes: string[]): URL =>
+            provider === 'google' && verifier !== undefined ? clients.google.createAuthorizationURL(state, verifier, scopes) :
+            provider === 'microsoft' && verifier !== undefined ? clients.microsoft.createAuthorizationURL(state, verifier, scopes) :
+            provider === 'apple' ? clients.apple.createAuthorizationURL(state, scopes) :
+            clients.github.createAuthorizationURL(state, scopes);
+        const validateCode = (provider: typeof OAuthProvider.Type, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
+            provider === 'google' && verifier !== undefined ? clients.google.validateAuthorizationCode(code, verifier) :
+            provider === 'microsoft' && verifier !== undefined ? clients.microsoft.validateAuthorizationCode(code, verifier) :
+            provider === 'apple' ? clients.apple.validateAuthorizationCode(code) :
+            clients.github.validateAuthorizationCode(code);
         return OAuth.of({
-            authenticate: (provider, code, state) =>
+            authenticate: (provider, code, state, stateCookie) =>
                 Effect.gen(function* () {
-                    const verifier = provider === 'github' ? '' : (yield* PkceState.decrypt(provider, state)).verifier;
-                    const rawTokens = yield* provider === 'github'
-                        ? exchange(provider, () => clients.github.validateAuthorizationCode(code))
-                        : exchange(provider, () => clients[provider].validateAuthorizationCode(code, verifier));
+                    const { verifier } = yield* validateState(provider, state, stateCookie);
+                    yield* (isPkceProvider(provider) && verifier === undefined
+                        ? Effect.fail(mkErr(provider, 'Missing PKCE verifier', 'PKCE_MISSING'))
+                        : Effect.void);
+                    const rawTokens = yield* exchange(provider, () => validateCode(provider, code, verifier));
                     return yield* extractAuth[provider](rawTokens);
                 }).pipe(Effect.provide(EncryptionKeyService.layer), Effect.provide(MetricsService.layer)),
             createAuthorizationUrl: (provider) =>
                 Effect.gen(function* () {
                     const state = generateState();
-                    const verifier = generateCodeVerifier();
-                    return provider === 'github'
-                        ? clients.github.createAuthorizationURL(state, [...AUTH_TUNING.oauth.scopes.github])
-                        : clients[provider].createAuthorizationURL(
-                              yield* PkceState.encrypt(provider, state, verifier),
-                              verifier,
-                              [...AUTH_TUNING.oauth.scopes.oidc],
-                          );
+                    const scopes = provider === 'github' ? [...AUTH_TUNING.oauth.scopes.github] : [...AUTH_TUNING.oauth.scopes.oidc];
+                    const verifier = isPkceProvider(provider) ? generateCodeVerifier() : undefined;
+                    const stateCookie = yield* OAuthState.encrypt(provider, state, verifier);
+                    const url = createAuthUrl(provider, state, verifier, scopes);
+                    return { stateCookie, url };
                 }).pipe(Effect.provide(EncryptionKeyService.layer), Effect.provide(MetricsService.layer)),
             refreshToken: (provider, token) =>
                 exchange(provider, () => refreshHandlers[provider](token)).pipe(

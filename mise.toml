@@ -453,3 +453,18 @@ gh run watch --exit-status
 [tasks."wf:clean"]
 description = "Clean workflow artifacts and cache"
 run = "rm -rf .artifacts/* .cache/* .act-secrets 2>/dev/null; echo '[OK] Cleaned'"
+
+[tasks."wf:local"]
+description = "Run workflow locally with act"
+run = '''
+docker info >/dev/null 2>&1 || { echo "[ERROR] Docker required"; exit 1; }
+WORKFLOW="${1:-ci.yml}" EVENT="${2:-pull_request}" JOB="${3:-}"
+mkdir -p .act-secrets && printf "GITHUB_TOKEN=%s\nSONAR_TOKEN=%s\n" "${GH_TOKEN:-}" "${SONAR_TOKEN:-}" > .act-secrets/secrets
+ARGS="--container-daemon-socket - --container-architecture linux/amd64 --artifact-server-path $PWD/.artifacts --secret-file .act-secrets/secrets -W .github/workflows/$WORKFLOW $EVENT"
+[[ -n "$JOB" ]] && ARGS="$ARGS -j $JOB"
+act $ARGS
+'''
+
+[tasks."wf:local-ci"]
+description = "Run CI quality job locally"
+run = "mise run wf:local ci.yml pull_request quality"

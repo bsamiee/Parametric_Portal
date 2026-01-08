@@ -1,6 +1,6 @@
 /**
  * Migration: Create all database tables matching schema.ts.
- * PostgreSQL 17 features: NULLS NOT DISTINCT, covering indexes with INCLUDE.
+ * PostgreSQL 18.1 features: NULLS NOT DISTINCT, covering indexes with INCLUDE.
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -13,7 +13,7 @@ export default Effect.flatMap(
     (sql) => sql`
     -- Enums
     CREATE TYPE role AS ENUM ('guest', 'viewer', 'member', 'admin', 'owner');
-    CREATE TYPE oauth_provider AS ENUM ('google', 'github', 'microsoft');
+    CREATE TYPE oauth_provider AS ENUM ('google', 'github', 'microsoft', 'apple');
     CREATE TYPE ai_provider AS ENUM ('anthropic', 'openai', 'gemini');
     CREATE TYPE asset_type AS ENUM ('icon', 'image', 'document');
     CREATE TYPE audit_operation AS ENUM ('create', 'update', 'delete', 'revoke');

@@ -28,20 +28,22 @@ import { IconGenerationServiceLive } from './services/icons.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({ defaults: { corsOrigins: '*', port: 4000 } } as const);
-const ServerConfig = Config.all({
-    corsOrigins: Config.string('CORS_ORIGINS').pipe(
-        Config.withDefault(B.defaults.corsOrigins),
-        Config.map((s) => s.split(',') as ReadonlyArray<string>),
-    ),
-    port: Config.number('PORT').pipe(Config.withDefault(B.defaults.port)),
-});
+const serverConfig = Effect.runSync(
+    Config.all({
+        corsOrigins: Config.string('CORS_ORIGINS').pipe(
+            Config.withDefault(B.defaults.corsOrigins),
+            Config.map((s) => s.split(',').map((origin) => origin.trim()).filter((origin) => origin.length > 0) as ReadonlyArray<string>),
+        ),
+        port: Config.number('PORT').pipe(Config.withDefault(B.defaults.port)),
+    }),
+);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const composeMiddleware = (app: HttpApp.Default) =>
+const composeMiddleware = <E, R>(app: HttpApp.Default<E, R>) =>
     app.pipe(
         Middleware.xForwardedHeaders,
-        Middleware.trace(),
+        Middleware.trace,
         createMetricsMiddleware(),
         Middleware.security(),
         Middleware.requestId(),
@@ -101,17 +103,13 @@ const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
     Layer.provide(RouteDependencies),
     Layer.provide(InfraLayers),
 );
-const ServerLive = Layer.unwrapEffect(
-    Effect.map(ServerConfig, (config) =>
-        HttpApiBuilder.serve(composeMiddleware).pipe(
-            Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
-            Layer.provide(ApiLive),
-            Layer.provide(Middleware.cors({ allowedOrigins: config.corsOrigins })),
-            Layer.provide(SessionAuthLive),
-            Layer.provide(MetricsService.layer),
-            Layer.provide(NodeHttpServer.layer(createServer, { port: config.port }).pipe(HttpServer.withLogAddress)),
-        ),
-    ),
+const ServerLive = HttpApiBuilder.serve(composeMiddleware).pipe(
+    Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
+    Layer.provide(ApiLive),
+    Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),
+    Layer.provide(SessionAuthLive),
+    Layer.provide(MetricsService.layer),
+    Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port }).pipe(HttpServer.withLogAddress)),
 );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

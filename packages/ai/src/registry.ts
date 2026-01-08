@@ -15,12 +15,13 @@ import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
 import type { AiProvider } from '@parametric-portal/types/schema';
-import { Config, type Effect, Layer, Schema as S } from 'effect';
+import { Config, type Effect, Layer, Redacted, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type AiProviderType = typeof AiProvider.Type;
 type AiModelConfig = {
+    readonly apiKey?: string;
     readonly maxTokens?: number;
     readonly model?: string;
     readonly temperature?: number;
@@ -46,13 +47,17 @@ const B = Object.freeze({
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const HttpLayer = FetchHttpClient.layer;
+const makeApiKeyConfig = (envKey: string, apiKey?: string) =>
+    apiKey === undefined ? Config.redacted(envKey) : Config.succeed(Redacted.make(apiKey));
 const clientFactories = {
-    anthropic: () =>
-        AnthropicClient.layerConfig({ apiKey: Config.redacted(B.envKeys.anthropic) }).pipe(Layer.provide(HttpLayer)),
-    gemini: () =>
-        GoogleClient.layerConfig({ apiKey: Config.redacted(B.envKeys.gemini) }).pipe(Layer.provide(HttpLayer)),
-    openai: () =>
-        OpenAiClient.layerConfig({ apiKey: Config.redacted(B.envKeys.openai) }).pipe(Layer.provide(HttpLayer)),
+    anthropic: (apiKey?: string) =>
+        AnthropicClient.layerConfig({ apiKey: makeApiKeyConfig(B.envKeys.anthropic, apiKey) }).pipe(
+            Layer.provide(HttpLayer),
+        ),
+    gemini: (apiKey?: string) =>
+        GoogleClient.layerConfig({ apiKey: makeApiKeyConfig(B.envKeys.gemini, apiKey) }).pipe(Layer.provide(HttpLayer)),
+    openai: (apiKey?: string) =>
+        OpenAiClient.layerConfig({ apiKey: makeApiKeyConfig(B.envKeys.openai, apiKey) }).pipe(Layer.provide(HttpLayer)),
 } as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -64,7 +69,7 @@ const createAnthropicModel = (config?: AiModelConfig) => {
         ...(config?.temperature !== undefined && { temperature: config.temperature }),
         ...(config?.topK !== undefined && { top_k: config.topK }),
         ...(config?.topP !== undefined && { top_p: config.topP }),
-    }).pipe(Layer.provide(clientFactories.anthropic()));
+    }).pipe(Layer.provide(clientFactories.anthropic(config?.apiKey)));
 };
 const createOpenAiModel = (config?: AiModelConfig) => {
     const d = B.defaults.openai;
@@ -72,7 +77,7 @@ const createOpenAiModel = (config?: AiModelConfig) => {
         max_output_tokens: config?.maxTokens ?? d.maxTokens,
         ...(config?.temperature !== undefined && { temperature: config.temperature }),
         ...(config?.topP !== undefined && { top_p: config.topP }),
-    }).pipe(Layer.provide(clientFactories.openai()));
+    }).pipe(Layer.provide(clientFactories.openai(config?.apiKey)));
 };
 const createGeminiModel = (config?: AiModelConfig) => {
     const d = B.defaults.gemini;
@@ -84,7 +89,7 @@ const createGeminiModel = (config?: AiModelConfig) => {
             ...(config?.topP !== undefined && { topP: config.topP }),
         },
         toolConfig: {},
-    }).pipe(Layer.provide(clientFactories.gemini()));
+    }).pipe(Layer.provide(clientFactories.gemini(config?.apiKey)));
 };
 const modelCreators = {
     anthropic: createAnthropicModel,
@@ -99,22 +104,11 @@ type AiModelLayer = ReturnType<typeof createAnthropicModel>;
 
 // --- [TOOL_BUILDERS] ---------------------------------------------------------
 
-/**
- * Create a typed tool definition for AI function calling.
- * Tools are invoked by the model when relevant to the prompt.
- *
- * @example
- * const GetWeather = createTool('GetWeather', {
- *   description: 'Get current weather for a location',
- *   parameters: { location: S.String },
- *   success: S.Struct({ temp: S.Number, conditions: S.String }),
- * });
- */
 const createTool = <
     N extends string,
     P extends Record<string, S.Schema.Any>,
     Success extends S.Schema.Any = typeof S.Void,
-    Failure extends S.Schema.Any = typeof S.Never,
+    Failure extends S.Schema.All = typeof S.Never,
 >(
     name: N,
     options: {
@@ -130,29 +124,12 @@ const createTool = <
         parameters: options.parameters ?? {},
         success: options.success ?? S.Void,
     });
-
-/**
- * Compose multiple tools into a Toolkit for use with LanguageModel.generateText().
- * The model can call any tool in the toolkit based on the prompt.
- *
- * @example
- * const toolkit = composeToolkit(GetWeather, SearchDocs);
- * const result = yield* LanguageModel.generateText({ prompt, toolkit });
- */
-const composeToolkit = <T extends ReadonlyArray<Tool.AnyTool>>(...tools: T) => Toolkit.make(...tools);
-
-/**
- * Create a tool handler Layer for a single tool.
- * Handlers define the actual implementation that runs when the model calls a tool.
- *
- * @example
- * const handlers = createToolHandlers(toolkit, Effect.gen(function*() {
- *   return { GetWeather: ({ location }) => fetchWeather(location) };
- * }));
- */
-const createToolHandlers = <T extends Toolkit.AnyToolkit>(
-    toolkit: T,
-    build: Effect.Effect<Toolkit.Handlers<T>, never, never> | Toolkit.Handlers<T>,
+/** Compose multiple tools into a Toolkit for use with LanguageModel.generateText(). The model can call any tool in the toolkit based on the prompt. */
+const composeToolkit = <T extends ReadonlyArray<Tool.Any>>(...tools: T) => Toolkit.make(...tools);
+/** Create a tool handler Layer for a single tool. Handlers define the actual implementation that runs when the model calls a tool. */
+const createToolHandlers = <Tools extends Record<string, Tool.Any>>(
+    toolkit: Toolkit.Toolkit<Tools>,
+    build: Effect.Effect<Toolkit.HandlersFrom<Tools>, never, never> | Toolkit.HandlersFrom<Tools>,
 ) => toolkit.toLayer(build);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -160,7 +137,7 @@ const createToolHandlers = <T extends Toolkit.AnyToolkit>(
 /** Create model Layer with optional config override. */
 const createModelLayer = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer =>
     modelCreators[provider](config);
-const getModel = (provider: AiProviderType): AiModelLayer => createModelLayer(provider);
+const getModel = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer => createModelLayer(provider, config);
 
 // --- [EXPORT] ----------------------------------------------------------------
 

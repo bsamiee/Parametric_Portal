@@ -9,9 +9,7 @@ import { DEVTOOLS_TUNING } from './types.ts';
 // --- [TYPES] -----------------------------------------------------------------
 
 type EnvironmentConsumer = { readonly config: { readonly consumer: 'client' | 'server' } };
-type DevtoolsPluginConfig = {
-    readonly app?: string | undefined;
-};
+type DevtoolsPluginConfig = { readonly app?: string | undefined };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -40,16 +38,13 @@ const devtoolsPlugin = (config: DevtoolsPluginConfig = {}): Plugin[] => {
     };
     const autoImport = AutoImport({
         dts: false,
-        imports: [
-            {
-                '@parametric-portal/devtools/trace': ['measure', 'span', 'trace'],
-            },
-        ],
+        imports: [{ '@parametric-portal/devtools/trace': ['measure', 'span', 'trace'] }],
     });
     const normalized = Array.isArray(autoImport) ? autoImport : [autoImport];
     const autoImportPlugins = normalized.filter(isPlugin);
     const clientAutoImportPlugins = autoImportPlugins.map((plugin) => ({
         ...plugin,
+        apply: 'serve' as const,
         applyToEnvironment: (environment: EnvironmentConsumer) => environment.config.consumer === 'client',
     }));
     return [virtualModule, ...clientAutoImportPlugins];

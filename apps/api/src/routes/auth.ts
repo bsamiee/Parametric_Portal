@@ -38,7 +38,7 @@ const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: U
                 maxAge: `${AUTH_TUNING.cookie.maxAge} seconds`,
                 path: AUTH_TUNING.cookie.path,
                 sameSite: 'lax',
-                secure: true,
+                secure: AUTH_TUNING.cookie.secure,
             }),
         ),
     );
@@ -51,7 +51,7 @@ const buildLogoutResponse = () =>
                 maxAge: '0 seconds',
                 path: AUTH_TUNING.cookie.path,
                 sameSite: 'lax',
-                secure: true,
+                secure: AUTH_TUNING.cookie.secure,
             }),
         ),
     );
@@ -66,8 +66,15 @@ const createAuthTokenPairs = () =>
             sessionToken: session.token,
         };
     });
-const rotateTokens = (repos: DatabaseServiceShape, userId: UserId, revokeTokenId?: RefreshTokenId) =>
+const rotateTokens = (
+    repos: DatabaseServiceShape,
+    userId: UserId,
+    revokeTokenId?: RefreshTokenId,
+    ctx?: { readonly ipAddress: string | null; readonly userAgent: string | null },
+) =>
     Effect.gen(function* () {
+        const ipAddress = ctx?.ipAddress ?? null;
+        const userAgent = ctx?.userAgent ?? null;
         const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
         const sessionExpiresAt = Timestamp.expiresAtDate(AUTH_TUNING.durations.sessionMs);
         const refreshExpiresAt = Timestamp.expiresAtDate(AUTH_TUNING.durations.refreshTokenMs);
@@ -76,10 +83,10 @@ const rotateTokens = (repos: DatabaseServiceShape, userId: UserId, revokeTokenId
                 yield* repos.sessions
                     .insert({
                         expiresAt: sessionExpiresAt,
-                        ipAddress: null,
+                        ipAddress,
                         revokedAt: null,
                         tokenHash: sessionHash,
-                        userAgent: null,
+                        userAgent,
                         userId,
                     })
                     .pipe(Effect.asVoid);
@@ -96,16 +103,23 @@ const rotateTokens = (repos: DatabaseServiceShape, userId: UserId, revokeTokenId
 
 const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: OAuthService, provider: typeof OAuthProvider.Type) =>
     Effect.gen(function* () {
-        const url = yield* oauth.createAuthorizationUrl(provider);
-        return { url: Url.decodeSync(url.toString()) };
+        const { stateCookie, url } = yield* oauth.createAuthorizationUrl(provider);
+        const response = yield* HttpServerResponse.json({ url: Url.decodeSync(url.toString()) });
+        return yield* HttpServerResponse.setCookie(response, AUTH_TUNING.oauth.stateCookie.name, stateCookie, {
+            httpOnly: true,
+            maxAge: `${AUTH_TUNING.oauth.stateCookie.maxAge} seconds`,
+            path: AUTH_TUNING.oauth.stateCookie.path,
+            sameSite: 'lax',
+            secure: AUTH_TUNING.oauth.stateCookie.secure,
+        });
     }).pipe(
-        Effect.mapError(
-            (e) =>
-                new HttpError.OAuth({
-                    provider: 'provider' in e ? e.provider : 'unknown',
-                    reason: 'reason' in e ? e.reason : String(e),
-                }),
-        ),
+        Effect.mapError((e) => {
+            const provider = 'provider' in e ? e.provider : 'unknown';
+            const isReason = 'reason' in e && typeof e.reason === 'string';
+            const fallback = e instanceof Error ? e.message : String(e);
+            const reason = isReason ? e.reason : fallback;
+            return new HttpError.OAuth({ provider, reason });
+        }),
     ),
 );
 const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
@@ -119,8 +133,15 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
         Effect.gen(function* () {
             const httpErr = (reason: string) => new HttpError.OAuth({ provider, reason });
             const request = yield* HttpServerRequest.HttpServerRequest;
+            const stateCookie = yield* pipe(
+                Option.fromNullable(request.cookies[AUTH_TUNING.oauth.stateCookie.name]),
+                Option.match({
+                    onNone: () => Effect.fail(httpErr('Missing OAuth state cookie')),
+                    onSome: Effect.succeed,
+                }),
+            );
             const ctx = extractRequestContext(request);
-            const result = yield* oauth.authenticate(provider, code, state);
+            const result = yield* oauth.authenticate(provider, code, state, stateCookie);
             const emailRaw = yield* Option.match(result.email, {
                 onNone: () => Effect.fail(httpErr('Email not provided by provider')),
                 onSome: Effect.succeed,
@@ -164,18 +185,29 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                 Effect.mapError(() => httpErr('Audit log failed')),
             );
             const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
-                rotateTokens(repos, userId),
+                rotateTokens(repos, userId, undefined, ctx),
                 Effect.mapError(() => httpErr('Token generation failed')),
             );
-            return yield* pipe(
+            const response = yield* pipe(
                 buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
                 Effect.mapError(() => httpErr('Response build failed')),
+            );
+            return yield* pipe(
+                HttpServerResponse.setCookie(response, AUTH_TUNING.oauth.stateCookie.name, '', {
+                    httpOnly: true,
+                    maxAge: '0 seconds',
+                    path: AUTH_TUNING.oauth.stateCookie.path,
+                    sameSite: 'lax',
+                    secure: AUTH_TUNING.oauth.stateCookie.secure,
+                }),
+                Effect.mapError(() => httpErr('Cookie clear failed')),
             );
         }),
 );
 const handleRefresh = Effect.fn('auth.refresh')((repos: DatabaseServiceShape) =>
     Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        const ctx = extractRequestContext(request);
         const refreshTokenInput = yield* pipe(
             Option.fromNullable(request.cookies[AUTH_TUNING.cookie.name]),
             Option.match({
@@ -196,7 +228,7 @@ const handleRefresh = Effect.fn('auth.refresh')((repos: DatabaseServiceShape) =>
             onSome: Effect.succeed,
         });
         const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
-            rotateTokens(repos, token.userId, token.id),
+            rotateTokens(repos, token.userId, token.id, ctx),
             HttpError.chain(HttpError.Auth, { reason: 'Token generation failed' }),
         );
         return yield* pipe(
@@ -303,8 +335,8 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
         const repos = yield* DatabaseService;
         const oauth = yield* Middleware.OAuth;
         return handlers
-            .handle('oauthStart', ({ path: { provider } }) => handleOAuthStart(oauth, provider).pipe(RateLimit.middleware.auth), )
-            .handleRaw('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) => handleOAuthCallback(oauth, repos, provider, code, state).pipe(RateLimit.middleware.auth), )
+            .handleRaw('oauthStart', ({ path: { provider } }) => handleOAuthStart(oauth, provider).pipe(RateLimit.middleware.auth))
+            .handleRaw('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) => handleOAuthCallback(oauth, repos, provider, code, state).pipe(RateLimit.middleware.auth))
             .handleRaw('refresh', () => handleRefresh(repos).pipe(RateLimit.middleware.auth))
             .handleRaw('logout', () => handleLogout(repos))
             .handle('me', () => handleMe(repos))

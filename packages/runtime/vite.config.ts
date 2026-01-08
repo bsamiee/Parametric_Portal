@@ -31,6 +31,7 @@ const config = Effect.runSync(
             '@effect/opentelemetry',
             '@effect/platform',
             '@effect/platform-browser',
+            '@floating-ui/react',
             '@parametric-portal/database',
             '@parametric-portal/types',
             'effect',

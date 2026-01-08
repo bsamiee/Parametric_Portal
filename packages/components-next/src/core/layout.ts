@@ -4,7 +4,7 @@
  * Interactive elements (buttons, links, inputs) use RAC instead.
  */
 import { type ComponentPropsWithoutRef, createElement, type ReactElement, type Ref } from 'react';
-import { cn } from './css-slots';
+import { cn } from './utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 

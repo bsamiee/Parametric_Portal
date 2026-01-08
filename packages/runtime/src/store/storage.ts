@@ -30,9 +30,6 @@ const B = Object.freeze({
         sameSite: 'Lax' as const,
         secure: true,
     },
-    defaults: {
-        storage: 'localStorage' as StorageType,
-    },
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -60,33 +57,32 @@ const removeCookie = (name: string): void => {
     document.cookie = `${encodeURIComponent(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${B.cookie.path}`;
 };
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
-
-const storageBackends: Record<StorageType, StorageAdapter> = Object.freeze({
-    cookies: { getItem: getCookie, removeItem: removeCookie, setItem: setCookie },
-    indexedDB: {
-        getItem: async (name) => (await get(name)) ?? null,
-        removeItem: del,
-        setItem: set,
-    },
-    localStorage: {
-        getItem: (n) => localStorage.getItem(n),
-        removeItem: (n) => localStorage.removeItem(n),
-        setItem: (n, v) => localStorage.setItem(n, v),
-    },
-    sessionStorage: {
-        getItem: (n) => sessionStorage.getItem(n),
-        removeItem: (n) => sessionStorage.removeItem(n),
-        setItem: (n, v) => sessionStorage.setItem(n, v),
-    },
-});
-
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createStorage = (type: StorageType = B.defaults.storage): ReturnType<typeof createJSONStorage> =>
-    createJSONStorage(() => storageBackends[type] as StateStorage);
+const createStorage = (type: StorageType = 'localStorage'): ReturnType<typeof createJSONStorage> =>
+    createJSONStorage(
+        () =>
+            ({
+                cookies: { getItem: getCookie, removeItem: removeCookie, setItem: setCookie },
+                indexedDB: {
+                    getItem: async (name: string) => (await get(name)) ?? null,
+                    removeItem: del,
+                    setItem: set,
+                },
+                localStorage: {
+                    getItem: (n: string) => localStorage.getItem(n),
+                    removeItem: (n: string) => localStorage.removeItem(n),
+                    setItem: (n: string, v: string) => localStorage.setItem(n, v),
+                },
+                sessionStorage: {
+                    getItem: (n: string) => sessionStorage.getItem(n),
+                    removeItem: (n: string) => sessionStorage.removeItem(n),
+                    setItem: (n: string, v: string) => sessionStorage.setItem(n, v),
+                },
+            })[type] as StateStorage,
+    );
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as STORAGE_TUNING, createStorage, storageBackends };
+export { B as STORAGE_TUNING, createStorage };
 export type { CookieOptions, StorageAdapter, StorageType };

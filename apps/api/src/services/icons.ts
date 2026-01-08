@@ -7,7 +7,7 @@ import { type AiProviderType, buildPrompt, getModel } from '@parametric-portal/a
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { IconServiceInput, Icons } from '@parametric-portal/types/icons';
 import { Svg, SvgAsset } from '@parametric-portal/types/svg';
-import { Context, Effect, Layer, pipe, Schema as S } from 'effect';
+import { Array as A, Context, Effect, Layer, Option, pipe, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -47,7 +47,10 @@ const B = Object.freeze({
 type Palette = (typeof Icons.design.palettes)['dark'];
 const getPalette = (mode: 'dark' | 'light'): Palette => Icons.design.palettes[mode];
 const minifySvgForPrompt = (svgContent: string): string =>
-    Svg.sanitize(svgContent).replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim();
+    Option.match(Svg.sanitize(svgContent), {
+        onNone: () => '',
+        onSome: (svg) => svg.replaceAll(/\s+/g, ' ').replaceAll(/>\s+</g, '><').trim(),
+    });
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
     const { layers } = Icons.design;
@@ -132,7 +135,7 @@ Guide: baseline + symmetry axis. Primary: arch curve. Grips: ON curve at input p
 </example>
 
 <output>
-{"variants":[{"id":"v1","name":"Tool Name","svg":"<svg>...</svg>"}]}
+{"variants":[{"name":"Tool Name","svg":"<svg>...</svg>"}]}
 Generate ${ctx.variantCount} variant(s).
 </output>`;
 };
@@ -193,7 +196,7 @@ const generateWithAi = Effect.fn('icons.ai')((validInput: ServiceInput) => {
             schema: AiResponseSchema,
         }),
         Effect.map((response) => response.value),
-        Effect.provide(getModel(provider)),
+        Effect.provide(getModel(provider, validInput.apiKey === undefined ? {} : { apiKey: validInput.apiKey })),
         Effect.mapError((e) => new HttpError.Internal({ message: B.errors.aiGeneration(provider, e) })),
     );
 });
@@ -211,7 +214,7 @@ const IconGenerationServiceLive = Layer.succeed(
             Effect.gen(function* () {
                 const response = yield* generateWithAi(input);
                 return {
-                    variants: response.variants.map((v) => SvgAsset.create(v.name, v.svg)),
+                    variants: A.filterMap(response.variants, (v) => SvgAsset.create(v.name, v.svg)),
                 } satisfies ServiceOutput;
             }),
         ),
