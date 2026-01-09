@@ -1,11 +1,13 @@
 /**
  * Core utilities for component development.
  * CSS class merging, RAC render-props composition, slot resolution and rendering.
+ * SlotInput accepts raw values (LucideIcon, ReactElement) OR SlotDef for async-aware slots.
+ * SlotDef keys map 1:1 to AsyncState._tag values (Idle, Loading, Success, Failure).
  */
 
 import { AsyncState } from '@parametric-portal/types/async';
 import { type ClassValue, clsx } from 'clsx';
-import { Match, Predicate } from 'effect';
+import { Match, Option, pipe, Predicate } from 'effect';
 import type { LucideIcon } from 'lucide-react';
 import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { composeRenderProps } from 'react-aria-components';
@@ -13,8 +15,9 @@ import { type ClassNameValue, twMerge } from 'tailwind-merge';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type RenderPropsClassName<T> = ((state: T) => string) | string | undefined;
 type Renderable = LucideIcon | ReactElement | ReactNode;
+type SlotInput<T extends Renderable = Renderable> = T | SlotDef<T>;
+type RenderPropsClassName<T> = ((state: T) => string) | string | undefined;
 type SlotDef<T extends Renderable = Renderable> = {
 	readonly default?: T;
 	readonly idle?: T;
@@ -45,13 +48,14 @@ const isLucide = (v: unknown): v is LucideIcon =>
 	typeof v === 'function' &&
 	typeof (v as { displayName?: unknown }).displayName === 'string' &&
 	typeof (v as { render?: unknown }).render === 'function';
-const resolve = <T extends Renderable>(
-	def: SlotDef<T> | undefined,
-	state: AsyncState<unknown, unknown> | undefined,
-): T | undefined => {
-	const key = (state?._tag.toLowerCase() ?? 'default') as keyof SlotDef;
-	return def === undefined ? undefined : (def[key] ?? def.default);
-};
+const isSlotDef = <T extends Renderable>(v: unknown): v is SlotDef<T> =>
+	v != null &&
+	typeof v === 'object' &&
+	!isValidElement(v) &&
+	!isLucide(v) &&
+	('default' in v || 'idle' in v || 'loading' in v || 'success' in v || 'failure' in v);
+const normalize = <T extends Renderable>(input: SlotInput<T> | undefined): SlotDef<T> | undefined =>
+    pipe(Option.fromNullable(input), Option.map((v) => isSlotDef<T>(v) ? v : { default: v } as SlotDef<T>), Option.getOrUndefined);
 const content = (slotContent: Renderable | null | undefined, className?: string): ReactNode =>
 	Match.value(slotContent).pipe(
 		Match.when(Predicate.isNullable, () => null),
@@ -59,22 +63,30 @@ const content = (slotContent: Renderable | null | undefined, className?: string)
 		Match.when(isValidElement<{ className?: string }>, (el) => cloneElement(el, { className: cn(el.props.className, className) })),
 		Match.orElse((node) => node),
 	);
+const resolve = <T extends Renderable>(
+	input: SlotInput<T> | undefined,
+	state: AsyncState<unknown, unknown> | undefined,
+): T | undefined => {
+	const def = normalize(input);
+	const key = (state?._tag.toLowerCase() ?? 'default') as keyof SlotDef;
+	return def ? (def[key] ?? def.default) : undefined;
+};
 const render = (
-	def: SlotDef | undefined,
+	input: SlotInput | undefined,
 	state: AsyncState<unknown, unknown> | undefined,
 	className?: string,
-): ReactNode => content(resolve(def, state), className);
+): ReactNode => content(resolve(input, state), className);
 const bind = (state: AsyncState<unknown, unknown> | undefined) =>
 	Object.freeze({
 		attr: AsyncState.toAttr(state),
 		content,
 		pending: AsyncState.isPending(state),
-		render: (def: SlotDef | undefined, className?: string) => render(def, state, className),
-		resolve: <T extends Renderable>(def: SlotDef<T> | undefined) => resolve(def, state),
+		render: (input: SlotInput | undefined, className?: string) => render(input, state, className),
+		resolve: <T extends Renderable>(input: SlotInput<T> | undefined) => resolve(input, state),
 	});
-const Slot = Object.freeze({ bind, content, render, resolve });
+const Slot = Object.freeze({ bind, content, isSlotDef, normalize, render, resolve });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { cn, composeTailwindRenderProps, defined, Slot };
-export type { RenderPropsClassName, SlotDef };
+export type { SlotDef, SlotInput };

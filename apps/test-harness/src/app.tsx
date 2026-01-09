@@ -1,16 +1,16 @@
 // biome-ignore-all lint/correctness/useUniqueElementIds: RAC Tab/TabPanel `id` props are internal state keys, not DOM ids.
 /**
  * Test harness: Comprehensive component validation with theme integration.
- * Tests: Button, Toggle, Select, Tabs, Menu, FileUpload, FilePreview.
+ * Tests: Button, Toggle, Select, Tabs, Menu, FileUpload, FilePreview, Accordion.
  * Validates: CSS variables, async states, tooltips, icons, all variants.
  */
-import { Button } from '@parametric-portal/components-next/button';
-import { FilePreview } from '@parametric-portal/components-next/file-preview';
-import { FileUpload } from '@parametric-portal/components-next/file-upload';
-import { Menu, MenuItem, MenuSection, MenuSeparator } from '@parametric-portal/components-next/menu';
-import { Select, SelectItem, SelectSection, SelectSeparator } from '@parametric-portal/components-next/select';
-import { Tab, TabList, TabPanel, Tabs } from '@parametric-portal/components-next/tabs';
-import { Checkbox, CheckboxGroup, Switch } from '@parametric-portal/components-next/toggle';
+import { Button } from '@parametric-portal/components-next/actions/button';
+import { Checkbox, CheckboxGroup, Switch } from '@parametric-portal/components-next/actions/toggle';
+import { Select } from '@parametric-portal/components-next/inputs/select';
+import { Menu } from '@parametric-portal/components-next/navigation/menu';
+import { Tabs } from '@parametric-portal/components-next/navigation/tabs';
+import { FilePreview } from '@parametric-portal/components-next/pickers/file-preview';
+import { FileUpload } from '@parametric-portal/components-next/pickers/file-upload';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import { useFileUpload } from '@parametric-portal/runtime/hooks/file-upload';
 import { Runtime } from '@parametric-portal/runtime/runtime';
@@ -123,77 +123,81 @@ const SelectDemo: FC = () => (
     <>
         {/* Basic Select with sections */}
         <Select color='primary' placeholder='Select page...' size='md' suffix={ChevronDown}>
-            <SelectSection title='Navigation'>
-                <SelectItem icon={{ default: Home }}>Home</SelectItem>
-                <SelectItem icon={{ default: User }}>Profile</SelectItem>
-                <SelectItem icon={{ default: Settings }} isDisabled>
+            <Select.Section title='Navigation'>
+                <Select.Item icon={{ default: Home }}>Home</Select.Item>
+                <Select.Item icon={{ default: User }}>Profile</Select.Item>
+                <Select.Item icon={{ default: Settings }} isDisabled>
                     Settings
-                </SelectItem>
-            </SelectSection>
-            <SelectSeparator />
-            <SelectSection title='Actions'>
-                <SelectItem icon={{ default: Copy }}>Copy</SelectItem>
-                <SelectItem icon={{ default: Download }}>Download</SelectItem>
-            </SelectSection>
-            <SelectSeparator />
-            <SelectItem destructive icon={{ default: Trash2 }}>
+                </Select.Item>
+            </Select.Section>
+            <Select.Separator />
+            <Select.Section title='Actions'>
+                <Select.Item icon={{ default: Copy }}>Copy</Select.Item>
+                <Select.Item icon={{ default: Download }}>Download</Select.Item>
+            </Select.Section>
+            <Select.Separator />
+            <Select.Item destructive icon={{ default: Trash2 }}>
                 Delete Account
-            </SelectItem>
+            </Select.Item>
         </Select>
         {/* Select with badges */}
         <Select color='secondary' placeholder='With badges' size='md' suffix={ChevronDown}>
-            <SelectItem badge={5} description='5 unread messages' icon={{ default: Mail }}>
+            <Select.Item badge={5} description='5 unread messages' icon={{ default: Mail }}>
                 Inbox
-            </SelectItem>
-            <SelectItem badge={12} icon={{ default: Edit }}>
+            </Select.Item>
+            <Select.Item badge={12} icon={{ default: Edit }}>
                 Drafts
-            </SelectItem>
-            <SelectItem badge={100} icon={{ default: FolderOpen }}>
+            </Select.Item>
+            <Select.Item badge={100} icon={{ default: FolderOpen }}>
                 Archive
-            </SelectItem>
+            </Select.Item>
         </Select>
         {/* Select with item tooltips */}
         <Select color='primary' placeholder='With tooltips' size='md' suffix={ChevronDown}>
-            <SelectItem
+            <Select.Item
                 description='Navigate to home page'
                 icon={{ default: Home }}
                 tooltip={{ content: 'Go to dashboard' }}
             >
                 Home
-            </SelectItem>
-            <SelectItem description='View your profile' icon={{ default: User }} tooltip={{ content: 'Edit settings' }}>
+            </Select.Item>
+            <Select.Item
+                description='View your profile'
+                icon={{ default: User }}
+                tooltip={{ content: 'Edit settings' }}
+            >
                 Profile
-            </SelectItem>
+            </Select.Item>
         </Select>
         {/* Sizes */}
         <Select color='secondary' placeholder='Small' size='sm' suffix={ChevronDown}>
-            <SelectItem>First</SelectItem>
-            <SelectItem>Second</SelectItem>
+            <Select.Item>First</Select.Item>
+            <Select.Item>Second</Select.Item>
         </Select>
         <Select color='primary' isDisabled placeholder='Disabled' size='md' suffix={ChevronDown}>
-            <SelectItem>Item</SelectItem>
+            <Select.Item>Item</Select.Item>
         </Select>
     </>
 );
 const TabsDemo: FC = () => (
     <div className='flex flex-col gap-4 w-full max-w-md'>
         <Tabs color='primary' defaultSelectedKey='tab1' size='md'>
-            <TabList>
-                <Tab children={{ default: 'Home' }} icon={{ default: Home }} id='tab1' />
-                <Tab children={{ default: 'Profile' }} icon={{ default: User }} id='tab2' />
-                <Tab children={{ default: 'Settings' }} icon={{ default: Settings }} id='tab3' isDisabled />
-            </TabList>
-            <TabPanel id='tab1'>Home panel content with icon tab.</TabPanel>
-            <TabPanel id='tab2'>Profile panel - navigate with arrows.</TabPanel>
-            <TabPanel id='tab3'>Settings disabled.</TabPanel>
+            <Tabs.List>
+                <Tabs.Tab children={{ default: 'Home' }} icon={{ default: Home }} id='tab1' />
+                <Tabs.Tab children={{ default: 'Profile' }} icon={{ default: User }} id='tab2' />
+                <Tabs.Tab children={{ default: 'Settings' }} icon={{ default: Settings }} id='tab3' isDisabled />
+            </Tabs.List>
+            <Tabs.Panel id='tab1'>Home panel content with icon tab.</Tabs.Panel>
+            <Tabs.Panel id='tab2'>Profile panel - navigate with arrows.</Tabs.Panel>
+            <Tabs.Panel id='tab3'>Settings disabled.</Tabs.Panel>
         </Tabs>
         <Tabs color='secondary' orientation='vertical' size='sm'>
-            <TabList>
-                <Tab children={{ default: 'Files' }} id='v1' />
-                <Tab children={{ default: 'Edit' }} id='v2' />
-            </TabList>
-            <TabPanel id='v1'>Vertical tabs - Files</TabPanel>
-            <TabPanel id='v2'>Vertical tabs - Edit</TabPanel>
+            <Tabs.List>
+                <Tabs.Tab children={{ default: 'Files' }} id='v1' />
+                <Tabs.Tab children={{ default: 'Edit' }} id='v2' />
+            </Tabs.List>
+            <Tabs.Panel id='v1'>Vertical tabs - Files</Tabs.Panel>
+            <Tabs.Panel id='v2'>Vertical tabs - Edit</Tabs.Panel>
         </Tabs>
     </div>
 );
@@ -211,17 +215,29 @@ const MenuDemo: FC = () => (
             />
         }
     >
-        <MenuSection title='Edit'>
-            <MenuItem children={{ default: 'Copy' }} icon={{ default: Copy }} shortcut='Cmd+C' />
-            <MenuItem children={{ default: 'Edit' }} icon={{ default: Edit }} shortcut='Cmd+E' />
-        </MenuSection>
-        <MenuSeparator />
-        <MenuSection title='Export'>
-            <MenuItem children={{ default: 'Download' }} icon={{ default: Download }} />
-            <MenuItem children={{ default: 'Export PDF' }} icon={{ default: FileText }} />
-        </MenuSection>
-        <MenuSeparator />
-        <MenuItem children={{ default: 'Delete' }} destructive icon={{ default: Trash2 }} shortcut='Cmd+Del' />
+        <Menu.Section title='Edit'>
+            <Menu.Item children={{ default: 'Copy' }} copy />
+            <Menu.Item children={{ default: 'Edit' }} icon={{ default: Edit }} shortcut='⌘E' />
+        </Menu.Section>
+        <Menu.Separator />
+        <Menu.Section title='Export'>
+            <Menu.Item children={{ default: 'Download' }} icon={{ default: Download }} />
+            <Menu.Item children={{ default: 'Export PDF' }} icon={{ default: FileText }} />
+        </Menu.Section>
+        <Menu.Separator />
+        <Menu.Item
+            children={{ default: 'Delete' }}
+            confirm={{
+                buttons: [
+                    { action: 'close', label: 'Cancel' },
+                    { action: 'confirm', autoFocus: true, label: 'Delete' },
+                ],
+                description: 'This action cannot be undone.',
+                title: 'Delete item?',
+            }}
+            delete
+            destructive
+        />
     </Menu>
 );
 const FileDemo: FC = () => {

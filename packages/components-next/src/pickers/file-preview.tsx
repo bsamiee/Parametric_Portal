@@ -6,24 +6,23 @@
 import { type FileMetadata, type MimeCategory, type MimeType, mimeToCategory } from '@parametric-portal/types/files';
 import type { LucideIcon } from 'lucide-react';
 import { Archive, Code, File, FileText, Image } from 'lucide-react';
-import type { FC, Ref } from 'react';
-import type { BasePropsFor } from '../core/props';
+import type { FC, ReactNode, Ref } from 'react';
 import { cn, Slot } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type FilePreviewProps = BasePropsFor<'filePreview'> & FilePreviewSpecificProps;
 type PreviewMode = MimeCategory | 'svg' | 'unknown';
 type ValidatedFileInput = {
 	readonly content: string;
 	readonly dataUrl: string;
 	readonly metadata: FileMetadata;
 };
-type FilePreviewSpecificProps = {
+type FilePreviewProps = {
 	readonly className?: string;
 	readonly content?: string;
 	readonly dataUrl?: string;
 	readonly file?: ValidatedFileInput;
+	readonly icon?: LucideIcon | ReactNode;
 	readonly metadata?: FileMetadata;
 	readonly mode?: PreviewMode;
 	readonly ref?: Ref<HTMLDivElement>;
@@ -89,4 +88,4 @@ const FilePreview: FC<FilePreviewProps> = ({ className, content, dataUrl, file, 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { FilePreview };
-export type { FilePreviewProps, PreviewMode };
+export type { FilePreviewProps };

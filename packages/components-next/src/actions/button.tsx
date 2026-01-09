@@ -2,38 +2,34 @@
  * Button: Pure presentation component with theme-driven styling via CSS variable slots.
  * Async state comes from external hooks (useEffectMutate) - no internal Effect execution.
  * REQUIRED: color and size props - no defaults, no hardcoded mappings.
+ *
+ * RAC props pass through directly - we only add: theme, asyncState, tooltip, prefix/suffix, gesture.
  */
 import { useMergeRefs } from '@floating-ui/react';
+import type { AsyncState } from '@parametric-portal/types/async';
 import type { CSSProperties, FC, ReactNode, Ref } from 'react';
 import { useRef } from 'react';
 import { Button as RACButton, type ButtonProps as RACButtonProps } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
-import { useTooltip } from '../core/floating';
+import { useTooltip, type TooltipConfig } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
-import type { BasePropsFor } from '../core/props';
-import { cn, composeTailwindRenderProps, Slot, type SlotDef } from '../core/utils';
+import { cn, composeTailwindRenderProps, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ButtonSpecificProps = {
+type ButtonProps = Omit<RACButtonProps, 'children'> & {
+	readonly asyncState?: AsyncState;
 	readonly bgOpacity?: number;
-	readonly children?: SlotDef<ReactNode>;
-	readonly className?: RACButtonProps['className'];
-	readonly formAction?: string;
-	readonly formEncType?: string;
-	readonly formMethod?: string;
-	readonly formNoValidate?: boolean;
-	readonly formTarget?: string;
+	readonly children?: SlotInput<ReactNode>;
+	readonly color: string;
 	readonly gesture?: GestureProps;
-	readonly isPending?: boolean;
-	readonly prefix?: SlotDef;
-	readonly preventFocusOnPress?: boolean;
+	readonly prefix?: SlotInput;
 	readonly ref?: Ref<HTMLButtonElement>;
-	readonly suffix?: SlotDef;
-	readonly type?: 'button' | 'reset' | 'submit';
-	readonly value?: string;
+	readonly size: string;
+	readonly suffix?: SlotInput;
+	readonly tooltip?: TooltipConfig;
+	readonly variant?: string;
 };
-type ButtonProps = BasePropsFor<'button'> & ButtonSpecificProps;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -61,8 +57,7 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Button: FC<ButtonProps> = ({
-	asyncState, bgOpacity, children, className, color, gesture, isDisabled,
-	prefix, ref, size, suffix, tooltip, variant,
+	asyncState, bgOpacity, children, className, color, gesture, isDisabled, prefix, ref, size, style: styleProp, suffix, tooltip, variant,
 	...rest
 }) => {
 	const slot = Slot.bind(asyncState);
@@ -70,26 +65,33 @@ const Button: FC<ButtonProps> = ({
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
+		prefix: 'button',
 		ref: buttonRef,
 		...gesture,
-		cssVars: { progress: '--button-longpress-progress', ...gesture?.cssVars },
 		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
 	});
 	const mergedRef = useMergeRefs([ref, buttonRef, tooltipProps.ref as Ref<HTMLButtonElement>]);
+	const mergedStyle = {
+		...gestureProps.style,
+		...styleProp,
+		...(bgOpacity !== undefined && { '--button-bg-opacity': bgOpacity }),
+	} as CSSProperties;
 	return (
 		<>
 			<RACButton
-				{...({ ...rest, ...tooltipProps, ...gestureProps } as unknown as RACButtonProps)}
+				{...(rest as RACButtonProps)}
+				{...(tooltipProps as RACButtonProps)}
+				{...(gestureProps as RACButtonProps)}
 				className={composeTailwindRenderProps(className, B.slot.base)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
-				data-slot='button'
+				data-slot="button"
 				data-variant={variant}
 				isDisabled={isDisabled || slot.pending}
 				isPending={slot.pending}
 				ref={mergedRef}
-				{...(bgOpacity !== undefined && { style: { '--button-bg-opacity': bgOpacity } as CSSProperties })}
+				style={mergedStyle}
 			>
 				{slot.render(prefix, B.slot.icon)}
 				<span className={B.slot.text}>{slot.resolve(children)}</span>

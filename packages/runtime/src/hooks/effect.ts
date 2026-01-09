@@ -103,6 +103,7 @@ const useEffectMutate = <A, I, E, R>(
     );
     const mutate = useCallback(
         (i: I) => {
+            ref.current && rt.runFork(Fiber.interrupt(ref.current));
             setAsyncState(AsyncState.Loading());
             const { onErr, onOk } = makeCallbacks(
                 setAsyncState,

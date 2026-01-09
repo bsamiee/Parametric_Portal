@@ -9,23 +9,27 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: {
-                button: './src/button/button.tsx',
-                'core/animate': './src/core/animate.ts',
+                // --- actions ---
+                'actions/button': './src/actions/button.tsx',
+                'actions/toggle': './src/actions/toggle.tsx',
+                // --- core ---
                 'core/announce': './src/core/announce.tsx',
                 'core/floating': './src/core/floating.tsx',
                 'core/focus': './src/core/focus.tsx',
                 'core/gesture': './src/core/gesture.ts',
-                'core/layout': './src/core/layout.ts',
-                'core/props': './src/core/props.ts',
                 'core/utils': './src/core/utils.ts',
-                'file-preview': './src/file-preview/file-preview.tsx',
-                'file-upload': './src/file-upload/file-upload.tsx',
-                menu: './src/menu/menu.tsx',
-                'menu/confirm': './src/menu/confirm.tsx',
-                radio: './src/radio/radio.tsx',
-                select: './src/select/select.tsx',
-                tabs: './src/tabs/tabs.tsx',
-                toggle: './src/toggle/toggle.tsx',
+                // --- inputs ---
+                'inputs/radio': './src/inputs/radio.tsx',
+                'inputs/select': './src/inputs/select.tsx',
+                // --- navigation ---
+                'navigation/accordion': './src/navigation/accordion.tsx',
+                'navigation/menu': './src/navigation/menu.tsx',
+                'navigation/tabs': './src/navigation/tabs.tsx',
+                // --- overlays ---
+                'overlays/dialog': './src/overlays/dialog.tsx',
+                // --- pickers ---
+                'pickers/file-preview': './src/pickers/file-preview.tsx',
+                'pickers/file-upload': './src/pickers/file-upload.tsx',
             },
             external: [
                 '@floating-ui/react',
@@ -34,6 +38,8 @@ export default defineConfig(
                 '@parametric-portal/theme',
                 '@parametric-portal/types',
                 '@radix-ui/react-visually-hidden',
+                '@tanstack/react-virtual',
+                '@use-gesture/react',
                 'clsx',
                 'effect',
                 'lucide-react',
@@ -43,7 +49,9 @@ export default defineConfig(
                 'react-dom',
                 'react/jsx-runtime',
                 'tailwind-merge',
+                'ts-essentials',
                 'tw-animate-css',
+                'type-fest',
             ],
             mode: 'library',
             name: 'ParametricComponentsNext',

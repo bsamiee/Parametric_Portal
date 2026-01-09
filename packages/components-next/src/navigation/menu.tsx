@@ -11,59 +11,41 @@ import { AsyncState } from '@parametric-portal/types/async';
 import { ChevronRight, Clipboard, Copy, Trash2 } from 'lucide-react';
 import { createContext, createElement, type FC, type ReactElement, type ReactNode, type Ref, useCallback, useContext, useMemo, useRef } from 'react';
 import {
-	type Key, Header, MenuTrigger, Popover, Menu as RACMenu, MenuItem as RACMenuItem, type MenuItemProps as RACMenuItemProps, type MenuProps as RACMenuProps,
-	MenuSection as RACMenuSection, type MenuSectionProps as RACMenuSectionProps, Separator, type Selection, SubmenuTrigger as RACSubmenuTrigger,
+	Header, type Key, type MenuItemRenderProps, MenuTrigger, Popover, Menu as RACMenu, MenuItem as RACMenuItem, type MenuItemProps as RACMenuItemProps, type MenuProps as RACMenuProps,
+	MenuSection as RACMenuSection, type MenuSectionProps as RACMenuSectionProps, Separator, SubmenuTrigger as RACSubmenuTrigger,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
-import { useTooltip } from '../core/floating';
+import { type DialogConfig, useDialog } from '../overlays/dialog';
+import { type TooltipConfig, useTooltip } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
-import type { BasePropsFor } from '../core/props';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
-import { type ConfirmConfig, ConfirmDialog, useConfirm } from './confirm';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type SelectionMode = 'multiple' | 'none' | 'single';
-type MenuContextValue = { readonly size: string };
-type MenuItemState = {
-	readonly hasSubmenu: boolean;
-	readonly isDisabled: boolean;
-	readonly isFocused: boolean;
-	readonly isFocusVisible: boolean;
-	readonly isHovered: boolean;
-	readonly isOpen: boolean;
-	readonly isPressed: boolean;
-	readonly isSelected: boolean;
-	readonly selectionMode: SelectionMode;
-};
-type MenuSpecificProps<T extends object> = {
-	readonly children: ReactNode | ((item: T) => ReactNode);
-	readonly className?: RACMenuProps<T>['className'];
-	readonly defaultSelectedKeys?: Iterable<Key> | 'all';
-	readonly dependencies?: readonly unknown[];
-	readonly disallowEmptySelection?: boolean;
-	readonly escapeKeyBehavior?: 'clearSelection' | 'none';
-	readonly items?: Iterable<T>;
+type MenuContextValue = { readonly color: string; readonly size: string; readonly variant: string | undefined };
+type MenuProps<T extends object> = Omit<RACMenuProps<T>, 'children'> & {
+	readonly children?: RACMenuProps<T>['children'];
+	readonly color: string;
 	readonly offset?: number;
-	readonly onAction?: (key: Key) => void;
-	readonly onSelectionChange?: (keys: Selection) => void;
-	readonly renderEmptyState?: () => ReactNode;
-	readonly selectedKeys?: Iterable<Key> | 'all';
-	readonly selectionMode?: SelectionMode;
+	readonly onOpenChange?: (value: boolean) => void;
+	readonly size: string;
 	readonly trigger?: ReactNode;
 	readonly triggerBehavior?: 'longPress' | 'press';
+	readonly variant?: string;
 };
-type MenuItemSpecificProps = {
-	readonly children?: SlotDef<ReactNode> | ((state: MenuItemState) => ReactNode);
-	readonly className?: RACMenuItemProps['className'];
-	readonly confirm?: ConfirmConfig;
+type MenuItemProps = Omit<RACMenuItemProps, 'children' | 'onAction'> & {
+	readonly asyncState?: AsyncState<unknown, unknown>;
+	readonly badge?: ReactNode | number | string;
+	readonly children?: SlotDef<ReactNode> | ((state: MenuItemRenderProps) => ReactNode);
+	readonly confirm?: DialogConfig;
 	readonly copy?: boolean | string;
 	readonly delete?: boolean;
 	readonly destructive?: boolean;
 	readonly gesture?: GestureProps;
-	readonly isDisabled?: boolean;
-	readonly onAction?: () => void;
+	readonly icon?: SlotDef;
+	readonly onAction?: (key: Key) => void;
 	readonly paste?: boolean;
+	readonly ref?: Ref<HTMLDivElement>;
 	readonly shortcut?: string;
 	readonly submenu?: ReactElement;
 	readonly submenuAsyncState?: AsyncState<unknown, unknown>;
@@ -72,23 +54,12 @@ type MenuItemSpecificProps = {
 	readonly submenuOffset?: number;
 	readonly submenuSize?: string;
 	readonly submenuSkeletonCount?: number;
-	readonly textValue?: string;
+	readonly tooltip?: TooltipConfig;
 };
-type MenuSectionSpecificProps<T extends object = object> = {
-	readonly children: ReactNode | ((item: T) => ReactElement);
-	readonly className?: string;
-	readonly defaultSelectedKeys?: Iterable<Key> | 'all';
-	readonly dependencies?: readonly unknown[];
-	readonly disallowEmptySelection?: boolean;
-	readonly items?: Iterable<T>;
-	readonly onSelectionChange?: (keys: Selection) => void;
-	readonly selectedKeys?: Iterable<Key> | 'all';
-	readonly selectionMode?: SelectionMode;
+type MenuSectionProps<T extends object = object> = Omit<RACMenuSectionProps<T>, 'children'> & {
+	readonly children: RACMenuSectionProps<T>['children'];
 	readonly title?: string;
 };
-type MenuProps<T extends object> = BasePropsFor<'menu'> & MenuSpecificProps<T>;
-type MenuItemProps = BasePropsFor<'menuItem'> & MenuItemSpecificProps;
-type MenuSectionProps<T extends object = object> = BasePropsFor<'menuSection'> & MenuSectionSpecificProps<T>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -99,6 +70,9 @@ const B = Object.freeze({
 		submenuDelay: '--menu-submenu-delay',
 		submenuOffset: '--menu-submenu-offset',
 		submenuSkeletonCount: '--menu-submenu-skeleton-count',
+	}),
+	defaults: Object.freeze({
+		skeletonCount: 3,
 	}),
 	slot: {
 		item: cn(
@@ -165,12 +139,11 @@ const B = Object.freeze({
 	} as const,
 });
 const MenuContext = createContext<MenuContextValue | null>(null);
-const useMenuContext = (): MenuContextValue | null => useContext(MenuContext);
 
 // --- [COMPONENTS] ------------------------------------------------------------
 
 const SubmenuSkeleton: FC<{ readonly count?: number }> = ({ count }) => {
-	const resolvedCount = count ?? Math.max(1, Math.round(readCssPx(B.cssVars.submenuSkeletonCount)) || 3);
+	const resolvedCount = count ?? Math.max(1, Math.round(readCssPx(B.cssVars.submenuSkeletonCount)) || B.defaults.skeletonCount);
 	return (
 		<div className={B.slot.submenuSkeletonContainer} data-slot='submenu-skeleton'>
 			{Array.from({ length: resolvedCount }, (_, i) => (
@@ -183,24 +156,20 @@ const SubmenuSkeleton: FC<{ readonly count?: number }> = ({ count }) => {
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const Menu = <T extends object>({
-	autoFocus, children, className, color, defaultSelectedKeys, dependencies, disallowEmptySelection,
-    escapeKeyBehavior, items, offset, onClose, onOpenChange, onSelectionChange, renderEmptyState,
-    selectedKeys, selectionMode, size, slot, trigger, triggerBehavior,
-	...rest
-}: MenuProps<T>): ReactNode => {
+const MenuRoot = <T extends object>({
+	children, className, color, offset, onOpenChange, size, trigger, triggerBehavior, variant, ...racProps }: MenuProps<T>): ReactNode => {
 	const nodeId = useFloatingNodeId();
 	const resolvedOffset = offset ?? readCssPx(B.cssVars.offset);
-	const contextValue = useMemo(() => ({ size }), [size]);
+	const contextValue = useMemo(() => ({ color, size, variant }), [color, size, variant]);
 	const menu = (
 		<MenuContext.Provider value={contextValue}>
 			<RACMenu
-				{...({ ...rest } as unknown as RACMenuProps<T>)}
+				{...(racProps as RACMenuProps<T>)}
 				className={composeTailwindRenderProps(className, B.slot.menu)}
 				data-color={color}
 				data-size={size}
 				data-slot='menu'
-				{...defined({ autoFocus, defaultSelectedKeys, dependencies, disallowEmptySelection, escapeKeyBehavior, items, onClose, onSelectionChange, renderEmptyState, selectedKeys, selectionMode, slot })}
+				data-variant={variant}
 			>
 				{children}
 			</RACMenu>
@@ -209,38 +178,34 @@ const Menu = <T extends object>({
 	return trigger === undefined ? (
 		menu
 	) : (
-		<MenuTrigger {...defined({ onOpenChange, trigger: triggerBehavior })}>
-			{trigger}
-			<FloatingNode id={nodeId}>
-				<Popover className={B.slot.popover} data-color={color} data-size={size} data-slot='menu-popover' offset={resolvedOffset}>
-					{menu}
-				</Popover>
-			</FloatingNode>
-		</MenuTrigger>
+			<MenuTrigger {...defined({ onOpenChange, trigger: triggerBehavior })}>
+				{trigger}
+				<FloatingNode id={nodeId}>
+					<Popover
+						className={B.slot.popover}
+						data-color={color}
+						data-size={size}
+						data-slot='menu-popover'
+						data-theme='menu'
+						data-variant={variant}
+						offset={resolvedOffset}
+					>
+						{menu}
+					</Popover>
+				</FloatingNode>
+			</MenuTrigger>
 	);
 };
 const MenuItem: FC<MenuItemProps> = ({
-	asyncState, badge, children, className, confirm, copy, delete: deletePreset, destructive, download, gesture, href,
-	icon: iconProp, isDisabled, paste, ref, rel, shortcut: shortcutProp, submenu, submenuAsyncState,
-	submenuDelay, submenuIndicator, submenuOffset, submenuSize, submenuSkeletonCount, target, textValue, tooltip,
-	...rest
-}) => {
-	const confirmState = useConfirm();
-	const menuCtx = useMenuContext();
+	asyncState, badge, children, className, confirm, copy, delete: deletePreset, destructive, gesture, icon: iconProp,
+	isDisabled, onAction, paste, ref, shortcut: shortcutProp, submenu, submenuAsyncState, submenuDelay, submenuIndicator, submenuOffset, submenuSize,
+	submenuSkeletonCount, textValue, tooltip, ...racProps }) => {
+	const dialogResult = useDialog(confirm);
+	const menuCtx = useContext(MenuContext);
 	const clipboard = useClipboard();
 	const slot = Slot.bind(asyncState);
-	const icon: SlotDef | undefined = iconProp ?? (
-		copy ? { default: Copy } :
-		paste ? { default: Clipboard } :
-		deletePreset ? { default: Trash2 } :
-		undefined
-	);
-	const shortcut = shortcutProp ?? (
-		copy ? '⌘C' :
-		paste ? '⌘V' :
-		deletePreset ? '⌘⌫' :
-		undefined
-	);
+	const icon: SlotDef | undefined = iconProp ?? ([{ default: Copy }, { default: Clipboard }, { default: Trash2 }] as const).find((_, i) => [copy, paste, deletePreset][i]);
+	const shortcut = shortcutProp ?? (['⌘C', '⌘V', '⌘⌫'] as const).find((_, i) => [copy, paste, deletePreset][i]);
 	const resolvedSubmenuSize = submenuSize ?? menuCtx?.size;
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const itemRef = useRef<HTMLDivElement>(null);
@@ -254,25 +219,24 @@ const MenuItem: FC<MenuItemProps> = ({
 	const badgeMax = useMemo(() => readCssPx(B.cssVars.badgeMax) || 99, []);
 	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
+		prefix: 'menu-item',
 		ref: itemRef,
 		...gesture,
-		cssVars: { progress: '--menu-item-longpress-progress', ...gesture?.cssVars },
 		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
 	});
 	const mergedRef = useMergeRefs([ref, itemRef, tooltipProps.ref as Ref<HTMLDivElement>]);
-	const { onAction: originalOnAction, ...restWithoutAction } = rest as { onAction?: () => void };
 	const handleAction = useCallback(() => {
 		const executeAction = (): void => {
 			copy && clipboard.copy(typeof copy === 'string' ? copy : (textValue ?? ''));
 			paste && clipboard.paste();
-			originalOnAction?.();
+			racProps.id !== undefined && onAction?.(racProps.id);
 		};
-		confirm ? confirmState.open(executeAction) : executeAction();
-	}, [confirm, confirmState, copy, paste, clipboard, textValue, originalOnAction]);
+		confirm ? dialogResult.open(executeAction) : executeAction();
+	}, [confirm, dialogResult, copy, paste, clipboard, textValue, onAction, racProps.id]);
 	const isRenderFn = typeof children === 'function';
 	const itemContent = (
 		<RACMenuItem
-			{...({ ...restWithoutAction, ...tooltipProps, ...gestureProps } as unknown as RACMenuItemProps)}
+			{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACMenuItemProps)}
 			className={composeTailwindRenderProps(className, B.slot.item)}
 			data-async-state={slot.attr}
 			data-destructive={destructive || undefined}
@@ -280,24 +244,14 @@ const MenuItem: FC<MenuItemProps> = ({
 			isDisabled={isDisabled || slot.pending}
 			onAction={handleAction}
 			ref={mergedRef}
-			{...defined({ download, href, rel, target, textValue })}
+			{...defined({ textValue })}
 		>
 			{(renderProps) => (
 				<>
 					{slot.render(icon, B.slot.itemIcon)}
 					<span className='flex-1'>
 						{isRenderFn
-							? (children as (state: MenuItemState) => ReactNode)({
-								hasSubmenu,
-								isDisabled: renderProps.isDisabled,
-								isFocused: renderProps.isFocused,
-								isFocusVisible: renderProps.isFocusVisible,
-								isHovered: renderProps.isHovered,
-								isOpen: renderProps.isOpen,
-								isPressed: renderProps.isPressed,
-								isSelected: renderProps.isSelected,
-								selectionMode: renderProps.selectionMode,
-							})
+							? (children as (state: MenuItemRenderProps) => ReactNode)(renderProps)
 							: slot.resolve(children)}
 					</span>
 					{hasSubmenu && slot.render(submenuIndicator ?? { default: ChevronRight }, B.slot.submenuIndicator)}
@@ -313,7 +267,7 @@ const MenuItem: FC<MenuItemProps> = ({
 		<>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
-			{confirmState.isOpen && confirm && (<ConfirmDialog config={confirm} onCancel={confirmState.cancel} onConfirm={confirmState.confirm} /> )}
+			{dialogResult.render?.()}
 		</>
 	);
 	return hasSubmenu ? (
@@ -322,9 +276,11 @@ const MenuItem: FC<MenuItemProps> = ({
 			<FloatingNode id={submenuNodeId}>
 				<Popover
 					className={B.slot.submenuPopover}
+					data-color={menuCtx?.color}
+					data-theme='menu'
 					data-slot='submenu-popover'
 					offset={resolvedSubmenuConfig?.offset ?? readCssPx(B.cssVars.submenuOffset)}
-					{...defined({ 'data-size': resolvedSubmenuSize })}
+					{...defined({ 'data-size': resolvedSubmenuSize, 'data-variant': menuCtx?.variant })}
 				>
 					{submenuIsLoading ? <SubmenuSkeleton {...defined({ count: submenuSkeletonCount })} /> : submenu}
 				</Popover>
@@ -338,16 +294,11 @@ const MenuItem: FC<MenuItemProps> = ({
 		</>
 	);
 };
-const MenuSection = <T extends object = object>({
-	children, className, defaultSelectedKeys, dependencies, disabledKeys, disallowEmptySelection, id,
-	items, onSelectionChange, selectedKeys, selectionMode, title,
-	...rest
-}: MenuSectionProps<T>): ReactNode => (
+const MenuSection = <T extends object = object>({ children, className, title, ...racProps }: MenuSectionProps<T>): ReactNode => (
 	<RACMenuSection
-		{...({ ...rest } as unknown as RACMenuSectionProps<T>)}
+		{...(racProps as RACMenuSectionProps<T>)}
 		className={cn(B.slot.section, className)}
 		data-slot='menu-section'
-		{...defined({ defaultSelectedKeys, dependencies, disabledKeys, disallowEmptySelection, id, items, onSelectionChange, selectedKeys, selectionMode })}
 	>
 		{title && <Header className={B.slot.sectionHeader}>{title}</Header>}
 		{children as ReactNode}
@@ -357,7 +308,16 @@ const MenuSeparator: FC<{ readonly className?: string }> = ({ className }) => (
 	<Separator className={cn(B.slot.separator, className)} data-slot='menu-separator' />
 );
 
+// --- [ENTRY_POINT] -----------------------------------------------------------
+
+const Menu = Object.assign(MenuRoot, {
+	Item: MenuItem,
+	Section: MenuSection,
+	Separator: MenuSeparator,
+	useContext: (): MenuContextValue | null => useContext(MenuContext),
+});
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Menu, MenuItem, MenuSection, MenuSeparator };
-export type { MenuItemProps, MenuItemState, MenuProps, MenuSectionProps, SelectionMode };
+export { Menu };
+export type { MenuItemProps, MenuProps, MenuSectionProps };

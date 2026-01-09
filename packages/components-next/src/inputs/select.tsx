@@ -6,79 +6,47 @@
  */
 import { FloatingNode, useFloatingNodeId, useMergeRefs } from '@floating-ui/react';
 import { readCssPx } from '@parametric-portal/runtime/runtime';
+import type { AsyncState } from '@parametric-portal/types/async';
 import type { LucideIcon } from 'lucide-react';
-import { createContext, type FC, type ReactElement, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, type FC, type ReactElement, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from 'react';
 import {
-	type Key, Header, ListBox, ListBoxItem, type ListBoxItemProps, ListBoxSection,
-	Popover, Button as RACButton, Select as RACSelect, type SelectProps as RACSelectProps,
-	SelectValue, Separator,
+	Header, type Key, ListBox, type ListBoxProps, ListBoxItem, type ListBoxItemProps, type ListBoxItemRenderProps,
+	ListBoxSection, type ListBoxSectionProps, Popover, Button as RACButton,
+	Select as RACSelect, type SelectProps as RACSelectProps, SelectValue, Separator,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
-import { useTooltip } from '../core/floating';
-import type { BasePropsFor } from '../core/props';
-import { cn, composeTailwindRenderProps, defined, Slot } from '../core/utils';
+import { type TooltipConfig, useTooltip } from '../core/floating';
+import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type SelectionMode = 'multiple' | 'single';
-type SelectionBehavior = 'replace' | 'toggle';
-type LayoutType = 'grid' | 'stack';
 type SelectOption = { readonly id: Key; readonly label: string };
 type SelectContextValue = { readonly size: string };
-type SelectItemState = {
-	readonly isDisabled: boolean;
-	readonly isFocused: boolean;
-	readonly isFocusVisible: boolean;
-	readonly isHovered: boolean;
-	readonly isPressed: boolean;
-	readonly isSelected: boolean;
-};
-type SelectSpecificProps<T extends SelectOption = SelectOption> = {
+type SelectProps<T extends SelectOption = SelectOption> = Omit<RACSelectProps<T>, 'children'> &
+	Pick<ListBoxProps<T>, 'dependencies' | 'disallowEmptySelection' | 'escapeKeyBehavior' | 'items' | 'layout' | 'orientation' | 'renderEmptyState' | 'selectionBehavior' | 'shouldFocusOnHover' | 'shouldFocusWrap'> & {
+	readonly asyncState?: AsyncState;
 	readonly children?: ReactNode | ((item: T) => ReactNode);
-	readonly className?: RACSelectProps<T>['className'];
-	readonly defaultOpen?: boolean;
-	readonly defaultSelectedKey?: Key;
-	readonly defaultValue?: Key | null;
-	readonly dependencies?: readonly unknown[];
-	readonly disallowEmptySelection?: boolean;
-	readonly escapeKeyBehavior?: 'clearSelection' | 'none';
-	readonly isOpen?: boolean;
-	readonly items?: Iterable<T>;
-	readonly layout?: LayoutType;
+	readonly color: string;
 	readonly offset?: number;
-	readonly onChange?: (value: Key | null) => void;
-	readonly onSelectionChange?: (key: Key | null) => void;
-	readonly placeholder?: ReactNode;
 	readonly ref?: Ref<HTMLDivElement>;
-	readonly renderEmptyState?: () => ReactNode;
-	readonly selectedKey?: Key | null;
-	readonly selectionBehavior?: SelectionBehavior;
-	readonly selectionMode?: SelectionMode;
-	readonly shouldFocusOnHover?: boolean;
-	readonly shouldFocusWrap?: boolean;
+	readonly size: string;
 	readonly suffix: LucideIcon | ReactNode;
-	readonly validate?: RACSelectProps<T>['validate'];
-	readonly validationBehavior?: 'aria' | 'native';
-	readonly value?: Key | null;
+	readonly tooltip?: TooltipConfig;
+	readonly variant?: string;
 };
-type SelectItemSpecificProps = {
-	readonly children?: ReactNode | ((state: SelectItemState) => ReactNode);
-	readonly className?: string;
+type SelectItemProps = Omit<ListBoxItemProps, 'children'> & {
+	readonly badge?: ReactNode | number | string;
+	readonly children?: ReactNode | ((state: ListBoxItemRenderProps) => ReactNode);
 	readonly description?: ReactNode;
 	readonly destructive?: boolean;
-	readonly isDisabled?: boolean;
-	readonly onAction?: () => void;
-	readonly textValue?: string;
+	readonly icon?: SlotDef;
+	readonly ref?: Ref<HTMLDivElement>;
+	readonly tooltip?: TooltipConfig;
 };
-type SelectSectionSpecificProps<T extends object = object> = {
+type SelectSectionProps<T extends object = object> = Omit<ListBoxSectionProps<T>, 'children'> & {
 	readonly children: ReactNode | ((item: T) => ReactElement);
-	readonly className?: string;
-	readonly items?: Iterable<T>;
 	readonly title?: string;
 };
-type SelectProps<T extends SelectOption = SelectOption> = BasePropsFor<'select'> & SelectSpecificProps<T>;
-type SelectItemProps = BasePropsFor<'selectItem'> & SelectItemSpecificProps;
-type SelectSectionProps<T extends object = object> = BasePropsFor<'selectSection'> & SelectSectionSpecificProps<T>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -152,15 +120,10 @@ const SelectContext = createContext<SelectContextValue | null>(null);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const Select = <T extends SelectOption = SelectOption>({
-	asyncState, autoFocus, children, className, color, defaultOpen, defaultSelectedKey, defaultValue,
-	dependencies, disabledKeys, disallowEmptySelection, escapeKeyBehavior, excludeFromTabOrder, form,
-	isDisabled, isInvalid, isOpen, isReadOnly, isRequired, items, layout, name, offset, onChange,
-	onOpenChange, onSelectionChange, orientation, placeholder, ref, renderEmptyState,
-	selectedKey, selectionBehavior, selectionMode, shouldFocusOnHover, shouldFocusWrap, size, slot,
-	suffix, tooltip, validate, validationBehavior, value, variant,
-	...rest
-}: SelectProps<T>): ReactNode => {
+const SelectRoot = <T extends SelectOption = SelectOption>({
+	asyncState, children, className, color, dependencies, disallowEmptySelection, escapeKeyBehavior, isDisabled, isInvalid, items,
+	layout, offset, orientation, placeholder, ref, renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap,
+	size, suffix, tooltip, variant, ...racProps }: SelectProps<T>): ReactNode => {
 	const nodeId = useFloatingNodeId();
 	const resolvedOffset = offset ?? readCssPx(B.cssVars.offset);
 	const triggerRef = useRef<HTMLButtonElement>(null);
@@ -178,6 +141,7 @@ const Select = <T extends SelectOption = SelectOption>({
 	return (
 		<SelectContext.Provider value={contextValue}>
 			<RACSelect
+				{...(racProps as RACSelectProps<T>)}
 				{...tooltipProps}
 				className={composeTailwindRenderProps(className, '')}
 				data-async-state={asyncSlot.attr}
@@ -187,16 +151,9 @@ const Select = <T extends SelectOption = SelectOption>({
 				data-slot='select'
 				data-pending={asyncSlot.pending || undefined}
 				data-variant={variant}
+				{...(isInvalid !== undefined && { isInvalid })}
 				isDisabled={isDisabled || asyncSlot.pending}
 				ref={mergedRef}
-				{...({
-					...rest,
-					...defined({
-						autoFocus, defaultOpen, defaultSelectedKey, defaultValue, disabledKeys, excludeFromTabOrder,
-						form, isInvalid, isOpen, isReadOnly, isRequired, name, onChange, onOpenChange,
-						onSelectionChange, selectedKey, selectionMode, slot, validate, validationBehavior, value,
-					}),
-				} as unknown as RACSelectProps<T>)}
 			>
 				<RACButton className={B.slot.trigger} data-invalid={isInvalid || undefined} ref={triggerRef}>
 					<SelectValue className={B.slot.value}>
@@ -212,6 +169,7 @@ const Select = <T extends SelectOption = SelectOption>({
 						data-color={color}
 						data-size={size}
 						data-slot='select-popover'
+						data-theme='select'
 						data-variant={variant}
 						offset={resolvedOffset}
 						style={{ minWidth: triggerWidth }}
@@ -219,10 +177,7 @@ const Select = <T extends SelectOption = SelectOption>({
 						<ListBox
 							className={B.slot.listbox}
 							data-slot='select-listbox'
-							{...defined({
-								dependencies, disallowEmptySelection, escapeKeyBehavior, items, layout, orientation,
-								renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap,
-							})}
+							{...defined({ dependencies, disallowEmptySelection, escapeKeyBehavior, items, layout, orientation, renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap })}
 						>
 							{children}
 						</ListBox>
@@ -235,36 +190,27 @@ const Select = <T extends SelectOption = SelectOption>({
 	);
 };
 const SelectItem: FC<SelectItemProps> = ({
-	badge, children, className, description, destructive, download, href, icon, id, isDisabled, onAction,
-	ref, rel, slot, target, textValue, tooltip, ...rest
-}) => {
-	const badgeMax = readCssPx(B.cssVars.badgeMax);
+	badge, children, className, description, destructive, icon, ref, tooltip, ...racProps }) => {
+	const badgeMax = readCssPx(B.cssVars.badgeMax) || 99;
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
 	const isRenderFn = typeof children === 'function';
 	return (
 		<>
 			<ListBoxItem
-				{...({ ...rest, ...tooltipProps } as ListBoxItemProps)}
+				{...(racProps as ListBoxItemProps)}
+				{...tooltipProps}
 				className={composeTailwindRenderProps(className, B.slot.item)}
 				data-destructive={destructive || undefined}
 				data-slot='select-item'
 				ref={mergedRef}
-				{...defined({ download, href, id, isDisabled, onAction, rel, slot, target, textValue })}
 			>
 				{(renderProps) => (
 					<>
 						{Slot.render(icon, undefined, B.slot.itemIcon)}
 						<span className='flex-1 flex flex-col'>
 							{isRenderFn
-								? (children as (state: SelectItemState) => ReactNode)({
-									isDisabled: renderProps.isDisabled,
-									isFocused: renderProps.isFocused,
-									isFocusVisible: renderProps.isFocusVisible,
-									isHovered: renderProps.isHovered,
-									isPressed: renderProps.isPressed,
-									isSelected: renderProps.isSelected,
-								})
+								? (children as (state: ListBoxItemRenderProps) => ReactNode)(renderProps)
 							: children}
 							{description && <span className={B.slot.itemDescription}>{description}</span>}
 						</span>
@@ -280,14 +226,11 @@ const SelectItem: FC<SelectItemProps> = ({
 		</>
 	);
 };
-const SelectSection = <T extends object = object>({
-	children, className, disabledKeys, id, items, title, ...rest
-}: SelectSectionProps<T>): ReactNode => (
+const SelectSection = <T extends object = object>({ children, className, title, ...racProps }: SelectSectionProps<T>): ReactNode => (
 	<ListBoxSection
-		{...(rest as object)}
+		{...(racProps as ListBoxSectionProps<T>)}
 		className={cn(B.slot.section, className)}
 		data-slot='select-section'
-		{...defined({ disabledKeys, id, items })}
 	>
 		{title && <Header className={B.slot.sectionHeader}>{title}</Header>}
 		{children as ReactNode}
@@ -297,7 +240,16 @@ const SelectSeparator: FC<{ readonly className?: string }> = ({ className }) => 
 	<Separator className={cn(B.slot.separator, className)} data-slot='select-separator' />
 );
 
+// --- [ENTRY_POINT] -----------------------------------------------------------
+
+const Select = Object.assign(SelectRoot, {
+	Item: SelectItem,
+	Section: SelectSection,
+	Separator: SelectSeparator,
+	useContext: (): SelectContextValue | null => useContext(SelectContext),
+});
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Select, SelectItem, SelectSection, SelectSeparator };
-export type { SelectItemProps, SelectItemState, SelectOption, SelectProps, SelectSectionProps };
+export { Select };
+export type { SelectItemProps, SelectOption, SelectProps, SelectSectionProps };
