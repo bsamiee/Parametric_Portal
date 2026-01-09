@@ -881,6 +881,9 @@ importers:
       '@radix-ui/react-visually-hidden':
         specifier: 'catalog:'
         version: 1.2.4(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217)
+      '@tanstack/react-virtual':
+        specifier: 'catalog:'
+        version: 3.13.18(react-dom@19.3.0-canary-f93b9fd4-20251217(react@19.3.0-canary-f93b9fd4-20251217))(react@19.3.0-canary-f93b9fd4-20251217)
       '@use-gesture/react':
         specifier: 'catalog:'
         version: 10.3.1(react@19.3.0-canary-f93b9fd4-20251217)

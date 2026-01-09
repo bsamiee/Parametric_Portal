@@ -179,7 +179,7 @@ const Radio: FC<RadioProps> = ({
 	);
 };
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [COMPOUND] --------------------------------------------------------------
 
 const RadioGroup = Object.assign(RadioGroupRoot, {
 	useContext: (): RadioGroupContextValue | null => useContext(RadioGroupContext),

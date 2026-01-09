@@ -240,7 +240,7 @@ const SelectSeparator: FC<{ readonly className?: string }> = ({ className }) => 
 	<Separator className={cn(B.slot.separator, className)} data-slot='select-separator' />
 );
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [COMPOUND] --------------------------------------------------------------
 
 const Select = Object.assign(SelectRoot, {
 	Item: SelectItem,

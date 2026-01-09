@@ -180,7 +180,7 @@ const TabPanel: FC<TabPanelProps> = ({ className, ref, ...racProps }) => (
 	/>
 );
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [COMPOUND] --------------------------------------------------------------
 
 const Tabs = Object.assign(TabsRoot, {
 	List: TabList,
