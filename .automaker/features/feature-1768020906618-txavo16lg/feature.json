@@ -1,0 +1,19 @@
+{
+    "branchName": "main",
+    "category": "feature",
+    "dependencies": [],
+    "description": "Implement Sheet overlay component (~150 lines) for slide-in panels. Includes: Sheet root (DialogTrigger), Sheet.Content (overlay panel), Sheet.Header, Sheet.Body, Sheet.Footer. Uses Object.assign pattern, frozen B constant with CSS variable slots, position variants (left/right/top/bottom), useTooltip integration, focus trapping, and data-* attributes (data-position, data-open). Reference: modal.tsx for overlay pattern.",
+    "id": "feature-1768020906618-txavo16lg",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "lite",
+    "priority": 5,
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "startedAt": "2026-01-10T06:17:54.575Z",
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "medium",
+    "title": "Sheet overlay component",
+    "updatedAt": "2026-01-10T06:18:45.622Z"
+}

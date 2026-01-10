@@ -1,0 +1,140 @@
+{
+    "branchName": "main",
+    "category": "feature",
+    "dependencies": [],
+    "description": "Implement DatePicker as comprehensive compound component (~300 lines) following Menu/Accordion patterns. Includes: DatePicker root (trigger + popover), DatePicker.Field (segmented DateInput with DateSegment children), DatePicker.Calendar (grid with CalendarCell, CalendarGrid, header navigation), DatePicker.Range (DateRangePicker + RangeCalendar variant), DatePicker.Time (TimeField segment for datetime). Uses Object.assign pattern, frozen B constant with CSS variable slots, DatePickerContext for state sync, @internationalized/date for value handling, granularity prop for day/hour/minute precision, useTooltip integration, and data-* attributes. Reference: menu.tsx for popover compound pattern, RAC DatePicker + Calendar docs for composition.",
+    "id": "feature-1768020906617-jkyo2bjlx",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "spec",
+    "planSpec": {
+        "approvedAt": "2026-01-10T06:02:59.117Z",
+        "content": "🔧 Tool: Glob\nInput: {\n  \"pattern\": \"**/{menu,accordion,select,dropdown}.{tsx,ts}\"\n}\n\n🔧 Tool: Glob\nInput: {\n  \"pattern\": \"**/components/**/*.tsx\"\n}\n\n🔧 Tool: Grep\nInput: {\n  \"pattern\": \"Object\\\\.assign.*\\\\{\",\n  \"output_mode\": \"files_with_matches\"\n}\n\n🔧 Tool: Grep\nInput: {\n  \"pattern\": \"createContext\",\n  \"output_mode\": \"files_with_matches\",\n  \"glob\": \"**/*.tsx\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"find . -type f -name \\\"*.tsx\\\" -o -name \\\"*.ts\\\" | grep -v node_modules | head -20\",\n  \"description\": \"Find TypeScript/TSX files in project\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"ls -la\",\n  \"description\": \"List root directory contents\"\n}\n\n🔧 Tool: Read\nInput: {\n  \"file_path\": \".automaker/app_spec.txt\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"find . -name \\\"*.tsx\\\" -type f 2>/dev/null | grep -v node_modules | head -30\",\n  \"description\": \"Find TypeScript React files\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"ls -la src/ 2>/dev/null || ls -la lib/ 2>/dev/null || ls -la components/ 2>/dev/null || echo \\\"Checking structure...\\\"\",\n  \"description\": \"Check source directory structure\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"ls -la\",\n  \"description\": \"List all root directory files\"\n}\n\n🔧 Tool: Read\nInput: {\n  \"file_path\": \"package.json\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"pwd && ls -lah\",\n  \"description\": \"Show current directory and all files\"\n}\n\n🔧 Tool: Bash\nInput: {\n  \"command\": \"find . -maxdepth 3 -type f 2>/dev/null | grep -v \\\".git\\\" | head -40\",\n  \"description\": \"Find all files up to 3 levels deep\"\n}\n# Specification: DatePicker Compound Component\n\n## 1. Problem\nUsers need a comprehensive, accessible date and time selection component that supports single dates, date ranges, and datetime values with keyboard navigation, screen reader support, and various granularity levels (day, hour, minute). The component must follow the established compound component patterns used in the codebase.\n\n## 2. Solution\nCreate a comprehensive DatePicker compound component (~300 lines) using the Object.assign pattern with subcomponents for Field (segmented input), Calendar (visual grid), Range (date ranges), and Time (time input), backed by DatePickerContext for state synchronization and @internationalized/date for value handling.\n\n## 3. Acceptance Criteria\n\n- **GIVEN** a user needs to select a date, **WHEN** they use DatePicker with trigger and popover, **THEN** they can open a calendar popup, navigate with keyboard, and select dates with proper ARIA announcements\n- **GIVEN** a user needs keyboard-only date entry, **WHEN** they use DatePicker.Field, **THEN** they can type/arrow through segmented date parts (month/day/year) with automatic validation\n- **GIVEN** a user needs to select a date range, **WHEN** they use DatePicker.Range, **THEN** they can select start and end dates with visual range highlighting in the calendar\n- **GIVEN** a user needs datetime selection, **WHEN** they use DatePicker with granularity=\"minute\", **THEN** they see both calendar and time segments with hour/minute inputs\n- **GIVEN** any DatePicker variant, **WHEN** rendered, **THEN** all interactive elements support tooltips via useTooltip and use proper data-slot/data-color/data-size attributes\n\n## 4. Files to Modify\n\n| File | Purpose | Action |\n|------|---------|--------|\n| src/pickers/date-picker.tsx | Main DatePicker compound component with all subcomponents | create |\n| src/pickers/index.ts | Export barrel for picker components | create/modify |\n| src/core/utils.ts | Core utilities (if missing) | verify exists |\n| src/core/floating.tsx | useTooltip hook (if missing) | verify exists |\n| package.json | Ensure @internationalized/date dependency | verify/modify |\n| playwright-verification.spec.ts | Temporary Playwright test for verification | create (then delete) |\n\n## 5. Implementation Tasks\n\n```tasks\n- [ ] T001: Set up project structure and verify dependencies | File: package.json\n- [ ] T002: Create src/pickers directory if missing | File: src/pickers/\n- [ ] T003: Create core utilities if missing (cn, Slot, composeTailwindRenderProps) | File: src/core/utils.ts\n- [ ] T004: Create useTooltip hook if missing | File: src/core/floating.tsx\n- [ ] T005: Define TypeScript types for DatePicker props and subcomponents | File: src/pickers/date-picker.tsx\n- [ ] T006: Create frozen B constant with slot and cssVars configuration | File: src/pickers/date-picker.tsx\n- [ ] T007: Implement DatePickerContext with React context for state management | File: src/pickers/date-picker.tsx\n- [ ] T008: Implement DatePickerRoot component with trigger and popover | File: src/pickers/date-picker.tsx\n- [ ] T009: Implement DatePicker.Field subcomponent with DateSegment children | File: src/pickers/date-picker.tsx\n- [ ] T010: Implement DatePicker.Calendar with grid, cells, and navigation | File: src/pickers/date-picker.tsx\n- [ ] T011: Implement DatePicker.Range variant for date range selection | File: src/pickers/date-picker.tsx\n- [ ] T012: Implement DatePicker.Time subcomponent for time segments | File: src/pickers/date-picker.tsx\n- [ ] T013: Add data-* attributes and useTooltip integration to all interactive elements | File: src/pickers/date-picker.tsx\n- [ ] T014: Export DatePicker and types using Object.assign pattern | File: src/pickers/date-picker.tsx\n- [ ] T015: Create/update pickers index.ts barrel export | File: src/pickers/index.ts\n- [ ] T016: Create Playwright verification test for DatePicker functionality | File: playwright-verification.spec.ts\n- [ ] T017: Run Playwright test to verify implementation | File: playwright-verification.spec.ts\n- [ ] T018: Delete temporary verification test file | File: playwright-verification.spec.ts\n```\n\n## 6. Verification\n\n**Playwright Test Coverage:**\n- Test DatePicker trigger opens popover calendar on click\n- Test keyboard navigation through DatePicker.Field segments (Tab, Arrow keys)\n- Test calendar date selection updates field value\n- Test DatePicker.Range allows start/end date selection with visual range\n- Test granularity prop shows time segments for datetime selection\n- Test accessibility attributes (ARIA labels, roles, keyboard focus)\n- Test tooltip integration on interactive elements\n\n**Manual Verification:**\n- Visual inspection of calendar grid rendering\n- Test across different granularity values (day, hour, minute)\n- Verify data-slot, data-color, data-size attributes in DOM\n- Check CSS variable application from frozen B constant\n\n---\n\n**",
+        "currentTaskId": "T004",
+        "generatedAt": "2026-01-10T06:02:59.116Z",
+        "reviewedByUser": false,
+        "status": "approved",
+        "tasks": [
+            {
+                "description": "Set up project structure and verify dependencies",
+                "filePath": "package.json",
+                "id": "T001",
+                "status": "pending"
+            },
+            {
+                "description": "Create src/pickers directory if missing",
+                "filePath": "src/pickers/",
+                "id": "T002",
+                "status": "pending"
+            },
+            {
+                "description": "Create core utilities if missing (cn, Slot, composeTailwindRenderProps)",
+                "filePath": "src/core/utils.ts",
+                "id": "T003",
+                "status": "pending"
+            },
+            {
+                "description": "Create useTooltip hook if missing",
+                "filePath": "src/core/floating.tsx",
+                "id": "T004",
+                "status": "pending"
+            },
+            {
+                "description": "Define TypeScript types for DatePicker props and subcomponents",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T005",
+                "status": "pending"
+            },
+            {
+                "description": "Create frozen B constant with slot and cssVars configuration",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T006",
+                "status": "pending"
+            },
+            {
+                "description": "Implement DatePickerContext with React context for state management",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T007",
+                "status": "pending"
+            },
+            {
+                "description": "Implement DatePickerRoot component with trigger and popover",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T008",
+                "status": "pending"
+            },
+            {
+                "description": "Implement DatePicker.Field subcomponent with DateSegment children",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T009",
+                "status": "pending"
+            },
+            {
+                "description": "Implement DatePicker.Calendar with grid, cells, and navigation",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T010",
+                "status": "pending"
+            },
+            {
+                "description": "Implement DatePicker.Range variant for date range selection",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T011",
+                "status": "pending"
+            },
+            {
+                "description": "Implement DatePicker.Time subcomponent for time segments",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T012",
+                "status": "pending"
+            },
+            {
+                "description": "Add data-* attributes and useTooltip integration to all interactive elements",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T013",
+                "status": "pending"
+            },
+            {
+                "description": "Export DatePicker and types using Object.assign pattern",
+                "filePath": "src/pickers/date-picker.tsx",
+                "id": "T014",
+                "status": "pending"
+            },
+            {
+                "description": "Create/update pickers index.ts barrel export",
+                "filePath": "src/pickers/index.ts",
+                "id": "T015",
+                "status": "pending"
+            },
+            {
+                "description": "Create Playwright verification test for DatePicker functionality",
+                "filePath": "playwright-verification.spec.ts",
+                "id": "T016",
+                "status": "pending"
+            },
+            {
+                "description": "Run Playwright test to verify implementation",
+                "filePath": "playwright-verification.spec.ts",
+                "id": "T017",
+                "status": "pending"
+            },
+            {
+                "description": "Delete temporary verification test file",
+                "filePath": "playwright-verification.spec.ts",
+                "id": "T018",
+                "status": "pending"
+            }
+        ],
+        "tasksCompleted": 3,
+        "tasksTotal": 18,
+        "version": 1
+    },
+    "priority": 3,
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "startedAt": "2026-01-10T06:17:54.120Z",
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "high",
+    "title": "DatePicker compound component",
+    "updatedAt": "2026-01-10T06:18:40.890Z"
+}

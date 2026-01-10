@@ -1,0 +1,19 @@
+{
+    "branchName": "main",
+    "category": "feature",
+    "dependencies": [],
+    "description": "Implement Slider component (~120 lines) wrapping RAC Slider/SliderTrack/SliderThumb/SliderOutput. Supports single value OR range (array). Structure: Slider root with required color/size, SliderTrack renders fill via CSS --slider-fill-percent variable, SliderThumb with useTooltip showing current value on drag. Uses frozen B constant with CSS variable slots (--slider-track-*, --slider-thumb-*, --slider-fill-*), composeTailwindRenderProps, data-* attributes (data-orientation, data-dragging on thumb). NO useGesture - RAC handles drag internally. Reference: button.tsx for B constant, floating.tsx for useTooltip. Target: packages/components-next/src/inputs/slider.tsx",
+    "id": "feature-1768020906613-op5biqyd5",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "lite",
+    "priority": 1,
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "startedAt": "2026-01-10T06:17:53.841Z",
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "medium",
+    "title": "Slider component",
+    "updatedAt": "2026-01-10T06:18:38.046Z"
+}

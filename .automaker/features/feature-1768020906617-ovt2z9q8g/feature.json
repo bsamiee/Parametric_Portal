@@ -1,0 +1,19 @@
+{
+    "branchName": "main",
+    "category": "feature",
+    "dependencies": [],
+    "description": "Implement Tree as compound component (~300 lines) following Accordion patterns. Includes: Tree root, Tree.Item (expandable node with disclosure), Tree.ItemContent (label + actions), Tree.Group (nested children). Uses Object.assign pattern, frozen B constant with CSS variable slots, TreeContext for expansion state, useTooltip integration, keyboard navigation (arrow keys), selection modes (single/multiple), lazy loading support, and data-* attributes (data-expanded, data-selected, data-level). Reference: accordion.tsx for expand/collapse pattern, RAC Tree docs.",
+    "id": "feature-1768020906617-ovt2z9q8g",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "spec",
+    "priority": 4,
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "startedAt": "2026-01-10T06:17:54.201Z",
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "high",
+    "title": "Tree component",
+    "updatedAt": "2026-01-10T06:18:41.767Z"
+}

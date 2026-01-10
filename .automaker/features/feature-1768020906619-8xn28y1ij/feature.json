@@ -1,0 +1,17 @@
+{
+    "branchName": "main",
+    "category": "feature",
+    "dependencies": [],
+    "description": "Implement Breadcrumbs component (~100 lines) for navigation path display. Includes: Breadcrumbs root, Breadcrumbs.Item (link with separator), Breadcrumbs.Current (non-link terminal). Uses Object.assign pattern, frozen B constant with CSS variable slots, automatic separator rendering, useTooltip integration, and data-* attributes (data-current, data-disabled). Reference: RAC Breadcrumbs docs.",
+    "id": "feature-1768020906619-8xn28y1ij",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "lite",
+    "priority": 6,
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "medium",
+    "title": "Breadcrumbs component"
+}

@@ -1,0 +1,19 @@
+{
+    "branchName": "main",
+    "category": "enhancement",
+    "dependencies": [],
+    "description": "Enhance existing Select with searchable prop (~50 lines addition). When searchable=true, switch from RACSelect to RACComboBox internally (ComboBox has Input+Popover+ListBox, filtering built-in). Add: searchable?: boolean prop, ComboBox imports, conditional render. Preserve existing Select API - items, sections, badges, tooltips. CSS variables: add --select-input-* slots. Reference: RAC ComboBox docs. Target: packages/components-next/src/inputs/select.tsx",
+    "id": "feature-1768020906613-t8k810d74",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "lite",
+    "priority": 1,
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "startedAt": "2026-01-10T06:17:53.932Z",
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "medium",
+    "title": "Select searchable enhancement",
+    "updatedAt": "2026-01-10T06:18:38.615Z"
+}
