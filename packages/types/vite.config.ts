@@ -22,7 +22,6 @@ const config = Effect.runSync(
             svg: './src/svg.ts',
             types: './src/types.ts',
             ui: './src/ui.ts',
-            units: './src/units.ts',
         },
         external: ['@effect/experimental', 'drizzle-orm', 'effect', 'isomorphic-dompurify'],
         mode: 'library',

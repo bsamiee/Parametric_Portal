@@ -43,11 +43,6 @@
       "import": "./src/ui.ts",
       "default": "./src/ui.ts"
     },
-    "./units": {
-      "types": "./src/units.ts",
-      "import": "./src/units.ts",
-      "default": "./src/units.ts"
-    },
     "./schema": {
       "types": "./src/schema.ts",
       "import": "./src/schema.ts",

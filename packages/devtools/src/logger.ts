@@ -43,7 +43,7 @@ type DevToolsGlobal = {
     readonly appRenderDebug: () => void;
 };
 
-// --- [SIDE_EFFECTS] ----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const truncateLogs = (logs: LogEntry[], maxLogs: number): void => {
     const excess = logs.length - maxLogs + 1;

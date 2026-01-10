@@ -11,19 +11,20 @@ alwaysApply: true
 
 [FORBIDDEN]:
 - NEVER create wrappers adding no semantic value beyond delegation
-- NEVER create helpers serving fewer than three call-sites
+- NEVER create scattered helpers—consolidate into namespace objects
 - NEVER create separate single-item and array-item function variants
 - NEVER create factory patterns when single implementation exists
 - NEVER create barrel files (`index.ts`); consumers import directly from source
-- NEVER re-export symbols; each module defines and exports its own
+- NEVER re-export external lib types; import directly from ts-toolbelt, ts-essentials, type-fest
 - NEVER use inline exports; declare first, export at file end
 - NEVER create documentation files unless explicitly requested
 - NEVER write comments describing what; reserve for why
+- NEVER hand-roll utilities that exist in external libs
+- NEVER duplicate type definitions; derive from schema/tables
 
 [REQUIRED]:
 - Replace `any` with branded types via @effect/schema
 - Replace `try/catch` with Effect error channel
-- Replace `if/else` chains with dispatch tables
 - Replace `for/while` with `.map`, `.filter`, or Effect
 - Replace `let`/`var` with `const`
 - Replace default exports with named exports (exception: `*.config.ts`)
@@ -32,6 +33,14 @@ alwaysApply: true
 - Accept `T | ReadonlyArray<T>` with `Array.isArray()` normalization
 - Verify sources within 6 months of current date
 - Confirm APIs via official changelogs, not cached knowledge
+- Derive types from schemas: `type X = S.Schema.Type<typeof XSchema>`
+- Import external lib types directly from source
+
+[CONDITIONAL]:
+- PREFER dispatch tables for variant-based branching
+- ALLOW ternary for binary conditions
+- ALLOW guard expressions (`condition && fn()`) for early returns
+- ALLOW `if` statements within Effect.gen for complex control flow
 
 ---
 ## [2][CONTEXT]
@@ -142,8 +151,8 @@ const resilient = createRetry({ timeoutMs: 30000, maxAttempts: 5 });
 
 [IMPORTANT] SELECT implementation via keyed dispatch table
 
-Select implementation via dispatch. MUST route ALL behavior through keyed handler tables—never branch with conditionals.
-- **Zero Branching**: FORBIDDEN: `if/else` or `switch` for type-based dispatch. MUST use handler tables: `handlers[discriminant](data)`.
+Select implementation via dispatch. MUST route variant-based behavior through keyed handler tables.
+- **Dispatch for Variants**: PREFER handler tables for type-based dispatch: `handlers[discriminant](data)`. ALLOW ternary/guards for simple conditions.
 - **Single Entry**: MUST route ALL variants through ONE dispatcher function. NEVER scatter selection logic across multiple sites.
 - **Complete Coverage**: MUST type handlers via discriminated unions. ALWAYS enforce exhaustiveness with `satisfies Record<Discriminant, Handler>`.
 
@@ -225,8 +234,8 @@ const processUser = (raw: RawUser) =>
 [ESSENCE] EXPRESS logic via value-producing constructs (ternary, implicit return, `pipe`)
 
 Code as expressions, not statements. MUST write every construct to produce a value—never execute without returning.
-- **Zero Blocks**: FORBIDDEN: curly braces `{}` in single-expression contexts. MUST use implicit returns: `x => x * 2`.
-- **Ternary Branching**: FORBIDDEN: `if/else` for value selection. MUST use `condition ? valueA : valueB` for all conditionals.
+- **Implicit Returns**: PREFER implicit returns where possible: `x => x * 2`. ALLOW blocks in Effect.gen and complex logic.
+- **Ternary Branching**: PREFER `condition ? valueA : valueB` for binary conditionals. ALLOW `if` within Effect.gen.
 - **Expression Composition**: MUST compose via chained expressions (`.map()`, `.filter()`, `pipe()`). NEVER use intermediate `let` bindings.
 
 ```typescript
@@ -326,6 +335,148 @@ export default defineConfig({
 ```
 
 ---
+### [3.7][EFFECT_PIPELINES]
+
+[IMPORTANT] COMPOSE via Effect pipeline functions with appropriate patterns
+
+Effect composition follows consistent patterns for readability and tracing.
+
+**[EFFECT.FN_PATTERN]** — Named function with automatic span for tracing:
+
+```typescript
+const findUser = Effect.fn('db.users.find')(
+  (id: UserId) => Effect.gen(function* () {
+    const db = yield* DatabaseService
+    return yield* db.users.findById(id)
+  })
+)
+```
+
+**[EFFECT.GEN_PATTERN]** — Sequential composition with control flow:
+
+```typescript
+const processOrder = Effect.gen(function* () {
+  const user = yield* UserService
+  const order = yield* OrderService
+  yield* Effect.log('Processing', { orderId: order.id })
+  return yield* submitOrder(order)
+})
+```
+
+**[LAYER_PATTERN]** — Dynamic layer selection via Config:
+
+```typescript
+const storeLayer = Layer.unwrapEffect(
+  Config.string('STORE_TYPE').pipe(
+    Config.withDefault('memory'),
+    Effect.map((t) => t === 'redis' ? redisLayer : memoryLayer),
+  ),
+)
+```
+
+**[PIPELINE_FUNCTION_SELECTION]**:
+
+| [INDEX] | [FUNCTION]       | [WHEN_TO_USE]                                              |
+| :-----: | ---------------- | ---------------------------------------------------------- |
+|   [1]   | `Effect.map`     | Sync transform of success value                            |
+|   [2]   | `Effect.flatMap` | Chain Effect-returning functions                           |
+|   [3]   | `Effect.andThen` | Mixed input types (value, Promise, Effect, Option, Either) |
+|   [4]   | `Effect.tap`     | Side effects without changing value (logging, metrics)     |
+|   [5]   | `Effect.all`     | Combine multiple effects into structured result            |
+|   [6]   | `Effect.gen`     | Complex sequential logic with control flow                 |
+|   [7]   | `Effect.fn`      | Named function with automatic span                         |
+
+---
+### [3.8][NAMESPACE_OBJECTS]
+
+[IMPORTANT] BUNDLE schema, constructors, predicates, and methods into frozen namespace objects
+
+Namespace objects provide unified API surface for domain primitives.
+
+```typescript
+// Schema defines structure
+const TimestampSchema = pipe(S.Number, S.positive(), S.brand('Timestamp'))
+
+// Type derived from schema
+type Timestamp = S.Schema.Type<typeof TimestampSchema>
+
+// Namespace bundles everything
+const Timestamp = Object.freeze({
+  // Schema utilities
+  schema: TimestampSchema,
+  decode: S.decodeUnknown(TimestampSchema),
+  is: S.is(TimestampSchema),
+
+  // Constructors
+  now: Effect.sync(() => Date.now() as Timestamp),
+  nowSync: (): Timestamp => Date.now() as Timestamp,
+  fromDate: (d: Date): Timestamp => d.getTime() as Timestamp,
+
+  // Operations
+  diff: (a: Timestamp, b: Timestamp): DurationMs => (a - b) as DurationMs,
+  addDuration: (ts: Timestamp, d: DurationMs): Timestamp => (ts + d) as Timestamp,
+})
+```
+
+**[PATTERN_SELECTION]**:
+
+| [INDEX] | [USE_NAMESPACE_OBJECT]                    | [USE_S_CLASS]                         |
+| :-----: | ----------------------------------------- | ------------------------------------- |
+|   [1]   | Primitives (Timestamp, DurationMs, Hex64) | Domain entities with instance methods |
+|   [2]   | Utility collections (V2, CSS, Slot)       | Classes needing `this` context        |
+|   [3]   | ADT wrappers (AsyncState, GestureEvent)   | Schemas with complex derivation logic |
+
+---
+### [3.9][EXTERNAL_LIBS]
+
+[IMPORTANT] LEVERAGE external libraries; do not hand-roll utilities that exist
+
+**[TS-TOOLBELT]** — Type-level operations:
+
+```typescript
+import type { O, L, N } from 'ts-toolbelt'
+
+// Prefer O.Merge over intersection for cleaner hover types
+type Combined = O.Merge<BaseProps, ExtendedProps>
+
+// Type-level arithmetic
+type MulDim<A extends Dim, B extends Dim> = { L: N.Add<A['L'], B['L']> }
+```
+
+**[TS-ESSENTIALS]** — Exclusive unions and immutability:
+
+```typescript
+import type { XOR, DeepReadonly } from 'ts-essentials'
+
+type ControlledMode<T> = XOR<ControlledProps<T>, UncontrolledProps<T>>
+type FrozenConfig = DeepReadonly<typeof B>
+```
+
+**[TYPE-FEST]** — Type manipulation:
+
+```typescript
+import type { Simplify, LiteralUnion, Paths } from 'type-fest'
+
+type Flattened = Simplify<A & B>  // Clean hover types
+type Status = LiteralUnion<'active' | 'inactive', string>  // Autocomplete + extensibility
+```
+
+**[@EFFECT/EXPERIMENTAL]** — Server-side patterns:
+
+```typescript
+import { RateLimiter } from '@effect/experimental/RateLimiter'
+import { Machine } from '@effect/experimental/Machine'
+import { VariantSchema } from '@effect/experimental/VariantSchema'
+```
+
+| [INDEX] | [LIBRARY]              | [KEY_UTILITIES]                           | [USE_WHEN]                     |
+| :-----: | ---------------------- | ----------------------------------------- | ------------------------------ |
+|   [1]   | `ts-toolbelt`          | `O.Merge`, `L.Concat`, `N.Add`            | Type-level operations          |
+|   [2]   | `ts-essentials`        | `XOR`, `DeepReadonly`                     | Exclusive unions, immutability |
+|   [3]   | `type-fest`            | `Simplify`, `LiteralUnion`, `Paths`       | Type manipulation              |
+|   [4]   | `@effect/experimental` | `RateLimiter`, `Machine`, `VariantSchema` | Server-side patterns           |
+
+---
 ## [4][FILE_ARCHITECTURE]
 
 ### [4.1][SECTION_ORGANIZATION]
@@ -356,42 +507,42 @@ export default defineConfig({
 
 **Canonical Sections** (order is mandatory, omit unused):
 
-| [INDEX] | [SECTION] | [PURPOSE] | [CONTAINS] |
-| :-----: | --------- | --------- | ---------- |
-| [1] | `[TYPES]` | Shape definitions | Type aliases, interfaces, unions, inferred types |
-| [2] | `[SCHEMA]` | Validation rules | @effect/schema, branded types, enums |
-| [3] | `[CONSTANTS]` | Immutable values | B constant, frozen config, derived values |
-| [4] | `[CLASSES]` | Typed structures | S.Class, Data.TaggedError, Context.Tag |
-| [5] | `[SERVICES]` | Dependency injection | Effect services with Layer definitions |
-| [6] | `[PURE_FUNCTIONS]` | Stateless logic | Helpers, transformers, validators |
-| [7] | `[DISPATCH_TABLES]` | Polymorphic handlers | Keyed dispatch objects |
-| [8] | `[EFFECT_PIPELINE]` | Effect composition | Effect.gen, pipe chains |
-| [9] | `[LAYERS]` | Infrastructure wiring | Layer.effect, Layer.mergeAll |
-| [10] | `[ENTRY_POINT]` | Execution start | run(), main(), createX(), API definition |
-| [11] | `[EXPORT]` | Public interface | Named exports |
+| [INDEX] | [SECTION]           | [PURPOSE]             | [CONTAINS]                                       |
+| :-----: | ------------------- | --------------------- | ------------------------------------------------ |
+|   [1]   | `[TYPES]`           | Shape definitions     | Type aliases, interfaces, unions, inferred types |
+|   [2]   | `[SCHEMA]`          | Validation rules      | @effect/schema, branded types, enums             |
+|   [3]   | `[CONSTANTS]`       | Immutable values      | B constant, frozen config, derived values        |
+|   [4]   | `[CLASSES]`         | Typed structures      | S.Class, Data.TaggedError, Context.Tag           |
+|   [5]   | `[SERVICES]`        | Dependency injection  | Effect services with Layer definitions           |
+|   [6]   | `[PURE_FUNCTIONS]`  | Stateless logic       | Helpers, transformers, validators                |
+|   [7]   | `[DISPATCH_TABLES]` | Polymorphic handlers  | Keyed dispatch objects                           |
+|   [8]   | `[EFFECT_PIPELINE]` | Effect composition    | Effect.gen, pipe chains                          |
+|   [9]   | `[LAYERS]`          | Infrastructure wiring | Layer.effect, Layer.mergeAll                     |
+|  [10]   | `[ENTRY_POINT]`     | Execution start       | run(), main(), createX(), API definition         |
+|  [11]   | `[EXPORT]`          | Public interface      | Named exports                                    |
 
 **Domain Extensions** (insert after corresponding core section):
 
-| [INDEX] | [DOMAIN] | [EXTENSION] | [INSERT_AFTER] | [PURPOSE] |
-| :-----: | -------- | ----------- | -------------- | --------- |
-| [1] | Database | `[TABLES]` | SCHEMA | Drizzle table definitions |
-| [2] | Database | `[RELATIONS]` | TABLES | Drizzle relations |
-| [3] | Database | `[REPOSITORIES]` | SERVICES | Data access patterns |
-| [4] | API | `[GROUPS]` | SCHEMA | HttpApiGroup definitions |
-| [5] | API | `[MIDDLEWARE]` | SERVICES | Request middleware |
+| [INDEX] | [DOMAIN] | [EXTENSION]      | [INSERT_AFTER] | [PURPOSE]                 |
+| :-----: | -------- | ---------------- | -------------- | ------------------------- |
+|   [1]   | Database | `[TABLES]`       | SCHEMA         | Drizzle table definitions |
+|   [2]   | Database | `[RELATIONS]`    | TABLES         | Drizzle relations         |
+|   [3]   | Database | `[REPOSITORIES]` | SERVICES       | Data access patterns      |
+|   [4]   | API      | `[GROUPS]`       | SCHEMA         | HttpApiGroup definitions  |
+|   [5]   | API      | `[MIDDLEWARE]`   | SERVICES       | Request middleware        |
 
 **Consolidation Rules** (absorb into core sections):
 
-| [INDEX] | [FOUND] | [ABSORB_INTO] | [RATIONALE] |
-| :-----: | ------- | ------------- | ----------- |
-| [1] | `[CONFIG]` | `[CONSTANTS]` | Config is runtime constants |
-| [2] | `[CONTEXT]` | `[CLASSES]` | Context.Tag is class pattern |
-| [3] | `[DOMAIN_ERRORS]` | `[CLASSES]` | Errors are TaggedError classes |
-| [4] | `[ERROR_MAPPERS]` | `[PURE_FUNCTIONS]` | Mappers are pure functions |
-| [5] | `[SCHEMA_UTILS]` | `[PURE_FUNCTIONS]` | Utils are pure functions |
-| [6] | `[INFERRED_TYPES]` | `[TYPES]` | Inferred types are still types |
-| [7] | `[DERIVED]` | `[CONSTANTS]` | Derived values are constants |
-| [8] | `[FACTORIES]` | `[ENTRY_POINT]` | Factories create entry instances |
+| [INDEX] | [FOUND]            | [ABSORB_INTO]      | [RATIONALE]                      |
+| :-----: | ------------------ | ------------------ | -------------------------------- |
+|   [1]   | `[CONFIG]`         | `[CONSTANTS]`      | Config is runtime constants      |
+|   [2]   | `[CONTEXT]`        | `[CLASSES]`        | Context.Tag is class pattern     |
+|   [3]   | `[DOMAIN_ERRORS]`  | `[CLASSES]`        | Errors are TaggedError classes   |
+|   [4]   | `[ERROR_MAPPERS]`  | `[PURE_FUNCTIONS]` | Mappers are pure functions       |
+|   [5]   | `[SCHEMA_UTILS]`   | `[PURE_FUNCTIONS]` | Utils are pure functions         |
+|   [6]   | `[INFERRED_TYPES]` | `[TYPES]`          | Inferred types are still types   |
+|   [7]   | `[DERIVED]`        | `[CONSTANTS]`      | Derived values are constants     |
+|   [8]   | `[FACTORIES]`      | `[ENTRY_POINT]`    | Factories create entry instances |
 
 **FORBIDDEN**:
 - Parentheticals in labels: `[CONSTANTS] (B)` → `[CONSTANTS]`
@@ -421,10 +572,10 @@ export default defineConfig({
 
 >**Dictum:** *Packages export mechanisms; apps define values.*
 
-| Layer        | Owns                                                                             | Example                                                               |
-| ------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `packages/*` | Types, schemas, factories, pure functions, dispatch tables, CSS variable *slots* | `createMenu({ scale })` returns structure referencing `var(--menu-*)` |
-| `apps/*`     | CSS variable values, factory invocations, visual overrides                       | `:root { --menu-item-selected-bg: oklch(32% 0.04 275); }`             |
+| [INDEX] | [LAYER]      | [OWNS]                                                                           | [EXAMPLE]                                                             |
+| :-----: | ------------ | -------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+|   [1]   | `packages/*` | Types, schemas, factories, pure functions, dispatch tables, CSS variable *slots* | `createMenu({ scale })` returns structure referencing `var(--menu-*)` |
+|   [2]   | `apps/*`     | CSS variable values, factory invocations, visual overrides                       | `:root { --menu-item-selected-bg: oklch(32% 0.04 275); }`             |
 
 **FORBIDDEN**: Color/font/spacing literals in `packages/*`.<br>
 **Dropdown Menu**: Package renders title/label/active/checkmark structure. App provides `--menu-dropdown-bg`, `--menu-item-selected-bg` values.

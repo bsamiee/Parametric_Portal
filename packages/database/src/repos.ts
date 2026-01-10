@@ -219,7 +219,7 @@ const makeAuditRepo = (db: DrizzleDb, resolvers: Resolvers) => ({
     log: resolvers.insertAudit.execute,
 });
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [DERIVED_TYPES] ---------------------------------------------------------
 
 type UserRepository = ReturnType<typeof makeUserRepo>;
 type SessionRepository = ReturnType<typeof makeSessionRepo>;
