@@ -338,7 +338,6 @@
         },
         "typecheck": {
             "cache": true,
-            "dependsOn": ["^build"],
             "executor": "nx:run-commands",
             "inputs": ["typescript", "sharedGlobals"],
             "options": {
