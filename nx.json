@@ -1,5 +1,8 @@
 {
     "$schema": "./node_modules/nx/schemas/nx-schema.json",
+    "daemon": {
+        "enabled": false
+    },
     "defaultBase": "main",
     "extends": "nx/presets/npm.json",
     "installation": {
