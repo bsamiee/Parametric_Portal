@@ -199,7 +199,7 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 					data-async-state={asyncSlot.attr}
 					data-color={color}
 					data-orientation={orientation}
-					data-searchable={searchable || undefined}
+					data-searchable={true}
 					data-size={size}
 					data-slot='select'
 					data-pending={asyncSlot.pending || undefined}

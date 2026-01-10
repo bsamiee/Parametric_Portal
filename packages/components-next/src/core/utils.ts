@@ -30,7 +30,7 @@ type SlotDef<T extends Renderable = Renderable> = {
 
 const cn = (...inputs: readonly ClassValue[]): string => twMerge(clsx(inputs));
 const composeTailwindRenderProps = <T,>(cls: RenderPropsClassName<T>, tw: ClassNameValue): ((v: T) => string) | string => composeRenderProps(cls, (prev) => twMerge(tw, prev));
-const isExternalHref = (href: string | undefined): boolean => href?.startsWith('http') ? !href.startsWith(globalThis.location?.origin ?? '') : false;
+const isExternalHref = (href: string | undefined): boolean => href?.startsWith('http') ? !(globalThis.location && href.startsWith(globalThis.location.origin)) : false;
 /** Filter object to entries where value is not undefined. Optional mapper transforms values. */
 function defined<T extends Record<string, unknown>>(obj: T): { [K in keyof T as T[K] extends undefined ? never : K]: Exclude<T[K], undefined> };
 function defined<T extends Record<string, unknown>, R>(obj: T, map: (v: Exclude<T[keyof T], undefined>) => R): { [K in keyof T as T[K] extends undefined ? never : K]: R };
