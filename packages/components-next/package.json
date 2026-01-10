@@ -13,20 +13,100 @@
       "import": "./src/actions/toggle.tsx",
       "default": "./src/actions/toggle.tsx"
     },
+    "./actions/toolbar": {
+      "types": "./src/actions/toolbar.tsx",
+      "import": "./src/actions/toolbar.tsx",
+      "default": "./src/actions/toolbar.tsx"
+    },
+    "./collections/grid-list": {
+      "types": "./src/collections/grid-list.tsx",
+      "import": "./src/collections/grid-list.tsx",
+      "default": "./src/collections/grid-list.tsx"
+    },
+    "./collections/table": {
+      "types": "./src/collections/table.tsx",
+      "import": "./src/collections/table.tsx",
+      "default": "./src/collections/table.tsx"
+    },
+    "./collections/tag-group": {
+      "types": "./src/collections/tag-group.tsx",
+      "import": "./src/collections/tag-group.tsx",
+      "default": "./src/collections/tag-group.tsx"
+    },
+    "./collections/tree": {
+      "types": "./src/collections/tree.tsx",
+      "import": "./src/collections/tree.tsx",
+      "default": "./src/collections/tree.tsx"
+    },
+    "./core/announce": {
+      "types": "./src/core/announce.tsx",
+      "import": "./src/core/announce.tsx",
+      "default": "./src/core/announce.tsx"
+    },
+    "./core/floating": {
+      "types": "./src/core/floating.tsx",
+      "import": "./src/core/floating.tsx",
+      "default": "./src/core/floating.tsx"
+    },
+    "./core/gesture": {
+      "types": "./src/core/gesture.ts",
+      "import": "./src/core/gesture.ts",
+      "default": "./src/core/gesture.ts"
+    },
+    "./core/utils": {
+      "types": "./src/core/utils.ts",
+      "import": "./src/core/utils.ts",
+      "default": "./src/core/utils.ts"
+    },
+    "./feedback/progress": {
+      "types": "./src/feedback/progress.tsx",
+      "import": "./src/feedback/progress.tsx",
+      "default": "./src/feedback/progress.tsx"
+    },
+    "./inputs/number-field": {
+      "types": "./src/inputs/number-field.tsx",
+      "import": "./src/inputs/number-field.tsx",
+      "default": "./src/inputs/number-field.tsx"
+    },
     "./inputs/radio": {
       "types": "./src/inputs/radio.tsx",
       "import": "./src/inputs/radio.tsx",
       "default": "./src/inputs/radio.tsx"
+    },
+    "./inputs/search-field": {
+      "types": "./src/inputs/search-field.tsx",
+      "import": "./src/inputs/search-field.tsx",
+      "default": "./src/inputs/search-field.tsx"
     },
     "./inputs/select": {
       "types": "./src/inputs/select.tsx",
       "import": "./src/inputs/select.tsx",
       "default": "./src/inputs/select.tsx"
     },
+    "./inputs/slider": {
+      "types": "./src/inputs/slider.tsx",
+      "import": "./src/inputs/slider.tsx",
+      "default": "./src/inputs/slider.tsx"
+    },
+    "./inputs/text-field": {
+      "types": "./src/inputs/text-field.tsx",
+      "import": "./src/inputs/text-field.tsx",
+      "default": "./src/inputs/text-field.tsx"
+    },
     "./navigation/accordion": {
       "types": "./src/navigation/accordion.tsx",
       "import": "./src/navigation/accordion.tsx",
       "default": "./src/navigation/accordion.tsx"
+    },
+    "./navigation/breadcrumbs": {
+      "types": "./src/navigation/breadcrumbs.tsx",
+      "import": "./src/navigation/breadcrumbs.tsx",
+      "default": "./src/navigation/breadcrumbs.tsx"
+    },
+    "./navigation/link": {
+      "types": "./src/navigation/link.tsx",
+      "import": "./src/navigation/link.tsx",
+      "default": "./src/navigation/link.tsx"
     },
     "./navigation/menu": {
       "types": "./src/navigation/menu.tsx",
@@ -43,6 +123,21 @@
       "import": "./src/overlays/dialog.tsx",
       "default": "./src/overlays/dialog.tsx"
     },
+    "./overlays/drawer": {
+      "types": "./src/overlays/drawer.tsx",
+      "import": "./src/overlays/drawer.tsx",
+      "default": "./src/overlays/drawer.tsx"
+    },
+    "./pickers/color-picker": {
+      "types": "./src/pickers/color-picker.tsx",
+      "import": "./src/pickers/color-picker.tsx",
+      "default": "./src/pickers/color-picker.tsx"
+    },
+    "./pickers/date-picker": {
+      "types": "./src/pickers/date-picker.tsx",
+      "import": "./src/pickers/date-picker.tsx",
+      "default": "./src/pickers/date-picker.tsx"
+    },
     "./pickers/file-preview": {
       "types": "./src/pickers/file-preview.tsx",
       "import": "./src/pickers/file-preview.tsx",
@@ -52,31 +147,6 @@
       "types": "./src/pickers/file-upload.tsx",
       "import": "./src/pickers/file-upload.tsx",
       "default": "./src/pickers/file-upload.tsx"
-    },
-    "./core/announce": {
-      "types": "./src/core/announce.tsx",
-      "import": "./src/core/announce.tsx",
-      "default": "./src/core/announce.tsx"
-    },
-    "./core/floating": {
-      "types": "./src/core/floating.tsx",
-      "import": "./src/core/floating.tsx",
-      "default": "./src/core/floating.tsx"
-    },
-    "./core/focus": {
-      "types": "./src/core/focus.tsx",
-      "import": "./src/core/focus.tsx",
-      "default": "./src/core/focus.tsx"
-    },
-    "./core/gesture": {
-      "types": "./src/core/gesture.ts",
-      "import": "./src/core/gesture.ts",
-      "default": "./src/core/gesture.ts"
-    },
-    "./core/utils": {
-      "types": "./src/core/utils.ts",
-      "import": "./src/core/utils.ts",
-      "default": "./src/core/utils.ts"
     }
   },
   "scripts": {
@@ -91,17 +161,23 @@
   "dependencies": {
     "@floating-ui/react": "catalog:",
     "@formkit/auto-animate": "catalog:",
+    "@internationalized/date": "catalog:",
     "@parametric-portal/runtime": "workspace:*",
     "@parametric-portal/theme": "workspace:*",
     "@parametric-portal/types": "workspace:*",
     "@radix-ui/react-visually-hidden": "catalog:",
+    "@react-aria/live-announcer": "catalog:",
+    "@tanstack/react-table": "catalog:",
     "@tanstack/react-virtual": "catalog:",
     "@use-gesture/react": "catalog:",
     "clsx": "catalog:",
+    "colorjs.io": "catalog:",
     "effect": "catalog:",
     "lucide-react": "catalog:",
+    "motion": "catalog:",
     "react-aria": "catalog:",
     "react-aria-components": "catalog:",
+    "vaul": "catalog:",
     "tailwind-merge": "catalog:",
     "ts-essentials": "catalog:",
     "ts-toolbelt": "catalog:",

@@ -12,7 +12,7 @@ import { useRef } from 'react';
 import { Link as RACLink, type LinkProps as RACLinkProps, } from 'react-aria-components';
 import { useTooltip, type TooltipConfig } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
-import { cn, composeTailwindRenderProps, defined, Slot, type SlotInput } from '../core/utils';
+import { cn, composeTailwindRenderProps, defined, isExternalHref, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -80,18 +80,12 @@ const B = Object.freeze({
 	}),
 });
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const isExternalHref = (href: string | undefined): boolean =>
-	href?.startsWith('http') ? !href.startsWith(globalThis.location?.origin ?? '') : false;
-
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const LinkCore: FC<LinkProps> = (props) => {
 	const {
-		children, className, color, gesture, href, isDisabled, prefix, ref,
-		rel: relProp, size, style: styleProp, suffix, target: targetProp, tooltip, variant, ...rest
-	} = props;
+		children, className, color, gesture, href, isDisabled, prefix, ref, rel: relProp, size,
+		style: styleProp, suffix, target: targetProp, tooltip, variant, ...rest } = props;
 	const isButtonMode = variant !== undefined;
 	const isExternal = isExternalHref(href);
 	const hasGesture = gesture !== undefined;

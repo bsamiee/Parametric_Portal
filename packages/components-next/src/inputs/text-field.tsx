@@ -6,14 +6,16 @@
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
-import type { FC, ReactNode, Ref } from 'react';
+import type { FC, ReactNode, Ref, RefObject } from 'react';
 import { useRef } from 'react';
 import {
 	FieldError, Input, Label, Text, TextArea,
 	TextField as RACTextField, type TextFieldProps as RACTextFieldProps,
 	type ValidationResult,
 } from 'react-aria-components';
+import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
+import { type GestureProps, useGesture } from '../core/gesture';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -23,6 +25,7 @@ type TextFieldProps = Omit<RACTextFieldProps, 'children'> & {
 	readonly color: string;
 	readonly description?: ReactNode;
 	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
+	readonly gesture?: GestureProps;
 	readonly label?: ReactNode;
 	readonly multiline?: boolean;
 	readonly placeholder?: string;
@@ -82,17 +85,23 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const TextField: FC<TextFieldProps> = ({
-	asyncState, className, color, description, errorMessage, isDisabled, label, multiline, placeholder, prefix, ref, rows, size, suffix, 
+	asyncState, className, color, description, errorMessage, gesture, isDisabled, label, multiline, placeholder, prefix, ref, rows, size, suffix,
 	tooltip, variant, ...racProps }) => {
 	const slot = Slot.bind(asyncState);
-	const inputRef = useRef<HTMLDivElement>(null);
+	const fieldRef = useRef<HTMLDivElement>(null);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
-	const mergedRef = useMergeRefs([ref, inputRef, tooltipProps.ref as Ref<HTMLDivElement>]);
+	const { props: gestureProps } = useGesture({
+		isDisabled: isDisabled || slot.pending,
+		prefix: 'text-field',
+		ref: fieldRef as RefObject<HTMLElement | null>,
+		...gesture,
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
+	});
+	const mergedRef = useMergeRefs([ref, fieldRef, tooltipProps.ref as Ref<HTMLDivElement>]);
 	return (
 		<>
 			<RACTextField
-				{...(racProps as RACTextFieldProps)}
-				{...tooltipProps}
+				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACTextFieldProps)}
 				className={composeTailwindRenderProps(className, B.slot.root)}
 				data-async-state={slot.attr}
 				data-color={color}
@@ -121,6 +130,7 @@ const TextField: FC<TextFieldProps> = ({
 				<FieldError className={B.slot.error} data-slot='text-field-error'>{errorMessage}</FieldError>
 			</RACTextField>
 			{renderTooltip?.()}
+			<AsyncAnnouncer asyncState={asyncState} />
 		</>
 	);
 };

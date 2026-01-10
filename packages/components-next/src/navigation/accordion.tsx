@@ -106,8 +106,7 @@ const AccordionContext = createContext<AccordionContextValue | null>(null);
 // --- [SUB-COMPONENTS] --------------------------------------------------------
 
 const AccordionTrigger: FC<AccordionTriggerProps> = ({
-	asyncState, children, className, color, gesture, hideIndicator, indicator, isDisabled, prefix, ref, size, tooltip, variant,
-}) => {
+	asyncState, children, className, color, gesture, hideIndicator, indicator, isDisabled, prefix, ref, size, tooltip, variant, }) => {
 	const ctx = useContext(AccordionContext);
 	const disclosureState = useContext(DisclosureStateContext);
 	const isExpanded = disclosureState?.isExpanded ?? false;

@@ -16,6 +16,7 @@ import { AsyncAnnouncer } from '../core/announce';
 import type { TextDropItem } from 'react-aria';
 import { useDrag, useDrop } from 'react-aria';
 import { type TooltipConfig, useTooltip } from '../core/floating';
+import { type GestureProps, useGesture } from '../core/gesture';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
 import type { AsyncState } from '@parametric-portal/types/async';
 
@@ -40,6 +41,7 @@ type TabProps = Omit<RACTabProps, 'children'> & {
 	readonly asyncState?: AsyncState;
 	readonly badge?: ReactNode | number | string;
 	readonly children?: SlotDef<ReactNode> | ((state: TabRenderProps) => ReactNode);
+	readonly gesture?: GestureProps;
 	readonly icon?: SlotDef;
 	readonly ref?: Ref<HTMLDivElement>;
 	readonly tooltip?: TooltipConfig;
@@ -115,10 +117,10 @@ const TabList = <T extends object = object>({ className, ...racProps }: TabListP
 		data-slot='tabs-list'
 	/>
 );
-const Tab: FC<TabProps> = ({ asyncState, badge, children, className, icon, id, isDisabled, ref, tooltip, ...racProps }) => {
+const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, icon, id, isDisabled, ref, tooltip, ...racProps }) => {
 	const ctx = useContext(TabsContext);
 	const onReorder = ctx?.onReorder;
-	const dropRef = useRef<HTMLDivElement>(null);
+	const tabRef = useRef<HTMLDivElement>(null);
 	const mimeType = 'application/x-tabs-tab';
 	const { dragProps: { slot: _ds, ...dragProps }, isDragging } = useDrag({
 		getItems: () => [{ [mimeType]: String(id) }],
@@ -132,17 +134,24 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, icon, id, i
 			const targetId = String(id);
 			item?.getText(mimeType).then((fromId) => fromId !== targetId && onReorder?.(fromId, targetId));
 		},
-		ref: dropRef,
+		ref: tabRef,
 	});
 	const slot = Slot.bind(asyncState);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
-	const mergedRef = useMergeRefs([ref, dropRef, tooltipProps.ref as Ref<HTMLDivElement>].filter(Boolean) as Array<Ref<HTMLDivElement>>);
+	const { props: gestureProps } = useGesture({
+		isDisabled: isDisabled || slot.pending,
+		prefix: 'tabs-tab',
+		ref: tabRef,
+		...gesture,
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
+	});
+	const mergedRef = useMergeRefs([ref, tabRef, tooltipProps.ref as Ref<HTMLDivElement>].filter(Boolean) as Array<Ref<HTMLDivElement>>);
 	const isRenderFn = typeof children === 'function';
 	const badgeMax = useMemo(() => readCssPx(B.cssVars.badgeMax) || 99, []);
 	return (
 		<>
 			<RACTab
-				{...({ ...(onReorder ? { ...dragProps, ...dropProps } : {}), ...racProps, ...tooltipProps } as unknown as RACTabProps)}
+				{...({ ...(onReorder ? { ...dragProps, ...dropProps } : {}), ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACTabProps)}
 				className={composeTailwindRenderProps(className, B.slot.tab)}
 				data-async-state={slot.attr}
 				data-color={ctx?.color}

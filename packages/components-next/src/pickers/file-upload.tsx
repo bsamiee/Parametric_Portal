@@ -58,7 +58,6 @@ const extractFiles = async (items: readonly DropItem[]): Promise<readonly File[]
 const acceptTypes = (...types: readonly string[]) =>
 	(dragTypes: DragTypes, allowed: DropOperation[]): DropOperation =>
 		types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
-
 const FileUpload: FC<FileUploadProps> = ({
 	accept, acceptDirectory, asyncState, children, className, defaultCamera, isDisabled,
 	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, ref, trigger,
@@ -80,7 +79,6 @@ const FileUpload: FC<FileUploadProps> = ({
 	);
 	const getDropOperation = useMemo(() => acceptTypes(...accept), [accept]);
 	const { clipboardProps } = useClipboard({ onPaste, ...defined({ isDisabled }) });
-
 	return (
 		<DropZone
 			getDropOperation={getDropOperation}
