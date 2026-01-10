@@ -30,6 +30,7 @@ type SlotDef<T extends Renderable = Renderable> = {
 
 const cn = (...inputs: readonly ClassValue[]): string => twMerge(clsx(inputs));
 const composeTailwindRenderProps = <T,>(cls: RenderPropsClassName<T>, tw: ClassNameValue): ((v: T) => string) | string => composeRenderProps(cls, (prev) => twMerge(tw, prev));
+const isExternalHref = (href: string | undefined): boolean => href?.startsWith('http') ? !(globalThis.location && href.startsWith(globalThis.location.origin)) : false;
 /** Filter object to entries where value is not undefined. Optional mapper transforms values. */
 function defined<T extends Record<string, unknown>>(obj: T): { [K in keyof T as T[K] extends undefined ? never : K]: Exclude<T[K], undefined> };
 function defined<T extends Record<string, unknown>, R>(obj: T, map: (v: Exclude<T[keyof T], undefined>) => R): { [K in keyof T as T[K] extends undefined ? never : K]: R };
@@ -45,9 +46,12 @@ function defined<T extends Record<string, unknown>, R>(obj: T, map?: (v: Exclude
 
 const isLucide = (v: unknown): v is LucideIcon =>
 	v != null &&
-	typeof v === 'function' &&
-	typeof (v as { displayName?: unknown }).displayName === 'string' &&
-	typeof (v as { render?: unknown }).render === 'function';
+	((typeof v === 'function' &&
+		typeof (v as { displayName?: unknown }).displayName === 'string' &&
+		typeof (v as { render?: unknown }).render === 'function') ||
+	(typeof v === 'object' &&
+		(v as { $$typeof?: symbol }).$$typeof === Symbol['for']('react.forward_ref') &&
+		typeof (v as { render?: unknown }).render === 'function'));
 const isSlotDef = <T extends Renderable>(v: unknown): v is SlotDef<T> =>
 	v != null &&
 	typeof v === 'object' &&
@@ -65,8 +69,7 @@ const content = (slotContent: Renderable | null | undefined, className?: string)
 	);
 const resolve = <T extends Renderable>(
 	input: SlotInput<T> | undefined,
-	state: AsyncState<unknown, unknown> | undefined,
-): T | undefined => {
+	state: AsyncState<unknown, unknown> | undefined, ): T | undefined => {
 	const def = normalize(input);
 	const key = (state?._tag.toLowerCase() ?? 'default') as keyof SlotDef;
 	return def ? (def[key] ?? def.default) : undefined;
@@ -88,5 +91,5 @@ const Slot = Object.freeze({ bind, content, isSlotDef, normalize, render, resolv
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { cn, composeTailwindRenderProps, defined, Slot };
+export { cn, composeTailwindRenderProps, defined, isExternalHref, Slot };
 export type { SlotDef, SlotInput };

@@ -32,6 +32,13 @@ const B = Object.freeze({
             name: 'parametric_icons',
             port: 3001,
         },
+        test_harness: {
+            baseURL: 'http://localhost:3002',
+            command: 'pnpm exec nx dev @parametric-portal/test-harness',
+            healthURL: 'http://localhost:3002',
+            name: 'test_harness',
+            port: 3002,
+        },
     } as const satisfies Record<string, AppConfig>,
     browser: {
         headless: true,
@@ -67,7 +74,6 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const isCI = (): boolean => process.env.CI === 'true';
-
 const buildWebServer = (app: AppConfig) => ({
     command: app.command,
     reuseExistingServer: !isCI(),
@@ -79,17 +85,14 @@ const buildWebServer = (app: AppConfig) => ({
 
 export default defineConfig({
     forbidOnly: isCI(),
-
     fullyParallel: true,
     outputDir: B.output.dir,
-
     projects: [
         {
             name: 'chromium',
             use: { ...devices['Desktop Chrome'] },
         },
     ],
-
     reporter: [
         ['html', { open: 'never', outputFolder: B.output.reportDir }],
         ['list'],
@@ -98,9 +101,7 @@ export default defineConfig({
     retries: isCI() ? B.retry.ci : B.retry.local,
     testDir: B.patterns.testDir,
     testMatch: B.patterns.testMatch,
-
     timeout: B.timeout.test,
-
     use: {
         actionTimeout: B.timeout.action,
         baseURL: B.apps.parametric_icons.baseURL,
@@ -110,8 +111,11 @@ export default defineConfig({
         video: B.browser.video,
         viewport: B.browser.viewport,
     },
-
-    webServer: [buildWebServer(B.apps.api), buildWebServer(B.apps.parametric_icons)],
+    webServer: [
+        buildWebServer(B.apps.api),
+        buildWebServer(B.apps.parametric_icons),
+        buildWebServer(B.apps.test_harness),
+    ],
     workers: isCI() ? B.workers.ci : B.workers.local,
 });
 

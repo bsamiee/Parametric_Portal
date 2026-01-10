@@ -33,6 +33,10 @@ const ThemeConfigSchema = S.Struct({
         value: S.Struct({ c: S.Number.pipe(S.clamp(0, 0.4)), h: S.Number.pipe(S.clamp(0, 360)), l: S.Number.pipe(S.clamp(0, 1)), }),
     }),
     components: S.Array(ComponentSpecSchema),
+    drawer: S.optional(S.Struct({
+        fadeFromIndex: S.optional(S.Number),
+        snapPoints: S.optional(S.Array(S.Union(S.Number, S.String))),
+    })),
     focus: S.Struct({ color: FocusColorRefSchema, offset: S.String, width: S.String, z: S.String, }),
     fonts: S.Record({ key: S.String, value: S.String }),
     interaction: S.Struct({
@@ -144,6 +148,11 @@ const generateAnimationCSS = (animation: ThemeConfig['animation']): readonly str
     CSS.formatVar('animate', ['enter-scale'], String(animation.enterScale)),
     CSS.formatVar('animate', ['exit-scale'], String(animation.exitScale)),
 ];
+const generateDrawerCSS = (drawer: ThemeConfig['drawer']): readonly string[] =>
+    drawer === undefined ? [] : [
+        ...(drawer.snapPoints ?? []).map((v, i) => CSS.formatVar('drawer', [`snap-point-${i + 1}`], String(v))),
+        ...(drawer.fadeFromIndex === undefined ? [] : [CSS.formatVar('drawer', ['fade-from-index'], String(drawer.fadeFromIndex))]),
+    ];
 const generateTooltipGroupCSS = (tooltipGroup: ThemeConfig['tooltipGroup']): readonly string[] => [
     ...(tooltipGroup.boundary === undefined ? [] : [CSS.formatVar('tooltip', ['boundary'], tooltipGroup.boundary)]),
     CSS.formatVar('tooltip-group', ['open-delay'], `${tooltipGroup.openDelay}ms`),
@@ -172,10 +181,11 @@ const generateThemeCSS = (config: ThemeConfig): Effect.Effect<string, ThemeError
             );
             const fontLines = generateFontCSS(config.fonts);
             const animationLines = generateAnimationCSS(config.animation);
+            const drawerLines = generateDrawerCSS(config.drawer);
             const tooltipGroupLines = generateTooltipGroupCSS(config.tooltipGroup);
             const interactionLines = generateInteractionCSS(config.interaction);
             const focusLines = generateFocusCSS(config.focus);
-            const themeBlock = ['@theme {', ...colorLines, ...fontLines, ...animationLines, ...tooltipGroupLines, ...interactionLines, ...focusLines, '}'].join('\n');
+            const themeBlock = ['@theme {', ...colorLines, ...fontLines, ...animationLines, ...drawerLines, ...tooltipGroupLines, ...interactionLines, ...focusLines, '}'].join('\n');
             const wiringBlock = yield* generateComponentWiring(config.components, colorNames);
             const tooltipBlock = config.tooltipStyles === undefined || config.tooltipStyles.length === 0
                 ? ''

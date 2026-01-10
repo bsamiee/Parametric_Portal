@@ -60,7 +60,6 @@ describe('Runtime.use', () => {
         // biome-ignore lint/suspicious/noExplicitAny: test type coercion for generic runtime
         const runtime = ManagedRuntime.make(Layer.empty) as any;
         const { result } = renderHook(() => Runtime.use(), {
-            // biome-ignore lint/correctness/noChildrenProp: Runtime.Provider requires children in props
             // biome-ignore lint/suspicious/noExplicitAny: wrapper props require type coercion
             wrapper: ({ children }) => React.createElement(Runtime.Provider, { children, runtime } as any),
         });

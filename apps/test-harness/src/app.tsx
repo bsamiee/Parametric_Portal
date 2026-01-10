@@ -1,42 +1,49 @@
-// biome-ignore-all lint/correctness/useUniqueElementIds: RAC Tab/TabPanel `id` props are internal state keys, not DOM ids.
 /**
- * Test harness: Comprehensive component validation with theme integration.
- * Tests: Button, Toggle, Select, Tabs, Menu, FileUpload, FilePreview, Accordion.
- * Validates: CSS variables, async states, tooltips, icons, all variants.
+ * Test harness: Minimal component validation with theme integration.
+ * Tests: Button (async states), TextField (multiline), Select (searchable), Toolbar, Slider, ColorPicker, DatePicker, Tree, TagGroup, Table, GridList, Breadcrumbs, Progress, Drawer.
  */
 import { Button } from '@parametric-portal/components-next/actions/button';
-import { Checkbox, CheckboxGroup, Switch } from '@parametric-portal/components-next/actions/toggle';
+import { Toolbar } from '@parametric-portal/components-next/actions/toolbar';
+import { GridList } from '@parametric-portal/components-next/collections/grid-list';
+import { Table } from '@parametric-portal/components-next/collections/table';
+import { TagGroup } from '@parametric-portal/components-next/collections/tag-group';
+import { Tree } from '@parametric-portal/components-next/collections/tree';
+import { Progress } from '@parametric-portal/components-next/feedback/progress';
 import { Select } from '@parametric-portal/components-next/inputs/select';
-import { Menu } from '@parametric-portal/components-next/navigation/menu';
-import { Tabs } from '@parametric-portal/components-next/navigation/tabs';
-import { FilePreview } from '@parametric-portal/components-next/pickers/file-preview';
-import { FileUpload } from '@parametric-portal/components-next/pickers/file-upload';
+import { Slider } from '@parametric-portal/components-next/inputs/slider';
+import { TextField } from '@parametric-portal/components-next/inputs/text-field';
+import { Breadcrumbs } from '@parametric-portal/components-next/navigation/breadcrumbs';
+import { Drawer } from '@parametric-portal/components-next/overlays/drawer';
+import { ColorPicker } from '@parametric-portal/components-next/pickers/color-picker';
+import { DatePicker } from '@parametric-portal/components-next/pickers/date-picker';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
-import { useFileUpload } from '@parametric-portal/runtime/hooks/file-upload';
 import { Runtime } from '@parametric-portal/runtime/runtime';
 import { Duration, Effect, Layer } from 'effect';
 import {
+    AlignCenter,
+    AlignLeft,
+    AlignRight,
+    Bold,
+    Calendar,
     Check,
     ChevronDown,
-    Copy,
-    Download,
     Edit,
-    FileText,
-    FolderOpen,
+    File,
+    Folder,
     Home,
-    Info,
+    Image,
+    Italic,
     Loader2,
-    Mail,
-    Minus,
-    MoreVertical,
-    Search,
+    Menu,
+    PanelLeft,
     Settings,
-    Trash2,
-    Upload,
-    User,
+    Star,
+    Tag,
+    Underline,
     XCircle,
 } from 'lucide-react';
-import type { FC, ReactNode } from 'react';
+import { type FC, type ReactNode, useState } from 'react';
+import type { Key, Selection, SortDescriptor } from 'react-aria-components';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -56,7 +63,7 @@ const Section: FC<{ readonly children: ReactNode; readonly title: string }> = ({
     </section>
 );
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [DEMOS] -----------------------------------------------------------------
 
 const AsyncButtonDemo: FC = () => {
     const success = useEffectMutate(() => simulateAsync(1500, false));
@@ -84,276 +91,896 @@ const AsyncButtonDemo: FC = () => {
         </>
     );
 };
-const ToggleDemo: FC = () => {
-    const toggle = useEffectMutate(() => simulateAsync(800, false));
+const TextFieldDemo: FC = () => {
+    const asyncMutate = useEffectMutate(() => simulateAsync(1500, false));
     return (
         <>
-            <Switch children={{ default: 'Small' }} color='primary' size='sm' />
-            <Switch
-                asyncState={toggle.state}
-                children={{ default: 'With Async', loading: 'Saving...' }}
+            <TextField color='primary' label='Username' placeholder='Enter username...' size='md' />
+            <TextField
                 color='primary'
-                onChange={() => toggle.mutate(undefined)}
+                description='Multiline textarea with 4 rows'
+                label='Description'
+                multiline
+                placeholder='Enter description...'
+                rows={4}
                 size='md'
             />
-            <Switch
-                children={{ default: 'Large' }}
+            <TextField
+                asyncState={asyncMutate.state}
                 color='primary'
-                size='lg'
-                tooltip={{ content: 'Large switch with tooltip' }}
+                label='Async Field'
+                placeholder='Type and submit...'
+                prefix={{ default: Edit, loading: Loader2, success: Check }}
+                size='md'
             />
-            <Checkbox color='success' icon={Check} size='md'>
-                Accept Terms
-            </Checkbox>
-            <Checkbox color='primary' icon={Check} iconIndeterminate={Minus} isIndeterminate size='md'>
-                Indeterminate
-            </Checkbox>
-            <CheckboxGroup color='secondary' orientation='horizontal' size='md'>
-                <Checkbox icon={Check} size='md' value='a'>
-                    Option A
-                </Checkbox>
-                <Checkbox icon={Check} size='md' value='b'>
-                    Option B
-                </Checkbox>
-            </CheckboxGroup>
+            <Button
+                children={{ default: 'Submit' }}
+                color='primary'
+                onPress={() => asyncMutate.mutate(undefined)}
+                size='sm'
+                variant='outline'
+            />
         </>
     );
 };
-const SelectDemo: FC = () => (
-    <>
-        {/* Basic Select with sections */}
-        <Select color='primary' placeholder='Select page...' size='md' suffix={ChevronDown}>
-            <Select.Section title='Navigation'>
-                <Select.Item icon={{ default: Home }}>Home</Select.Item>
-                <Select.Item icon={{ default: User }}>Profile</Select.Item>
-                <Select.Item icon={{ default: Settings }} isDisabled>
-                    Settings
-                </Select.Item>
-            </Select.Section>
-            <Select.Separator />
-            <Select.Section title='Actions'>
-                <Select.Item icon={{ default: Copy }}>Copy</Select.Item>
-                <Select.Item icon={{ default: Download }}>Download</Select.Item>
-            </Select.Section>
-            <Select.Separator />
-            <Select.Item destructive icon={{ default: Trash2 }}>
-                Delete Account
-            </Select.Item>
-        </Select>
-        {/* Select with badges */}
-        <Select color='secondary' placeholder='With badges' size='md' suffix={ChevronDown}>
-            <Select.Item badge={5} description='5 unread messages' icon={{ default: Mail }}>
-                Inbox
-            </Select.Item>
-            <Select.Item badge={12} icon={{ default: Edit }}>
-                Drafts
-            </Select.Item>
-            <Select.Item badge={100} icon={{ default: FolderOpen }}>
-                Archive
-            </Select.Item>
-        </Select>
-        {/* Select with item tooltips */}
-        <Select color='primary' placeholder='With tooltips' size='md' suffix={ChevronDown}>
-            <Select.Item
-                description='Navigate to home page'
-                icon={{ default: Home }}
-                tooltip={{ content: 'Go to dashboard' }}
-            >
-                Home
-            </Select.Item>
-            <Select.Item
-                description='View your profile'
-                icon={{ default: User }}
-                tooltip={{ content: 'Edit settings' }}
-            >
-                Profile
-            </Select.Item>
-        </Select>
-        {/* Sizes */}
-        <Select color='secondary' placeholder='Small' size='sm' suffix={ChevronDown}>
-            <Select.Item>First</Select.Item>
-            <Select.Item>Second</Select.Item>
-        </Select>
-        <Select color='primary' isDisabled placeholder='Disabled' size='md' suffix={ChevronDown}>
-            <Select.Item>Item</Select.Item>
-        </Select>
-    </>
-);
-const TabsDemo: FC = () => (
-    <div className='flex flex-col gap-4 w-full max-w-md'>
-        <Tabs color='primary' defaultSelectedKey='tab1' size='md'>
-            <Tabs.List>
-                <Tabs.Tab children={{ default: 'Home' }} icon={{ default: Home }} id='tab1' />
-                <Tabs.Tab children={{ default: 'Profile' }} icon={{ default: User }} id='tab2' />
-                <Tabs.Tab children={{ default: 'Settings' }} icon={{ default: Settings }} id='tab3' isDisabled />
-            </Tabs.List>
-            <Tabs.Panel id='tab1'>Home panel content with icon tab.</Tabs.Panel>
-            <Tabs.Panel id='tab2'>Profile panel - navigate with arrows.</Tabs.Panel>
-            <Tabs.Panel id='tab3'>Settings disabled.</Tabs.Panel>
-        </Tabs>
-        <Tabs color='secondary' orientation='vertical' size='sm'>
-            <Tabs.List>
-                <Tabs.Tab children={{ default: 'Files' }} id='v1' />
-                <Tabs.Tab children={{ default: 'Edit' }} id='v2' />
-            </Tabs.List>
-            <Tabs.Panel id='v1'>Vertical tabs - Files</Tabs.Panel>
-            <Tabs.Panel id='v2'>Vertical tabs - Edit</Tabs.Panel>
-        </Tabs>
-    </div>
-);
-const MenuDemo: FC = () => (
-    <Menu
-        color='primary'
-        size='md'
-        trigger={
-            <Button
-                children={{ default: 'Actions' }}
-                color='primary'
-                prefix={{ default: MoreVertical }}
-                size='md'
-                variant='outline'
-            />
-        }
-    >
-        <Menu.Section title='Edit'>
-            <Menu.Item children={{ default: 'Copy' }} copy />
-            <Menu.Item children={{ default: 'Edit' }} icon={{ default: Edit }} shortcut='⌘E' />
-        </Menu.Section>
-        <Menu.Separator />
-        <Menu.Section title='Export'>
-            <Menu.Item children={{ default: 'Download' }} icon={{ default: Download }} />
-            <Menu.Item children={{ default: 'Export PDF' }} icon={{ default: FileText }} />
-        </Menu.Section>
-        <Menu.Separator />
-        <Menu.Item
-            children={{ default: 'Delete' }}
-            confirm={{
-                buttons: [
-                    { action: 'close', label: 'Cancel' },
-                    { action: 'confirm', autoFocus: true, label: 'Delete' },
-                ],
-                description: 'This action cannot be undone.',
-                title: 'Delete item?',
-            }}
-            delete
-            destructive
-        />
-    </Menu>
-);
-const FileDemo: FC = () => {
-    const upload = useFileUpload({ allowedTypes: ['image/png', 'image/jpeg', 'image/svg+xml'] });
+const SelectDemo: FC = () => {
+    const fruits = [
+        { id: 'apple', label: 'Apple' },
+        { id: 'banana', label: 'Banana' },
+        { id: 'cherry', label: 'Cherry' },
+        { id: 'date', label: 'Date' },
+        { id: 'elderberry', label: 'Elderberry' },
+        { id: 'fig', label: 'Fig' },
+        { id: 'grape', label: 'Grape' },
+        { id: 'honeydew', label: 'Honeydew' },
+    ];
     return (
-        <div className='flex flex-col gap-4'>
-            <FileUpload
-                {...upload.props}
-                trigger={
-                    <Button
-                        children={{ default: 'Select Image' }}
-                        color='primary'
-                        prefix={{ default: Upload }}
-                        size='sm'
-                        variant='outline'
-                    />
-                }
+        <>
+            <Select
+                color='primary'
+                items={fruits}
+                label='Regular Select'
+                placeholder='Select a fruit'
+                size='md'
+                suffix={ChevronDown}
             >
-                {({ isDropTarget }) => (
-                    <span className='text-sm text-(--color-text-600)'>
-                        {isDropTarget ? 'Drop here!' : 'Drag, paste, or click'}
-                    </span>
-                )}
-            </FileUpload>
-            {upload.results[0] && <FilePreview file={upload.results[0]} />}
-        </div>
+                {(item) => <Select.Item key={item.id}>{item.label}</Select.Item>}
+            </Select>
+            <Select
+                color='primary'
+                data-testid='searchable-select'
+                items={fruits}
+                label='Searchable Select'
+                placeholder='Search fruits...'
+                searchable
+                size='md'
+                suffix={ChevronDown}
+            >
+                {(item) => <Select.Item key={item.id}>{item.label}</Select.Item>}
+            </Select>
+        </>
     );
 };
-const DirectoryDemo: FC = () => {
-    const upload = useFileUpload({ allowedTypes: ['image/png', 'image/jpeg'] });
+const ToolbarDemo: FC = () => (
+    <>
+        <Toolbar
+            aria-label='Text formatting'
+            color='primary'
+            data-testid='toolbar-horizontal'
+            orientation='horizontal'
+            size='md'
+        >
+            <Toolbar.Group aria-label='Text style'>
+                <Toolbar.Item aria-label='Bold' prefix={Bold} tooltip={{ content: 'Bold (Ctrl+B)' }} />
+                <Toolbar.Item aria-label='Italic' prefix={Italic} tooltip={{ content: 'Italic (Ctrl+I)' }} />
+                <Toolbar.Item aria-label='Underline' prefix={Underline} tooltip={{ content: 'Underline (Ctrl+U)' }} />
+            </Toolbar.Group>
+            <Toolbar.Separator />
+            <Toolbar.Group aria-label='Alignment'>
+                <Toolbar.Item aria-label='Align left' defaultSelected prefix={AlignLeft} />
+                <Toolbar.Item aria-label='Align center' prefix={AlignCenter} />
+                <Toolbar.Item aria-label='Align right' prefix={AlignRight} />
+            </Toolbar.Group>
+        </Toolbar>
+        <Toolbar
+            aria-label='Vertical text formatting'
+            color='primary'
+            data-testid='toolbar-vertical'
+            orientation='vertical'
+            size='md'
+        >
+            <Toolbar.Group aria-label='Text style'>
+                <Toolbar.Item aria-label='Bold' prefix={Bold} />
+                <Toolbar.Item aria-label='Italic' prefix={Italic} />
+            </Toolbar.Group>
+            <Toolbar.Separator />
+            <Toolbar.Group aria-label='Alignment'>
+                <Toolbar.Item aria-label='Align left' prefix={AlignLeft} />
+                <Toolbar.Item aria-label='Align center' prefix={AlignCenter} />
+            </Toolbar.Group>
+        </Toolbar>
+    </>
+);
+const SliderDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-2 w-64'>
+            <Slider
+                aria-label='Volume'
+                color='primary'
+                data-testid='slider-single'
+                defaultValue={50}
+                label='Volume'
+                showOutput
+                size='md'
+            >
+                <Slider.Track>
+                    <Slider.Thumb tooltip />
+                </Slider.Track>
+            </Slider>
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <Slider
+                aria-label='Price Range'
+                color='primary'
+                data-testid='slider-range'
+                defaultValue={[25, 75]}
+                label='Price Range'
+                showOutput
+                size='md'
+            >
+                <Slider.Track>
+                    <Slider.Thumb index={0} tooltip />
+                    <Slider.Thumb index={1} tooltip />
+                </Slider.Track>
+            </Slider>
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <Slider
+                aria-label='Disabled'
+                color='primary'
+                data-testid='slider-disabled'
+                defaultValue={30}
+                isDisabled
+                label='Disabled'
+                showOutput
+                size='md'
+            >
+                <Slider.Track>
+                    <Slider.Thumb />
+                </Slider.Track>
+            </Slider>
+        </div>
+    </>
+);
+const ColorPickerDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-4'>
+            <ColorPicker color='primary' data-testid='color-picker-full' defaultValue='hsb(217, 91%, 96%)' size='md'>
+                <ColorPicker.Area xChannel='saturation' yChannel='brightness'>
+                    <ColorPicker.Thumb tooltip />
+                </ColorPicker.Area>
+                <ColorPicker.Slider channel='hue'>
+                    <ColorPicker.Thumb tooltip />
+                </ColorPicker.Slider>
+                <ColorPicker.Slider channel='alpha'>
+                    <ColorPicker.Thumb tooltip />
+                </ColorPicker.Slider>
+                <ColorPicker.Field label='Hex Color' />
+            </ColorPicker>
+        </div>
+        <div className='flex flex-col gap-4'>
+            <ColorPicker color='primary' data-testid='color-picker-wheel' defaultValue='hsb(161, 84%, 73%)' size='md'>
+                <ColorPicker.Wheel innerRadius={40} outerRadius={80}>
+                    <ColorPicker.WheelTrack />
+                    <ColorPicker.Thumb tooltip />
+                </ColorPicker.Wheel>
+            </ColorPicker>
+        </div>
+        <div className='flex flex-col gap-4'>
+            <ColorPicker color='primary' data-testid='color-picker-swatches' defaultValue='#ef4444' size='md'>
+                <ColorPicker.SwatchPicker>
+                    <ColorPicker.SwatchPickerItem color='#ef4444' name='Red' />
+                    <ColorPicker.SwatchPickerItem color='#f97316' name='Orange' />
+                    <ColorPicker.SwatchPickerItem color='#eab308' name='Yellow' />
+                    <ColorPicker.SwatchPickerItem color='#22c55e' name='Green' />
+                    <ColorPicker.SwatchPickerItem color='#3b82f6' name='Blue' />
+                    <ColorPicker.SwatchPickerItem color='#8b5cf6' name='Purple' />
+                    <ColorPicker.SwatchPickerItem color='#ec4899' name='Pink' />
+                    <ColorPicker.SwatchPickerItem color='#6b7280' name='Gray' />
+                </ColorPicker.SwatchPicker>
+            </ColorPicker>
+        </div>
+    </>
+);
+const DatePickerDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-2'>
+            <DatePicker color='primary' data-testid='date-picker-single' label='Single Date' size='md'>
+                <DatePicker.Group>
+                    <DatePicker.Field />
+                    <DatePicker.Trigger>
+                        <Calendar className='size-4' />
+                    </DatePicker.Trigger>
+                </DatePicker.Group>
+                <DatePicker.Popover>
+                    <DatePicker.Calendar />
+                </DatePicker.Popover>
+            </DatePicker>
+        </div>
+        <div className='flex flex-col gap-2'>
+            <DatePicker.Range color='primary' data-testid='date-picker-range' label='Date Range' size='md'>
+                <DatePicker.Group>
+                    <DatePicker.RangeField slot='start' />
+                    <span className='px-1 text-(--color-text-600)'>–</span>
+                    <DatePicker.RangeField slot='end' />
+                    <DatePicker.Trigger>
+                        <Calendar className='size-4' />
+                    </DatePicker.Trigger>
+                </DatePicker.Group>
+                <DatePicker.Popover>
+                    <DatePicker.RangeCalendar />
+                </DatePicker.Popover>
+            </DatePicker.Range>
+        </div>
+        <div className='flex flex-col gap-2'>
+            <DatePicker
+                color='primary'
+                data-testid='date-picker-datetime'
+                granularity='minute'
+                label='Date & Time'
+                size='md'
+            >
+                <DatePicker.Group>
+                    <DatePicker.Field />
+                    <DatePicker.Trigger>
+                        <Calendar className='size-4' />
+                    </DatePicker.Trigger>
+                </DatePicker.Group>
+                <DatePicker.Popover>
+                    <DatePicker.Calendar />
+                    <DatePicker.Time label='Time' />
+                </DatePicker.Popover>
+            </DatePicker>
+        </div>
+    </>
+);
+const TreeDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-2 min-w-72'>
+            <span className='text-xs font-medium text-(--color-text-600)'>File Explorer</span>
+            <Tree
+                aria-label='File explorer'
+                color='primary'
+                data-testid='tree-explorer'
+                selectionMode='single'
+                size='md'
+            >
+                <Tree.Item id='src' prefix={Folder} title='src' tooltip={{ content: 'Source files' }}>
+                    <Tree.Group>
+                        <Tree.Item id='src-components' prefix={Folder} title='components'>
+                            <Tree.Group>
+                                <Tree.Item
+                                    id='src-button'
+                                    prefix={File}
+                                    title='button.tsx'
+                                    tooltip={{ content: 'Button component' }}
+                                />
+                                <Tree.Item id='src-input' prefix={File} title='input.tsx' />
+                            </Tree.Group>
+                        </Tree.Item>
+                        <Tree.Item id='src-index' prefix={File} title='index.tsx' />
+                    </Tree.Group>
+                </Tree.Item>
+                <Tree.Item id='package' prefix={File} title='package.json' tooltip={{ content: 'Package manifest' }} />
+            </Tree>
+        </div>
+        <div className='flex flex-col gap-2 min-w-72'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Custom Content</span>
+            <Tree aria-label='Custom tree' color='primary' data-testid='tree-custom' size='md'>
+                <Tree.Item id='tagged'>
+                    <Tree.ItemContent prefix={Tag} tooltip={{ content: 'Items with badge' }}>
+                        <span className='flex items-center gap-1'>
+                            Tagged <span className='text-xs opacity-50'>(3)</span>
+                        </span>
+                    </Tree.ItemContent>
+                </Tree.Item>
+            </Tree>
+        </div>
+    </>
+);
+const TagGroupDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-2 min-w-72'>
+            <TagGroup
+                aria-label='Filter categories'
+                color='primary'
+                data-testid='tag-group-removable'
+                onRemove={(_keys) => undefined}
+                size='md'
+            >
+                <TagGroup.Label>Categories</TagGroup.Label>
+                <TagGroup.List>
+                    <TagGroup.Tag id='react' prefix={Tag} textValue='React' tooltip={{ content: 'JavaScript library' }}>
+                        React
+                    </TagGroup.Tag>
+                    <TagGroup.Tag id='typescript' prefix={Tag} textValue='TypeScript'>
+                        TypeScript
+                    </TagGroup.Tag>
+                    <TagGroup.Tag id='tailwind' prefix={Tag} textValue='Tailwind'>
+                        Tailwind
+                    </TagGroup.Tag>
+                </TagGroup.List>
+            </TagGroup>
+        </div>
+        <div className='flex flex-col gap-2 min-w-72'>
+            <TagGroup
+                aria-label='Select technologies'
+                color='primary'
+                data-testid='tag-group-selectable'
+                defaultSelectedKeys={['frontend']}
+                selectionMode='multiple'
+                size='md'
+                variant='solid'
+            >
+                <TagGroup.Label>Tech Stack</TagGroup.Label>
+                <TagGroup.List>
+                    <TagGroup.Tag id='frontend' textValue='Frontend'>
+                        Frontend
+                    </TagGroup.Tag>
+                    <TagGroup.Tag id='backend' textValue='Backend'>
+                        Backend
+                    </TagGroup.Tag>
+                    <TagGroup.Tag id='devops' textValue='DevOps'>
+                        DevOps
+                    </TagGroup.Tag>
+                </TagGroup.List>
+            </TagGroup>
+        </div>
+        <div className='flex flex-col gap-2 min-w-72'>
+            <TagGroup aria-label='Documentation links' color='primary' data-testid='tag-group-links' size='md'>
+                <TagGroup.Label>Resources</TagGroup.Label>
+                <TagGroup.List>
+                    <TagGroup.Tag
+                        href='https://react.dev'
+                        id='react-docs'
+                        textValue='React Docs'
+                        tooltip={{ content: 'Opens in new tab' }}
+                    >
+                        React Docs
+                    </TagGroup.Tag>
+                    <TagGroup.Tag href='https://typescriptlang.org' id='ts-docs' textValue='TypeScript'>
+                        TypeScript
+                    </TagGroup.Tag>
+                    <TagGroup.Tag href='https://tailwindcss.com' id='tw-docs' textValue='Tailwind'>
+                        Tailwind
+                    </TagGroup.Tag>
+                </TagGroup.List>
+            </TagGroup>
+        </div>
+    </>
+);
+const tableData = [
+    { email: 'alice@example.com', id: 1, name: 'Alice Johnson', role: 'Engineer', status: 'Active' },
+    { email: 'bob@example.com', id: 2, name: 'Bob Smith', role: 'Designer', status: 'Active' },
+    { email: 'carol@example.com', id: 3, name: 'Carol Williams', role: 'Manager', status: 'Inactive' },
+    { email: 'david@example.com', id: 4, name: 'David Brown', role: 'Engineer', status: 'Active' },
+    { email: 'eva@example.com', id: 5, name: 'Eva Martinez', role: 'Designer', status: 'Active' },
+];
+const TableDemo: FC = () => {
+    const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({ column: 'name', direction: 'ascending' });
+    const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<Key>());
+    const sortedData = [...tableData].sort((a, b) => {
+        const column = sortDescriptor.column as keyof typeof a;
+        const aValue = a[column];
+        const bValue = b[column];
+        const cmp = String(aValue).localeCompare(String(bValue));
+        return sortDescriptor.direction === 'descending' ? -cmp : cmp;
+    });
     return (
-        <FileUpload
-            {...upload.props}
-            acceptDirectory
+        <>
+            <div className='flex flex-col gap-2 w-full'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Sortable Table</span>
+                <Table
+                    aria-label='Users table with sorting'
+                    color='primary'
+                    data-testid='table-sortable'
+                    onSortChange={setSortDescriptor}
+                    size='md'
+                    sortDescriptor={sortDescriptor}
+                >
+                    <Table.Header>
+                        <Table.Column allowsSorting id='name' isRowHeader>
+                            Name
+                        </Table.Column>
+                        <Table.Column allowsSorting id='email'>
+                            Email
+                        </Table.Column>
+                        <Table.Column allowsSorting id='role'>
+                            Role
+                        </Table.Column>
+                        <Table.Column allowsSorting id='status'>
+                            Status
+                        </Table.Column>
+                    </Table.Header>
+                    <Table.Body emptyState={<span>No users found</span>}>
+                        {sortedData.map((user) => (
+                            <Table.Row id={user.id} key={user.id}>
+                                <Table.Cell>{user.name}</Table.Cell>
+                                <Table.Cell>{user.email}</Table.Cell>
+                                <Table.Cell>{user.role}</Table.Cell>
+                                <Table.Cell>{user.status}</Table.Cell>
+                            </Table.Row>
+                        ))}
+                    </Table.Body>
+                </Table>
+            </div>
+            <div className='flex flex-col gap-2 w-full'>
+                <span className='text-xs font-medium text-(--color-text-600)'>
+                    Selectable Table (Selected:{' '}
+                    {selectedKeys === 'all' ? 'All' : [...selectedKeys].join(', ') || 'None'})
+                </span>
+                <Table
+                    aria-label='Users table with selection'
+                    color='primary'
+                    data-testid='table-selectable'
+                    onSelectionChange={setSelectedKeys}
+                    selectedKeys={selectedKeys}
+                    selectionMode='multiple'
+                    size='md'
+                >
+                    <Table.Header>
+                        <Table.Column id='select' isRowHeader={false}>
+                            {null}
+                        </Table.Column>
+                        <Table.Column id='name' isRowHeader>
+                            Name
+                        </Table.Column>
+                        <Table.Column id='email'>Email</Table.Column>
+                        <Table.Column id='role'>Role</Table.Column>
+                    </Table.Header>
+                    <Table.Body>
+                        {tableData.map((user) => (
+                            <Table.Row id={user.id} key={user.id}>
+                                <Table.Cell>
+                                    <Table.RowCheckbox />
+                                </Table.Cell>
+                                <Table.Cell>{user.name}</Table.Cell>
+                                <Table.Cell>{user.email}</Table.Cell>
+                                <Table.Cell>{user.role}</Table.Cell>
+                            </Table.Row>
+                        ))}
+                    </Table.Body>
+                </Table>
+            </div>
+            <div className='flex flex-col gap-2 w-full'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Resizable Columns</span>
+                <Table.ResizableContainer onResize={(_widths) => undefined}>
+                    <Table
+                        aria-label='Users table with resizable columns'
+                        color='primary'
+                        data-testid='table-resizable'
+                        size='md'
+                    >
+                        <Table.Header>
+                            <Table.Column defaultWidth='1fr' id='name' isRowHeader minWidth={100}>
+                                Name
+                                <Table.ColumnResizer />
+                            </Table.Column>
+                            <Table.Column defaultWidth='1fr' id='email' minWidth={150}>
+                                Email
+                                <Table.ColumnResizer />
+                            </Table.Column>
+                            <Table.Column defaultWidth={100} id='role' minWidth={80}>
+                                Role
+                                <Table.ColumnResizer />
+                            </Table.Column>
+                            <Table.Column defaultWidth={100} id='status' minWidth={80}>
+                                Status
+                            </Table.Column>
+                        </Table.Header>
+                        <Table.Body>
+                            {tableData.map((user) => (
+                                <Table.Row id={user.id} key={user.id}>
+                                    <Table.Cell>{user.name}</Table.Cell>
+                                    <Table.Cell tooltip={{ content: user.email }}>{user.email}</Table.Cell>
+                                    <Table.Cell>{user.role}</Table.Cell>
+                                    <Table.Cell>{user.status}</Table.Cell>
+                                </Table.Row>
+                            ))}
+                        </Table.Body>
+                    </Table>
+                </Table.ResizableContainer>
+            </div>
+        </>
+    );
+};
+const GridListDemo: FC = () => {
+    const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<Key>());
+    return (
+        <>
+            <div className='flex flex-col gap-2 min-w-72'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Single Selection</span>
+                <GridList
+                    aria-label='Image gallery'
+                    color='primary'
+                    data-testid='grid-list-single'
+                    selectionMode='single'
+                    size='md'
+                >
+                    <GridList.Item id='img-1' prefix={Image} tooltip={{ content: 'Beach sunset photo' }}>
+                        Beach Sunset
+                    </GridList.Item>
+                    <GridList.Item id='img-2' prefix={Image} tooltip={{ content: 'Mountain landscape' }}>
+                        Mountains
+                    </GridList.Item>
+                    <GridList.Item id='img-3' prefix={Image}>
+                        City Skyline
+                    </GridList.Item>
+                    <GridList.Item id='img-4' prefix={Image}>
+                        Forest Trail
+                    </GridList.Item>
+                </GridList>
+            </div>
+            <div className='flex flex-col gap-2 min-w-72'>
+                <span className='text-xs font-medium text-(--color-text-600)'>
+                    Multiple Selection (Selected:{' '}
+                    {selectedKeys === 'all' ? 'All' : [...selectedKeys].join(', ') || 'None'})
+                </span>
+                <GridList
+                    aria-label='Favorites'
+                    color='primary'
+                    data-testid='grid-list-multiple'
+                    onSelectionChange={setSelectedKeys}
+                    selectedKeys={selectedKeys}
+                    selectionMode='multiple'
+                    size='md'
+                >
+                    <GridList.Item id='fav-1' prefix={Star}>
+                        Favorite 1
+                    </GridList.Item>
+                    <GridList.Item id='fav-2' prefix={Star}>
+                        Favorite 2
+                    </GridList.Item>
+                    <GridList.Item id='fav-3' prefix={Star}>
+                        Favorite 3
+                    </GridList.Item>
+                    <GridList.Item id='fav-4' prefix={Star} isDisabled tooltip={{ content: 'This item is disabled' }}>
+                        Disabled Item
+                    </GridList.Item>
+                </GridList>
+            </div>
+            <div className='flex flex-col gap-2 min-w-72'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Display Only (No Selection)</span>
+                <GridList
+                    aria-label='File icons'
+                    color='primary'
+                    data-testid='grid-list-display'
+                    selectionMode='none'
+                    size='md'
+                >
+                    <GridList.Item id='file-1' prefix={File} suffix={Check}>
+                        Document.pdf
+                    </GridList.Item>
+                    <GridList.Item id='file-2' prefix={Folder}>
+                        Projects
+                    </GridList.Item>
+                    <GridList.Item id='file-3' prefix={File}>
+                        Notes.txt
+                    </GridList.Item>
+                </GridList>
+            </div>
+        </>
+    );
+};
+const BreadcrumbsDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-2'>
+            <Breadcrumbs aria-label='Page navigation' color='primary' data-testid='breadcrumbs-basic' size='md'>
+                <Breadcrumbs.Item href='#' prefix={Home} tooltip={{ content: 'Go to home page' }}>
+                    Home
+                </Breadcrumbs.Item>
+                <Breadcrumbs.Item href='#'>Products</Breadcrumbs.Item>
+                <Breadcrumbs.Item href='#'>Electronics</Breadcrumbs.Item>
+                <Breadcrumbs.Current>Laptops</Breadcrumbs.Current>
+            </Breadcrumbs>
+        </div>
+        <div className='flex flex-col gap-2'>
+            <Breadcrumbs aria-label='Settings navigation' color='primary' data-testid='breadcrumbs-disabled' size='md'>
+                <Breadcrumbs.Item href='#'>Dashboard</Breadcrumbs.Item>
+                <Breadcrumbs.Item href='#' isDisabled tooltip={{ content: 'Access restricted' }}>
+                    Admin
+                </Breadcrumbs.Item>
+                <Breadcrumbs.Current>Settings</Breadcrumbs.Current>
+            </Breadcrumbs>
+        </div>
+        <div className='flex flex-col gap-2'>
+            <Breadcrumbs aria-label='File navigation' color='primary' data-testid='breadcrumbs-icons' size='md'>
+                <Breadcrumbs.Item href='#' prefix={Folder}>
+                    Documents
+                </Breadcrumbs.Item>
+                <Breadcrumbs.Item href='#' prefix={Folder}>
+                    Projects
+                </Breadcrumbs.Item>
+                <Breadcrumbs.Current prefix={File}>Report.pdf</Breadcrumbs.Current>
+            </Breadcrumbs>
+        </div>
+    </>
+);
+const ProgressDemo: FC = () => (
+    <>
+        <div className='flex flex-col gap-2 w-64'>
+            <Progress
+                aria-label='Loading progress'
+                color='primary'
+                data-testid='progress-determinate'
+                label='Loading...'
+                showValue
+                size='md'
+                value={65}
+            />
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <Progress
+                aria-label='Uploading'
+                color='primary'
+                data-testid='progress-indeterminate'
+                isIndeterminate
+                label='Uploading files...'
+                size='md'
+            />
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <Progress
+                aria-label='Download progress'
+                color='primary'
+                data-testid='progress-custom'
+                formatValue={(p) => `${Math.round(p * 10)}MB / 1GB`}
+                label='Downloading'
+                maxValue={1000}
+                showValue
+                size='md'
+                value={420}
+            />
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <Progress
+                aria-label='Task completion'
+                color='primary'
+                data-testid='progress-tooltip'
+                label='Tasks'
+                showValue
+                size='md'
+                tooltip={{ content: '25 of 100 tasks completed' }}
+                value={25}
+            />
+        </div>
+        <div className='flex flex-col gap-2'>
+            <Progress
+                aria-label='Circular progress'
+                color='primary'
+                data-testid='progress-circular'
+                shape='circular'
+                showValue
+                size='md'
+                value={75}
+            />
+        </div>
+        <div className='flex flex-col gap-2'>
+            <Progress
+                aria-label='Completed'
+                centerIcon={Check}
+                color='primary'
+                data-testid='progress-circular-icon'
+                label='Complete'
+                shape='circular'
+                size='md'
+                value={100}
+            />
+        </div>
+        <div className='flex flex-col gap-2'>
+            <Progress
+                aria-label='Loading'
+                color='primary'
+                data-testid='progress-circular-indeterminate'
+                isIndeterminate
+                label='Loading...'
+                shape='circular'
+                size='md'
+            />
+        </div>
+    </>
+);
+const DrawerDemo: FC = () => (
+    <>
+        <Drawer
+            color='primary'
+            data-testid='drawer-bottom'
+            direction='bottom'
+            size='md'
             trigger={
                 <Button
-                    children={{ default: 'Folder' }}
-                    color='secondary'
-                    prefix={{ default: FolderOpen }}
-                    size='sm'
+                    children={{ default: 'Bottom Drawer' }}
+                    color='primary'
+                    prefix={Menu}
+                    size='md'
                     variant='outline'
                 />
             }
         >
-            <span className='text-sm text-(--color-text-600)'>Found: {upload.results.length} files</span>
-        </FileUpload>
-    );
-};
+            <Drawer.Handle />
+            <Drawer.Header>
+                <Drawer.Title>Bottom Drawer</Drawer.Title>
+                <Drawer.Description>Mobile-style sheet sliding up from bottom.</Drawer.Description>
+            </Drawer.Header>
+            <Drawer.Body>
+                <p>Gesture-driven drawer with swipe-to-dismiss. Perfect for action sheets and mobile interfaces.</p>
+            </Drawer.Body>
+            <Drawer.Footer>
+                <Drawer.Close>
+                    <Button children={{ default: 'Cancel' }} color='primary' size='sm' variant='ghost' />
+                </Drawer.Close>
+                <Button children={{ default: 'Confirm' }} color='primary' size='sm' variant='solid' />
+            </Drawer.Footer>
+        </Drawer>
+        <Drawer
+            color='primary'
+            data-testid='drawer-left'
+            direction='left'
+            size='md'
+            trigger={
+                <Button
+                    children={{ default: 'Left Panel' }}
+                    color='primary'
+                    prefix={PanelLeft}
+                    size='md'
+                    variant='outline'
+                />
+            }
+        >
+            <Drawer.Header>
+                <Drawer.Title>Navigation</Drawer.Title>
+            </Drawer.Header>
+            <Drawer.Body>
+                <p>Left side panel for navigation menus, settings trees, or sidebar content.</p>
+            </Drawer.Body>
+            <Drawer.Footer>
+                <Drawer.Close>
+                    <Button children={{ default: 'Close' }} color='primary' size='sm' variant='ghost' />
+                </Drawer.Close>
+            </Drawer.Footer>
+        </Drawer>
+        <Drawer
+            color='primary'
+            data-testid='drawer-right'
+            direction='right'
+            size='md'
+            trigger={
+                <Button
+                    children={{ default: 'Settings' }}
+                    color='primary'
+                    prefix={Settings}
+                    size='md'
+                    variant='outline'
+                />
+            }
+        >
+            <Drawer.Header>
+                <Drawer.Title>Settings</Drawer.Title>
+                <Drawer.Description>Configure application preferences.</Drawer.Description>
+            </Drawer.Header>
+            <Drawer.Body>
+                <p>Right drawer for settings panels, inspectors, or detail views.</p>
+            </Drawer.Body>
+            <Drawer.Footer>
+                <Drawer.Close>
+                    <Button children={{ default: 'Cancel' }} color='primary' size='sm' variant='ghost' />
+                </Drawer.Close>
+                <Button children={{ default: 'Save' }} color='primary' size='sm' variant='solid' />
+            </Drawer.Footer>
+        </Drawer>
+        <Drawer
+            color='primary'
+            data-testid='drawer-nested-outer'
+            direction='bottom'
+            size='lg'
+            trigger={<Button children={{ default: 'Nested Drawers' }} color='primary' size='md' variant='solid' />}
+        >
+            <Drawer.Handle />
+            <Drawer.Header>
+                <Drawer.Title>Outer Drawer</Drawer.Title>
+                <Drawer.Description>Click to open nested drawer inside.</Drawer.Description>
+            </Drawer.Header>
+            <Drawer.Body>
+                <Drawer
+                    color='primary'
+                    data-testid='drawer-nested-inner'
+                    direction='bottom'
+                    nested
+                    size='md'
+                    trigger={
+                        <Button children={{ default: 'Open Nested' }} color='primary' size='sm' variant='outline' />
+                    }
+                >
+                    <Drawer.Handle />
+                    <Drawer.Header>
+                        <Drawer.Title>Nested Drawer</Drawer.Title>
+                    </Drawer.Header>
+                    <Drawer.Body>
+                        <p>This is a nested drawer using Vaul.NestedRoot.</p>
+                    </Drawer.Body>
+                    <Drawer.Footer>
+                        <Drawer.Close>
+                            <Button children={{ default: 'Close' }} color='primary' size='sm' variant='ghost' />
+                        </Drawer.Close>
+                    </Drawer.Footer>
+                </Drawer>
+            </Drawer.Body>
+            <Drawer.Footer>
+                <Drawer.Close>
+                    <Button children={{ default: 'Close Outer' }} color='primary' size='sm' variant='ghost' />
+                </Drawer.Close>
+            </Drawer.Footer>
+        </Drawer>
+    </>
+);
+
+// --- [ENTRY_POINT] -----------------------------------------------------------
+
 const AppContent: FC = () => (
     <main className='min-h-screen bg-(--color-surface-500) p-8'>
         <div className='mx-auto flex max-w-4xl flex-col gap-8'>
             <header className='flex flex-col gap-2'>
                 <h1 className='text-2xl font-bold text-(--color-text-500)'>Component Test Harness</h1>
                 <p className='text-sm text-(--color-text-700)'>
-                    Validates: CSS variables, async states, tooltips, icons, all size/color/variant combinations.
+                    Minimal validation: async states, multiline fields, searchable selects.
                 </p>
             </header>
-            <Section title='Button Sizes + Variants'>
-                <Button children={{ default: 'Small' }} color='primary' size='sm' variant='solid' />
-                <Button children={{ default: 'Medium' }} color='primary' size='md' variant='solid' />
-                <Button children={{ default: 'Large' }} color='primary' size='lg' variant='solid' />
+            <Section title='Button Variants'>
+                <Button children={{ default: 'Primary' }} color='primary' size='md' variant='solid' />
                 <Button children={{ default: 'Outline' }} color='primary' size='md' variant='outline' />
                 <Button children={{ default: 'Ghost' }} color='primary' size='md' variant='ghost' />
-            </Section>
-            <Section title='Button Colors'>
-                <Button children={{ default: 'Primary' }} color='primary' size='md' variant='solid' />
-                <Button children={{ default: 'Secondary' }} color='secondary' size='md' variant='solid' />
-                <Button children={{ default: 'Success' }} color='success' size='md' variant='solid' />
-                <Button children={{ default: 'Warning' }} color='warning' size='md' variant='solid' />
-                <Button children={{ default: 'Danger' }} color='danger' size='md' variant='solid' />
-                <Button children={{ default: 'Accent' }} color='accent' size='md' variant='solid' />
-            </Section>
-            <Section title='Button Icons + States'>
-                <Button
-                    children={{ default: 'Search' }}
-                    color='primary'
-                    prefix={{ default: Search }}
-                    size='md'
-                    variant='solid'
-                />
-                <Button
-                    children={{ default: 'Email' }}
-                    color='secondary'
-                    prefix={{ default: Mail }}
-                    size='md'
-                    variant='solid'
-                />
-                <Button children={{ default: 'Disabled' }} color='primary' isDisabled size='md' variant='solid' />
-                <Button
-                    children={{ default: <Info className='size-4' /> }}
-                    color='primary'
-                    size='md'
-                    tooltip={{ content: 'With tooltip' }}
-                    variant='solid'
-                />
             </Section>
             <Section title='Async Button States'>
                 <AsyncButtonDemo />
             </Section>
-            <Section title='Toggle Components'>
-                <ToggleDemo />
+            <Section title='TextField Components'>
+                <TextFieldDemo />
             </Section>
             <Section title='Select Components'>
                 <SelectDemo />
             </Section>
-            <Section title='Tabs Navigation'>
-                <TabsDemo />
+            <Section title='Toolbar Components'>
+                <ToolbarDemo />
             </Section>
-            <Section title='Menu with Sections'>
-                <MenuDemo />
+            <Section title='Slider Components'>
+                <SliderDemo />
             </Section>
-            <Section title='File Upload'>
-                <FileDemo />
+            <Section title='ColorPicker Components'>
+                <ColorPickerDemo />
             </Section>
-            <Section title='Directory Upload'>
-                <DirectoryDemo />
+            <Section title='DatePicker Components'>
+                <DatePickerDemo />
+            </Section>
+            <Section title='Tree Components'>
+                <TreeDemo />
+            </Section>
+            <Section title='TagGroup Components'>
+                <TagGroupDemo />
+            </Section>
+            <Section title='Table Components'>
+                <TableDemo />
+            </Section>
+            <Section title='GridList Components'>
+                <GridListDemo />
+            </Section>
+            <Section title='Breadcrumbs Components'>
+                <BreadcrumbsDemo />
+            </Section>
+            <Section title='Progress Components'>
+                <ProgressDemo />
+            </Section>
+            <Section title='Drawer Components'>
+                <DrawerDemo />
             </Section>
         </div>
     </main>

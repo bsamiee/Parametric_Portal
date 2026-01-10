@@ -13,6 +13,10 @@
     20%, 60% { transform: translateX(-2px); }
     40%, 80% { transform: translateX(2px); }
 }
+@keyframes progress-indeterminate {             /* Linear progress indeterminate slide */
+    0% { left: -35%; }
+    100% { left: 100%; }
+}
 @media (prefers-reduced-motion: reduce) {       /* Reduced motion: accessibility requirement */
     *, *::before, *::after {
         transition-duration: 0.01ms;

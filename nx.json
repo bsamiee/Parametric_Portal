@@ -1,5 +1,8 @@
 {
     "$schema": "./node_modules/nx/schemas/nx-schema.json",
+    "daemon": {
+        "enabled": false
+    },
     "defaultBase": "main",
     "extends": "nx/presets/npm.json",
     "installation": {
@@ -72,11 +75,11 @@
             "sharedGlobals"
         ]
     },
-    "parallel": 4,
+    "parallel": 2,
     "plugins": [
         {
-            "exclude": ["tools/**/*"],
-            "include": ["apps/**/*", "packages/**/*"],
+            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
+            "include": ["apps/*/vite.config.ts", "packages/*/vite.config.ts"],
             "options": {
                 "buildTargetName": "build",
                 "previewTargetName": "preview",
@@ -86,8 +89,8 @@
             "plugin": "@nx/vite/plugin"
         },
         {
-            "exclude": ["tools/**/*"],
-            "include": ["apps/**/*", "packages/**/*"],
+            "exclude": ["tools/**/*", "**/node_modules/**"],
+            "include": ["apps/*/vite.config.ts", "packages/*/vite.config.ts"],
             "options": {
                 "testMode": "run",
                 "testTargetName": "test"
@@ -96,7 +99,7 @@
         },
         {
             "exclude": ["tools/**/*"],
-            "include": ["apps/**/*"],
+            "include": ["apps/*/Dockerfile"],
             "options": {
                 "buildTargetName": "docker:build",
                 "defaultPlatform": "linux/amd64"
@@ -104,12 +107,15 @@
             "plugin": "@nx/docker"
         },
         {
+            "include": ["playwright.config.ts"],
             "options": {
                 "targetName": "e2e"
             },
             "plugin": "@nx/playwright/plugin"
         },
         {
+            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
+            "include": ["apps/*", "packages/*"],
             "options": {
                 "targetName": "check"
             },
@@ -332,7 +338,6 @@
         },
         "typecheck": {
             "cache": true,
-            "dependsOn": ["^build"],
             "executor": "nx:run-commands",
             "inputs": ["typescript", "sharedGlobals"],
             "options": {

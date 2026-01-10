@@ -19,6 +19,7 @@ type ArrowConfig = {
     readonly stroke?: string; readonly strokeWidth?: number; readonly tipRadius?: number; readonly width?: number | string;
 };
 type TooltipConfig = {
+    readonly anchor?: RefObject<HTMLElement | null>;
     readonly arrow?: ArrowConfig;
     readonly arrowPadding?: number;
     readonly boundary?: Element | 'clippingAncestors';
@@ -124,6 +125,7 @@ const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, 
         hide({ strategy: 'referenceHidden' }),
     ];
     const { context, floatingStyles, refs } = useFloating({
+        ...(cfg?.anchor && { elements: { reference: cfg.anchor.current } }),
         middleware: middleware || [],
         ...(nodeId && { nodeId }),
         onOpenChange: (open: boolean) => {
@@ -137,10 +139,12 @@ const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, 
     });
     const { delay: groupDelay, isInstantPhase, currentId } = useDelayGroup(context, { id });
     const { click = false, dismissOnEscape = true, dismissOnOutsidePress = true } = cfg?.interactions ?? {};
+    const hasExternalAnchor = cfg?.anchor !== undefined;
+    const isControlled = cfg?.open !== undefined;
     const { getFloatingProps, getReferenceProps } = useInteractions([
-        useHover(context, { delay: cfg?.delay ?? groupDelay, enabled: has, handleClose: safePolygon({ blockPointerEvents: true }) }),
-        useFocus(context, { enabled: has }),
-        useClick(context, { enabled: click }),
+        useHover(context, { delay: cfg?.delay ?? groupDelay, enabled: has && !isControlled, handleClose: safePolygon({ blockPointerEvents: true }) }),
+        useFocus(context, { enabled: has && !isControlled }),
+        useClick(context, { enabled: click && !isControlled }),
         useDismiss(context, { escapeKey: dismissOnEscape, outsidePress: dismissOnOutsidePress }),
         useRole(context, { role: 'tooltip' }),
     ]);
@@ -170,10 +174,10 @@ const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, 
               })()
             : cssOnlyProps;
     }, [cfg?.arrow]);
-    const mergedRef = useMergeRefs([baseRef, has ? refs.setReference : undefined]);
+    const mergedRef = useMergeRefs([baseRef, has && !hasExternalAnchor ? refs.setReference : undefined]);
     const mergedProps = {
         ...(baseProps ?? ({} as P)),
-        ...(has && getReferenceProps()),
+        ...(has && !isControlled && getReferenceProps()),
         ...(has && isOpen && { 'aria-describedby': id }),
         ref: mergedRef,
     } as P & { ref: Ref<HTMLElement> };

@@ -6,21 +6,24 @@
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
 import type { LucideIcon } from 'lucide-react';
-import type { FC, ReactNode, Ref } from 'react';
+import type { FC, ReactNode, Ref, RefObject } from 'react';
+import { useRef } from 'react';
 import {
-	Checkbox as RACCheckbox, CheckboxGroup as RACCheckboxGroup, type CheckboxGroupProps as RACCheckboxGroupProps,
-	type CheckboxProps as RACCheckboxProps, Switch as RACSwitch, type SwitchProps as RACSwitchProps,
+	Checkbox as RACCheckbox, CheckboxGroup as RACCheckboxGroup, type CheckboxGroupProps as RACCheckboxGroupProps, type CheckboxProps as RACCheckboxProps,
+	FieldError, Switch as RACSwitch, type SwitchProps as RACSwitchProps, type ValidationResult,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
-import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
+import { type GestureProps, useGesture } from '../core/gesture';
+import { cn, composeTailwindRenderProps, defined, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type SwitchProps = Omit<RACSwitchProps, 'children'> & {
 	readonly asyncState?: AsyncState;
-	readonly children?: SlotDef<ReactNode>;
+	readonly children?: SlotInput<ReactNode>;
 	readonly color: string;
+	readonly gesture?: GestureProps;
 	readonly ref?: Ref<HTMLLabelElement>;
 	readonly size: string;
 	readonly tooltip?: TooltipConfig;
@@ -28,8 +31,9 @@ type SwitchProps = Omit<RACSwitchProps, 'children'> & {
 };
 type CheckboxProps = Omit<RACCheckboxProps, 'children'> & {
 	readonly asyncState?: AsyncState;
-	readonly children?: ReactNode;
-	readonly color?: string;
+	readonly children?: SlotInput<ReactNode>;
+	readonly color: string;
+	readonly gesture?: GestureProps;
 	readonly icon: LucideIcon | ReactNode;
 	readonly iconIndeterminate?: LucideIcon | ReactNode;
 	readonly ref?: Ref<HTMLLabelElement>;
@@ -39,7 +43,8 @@ type CheckboxProps = Omit<RACCheckboxProps, 'children'> & {
 };
 type CheckboxGroupProps = Omit<RACCheckboxGroupProps, 'children'> & {
 	readonly children: ReactNode;
-	readonly color?: string;
+	readonly color: string;
+	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
 	readonly orientation?: 'horizontal' | 'vertical';
 	readonly size: string;
 	readonly variant?: string;
@@ -64,6 +69,7 @@ const B = Object.freeze({
 			'group-invalid:border-(--checkbox-invalid-border)',
 			'group-focus-visible:ring-(--focus-ring-width) group-focus-visible:ring-(--focus-ring-color)',
 		),
+		checkboxError: cn('text-(--checkbox-group-error-size) text-(--checkbox-group-error-color)'),
 		checkboxIcon: cn('size-(--checkbox-icon-size) text-(--checkbox-icon-color)'),
 		checkboxLabel: cn('text-(--checkbox-label-size) text-(--checkbox-label-color)'),
 		group: cn('flex gap-(--checkbox-group-gap)', 'data-[orientation=vertical]:flex-col'),
@@ -90,15 +96,23 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Switch: FC<SwitchProps> = ({
-	asyncState, children, className, color, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
+	asyncState, children, className, color, gesture, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
 	const slot = Slot.bind(asyncState);
 	const activeChildren = slot.resolve(children);
+	const switchRef = useRef<HTMLLabelElement>(null);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
-	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLLabelElement>]);
+	const { props: gestureProps } = useGesture({
+		isDisabled: isDisabled || slot.pending,
+		prefix: 'switch',
+		ref: switchRef as RefObject<HTMLElement | null>,
+		...gesture,
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
+	});
+	const mergedRef = useMergeRefs([ref, switchRef, tooltipProps.ref as Ref<HTMLLabelElement>]);
 	return (
 		<>
 			<RACSwitch
-				{...({ ...racProps, ...tooltipProps } as unknown as RACSwitchProps)}
+				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACSwitchProps)}
 				className={composeTailwindRenderProps(className, B.slot.switchBase)}
 				data-async-state={slot.attr}
 				data-color={color}
@@ -119,14 +133,23 @@ const Switch: FC<SwitchProps> = ({
 	);
 };
 const Checkbox: FC<CheckboxProps> = ({
-	asyncState, children, className, color, icon, iconIndeterminate, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
+	asyncState, children, className, color, gesture, icon, iconIndeterminate, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
 	const slot = Slot.bind(asyncState);
+	const activeChildren = slot.resolve(children);
+	const checkboxRef = useRef<HTMLLabelElement>(null);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
-	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLLabelElement>]);
+	const { props: gestureProps } = useGesture({
+		isDisabled: isDisabled || slot.pending,
+		prefix: 'checkbox',
+		ref: checkboxRef as RefObject<HTMLElement | null>,
+		...gesture,
+		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
+	});
+	const mergedRef = useMergeRefs([ref, checkboxRef, tooltipProps.ref as Ref<HTMLLabelElement>]);
 	return (
 		<>
 			<RACCheckbox
-				{...({ ...racProps, ...tooltipProps } as unknown as RACCheckboxProps)}
+				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACCheckboxProps)}
 				className={composeTailwindRenderProps(className, B.slot.checkboxBase)}
 				data-async-state={slot.attr}
 				data-color={color}
@@ -144,7 +167,7 @@ const Checkbox: FC<CheckboxProps> = ({
 								B.slot.checkboxIcon,
 							)}
 						</span>
-						{children && <span className={B.slot.checkboxLabel}>{children}</span>}
+						{activeChildren && <span className={B.slot.checkboxLabel}>{activeChildren}</span>}
 					</>
 				)}
 			</RACCheckbox>
@@ -154,7 +177,7 @@ const Checkbox: FC<CheckboxProps> = ({
 	);
 };
 const CheckboxGroup: FC<CheckboxGroupProps> = ({
-	children, className, color, orientation, size, variant, ...racProps }) => (
+	children, className, color, errorMessage, orientation, size, variant, ...racProps }) => (
 	<RACCheckboxGroup
 		{...(racProps as RACCheckboxGroupProps)}
 		className={composeTailwindRenderProps(className, B.slot.group)}
@@ -166,6 +189,7 @@ const CheckboxGroup: FC<CheckboxGroupProps> = ({
 		{...defined({ orientation })}
 	>
 		{children}
+		<FieldError className={B.slot.checkboxError} data-slot='checkbox-group-error'>{errorMessage}</FieldError>
 	</RACCheckboxGroup>
 );
 

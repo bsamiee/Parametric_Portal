@@ -139,7 +139,12 @@
         },
         {
             "includes": ["apps/test-harness/**/*.tsx"],
-            "linter": { "rules": { "correctness": { "noChildrenProp": "off" } } }
+            "linter": {
+                "rules": {
+                    "a11y": { "noLabelWithoutControl": "off" },
+                    "correctness": { "noChildrenProp": "off", "useUniqueElementIds": "off" }
+                }
+            }
         },
         {
             "includes": ["packages/components-next/src/core/utils.ts"],

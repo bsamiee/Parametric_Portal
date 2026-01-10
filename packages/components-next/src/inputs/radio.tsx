@@ -35,11 +35,11 @@ type RadioProps = Omit<RACRadioProps, 'children'> & {
 	readonly asyncState?: AsyncState;
 	readonly card?: boolean;
 	readonly children?: SlotDef<ReactNode> | ((state: RadioRenderProps) => ReactNode);
-	readonly color?: string;
+	readonly color: string;
 	readonly gesture?: GestureProps;
 	readonly icon: LucideIcon | ReactNode;
 	readonly ref?: Ref<HTMLLabelElement>;
-	readonly size?: string;
+	readonly size: string;
 	readonly tooltip?: TooltipConfig;
 	readonly variant?: string;
 };

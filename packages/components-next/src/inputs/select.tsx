@@ -10,9 +10,9 @@ import type { AsyncState } from '@parametric-portal/types/async';
 import type { LucideIcon } from 'lucide-react';
 import { createContext, useContext, type FC, type ReactElement, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from 'react';
 import {
-	Header, type Key, ListBox, type ListBoxProps, ListBoxItem, type ListBoxItemProps, type ListBoxItemRenderProps,
-	ListBoxSection, type ListBoxSectionProps, Popover, Button as RACButton,
-	Select as RACSelect, type SelectProps as RACSelectProps, SelectValue, Separator,
+	ComboBox as RACComboBox, FieldError, Header, Input, type Key, Label, ListBox, type ListBoxProps, ListBoxItem, type ListBoxItemProps, type ListBoxItemRenderProps,
+	ListBoxSection, type ListBoxSectionProps, Popover, Button as RACButton, Select as RACSelect, type SelectProps as RACSelectProps, SelectValue, Separator, Text,
+	type ValidationResult,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
@@ -27,8 +27,12 @@ type SelectProps<T extends SelectOption = SelectOption> = Omit<RACSelectProps<T>
 	readonly asyncState?: AsyncState;
 	readonly children?: ReactNode | ((item: T) => ReactNode);
 	readonly color: string;
+	readonly description?: ReactNode;
+	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
+	readonly label?: ReactNode;
 	readonly offset?: number;
 	readonly ref?: Ref<HTMLDivElement>;
+	readonly searchable?: boolean;
 	readonly size: string;
 	readonly suffix: LucideIcon | ReactNode;
 	readonly tooltip?: TooltipConfig;
@@ -56,6 +60,30 @@ const B = Object.freeze({
 		offset: '--select-popover-offset',
 	}),
 	slot: {
+		description: cn('text-(--select-description-size) text-(--select-description-color)'),
+		error: cn('text-(--select-error-size) text-(--select-error-color)'),
+		input: cn(
+			'flex-1 bg-transparent outline-none text-(--select-fg)',
+			'placeholder:text-(--select-placeholder-color)',
+			'disabled:cursor-not-allowed',
+		),
+		inputIcon: cn(
+			'size-(--select-icon-size) shrink-0 text-(--select-icon-color)',
+			'pointer-events-none',
+		),
+		inputWrapper: cn(
+			'group inline-flex items-center gap-(--select-gap) cursor-text',
+			'h-(--select-height) w-(--select-width) px-(--select-px)',
+			'text-(--select-font-size) font-(--select-font-weight) rounded-(--select-radius)',
+			'bg-(--select-bg) text-(--select-fg)',
+			'border-(--select-border-width) border-(--select-border-color)',
+			'shadow-(--select-shadow)',
+			'transition-colors duration-(--select-transition-duration) ease-(--select-transition-easing)',
+			'hovered:bg-(--select-hover-bg) hovered:border-(--select-hover-border)',
+			'focus-within:border-(--select-hover-border) focus-within:ring-(--focus-ring-width) focus-within:ring-(--focus-ring-color) focus-within:ring-offset-(--focus-ring-offset)',
+			'disabled:pointer-events-none disabled:opacity-(--select-disabled-opacity)',
+			'invalid:border-(--select-invalid-border)',
+		),
 		item: cn(
 			'flex items-center gap-(--select-item-gap) cursor-pointer outline-none',
 			'h-(--select-item-height) px-(--select-item-px)',
@@ -78,6 +106,7 @@ const B = Object.freeze({
 		),
 		itemDescription: cn('text-(--select-item-description-font-size) text-(--select-item-description-fg)'),
 		itemIcon: cn('size-(--select-item-icon-size) shrink-0'),
+		label: cn('text-(--select-label-size) text-(--select-label-color) font-(--select-label-weight)'),
 		listbox: cn('outline-none overflow-auto', 'max-h-(--select-listbox-max-height) p-(--select-listbox-padding)'),
 		popover: cn(
 			'bg-(--select-listbox-bg) rounded-(--select-listbox-radius) shadow-(--select-listbox-shadow)',
@@ -87,6 +116,7 @@ const B = Object.freeze({
 			'placement-top:slide-in-from-bottom-(--select-popover-animation-offset)',
 			'placement-bottom:slide-in-from-top-(--select-popover-animation-offset)',
 		),
+		root: cn('group flex flex-col gap-(--select-wrapper-gap)'),
 		section: cn(''),
 		sectionHeader: cn(
 			'px-(--select-section-header-px) py-(--select-section-header-py)',
@@ -121,12 +151,12 @@ const SelectContext = createContext<SelectContextValue | null>(null);
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const SelectRoot = <T extends SelectOption = SelectOption>({
-	asyncState, children, className, color, dependencies, disallowEmptySelection, escapeKeyBehavior, isDisabled, isInvalid, items,
-	layout, offset, orientation, placeholder, ref, renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap,
+	asyncState, children, className, color, dependencies, description, disallowEmptySelection, errorMessage, escapeKeyBehavior, isDisabled, isInvalid, items,
+	label, layout, offset, orientation, placeholder, ref, renderEmptyState, searchable, selectionBehavior, shouldFocusOnHover, shouldFocusWrap,
 	size, suffix, tooltip, variant, ...racProps }: SelectProps<T>): ReactNode => {
 	const nodeId = useFloatingNodeId();
 	const resolvedOffset = offset ?? readCssPx(B.cssVars.offset);
-	const triggerRef = useRef<HTMLButtonElement>(null);
+	const triggerRef = useRef<HTMLButtonElement | HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState<number | undefined>();
 	const asyncSlot = Slot.bind(asyncState);
 	const contextValue = useMemo(() => ({ size }), [size]);
@@ -138,52 +168,85 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 		el && observer?.observe(el);
 		return () => observer?.disconnect();
 	}, []);
+	const popoverContent = (
+		<FloatingNode id={nodeId}>
+			<Popover
+				className={B.slot.popover}
+				data-color={color}
+				data-size={size}
+				data-slot='select-popover'
+				data-theme='select'
+				data-variant={variant}
+				offset={resolvedOffset}
+				style={{ minWidth: triggerWidth }}
+			>
+				<ListBox
+					className={B.slot.listbox}
+					data-slot='select-listbox'
+					{...defined({ dependencies, disallowEmptySelection, escapeKeyBehavior, items, layout, orientation, renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap })}
+				>
+					{children}
+				</ListBox>
+			</Popover>
+		</FloatingNode>
+	);
 	return (
 		<SelectContext.Provider value={contextValue}>
-			<RACSelect
-				{...(racProps as RACSelectProps<T>)}
-				{...tooltipProps}
-				className={composeTailwindRenderProps(className, '')}
-				data-async-state={asyncSlot.attr}
-				data-color={color}
-				data-orientation={orientation}
-				data-size={size}
-				data-slot='select'
-				data-pending={asyncSlot.pending || undefined}
-				data-variant={variant}
-				{...(isInvalid !== undefined && { isInvalid })}
-				isDisabled={isDisabled || asyncSlot.pending}
-				ref={mergedRef}
-			>
-				<RACButton className={B.slot.trigger} data-invalid={isInvalid || undefined} ref={triggerRef}>
-					<SelectValue className={B.slot.value}>
-						{({ selectedText }) => (
-							<span className={selectedText ? undefined : B.slot.valuePlaceholder}> {selectedText || placeholder} </span>
-						)}
-					</SelectValue>
-					{Slot.content(suffix, B.slot.triggerIcon)}
-				</RACButton>
-				<FloatingNode id={nodeId}>
-					<Popover
-						className={B.slot.popover}
-						data-color={color}
-						data-size={size}
-						data-slot='select-popover'
-						data-theme='select'
-						data-variant={variant}
-						offset={resolvedOffset}
-						style={{ minWidth: triggerWidth }}
-					>
-						<ListBox
-							className={B.slot.listbox}
-							data-slot='select-listbox'
-							{...defined({ dependencies, disallowEmptySelection, escapeKeyBehavior, items, layout, orientation, renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap })}
-						>
-							{children}
-						</ListBox>
-					</Popover>
-				</FloatingNode>
-			</RACSelect>
+			{searchable ? (
+				<RACComboBox
+					{...({ ...racProps, ...tooltipProps } as unknown as object)}
+					className={cn(B.slot.root, className)}
+					data-async-state={asyncSlot.attr}
+					data-color={color}
+					data-orientation={orientation}
+					data-searchable={true}
+					data-size={size}
+					data-slot='select'
+					data-pending={asyncSlot.pending || undefined}
+					data-variant={variant}
+					{...(isInvalid !== undefined && { isInvalid })}
+					isDisabled={isDisabled || asyncSlot.pending}
+					ref={mergedRef}
+				>
+					{label && <Label className={B.slot.label} data-slot='select-label'>{label}</Label>}
+					<div className={B.slot.inputWrapper} data-invalid={isInvalid || undefined} ref={triggerRef as Ref<HTMLDivElement>}>
+						<Input className={B.slot.input} {...defined({ placeholder })} />
+						{Slot.content(suffix, B.slot.inputIcon)}
+					</div>
+					{popoverContent}
+					{description && <Text className={B.slot.description} data-slot='select-description' slot='description'>{description}</Text>}
+					<FieldError className={B.slot.error} data-slot='select-error'>{errorMessage}</FieldError>
+				</RACComboBox>
+			) : (
+				<RACSelect
+					{...(racProps as RACSelectProps<T>)}
+					{...tooltipProps}
+					className={composeTailwindRenderProps(className, B.slot.root)}
+					data-async-state={asyncSlot.attr}
+					data-color={color}
+					data-orientation={orientation}
+					data-size={size}
+					data-slot='select'
+					data-pending={asyncSlot.pending || undefined}
+					data-variant={variant}
+					{...(isInvalid !== undefined && { isInvalid })}
+					isDisabled={isDisabled || asyncSlot.pending}
+					ref={mergedRef}
+				>
+					{label && <Label className={B.slot.label} data-slot='select-label'>{label}</Label>}
+					<RACButton className={B.slot.trigger} data-invalid={isInvalid || undefined} ref={triggerRef as Ref<HTMLButtonElement>}>
+						<SelectValue className={B.slot.value}>
+							{({ selectedText }) => (
+								<span className={selectedText ? undefined : B.slot.valuePlaceholder}> {selectedText || placeholder} </span>
+							)}
+						</SelectValue>
+						{Slot.content(suffix, B.slot.triggerIcon)}
+					</RACButton>
+					{popoverContent}
+					{description && <Text className={B.slot.description} data-slot='select-description' slot='description'>{description}</Text>}
+					<FieldError className={B.slot.error} data-slot='select-error'>{errorMessage}</FieldError>
+				</RACSelect>
+			)}
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
 		</SelectContext.Provider>
