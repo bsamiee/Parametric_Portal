@@ -3,12 +3,9 @@
  * ADT discriminant enables exhaustive matching; full FullGestureState exposed via accessors.
  * Library config types passed through unchanged - no wrapping, no duplication.
  */
-import {
-	useGesture as useGestureLib, type CoordinatesConfig, type DragConfig, type FullGestureState,
-	type HoverConfig, type MoveConfig, type PinchConfig,
-} from '@use-gesture/react';
+import { useGesture as useGestureLib, type CoordinatesConfig, type DragConfig, type FullGestureState, type HoverConfig, type MoveConfig, type PinchConfig, } from '@use-gesture/react';
 import { Data, Option, pipe } from 'effect';
-import { clamp, readCssMs, readCssPx } from '@parametric-portal/runtime/runtime';
+import { clamp, readCssMs, readCssPx, readCssVar } from '@parametric-portal/runtime/runtime';
 import type { DOMAttributes, RefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLongPress, type LongPressProps as RACLongPressProps } from 'react-aria';
@@ -32,6 +29,16 @@ type DecayConfig = DeepReadonly<{ power: number; restDelta: number }>;
 type PhysicsConfig = SimplifyDeep<{ readonly decay: DecayConfig } & { readonly velocityMultiplier?: number }>;
 type BoundsConfig = DeepReadonly<{ movement?: V2Bounds & { rubberband?: { factor: number } }; scale?: { min: number; max: number }; angle?: { min: number; max: number } }>;
 type MobileConfig = DeepReadonly<{ filterTaps?: boolean; preventScroll?: boolean; preventScrollAxis?: 'lock' | 'x' | 'y' }>;
+type GestureConfig = GestureProps & { readonly ref: RefObject<HTMLElement | null>; readonly isDisabled?: boolean; readonly prefix?: string };
+type GestureResult = { readonly props: DOMAttributes<Element> & { readonly style?: { touchAction?: string } }; readonly state: Partial<Record<Lowercase<GestureEventTag>, GestureEventDef>> };
+type LongPressConfig = {
+	readonly threshold?: number; readonly haptic?: boolean; readonly cancelOnMove?: boolean;
+	readonly repeatInterval?: number; readonly accessibilityDescription?: string;
+};
+type CssVarConfig = {
+	readonly x?: string; readonly y?: string; readonly scale?: string; readonly angle?: string; readonly progress?: string;
+	readonly velocityX?: string; readonly velocityY?: string; readonly deltaX?: string; readonly deltaY?: string; readonly momentum?: string;
+};
 type GestureEventDef = Data.TaggedEnum<{
 	Drag: { readonly state: FullGestureState<'drag'>; readonly swipe: SwipeDir | null };
 	Hover: { readonly state: FullGestureState<'hover'> };
@@ -41,25 +48,6 @@ type GestureEventDef = Data.TaggedEnum<{
 	Scroll: { readonly state: FullGestureState<'scroll'> };
 	Wheel: { readonly state: FullGestureState<'wheel'> };
 }>;
-type LongPressConfig = {
-	readonly threshold?: number;
-	readonly haptic?: boolean;
-	readonly cancelOnMove?: boolean;
-	readonly repeatInterval?: number;
-	readonly accessibilityDescription?: string;
-};
-type CssVarConfig = {
-	readonly x?: string;
-	readonly y?: string;
-	readonly scale?: string;
-	readonly angle?: string;
-	readonly progress?: string;
-	readonly velocityX?: string;
-	readonly velocityY?: string;
-	readonly deltaX?: string;
-	readonly deltaY?: string;
-	readonly momentum?: string;
-};
 type GestureProps = SimplifyDeep<{
 	readonly drag?: DragConfig;
 	readonly pinch?: PinchConfig;
@@ -85,13 +73,13 @@ type GestureProps = SimplifyDeep<{
 	readonly physics?: PhysicsConfig;
 	readonly mobile?: MobileConfig;
 }>;
-type GestureConfig = GestureProps & { readonly ref: RefObject<HTMLElement | null>; readonly isDisabled?: boolean };
-type GestureResult = { readonly props: DOMAttributes<Element> & { readonly style?: { touchAction?: string } }; readonly state: Partial<Record<Lowercase<GestureEventTag>, GestureEventDef>> };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-	css: Object.freeze({
+	cssVars: Object.freeze({
+		interactionHaptic: '--interaction-haptic-duration',
+		interactionLongPressThreshold: '--interaction-long-press-threshold',
 		longPressCancelDistance: '--gesture-longpress-cancel-distance',
 		longPressHaptic: '--gesture-longpress-haptic',
 		longPressThreshold: '--gesture-longpress-threshold',
@@ -99,31 +87,28 @@ const B = Object.freeze({
 		swipeDuration: '--gesture-swipe-duration',
 		swipeVelocity: '--gesture-swipe-velocity',
 	}),
+	cssVarsFor: Object.freeze({
+		drag: (p: string): Partial<CssVarConfig> => ({ deltaX: `--${p}-drag-delta-x`, deltaY: `--${p}-drag-delta-y`, momentum: `--${p}-drag-momentum`, velocityX: `--${p}-drag-velocity-x`, velocityY: `--${p}-drag-velocity-y`, x: `--${p}-drag-x`, y: `--${p}-drag-y` }),
+		longPress: (p: string): Partial<CssVarConfig> => ({ progress: `--${p}-longpress-progress` }),
+		move: (p: string): Partial<CssVarConfig> => ({ x: `--${p}-move-x`, y: `--${p}-move-y` }),
+		pinch: (p: string): Partial<CssVarConfig> => ({ angle: `--${p}-pinch-angle`, scale: `--${p}-pinch-scale` }),
+		scroll: (p: string): Partial<CssVarConfig> => ({ x: `--${p}-scroll-x`, y: `--${p}-scroll-y` }),
+		wheel: (p: string): Partial<CssVarConfig> => ({ x: `--${p}-wheel-x`, y: `--${p}-wheel-y` }),
+	}),
 	defaults: Object.freeze({ decayPower: 0.95, decayRestDelta: 0.5, rubberbandFactor: 0.2, snapThreshold: 50, snapVelocity: 0.5 }),
-}) satisfies { readonly css: Record<string, string>; readonly defaults: Record<string, number> };
+});
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const { $is, $match, Drag, Hover, LongPress, Move, Pinch, Scroll, Wheel } = Data.taggedEnum<GestureEventDef>();
 
-const V2 = Object.freeze({
-	clamp: (v: V2, bounds: V2Bounds): V2 => V2.map(v, (x, i) => clamp(x, bounds.min[i], bounds.max[i])),
-	from: (v: [number, number]): V2 => [v[0], v[1]] as const,
-	magnitude: (v: V2): number => Math.hypot(v[0], v[1]),
-	map: (v: V2, f: (x: number, i: 0 | 1) => number): V2 => [f(v[0], 0), f(v[1], 1)] as const,
-	rubberband: (v: V2, bounds: V2Bounds, factor: number): V2 => {
-		const rb = (x: number, min: number, max: number): number => x < min ? min + (x - min) * factor : x > max ? max + (x - max) * factor : x;
-		return V2.map(v, (x, i) => rb(x, bounds.min[i], bounds.max[i]));
-	},
-	snap: (v: V2, snap: SnapConfig, threshold: number): V2 => {
-		const nearest = (x: number, points: readonly number[], th: number): number => {
-			const best = points.reduce((b, p) => Math.abs(p - x) < Math.abs(b - x) ? p : b, points[0] ?? 0);
-			return Math.abs(best - x) < th ? best : x;
-		};
-		return 'unified' in snap && snap.unified
-			? V2.map(v, (x) => nearest(x, snap.unified.points, snap.unified.threshold ?? threshold))
-			: [nearest(v[0], snap.x.points, snap.x.threshold ?? threshold), nearest(v[1], snap.y.points, snap.y.threshold ?? threshold)] as const;
-	},
+const generateCssVars = (prefix: string, config: GestureProps): CssVarConfig => ({
+	...(config.drag && B.cssVarsFor.drag(prefix)),
+	...(config.longPress && B.cssVarsFor.longPress(prefix)),
+	...(config.move && B.cssVarsFor.move(prefix)),
+	...(config.pinch && B.cssVarsFor.pinch(prefix)),
+	...(config.scroll && B.cssVarsFor.scroll(prefix)),
+	...(config.wheel && B.cssVarsFor.wheel(prefix)),
 });
 // Side-effectful CSS sync - uses plain guards since Option.gen is for pure transformations
 const syncCssVars = (ref: RefObject<HTMLElement | null>, evt: GestureEventDef, cfg: CssVarConfig | undefined): void => {
@@ -147,16 +132,37 @@ const syncCssVars = (ref: RefObject<HTMLElement | null>, evt: GestureEventDef, c
 		});
 	})();
 };
-const swipeFrom = (v: [number, number]): SwipeDir | null => (v[0] === -1 ? 'left' : v[0] === 1 ? 'right' : v[1] === -1 ? 'up' : v[1] === 1 ? 'down' : null);
-const touchAction = (cfg: GestureConfig): string => (
-	!cfg.drag && !cfg.pinch && !cfg.scroll ? 'auto' :
-	cfg.drag?.axis === 'x' ? 'pan-y' :
-	cfg.drag?.axis === 'y' ? 'pan-x' :
-	'none'
-);
+const V2 = Object.freeze({
+	clamp: (v: V2, bounds: V2Bounds): V2 => V2.map(v, (x, i) => clamp(x, bounds.min[i], bounds.max[i])),
+	from: (v: [number, number]): V2 => [v[0], v[1]] as const,
+	magnitude: (v: V2): number => Math.hypot(v[0], v[1]),
+	map: (v: V2, f: (x: number, i: 0 | 1) => number): V2 => [f(v[0], 0), f(v[1], 1)] as const,
+	rubberband: (v: V2, bounds: V2Bounds, factor: number): V2 => {
+		const rb = (x: number, min: number, max: number): number => x < min ? min + (x - min) * factor : x > max ? max + (x - max) * factor : x;
+		return V2.map(v, (x, i) => rb(x, bounds.min[i], bounds.max[i]));
+	},
+	snap: (v: V2, snap: SnapConfig, threshold: number): V2 => {
+		const nearest = (x: number, points: readonly number[], th: number): number => {
+			const best = points.reduce((b, p) => Math.abs(p - x) < Math.abs(b - x) ? p : b, points[0] ?? 0);
+			return Math.abs(best - x) < th ? best : x;
+		};
+		return 'unified' in snap && snap.unified
+			? V2.map(v, (x) => nearest(x, snap.unified.points, snap.unified.threshold ?? threshold))
+			: [nearest(v[0], snap.x.points, snap.x.threshold ?? threshold), nearest(v[1], snap.y.points, snap.y.threshold ?? threshold)] as const;
+	},
+});
+const applyMovementBounds = (v: V2, movement: V2Bounds & { rubberband?: { factor: number } } | undefined): V2 =>
+	pipe(
+		Option.fromNullable(movement),
+		Option.map((mv) => mv.rubberband ? V2.rubberband(v, mv, mv.rubberband.factor ?? B.defaults.rubberbandFactor) : V2.clamp(v, mv)),
+		Option.getOrElse(() => v),
+	);
+const swipeFrom = (v: [number, number]): SwipeDir | null => ({ '-1,0': 'left', '0,-1': 'up', '0,1': 'down', '1,0': 'right' } as Record<string, SwipeDir>)[`${v[0]},${v[1]}`] ?? null;
+const touchAction = (cfg: GestureConfig): string => !cfg.drag && !cfg.pinch && !cfg.scroll ? 'auto' : ({ x: 'pan-y', y: 'pan-x' } as Record<string, string>)[cfg.drag?.axis ?? ''] ?? 'none';
 const vibrate = (ms: number): void => { 'vibrate' in (navigator ?? {}) && navigator.vibrate(ms); };
-const phaseOf = <K extends GestureKind>(g: FullGestureState<K>): Phase => (g.first ? 'start' : g.last ? 'end' : 'move');
+const phaseOf = <K extends GestureKind>(g: FullGestureState<K>): Phase => (g.first && 'start') || (g.last && 'end') || 'move';
 const hasState = (e: GestureEventDef): e is HasState => e._tag !== 'LongPress';
+const resolveMs = (primary: string, fallback: string): number => readCssVar(primary) ? readCssMs(primary) : readCssMs(fallback);
 // Predicates
 const isDrag = $is('Drag'), isHover = $is('Hover'), isLongPress = $is('LongPress'), isMove = $is('Move'), isPinch = $is('Pinch'), isScroll = $is('Scroll'), isWheel = $is('Wheel');
 const isCoordinates = (e: GestureEventDef | undefined): boolean => e != null && ['Drag', 'Hover', 'Move', 'Scroll', 'Wheel'].includes(e._tag);
@@ -183,14 +189,16 @@ const isIntentional = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? 
 
 const useGesture = (config: GestureConfig): GestureResult => {
 	const {
-		bounds, cssVars, drag, eventOptions, hover, isDisabled = false, longPress, mobile, move,
+		bounds, cssVars: cssVarsExplicit, drag, eventOptions, hover, isDisabled = false, longPress, mobile, move,
 		onDrag: onDragCb, onGesture, onHover: onHoverCb, onLongPress, onMove: onMoveCb,
 		onPinch: onPinchCb, onScroll: onScrollCb, onSwipe, onWheel: onWheelCb,
-		physics, pinch, ref, scroll, snap, transform, wheel,
+		physics, pinch, prefix, ref, scroll, snap, transform, wheel,
 	} = config;
+	// Auto-generate CSS vars from prefix if provided; explicit cssVars override generated ones
+	const cssVars = useMemo(() => prefix ? { ...generateCssVars(prefix, config), ...cssVarsExplicit } : cssVarsExplicit, [config, cssVarsExplicit, prefix]);
 	const [state, setState] = useState<Partial<Record<Lowercase<GestureEventTag>, GestureEventDef>>>({});
 	const enabled = !isDisabled;
-	const swipeCfg = useMemo(() => ({ distance: readCssPx(B.css.swipeDistance), duration: readCssMs(B.css.swipeDuration), velocity: readCssPx(B.css.swipeVelocity) / 1000 }), []);
+	const swipeCfg = useMemo(() => ({ distance: readCssPx(B.cssVars.swipeDistance), duration: readCssMs(B.cssVars.swipeDuration), velocity: readCssPx(B.cssVars.swipeVelocity) / 1000 }), []);
 	const inertiaRef = useRef<{ active: boolean; position: V2; velocity: V2 }>({ active: false, position: [0, 0], velocity: [0, 0] });
 	const physicsRafRef = useRef<number | null>(null);
 	const typedCallbacks = useMemo(() => ({ drag: onDragCb, hover: onHoverCb, longpress: onLongPress, move: onMoveCb, pinch: onPinchCb, scroll: onScrollCb, wheel: onWheelCb }) as const, [onDragCb, onHoverCb, onLongPress, onMoveCb, onPinchCb, onScrollCb, onWheelCb]);
@@ -219,7 +227,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 	const handler = useCallback(<K extends GestureKind>(kind: Lowercase<GestureEventTag>, factory: (g: FullGestureState<K>) => GestureEventDef) => (g: FullGestureState<K>): void => {
 		const offset = pipe(
 			V2.from(g.offset),
-			(v) => bounds?.movement ? (bounds.movement.rubberband ? V2.rubberband(v, bounds.movement, bounds.movement.rubberband.factor ?? B.defaults.rubberbandFactor) : V2.clamp(v, bounds.movement)) : v,
+			(v) => applyMovementBounds(v, bounds?.movement),
 			(v) => snap && g.last && !physics ? V2.snap(v, snap, B.defaults.snapThreshold) : v,
 		);
 		const evt = factory({ ...g, offset } as FullGestureState<K>);
@@ -246,9 +254,11 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		...defined({ hover, move, pinch, scroll, wheel }),
 	}), [drag, enabled, eventOptions, hover, mobile, move, pinch, scroll, swipeCfg, transform, wheel]);
 	const bind = useGestureLib(handlers, gestureConfig as Parameters<typeof useGestureLib>[1]);
-	const lpThreshold = longPress?.threshold ?? readCssMs(B.css.longPressThreshold);
-	const lpHapticMs = longPress?.haptic ? readCssMs(B.css.longPressHaptic) : 0;
-	const lpCancelDist = readCssPx(B.css.longPressCancelDistance);
+	const lpConfig = useMemo(() => ({
+		cancelDist: readCssPx(B.cssVars.longPressCancelDistance),
+		hapticMs: longPress?.haptic ? resolveMs(B.cssVars.longPressHaptic, B.cssVars.interactionHaptic) : 0,
+		threshold: longPress?.threshold ?? resolveMs(B.cssVars.longPressThreshold, B.cssVars.interactionLongPressThreshold),
+	}), [longPress?.threshold, longPress?.haptic]);
 	const rafRef = useRef<number | null>(null);
 	const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const startPos = useRef<{ x: number; y: number } | null>(null);
@@ -259,7 +269,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		pointerTypeRef.current = e.pointerType as PointerType;
 		startPos.current = 'clientX' in e ? { x: (e as unknown as PointerEvent).clientX, y: (e as unknown as PointerEvent).clientY } : null;
 		const tick = (): void => {
-			const p = Math.min((Date.now() - t0) / lpThreshold, 1);
+			const p = Math.min((Date.now() - t0) / lpConfig.threshold, 1);
 			cssVars?.progress && ref.current?.style.setProperty(cssVars.progress, String(p));
 			ref.current?.setAttribute('data-longpress-progress', String(p));
 			rafRef.current = p < 1 ? requestAnimationFrame(tick) : null;
@@ -269,7 +279,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		setState((s) => ({ ...s, longpress: evt }));
 		onLongPress?.(evt, 'start');
 		onGesture?.(evt, 'start');
-	}, [cssVars?.progress, lpThreshold, onGesture, onLongPress, ref]);
+	}, [cssVars?.progress, lpConfig, onGesture, onLongPress, ref]);
 	const lpEnd = useCallback(() => {
 		rafRef.current !== null && cancelAnimationFrame(rafRef.current);
 		repeatRef.current !== null && clearInterval(repeatRef.current);
@@ -282,27 +292,27 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		onGesture?.(evt, 'end');
 	}, [cssVars?.progress, onGesture, onLongPress, ref]);
 	const lpComplete = useCallback(() => {
-		lpHapticMs > 0 && vibrate(lpHapticMs);
+		lpConfig.hapticMs > 0 && vibrate(lpConfig.hapticMs);
 		const evt = LongPress({ pointerType: pointerTypeRef.current, progress: 1 });
 		onLongPress?.(evt, 'move');
 		onGesture?.(evt, 'move');
 		const interval = longPress?.repeatInterval && longPress.repeatInterval > 0
-			? setInterval(() => { lpHapticMs > 0 && vibrate(lpHapticMs); onLongPress?.(evt, 'move'); onGesture?.(evt, 'move'); }, longPress.repeatInterval)
+			? setInterval(() => { lpConfig.hapticMs > 0 && vibrate(lpConfig.hapticMs); onLongPress?.(evt, 'move'); onGesture?.(evt, 'move'); }, longPress.repeatInterval)
 			: null;
 		repeatRef.current = interval;
-	}, [longPress?.repeatInterval, lpHapticMs, onGesture, onLongPress]);
+	}, [longPress?.repeatInterval, lpConfig, onGesture, onLongPress]);
 	useEffect(() => longPress?.cancelOnMove
 		? (() => {
 			const onMove = (e: PointerEvent): void => {
 				const pos = startPos.current;
-				const exceeds = pos && Math.hypot(e.clientX - pos.x, e.clientY - pos.y) > lpCancelDist;
+				const exceeds = pos && Math.hypot(e.clientX - pos.x, e.clientY - pos.y) > lpConfig.cancelDist;
 				exceeds && rafRef.current !== null && cancelAnimationFrame(rafRef.current);
 				exceeds && cssVars?.progress && ref.current?.style.removeProperty(cssVars.progress);
 			};
 			document.addEventListener('pointermove', onMove);
 			return () => document.removeEventListener('pointermove', onMove);
 		})()
-		: undefined, [longPress?.cancelOnMove, lpCancelDist, cssVars?.progress, ref]);
+		: undefined, [longPress?.cancelOnMove, lpConfig, cssVars?.progress, ref]);
 	useEffect(() => () => {
 		rafRef.current !== null && cancelAnimationFrame(rafRef.current);
 		repeatRef.current !== null && clearInterval(repeatRef.current);
@@ -314,12 +324,10 @@ const useGesture = (config: GestureConfig): GestureResult => {
 		onLongPress: lpComplete,
 		onLongPressEnd: lpEnd,
 		onLongPressStart: lpStart,
-		threshold: lpThreshold,
+		threshold: lpConfig.threshold,
 	});
 	return { props: { ...(enabled ? bind() : {}), ...(longPress && enabled ? longPressProps : {}), style: { touchAction: touchAction(config) } }, state };
 };
-
-// --- [EXPORT] ----------------------------------------------------------------
 
 // biome-ignore assist/source/useSortedKeys: categorical grouping (type system, constructors, predicates, accessors, lifecycle)
 const GestureEvent = Object.freeze({
@@ -329,8 +337,7 @@ const GestureEvent = Object.freeze({
 	isActive, isFirst, isLast, isCanceled, isIntentional,
 });
 
-export { B as GESTURE_CSS, GestureEvent, useGesture };
-export type {
-	BoundsConfig, CssVarConfig, DecayConfig, GestureConfig, GestureEventDef as GestureEventType, GestureEventTag, GestureProps, GestureResult,
-	LongPressConfig, MobileConfig, Phase, PhysicsConfig, PointerType, SnapConfig, SwipeDir, V2,
-};
+// --- [EXPORT] ----------------------------------------------------------------
+
+export { GestureEvent, useGesture };
+export type { GestureProps };

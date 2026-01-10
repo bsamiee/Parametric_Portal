@@ -20,6 +20,17 @@
         animation-iteration-count: 1;
     }
 }
+@media print {                                  /* Print mode: expand disclosures, hide overlays */
+    [data-slot="accordion-panel"],
+    [data-slot="disclosure-panel"] { grid-template-rows: 1fr; height: auto; }
+    [data-slot="accordion-indicator"],
+    [data-slot="menu-popover"],
+    [data-slot="select-popover"],
+    [data-slot="submenu-popover"],
+    [data-slot="tooltip"],
+    [data-slot="dialog-overlay"] { display: none; }
+    [data-slot="accordion-item"] { page-break-inside: avoid; break-inside: avoid; }
+}
 [inert] {                                       /* Inert state styling: non-interactive sections */
     pointer-events: none;
     user-select: none;

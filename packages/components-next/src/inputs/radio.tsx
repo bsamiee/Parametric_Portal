@@ -6,56 +6,43 @@
  * REQUIRED: color, size, icon props - no defaults.
  */
 import { useMergeRefs } from '@floating-ui/react';
+import type { AsyncState } from '@parametric-portal/types/async';
+import type { LucideIcon } from 'lucide-react';
 import { createContext, type FC, type ReactNode, type Ref, useContext, useMemo, useRef } from 'react';
 import {
 	FieldError, Label, Radio as RACRadio, RadioGroup as RACRadioGroup, type RadioGroupProps as RACRadioGroupProps,
-	type RadioProps as RACRadioProps, Text, type ValidationResult,
+	type RadioProps as RACRadioProps, type RadioRenderProps, Text, type ValidationResult,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
-import { useTooltip } from '../core/floating';
-import { useGesture, type GestureProps } from '../core/gesture';
-import type { BasePropsFor } from '../core/props';
+import { type TooltipConfig, useTooltip } from '../core/floating';
+import { type GestureProps, useGesture } from '../core/gesture';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type RadioGroupContextValue = { readonly segmented: boolean };
-type RadioState = {
-	readonly isDisabled: boolean;
-	readonly isFocused: boolean;
-	readonly isFocusVisible: boolean;
-	readonly isHovered: boolean;
-	readonly isInvalid: boolean;
-	readonly isPressed: boolean;
-	readonly isReadOnly: boolean;
-	readonly isRequired: boolean;
-	readonly isSelected: boolean;
-};
-type RadioGroupSpecificProps = {
+type RadioGroupProps = Omit<RACRadioGroupProps, 'children'> & {
 	readonly children: ReactNode;
-	readonly className?: RACRadioGroupProps['className'];
-	readonly defaultValue?: string | null;
+	readonly color: string;
 	readonly description?: ReactNode;
 	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
 	readonly label?: ReactNode;
-	readonly onChange?: (value: string) => void;
 	readonly segmented?: boolean;
 	readonly size: string;
-	readonly validate?: RACRadioGroupProps['validate'];
-	readonly validationBehavior?: 'aria' | 'native';
-	readonly value?: string | null;
+	readonly variant?: string;
 };
-type RadioSpecificProps = {
+type RadioProps = Omit<RACRadioProps, 'children'> & {
+	readonly asyncState?: AsyncState;
 	readonly card?: boolean;
-	readonly children?: SlotDef<ReactNode> | ((state: RadioState) => ReactNode);
-	readonly className?: RACRadioProps['className'];
+	readonly children?: SlotDef<ReactNode> | ((state: RadioRenderProps) => ReactNode);
+	readonly color?: string;
 	readonly gesture?: GestureProps;
-	readonly id?: string;
+	readonly icon: LucideIcon | ReactNode;
 	readonly ref?: Ref<HTMLLabelElement>;
-	readonly value: string;
+	readonly size?: string;
+	readonly tooltip?: TooltipConfig;
+	readonly variant?: string;
 };
-type RadioGroupProps = BasePropsFor<'radioGroup'> & RadioGroupSpecificProps;
-type RadioProps = BasePropsFor<'radio'> & RadioSpecificProps;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -114,26 +101,22 @@ const B = Object.freeze({
 	} as const,
 });
 const RadioGroupContext = createContext<RadioGroupContextValue | null>(null);
-const useRadioGroupContext = (): RadioGroupContextValue | null => useContext(RadioGroupContext);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const RadioGroup: FC<RadioGroupProps> = ({
-	children, className, color, defaultValue, description, errorMessage, form, isDisabled, isInvalid,
-	isReadOnly, isRequired, label, name, onBlur, onChange, onFocus, onFocusChange, orientation, segmented, size, slot, validate, validationBehavior, value, variant,
-	...rest
-}) => {
+const RadioGroupRoot: FC<RadioGroupProps> = ({
+	children, className, color, description, errorMessage, label, orientation, segmented, size, variant, ...racProps }) => {
 	const contextValue = useMemo(() => ({ segmented: segmented ?? false }), [segmented]);
 	return (
 		<RACRadioGroup
-			{...({ ...rest } as unknown as RACRadioGroupProps)}
+			{...(racProps as RACRadioGroupProps)}
 			className={composeTailwindRenderProps(className, B.slot.groupWrapper)}
 			data-color={color}
 			data-segmented={segmented || undefined}
 			data-size={size}
 			data-slot='radio-group'
 			data-variant={variant}
-			{...defined({ defaultValue, form, isDisabled, isInvalid, isReadOnly, isRequired, name, onBlur, onChange, onFocus, onFocusChange, orientation, slot, validate, validationBehavior, value })}
+			{...defined({ orientation })}
 		>
 			<RadioGroupContext.Provider value={contextValue}>
 				{label && <Label className={B.slot.groupLabel} data-slot='radio-group-label'>{label}</Label>}
@@ -145,19 +128,16 @@ const RadioGroup: FC<RadioGroupProps> = ({
 	);
 };
 const Radio: FC<RadioProps> = ({
-	asyncState, autoFocus, card, children, className, color, gesture, icon, inputRef, isDisabled,
-	onBlur, onFocus, onFocusChange, onHoverEnd, onHoverStart, onKeyDown, onKeyUp, ref, size, slot: slotProp, tooltip,
-	...rest
-}) => {
-	const groupCtx = useRadioGroupContext();
+	asyncState, card, children, className, color, gesture, icon, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
+	const groupCtx = useContext(RadioGroupContext);
 	const slot = Slot.bind(asyncState);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const radioRef = useRef<HTMLLabelElement>(null);
 	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
+		prefix: 'radio',
 		ref: radioRef,
 		...gesture,
-		cssVars: { progress: '--radio-longpress-progress', ...gesture?.cssVars },
 		...(gesture?.longPress && { longPress: { haptic: true, ...gesture.longPress } }),
 	});
 	const mergedRef = useMergeRefs([ref, radioRef, tooltipProps.ref as Ref<HTMLLabelElement>]);
@@ -168,16 +148,16 @@ const Radio: FC<RadioProps> = ({
 	return (
 		<>
 			<RACRadio
-				{...({ ...rest, ...tooltipProps, ...gestureProps } as unknown as RACRadioProps)}
+				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACRadioProps)}
 				className={composeTailwindRenderProps(className, baseSlot)}
 				data-async-state={slot.attr}
 				data-card={card || undefined}
 				data-color={color}
 				data-size={size}
 				data-slot='radio'
+				data-variant={variant}
 				isDisabled={isDisabled || slot.pending}
 				ref={mergedRef}
-				{...defined({ autoFocus, inputRef, onBlur, onFocus, onFocusChange, onHoverEnd, onHoverStart, onKeyDown, onKeyUp, slot: slotProp })}
 			>
 				{(renderProps) => (
 					<>
@@ -188,7 +168,7 @@ const Radio: FC<RadioProps> = ({
 							</span>
 						)}
 						{isRenderFn
-							? (children as (state: RadioState) => ReactNode)(renderProps)
+							? (children as (state: RadioRenderProps) => ReactNode)(renderProps)
 							: children && <span className={B.slot.radioLabel}>{slot.resolve(children)}</span>}
 					</>
 				)}
@@ -199,7 +179,13 @@ const Radio: FC<RadioProps> = ({
 	);
 };
 
+// --- [COMPOUND] --------------------------------------------------------------
+
+const RadioGroup = Object.assign(RadioGroupRoot, {
+	useContext: (): RadioGroupContextValue | null => useContext(RadioGroupContext),
+});
+
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { Radio, RadioGroup };
-export type { RadioGroupProps, RadioProps, RadioState };
+export type { RadioGroupProps, RadioProps };

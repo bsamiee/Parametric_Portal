@@ -32,23 +32,17 @@ const ctx = createContext<ManagedRuntime.ManagedRuntime<any, any> | null>(null);
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
 
-const readCssMs = (name: string): number => {
+const readCssVar = (name: string): string => {
     const root = globalThis.document?.documentElement;
-    const raw = root === undefined ? '' : getComputedStyle(root).getPropertyValue(name).trim();
-    const parsed = Number.parseInt(raw.replace('ms', ''), 10);
+    return root === undefined ? '' : getComputedStyle(root).getPropertyValue(name).trim();
+};
+const readCssMs = (name: string): number => {
+    const parsed = Number.parseInt(readCssVar(name).replace('ms', ''), 10);
     return Number.isNaN(parsed) ? 0 : parsed;
 };
 const readCssPx = (name: string): number => {
-    const root = globalThis.document?.documentElement;
-    const raw = root === undefined ? '' : getComputedStyle(root).getPropertyValue(name).trim();
-    const parsed = Number.parseFloat(raw.replace('px', ''));
+    const parsed = Number.parseFloat(readCssVar(name).replace('px', ''));
     return Number.isNaN(parsed) ? 0 : parsed;
-};
-const readCssFloat = (name: string, fallback: number): number => {
-    const root = globalThis.document?.documentElement;
-    const raw = root === undefined ? '' : getComputedStyle(root).getPropertyValue(name).trim();
-    const parsed = Number.parseFloat(raw);
-    return Number.isNaN(parsed) ? fallback : parsed;
 };
 const Provider = <R, E>({ children, disposeOnUnmount, runtime }: ProviderProps<R, E>): ReactNode => {
     const floatingConfig = useMemo(
@@ -101,5 +95,5 @@ const Runtime = Object.freeze({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as RUNTIME_TUNING, clamp, readCssFloat, readCssMs, readCssPx, Runtime };
+export { B as RUNTIME_TUNING, clamp, readCssMs, readCssPx, readCssVar, Runtime };
 export type { ProviderProps as RuntimeProviderProps };

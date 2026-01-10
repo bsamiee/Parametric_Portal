@@ -54,10 +54,6 @@ const ComponentSpecSchema = S.Struct({
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type RuleResult = { readonly selector: string; readonly entries: readonly (readonly [string, string])[] } | undefined;
-type FocusRingOverride = S.Schema.Type<typeof FocusRingOverrideSchema>;
-type ComponentSpec = S.Schema.Type<typeof ComponentSpecSchema>;
-type TooltipStyleSpec = S.Schema.Type<typeof TooltipStyleSpecSchema>;
 type RuleInput =
 	| { readonly kind: 'async'; readonly name: string; readonly state: string; readonly values: Record<string, string> }
 	| { readonly kind: 'base'; readonly name: string; readonly values: Record<string, string> }
@@ -68,6 +64,10 @@ type RuleInput =
 	| { readonly kind: 'size'; readonly name: string; readonly size: string; readonly values: Record<string, string> }
 	| { readonly kind: 'variant'; readonly name: string; readonly values: Record<string, string>; readonly variant: string };
 type RuleContext<K extends RuleInput['kind']> = Extract<RuleInput, { kind: K }>;
+type RuleResult = { readonly selector: string; readonly entries: readonly (readonly [string, string])[] } | undefined;
+type FocusRingOverride = S.Schema.Type<typeof FocusRingOverrideSchema>;
+type ComponentSpec = S.Schema.Type<typeof ComponentSpecSchema>;
+type TooltipStyleSpec = S.Schema.Type<typeof TooltipStyleSpecSchema>;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -77,18 +77,19 @@ const B = Object.freeze({
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
+const slotSelector = (n: string): string => `:is([data-slot="${n}"], [data-theme="${n}"])`;
 const selectorFor = Object.freeze({
 	async: (n: string, state: string) =>
 		state === 'loading'
-			? `[data-slot="${n}"]:is([data-async-state="loading"], [data-pending])`
-			: `[data-slot="${n}"][data-async-state="${state}"]`,
-	base: (n: string) => `[data-slot="${n}"]`,
-	color: (n: string, color: string) => `[data-slot="${n}"][data-color="${color}"]`,
-	'color-inherit': (n: string, color: string, ancestor: string) => `[data-slot="${ancestor}"][data-color="${color}"] [data-slot="${n}"]:not([data-color])`,
-	'focus-ring': (n: string) => `[data-slot="${n}"]`,
-	longpress: (n: string) => `[data-slot="${n}"][data-longpress-progress]::before`,
-	size: (n: string, size: string) => `[data-slot="${n}"][data-size="${size}"]`,
-	variant: (n: string, variant: string) => `[data-slot="${n}"][data-variant="${variant}"]`,
+			? `${slotSelector(n)}:is([data-async-state="loading"], [data-pending])`
+			: `${slotSelector(n)}[data-async-state="${state}"]`,
+	base: (n: string) => slotSelector(n),
+	color: (n: string, color: string) => `${slotSelector(n)}[data-color="${color}"]`,
+	'color-inherit': (n: string, color: string, ancestor: string) => `${slotSelector(ancestor)}[data-color="${color}"] ${slotSelector(n)}:not([data-color])`,
+	'focus-ring': (n: string) => slotSelector(n),
+	longpress: (n: string) => `${slotSelector(n)}[data-longpress-progress]::before`,
+	size: (n: string, size: string) => `${slotSelector(n)}[data-size="${size}"]`,
+	variant: (n: string, variant: string) => `${slotSelector(n)}[data-variant="${variant}"]`,
 });
 const resolveColorValue = (value: string, color: string): string => value.startsWith('var(') ? value : value === 'text-on' ? `var(--color-text-on-${color})` : `var(--color-${color}-${value})`;
 const ruleHandlers: { readonly [K in RuleInput['kind']]: (input: RuleContext<K>) => RuleResult } = Object.freeze({

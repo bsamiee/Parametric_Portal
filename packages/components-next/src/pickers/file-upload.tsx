@@ -2,35 +2,35 @@
  * FileUpload: Unified DnD (drop + clipboard) + FileTrigger.
  * Pure presentation - async state from external useFileUpload hook.
  * REQUIRED: accept prop for MIME type filtering.
+ * Uses RAC DropZone + useClipboard directly.
  */
 import { AsyncState } from '@parametric-portal/types/async';
 import type { FC, ReactNode, Ref } from 'react';
 import { useCallback, useMemo } from 'react';
-import type { DropEvent, DropItem, FileDropItem } from 'react-aria';
-import { FileTrigger } from 'react-aria-components';
-import { DndUtils, useDnd } from '../core/dnd';
-import type { BasePropsFor } from '../core/props';
+import type { DragTypes, DropItem, DropOperation, FileDropItem } from 'react-aria';
+import { useClipboard } from 'react-aria';
+import { DropZone, FileTrigger } from 'react-aria-components';
 import { cn, defined } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type DropActivateEvent = { readonly x: number; readonly y: number };
 type FileUploadRenderProps = { readonly isDropTarget: boolean };
-type FileUploadSpecificProps = {
+type FileUploadProps = {
 	readonly accept: ReadonlyArray<string>;
 	readonly acceptDirectory?: boolean;
+	readonly asyncState?: AsyncState;
 	readonly children?: ReactNode | ((state: FileUploadRenderProps) => ReactNode);
 	readonly className?: string;
 	readonly defaultCamera?: 'environment' | 'user';
+	readonly isDisabled?: boolean;
 	readonly multiple?: boolean;
-	readonly onDropActivate?: (e: DropActivateEvent) => void;
+	readonly onDropActivate?: () => void;
 	readonly onDropEnter?: () => void;
 	readonly onDropExit?: () => void;
 	readonly onFilesChange: (files: ReadonlyArray<File>) => void;
 	readonly ref?: Ref<HTMLDivElement>;
 	readonly trigger?: ReactNode;
 };
-type FileUploadProps = BasePropsFor<'fileUpload'> & FileUploadSpecificProps;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -53,12 +53,18 @@ const B = Object.freeze({
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
+const extractFiles = async (items: readonly DropItem[]): Promise<readonly File[]> =>
+	Promise.all(items.filter((i): i is FileDropItem => i.kind === 'file').map((i) => i.getFile()));
+const acceptTypes = (...types: readonly string[]) =>
+	(dragTypes: DragTypes, allowed: DropOperation[]): DropOperation =>
+		types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
+
 const FileUpload: FC<FileUploadProps> = ({
 	accept, acceptDirectory, asyncState, children, className, defaultCamera, isDisabled,
 	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, ref, trigger,
 }) => {
-	const onDrop = useCallback(
-		(e: DropEvent) => void DndUtils.extractFiles(e.items).then((f) => f.length > 0 && onFilesChange(f)),
+	const onDropHandler = useCallback(
+		(e: { items: readonly DropItem[] }) => void extractFiles(e.items).then((f) => f.length > 0 && onFilesChange(f)),
 		[onFilesChange],
 	);
 	const onPaste = useCallback(
@@ -72,38 +78,44 @@ const FileUpload: FC<FileUploadProps> = ({
 		(fl: FileList | null) => fl && fl.length > 0 && onFilesChange(Array.from(fl)),
 		[onFilesChange],
 	);
-	const getDropOperation = useMemo(() => DndUtils.acceptTypes(...accept as Parameters<typeof DndUtils.acceptTypes>), [accept]);
-	const { props: dndProps, ref: dndRef, isDropTarget } = useDnd({
-		clipboard: { onPaste },
-		drop: { getDropOperation, onDrop, ...defined({ onDropActivate, onDropEnter, onDropExit }) },
-		...(ref !== undefined && { ref: ref as Ref<HTMLElement | null> }),
-		...(isDisabled !== undefined && { isDisabled }),
-	});
+	const getDropOperation = useMemo(() => acceptTypes(...accept), [accept]);
+	const { clipboardProps } = useClipboard({ onPaste, ...defined({ isDisabled }) });
+
 	return (
-		<div
-			{...dndProps}
-			className={cn(B.slot.base, className)}
-			data-async-state={AsyncState.toAttr(asyncState)}
-			data-slot='file-upload'
-			ref={dndRef as Ref<HTMLDivElement>}
+		<DropZone
+			getDropOperation={getDropOperation}
+			onDrop={onDropHandler}
+			{...defined({ isDisabled, onDropActivate, onDropEnter, onDropExit })}
 		>
-			{trigger && (
-				<FileTrigger
-					acceptedFileTypes={accept as string[]}
-					allowsMultiple={multiple}
-					onSelect={onSelect}
-					{...(acceptDirectory === true && { acceptDirectory: true })}
-					{...defined({ defaultCamera })}
+			{({ isDropTarget, isFocusVisible }) => (
+				<div
+					{...clipboardProps}
+					className={cn(B.slot.base, className)}
+					data-async-state={AsyncState.toAttr(asyncState)}
+					data-drop-target={isDropTarget || undefined}
+					data-focus-visible={isFocusVisible || undefined}
+					data-slot='file-upload'
+					ref={ref}
 				>
-					{trigger}
-				</FileTrigger>
+					{trigger && (
+						<FileTrigger
+							acceptedFileTypes={accept as string[]}
+							allowsMultiple={multiple}
+							onSelect={onSelect}
+							{...(acceptDirectory === true && { acceptDirectory: true })}
+							{...defined({ defaultCamera })}
+						>
+							{trigger}
+						</FileTrigger>
+					)}
+					{typeof children === 'function' ? children({ isDropTarget }) : children}
+				</div>
 			)}
-			{typeof children === 'function' ? children({ isDropTarget }) : children}
-		</div>
+		</DropZone>
 	);
 };
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { FileUpload };
-export type { DropActivateEvent, FileUploadProps, FileUploadRenderProps };
+export type { FileUploadProps };

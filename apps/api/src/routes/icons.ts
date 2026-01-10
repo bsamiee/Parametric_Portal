@@ -34,7 +34,7 @@ const getUserApiKey = Effect.fn('icons.apiKey.get')(
             const keyEncryptedOpt = Option.map(apiKeyOpt, (apiKey) => apiKey.keyEncrypted);
             return yield* Option.match(keyEncryptedOpt, {
                 onNone: () => Effect.succeed(Option.none<string>()),
-                onSome: (keyEncrypted: Buffer) =>
+                onSome: (keyEncrypted) =>
                     EncryptedKey.decryptBytes(new Uint8Array(keyEncrypted)).pipe(
                         Effect.map(Option.some),
                         Effect.mapError(() => new HttpError.Internal({ message: 'Key decryption failed' })),

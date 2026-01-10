@@ -3,15 +3,55 @@
 	"version": "0.1.0",
 	"type": "module",
 	"exports": {
-		"./button": {
-			"types": "./src/button/button.tsx",
-			"import": "./src/button/button.tsx",
-			"default": "./src/button/button.tsx"
+		"./actions/button": {
+			"types": "./src/actions/button.tsx",
+			"import": "./src/actions/button.tsx",
+			"default": "./src/actions/button.tsx"
 		},
-		"./core/animate": {
-			"types": "./src/core/animate.ts",
-			"import": "./src/core/animate.ts",
-			"default": "./src/core/animate.ts"
+		"./actions/toggle": {
+			"types": "./src/actions/toggle.tsx",
+			"import": "./src/actions/toggle.tsx",
+			"default": "./src/actions/toggle.tsx"
+		},
+		"./inputs/radio": {
+			"types": "./src/inputs/radio.tsx",
+			"import": "./src/inputs/radio.tsx",
+			"default": "./src/inputs/radio.tsx"
+		},
+		"./inputs/select": {
+			"types": "./src/inputs/select.tsx",
+			"import": "./src/inputs/select.tsx",
+			"default": "./src/inputs/select.tsx"
+		},
+		"./navigation/accordion": {
+			"types": "./src/navigation/accordion.tsx",
+			"import": "./src/navigation/accordion.tsx",
+			"default": "./src/navigation/accordion.tsx"
+		},
+		"./navigation/menu": {
+			"types": "./src/navigation/menu.tsx",
+			"import": "./src/navigation/menu.tsx",
+			"default": "./src/navigation/menu.tsx"
+		},
+		"./navigation/tabs": {
+			"types": "./src/navigation/tabs.tsx",
+			"import": "./src/navigation/tabs.tsx",
+			"default": "./src/navigation/tabs.tsx"
+		},
+		"./overlays/dialog": {
+			"types": "./src/overlays/dialog.tsx",
+			"import": "./src/overlays/dialog.tsx",
+			"default": "./src/overlays/dialog.tsx"
+		},
+		"./pickers/file-preview": {
+			"types": "./src/pickers/file-preview.tsx",
+			"import": "./src/pickers/file-preview.tsx",
+			"default": "./src/pickers/file-preview.tsx"
+		},
+		"./pickers/file-upload": {
+			"types": "./src/pickers/file-upload.tsx",
+			"import": "./src/pickers/file-upload.tsx",
+			"default": "./src/pickers/file-upload.tsx"
 		},
 		"./core/announce": {
 			"types": "./src/core/announce.tsx",
@@ -28,70 +68,15 @@
 			"import": "./src/core/focus.tsx",
 			"default": "./src/core/focus.tsx"
 		},
-		"./core/dnd": {
-			"types": "./src/core/dnd.ts",
-			"import": "./src/core/dnd.ts",
-			"default": "./src/core/dnd.ts"
-		},
 		"./core/gesture": {
 			"types": "./src/core/gesture.ts",
 			"import": "./src/core/gesture.ts",
 			"default": "./src/core/gesture.ts"
 		},
-		"./core/layout": {
-			"types": "./src/core/layout.ts",
-			"import": "./src/core/layout.ts",
-			"default": "./src/core/layout.ts"
-		},
-		"./core/props": {
-			"types": "./src/core/props.ts",
-			"import": "./src/core/props.ts",
-			"default": "./src/core/props.ts"
-		},
 		"./core/utils": {
 			"types": "./src/core/utils.ts",
 			"import": "./src/core/utils.ts",
 			"default": "./src/core/utils.ts"
-		},
-		"./file-preview": {
-			"types": "./src/file-preview/file-preview.tsx",
-			"import": "./src/file-preview/file-preview.tsx",
-			"default": "./src/file-preview/file-preview.tsx"
-		},
-		"./file-upload": {
-			"types": "./src/file-upload/file-upload.tsx",
-			"import": "./src/file-upload/file-upload.tsx",
-			"default": "./src/file-upload/file-upload.tsx"
-		},
-		"./menu": {
-			"types": "./src/menu/menu.tsx",
-			"import": "./src/menu/menu.tsx",
-			"default": "./src/menu/menu.tsx"
-		},
-		"./menu/confirm": {
-			"types": "./src/menu/confirm.tsx",
-			"import": "./src/menu/confirm.tsx",
-			"default": "./src/menu/confirm.tsx"
-		},
-		"./radio": {
-			"types": "./src/radio/radio.tsx",
-			"import": "./src/radio/radio.tsx",
-			"default": "./src/radio/radio.tsx"
-		},
-		"./select": {
-			"types": "./src/select/select.tsx",
-			"import": "./src/select/select.tsx",
-			"default": "./src/select/select.tsx"
-		},
-		"./tabs": {
-			"types": "./src/tabs/tabs.tsx",
-			"import": "./src/tabs/tabs.tsx",
-			"default": "./src/tabs/tabs.tsx"
-		},
-		"./toggle": {
-			"types": "./src/toggle/toggle.tsx",
-			"import": "./src/toggle/toggle.tsx",
-			"default": "./src/toggle/toggle.tsx"
 		}
 	},
 	"scripts": {
@@ -110,6 +95,7 @@
 		"@parametric-portal/theme": "workspace:*",
 		"@parametric-portal/types": "workspace:*",
 		"@radix-ui/react-visually-hidden": "catalog:",
+		"@tanstack/react-virtual": "catalog:",
 		"@use-gesture/react": "catalog:",
 		"clsx": "catalog:",
 		"effect": "catalog:",

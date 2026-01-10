@@ -67,15 +67,16 @@ const aiProviderEnum = pgEnum('ai_provider', [...B.enums.aiProvider]);
 const assetTypeEnum = pgEnum('asset_type', [...B.enums.assetType]);
 const auditOperationEnum = pgEnum('audit_operation', [...B.enums.auditOperation]);
 // Server-only: Buffer type guarded for browser import safety
-// biome-ignore lint/suspicious/noExplicitAny: Buffer only available in Node.js
-const BufferType = globalThis.Buffer ?? (class BufferPolyfill { private readonly _brand = 'BufferPolyfill' as const; } as any);
-const bytea = customType<{ data: typeof BufferType; driverData: typeof BufferType }>({
+// Runtime polyfill prevents crash when types imported in browser; actual Buffer ops are Node.js only
+// biome-ignore lint/complexity/noStaticOnlyClass: Minimal polyfill stub for browser compatibility
+const BufferRuntime = globalThis.Buffer ?? (class BufferPolyfill { static readonly isBuffer = () => false } as unknown as typeof Buffer);
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
     dataType: () => 'bytea',
-    fromDriver: (value): typeof BufferType => value,
-    toDriver: (value): typeof BufferType => value,
+    fromDriver: (value) => value as Buffer,
+    toDriver: (value) => value as Buffer,
 });
 const NullableDate = S.NullOr(S.DateFromSelf);
-const BufferSchema = S.instanceOf(BufferType);
+const BufferSchema: S.Schema<Buffer, Buffer> = S.instanceOf(BufferRuntime) as S.Schema<Buffer, Buffer>;
 
 // --- [ROW_SCHEMAS] -----------------------------------------------------------
 

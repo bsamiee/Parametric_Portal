@@ -37,8 +37,7 @@ const B = Object.freeze({
 
 const useAsyncAnnounce = (
     asyncState: AsyncState<unknown, unknown> | undefined,
-    config: AsyncAnnounceConfig = {},
-): string | null => {
+    config: AsyncAnnounceConfig = {}, ): string | null => {
     const [announcement, setAnnouncement] = useState<string | null>(null);
     const prevStateRef = useRef<string | undefined>(undefined);
     useEffect(() => {
@@ -66,8 +65,7 @@ const useAsyncAnnounce = (
 
 const AsyncAnnouncer: FC<{
     readonly asyncState: AsyncState<unknown, unknown> | undefined;
-    readonly config?: AsyncAnnounceConfig;
-}> = ({ asyncState, config }) => {
+    readonly config?: AsyncAnnounceConfig; }> = ({ asyncState, config }) => {
     const announcement = useAsyncAnnounce(asyncState, config);
     const urgency = config?.urgency ?? B.defaults.urgency;
     return announcement ? (
