@@ -4,7 +4,7 @@
  * Library config types passed through unchanged - no wrapping, no duplication.
  */
 import { useGesture as useGestureLib, type CoordinatesConfig, type DragConfig, type FullGestureState, type HoverConfig, type MoveConfig, type PinchConfig, } from '@use-gesture/react';
-import { Data, Option, pipe } from 'effect';
+import { Data, Match, Option, pipe } from 'effect';
 import { clamp, readCssMs, readCssPx, readCssVar } from '@parametric-portal/runtime/runtime';
 import type { DOMAttributes, RefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -138,7 +138,12 @@ const V2 = Object.freeze({
 	magnitude: (v: V2): number => Math.hypot(v[0], v[1]),
 	map: (v: V2, f: (x: number, i: 0 | 1) => number): V2 => [f(v[0], 0), f(v[1], 1)] as const,
 	rubberband: (v: V2, bounds: V2Bounds, factor: number): V2 => {
-		const rb = (x: number, min: number, max: number): number => x < min ? min + (x - min) * factor : x > max ? max + (x - max) * factor : x;
+		const rb = (x: number, min: number, max: number): number =>
+			Match.value(x).pipe(
+				Match.when((n) => n < min, (n) => min + (n - min) * factor),
+				Match.when((n) => n > max, (n) => max + (n - max) * factor),
+				Match.orElse((n) => n),
+			);
 		return V2.map(v, (x, i) => rb(x, bounds.min[i], bounds.max[i]));
 	},
 	snap: (v: V2, snap: SnapConfig, threshold: number): V2 => {

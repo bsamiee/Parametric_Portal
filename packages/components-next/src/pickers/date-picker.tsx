@@ -36,7 +36,7 @@ type DatePickerContextValue = {
 };
 type DatePickerProps<T extends DateValue> = RACDatePickerProps<T> & {
 	readonly children: ReactNode; readonly color: string;
-	readonly size: string; readonly variant?: string;
+	readonly label?: ReactNode; readonly size: string; readonly variant?: string;
 };
 type DatePickerFieldProps = {
 	readonly className?: string; readonly color?: string; readonly ref?: Ref<HTMLDivElement>;
@@ -57,7 +57,7 @@ type DatePickerRangeCalendarProps<T extends DateValue> = Omit<RACRangeCalendarPr
 };
 type DatePickerRangeProps<T extends DateValue> = RACDateRangePickerProps<T> & {
 	readonly children: ReactNode; readonly color: string;
-	readonly size: string; readonly variant?: string;
+	readonly label?: ReactNode; readonly size: string; readonly variant?: string;
 };
 type DatePickerTimeProps<T extends TimeValue> = Omit<RACTimeFieldProps<T>, 'children'> & {
 	readonly children?: ReactNode; readonly className?: string; readonly color?: string;
@@ -169,6 +169,11 @@ const B = Object.freeze({
 			'font-(--date-picker-header-title-font-weight)',
 			'text-(--date-picker-header-title-fg)',
 		),
+		label: cn(
+			'text-(--date-picker-label-font-size)',
+			'font-(--date-picker-label-font-weight)',
+			'text-(--date-picker-label-fg)',
+		),
 		popover: cn(
 			'bg-(--date-picker-popover-bg)',
 			'rounded-(--date-picker-popover-radius)',
@@ -230,7 +235,7 @@ const DatePickerContext = createContext<DatePickerContextValue | null>(null);
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const DatePickerRoot = <T extends DateValue>({
-	children, className, color, granularity = 'day', size, variant, ...racProps }: DatePickerProps<T>): ReactNode => {
+	children, className, color, granularity = 'day', label, size, variant, ...racProps }: DatePickerProps<T>): ReactNode => {
 	const contextValue: DatePickerContextValue = useMemo(
 		() => ({ color, granularity, size, variant }),
 		[color, granularity, size, variant],
@@ -246,7 +251,10 @@ const DatePickerRoot = <T extends DateValue>({
 			data-variant={variant}
 			granularity={granularity}
 		>
-			<DatePickerContext.Provider value={contextValue}> {children} </DatePickerContext.Provider>
+			<DatePickerContext.Provider value={contextValue}>
+				{label && <RACLabel className={B.slot.label} data-slot="date-picker-label">{label}</RACLabel>}
+				{children}
+			</DatePickerContext.Provider>
 		</RACDatePicker>
 	);
 };
@@ -469,7 +477,7 @@ const DatePickerRangeCalendar = <T extends DateValue>({
 	);
 };
 const DatePickerRange = <T extends DateValue>({
-	children, className, color, granularity = 'day', size, variant, ...racProps }: DatePickerRangeProps<T>): ReactNode => {
+	children, className, color, granularity = 'day', label, size, variant, ...racProps }: DatePickerRangeProps<T>): ReactNode => {
 	const contextValue: DatePickerContextValue = useMemo(
 		() => ({ color, granularity, size, variant }),
 		[color, granularity, size, variant],
@@ -486,6 +494,7 @@ const DatePickerRange = <T extends DateValue>({
 			granularity={granularity}
 		>
 			<DatePickerContext.Provider value={contextValue}>
+				{label && <RACLabel className={B.slot.label} data-slot="date-picker-label">{label}</RACLabel>}
 				{children}
 			</DatePickerContext.Provider>
 		</RACDateRangePicker>

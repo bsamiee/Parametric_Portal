@@ -45,11 +45,7 @@ const walkDirectory = async (dir: DirectoryDropItem, basePath: string = ''): Pro
         file: async (entry: { getFile: () => Promise<File> }, path: string) => [{ file: await entry.getFile(), path }],
     } as const;
     const results = await Promise.all(
-        entries.map(
-            (entry) =>
-                handlers[entry.kind as 'directory' | 'file']?.(entry as never, makePath(entry.name)) ??
-                Promise.resolve([]),
-        ),
+        entries.map((entry) => handlers[entry.kind]?.(entry as never, makePath(entry.name)) ?? Promise.resolve([])),
     );
     return results.flat();
 };

@@ -91,7 +91,6 @@ const AsyncButtonDemo: FC = () => {
         </>
     );
 };
-
 const TextFieldDemo: FC = () => {
     const asyncMutate = useEffectMutate(() => simulateAsync(1500, false));
     return (
@@ -124,7 +123,6 @@ const TextFieldDemo: FC = () => {
         </>
     );
 };
-
 const SelectDemo: FC = () => {
     const fruits = [
         { id: 'apple', label: 'Apple' },
@@ -163,10 +161,8 @@ const SelectDemo: FC = () => {
         </>
     );
 };
-
 const ToolbarDemo: FC = () => (
     <>
-        {/* Horizontal Toolbar */}
         <Toolbar
             aria-label='Text formatting'
             color='primary'
@@ -186,8 +182,6 @@ const ToolbarDemo: FC = () => (
                 <Toolbar.Item aria-label='Align right' prefix={AlignRight} />
             </Toolbar.Group>
         </Toolbar>
-
-        {/* Vertical Toolbar */}
         <Toolbar
             aria-label='Vertical text formatting'
             color='primary'
@@ -207,10 +201,8 @@ const ToolbarDemo: FC = () => (
         </Toolbar>
     </>
 );
-
 const SliderDemo: FC = () => (
     <>
-        {/* Single Value Slider */}
         <div className='flex flex-col gap-2 w-64'>
             <Slider
                 aria-label='Volume'
@@ -226,8 +218,6 @@ const SliderDemo: FC = () => (
                 </Slider.Track>
             </Slider>
         </div>
-
-        {/* Range Slider */}
         <div className='flex flex-col gap-2 w-64'>
             <Slider
                 aria-label='Price Range'
@@ -244,8 +234,6 @@ const SliderDemo: FC = () => (
                 </Slider.Track>
             </Slider>
         </div>
-
-        {/* Disabled Slider */}
         <div className='flex flex-col gap-2 w-64'>
             <Slider
                 aria-label='Disabled'
@@ -264,10 +252,8 @@ const SliderDemo: FC = () => (
         </div>
     </>
 );
-
 const ColorPickerDemo: FC = () => (
     <>
-        {/* Full ColorPicker with Area and Sliders - uses HSB color for saturation/brightness area */}
         <div className='flex flex-col gap-4'>
             <ColorPicker color='primary' data-testid='color-picker-full' defaultValue='hsb(217, 91%, 96%)' size='md'>
                 <ColorPicker.Area xChannel='saturation' yChannel='brightness'>
@@ -282,8 +268,6 @@ const ColorPickerDemo: FC = () => (
                 <ColorPicker.Field label='Hex Color' />
             </ColorPicker>
         </div>
-
-        {/* ColorPicker with Wheel - uses HSB color for proper hue wheel */}
         <div className='flex flex-col gap-4'>
             <ColorPicker color='primary' data-testid='color-picker-wheel' defaultValue='hsb(161, 84%, 73%)' size='md'>
                 <ColorPicker.Wheel innerRadius={40} outerRadius={80}>
@@ -292,8 +276,6 @@ const ColorPickerDemo: FC = () => (
                 </ColorPicker.Wheel>
             </ColorPicker>
         </div>
-
-        {/* SwatchPicker with Preset Colors */}
         <div className='flex flex-col gap-4'>
             <ColorPicker color='primary' data-testid='color-picker-swatches' defaultValue='#ef4444' size='md'>
                 <ColorPicker.SwatchPicker>
@@ -310,13 +292,10 @@ const ColorPickerDemo: FC = () => (
         </div>
     </>
 );
-
 const DatePickerDemo: FC = () => (
     <>
-        {/* Single Date Picker */}
         <div className='flex flex-col gap-2'>
-            <label className='text-xs font-medium text-(--color-text-600)'>Single Date</label>
-            <DatePicker color='primary' data-testid='date-picker-single' size='md'>
+            <DatePicker color='primary' data-testid='date-picker-single' label='Single Date' size='md'>
                 <DatePicker.Group>
                     <DatePicker.Field />
                     <DatePicker.Trigger>
@@ -328,11 +307,8 @@ const DatePickerDemo: FC = () => (
                 </DatePicker.Popover>
             </DatePicker>
         </div>
-
-        {/* Date Range Picker */}
         <div className='flex flex-col gap-2'>
-            <label className='text-xs font-medium text-(--color-text-600)'>Date Range</label>
-            <DatePicker.Range color='primary' data-testid='date-picker-range' size='md'>
+            <DatePicker.Range color='primary' data-testid='date-picker-range' label='Date Range' size='md'>
                 <DatePicker.Group>
                     <DatePicker.RangeField slot='start' />
                     <span className='px-1 text-(--color-text-600)'>–</span>
@@ -346,11 +322,14 @@ const DatePickerDemo: FC = () => (
                 </DatePicker.Popover>
             </DatePicker.Range>
         </div>
-
-        {/* DateTime Picker with minute granularity */}
         <div className='flex flex-col gap-2'>
-            <label className='text-xs font-medium text-(--color-text-600)'>Date & Time</label>
-            <DatePicker color='primary' data-testid='date-picker-datetime' granularity='minute' size='md'>
+            <DatePicker
+                color='primary'
+                data-testid='date-picker-datetime'
+                granularity='minute'
+                label='Date & Time'
+                size='md'
+            >
                 <DatePicker.Group>
                     <DatePicker.Field />
                     <DatePicker.Trigger>
@@ -365,12 +344,10 @@ const DatePickerDemo: FC = () => (
         </div>
     </>
 );
-
 const TreeDemo: FC = () => (
     <>
-        {/* Simplified API - title/prefix/tooltip */}
         <div className='flex flex-col gap-2 min-w-72'>
-            <label className='text-xs font-medium text-(--color-text-600)'>File Explorer</label>
+            <span className='text-xs font-medium text-(--color-text-600)'>File Explorer</span>
             <Tree
                 aria-label='File explorer'
                 color='primary'
@@ -397,10 +374,8 @@ const TreeDemo: FC = () => (
                 <Tree.Item id='package' prefix={File} title='package.json' tooltip={{ content: 'Package manifest' }} />
             </Tree>
         </div>
-
-        {/* Custom Content - Tree.ItemContent for complex labels */}
         <div className='flex flex-col gap-2 min-w-72'>
-            <label className='text-xs font-medium text-(--color-text-600)'>Custom Content</label>
+            <span className='text-xs font-medium text-(--color-text-600)'>Custom Content</span>
             <Tree aria-label='Custom tree' color='primary' data-testid='tree-custom' size='md'>
                 <Tree.Item id='tagged'>
                     <Tree.ItemContent prefix={Tag} tooltip={{ content: 'Items with badge' }}>
@@ -413,10 +388,8 @@ const TreeDemo: FC = () => (
         </div>
     </>
 );
-
 const TagGroupDemo: FC = () => (
     <>
-        {/* Removable Tags with Tooltips */}
         <div className='flex flex-col gap-2 min-w-72'>
             <TagGroup
                 aria-label='Filter categories'
@@ -439,8 +412,6 @@ const TagGroupDemo: FC = () => (
                 </TagGroup.List>
             </TagGroup>
         </div>
-
-        {/* Selection + Variants */}
         <div className='flex flex-col gap-2 min-w-72'>
             <TagGroup
                 aria-label='Select technologies'
@@ -465,8 +436,6 @@ const TagGroupDemo: FC = () => (
                 </TagGroup.List>
             </TagGroup>
         </div>
-
-        {/* Link Tags */}
         <div className='flex flex-col gap-2 min-w-72'>
             <TagGroup aria-label='Documentation links' color='primary' data-testid='tag-group-links' size='md'>
                 <TagGroup.Label>Resources</TagGroup.Label>
@@ -490,8 +459,6 @@ const TagGroupDemo: FC = () => (
         </div>
     </>
 );
-
-// Sample data for Table demos
 const tableData = [
     { email: 'alice@example.com', id: 1, name: 'Alice Johnson', role: 'Engineer', status: 'Active' },
     { email: 'bob@example.com', id: 2, name: 'Bob Smith', role: 'Designer', status: 'Active' },
@@ -499,15 +466,9 @@ const tableData = [
     { email: 'david@example.com', id: 4, name: 'David Brown', role: 'Engineer', status: 'Active' },
     { email: 'eva@example.com', id: 5, name: 'Eva Martinez', role: 'Designer', status: 'Active' },
 ];
-
 const TableDemo: FC = () => {
-    // State for sorting demo
     const [sortDescriptor, setSortDescriptor] = useState<SortDescriptor>({ column: 'name', direction: 'ascending' });
-
-    // State for selection demo
     const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<Key>());
-
-    // Sort the data based on sortDescriptor
     const sortedData = [...tableData].sort((a, b) => {
         const column = sortDescriptor.column as keyof typeof a;
         const aValue = a[column];
@@ -515,10 +476,8 @@ const TableDemo: FC = () => {
         const cmp = String(aValue).localeCompare(String(bValue));
         return sortDescriptor.direction === 'descending' ? -cmp : cmp;
     });
-
     return (
         <>
-            {/* Basic Table with Sorting */}
             <div className='flex flex-col gap-2 w-full'>
                 <span className='text-xs font-medium text-(--color-text-600)'>Sortable Table</span>
                 <Table
@@ -555,8 +514,6 @@ const TableDemo: FC = () => {
                     </Table.Body>
                 </Table>
             </div>
-
-            {/* Table with Selection */}
             <div className='flex flex-col gap-2 w-full'>
                 <span className='text-xs font-medium text-(--color-text-600)'>
                     Selectable Table (Selected:{' '}
@@ -595,8 +552,6 @@ const TableDemo: FC = () => {
                     </Table.Body>
                 </Table>
             </div>
-
-            {/* Resizable Table */}
             <div className='flex flex-col gap-2 w-full'>
                 <span className='text-xs font-medium text-(--color-text-600)'>Resizable Columns</span>
                 <Table.ResizableContainer onResize={(_widths) => undefined}>
@@ -639,12 +594,10 @@ const TableDemo: FC = () => {
         </>
     );
 };
-
 const GridListDemo: FC = () => {
     const [selectedKeys, setSelectedKeys] = useState<Selection>(new Set<Key>());
     return (
         <>
-            {/* Single Selection GridList */}
             <div className='flex flex-col gap-2 min-w-72'>
                 <span className='text-xs font-medium text-(--color-text-600)'>Single Selection</span>
                 <GridList
@@ -668,8 +621,6 @@ const GridListDemo: FC = () => {
                     </GridList.Item>
                 </GridList>
             </div>
-
-            {/* Multiple Selection GridList */}
             <div className='flex flex-col gap-2 min-w-72'>
                 <span className='text-xs font-medium text-(--color-text-600)'>
                     Multiple Selection (Selected:{' '}
@@ -698,8 +649,6 @@ const GridListDemo: FC = () => {
                     </GridList.Item>
                 </GridList>
             </div>
-
-            {/* Non-selectable GridList with prefix/suffix */}
             <div className='flex flex-col gap-2 min-w-72'>
                 <span className='text-xs font-medium text-(--color-text-600)'>Display Only (No Selection)</span>
                 <GridList
@@ -723,7 +672,6 @@ const GridListDemo: FC = () => {
         </>
     );
 };
-
 const BreadcrumbsDemo: FC = () => (
     <>
         <div className='flex flex-col gap-2'>
@@ -844,7 +792,6 @@ const ProgressDemo: FC = () => (
 );
 const DrawerDemo: FC = () => (
     <>
-        {/* Bottom Drawer - mobile sheet style */}
         <Drawer
             color='primary'
             data-testid='drawer-bottom'
@@ -875,8 +822,6 @@ const DrawerDemo: FC = () => (
                 <Button children={{ default: 'Confirm' }} color='primary' size='sm' variant='solid' />
             </Drawer.Footer>
         </Drawer>
-
-        {/* Left Drawer - navigation panel */}
         <Drawer
             color='primary'
             data-testid='drawer-left'
@@ -904,8 +849,6 @@ const DrawerDemo: FC = () => (
                 </Drawer.Close>
             </Drawer.Footer>
         </Drawer>
-
-        {/* Right Drawer - settings/inspector panel */}
         <Drawer
             color='primary'
             data-testid='drawer-right'
@@ -935,8 +878,6 @@ const DrawerDemo: FC = () => (
                 <Button children={{ default: 'Save' }} color='primary' size='sm' variant='solid' />
             </Drawer.Footer>
         </Drawer>
-
-        {/* Nested Drawer */}
         <Drawer
             color='primary'
             data-testid='drawer-nested-outer'

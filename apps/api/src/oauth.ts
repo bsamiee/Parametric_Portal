@@ -210,15 +210,13 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                 clients.microsoft.refreshAccessToken(token, [...AUTH_TUNING.oauth.scopes.oidc]),
         } satisfies Record<typeof OAuthProvider.Type, (token: string) => Promise<OAuth2Tokens>>);
         const createAuthUrl = (provider: typeof OAuthProvider.Type, state: string, verifier: string | undefined, scopes: string[]): URL =>
-            provider === 'google' && verifier !== undefined ? clients.google.createAuthorizationURL(state, verifier, scopes) :
-            provider === 'microsoft' && verifier !== undefined ? clients.microsoft.createAuthorizationURL(state, verifier, scopes) :
-            provider === 'apple' ? clients.apple.createAuthorizationURL(state, scopes) :
-            clients.github.createAuthorizationURL(state, scopes);
+            isPkceProvider(provider)
+                ? clients[provider].createAuthorizationURL(state, verifier as string, scopes)
+                : clients[provider].createAuthorizationURL(state, scopes);
         const validateCode = (provider: typeof OAuthProvider.Type, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
-            provider === 'google' && verifier !== undefined ? clients.google.validateAuthorizationCode(code, verifier) :
-            provider === 'microsoft' && verifier !== undefined ? clients.microsoft.validateAuthorizationCode(code, verifier) :
-            provider === 'apple' ? clients.apple.validateAuthorizationCode(code) :
-            clients.github.validateAuthorizationCode(code);
+            isPkceProvider(provider)
+                ? clients[provider].validateAuthorizationCode(code, verifier as string)
+                : clients[provider].validateAuthorizationCode(code);
         return OAuth.of({
             authenticate: (provider, code, state, stateCookie) =>
                 Effect.gen(function* () {
