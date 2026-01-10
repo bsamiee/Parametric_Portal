@@ -1,108 +1,108 @@
 {
-    "name": "@parametric-portal/components",
-    "version": "1.0.7",
-    "type": "module",
-    "exports": {
-        "./command": {
-            "types": "./src/command.ts",
-            "import": "./src/command.ts",
-            "default": "./src/command.ts"
-        },
-        "./controls": {
-            "types": "./src/controls.ts",
-            "import": "./src/controls.ts",
-            "default": "./src/controls.ts"
-        },
-        "./data": {
-            "types": "./src/data.ts",
-            "import": "./src/data.ts",
-            "default": "./src/data.ts"
-        },
-        "./elements": {
-            "types": "./src/elements.ts",
-            "import": "./src/elements.ts",
-            "default": "./src/elements.ts"
-        },
-        "./feedback": {
-            "types": "./src/feedback.ts",
-            "import": "./src/feedback.ts",
-            "default": "./src/feedback.ts"
-        },
-        "./icons": {
-            "types": "./src/icons.ts",
-            "import": "./src/icons.ts",
-            "default": "./src/icons.ts"
-        },
-        "./input-bar": {
-            "types": "./src/input-bar.ts",
-            "import": "./src/input-bar.ts",
-            "default": "./src/input-bar.ts"
-        },
-        "./navigation": {
-            "types": "./src/navigation.ts",
-            "import": "./src/navigation.ts",
-            "default": "./src/navigation.ts"
-        },
-        "./overlays": {
-            "types": "./src/overlays.ts",
-            "import": "./src/overlays.ts",
-            "default": "./src/overlays.ts"
-        },
-        "./schema": {
-            "types": "./src/schema.ts",
-            "import": "./src/schema.ts",
-            "default": "./src/schema.ts"
-        },
-        "./selection": {
-            "types": "./src/selection.ts",
-            "import": "./src/selection.ts",
-            "default": "./src/selection.ts"
-        },
-        "./upload": {
-            "types": "./src/upload.ts",
-            "import": "./src/upload.ts",
-            "default": "./src/upload.ts"
-        },
-        "./utility": {
-            "types": "./src/utility.ts",
-            "import": "./src/utility.ts",
-            "default": "./src/utility.ts"
-        }
+  "name": "@parametric-portal/components",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": {
+    "./command": {
+      "types": "./src/command.ts",
+      "import": "./src/command.ts",
+      "default": "./src/command.ts"
     },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "fix": "biome check --write .",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./controls": {
+      "types": "./src/controls.ts",
+      "import": "./src/controls.ts",
+      "default": "./src/controls.ts"
     },
-    "dependencies": {
-        "@floating-ui/react-dom": "catalog:",
-        "@parametric-portal/types": "workspace:*",
-        "@radix-ui/react-slot": "catalog:",
-        "class-variance-authority": "catalog:",
-        "clsx": "catalog:",
-        "cmdk": "catalog:",
-        "effect": "catalog:",
-        "lucide-react": "catalog:",
-        "react-aria": "catalog:",
-        "react-aria-components": "catalog:",
-        "react-stately": "catalog:",
-        "tailwind-merge": "catalog:"
+    "./data": {
+      "types": "./src/data.ts",
+      "import": "./src/data.ts",
+      "default": "./src/data.ts"
     },
-    "devDependencies": {
-        "@fast-check/vitest": "catalog:",
-        "@types/react": "catalog:",
-        "@types/react-dom": "catalog:",
-        "fast-check": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./elements": {
+      "types": "./src/elements.ts",
+      "import": "./src/elements.ts",
+      "default": "./src/elements.ts"
     },
-    "peerDependencies": {
-        "react": "catalog:",
-        "react-dom": "catalog:"
+    "./feedback": {
+      "types": "./src/feedback.ts",
+      "import": "./src/feedback.ts",
+      "default": "./src/feedback.ts"
+    },
+    "./icons": {
+      "types": "./src/icons.ts",
+      "import": "./src/icons.ts",
+      "default": "./src/icons.ts"
+    },
+    "./input-bar": {
+      "types": "./src/input-bar.ts",
+      "import": "./src/input-bar.ts",
+      "default": "./src/input-bar.ts"
+    },
+    "./navigation": {
+      "types": "./src/navigation.ts",
+      "import": "./src/navigation.ts",
+      "default": "./src/navigation.ts"
+    },
+    "./overlays": {
+      "types": "./src/overlays.ts",
+      "import": "./src/overlays.ts",
+      "default": "./src/overlays.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts",
+      "default": "./src/schema.ts"
+    },
+    "./selection": {
+      "types": "./src/selection.ts",
+      "import": "./src/selection.ts",
+      "default": "./src/selection.ts"
+    },
+    "./upload": {
+      "types": "./src/upload.ts",
+      "import": "./src/upload.ts",
+      "default": "./src/upload.ts"
+    },
+    "./utility": {
+      "types": "./src/utility.ts",
+      "import": "./src/utility.ts",
+      "default": "./src/utility.ts"
     }
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "dev": "vite dev --host",
+    "fix": "biome check --write .",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@floating-ui/react-dom": "catalog:",
+    "@parametric-portal/types": "workspace:*",
+    "@radix-ui/react-slot": "catalog:",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
+    "cmdk": "catalog:",
+    "effect": "catalog:",
+    "lucide-react": "catalog:",
+    "react-aria": "catalog:",
+    "react-aria-components": "catalog:",
+    "react-stately": "catalog:",
+    "tailwind-merge": "catalog:"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  }
 }

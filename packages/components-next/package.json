@@ -1,123 +1,123 @@
 {
-	"name": "@parametric-portal/components-next",
-	"version": "0.1.0",
-	"type": "module",
-	"exports": {
-		"./actions/button": {
-			"types": "./src/actions/button.tsx",
-			"import": "./src/actions/button.tsx",
-			"default": "./src/actions/button.tsx"
-		},
-		"./actions/toggle": {
-			"types": "./src/actions/toggle.tsx",
-			"import": "./src/actions/toggle.tsx",
-			"default": "./src/actions/toggle.tsx"
-		},
-		"./inputs/radio": {
-			"types": "./src/inputs/radio.tsx",
-			"import": "./src/inputs/radio.tsx",
-			"default": "./src/inputs/radio.tsx"
-		},
-		"./inputs/select": {
-			"types": "./src/inputs/select.tsx",
-			"import": "./src/inputs/select.tsx",
-			"default": "./src/inputs/select.tsx"
-		},
-		"./navigation/accordion": {
-			"types": "./src/navigation/accordion.tsx",
-			"import": "./src/navigation/accordion.tsx",
-			"default": "./src/navigation/accordion.tsx"
-		},
-		"./navigation/menu": {
-			"types": "./src/navigation/menu.tsx",
-			"import": "./src/navigation/menu.tsx",
-			"default": "./src/navigation/menu.tsx"
-		},
-		"./navigation/tabs": {
-			"types": "./src/navigation/tabs.tsx",
-			"import": "./src/navigation/tabs.tsx",
-			"default": "./src/navigation/tabs.tsx"
-		},
-		"./overlays/dialog": {
-			"types": "./src/overlays/dialog.tsx",
-			"import": "./src/overlays/dialog.tsx",
-			"default": "./src/overlays/dialog.tsx"
-		},
-		"./pickers/file-preview": {
-			"types": "./src/pickers/file-preview.tsx",
-			"import": "./src/pickers/file-preview.tsx",
-			"default": "./src/pickers/file-preview.tsx"
-		},
-		"./pickers/file-upload": {
-			"types": "./src/pickers/file-upload.tsx",
-			"import": "./src/pickers/file-upload.tsx",
-			"default": "./src/pickers/file-upload.tsx"
-		},
-		"./core/announce": {
-			"types": "./src/core/announce.tsx",
-			"import": "./src/core/announce.tsx",
-			"default": "./src/core/announce.tsx"
-		},
-		"./core/floating": {
-			"types": "./src/core/floating.tsx",
-			"import": "./src/core/floating.tsx",
-			"default": "./src/core/floating.tsx"
-		},
-		"./core/focus": {
-			"types": "./src/core/focus.tsx",
-			"import": "./src/core/focus.tsx",
-			"default": "./src/core/focus.tsx"
-		},
-		"./core/gesture": {
-			"types": "./src/core/gesture.ts",
-			"import": "./src/core/gesture.ts",
-			"default": "./src/core/gesture.ts"
-		},
-		"./core/utils": {
-			"types": "./src/core/utils.ts",
-			"import": "./src/core/utils.ts",
-			"default": "./src/core/utils.ts"
-		}
-	},
-	"scripts": {
-		"build": "vite build",
-		"check": "biome check .",
-		"dev": "vite dev --host",
-		"fix": "biome check --write .",
-		"preview": "vite preview --host",
-		"test": "vitest run --passWithNoTests",
-		"typecheck": "tsc --project tsconfig.json --noEmit"
-	},
-	"dependencies": {
-		"@floating-ui/react": "catalog:",
-		"@formkit/auto-animate": "catalog:",
-		"@parametric-portal/runtime": "workspace:*",
-		"@parametric-portal/theme": "workspace:*",
-		"@parametric-portal/types": "workspace:*",
-		"@radix-ui/react-visually-hidden": "catalog:",
-		"@tanstack/react-virtual": "catalog:",
-		"@use-gesture/react": "catalog:",
-		"clsx": "catalog:",
-		"effect": "catalog:",
-		"lucide-react": "catalog:",
-		"react-aria": "catalog:",
-		"react-aria-components": "catalog:",
-		"tailwind-merge": "catalog:",
-		"ts-essentials": "catalog:",
-		"ts-toolbelt": "catalog:",
-		"tw-animate-css": "catalog:",
-		"type-fest": "catalog:"
-	},
-	"devDependencies": {
-		"@types/react": "catalog:",
-		"@types/react-dom": "catalog:",
-		"tailwindcss": "catalog:",
-		"typescript": "catalog:",
-		"vite": "catalog:",
-		"vitest": "catalog:"
-	},
-	"peerDependencies": {
-		"react": "catalog:",
-		"react-dom": "catalog:"
-	}
+  "name": "@parametric-portal/components-next",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": {
+    "./actions/button": {
+      "types": "./src/actions/button.tsx",
+      "import": "./src/actions/button.tsx",
+      "default": "./src/actions/button.tsx"
+    },
+    "./actions/toggle": {
+      "types": "./src/actions/toggle.tsx",
+      "import": "./src/actions/toggle.tsx",
+      "default": "./src/actions/toggle.tsx"
+    },
+    "./inputs/radio": {
+      "types": "./src/inputs/radio.tsx",
+      "import": "./src/inputs/radio.tsx",
+      "default": "./src/inputs/radio.tsx"
+    },
+    "./inputs/select": {
+      "types": "./src/inputs/select.tsx",
+      "import": "./src/inputs/select.tsx",
+      "default": "./src/inputs/select.tsx"
+    },
+    "./navigation/accordion": {
+      "types": "./src/navigation/accordion.tsx",
+      "import": "./src/navigation/accordion.tsx",
+      "default": "./src/navigation/accordion.tsx"
+    },
+    "./navigation/menu": {
+      "types": "./src/navigation/menu.tsx",
+      "import": "./src/navigation/menu.tsx",
+      "default": "./src/navigation/menu.tsx"
+    },
+    "./navigation/tabs": {
+      "types": "./src/navigation/tabs.tsx",
+      "import": "./src/navigation/tabs.tsx",
+      "default": "./src/navigation/tabs.tsx"
+    },
+    "./overlays/dialog": {
+      "types": "./src/overlays/dialog.tsx",
+      "import": "./src/overlays/dialog.tsx",
+      "default": "./src/overlays/dialog.tsx"
+    },
+    "./pickers/file-preview": {
+      "types": "./src/pickers/file-preview.tsx",
+      "import": "./src/pickers/file-preview.tsx",
+      "default": "./src/pickers/file-preview.tsx"
+    },
+    "./pickers/file-upload": {
+      "types": "./src/pickers/file-upload.tsx",
+      "import": "./src/pickers/file-upload.tsx",
+      "default": "./src/pickers/file-upload.tsx"
+    },
+    "./core/announce": {
+      "types": "./src/core/announce.tsx",
+      "import": "./src/core/announce.tsx",
+      "default": "./src/core/announce.tsx"
+    },
+    "./core/floating": {
+      "types": "./src/core/floating.tsx",
+      "import": "./src/core/floating.tsx",
+      "default": "./src/core/floating.tsx"
+    },
+    "./core/focus": {
+      "types": "./src/core/focus.tsx",
+      "import": "./src/core/focus.tsx",
+      "default": "./src/core/focus.tsx"
+    },
+    "./core/gesture": {
+      "types": "./src/core/gesture.ts",
+      "import": "./src/core/gesture.ts",
+      "default": "./src/core/gesture.ts"
+    },
+    "./core/utils": {
+      "types": "./src/core/utils.ts",
+      "import": "./src/core/utils.ts",
+      "default": "./src/core/utils.ts"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "dev": "vite dev --host",
+    "fix": "biome check --write .",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@floating-ui/react": "catalog:",
+    "@formkit/auto-animate": "catalog:",
+    "@parametric-portal/runtime": "workspace:*",
+    "@parametric-portal/theme": "workspace:*",
+    "@parametric-portal/types": "workspace:*",
+    "@radix-ui/react-visually-hidden": "catalog:",
+    "@tanstack/react-virtual": "catalog:",
+    "@use-gesture/react": "catalog:",
+    "clsx": "catalog:",
+    "effect": "catalog:",
+    "lucide-react": "catalog:",
+    "react-aria": "catalog:",
+    "react-aria-components": "catalog:",
+    "tailwind-merge": "catalog:",
+    "ts-essentials": "catalog:",
+    "ts-toolbelt": "catalog:",
+    "tw-animate-css": "catalog:",
+    "type-fest": "catalog:"
+  },
+  "devDependencies": {
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  }
 }

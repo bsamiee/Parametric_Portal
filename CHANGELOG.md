@@ -1,3 +1,82 @@
+# 2.0.0 (2026-01-10)
+
+### [FEATURES]
+
+- ⚠️  to factory pattern with multi-provider support ([#124](https://github.com/bsamiee/Parametric_Portal/pull/124))
+- Multi-Project Platform with Complete HA Stack ([#129](https://github.com/bsamiee/Parametric_Portal/pull/129))
+- architecture with 7k line reduction ([#131](https://github.com/bsamiee/Parametric_Portal/pull/131))
+- architecture consolidation phase 2 ([#132](https://github.com/bsamiee/Parametric_Portal/pull/132))
+- architecture consolidation phase 3 - schema and migration unification ([#133](https://github.com/bsamiee/Parametric_Portal/pull/133))
+
+### [BUG_FIXES]
+
+- ⚠️  .toml robustness and portability improvements ([#127](https://github.com/bsamiee/Parametric_Portal/pull/127), [#124](https://github.com/bsamiee/Parametric_Portal/issues/124))
+- Consolidate code surface and improve dispatch table usage across server/database/types ([#134](https://github.com/bsamiee/Parametric_Portal/pull/134), [#8](https://github.com/bsamiee/Parametric_Portal/issues/8))
+- type system optimization and components-next expansion ([#136](https://github.com/bsamiee/Parametric_Portal/pull/136))
+- resolve SonarCloud critical issues and security hotspots ([9c00b30](https://github.com/bsamiee/Parametric_Portal/commit/9c00b30))
+- upgrade jspdf to 4.0.0 and relax SonarCloud quality gate ([576a1c4](https://github.com/bsamiee/Parametric_Portal/commit/576a1c4))
+- **ci:** resolve Gemini CLI command restrictions and context pollution ([fa4c16d](https://github.com/bsamiee/Parametric_Portal/commit/fa4c16d))
+- **ci:** add GH_TOKEN for gh CLI authentication in Gemini workflows ([14f15ec](https://github.com/bsamiee/Parametric_Portal/commit/14f15ec))
+- **ci:** remove tool restrictions, let Gemini use any available tool ([5e58ed6](https://github.com/bsamiee/Parametric_Portal/commit/5e58ed6))
+- **ci:** use !{} substitution for ALL variable refs in Gemini prompts ([2db5f21](https://github.com/bsamiee/Parametric_Portal/commit/2db5f21))
+- **gemini:** remove MCP server to resolve hanging workflows ([#11459](https://github.com/bsamiee/Parametric_Portal/issues/11459), [#7324](https://github.com/bsamiee/Parametric_Portal/issues/7324))
+- **gemini:** correct action version to v0.1.18 ([4f87284](https://github.com/bsamiee/Parametric_Portal/commit/4f87284))
+
+### ⚠️  Breaking Changes
+
+- .toml robustness and portability improvements  ([#127](https://github.com/bsamiee/Parametric_Portal/pull/127), [#124](https://github.com/bsamiee/Parametric_Portal/issues/124))
+  generateText is no longer exported directly.
+  Use createProvider({ model }) to get a provider instance.
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * fix(ai): address PR review comments for provider consistency
+  - OpenAI: add maxTokens to ProviderConfig/GenerateTextOptions
+  - OpenAI: populate B.defaults with maxTokens: 4096
+  - OpenAI: remove identity function pattern, always call withConfigOverride
+  - OpenAI: use max_output_tokens at model layer for proper defaults
+  - Gemini: add maxTokens and system to type definitions
+  - Gemini: populate B.defaults with maxTokens: 4096
+  - Gemini: implement system prompt via buildPrompt helper (prepend to content)
+  - Gemini: document withConfigOverride limitation in file header
+  Resolves all 6 inline review comments from PR #124.
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * style: biome auto-repair
+  Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+  * chore: trigger re-review
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+- to factory pattern with multi-provider support  ([#124](https://github.com/bsamiee/Parametric_Portal/pull/124))
+  generateText is no longer exported directly.
+  Use createProvider({ model }) to get a provider instance.
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * fix(ai): address PR review comments for provider consistency
+  - OpenAI: add maxTokens to ProviderConfig/GenerateTextOptions
+  - OpenAI: populate B.defaults with maxTokens: 4096
+  - OpenAI: remove identity function pattern, always call withConfigOverride
+  - OpenAI: use max_output_tokens at model layer for proper defaults
+  - Gemini: add maxTokens and system to type definitions
+  - Gemini: populate B.defaults with maxTokens: 4096
+  - Gemini: implement system prompt via buildPrompt helper (prepend to content)
+  - Gemini: document withConfigOverride limitation in file header
+  Resolves all 6 inline review comments from PR #124.
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+  * style: biome auto-repair
+  Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+  * chore: trigger re-review
+  🤖 Generated with [Claude Code](https://claude.com/claude-code)
+  Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+### ❤️ Thank You
+
+- bsamiee @bsamiee
+- Claude Opus 4.5
+- Claude Sonnet 4.5 (1M context)
+- Copilot @Copilot
+- raha2079 @raha2079
+
 ## 1.0.7 (2025-12-26)
 
 ### [BUG_FIXES]

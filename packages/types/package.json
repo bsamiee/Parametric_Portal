@@ -1,83 +1,83 @@
 {
-    "name": "@parametric-portal/types",
-    "version": "1.0.7",
-    "type": "module",
-    "exports": {
-        "./async": {
-            "types": "./src/async.ts",
-            "import": "./src/async.ts",
-            "default": "./src/async.ts"
-        },
-        "./props": {
-            "types": "./src/props.ts",
-            "import": "./src/props.ts",
-            "default": "./src/props.ts"
-        },
-        "./app-error": {
-            "types": "./src/app-error.ts",
-            "import": "./src/app-error.ts",
-            "default": "./src/app-error.ts"
-        },
-        "./files": {
-            "types": "./src/files.ts",
-            "import": "./src/files.ts",
-            "default": "./src/files.ts"
-        },
-        "./icons": {
-            "types": "./src/icons.ts",
-            "import": "./src/icons.ts",
-            "default": "./src/icons.ts"
-        },
-        "./svg": {
-            "types": "./src/svg.ts",
-            "import": "./src/svg.ts",
-            "default": "./src/svg.ts"
-        },
-        "./types": {
-            "types": "./src/types.ts",
-            "import": "./src/types.ts",
-            "default": "./src/types.ts"
-        },
-        "./ui": {
-            "types": "./src/ui.ts",
-            "import": "./src/ui.ts",
-            "default": "./src/ui.ts"
-        },
-        "./units": {
-            "types": "./src/units.ts",
-            "import": "./src/units.ts",
-            "default": "./src/units.ts"
-        },
-        "./schema": {
-            "types": "./src/schema.ts",
-            "import": "./src/schema.ts",
-            "default": "./src/schema.ts"
-        }
+  "name": "@parametric-portal/types",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": {
+    "./async": {
+      "types": "./src/async.ts",
+      "import": "./src/async.ts",
+      "default": "./src/async.ts"
     },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "dev": "vite dev --host",
-        "fix": "biome check --write .",
-        "preview": "vite preview --host",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./props": {
+      "types": "./src/props.ts",
+      "import": "./src/props.ts",
+      "default": "./src/props.ts"
     },
-    "dependencies": {
-        "drizzle-orm": "catalog:",
-        "effect": "catalog:",
-        "happy-dom": "catalog:",
-        "isomorphic-dompurify": "catalog:"
+    "./app-error": {
+      "types": "./src/app-error.ts",
+      "import": "./src/app-error.ts",
+      "default": "./src/app-error.ts"
     },
-    "devDependencies": {
-        "@fast-check/vitest": "catalog:",
-        "@types/node": "catalog:",
-        "fast-check": "catalog:",
-        "ts-essentials": "catalog:",
-        "ts-toolbelt": "catalog:",
-        "type-fest": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./files": {
+      "types": "./src/files.ts",
+      "import": "./src/files.ts",
+      "default": "./src/files.ts"
+    },
+    "./icons": {
+      "types": "./src/icons.ts",
+      "import": "./src/icons.ts",
+      "default": "./src/icons.ts"
+    },
+    "./svg": {
+      "types": "./src/svg.ts",
+      "import": "./src/svg.ts",
+      "default": "./src/svg.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "import": "./src/types.ts",
+      "default": "./src/types.ts"
+    },
+    "./ui": {
+      "types": "./src/ui.ts",
+      "import": "./src/ui.ts",
+      "default": "./src/ui.ts"
+    },
+    "./units": {
+      "types": "./src/units.ts",
+      "import": "./src/units.ts",
+      "default": "./src/units.ts"
+    },
+    "./schema": {
+      "types": "./src/schema.ts",
+      "import": "./src/schema.ts",
+      "default": "./src/schema.ts"
     }
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "dev": "vite dev --host",
+    "fix": "biome check --write .",
+    "preview": "vite preview --host",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "happy-dom": "catalog:",
+    "isomorphic-dompurify": "catalog:"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "ts-essentials": "catalog:",
+    "ts-toolbelt": "catalog:",
+    "type-fest": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
 }

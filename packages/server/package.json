@@ -1,68 +1,68 @@
 {
-    "name": "@parametric-portal/server",
-    "version": "1.0.7",
-    "type": "module",
-    "exports": {
-        "./api": {
-            "types": "./src/api.ts",
-            "import": "./src/api.ts",
-            "default": "./src/api.ts"
-        },
-        "./crypto": {
-            "types": "./src/crypto.ts",
-            "import": "./src/crypto.ts",
-            "default": "./src/crypto.ts"
-        },
-        "./auth": {
-            "types": "./src/auth.ts",
-            "import": "./src/auth.ts",
-            "default": "./src/auth.ts"
-        },
-        "./http-errors": {
-            "types": "./src/http-errors.ts",
-            "import": "./src/http-errors.ts",
-            "default": "./src/http-errors.ts"
-        },
-        "./metrics": {
-            "types": "./src/metrics.ts",
-            "import": "./src/metrics.ts",
-            "default": "./src/metrics.ts"
-        },
-        "./middleware": {
-            "types": "./src/middleware.ts",
-            "import": "./src/middleware.ts",
-            "default": "./src/middleware.ts"
-        },
-        "./rate-limit": {
-            "types": "./src/rate-limit.ts",
-            "import": "./src/rate-limit.ts",
-            "default": "./src/rate-limit.ts"
-        },
-        "./telemetry": {
-            "types": "./src/telemetry.ts",
-            "import": "./src/telemetry.ts",
-            "default": "./src/telemetry.ts"
-        }
+  "name": "@parametric-portal/server",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": {
+    "./api": {
+      "types": "./src/api.ts",
+      "import": "./src/api.ts",
+      "default": "./src/api.ts"
     },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "fix": "biome check --write .",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./crypto": {
+      "types": "./src/crypto.ts",
+      "import": "./src/crypto.ts",
+      "default": "./src/crypto.ts"
     },
-    "dependencies": {
-        "@effect/experimental": "catalog:",
-        "@effect/opentelemetry": "catalog:",
-        "@effect/platform": "catalog:",
-        "@effect/sql": "catalog:",
-        "@parametric-portal/types": "workspace:*",
-        "effect": "catalog:",
-        "ioredis": "catalog:"
+    "./auth": {
+      "types": "./src/auth.ts",
+      "import": "./src/auth.ts",
+      "default": "./src/auth.ts"
     },
-    "devDependencies": {
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./http-errors": {
+      "types": "./src/http-errors.ts",
+      "import": "./src/http-errors.ts",
+      "default": "./src/http-errors.ts"
+    },
+    "./metrics": {
+      "types": "./src/metrics.ts",
+      "import": "./src/metrics.ts",
+      "default": "./src/metrics.ts"
+    },
+    "./middleware": {
+      "types": "./src/middleware.ts",
+      "import": "./src/middleware.ts",
+      "default": "./src/middleware.ts"
+    },
+    "./rate-limit": {
+      "types": "./src/rate-limit.ts",
+      "import": "./src/rate-limit.ts",
+      "default": "./src/rate-limit.ts"
+    },
+    "./telemetry": {
+      "types": "./src/telemetry.ts",
+      "import": "./src/telemetry.ts",
+      "default": "./src/telemetry.ts"
     }
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/experimental": "catalog:",
+    "@effect/opentelemetry": "catalog:",
+    "@effect/platform": "catalog:",
+    "@effect/sql": "catalog:",
+    "@parametric-portal/types": "workspace:*",
+    "effect": "catalog:",
+    "ioredis": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
 }

@@ -1,120 +1,120 @@
 {
-    "name": "@parametric-portal/runtime",
-    "version": "1.0.7",
-    "type": "module",
-    "exports": {
-        "./css-sync": {
-            "types": "./src/css-sync.ts",
-            "import": "./src/css-sync.ts",
-            "default": "./src/css-sync.ts"
-        },
-        "./hooks/browser": {
-            "types": "./src/hooks/browser.ts",
-            "import": "./src/hooks/browser.ts",
-            "default": "./src/hooks/browser.ts"
-        },
-        "./hooks/effect": {
-            "types": "./src/hooks/effect.ts",
-            "import": "./src/hooks/effect.ts",
-            "default": "./src/hooks/effect.ts"
-        },
-        "./hooks/file-upload": {
-            "types": "./src/hooks/file-upload.ts",
-            "import": "./src/hooks/file-upload.ts",
-            "default": "./src/hooks/file-upload.ts"
-        },
-        "./services/file": {
-            "types": "./src/services/file.ts",
-            "import": "./src/services/file.ts",
-            "default": "./src/services/file.ts"
-        },
-        "./hooks/suspense": {
-            "types": "./src/hooks/suspense.ts",
-            "import": "./src/hooks/suspense.ts",
-            "default": "./src/hooks/suspense.ts"
-        },
-        "./messaging": {
-            "types": "./src/messaging.ts",
-            "import": "./src/messaging.ts",
-            "default": "./src/messaging.ts"
-        },
-        "./runtime": {
-            "types": "./src/runtime.ts",
-            "import": "./src/runtime.ts",
-            "default": "./src/runtime.ts"
-        },
-        "./services/browser": {
-            "types": "./src/services/browser.ts",
-            "import": "./src/services/browser.ts",
-            "default": "./src/services/browser.ts"
-        },
-        "./services/telemetry": {
-            "types": "./src/services/telemetry.ts",
-            "import": "./src/services/telemetry.ts",
-            "default": "./src/services/telemetry.ts"
-        },
-        "./store/factory": {
-            "types": "./src/store/factory.ts",
-            "import": "./src/store/factory.ts",
-            "default": "./src/store/factory.ts"
-        },
-        "./store/storage": {
-            "types": "./src/store/storage.ts",
-            "import": "./src/store/storage.ts",
-            "default": "./src/store/storage.ts"
-        },
-        "./stores/auth": {
-            "types": "./src/stores/auth.ts",
-            "import": "./src/stores/auth.ts",
-            "default": "./src/stores/auth.ts"
-        },
-        "./url": {
-            "types": "./src/url.ts",
-            "import": "./src/url.ts",
-            "default": "./src/url.ts"
-        }
+  "name": "@parametric-portal/runtime",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": {
+    "./css-sync": {
+      "types": "./src/css-sync.ts",
+      "import": "./src/css-sync.ts",
+      "default": "./src/css-sync.ts"
     },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "fix": "biome check --write .",
-        "test": "vitest run --config ../../vitest.config.ts --project runtime-browser",
-        "test:coverage": "vitest run --config ../../vitest.config.ts --project runtime-browser --coverage",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./hooks/browser": {
+      "types": "./src/hooks/browser.ts",
+      "import": "./src/hooks/browser.ts",
+      "default": "./src/hooks/browser.ts"
     },
-    "dependencies": {
-        "@effect/opentelemetry": "catalog:",
-        "@effect/platform": "catalog:",
-        "@effect/platform-browser": "catalog:",
-        "@floating-ui/react": "catalog:",
-        "@parametric-portal/database": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
-        "effect": "catalog:",
-        "idb-keyval": "catalog:",
-        "immer": "catalog:",
-        "jszip": "catalog:",
-        "nuqs": "catalog:",
-        "react-aria": "catalog:",
-        "zundo": "catalog:",
-        "zustand": "catalog:",
-        "zustand-computed": "catalog:",
-        "zustand-slices": "catalog:"
+    "./hooks/effect": {
+      "types": "./src/hooks/effect.ts",
+      "import": "./src/hooks/effect.ts",
+      "default": "./src/hooks/effect.ts"
     },
-    "peerDependencies": {
-        "react": "catalog:"
+    "./hooks/file-upload": {
+      "types": "./src/hooks/file-upload.ts",
+      "import": "./src/hooks/file-upload.ts",
+      "default": "./src/hooks/file-upload.ts"
     },
-    "devDependencies": {
-        "@effect/vitest": "catalog:",
-        "@fast-check/vitest": "catalog:",
-        "@parametric-portal/test-utils": "workspace:*",
-        "@testing-library/react": "catalog:",
-        "@types/react": "catalog:",
-        "@vitest/browser-playwright": "catalog:",
-        "fake-indexeddb": "catalog:",
-        "fast-check": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:",
-        "vitest-browser-react": "catalog:"
+    "./services/file": {
+      "types": "./src/services/file.ts",
+      "import": "./src/services/file.ts",
+      "default": "./src/services/file.ts"
+    },
+    "./hooks/suspense": {
+      "types": "./src/hooks/suspense.ts",
+      "import": "./src/hooks/suspense.ts",
+      "default": "./src/hooks/suspense.ts"
+    },
+    "./messaging": {
+      "types": "./src/messaging.ts",
+      "import": "./src/messaging.ts",
+      "default": "./src/messaging.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime.ts",
+      "import": "./src/runtime.ts",
+      "default": "./src/runtime.ts"
+    },
+    "./services/browser": {
+      "types": "./src/services/browser.ts",
+      "import": "./src/services/browser.ts",
+      "default": "./src/services/browser.ts"
+    },
+    "./services/telemetry": {
+      "types": "./src/services/telemetry.ts",
+      "import": "./src/services/telemetry.ts",
+      "default": "./src/services/telemetry.ts"
+    },
+    "./store/factory": {
+      "types": "./src/store/factory.ts",
+      "import": "./src/store/factory.ts",
+      "default": "./src/store/factory.ts"
+    },
+    "./store/storage": {
+      "types": "./src/store/storage.ts",
+      "import": "./src/store/storage.ts",
+      "default": "./src/store/storage.ts"
+    },
+    "./stores/auth": {
+      "types": "./src/stores/auth.ts",
+      "import": "./src/stores/auth.ts",
+      "default": "./src/stores/auth.ts"
+    },
+    "./url": {
+      "types": "./src/url.ts",
+      "import": "./src/url.ts",
+      "default": "./src/url.ts"
     }
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "test": "vitest run --config ../../vitest.config.ts --project runtime-browser",
+    "test:coverage": "vitest run --config ../../vitest.config.ts --project runtime-browser --coverage",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/opentelemetry": "catalog:",
+    "@effect/platform": "catalog:",
+    "@effect/platform-browser": "catalog:",
+    "@floating-ui/react": "catalog:",
+    "@parametric-portal/database": "workspace:*",
+    "@parametric-portal/types": "workspace:*",
+    "effect": "catalog:",
+    "idb-keyval": "catalog:",
+    "immer": "catalog:",
+    "jszip": "catalog:",
+    "nuqs": "catalog:",
+    "react-aria": "catalog:",
+    "zundo": "catalog:",
+    "zustand": "catalog:",
+    "zustand-computed": "catalog:",
+    "zustand-slices": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@fast-check/vitest": "catalog:",
+    "@parametric-portal/test-utils": "workspace:*",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "fake-indexeddb": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vitest-browser-react": "catalog:"
+  }
 }

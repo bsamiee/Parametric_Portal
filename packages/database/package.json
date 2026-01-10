@@ -1,46 +1,46 @@
 {
-    "name": "@parametric-portal/database",
-    "version": "1.0.7",
-    "type": "module",
-    "exports": {
-        "./client": {
-            "types": "./src/client.ts",
-            "import": "./src/client.ts",
-            "default": "./src/client.ts"
-        },
-        "./migrator": {
-            "types": "./src/migrator.ts",
-            "import": "./src/migrator.ts",
-            "default": "./src/migrator.ts"
-        },
-        "./repos": {
-            "types": "./src/repos.ts",
-            "import": "./src/repos.ts",
-            "default": "./src/repos.ts"
-        }
+  "name": "@parametric-portal/database",
+  "version": "2.0.0",
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
     },
-    "scripts": {
-        "build": "vite build",
-        "check": "biome check .",
-        "fix": "biome check --write .",
-        "test": "vitest run --passWithNoTests",
-        "typecheck": "tsc --project tsconfig.json --noEmit"
+    "./migrator": {
+      "types": "./src/migrator.ts",
+      "import": "./src/migrator.ts",
+      "default": "./src/migrator.ts"
     },
-    "dependencies": {
-        "@effect/experimental": "catalog:",
-        "@effect/platform": "catalog:",
-        "@effect/sql": "catalog:",
-        "@effect/sql-drizzle": "catalog:",
-        "@effect/sql-pg": "catalog:",
-        "@parametric-portal/server": "workspace:*",
-        "@parametric-portal/types": "workspace:*",
-        "drizzle-orm": "catalog:",
-        "effect": "catalog:"
-    },
-    "devDependencies": {
-        "drizzle-kit": "catalog:",
-        "typescript": "catalog:",
-        "vite": "catalog:",
-        "vitest": "catalog:"
+    "./repos": {
+      "types": "./src/repos.ts",
+      "import": "./src/repos.ts",
+      "default": "./src/repos.ts"
     }
+  },
+  "scripts": {
+    "build": "vite build",
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@effect/experimental": "catalog:",
+    "@effect/platform": "catalog:",
+    "@effect/sql": "catalog:",
+    "@effect/sql-drizzle": "catalog:",
+    "@effect/sql-pg": "catalog:",
+    "@parametric-portal/server": "workspace:*",
+    "@parametric-portal/types": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
 }
