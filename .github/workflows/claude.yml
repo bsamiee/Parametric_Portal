@@ -25,25 +25,36 @@ jobs:
       id-token: write
       actions: read
     steps:
+      - name: Check for review request
+        id: check-review
+        run: |
+          COMMENT_BODY="${{ github.event.comment.body || github.event.review.body || github.event.issue.body || '' }}"
+          if echo "$COMMENT_BODY" | grep -iqE '@claude\s+(code\s+)?review'; then
+            echo "is_review=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_review=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger Code Review
+        if: steps.check-review.outputs.is_review == 'true' && github.event.issue.pull_request != null
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.issue.number }}
+          gh workflow run claude-code-review.yml -f pr_number=$PR_NUMBER
+          gh issue comment $PR_NUMBER --body "🔍 Code review triggered. Check the [Actions tab](/${{ github.repository }}/actions/workflows/claude-code-review.yml) for progress."
+
       - name: Checkout repository
+        if: steps.check-review.outputs.is_review == 'false'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
+        if: steps.check-review.outputs.is_review == 'false'
         id: claude
         uses: anthropics/claude-code-action@7145c3e0510bcdbdd29f67cc4a8c1958f1acfa2f # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-          # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
-
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
