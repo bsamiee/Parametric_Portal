@@ -1,14 +1,15 @@
 /**
- * Bridge file upload to React state with auto-wired props.
+ * Bridge file upload to React state with progress tracking.
  * Uses FileOps service for processing, returns component-ready props.
+ * Progress derived from per-file completion (completedFiles / totalFiles).
  */
 import type { AppError } from '@parametric-portal/types/app-error';
 import { AsyncState, type AsyncStateType } from '@parametric-portal/types/async';
 import type { FileUploadConfig, MimeType, ValidatedFile } from '@parametric-portal/types/files';
 import { Effect } from 'effect';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Runtime } from '../runtime';
 import { FileOps } from '../services/file';
-import { useEffectMutate } from './effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -27,11 +28,13 @@ type FileUploadProps<T extends MimeType> = {
     readonly defaultCamera?: 'environment' | 'user';
     readonly multiple?: boolean;
     readonly onFilesChange: (files: ReadonlyArray<File>) => void;
+    readonly progress: number;
 };
 type FileUploadReturn<T extends MimeType> = {
     readonly error: AppError<'File'> | null;
     readonly fileResults: ReadonlyArray<FileValidationResult<T>>;
     readonly isPending: boolean;
+    readonly progress: number;
     readonly props: FileUploadProps<T>;
     readonly reset: () => void;
     readonly results: ReadonlyArray<ValidatedFile<T>>;
@@ -40,13 +43,50 @@ type FileUploadReturn<T extends MimeType> = {
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const useFileUpload = <T extends MimeType = MimeType>(config: FileUploadHookConfig<T> = {}): FileUploadReturn<T> => {
-    const processEffect = useMemo(
-        () => (files: ReadonlyArray<File>) =>
-            FileOps.pipe(Effect.flatMap((ops) => ops.processUpload<T>(files, config))),
-        [config],
+    const runtime = Runtime.use<FileOps, never>();
+    const [state, setState] = useState<AsyncStateType<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>>(
+        AsyncState.Idle(),
     );
-    const { mutate, reset, state } = useEffectMutate(processEffect);
+    const [progress, setProgress] = useState(0);
+    const completedRef = useRef(0);
     const isPending = AsyncState.isPending(state);
+    const mutate = useCallback(
+        (files: ReadonlyArray<File>) => {
+            setState(AsyncState.Loading());
+            setProgress(0);
+            completedRef.current = 0;
+            const total = files.length;
+            runtime.runFork(
+                Effect.gen(function* () {
+                    const ops = yield* FileOps;
+                    const results = yield* Effect.all(
+                        files.map((file) =>
+                            ops.processUpload<T>([file], config).pipe(
+                                Effect.tap(() =>
+                                    Effect.sync(() => {
+                                        completedRef.current += 1;
+                                        setProgress((completedRef.current / total) * 100);
+                                    }),
+                                ),
+                                Effect.map((r) => r[0] as ValidatedFile<T>),
+                            ),
+                        ),
+                        { concurrency: 'unbounded' },
+                    );
+                    return results as ReadonlyArray<ValidatedFile<T>>;
+                }).pipe(
+                    Effect.tap((data) => Effect.sync(() => setState(AsyncState.Success(data)))),
+                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(e)))),
+                ),
+            );
+        },
+        [runtime, config],
+    );
+    const reset = useCallback(() => {
+        setState(AsyncState.Idle());
+        setProgress(0);
+        completedRef.current = 0;
+    }, []);
     const { error, fileResults, results } = useMemo(
         () =>
             AsyncState.$match(state, {
@@ -81,12 +121,13 @@ const useFileUpload = <T extends MimeType = MimeType>(config: FileUploadHookConf
             ...(config.defaultCamera != null && { defaultCamera: config.defaultCamera }),
             ...(config.multiple != null && { multiple: config.multiple }),
             onFilesChange: (files) => files.length > 0 && mutate(files),
+            progress,
         }),
-        [config.allowedTypes, config.acceptDirectory, config.defaultCamera, config.multiple, state, mutate],
+        [config.allowedTypes, config.acceptDirectory, config.defaultCamera, config.multiple, state, mutate, progress],
     );
     return useMemo(
-        () => ({ error, fileResults, isPending, props, reset, results }),
-        [error, fileResults, isPending, props, reset, results],
+        () => ({ error, fileResults, isPending, progress, props, reset, results }),
+        [error, fileResults, isPending, progress, props, reset, results],
     );
 };
 

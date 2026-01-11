@@ -10,12 +10,14 @@
  * Supports: onAction for navigation callbacks, gesture integration, tooltips.
  */
 import { useMergeRefs } from '@floating-ui/react';
+import type { AsyncState } from '@parametric-portal/types/async';
 import { ChevronRight, MoreHorizontal } from 'lucide-react';
 import { createContext, type FC, type ReactNode, type Ref, type RefObject, useContext, useMemo, useRef } from 'react';
 import {
 	Breadcrumb as RACBreadcrumb, type BreadcrumbProps as RACBreadcrumbProps, Breadcrumbs as RACBreadcrumbs, type BreadcrumbsProps as RACBreadcrumbsProps,
 	type Key, Link as RACLink, type LinkProps as RACLinkProps,
 } from 'react-aria-components';
+import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
 import { type GestureProps, useGesture } from '../core/gesture';
 import { cn, defined, isExternalHref, Slot, type SlotInput } from '../core/utils';
@@ -33,6 +35,7 @@ type BreadcrumbsProps<T extends object = object> = Omit<RACBreadcrumbsProps<T>, 
 	readonly variant?: string;
 };
 type BreadcrumbsItemProps = Omit<RACBreadcrumbProps, 'children' | 'id'> & {
+	readonly asyncState?: AsyncState;
 	readonly children?: SlotInput<ReactNode>;
 	readonly className?: string;
 	readonly ellipsis?: boolean;
@@ -100,9 +103,9 @@ const BreadcrumbsContext = createContext<BreadcrumbsContextValue | null>(null);
 // --- [SUB-COMPONENTS] --------------------------------------------------------
 
 const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
-	children, className, ellipsis, ellipsisIcon, gesture, href, id, isDisabled, prefix, ref, separator, tooltip, ...racProps }) => {
+	asyncState, children, className, ellipsis, ellipsisIcon, gesture, href, id, isDisabled, prefix, ref, separator, tooltip, ...racProps }) => {
 	const ctx = useContext(BreadcrumbsContext);
-	const slot = Slot.bind(undefined);
+	const slot = Slot.bind(asyncState);
 	const ellipsisMode = ellipsis === true;
 	const isExternal = isExternalHref(href);
 	const target = isExternal ? '_blank' : undefined;
@@ -111,7 +114,7 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLLIElement>]);
 	const linkRef = useRef<HTMLAnchorElement>(null);
 	const { props: gestureProps } = useGesture({
-		isDisabled: isDisabled ?? false,
+		isDisabled: isDisabled || slot.pending,
 		prefix: 'breadcrumbs-link',
 		ref: linkRef as RefObject<HTMLElement | null>,
 		...gesture,
@@ -125,6 +128,7 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 				{...(racProps as RACBreadcrumbProps)}
 				{...(tooltipProps as object)}
 				className={cn(B.slot.item, className)}
+				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-ellipsis='true'
 				data-size={ctx?.size}
@@ -142,12 +146,14 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 				</span>
 			</RACBreadcrumb>
 			{renderTooltip?.()}
+			<AsyncAnnouncer asyncState={asyncState} />
 		</>
 	) : (
 		<>
 			<RACBreadcrumb
 				{...(racProps as RACBreadcrumbProps)}
 				className={cn(B.slot.item, className)}
+				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-size={ctx?.size}
 				data-slot='breadcrumbs-item'
@@ -158,10 +164,10 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 				<RACLink
 					{...({ ...tooltipProps, ...gestureProps } as unknown as RACLinkProps)}
 					className={B.slot.link}
-					data-disabled={isDisabled || undefined}
+					data-disabled={isDisabled || slot.pending || undefined}
 					data-slot='breadcrumbs-link'
 					ref={mergedLinkRef}
-					{...defined({ href, isDisabled, rel, target })}
+					{...defined({ href, isDisabled: isDisabled || slot.pending, rel, target })}
 				>
 					{slot.render(prefix, B.slot.icon)}
 					<span>{slot.resolve(children)}</span>
@@ -171,6 +177,7 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 				</span>
 			</RACBreadcrumb>
 			{renderTooltip?.()}
+			<AsyncAnnouncer asyncState={asyncState} />
 		</>
 	);
 };

@@ -10,7 +10,6 @@ import { Duration, Option, Schema as S, Schedule } from 'effect';
 
 // Derive secure flag from API_BASE_URL - only true for HTTPS (prevents HTTP cookie issues)
 const isSecureContext = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
-
 const B = Object.freeze({
     cookie: { maxAge: 2592000, name: 'refreshToken', path: '/api/auth', secure: isSecureContext },
     durations: {

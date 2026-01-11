@@ -334,8 +334,8 @@ const config: {
         optimizeDeps: {
             esbuildOptions: { supported: { 'top-level-await': true }, target: 'esnext' },
             exclude: [...B.ssr.noExt],
-            force: !prod,
-            holdUntilCrawlEnd: false,
+            force: false,
+            holdUntilCrawlEnd: true,
             include: [...B.ssr.ext, 'react-aria-components', '@floating-ui/react', 'effect'],
         },
         plugins: plugins.app(c, prod),
@@ -345,16 +345,38 @@ const config: {
             hmr: { overlay: true },
             port: c.port ?? B.port,
             strictPort: false,
-            warmup: { clientFiles: ['./apps/*/src/main.tsx', './packages/*/src/index.ts'] },
+            warmup: { clientFiles: ['./apps/*/src/main.tsx'] },
             watch: {
                 ignored: [
+                    // Dependencies and version control
+                    '**/node_modules/**',
+                    '**/.git/**',
+                    '**/.pnpm-store/**',
+                    // Build outputs
                     '**/dist/**',
+                    '**/build/**',
+                    '**/out/**',
+                    // Caches
                     '**/.nx/**',
-                    '**/coverage/**',
                     '**/.vite/**',
                     '**/.vite-inspect/**',
+                    '**/.cache/**',
+                    '**/.turbo/**',
+                    '**/coverage/**',
+                    // Test artifacts
                     '**/test-results/**',
+                    '**/playwright-report/**',
+                    '**/playwright/.cache/**',
+                    '**/stryker-tmp/**',
+                    '**/reports/**',
+                    // Python artifacts
+                    '**/__pycache__/**',
+                    '**/.venv/**',
+                    '**/venv/**',
+                    '**/*.pyc',
+                    // Logs and misc
                     '**/*.log',
+                    '**/.DS_Store',
                 ],
                 ignoreInitial: true,
             },

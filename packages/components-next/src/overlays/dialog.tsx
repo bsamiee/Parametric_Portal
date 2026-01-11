@@ -3,12 +3,14 @@
  * Uses React Aria Components Dialog with ModalOverlay for focus management.
  * useDialog hook provides deferred action pattern for confirmation workflows.
  */
+import { AsyncState, type AsyncStateType } from '@parametric-portal/types/async';
 import type { CSSProperties, FC, ReactNode, Ref, RefObject } from 'react';
 import { createContext, useContext, useMemo, useRef, useState } from 'react';
 import {
 	Dialog as RACDialog, type DialogProps as RACDialogProps, DialogTrigger as RACDialogTrigger,
 	Heading, Modal as RACModal, ModalOverlay as RACModalOverlay,
 } from 'react-aria-components';
+import { AsyncAnnouncer } from '../core/announce';
 import { cn, composeTailwindRenderProps, defined } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -29,8 +31,10 @@ type DialogRenderContext = {
 	readonly close: () => void;
 	readonly confirm: () => void;
 	readonly isOpen: boolean;
+	readonly isPending: boolean;
 };
 type DialogConfig = {
+	readonly asyncState?: AsyncStateType<unknown, unknown>;
 	readonly backdropBlur?: boolean;
 	readonly buttons?: readonly DialogButton[];
 	readonly className?: string;
@@ -49,6 +53,7 @@ type DialogResult<P extends object = object> = {
 	readonly close: () => void;
 	readonly confirm: () => void;
 	readonly isOpen: boolean;
+	readonly isPending: boolean;
 	readonly open: (onConfirm?: () => void) => void;
 	readonly props: P & { readonly ref: Ref<HTMLElement> };
 	readonly ref: RefObject<HTMLElement | null>;
@@ -142,6 +147,7 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 	const [internalOpen, setInternalOpen] = useState(false);
 	const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 	const isOpen = cfg?.open ?? internalOpen;
+	const isPending = AsyncState.isPending(cfg?.asyncState);
 	const behavior = resolveDialogBehavior(cfg);
 	const { close, confirm, handleOpenChange, open } = useMemo(() => ({
 		close: () => { setPendingAction(null); setInternalOpen(false); cfg?.onOpenChange?.(false); },
@@ -157,7 +163,7 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 		ref: baseRef ?? triggerRef,
 	} as P & { ref: Ref<HTMLElement> }), [baseProps, baseRef]);
 	const contextValue: DialogContextValue = useMemo(() => ({ role: behavior.role }), [behavior.role]);
-	const renderContext: DialogRenderContext = { close, confirm, isOpen };
+	const renderContext: DialogRenderContext = { close, confirm, isOpen, isPending };
 	const hasContent = cfg?.title || cfg?.description || cfg?.content || cfg?.buttons;
 	const render = has && isOpen && hasContent ? () => (
 		<RACModalOverlay
@@ -185,6 +191,7 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 										// biome-ignore lint/a11y/noAutofocus: dialog buttons may require autofocus for UX
 										autoFocus={btn.autoFocus}
 										className={cn(B.slot.button, btn.action === 'confirm' ? B.slot.buttonConfirm : B.slot.buttonCancel, btn.className)}
+										disabled={isPending}
 										key={`${btn.action}-${String(btn.label)}`}
 										onClick={btn.action === 'confirm' ? confirm : close}
 										type='button'
@@ -194,12 +201,13 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 								))}
 							</div>
 						)}
+						<AsyncAnnouncer asyncState={cfg.asyncState} />
 					</DialogContext.Provider>
 				</RACDialog>
 			</RACModal>
 		</RACModalOverlay>
 	) : null;
-	return { close, confirm, isOpen: has && isOpen, open, props: mergedProps, ref: triggerRef, render };
+	return { close, confirm, isOpen: has && isOpen, isPending, open, props: mergedProps, ref: triggerRef, render };
 };
 
 // --- [SUB-COMPONENTS] --------------------------------------------------------

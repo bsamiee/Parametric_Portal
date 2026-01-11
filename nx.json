@@ -75,7 +75,8 @@
             "sharedGlobals"
         ]
     },
-    "parallel": 2,
+    "nxCloudAccessToken": "",
+    "parallel": 4,
     "plugins": [
         {
             "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
@@ -89,7 +90,7 @@
             "plugin": "@nx/vite/plugin"
         },
         {
-            "exclude": ["tools/**/*", "**/node_modules/**"],
+            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
             "include": ["apps/*/vite.config.ts", "packages/*/vite.config.ts"],
             "options": {
                 "testMode": "run",
@@ -98,7 +99,7 @@
             "plugin": "@nx/vitest"
         },
         {
-            "exclude": ["tools/**/*"],
+            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
             "include": ["apps/*/Dockerfile"],
             "options": {
                 "buildTargetName": "docker:build",
@@ -114,8 +115,8 @@
             "plugin": "@nx/playwright/plugin"
         },
         {
-            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**"],
-            "include": ["apps/*", "packages/*"],
+            "exclude": ["tools/**/*", "**/node_modules/**", "**/dist/**", "**/.nx/**", "**/.vite/**"],
+            "include": ["apps/*/biome.json", "packages/*/biome.json", "biome.json"],
             "options": {
                 "targetName": "check"
             },
@@ -346,7 +347,8 @@
             }
         }
     },
-    "useInferencePlugins": true,
+    "useInferencePlugins": false,
+    "useLegacyCache": false,
     "workspaceLayout": {
         "appsDir": "apps",
         "libsDir": "packages"

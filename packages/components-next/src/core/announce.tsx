@@ -1,12 +1,14 @@
 /**
- * Screen reader announcements for async state transitions.
+ * Screen reader announcements and accessibility utilities.
  * Uses @react-aria/live-announcer singleton for stable live regions.
  * Safari-safe: announcer handles 100ms timing quirk internally.
+ * VisuallyHidden: Content hidden visually but accessible to screen readers.
  */
 import { announce } from '@react-aria/live-announcer';
 import { AsyncState } from '@parametric-portal/types/async';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
+import { VisuallyHidden as RACVisuallyHidden } from 'react-aria-components';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -61,8 +63,11 @@ const AsyncAnnouncer: FC<{
     useAsyncAnnounce(asyncState, config);
     return null;
 };
+const VisuallyHidden: FC<{ readonly children: ReactNode }> = ({ children }) => (
+    <RACVisuallyHidden>{children}</RACVisuallyHidden>
+);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AsyncAnnouncer, useAsyncAnnounce };
+export { AsyncAnnouncer, useAsyncAnnounce, VisuallyHidden };
 export type { Assertiveness, AsyncAnnounceConfig };

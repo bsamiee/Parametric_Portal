@@ -133,8 +133,8 @@ const useExport = (): ExportState => {
             runtime.runFork(
                 Effect.gen(function* () {
                     const svc = yield* Browser;
-                    yield* svc.export({ ...input, onProgress: setProgress });
-                    setProgress(1);
+                    yield* svc.export({ ...input, onProgress: (p) => setProgress(p * 100) });
+                    setProgress(100);
                 }).pipe(
                     Effect.tap(() => Effect.sync(() => setState(AsyncState.Success(undefined)))),
                     Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(e)))),

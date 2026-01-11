@@ -22,6 +22,7 @@ type NumberFieldProps = Omit<RACNumberFieldProps, 'children'> & {
 	readonly decrementIcon: SlotInput;
 	readonly description?: ReactNode;
 	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
+	readonly formatOptions?: Intl.NumberFormatOptions;
 	readonly gesture?: GestureProps;
 	readonly incrementIcon: SlotInput;
 	readonly label?: ReactNode;
@@ -71,7 +72,7 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const NumberField: FC<NumberFieldProps> = ({
-	asyncState, className, color, decrementIcon, description, errorMessage, gesture, incrementIcon, isDisabled, label, ref, size, tooltip, variant, ...racProps }) => {
+	asyncState, className, color, decrementIcon, description, errorMessage, formatOptions, gesture, incrementIcon, isDisabled, label, ref, size, tooltip, variant, ...racProps }) => {
 	const slot = Slot.bind(asyncState);
 	const fieldRef = useRef<HTMLDivElement>(null);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
@@ -87,6 +88,7 @@ const NumberField: FC<NumberFieldProps> = ({
 		<>
 			<RACNumberField
 				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACNumberFieldProps)}
+				{...(formatOptions && { formatOptions })}
 				className={composeTailwindRenderProps(className, B.slot.root)}
 				data-async-state={slot.attr}
 				data-color={color}

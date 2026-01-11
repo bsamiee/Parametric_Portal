@@ -1,191 +1,140 @@
 <project_specification>
   <project_name>React Aria Components Wrapper Library</project_name>
 
-  <overview>
-    A comprehensive React component library built as a wrapper around Adobe React Aria Components within an Nx monorepo architecture. The library provides accessible, production-ready UI components with built-in gesture support, async-aware rendering, and screen reader announcements. All components are styled with Tailwind CSS v4 and follow strict TypeScript patterns for type safety. The project focuses on delivering enterprise-grade accessibility, consistent design patterns, and developer-friendly APIs through compound components and composable hooks.
-  </overview>
+  <overview>RAC wrapper library in Nx monorepo. Components use Slot.bind(asyncState) for async-aware rendering, useGesture/useTooltip hooks, compound patterns via Object.assign, CSS variable theming with data-* attributes.</overview>
 
   <technology_stack>
-    <technology>React 19 canary (19.3.0-canary)</technology>
-    <technology>React Aria Components 1.14</technology>
-    <technology>TypeScript 6.0-dev (strict mode)</technology>
-    <technology>Tailwind CSS v4 (4.1.18)</technology>
-    <technology>Vite 7.3</technology>
-    <technology>Effect 3.19 for functional composition</technology>
-    <technology>Nx Monorepo</technology>
-    <technology>CSS Variables for theming</technology>
-    <technology>Biome for linting and formatting</technology>
-    <technology>LightningCSS for transforms</technology>
+    <technology>React 19 canary, React Aria Components, TypeScript strict, Tailwind CSS v4, Vite, Effect, Nx, Biome, LightningCSS</technology>
+    <technology>Versions in pnpm-workspace.yaml catalog - always check before adding dependencies</technology>
   </technology_stack>
 
-  <core_capabilities>
-    <capability>Accessible UI components following WAI-ARIA standards via React Aria</capability>
-    <capability>Async-aware rendering with Slot.bind(asyncState) for dynamic content states</capability>
-    <capability>Advanced gesture support including drag, long press, and physics-based interactions via useGesture hook</capability>
-    <capability>Integrated tooltip system with useTooltip hook on all interactive elements</capability>
-    <capability>Screen reader announcements through AsyncAnnouncer for dynamic content changes</capability>
-    <capability>Compound component patterns using Object.assign for intuitive component composition</capability>
-    <capability>CSS variable-based theming with runtime utilities (readCssVar, readCssMs, readCssPx)</capability>
-    <capability>Data attribute-driven styling (data-slot, data-color, data-size, data-async-state)</capability>
-    <capability>Strict TypeScript typing with required color and size props (no defaults)</capability>
-    <capability>Tailwind CSS class merging via cn() utility for flexible styling</capability>
-  </core_capabilities>
-
-  <implemented_features>
-    <feature>
-      <name>Core Infrastructure</name>
-      <description>Foundational utilities and hooks in core/ directory</description>
-      <components>
-        <component>core/utils.ts - Slot.bind(asyncState) for async rendering, cn() for Tailwind merge, composeTailwindRenderProps for className composition</component>
-        <component>core/gesture.ts - useGesture() hook with drag, longPress, and physics support</component>
-        <component>core/floating.tsx - useTooltip() hook for tooltip integration</component>
-        <component>core/announce.tsx - AsyncAnnouncer for screen reader accessibility</component>
-        <component>core/focus.tsx - Focus management utilities</component>
-      </components>
-    </feature>
-    <feature>
-      <name>Runtime Package</name>
-      <description>CSS variable runtime utilities in packages/runtime</description>
-      <components>
-        <component>readCssVar() - Read CSS custom property values</component>
-        <component>readCssMs() - Parse CSS time values in milliseconds</component>
-        <component>readCssPx() - Parse CSS length values in pixels</component>
-      </components>
-    </feature>
-    <feature>
-      <name>Action Components</name>
-      <description>Interactive action components in actions/ directory</description>
-      <components>
-        <component>Button - Standard and toggle modes with Button.Group compound pattern</component>
-        <component>Switch - Toggle switch with track/thumb styling</component>
-        <component>Checkbox - Single checkbox with indeterminate state support</component>
-        <component>CheckboxGroup - Grouped checkboxes with validation</component>
-      </components>
-    </feature>
-    <feature>
-      <name>Input Components</name>
-      <description>Form input components in inputs/ directory</description>
-      <components>
-        <component>TextField - Single-line text input with label, description, validation, prefix/suffix icons</component>
-        <component>SearchField - Search input with clear button and search icon</component>
-        <component>NumberField - Numeric input with increment/decrement controls</component>
-        <component>Radio - RadioGroup with Radio items, supports card and segmented modes</component>
-        <component>Select - Dropdown selection component with popover</component>
-      </components>
-    </feature>
-    <feature>
-      <name>Navigation Components</name>
-      <description>Navigation and menu components in navigation/ directory</description>
-      <components>
-        <component>Accordion - Expandable/collapsible content panels</component>
-        <component>Link - Text and button-styled link with external link detection</component>
-        <component>Menu - Menu.Item, Menu.Section, Menu.Separator with submenu support</component>
-        <component>Tabs - Tabbed navigation and content display</component>
-      </components>
-    </feature>
-    <feature>
-      <name>Overlay Components</name>
-      <description>Modal and overlay components in overlays/ directory</description>
-      <components>
-        <component>Dialog - Dialog.Header, Dialog.Body, Dialog.Footer with useDialog hook</component>
-      </components>
-    </feature>
-    <feature>
-      <name>Picker Components</name>
-      <description>File and media picker components in pickers/ directory</description>
-      <components>
-        <component>FileUpload - File selection and upload interface</component>
-        <component>FilePreview - File preview display component</component>
-      </components>
-    </feature>
-  </implemented_features>
-
   <development_guidelines>
-    <guideline>All components must define a frozen B constant using Object.freeze({ slot: {...}, cssVars: {...} })</guideline>
-    <guideline>Use Slot.bind(asyncState) for async-aware icon and content slots in all components</guideline>
-    <guideline>Color and size props are required on all components and must never have default values</guideline>
-    <guideline>Use compound component pattern with Object.assign(Root, { Item, Section }) for complex components</guideline>
-    <guideline>Apply useTooltip(tooltip) hook on every interactive element for accessibility</guideline>
-    <guideline>Use useGesture hook for components requiring drag, slider, or gesture interactions</guideline>
-    <guideline>All components must use data-* attributes: data-slot, data-color, data-size, data-async-state</guideline>
-    <guideline>CSS variables must follow --component-property naming convention</guideline>
-    <guideline>TypeScript strict mode must be enabled for all code</guideline>
-    <guideline>Use cn() utility from core/utils.ts for merging Tailwind CSS classes</guideline>
-    <guideline>Never create Modal or AlertDialog components (use Dialog with appropriate roles)</guideline>
-    <guideline>Never create polymorphic factory utilities (use Object.assign compound pattern)</guideline>
-    <guideline>Theme tokens and providers belong in packages/theme, not in components</guideline>
-    <guideline>Leverage existing CSS variable system from runtime package</guideline>
-    <guideline>Derive types from RAC using Omit pattern: type XProps = Omit&lt;RACXProps, 'children'&gt; &amp; {...}</guideline>
-    <guideline>Use composeTailwindRenderProps(className, B.slot.x) for RAC className composition</guideline>
-    <guideline>Use useMergeRefs from @floating-ui/react to combine multiple refs</guideline>
-    <guideline>Add AsyncAnnouncer component after main render for screen reader announcements</guideline>
-    <guideline>Follow file sections: TYPES → CONSTANTS → SUB-COMPONENTS → ENTRY_POINT → EXPORT</guideline>
-    <guideline>Export pattern: named component export first, then type exports on separate line</guideline>
-    <guideline>Import runtime utilities from @parametric-portal/runtime/runtime - never hand-roll</guideline>
+    <guideline>Frozen B constant per file: Object.freeze({ slot: {...} })</guideline>
+    <guideline>Slot.bind(asyncState) for async-aware slots in all components</guideline>
+    <guideline>Required props: color, size (no defaults)</guideline>
+    <guideline>Compound pattern: Object.assign(Root, { Item, Section })</guideline>
+    <guideline>Hooks: useTooltip on interactive elements, useGesture for drag/slider</guideline>
+    <guideline>Data attributes: data-slot, data-color, data-size, data-async-state</guideline>
+    <guideline>Types from RAC: type XProps = Omit&lt;RACXProps, 'children'&gt; &amp; {...}</guideline>
+    <guideline>File sections: TYPES → CONSTANTS → SUB-COMPONENTS → ENTRY_POINT → EXPORT</guideline>
+    <guideline>Mode props over separate files (Progress shape="linear"|"circular" pattern)</guideline>
+    <guideline>ONE LINE usage for common cases - composition only for advanced</guideline>
+    <guideline>Hide internal sub-components from export</guideline>
   </development_guidelines>
+
+  <anti_patterns>
+    <item>NO hand-rolled types → derive from RAC: Omit&lt;RACXProps, 'children'&gt; &amp; {...}</item>
+    <item>NO exposed internals (Thumb, Track, Cell) → auto-render within parent</item>
+    <item>NO separate files for modes → unify with type prop (Field type="text|search|number")</item>
+    <item>NO manual composition for basic usage → props enable features (triggerIcon={Icon})</item>
+    <item>NO type-only props → every prop MUST affect output</item>
+    <item>NO explicit children for simple cases → data props (colors={[...]}), children for advanced</item>
+    <item>NO deep nesting (5+ levels) → max 4, use Match/dispatch tables</item>
+    <item>NO nested ternaries (3+ branches) → Effect.Match.value().pipe()</item>
+    <item>NO manual null checks → Option.fromNullable().pipe(Option.map, Option.getOrElse)</item>
+    <item>NO hand-rolled utilities → use react-aria mergeProps/useObjectRef, Effect.Array/Record</item>
+  </anti_patterns>
+
+  <gold_standard_reference>
+    <name>Button Component</name>
+    <file>packages/components-next/src/actions/button.tsx</file>
+    <description>Demonstrates ideal component density - maximum functionality, minimum API surface</description>
+    <usage_example>
+      <code><![CDATA[
+<Button
+  asyncState={success.state}
+  children={{ default: 'Success', loading: 'Working...', success: 'Done!' }}
+  prefix={{ loading: Loader2, success: Check }}
+  color='primary' size='md' variant='solid'
+  onPress={() => success.mutate(undefined)}
+/>
+      ]]></code>
+    </usage_example>
+    <key_patterns>
+      <pattern>ONE component handles: standard press, toggle mode, async states, icons, tooltips, gestures</pattern>
+      <pattern>Toggle mode auto-detected from isSelected/defaultSelected/onChange props - no separate ToggleButton</pattern>
+      <pattern>Async-aware slots: children={{ default, loading, success, failure }} prefix={{ loading, success }}</pattern>
+      <pattern>No manual composition required - everything flows through props</pattern>
+      <pattern>168 lines total for full functionality - dense and focused</pattern>
+    </key_patterns>
+  </gold_standard_reference>
+
+  <quality_gate>
+    <description>Run after EVERY phase before proceeding</description>
+    <commands>
+      <cmd>pnpm exec nx run components-next:typecheck</cmd>
+      <cmd>pnpm exec nx run components-next:check</cmd>
+    </commands>
+    <review>
+      <item>VERIFY dense FP code - NO imperative if/else, use Match/Option/dispatch tables</item>
+      <item>VERIFY all props have REAL functionality - no dead props</item>
+      <item>VERIFY no handrolling - use RAC/Effect utilities</item>
+      <item>REDUCE LOC where better logic achieves same output</item>
+    </review>
+  </quality_gate>
 
   <implementation_roadmap>
     <phase>
-      <name>Phase 1 - Field Enhancements and Slider</name>
-      <description>Enhance existing fields, add slider component</description>
-      <components>
-        <component>text-field.tsx enhancement - Add multiline prop to switch Input to TextArea element</component>
-        <component>select.tsx enhancement - Add searchable prop for ComboBox filtering mode</component>
-        <component>slider.tsx (new) - Range slider with useGesture for drag, supports single and range values</component>
-      </components>
+      <name>Phase 0 - Code Quality &amp; Prop Audit</name>
+      <goal>Clean code before consolidation: Effect FP patterns, remove handrolling, verify prop functionality</goal>
+      <files>packages/components-next/src/**/*.tsx</files>
+      <tasks>
+        <task>Code Cleanup - flatten nesting (max 4 levels), nested ternaries → Match, null checks → Option, if/else → dispatch tables, consolidate to B constant</task>
+        <task>Remove Handrolling - audit utils against react-aria (mergeProps, useObjectRef, filterDOMProps) and Effect (Array, Record), keep only: cn(), Slot.bind(), composeTailwindRenderProps()</task>
+        <task>Prop Audit - trace every prop to real output (renders UI, modifies behavior, passes to RAC, sets data-*), remove dead props, implement missing functionality</task>
+        <task>Run quality_gate</task>
+      </tasks>
     </phase>
+
     <phase>
-      <name>Phase 2 - Color Components</name>
-      <description>Build color selection as single compound component file</description>
-      <components>
-        <component>color-picker.tsx (new) - ColorPicker compound with Color.Area, Color.Slider, Color.Field, Color.Swatch, Color.SwatchPicker, Color.Wheel subcomponents</component>
-      </components>
+      <name>Phase 1 - Field Unification</name>
+      <goal>Unify TextField + SearchField + NumberField → single Field with type="text|search|number"</goal>
+      <tasks>
+        <task>Create packages/components-next/src/inputs/field.tsx - discriminated union, shared base props, mode-specific props (text: multiline/rows, search: searchIcon/clearIcon, number: incrementIcon/decrementIcon/formatOptions), data-type attribute</task>
+        <task>Delete text-field.tsx, search-field.tsx, number-field.tsx</task>
+        <task>Update packages/theme/src/component-wiring.ts - unified --field-* namespace with data-type overrides</task>
+        <task>Update apps/test-harness/src/app.tsx - Field with type prop</task>
+        <task>Run quality_gate</task>
+      </tasks>
     </phase>
+
     <phase>
-      <name>Phase 3 - DateTime Components</name>
-      <description>Build date/time as three logical groupings by interaction pattern</description>
-      <components>
-        <component>date-time-field.tsx (new) - DateField + TimeField segmented keyboard inputs in one file</component>
-        <component>calendar.tsx (new) - Calendar + RangeCalendar visual grid selection in one file</component>
-        <component>date-picker.tsx (new) - DatePicker + DateRangePicker overlay components in one file</component>
-      </components>
+      <name>Phase 2 - Slider Simplification</name>
+      <goal>Auto-render Track/Thumb - target 1 line usage</goal>
+      <target><![CDATA[<Slider color='primary' size='md' defaultValue={50} thumbTooltip />
+<Slider color='primary' size='md' defaultValue={[25, 75]} thumbTooltip /> <!-- range auto-detected -->]]></target>
+      <tasks>
+        <task>Update packages/components-next/src/inputs/slider.tsx - add thumbTooltip prop, auto-render Track+Thumb(s) when no children, detect array=range/number=single</task>
+        <task>Update test-harness - one-line usage, keep one advanced Track/Thumb example</task>
+        <task>Run quality_gate</task>
+      </tasks>
     </phase>
+
     <phase>
-      <name>Phase 4 - Advanced Collections</name>
-      <description>Build complex data display components</description>
-      <components>
-        <component>table.tsx (new) - Table with sorting, selection, column resize, row actions</component>
-        <component>tree.tsx (new) - Tree hierarchical view with expand/collapse and selection</component>
-        <component>grid-list.tsx (new) - GridList for grid-based item selection with keyboard nav</component>
-        <component>tag-group.tsx (new) - TagGroup for tag display with removal and keyboard navigation</component>
-      </components>
+      <name>Phase 3 - ColorPicker Simplification</name>
+      <goal>Auto-render Thumb in Area/Slider/Wheel, colors prop for SwatchPicker</goal>
+      <target><![CDATA[<ColorPicker.Area thumbTooltip /> <!-- auto-renders Thumb -->
+<ColorPicker.SwatchPicker colors={['#ef4444', '#f97316', '#eab308']} />]]></target>
+      <tasks>
+        <task>Update packages/components-next/src/pickers/color-picker.tsx - thumbTooltip prop on Area/Slider/Wheel (auto-render Thumb), colors prop on SwatchPicker (auto-render items)</task>
+        <task>Remove from export: Thumb, WheelTrack, SwatchPickerItem, Swatch (keep internal)</task>
+        <task>Update test-harness - simplified usage</task>
+        <task>Run quality_gate</task>
+      </tasks>
     </phase>
+
     <phase>
-      <name>Phase 5 - Sheet Overlay</name>
-      <description>Build edge-positioned drawer component (custom, not RAC)</description>
-      <components>
-        <component>sheet.tsx (new) - Edge-positioned drawer/panel sliding from top, right, bottom, left with gesture dismiss</component>
-      </components>
-    </phase>
-    <phase>
-      <name>Phase 6 - Navigation and Feedback</name>
-      <description>Build navigation aids and progress indicators</description>
-      <components>
-        <component>breadcrumbs.tsx (new) - Breadcrumbs navigation trail with overflow handling</component>
-        <component>toolbar.tsx (new) - Toolbar container for grouped action controls</component>
-        <component>progress.tsx (new) - ProgressBar + Meter in one file (both are progress indicators)</component>
-      </components>
+      <name>Phase 4 - DatePicker Simplification</name>
+      <goal>Auto-compose with triggerIcon prop, unify Range via mode prop - target 1 line usage</goal>
+      <target><![CDATA[<DatePicker color='primary' size='md' triggerIcon={Calendar} />
+<DatePicker color='primary' size='md' triggerIcon={Calendar} mode='range' />]]></target>
+      <tasks>
+        <task>Update packages/components-next/src/pickers/date-picker.tsx - triggerIcon prop auto-composes Field+Trigger+Popover+Calendar, mode="single|range" prop replaces DatePicker.Range</task>
+        <task>Remove from export: Group, Popover, Cell, Grid, Header, HeaderCell, Segment, RangeField, RangeCalendar (keep internal)</task>
+        <task>Update test-harness - one-line usage, keep one advanced composition example</task>
+        <task>Run quality_gate</task>
+        <task>Final audit: verify FP patterns consistent across ALL components</task>
+      </tasks>
     </phase>
   </implementation_roadmap>
-
-  <additional_requirements>
-    <requirement>All components must be tested for keyboard navigation and screen reader compatibility</requirement>
-    <requirement>Components must support both controlled and uncontrolled patterns where applicable</requirement>
-    <requirement>All interactive components must provide visual focus indicators</requirement>
-    <requirement>Components must handle loading, error, and empty states via async-aware slots</requirement>
-    <requirement>Documentation must include accessibility considerations and ARIA patterns used</requirement>
-    <requirement>Each component must export TypeScript types for props and compound subcomponents</requirement>
-    <requirement>Components must be tree-shakeable for optimal bundle size</requirement>
-    <requirement>All gesture-based interactions must include fallback keyboard controls</requirement>
-  </additional_requirements>
 </project_specification>

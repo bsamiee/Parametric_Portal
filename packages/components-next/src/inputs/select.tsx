@@ -7,12 +7,13 @@
 import { FloatingNode, useFloatingNodeId, useMergeRefs } from '@floating-ui/react';
 import { readCssPx } from '@parametric-portal/runtime/runtime';
 import type { AsyncState } from '@parametric-portal/types/async';
+import { Check } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { createContext, useContext, type FC, type ReactElement, type ReactNode, type Ref, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	ComboBox as RACComboBox, FieldError, Header, Input, type Key, Label, ListBox, type ListBoxProps, ListBoxItem, type ListBoxItemProps, type ListBoxItemRenderProps,
-	ListBoxSection, type ListBoxSectionProps, Popover, Button as RACButton, Select as RACSelect, type SelectProps as RACSelectProps, SelectValue, Separator, Text,
-	type ValidationResult,
+	ListBoxSection, type ListBoxSectionProps, Popover, Button as RACButton, Select as RACSelect, type SelectProps as RACSelectProps, type Selection,
+	SelectValue, Separator, Text, type ValidationResult,
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
@@ -21,7 +22,7 @@ import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../
 // --- [TYPES] -----------------------------------------------------------------
 
 type SelectOption = { readonly id: Key; readonly label: string };
-type SelectContextValue = { readonly size: string };
+type SelectContextValue = { readonly selectionMode: 'multiple' | 'single'; readonly size: string };
 type SelectProps<T extends SelectOption = SelectOption> = Omit<RACSelectProps<T>, 'children'> &
 	Pick<ListBoxProps<T>, 'dependencies' | 'disallowEmptySelection' | 'escapeKeyBehavior' | 'items' | 'layout' | 'orientation' | 'renderEmptyState' | 'selectionBehavior' | 'shouldFocusOnHover' | 'shouldFocusWrap'> & {
 	readonly asyncState?: AsyncState;
@@ -31,8 +32,11 @@ type SelectProps<T extends SelectOption = SelectOption> = Omit<RACSelectProps<T>
 	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
 	readonly label?: ReactNode;
 	readonly offset?: number;
+	readonly onSelectionChange?: (keys: Set<Key>) => void;
 	readonly ref?: Ref<HTMLDivElement>;
 	readonly searchable?: boolean;
+	readonly selectedKeys?: Iterable<Key>;
+	readonly selectionMode?: 'multiple' | 'single';
 	readonly size: string;
 	readonly suffix: LucideIcon | ReactNode;
 	readonly tooltip?: TooltipConfig;
@@ -104,6 +108,16 @@ const B = Object.freeze({
 			'bg-(--select-item-badge-bg) text-(--select-item-badge-fg)',
 			'rounded-(--select-item-badge-radius)',
 		),
+		itemCheckbox: cn(
+			'flex items-center justify-center shrink-0',
+			'size-(--select-item-checkbox-size)',
+			'rounded-(--select-item-checkbox-radius)',
+			'border-(--select-item-checkbox-border-width) border-(--select-item-checkbox-border-color)',
+			'bg-(--select-item-checkbox-bg)',
+			'transition-colors duration-(--select-transition-duration)',
+			'group-selected:bg-(--select-item-checkbox-selected-bg) group-selected:border-(--select-item-checkbox-selected-border)',
+		),
+		itemCheckboxIcon: cn('size-(--select-item-checkbox-icon-size) text-(--select-item-checkbox-icon-color)'),
 		itemDescription: cn('text-(--select-item-description-font-size) text-(--select-item-description-fg)'),
 		itemIcon: cn('size-(--select-item-icon-size) shrink-0'),
 		label: cn('text-(--select-label-size) text-(--select-label-color) font-(--select-label-weight)'),
@@ -152,14 +166,17 @@ const SelectContext = createContext<SelectContextValue | null>(null);
 
 const SelectRoot = <T extends SelectOption = SelectOption>({
 	asyncState, children, className, color, dependencies, description, disallowEmptySelection, errorMessage, escapeKeyBehavior, isDisabled, isInvalid, items,
-	label, layout, offset, orientation, placeholder, ref, renderEmptyState, searchable, selectionBehavior, shouldFocusOnHover, shouldFocusWrap,
-	size, suffix, tooltip, variant, ...racProps }: SelectProps<T>): ReactNode => {
+	label, layout, offset, onSelectionChange, orientation, placeholder, ref, renderEmptyState, searchable, selectedKeys, selectionBehavior, selectionMode = 'single',
+	shouldFocusOnHover, shouldFocusWrap, size, suffix, tooltip, variant, ...racProps }: SelectProps<T>): ReactNode => {
 	const nodeId = useFloatingNodeId();
 	const resolvedOffset = offset ?? readCssPx(B.cssVars.offset);
 	const triggerRef = useRef<HTMLButtonElement | HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState<number | undefined>();
 	const asyncSlot = Slot.bind(asyncState);
-	const contextValue = useMemo(() => ({ size }), [size]);
+	const contextValue = useMemo(() => ({ selectionMode, size }), [selectionMode, size]);
+	const handleSelectionChange = (selection: Selection) => {
+		onSelectionChange?.(selection === 'all' ? new Set<Key>() : selection as Set<Key>);
+	};
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
 	useEffect(() => {
@@ -173,6 +190,7 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 			<Popover
 				className={B.slot.popover}
 				data-color={color}
+				data-selection-mode={selectionMode}
 				data-size={size}
 				data-slot='select-popover'
 				data-theme='select'
@@ -183,7 +201,9 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 				<ListBox
 					className={B.slot.listbox}
 					data-slot='select-listbox'
-					{...defined({ dependencies, disallowEmptySelection, escapeKeyBehavior, items, layout, orientation, renderEmptyState, selectionBehavior, shouldFocusOnHover, shouldFocusWrap })}
+					onSelectionChange={handleSelectionChange}
+					selectionMode={selectionMode}
+					{...defined({ dependencies, disallowEmptySelection, escapeKeyBehavior, items, layout, orientation, renderEmptyState, selectedKeys, selectionBehavior, shouldFocusOnHover, shouldFocusWrap })}
 				>
 					{children}
 				</ListBox>
@@ -254,6 +274,8 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 };
 const SelectItem: FC<SelectItemProps> = ({
 	badge, children, className, description, destructive, icon, ref, tooltip, ...racProps }) => {
+	const ctx = useContext(SelectContext);
+	const isMultiple = ctx?.selectionMode === 'multiple';
 	const badgeMax = readCssPx(B.cssVars.badgeMax) || 99;
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
@@ -263,13 +285,18 @@ const SelectItem: FC<SelectItemProps> = ({
 			<ListBoxItem
 				{...(racProps as ListBoxItemProps)}
 				{...tooltipProps}
-				className={composeTailwindRenderProps(className, B.slot.item)}
+				className={composeTailwindRenderProps(className, cn(B.slot.item, isMultiple && 'group'))}
 				data-destructive={destructive || undefined}
 				data-slot='select-item'
 				ref={mergedRef}
 			>
 				{(renderProps) => (
 					<>
+						{isMultiple && (
+							<span className={B.slot.itemCheckbox} data-slot='select-item-checkbox'>
+								{renderProps.isSelected && <Check className={B.slot.itemCheckboxIcon} />}
+							</span>
+						)}
 						{Slot.render(icon, undefined, B.slot.itemIcon)}
 						<span className='flex-1 flex flex-col'>
 							{isRenderFn

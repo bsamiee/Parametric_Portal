@@ -18,6 +18,7 @@ import { ColorPicker } from '@parametric-portal/components-next/pickers/color-pi
 import { DatePicker } from '@parametric-portal/components-next/pickers/date-picker';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import { Runtime } from '@parametric-portal/runtime/runtime';
+import { AsyncState } from '@parametric-portal/types/async';
 import { Duration, Effect, Layer } from 'effect';
 import {
     AlignCenter,
@@ -708,11 +709,13 @@ const BreadcrumbsDemo: FC = () => (
 );
 const ProgressDemo: FC = () => (
     <>
+        {/* --- LINEAR PROGRESS --- */}
         <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Linear Progress</span>
             <Progress
                 aria-label='Loading progress'
                 color='primary'
-                data-testid='progress-determinate'
+                data-testid='progress-linear'
                 label='Loading...'
                 showValue
                 size='md'
@@ -720,20 +723,22 @@ const ProgressDemo: FC = () => (
             />
         </div>
         <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Indeterminate (via asyncState)</span>
             <Progress
                 aria-label='Uploading'
+                asyncState={AsyncState.Loading()}
                 color='primary'
                 data-testid='progress-indeterminate'
-                isIndeterminate
                 label='Uploading files...'
                 size='md'
             />
         </div>
         <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Custom Format</span>
             <Progress
                 aria-label='Download progress'
                 color='primary'
-                data-testid='progress-custom'
+                data-testid='progress-custom-format'
                 formatValue={(p) => `${Math.round(p * 10)}MB / 1GB`}
                 label='Downloading'
                 maxValue={1000}
@@ -743,18 +748,21 @@ const ProgressDemo: FC = () => (
             />
         </div>
         <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Disabled</span>
             <Progress
-                aria-label='Task completion'
+                aria-label='Disabled progress'
                 color='primary'
-                data-testid='progress-tooltip'
-                label='Tasks'
+                data-testid='progress-disabled'
+                isDisabled
+                label='Disabled'
                 showValue
                 size='md'
-                tooltip={{ content: '25 of 100 tasks completed' }}
-                value={25}
+                value={50}
             />
         </div>
-        <div className='flex flex-col gap-2'>
+        {/* --- CIRCULAR PROGRESS --- */}
+        <div className='flex flex-col gap-2 items-center'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Circular</span>
             <Progress
                 aria-label='Circular progress'
                 color='primary'
@@ -765,7 +773,8 @@ const ProgressDemo: FC = () => (
                 value={75}
             />
         </div>
-        <div className='flex flex-col gap-2'>
+        <div className='flex flex-col gap-2 items-center'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Center Icon</span>
             <Progress
                 aria-label='Completed'
                 centerIcon={Check}
@@ -777,15 +786,104 @@ const ProgressDemo: FC = () => (
                 value={100}
             />
         </div>
-        <div className='flex flex-col gap-2'>
+        <div className='flex flex-col gap-2 items-center'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Circular Indeterminate</span>
             <Progress
                 aria-label='Loading'
+                asyncState={AsyncState.Loading()}
                 color='primary'
                 data-testid='progress-circular-indeterminate'
-                isIndeterminate
                 label='Loading...'
                 shape='circular'
                 size='md'
+            />
+        </div>
+        {/* --- METER (auto-detected from threshold props) --- */}
+        <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Meter: Optimal (&lt;70%)</span>
+            <Progress
+                aria-label='CPU usage optimal'
+                color='primary'
+                criticalThreshold={90}
+                data-testid='meter-optimal'
+                label='CPU Usage'
+                showValue
+                size='md'
+                value={45}
+                warningThreshold={70}
+            />
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Meter: Warning (70-90%)</span>
+            <Progress
+                aria-label='CPU usage warning'
+                color='primary'
+                criticalThreshold={90}
+                data-testid='meter-warning'
+                label='CPU Usage'
+                showValue
+                size='md'
+                value={78}
+                warningThreshold={70}
+            />
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Meter: Critical (&gt;90%)</span>
+            <Progress
+                aria-label='CPU usage critical'
+                color='primary'
+                criticalThreshold={90}
+                data-testid='meter-critical'
+                label='CPU Usage'
+                showValue
+                size='md'
+                value={95}
+                warningThreshold={70}
+            />
+        </div>
+        <div className='flex flex-col gap-2 w-64'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Custom Thresholds (50/80)</span>
+            <Progress
+                aria-label='Memory with custom thresholds'
+                color='primary'
+                criticalThreshold={80}
+                data-testid='meter-custom-thresholds'
+                label='Memory'
+                showValue
+                size='md'
+                value={65}
+                warningThreshold={50}
+            />
+        </div>
+        {/* --- CIRCULAR METER --- */}
+        <div className='flex flex-col gap-2 items-center'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Circular Meter: Optimal</span>
+            <Progress
+                aria-label='Battery optimal'
+                color='primary'
+                criticalThreshold={15}
+                data-testid='meter-circular-optimal'
+                label='Battery'
+                shape='circular'
+                showValue
+                size='md'
+                value={85}
+                warningThreshold={30}
+            />
+        </div>
+        <div className='flex flex-col gap-2 items-center'>
+            <span className='text-xs font-medium text-(--color-text-600)'>Circular Meter: Critical</span>
+            <Progress
+                aria-label='Battery critical'
+                color='primary'
+                criticalThreshold={15}
+                data-testid='meter-circular-critical'
+                label='Battery'
+                shape='circular'
+                showValue
+                size='md'
+                value={8}
+                warningThreshold={30}
             />
         </div>
     </>

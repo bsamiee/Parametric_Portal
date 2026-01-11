@@ -14,7 +14,7 @@ import { cn, defined } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type FileUploadRenderProps = { readonly isDropTarget: boolean };
+type FileUploadRenderProps = { readonly isDropTarget: boolean; readonly progress: number };
 type FileUploadProps = {
 	readonly accept: ReadonlyArray<string>;
 	readonly acceptDirectory?: boolean;
@@ -28,6 +28,7 @@ type FileUploadProps = {
 	readonly onDropEnter?: () => void;
 	readonly onDropExit?: () => void;
 	readonly onFilesChange: (files: ReadonlyArray<File>) => void;
+	readonly progress?: number;
 	readonly ref?: Ref<HTMLDivElement>;
 	readonly trigger?: ReactNode;
 };
@@ -60,7 +61,7 @@ const acceptTypes = (...types: readonly string[]) =>
 		types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
 const FileUpload: FC<FileUploadProps> = ({
 	accept, acceptDirectory, asyncState, children, className, defaultCamera, isDisabled,
-	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, ref, trigger,
+	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, progress = 0, ref, trigger,
 }) => {
 	const onDropHandler = useCallback(
 		(e: { items: readonly DropItem[] }) => void extractFiles(e.items).then((f) => f.length > 0 && onFilesChange(f)),
@@ -106,7 +107,7 @@ const FileUpload: FC<FileUploadProps> = ({
 							{trigger}
 						</FileTrigger>
 					)}
-					{typeof children === 'function' ? children({ isDropTarget }) : children}
+					{typeof children === 'function' ? children({ isDropTarget, progress }) : children}
 				</div>
 			)}
 		</DropZone>

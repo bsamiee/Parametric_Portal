@@ -7,9 +7,11 @@
  * REQUIRED: color prop. size required when variant is set.
  */
 import { useMergeRefs } from '@floating-ui/react';
+import type { AsyncState } from '@parametric-portal/types/async';
 import type { CSSProperties, FC, ReactNode, Ref, RefObject } from 'react';
 import { useRef } from 'react';
 import { Link as RACLink, type LinkProps as RACLinkProps, } from 'react-aria-components';
+import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip, type TooltipConfig } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
 import { cn, composeTailwindRenderProps, defined, isExternalHref, Slot, type SlotInput } from '../core/utils';
@@ -17,6 +19,7 @@ import { cn, composeTailwindRenderProps, defined, isExternalHref, Slot, type Slo
 // --- [TYPES] -----------------------------------------------------------------
 
 type LinkProps = Omit<RACLinkProps, 'children'> & {
+	readonly asyncState?: AsyncState;
 	readonly children?: SlotInput<ReactNode>;
 	readonly color: string;
 	readonly gesture?: GestureProps;
@@ -29,8 +32,10 @@ type LinkProps = Omit<RACLinkProps, 'children'> & {
 };
 type LinkIconProps = Omit<RACLinkProps, 'children'> & {
 	readonly 'aria-label': string;
+	readonly asyncState?: AsyncState;
 	readonly children: ReactNode;
 	readonly color: string;
+	readonly isDisabled?: boolean;
 	readonly ref?: Ref<HTMLAnchorElement>;
 	readonly size: string;
 	readonly tooltip?: TooltipConfig;
@@ -84,18 +89,18 @@ const B = Object.freeze({
 
 const LinkCore: FC<LinkProps> = (props) => {
 	const {
-		children, className, color, gesture, href, isDisabled, prefix, ref, rel: relProp, size,
+		asyncState, children, className, color, gesture, href, isDisabled, prefix, ref, rel: relProp, size,
 		style: styleProp, suffix, target: targetProp, tooltip, variant, ...rest } = props;
+	const slot = Slot.bind(asyncState);
 	const isButtonMode = variant !== undefined;
 	const isExternal = isExternalHref(href);
 	const hasGesture = gesture !== undefined;
 	const target = targetProp ?? (isExternal ? '_blank' : undefined);
 	const rel = relProp ?? (isExternal ? 'noopener noreferrer' : undefined);
-	const slot = Slot.bind(undefined);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const linkRef = useRef<HTMLAnchorElement>(null);
 	const { props: gestureProps } = useGesture({
-		isDisabled: isDisabled ?? false,
+		isDisabled: isDisabled || slot.pending,
 		prefix: 'link',
 		ref: linkRef as RefObject<HTMLElement | null>,
 		...gesture,
@@ -103,6 +108,7 @@ const LinkCore: FC<LinkProps> = (props) => {
 	const mergedRef = useMergeRefs([ref, linkRef, tooltipProps.ref as Ref<HTMLAnchorElement>]);
 	const mergedStyle = { ...(hasGesture ? gestureProps.style : {}), ...styleProp } as CSSProperties;
 	const dataProps = {
+		'data-async-state': slot.attr,
 		'data-color': color,
 		'data-size': size,
 		'data-slot': isButtonMode ? 'link-button' : 'link',
@@ -120,18 +126,20 @@ const LinkCore: FC<LinkProps> = (props) => {
 				className={composedClassName}
 				ref={mergedRef}
 				style={mergedStyle}
-				{...defined({ href, isDisabled, rel, target })}
+				{...defined({ href, isDisabled: isDisabled || slot.pending, rel, target })}
 			>
 				{slot.render(prefix, iconClass)}
 				<span className={textClass}>{slot.resolve(children)}</span>
 				{slot.render(suffix, iconClass)}
 			</RACLink>
 			{renderTooltip?.()}
+			<AsyncAnnouncer asyncState={asyncState} />
 		</>
 	);
 };
 const LinkIcon: FC<LinkIconProps> = (props) => {
-	const { 'aria-label': ariaLabel, children, className, color, href, ref, size, tooltip, ...rest } = props;
+	const { 'aria-label': ariaLabel, asyncState, children, className, color, href, isDisabled, ref, size, tooltip, ...rest } = props;
+	const slot = Slot.bind(asyncState);
 	const isExternal = isExternalHref(href);
 	const target = isExternal ? '_blank' : undefined;
 	const rel = isExternal ? 'noopener noreferrer' : undefined;
@@ -144,15 +152,17 @@ const LinkIcon: FC<LinkIconProps> = (props) => {
 				{...({ ...rest, ...tooltipProps } as unknown as RACLinkProps)}
 				aria-label={ariaLabel}
 				className={composeTailwindRenderProps(className, B.slot.iconOnly)}
+				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
 				data-slot="link-icon"
 				ref={mergedRef}
-				{...defined({ href, rel, target })}
+				{...defined({ href, isDisabled: isDisabled || slot.pending, rel, target })}
 			>
 				{children}
 			</RACLink>
 			{renderTooltip?.()}
+			<AsyncAnnouncer asyncState={asyncState} />
 		</>
 	);
 };
