@@ -13,8 +13,7 @@ import { Effect, Option, pipe } from 'effect';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const toUserResponse = (u: User) =>
-    Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
+const toUserResponse = (u: User) => Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 

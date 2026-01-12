@@ -69,8 +69,7 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const mkErr = (provider: typeof OAuthProvider.Type, reason: string, _code: string, _cause?: unknown) =>
-    new HttpError.OAuth({ provider, reason });
+const mkErr = (provider: typeof OAuthProvider.Type, reason: string, _code: string, _cause?: unknown) => new HttpError.OAuth({ provider, reason });
 const handler = <T>(
     guard: (e: unknown) => e is T,
     fn: (p: typeof OAuthProvider.Type, e: T) => InstanceType<typeof HttpError.OAuth>,
@@ -93,11 +92,10 @@ const arcticHandlers = [
         (p, e) => mkErr(p, `Unexpected error: HTTP ${e.status}`, 'UNEXPECTED_ERROR_BODY'),
     ),
 ] as const;
+const isPkceProvider = (p: typeof OAuthProvider.Type): p is 'google' | 'microsoft' => p === 'google' || p === 'microsoft';
 const mapArctic = (p: typeof OAuthProvider.Type, e: unknown) =>
     arcticHandlers.find(([guard]) => guard(e))?.[1](p, e as never) ??
     new HttpError.OAuth({ provider: p, reason: e instanceof Error ? e.message : 'Unknown error' });
-const isPkceProvider = (p: typeof OAuthProvider.Type): p is 'google' | 'microsoft' =>
-    p === 'google' || p === 'microsoft';
 const extractResult = (t: OAuth2Tokens, user: { readonly id: string; readonly email?: string | null }) =>
     OAuthResult.fromProvider(
         {
