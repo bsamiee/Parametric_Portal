@@ -2,6 +2,7 @@
 name: nx-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Queries Nx workspace metadata, project configurations, affected detection,
   generator schemas, and dependency graphs via unified Python CLI. Use when

@@ -296,27 +296,32 @@ const ColorPickerDemo: FC = () => (
 const DatePickerDemo: FC = () => (
     <>
         <DatePicker
+            cellTooltip
             data-testid='date-picker-single'
+            description='Auto-detected locale (firstDayOfWeek, hourCycle)'
             label='Single Date'
             size='md'
-            tooltip={{ content: 'Select a date' }}
             triggerIcon={Calendar}
         />
         <DatePicker
+            cellTooltip
             data-testid='date-picker-range'
+            description='Week starts Monday (ISO/European)'
+            firstDayOfWeek='mon'
             label='Date Range'
             mode='range'
             size='md'
-            tooltip={{ content: 'Select date range' }}
             triggerIcon={Calendar}
         />
         <DatePicker
+            cellTooltip={(date) => `Week ${Math.ceil(date.day / 7)}`}
             data-testid='date-picker-datetime'
+            description='24-hour format with custom cell tooltip'
             granularity='minute'
+            hourCycle={24}
             label='Date & Time'
             size='md'
             time={{ label: 'Time' }}
-            tooltip={{ content: 'Select date and time' }}
             triggerIcon={Calendar}
         />
     </>

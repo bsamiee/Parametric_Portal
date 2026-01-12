@@ -1,6 +1,6 @@
 ---
 description: Load skill knowledge via skill-summarizer agent
-argument-hint: "[skill-name] [section?]"
+argument-hint: [skill-name] [section?]
 allowed-tools: Task
 ---
 

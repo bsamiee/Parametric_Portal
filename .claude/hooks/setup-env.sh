@@ -22,6 +22,7 @@ TOKEN_CACHE="$HOME/.config/hm-op-session.sh"
     [[ -n "$GH_PROJECTS_TOKEN" ]] && echo "export GH_PROJECTS_TOKEN=\"$GH_PROJECTS_TOKEN\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$HOSTINGER_TOKEN" ]] && echo "export HOSTINGER_TOKEN=\"$HOSTINGER_TOKEN\"" >> "$CLAUDE_ENV_FILE"
     [[ -n "$GREPTILE_TOKEN" ]] && echo "export GREPTILE_TOKEN=\"$GREPTILE_TOKEN\"" >> "$CLAUDE_ENV_FILE"
+    [[ -n "$CONTEXT7_API_KEY" ]] && echo "export CONTEXT7_API_KEY=\"$CONTEXT7_API_KEY\"" >> "$CLAUDE_ENV_FILE"
 }
 
 exit 0

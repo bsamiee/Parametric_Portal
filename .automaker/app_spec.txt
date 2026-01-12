@@ -1,71 +1,71 @@
 <project_specification>
-  <project_name>React Aria Components Wrapper Library</project_name>
+  <project_name>Parametric Portal</project_name>
 
-  <overview>RAC wrapper library in Nx monorepo. Components use Slot.bind(asyncState) for async-aware rendering, useGesture/useTooltip hooks, compound patterns via Object.assign, CSS variable theming with data-* attributes.</overview>
+  <overview>
+    Multi-application platform built as Nx monorepo. Provides universal infrastructure
+    (packages/) enabling rapid development of multiple independent apps (apps/). Goal:
+    80-90% of requirements pre-built—auth, database, API, components, theming, telemetry—
+    so new apps are composition, not implementation.
+  </overview>
+
+  <architecture>
+    <principle>packages/ = universal infrastructure (app-agnostic)</principle>
+    <principle>apps/ = individual applications (compose from packages/)</principle>
+    <principle>All design decisions support multi-app scenarios, never single-app</principle>
+  </architecture>
 
   <technology_stack>
-    <technology>React 19 canary, React Aria Components, TypeScript strict, Tailwind CSS v4, Vite, Effect, Nx, Biome, LightningCSS</technology>
-    <technology>Versions in pnpm-workspace.yaml catalog</technology>
+    <technology>Nx monorepo, pnpm workspaces, TypeScript 6.0-dev strict</technology>
+    <technology>Effect 3.19 (FP core, error handling, schemas, runtime)</technology>
+    <technology>React 19 canary, React Aria Components, Vite 7</technology>
+    <technology>Drizzle ORM, PostgreSQL, @effect/platform-node</technology>
+    <technology>Tailwind v4, LightningCSS, Biome, Vitest</technology>
+    <technology>Catalog-managed deps via pnpm-workspace.yaml</technology>
   </technology_stack>
 
+  <packages_infrastructure>
+    <package name="components-next">Universal React components with built-in tooltips, gestures, async state handling</package>
+    <package name="server">HTTP middleware, API contracts, error handling for multi-app backend</package>
+    <package name="database">Drizzle client, repositories, migrations supporting multi-app isolation</package>
+    <package name="types">Branded primitives, schemas, cross-app type definitions</package>
+    <package name="theme">OKLCH color system, runtime theming, Tailwind integration</package>
+    <package name="runtime">React-Effect bridge, universal state management patterns</package>
+    <package name="ai">Effect-based AI service integrations (Anthropic, OpenAI)</package>
+  </packages_infrastructure>
+
+  <core_capabilities>
+    <capability>Universal component library with async-aware rendering via Slot.bind</capability>
+    <capability>Multi-app HTTP API with Effect-based middleware and routing</capability>
+    <capability>Type-safe database layer with repositories and multi-app support</capability>
+    <capability>Cross-app authentication, authorization, and session management</capability>
+    <capability>Runtime theme system with OKLCH colors and data-* attributes</capability>
+    <capability>Telemetry and metrics infrastructure (app-scoped, cross-app aggregation)</capability>
+  </core_capabilities>
+
   <development_guidelines>
-    <guideline>Frozen B constant per file: Object.freeze({ slot: {...} })</guideline>
-    <guideline>Slot.bind(asyncState) for async-aware slots in all components</guideline>
-    <guideline>Required props: color, size (no defaults)</guideline>
-    <guideline>Compound pattern: Object.assign(Root, { Item, Section })</guideline>
-    <guideline>Hooks: useTooltip on interactive elements, useGesture for drag/slider</guideline>
-    <guideline>Data attributes: data-slot, data-color, data-size, data-async-state</guideline>
-    <guideline>Types from RAC: type XProps = Omit&lt;RACXProps, 'children'&gt; &amp; {...}</guideline>
-    <guideline>File sections: TYPES → CONSTANTS → SUB-COMPONENTS → ENTRY_POINT → EXPORT</guideline>
-    <guideline>Mode props over separate files (Progress shape="linear"|"circular" pattern)</guideline>
-    <guideline>ONE LINE usage for common cases - composition only for advanced</guideline>
-    <guideline>Hide internal sub-components from export</guideline>
+    <guideline>MULTI-APP FIRST: packages/ code is infrastructure for many apps, never app-specific logic</guideline>
+    <guideline>EFFECT-FIRST: Effect.pipe, Match, Option over imperative if/else/try-catch</guideline>
+    <guideline>ALGORITHMIC: Derive values from frozen B constant per file, zero hardcoded literals</guideline>
+    <guideline>USE INFRASTRUCTURE: Search packages/ before creating utilities—no duplication</guideline>
+    <guideline>BRANDED TYPES: Use @parametric-portal/types (DurationMs, Timestamp, UserId, etc.)</guideline>
+    <guideline>COMPOUND PATTERNS: Object.assign(Root, {{ Item, Section }}) for component composition</guideline>
+    <guideline>ONE-LINE USAGE: Common cases require single JSX line, composition only for advanced</guideline>
+    <guideline>DATA ATTRIBUTES: Use data-slot, data-color, data-size, data-async-state for styling</guideline>
+    <guideline>QUALITY: Sub-3-min builds (Nx cache), 80% coverage, typecheck + check before completion</guideline>
   </development_guidelines>
 
   <anti_patterns>
-    <item>NO hand-rolled types → derive from RAC: Omit&lt;RACXProps, 'children'&gt; &amp; {...}</item>
-    <item>NO exposed internal types/constats</item>
-    <item>NO type-only props → every prop MUST affect output</item>
-    <item>NO deep nesting (4+ levels) → max 3, use Match/dispatch tables</item>
-    <item>NO nested ternaries (3+ branches) → Effect.Match.value().pipe()</item>
-    <item>NO manual null checks → Option.fromNullable().pipe(Option.map, Option.getOrElse)</item>
-    <item>NO hand-rolled utilities → use packages/components-next/src/core, react-aria mergeProps/useObjectRef, Effect.Array/Record</item>
+    <item>Hardcoding app-specific logic in packages/ (breaks universal infrastructure)</item>
+    <item>Designing server/database/API for single app (limits multi-app scaling)</item>
+    <item>Hand-rolled types—derive from RAC: Omit&lt;RACXProps, 'children'&gt; &amp; {{}}</item>
+    <item>Deep nesting (4+ levels) or nested ternaries—use Match/dispatch tables</item>
+    <item>Manual null checks—use Option.fromNullable().pipe()</item>
+    <item>Duplicating utilities from packages/ or external libs (RAC, Effect)</item>
+    <item>Type-only props—every prop must affect rendered output</item>
   </anti_patterns>
 
-  <gold_standard_reference>
-    <name>Button Component</name>
+  <reference_implementation>
     <file>packages/components-next/src/actions/button.tsx</file>
-    <description>Demonstrates ideal component density - maximum functionality, minimum API surface</description>
-    <usage_example>
-      <code><![CDATA[
-<Button
-  asyncState={success.state}
-  children={{ default: 'Success', loading: 'Working...', success: 'Done!' }}
-  prefix={{ loading: Loader2, success: Check }}
-  color='primary' size='md' variant='solid'
-  onPress={() => success.mutate(undefined)}
-/>
-      ]]></code>
-    </usage_example>
-    <key_patterns>
-      <pattern>ONE component handles: standard press, toggle mode, async states, icons, tooltips, gestures</pattern>
-      <pattern>Toggle mode auto-detected from isSelected/defaultSelected/onChange props - no separate ToggleButton</pattern>
-      <pattern>Async-aware slots: children={{ default, loading, success, failure }} prefix={{ loading, success }}</pattern>
-      <pattern>No manual composition required - everything flows through props</pattern>
-      <pattern>168 lines total for full functionality - dense and focused</pattern>
-    </key_patterns>
-  </gold_standard_reference>
-
-  <quality_gate>
-    <description>Run after EVERY phase before proceeding</description>
-    <commands>
-      <cmd>pnpm exec nx run components-next:typecheck</cmd>
-      <cmd>pnpm exec nx run components-next:check</cmd>
-    </commands>
-    <review>
-      <item>VERIFY dense FP code - NO imperative if/else, use Match/Option/dispatch tables</item>
-      <item>VERIFY all props have REAL functionality - no dead props</item>
-      <item>VERIFY no handrolling - use RAC/Effect utilities</item>
-      <item>REDUCE LOC where better logic achieves same output</item>
-    </review>
-  </quality_gate>
+    <description>Gold standard: 168 lines, handles standard/toggle/async modes, tooltips, gestures, icons—one component, zero composition required for common cases</description>
+  </reference_implementation>
+</project_specification>

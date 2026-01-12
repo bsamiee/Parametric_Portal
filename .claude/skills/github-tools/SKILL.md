@@ -2,6 +2,7 @@
 name: github-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Executes GitHub operations via gh CLI wrapper. Use when managing issues,
   pull requests, workflows, CI runs, projects, releases, cache, labels, or

@@ -9,7 +9,7 @@ import type { AsyncState } from '@parametric-portal/types/async';
 import { readCssPx } from '@parametric-portal/runtime/runtime';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { FC, ReactNode, Ref } from 'react';
-import { createContext, useContext, useRef } from 'react';
+import { createContext, useContext, useMemo, useRef } from 'react';
 import {
 	Button as RACButton, type ButtonProps as RACButtonProps, Calendar as RACCalendar, CalendarCell as RACCalendarCell, type CalendarCellProps as RACCalendarCellProps,
 	CalendarGrid as RACCalendarGrid, CalendarGridBody as RACCalendarGridBody, CalendarGridHeader as RACCalendarGridHeader, CalendarHeaderCell as RACCalendarHeaderCell,
@@ -21,16 +21,24 @@ import {
 import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
 import { type GestureProps, useGesture } from '../core/gesture';
+import { Option, pipe } from 'effect';
 import { cn, defined, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type DatePickerMode = 'range' | 'single';
 type DatePickerGranularity = 'day' | 'hour' | 'minute' | 'second';
+type FirstDayOfWeek = 'fri' | 'mon' | 'sat' | 'sun' | 'thu' | 'tue' | 'wed';
+type HourCycle = 12 | 24;
+type LocaleWithWeekInfo = Intl.Locale & { weekInfo?: { firstDay: number }; getWeekInfo?: () => { firstDay: number } };
+type TriggerProps = { readonly asyncState?: AsyncState<unknown, unknown>; readonly gesture?: GestureProps; readonly icon?: SlotInput; readonly tooltip?: TooltipConfig };
 type ContextValue = {
 	readonly calendarLabel: string | undefined;
+	readonly cellTooltip: ((date: DateValue) => string) | boolean | undefined;
 	readonly color: string | undefined;
+	readonly firstDayOfWeek: FirstDayOfWeek;
 	readonly granularity: DatePickerGranularity;
+	readonly hourCycle: HourCycle;
 	readonly isDisabled: boolean;
 	readonly isReadOnly: boolean;
 	readonly nextButtonLabel: string | undefined;
@@ -38,15 +46,17 @@ type ContextValue = {
 	readonly size: string;
 	readonly variant: string | undefined;
 };
-type TriggerProps = { readonly asyncState?: AsyncState<unknown, unknown>; readonly gesture?: GestureProps; readonly icon?: SlotInput; readonly tooltip?: TooltipConfig };
-type DatePickerProps<T extends DateValue> = Omit<RACDatePickerProps<T> & RACDateRangePickerProps<T>, 'children' | 'granularity'> & {
+type DatePickerProps<T extends DateValue> = Omit<RACDatePickerProps<T> & RACDateRangePickerProps<T>, 'children' | 'firstDayOfWeek' | 'granularity' | 'hourCycle'> & {
 	readonly calendarLabel?: string;
+	readonly cellTooltip?: ((date: DateValue) => string) | boolean;
 	readonly children?: ReactNode;
 	readonly className?: string;
 	readonly color?: string;
 	readonly description?: ReactNode;
 	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
+	readonly firstDayOfWeek?: 'auto' | FirstDayOfWeek;
 	readonly granularity?: DatePickerGranularity;
+	readonly hourCycle?: 'auto' | HourCycle;
 	readonly label?: ReactNode;
 	readonly mode?: DatePickerMode;
 	readonly nextButtonLabel?: string;
@@ -66,9 +76,21 @@ type DatePickerProps<T extends DateValue> = Omit<RACDatePickerProps<T> & RACDate
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
+const FIRST_DAY: readonly FirstDayOfWeek[] = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+const getLocaleFirstDayOfWeek = (): FirstDayOfWeek => pipe(
+	Option.liftThrowable(() => new Intl.Locale(navigator.language) as LocaleWithWeekInfo)(),
+	Option.flatMap((locale) => Option.fromNullable(locale.weekInfo ?? locale.getWeekInfo?.())),
+	Option.flatMap(({ firstDay }) => Option.fromNullable(FIRST_DAY[firstDay])),
+	Option.getOrElse((): FirstDayOfWeek => 'sun'),
+);
+const getLocaleHourCycle = (): HourCycle => pipe(
+	Option.liftThrowable(() => new Intl.DateTimeFormat(navigator.language, { hour: 'numeric' }).resolvedOptions())(),
+	Option.map(({ hourCycle }): HourCycle => hourCycle === 'h23' || hourCycle === 'h24' ? 24 : 12),
+	Option.getOrElse((): HourCycle => 12),
+);
 const B = Object.freeze({
 	cssVars: Object.freeze({ offset: '--date-picker-popover-offset' }),
-	defaults: Object.freeze({ granularity: 'day' as DatePickerGranularity, mode: 'single' as DatePickerMode, offset: 8, rangeSeparator: '-' }),
+	defaults: Object.freeze({ firstDayOfWeek: 'auto' as const, granularity: 'day' as DatePickerGranularity, hourCycle: 'auto' as const, mode: 'single' as DatePickerMode, offset: 8, rangeSeparator: '-' }),
 	granularity: Object.freeze({ time: ['hour', 'minute', 'second'] as const }),
 	icon: Object.freeze({ next: ChevronRight, prev: ChevronLeft }),
 	slot: Object.freeze({
@@ -217,13 +239,30 @@ const CalendarHeader: FC = () => {
 		</header>
 	);
 };
+const Cell: FC<{ readonly date: RACCalendarCellProps['date'] }> = ({ date }) => {
+	const ctx = useContext(Ctx);
+	const tooltipConfig = pipe(
+		Option.fromNullable(ctx?.cellTooltip),
+		Option.map((cfg): TooltipConfig => ({
+			content: typeof cfg === 'function' ? cfg(date as DateValue) : date.toDate('UTC').toLocaleDateString(undefined, { dateStyle: 'full' }),
+		})),
+		Option.getOrUndefined,
+	);
+	const { props: { ref: tooltipRef, ...tooltipProps }, render: renderTooltip } = useTooltip(tooltipConfig);
+	return (
+		<>
+			<RACCalendarCell {...tooltipProps} ref={tooltipRef as Ref<HTMLTableCellElement>} className={B.slot.cell} data-slot='date-picker-cell' date={date} />
+			{renderTooltip?.()}
+		</>
+	);
+};
 const CalendarGrid: FC = () => (
 	<RACCalendarGrid className={B.slot.grid} data-slot='date-picker-grid'>
 		<RACCalendarGridHeader>
 			{(day) => <RACCalendarHeaderCell className={B.slot.headerCell} data-slot='date-picker-header-cell'>{day}</RACCalendarHeaderCell>}
 		</RACCalendarGridHeader>
 		<RACCalendarGridBody>
-			{(date: RACCalendarCellProps['date']) => <RACCalendarCell className={B.slot.cell} data-slot='date-picker-cell' date={date} />}
+			{(date: RACCalendarCellProps['date']) => <Cell date={date} />}
 		</RACCalendarGridBody>
 	</RACCalendarGrid>
 );
@@ -231,12 +270,12 @@ const Calendar: FC<{ readonly isRange: boolean }> = ({ isRange }) => {
 	const ctx = useContext(Ctx);
 	const dataProps = { 'data-color': ctx?.color, 'data-size': ctx?.size, 'data-variant': ctx?.variant };
 	return isRange ? (
-		<RACRangeCalendar {...dataProps} className={B.slot.rangeCalendar} data-slot='date-picker-range-calendar' {...defined({ 'aria-label': ctx?.calendarLabel })}>
+		<RACRangeCalendar {...dataProps} className={B.slot.rangeCalendar} data-slot='date-picker-range-calendar' {...defined({ 'aria-label': ctx?.calendarLabel, firstDayOfWeek: ctx?.firstDayOfWeek })}>
 			<CalendarHeader />
 			<CalendarGrid />
 		</RACRangeCalendar>
 	) : (
-		<RACCalendar {...dataProps} className={B.slot.calendar} data-slot='date-picker-calendar' {...defined({ 'aria-label': ctx?.calendarLabel })}>
+		<RACCalendar {...dataProps} className={B.slot.calendar} data-slot='date-picker-calendar' {...defined({ 'aria-label': ctx?.calendarLabel, firstDayOfWeek: ctx?.firstDayOfWeek })}>
 			<CalendarHeader />
 			<CalendarGrid />
 		</RACCalendar>
@@ -254,6 +293,7 @@ const TimeField: FC<{ readonly config: { readonly description?: ReactNode; reado
 	const timeGranularity = B.granularity.time.includes(ctx?.granularity as (typeof B.granularity.time)[number])
 		? (ctx?.granularity as 'hour' | 'minute' | 'second')
 		: undefined;
+	const hourCycle = ctx?.hourCycle;
 	return hasTime ? (
 		<RACTimeField
 			className={B.slot.time}
@@ -263,6 +303,7 @@ const TimeField: FC<{ readonly config: { readonly description?: ReactNode; reado
 			data-variant={ctx?.variant}
 			onChange={handleChange as NonNullable<RACTimeFieldProps<TimeValue>['onChange']>}
 			value={autoValue}
+			{...(hourCycle !== undefined && { hourCycle })}
 			{...defined({ granularity: timeGranularity, slot })}
 		>
 			{config.label && <RACLabel className={B.slot.timeLabel} data-slot='date-picker-time-label'>{config.label}</RACLabel>}
@@ -298,18 +339,20 @@ const PopoverContent: FC<{ readonly children: ReactNode; readonly offset?: numbe
 
 const DatePicker = <T extends DateValue>(props: DatePickerProps<T>): ReactNode => {
 	const {
-		calendarLabel, children, className, color, description, errorMessage, granularity: granularityProp, isDisabled = false, isReadOnly = false,
+		calendarLabel, cellTooltip, children, className, color, description, errorMessage, firstDayOfWeek: firstDayProp, granularity: granularityProp, hourCycle: hourCycleProp, isDisabled = false, isReadOnly = false,
 		label, mode: modeProp, nextButtonLabel, popoverOffset, prevButtonLabel, rangeSeparator, ref, size, time, tooltip, triggerAsyncState,
 		triggerGesture, triggerIcon, triggerTooltip, variant, ...racProps } = props;
 	const { render: renderTooltip } = useTooltip(tooltip);
 	const mode = modeProp ?? B.defaults.mode;
 	const granularity = granularityProp ?? B.defaults.granularity;
+	const firstDayOfWeek = firstDayProp === 'auto' || firstDayProp === undefined ? getLocaleFirstDayOfWeek() : firstDayProp;
+	const hourCycle = hourCycleProp === 'auto' || hourCycleProp === undefined ? getLocaleHourCycle() : hourCycleProp;
 	const isRange = mode === 'range';
 	const separator = rangeSeparator === false ? null : rangeSeparator ?? B.defaults.rangeSeparator;
 	const isDefaultSeparator = rangeSeparator === undefined;
 	const showTime = time === true || (typeof time === 'object') || B.granularity.time.includes(granularity as (typeof B.granularity.time)[number]);
 	const timeConfig = typeof time === 'object' ? time : {};
-	const ctxValue: ContextValue = { calendarLabel, color, granularity, isDisabled, isReadOnly, nextButtonLabel, prevButtonLabel, size, variant };
+	const ctxValue = useMemo<ContextValue>(() => ({ calendarLabel, cellTooltip, color, firstDayOfWeek, granularity, hourCycle, isDisabled, isReadOnly, nextButtonLabel, prevButtonLabel, size, variant }), [calendarLabel, cellTooltip, color, firstDayOfWeek, granularity, hourCycle, isDisabled, isReadOnly, nextButtonLabel, prevButtonLabel, size, variant]);
 	const dataProps = {
 		'data-color': color,
 		'data-granularity': granularity,

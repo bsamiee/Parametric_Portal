@@ -2,6 +2,7 @@
 name: tavily-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Executes Tavily AI web operations via unified Python CLI. Use when searching
   the web, extracting content from URLs, crawling websites, or mapping site

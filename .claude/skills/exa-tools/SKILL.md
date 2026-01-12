@@ -2,6 +2,7 @@
 name: exa-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Executes Exa AI search queries via unified Python CLI. Use when searching the
   web for current information, finding code examples, researching APIs, SDKs,

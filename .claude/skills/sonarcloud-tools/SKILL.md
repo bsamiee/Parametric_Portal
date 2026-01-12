@@ -2,6 +2,7 @@
 name: sonarcloud-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Executes SonarCloud API queries via unified Python CLI. Use when checking
   quality gate status, searching issues (bugs, vulnerabilities, code smells),

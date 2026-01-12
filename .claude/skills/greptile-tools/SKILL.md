@@ -2,6 +2,7 @@
 name: greptile-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Queries indexed repositories via Greptile API for codebase-aware answers. Use
   when asking natural language questions about code architecture, searching for

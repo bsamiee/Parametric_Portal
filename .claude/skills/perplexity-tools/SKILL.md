@@ -2,6 +2,7 @@
 name: perplexity-tools
 type: complex
 depth: base
+user-invocable: false
 description: >-
   Executes Perplexity AI queries via unified Python CLI. Use when conducting
   web research, asking questions with citations, deep research tasks, reasoning
