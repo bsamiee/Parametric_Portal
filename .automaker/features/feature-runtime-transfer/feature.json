@@ -1,0 +1,9 @@
+{
+    "category": "frontend",
+    "dependencies": ["feature-1768229997819-r7c0q43xw"],
+    "description": "Add client-side transfer service and hook for browser export/download of in-memory data.\n\nCurrently: `FileOps` in `packages/runtime/src/services/file.ts` handles file read operations. `useFileUpload` in `packages/runtime/src/hooks/file-upload.ts` bridges to React. `TransferFormat` and `ExportMeta` types will exist in `packages/types/src/transfer.ts` after server feature. No client-side export capability exists.\n\nDeliverables:\n1. Create `packages/runtime/src/services/transfer.ts` with `TransferOps` class extending `Context.Tag`:\n   - `toCsv<T>(data: readonly T[], columns: readonly (keyof T)[]) => string` - generates CSV with header\n   - `toJson<T>(data: readonly T[]) => string` - generates NDJSON\n   - `download(content: string, meta: ExportMeta) => Effect<void>` - creates blob URL, triggers download, revokes URL\n2. Create `TransferOpsLive` Layer implementing the service\n3. Create `packages/runtime/src/hooks/transfer.ts` with `useTransfer` hook:\n   - Uses `TransferOps` service via `Runtime.use()`\n   - Returns `{ exportCsv, exportJson, isPending, error }` shape\n   - Tracks async state like `useFileUpload`\n4. Export from `packages/runtime` entry point\n5. Pattern: mirror FileOps/useFileUpload structure exactly\n\nAcceptance: `pnpm exec nx run runtime:typecheck` passes. `exportCsv([{a:1}], ['a'])` triggers browser download. Works offline.",
+    "descriptionHistory": [],
+    "id": "feature-runtime-transfer",
+    "status": "backlog",
+    "title": "Runtime TransferOps service"
+}

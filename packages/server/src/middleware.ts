@@ -1,9 +1,10 @@
 /**
- * HTTP middleware: session auth, CORS, logging, request ID, security headers.
+ * HTTP middleware: session auth, CORS, logging, request ID, security headers, role enforcement.
  * Effect.Tag + HttpApiMiddleware.Tag + frozen dispatch table.
  */
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
-import type { OAuthProvider } from '@parametric-portal/types/schema';
+import type { OAuthProvider, RoleKey } from '@parametric-portal/types/schema';
+import { SCHEMA_TUNING } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { Effect, Layer, Option, Redacted } from 'effect';
 import type { AuthContext, OAuthResult } from './auth.ts';
@@ -14,6 +15,8 @@ import { MetricsService } from './metrics.ts';
 // --- [TYPES] -----------------------------------------------------------------
 
 type OAuthError = InstanceType<typeof HttpError.OAuth>;
+type ForbiddenError = InstanceType<typeof HttpError.Forbidden>;
+type UserLookup = { readonly findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: RoleKey }>, unknown> };
 type OAuthService = {
     readonly authenticate: (
         provider: typeof OAuthProvider.Type,
@@ -56,6 +59,7 @@ class OAuth extends Effect.Tag('server/OAuth')<OAuth, OAuthService>() {}
 class RequestId extends Effect.Tag('server/RequestId')<RequestId, string>() {}
 class Session extends Effect.Tag('server/Session')<Session, AuthContext>() {}
 class SessionLookup extends Effect.Tag('server/SessionLookup')<SessionLookup, SessionLookupService>() {}
+class UserLookupService extends Effect.Tag('server/UserLookup')<UserLookupService, UserLookup>() {}
 
 // --- [MIDDLEWARE] ------------------------------------------------------------
 
@@ -126,6 +130,27 @@ const trace = HttpMiddleware.make((app) =>
 const withTracerDisabled = <A, E, R>(layer: Layer.Layer<A, E, R>, urls = B.tracerDisabledUrls) =>
     HttpMiddleware.withTracerDisabledForUrls(layer, urls);
 
+// --- [ROLE_ENFORCEMENT] ------------------------------------------------------
+
+/** Creates role enforcement middleware that gates endpoints by minimum role level. Requires `Session` (provided by `SessionAuth`) and `UserLookupService` to be available. */
+const requireRole = (min: RoleKey): Effect.Effect<void, ForbiddenError, Session | UserLookupService> =>
+    Effect.gen(function* () {
+        const { userId } = yield* Session;
+        const { findById } = yield* UserLookupService;
+        yield* findById(userId).pipe(
+            Effect.mapError(() => new HttpError.Forbidden({ reason: 'User lookup failed' })),
+            Effect.flatMap(Option.match({
+                onNone: () => Effect.fail(new HttpError.Forbidden({ reason: 'User not found' })),
+                onSome: Effect.succeed,
+            })),
+            Effect.filterOrFail(
+                (u) => SCHEMA_TUNING.roleLevels[u.role] >= SCHEMA_TUNING.roleLevels[min],
+                () => new HttpError.Forbidden({ reason: 'Insufficient permissions' }),
+            ),
+            Effect.asVoid,
+        );
+    });
+
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const Middleware = Object.freeze({
@@ -145,15 +170,17 @@ const Middleware = Object.freeze({
     OAuth,
     RequestId,
     requestId,
+    requireRole,
     Session,
     SessionLookup,
     security,
     trace,
+    UserLookupService,
     withTracerDisabled,
     xForwardedHeaders: HttpMiddleware.xForwardedHeaders,
 } as const);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as MIDDLEWARE_TUNING, Middleware, OAuth };
-export type { OAuthService, SessionLookupService };
+export { B as MIDDLEWARE_TUNING, Middleware, OAuth, requireRole };
+export type { OAuthService, SessionLookupService, UserLookup };

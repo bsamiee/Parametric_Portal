@@ -1,14 +1,9 @@
 {
-    "category": "ui",
-    "description": "Enable users to export filtered datasets and reports in common formats. Implement server-side generation using Effect pipelines with streaming for large datasets. Support scheduled exports via the job queue and email delivery with presigned download URLs.\n\n**Rationale:** Users need to analyze data in external tools or share reports with stakeholders. Export functionality is a baseline expectation in data-driven applications, especially for business intelligence and compliance reporting.",
-    "descriptionHistory": [
-        {
-            "description": "Enable users to export filtered datasets and reports in common formats. Implement server-side generation using Effect pipelines with streaming for large datasets. Support scheduled exports via the job queue and email delivery with presigned download URLs.\n\n**Rationale:** Users need to analyze data in external tools or share reports with stakeholders. Export functionality is a baseline expectation in data-driven applications, especially for business intelligence and compliance reporting.",
-            "source": "initial",
-            "timestamp": "2026-01-12T14:59:57.820Z"
-        }
-    ],
+    "category": "backend",
+    "dependencies": ["feature-multiapp-context"],
+    "description": "Create unified TransferService for server-side import/export with streaming and appId scoping.\n\nCurrently (after multiapp-context): `RequestContext` service provides `appId`. `AssetRepository.streamByUserId` in `packages/database/src/repos.ts:214` returns `Stream<Asset>`. `AssetInsertSchema` in `packages/types/src/schema.ts:159` validates inserts. `insertAsset` resolver (line 92-97) supports batched inserts. `Stream` from `effect` provides composition. No transfer types or service exist.\n\nDeliverables:\n1. Create `packages/types/src/transfer.ts`:\n   - `TransferFormat = S.Literal('json', 'csv')` schema\n   - `TransferConfig` schema: `{ format: TransferFormat; filters?: { type?: AssetType } }`\n   - `ImportResult` schema: `{ imported: number; failed: Array<{ row: number; error: string }> }`\n   - `ExportMeta` schema: `{ format: TransferFormat; filename: string; mimeType: string }`\n2. Create `packages/server/src/transfer.ts` with `TransferService` class extending `Effect.Service`:\n   - `export(config: TransferConfig) => Stream<Uint8Array>` - reads appId from RequestContext, streams from AssetRepository\n   - `import(format: TransferFormat, stream: Stream<Uint8Array>) => Effect<ImportResult>` - validates via schema, batch inserts\n3. JSON export: NDJSON format via `Stream.map` + JSON.stringify + newline\n4. CSV export: header row via `Stream.prepend`, then `Stream.map` each row\n5. Import: parse stream, validate each row against `AssetInsertSchema`, collect valid, batch insert\n6. Add `TransferGroup` in `packages/server/src/api.ts`: `GET /api/transfer/export`, `POST /api/transfer/import`\n7. Both endpoints require `SessionAuth`, read `appId` from `RequestContext`\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p types,server,api` passes. Export streams without OOM. Import with 1 invalid row returns partial success.",
+    "descriptionHistory": [],
     "id": "feature-1768229997819-r7c0q43xw",
     "status": "backlog",
-    "title": "Data export to multiple formats (CSV, JSON, PDF)"
+    "title": "Server TransferService"
 }

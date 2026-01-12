@@ -1,0 +1,9 @@
+{
+    "category": "frontend",
+    "dependencies": [],
+    "description": "Add Background Sync for offline mutations and offline status indicator.\n\nCurrently: `vite-plugin-pwa: 1.2.0` in catalog configures Workbox. `idb-keyval: 6.2.2` in catalog for IndexedDB. No offline mutation queue exists. No offline indicator component.\n\nDeliverables:\n1. Update `apps/parametric_icons/vite.config.ts`: configure Workbox `backgroundSync` plugin with `queueName: 'offline-mutations'`\n2. Create custom service worker handler for POST/PUT/DELETE requests that queues to IndexedDB on network failure\n3. Use `idb-keyval` for simple key-value storage of pending mutations\n4. Create `packages/components-next/src/feedback/offline-indicator.tsx` component\n5. Component listens to `navigator.onLine` and `online`/`offline` events\n6. Use `data-slot=\"offline-indicator\"`, `data-offline=\"true|false\"` for styling\n7. Export from `packages/components-next`\n\nAcceptance: `pnpm exec nx run parametric_icons:build` succeeds. Offline indicator shows when `navigator.onLine === false`. Queued mutation replays automatically when online.",
+    "descriptionHistory": [],
+    "id": "feature-pwa-offline",
+    "status": "backlog",
+    "title": "PWA offline support"
+}

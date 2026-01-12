@@ -23,6 +23,8 @@ import { OAuthLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
 import { TelemetryRouteLive } from './routes/telemetry.ts';
+import { UsersLive } from './routes/users.ts';
+import { MfaLive } from './routes/mfa.ts';
 import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -67,6 +69,19 @@ const SessionLookupLive = Layer.effect(
         };
     }),
 );
+const UserLookupLive = Layer.effect(
+    Middleware.UserLookupService,
+    Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const metrics = yield* MetricsService;
+        return {
+            findById: (userId: string) =>
+                db.users.findById(userId as Parameters<typeof db.users.findById>[0]).pipe(
+                    Effect.provideService(MetricsService, metrics),
+                ),
+        };
+    }),
+);
 const DatabaseLive = DatabaseService.layer;
 const SessionAuthLive = Middleware.Auth.layer.pipe(Layer.provide(SessionLookupLive), Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
@@ -99,15 +114,17 @@ const RateLimitLive = RateLimit.layer;
 const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyService.layer, RateLimitLive);
 const RouteDependencies = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive);
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
-    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, TelemetryRouteLive)),
+    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MfaLive, TelemetryRouteLive, UsersLive)),
     Layer.provide(RouteDependencies),
     Layer.provide(InfraLayers),
 );
+const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const ServerLive = HttpApiBuilder.serve(composeMiddleware).pipe(
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),
     Layer.provide(SessionAuthLive),
+    Layer.provide(UserLookupServiceLive),
     Layer.provide(MetricsService.layer),
     Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port }).pipe(HttpServer.withLogAddress)),
 );

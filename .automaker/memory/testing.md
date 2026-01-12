@@ -35,3 +35,13 @@ usageStats:
 - **Problem solved:** Tests need to assert services were called with specific arguments. Choice between reference equality vs deep equality comparison
 - **Why this works:** Recording raw arguments preserves Effect instances and complex object references needed for verification. Deep equality comparison would require serialization strategy and could be slow.
 - **Trade-offs:** Reference equality works well for simple values and Effect instances but fails for equivalent but different object references. Users can use getCalls() and manually inspect for complex assertions.
+
+#### [Gotcha] Vitest setupFiles in monorepo workspace references @parametric-portal/test-utils package that fails to resolve during test runs due to pnpm workspace resolution and Node.js version incompatibility (v22 vs v25 requirement) (2026-01-12)
+- **Situation:** Attempted to create unit tests for middleware but vitest config's setupFiles prevented test execution
+- **Root cause:** Project specifies Node v25.2.1 in package.json, environment has v22.20.0. Workspace package resolution layers on top of version mismatch, causing import chain failures in setup.
+- **How to avoid:** Typecheck passes (uses tsc, version-agnostic). Tests cannot run (requires workspace package import). Implementation verified via typecheck but edge cases cannot be tested.
+
+#### [Gotcha] Playwright E2E tests for MFA endpoints require running database and both services, preventing CI integration without additional setup (2026-01-12)
+- **Situation:** MFA is backend-only feature; no UI to test; endpoints require authentication context and database state
+- **Root cause:** TOTP verification is time-dependent and cryptographic; needs real service state, not mocked; difficult to test without full stack
+- **How to avoid:** Tests are slower and more brittle; require infrastructure; cannot run in lightweight CI; catch real integration issues

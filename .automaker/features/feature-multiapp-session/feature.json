@@ -1,0 +1,9 @@
+{
+    "category": "infrastructure",
+    "dependencies": ["feature-multiapp-context"],
+    "description": "Move SessionLookup implementation from apps/api to packages/server as replaceable Layer.\n\nCurrently: `SessionLookup` Tag defined in `packages/server/src/middleware.ts` (line 58). Implementation lives in `apps/api/src/main.ts` querying `db.sessions.findValidByTokenHash`. Apps cannot override session lookup strategy.\n\nDeliverables:\n1. Create `packages/server/src/session.ts` with `SessionLookupService` class extending `Effect.Service`\n2. Add `SessionLookupError` tagged error with variants: `DatabaseError`, `SessionExpired`, `SessionRevoked`\n3. Create `SessionLookupService.Default` Layer using `DatabaseService` from `packages/database`\n4. Update `packages/server/src/middleware.ts`: import `SessionLookupService` from `./session.ts`\n5. Update `apps/api/src/main.ts`: replace inline session lookup with `SessionLookupService.Default` Layer provision\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p server,api` passes. Expired session returns `SessionExpired` error.",
+    "descriptionHistory": [],
+    "id": "feature-multiapp-session",
+    "status": "backlog",
+    "title": "SessionLookup service abstraction"
+}

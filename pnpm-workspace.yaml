@@ -84,6 +84,7 @@ catalog:
   msw: 2.12.7
   nuqs: 2.8.6
   nx: 22.3.3
+  otplib: 13.1.0
   react: 19.3.0-canary-f93b9fd4-20251217
   react-aria: 3.45.0
   react-aria-components: 1.14.0

@@ -60,7 +60,9 @@ class EncryptedKey extends S.Class<EncryptedKey>('EncryptedKey')({
     /** Static: decrypt from raw bytes (parses then decrypts). */
     static readonly decryptBytes = Effect.fn('crypto.decrypt.bytes')((bytes: Uint8Array) =>
         Effect.gen(function* () {
-            const encrypted = yield* S.decodeUnknown(EncryptedKey.fromBytes)(bytes);
+            const encrypted = yield* S.decodeUnknown(EncryptedKey.fromBytes)(bytes).pipe(
+                Effect.mapError(() => new HttpError.Internal({ message: 'Invalid encrypted data format' })),
+            );
             return yield* encrypted.decrypt();
         }),
     );
