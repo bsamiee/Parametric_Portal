@@ -4,6 +4,7 @@
  * Accepts either individual props OR a `file` object from useFileUpload.
  */
 import { type FileMetadata, type MimeCategory, type MimeType, mimeToCategory } from '@parametric-portal/types/files';
+import { Match } from 'effect';
 import type { LucideIcon } from 'lucide-react';
 import { Archive, Code, File, FileText, Image } from 'lucide-react';
 import type { FC, ReactNode, Ref } from 'react';
@@ -63,9 +64,10 @@ const B = Object.freeze({
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const detectMode = (mimeType: string): PreviewMode =>
-	mimeType === 'image/svg+xml'
-		? 'svg'
-		: ((mimeToCategory[mimeType as MimeType] as PreviewMode | undefined) ?? 'unknown');
+	Match.value(mimeType).pipe(
+		Match.when('image/svg+xml', () => 'svg' as const),
+		Match.orElse(() => (mimeToCategory[mimeType as MimeType] as PreviewMode | undefined) ?? 'unknown'),
+	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

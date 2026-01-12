@@ -3,17 +3,17 @@
  * Pure presentation - CSS variable driven styling via frozen B constant.
  * Supports single value (number) OR range (number[]) via value/defaultValue props.
  * Track fill rendered via --slider-fill-percent and --slider-fill-start CSS variables.
- * Thumb shows current value in tooltip during drag via useTooltip.
+ * Thumb tooltip uses DragStateSync pattern (same as ColorPicker).
  * REQUIRED: color, size props - no defaults, no hardcoded mappings.
  */
 import { useMergeRefs } from '@floating-ui/react';
-import type { CSSProperties, FC, ReactNode, Ref, RefObject } from 'react';
-import { useRef } from 'react';
+import type { CSSProperties, FC, ReactNode, Ref } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
 	Label, Slider as RACSlider, SliderOutput as RACSliderOutput, type SliderOutputProps as RACSliderOutputProps, type SliderProps as RACSliderProps,
 	SliderThumb as RACSliderThumb, type SliderThumbProps as RACSliderThumbProps, SliderTrack as RACSliderTrack, type SliderTrackProps as RACSliderTrackProps,
 } from 'react-aria-components';
-import { useTooltip } from '../core/floating';
+import { type TooltipConfig, useTooltip } from '../core/floating';
 import { cn, composeTailwindRenderProps } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -25,6 +25,8 @@ type SliderProps = Omit<RACSliderProps, 'children'> & {
 	readonly ref?: Ref<HTMLDivElement>;
 	readonly showOutput?: boolean;
 	readonly size: string;
+	readonly thumbTooltip?: boolean;
+	readonly tooltip?: TooltipConfig;
 	readonly variant?: string;
 };
 type SliderTrackProps = Omit<RACSliderTrackProps, 'children'> & {
@@ -34,7 +36,7 @@ type SliderTrackProps = Omit<RACSliderTrackProps, 'children'> & {
 type SliderThumbProps = Omit<RACSliderThumbProps, 'children'> & {
 	readonly children?: ReactNode;
 	readonly ref?: Ref<HTMLDivElement>;
-	readonly tooltip?: boolean;
+	readonly tooltip?: boolean | TooltipConfig;
 };
 type SliderOutputProps = Omit<RACSliderOutputProps, 'children'> & {
 	readonly children?: ReactNode | ((state: { readonly values: readonly number[] }) => ReactNode);
@@ -85,36 +87,63 @@ const B = Object.freeze({
 	}),
 });
 
+// --- [SUB_COMPONENTS] --------------------------------------------------------
+
+const DragStateSync: FC<{
+	readonly children: ReactNode;
+	readonly isDragging: boolean;
+	readonly onSync: (state: { isDragging: boolean; valueLabel: string }) => void;
+	readonly valueLabel: string;
+}> = ({ children, isDragging, onSync, valueLabel }) => {
+	useEffect(() => { onSync({ isDragging, valueLabel }); }, [isDragging, onSync, valueLabel]);
+	return <>{children}</>;
+};
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const SliderRoot: FC<SliderProps> = ({
-	children, className, color, label, orientation = 'horizontal', ref, showOutput, size, variant, ...racProps }) => (
-	<RACSlider
-		{...(racProps as RACSliderProps)}
-		className={composeTailwindRenderProps(className, B.slot.root)}
-		data-color={color}
-		data-orientation={orientation}
-		data-size={size}
-		data-slot='slider'
-		data-variant={variant}
-		orientation={orientation}
-		ref={ref}
-	>
-		{(renderProps) => (
-			<>
-				{label && <Label className={B.slot.label} data-slot='slider-label'>{label}</Label>}
-				{showOutput && (
-					<RACSliderOutput className={B.slot.output} data-slot='slider-output'>
-						{renderProps.state.values.map((v, i) => (
-							<span key={`thumb-${String(v)}-${String(i)}`}>{i > 0 && ' – '}{renderProps.state.getThumbValueLabel(i)}</span>
-						))}
-					</RACSliderOutput>
+	children, className, color, label, orientation = 'horizontal', ref, showOutput, size, thumbTooltip, tooltip, variant, ...racProps }) => {
+	const isRange = Array.isArray(racProps.value) || Array.isArray(racProps.defaultValue);
+	const sliderRef = useRef<HTMLDivElement>(null);
+	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
+	const mergedRef = useMergeRefs([ref, sliderRef, tooltipProps.ref as Ref<HTMLDivElement>]);
+	const defaultContent = (
+		<SliderTrack>
+			{isRange ? (
+				<>
+					<SliderThumb index={0} {...(thumbTooltip && { tooltip: true })} />
+					<SliderThumb index={1} {...(thumbTooltip && { tooltip: true })} />
+				</>
+			) : (
+				<SliderThumb {...(thumbTooltip && { tooltip: true })} />
+			)}
+		</SliderTrack>
+	);
+	return (
+		<>
+			<RACSlider
+				{...({ ...racProps, ...tooltipProps } as unknown as RACSliderProps)}
+				className={composeTailwindRenderProps(className, B.slot.root)}
+				data-color={color}
+				data-orientation={orientation}
+				data-size={size}
+				data-slot='slider'
+				data-variant={variant}
+				orientation={orientation}
+				ref={mergedRef}
+			>
+				{() => (
+					<>
+						{label && <Label className={B.slot.label} data-slot='slider-label'>{label}</Label>}
+						{showOutput && <SliderOutput />}
+						{children ?? defaultContent}
+					</>
 				)}
-				{children}
-			</>
-		)}
-	</RACSlider>
-);
+			</RACSlider>
+			{renderTooltip?.()}
+		</>
+	);
+};
 const SliderTrack: FC<SliderTrackProps> = ({ children, className, ref, ...racProps }) => (
 	<RACSliderTrack
 		{...(racProps as RACSliderTrackProps)}
@@ -150,33 +179,35 @@ const SliderTrack: FC<SliderTrackProps> = ({ children, className, ref, ...racPro
 );
 const SliderThumb: FC<SliderThumbProps> = ({ children, className, ref, tooltip, ...racProps }) => {
 	const thumbRef = useRef<HTMLDivElement>(null);
-	const mergedRef = useMergeRefs([ref, thumbRef]);
+	const [dragState, setDragState] = useState({ isDragging: false, valueLabel: '' });
+	const tooltipConfig: TooltipConfig | undefined = tooltip
+		? { content: dragState.valueLabel, open: dragState.isDragging, placement: 'top',
+				...(typeof tooltip === 'object' ? tooltip : {}) }
+		: undefined;
+	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltipConfig);
+	const mergedRef = useMergeRefs([ref, thumbRef, tooltipProps.ref as Ref<HTMLDivElement>]);
 	return (
-		<RACSliderThumb
-			{...(racProps as RACSliderThumbProps)}
-			className={composeTailwindRenderProps(className, B.slot.thumb)}
-			data-slot='slider-thumb'
-			ref={mergedRef}
-		>
-			{(renderProps) => {
-				const { isDragging, state } = renderProps;
-				const index = racProps.index ?? 0;
-				const valueLabel = state.getThumbValueLabel(index);
-				return (
-					<>
-						{children}
-						{tooltip && isDragging && (
-							<DragTooltip anchor={thumbRef} value={valueLabel} />
-						)}
-					</>
-				);
-			}}
-		</RACSliderThumb>
+		<>
+			<RACSliderThumb
+				{...(racProps as RACSliderThumbProps)}
+				className={composeTailwindRenderProps(className, B.slot.thumb)}
+				data-slot='slider-thumb'
+				ref={mergedRef}
+			>
+				{(renderProps) => {
+					const { isDragging, state } = renderProps;
+					const index = racProps.index ?? 0;
+					const valueLabel = state.getThumbValueLabel(index);
+					return (
+						<DragStateSync isDragging={isDragging} onSync={setDragState} valueLabel={valueLabel}>
+							{children}
+						</DragStateSync>
+					);
+				}}
+			</RACSliderThumb>
+			{renderTooltip?.()}
+		</>
 	);
-};
-const DragTooltip: FC<{ readonly anchor: RefObject<HTMLDivElement | null>; readonly value: string }> = ({ anchor, value }) => {
-	const { render } = useTooltip({ anchor, content: value, open: true, placement: 'top' });
-	return render?.() ?? null;
 };
 const SliderOutput: FC<SliderOutputProps> = ({ children, className, ref, ...racProps }) => (
 	<RACSliderOutput
@@ -193,14 +224,7 @@ const SliderOutput: FC<SliderOutputProps> = ({ children, className, ref, ...racP
 		}}
 	</RACSliderOutput>
 );
-
-// --- [COMPOUND] --------------------------------------------------------------
-
-const Slider = Object.assign(SliderRoot, {
-	Output: SliderOutput,
-	Thumb: SliderThumb,
-	Track: SliderTrack,
-});
+const Slider = Object.assign(SliderRoot, { Output: SliderOutput, Thumb: SliderThumb, Track: SliderTrack });
 
 // --- [EXPORT] ----------------------------------------------------------------
 

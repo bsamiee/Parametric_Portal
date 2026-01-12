@@ -6,6 +6,7 @@
  */
 import { announce } from '@react-aria/live-announcer';
 import { AsyncState } from '@parametric-portal/types/async';
+import { Option, pipe } from 'effect';
 import type { FC, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import { VisuallyHidden as RACVisuallyHidden } from 'react-aria-components';
@@ -39,18 +40,20 @@ const useAsyncAnnounce = (
 ): void => {
     const prevTagRef = useRef<string | undefined>(undefined);
     useEffect(() => {
-        const currentTag = asyncState?._tag;
         const prevTag = prevTagRef.current;
-        prevTagRef.current = currentTag;
-        prevTag !== currentTag && asyncState !== undefined && (() => {
-            const message = AsyncState.$match(asyncState, {
+        prevTagRef.current = asyncState?._tag;
+        pipe(
+            Option.fromNullable(asyncState),
+            Option.filter((state) => prevTag !== state._tag),
+            Option.map((state) => AsyncState.$match(state, {
                 Failure: () => config.failure ?? B.defaults.failure,
                 Idle: () => null,
                 Loading: () => config.loading ?? B.defaults.loading,
                 Success: () => config.success ?? B.defaults.success,
-            });
-            message && announce(message, config.assertiveness ?? B.defaults.assertiveness);
-        })();
+            })),
+            Option.flatMap(Option.fromNullable),
+            Option.map((message) => announce(message, config.assertiveness ?? B.defaults.assertiveness)),
+        );
     }, [asyncState, config.assertiveness, config.failure, config.loading, config.success]);
 };
 
@@ -58,8 +61,7 @@ const useAsyncAnnounce = (
 
 const AsyncAnnouncer: FC<{
     readonly asyncState: AsyncState<unknown, unknown> | undefined;
-    readonly config?: AsyncAnnounceConfig;
-}> = ({ asyncState, config }) => {
+    readonly config?: AsyncAnnounceConfig; }> = ({ asyncState, config }) => {
     useAsyncAnnounce(asyncState, config);
     return null;
 };

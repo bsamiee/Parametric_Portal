@@ -63,20 +63,15 @@
       "import": "./src/feedback/progress.tsx",
       "default": "./src/feedback/progress.tsx"
     },
-    "./inputs/number-field": {
-      "types": "./src/inputs/number-field.tsx",
-      "import": "./src/inputs/number-field.tsx",
-      "default": "./src/inputs/number-field.tsx"
+    "./inputs/field": {
+      "types": "./src/inputs/field.tsx",
+      "import": "./src/inputs/field.tsx",
+      "default": "./src/inputs/field.tsx"
     },
     "./inputs/radio": {
       "types": "./src/inputs/radio.tsx",
       "import": "./src/inputs/radio.tsx",
       "default": "./src/inputs/radio.tsx"
-    },
-    "./inputs/search-field": {
-      "types": "./src/inputs/search-field.tsx",
-      "import": "./src/inputs/search-field.tsx",
-      "default": "./src/inputs/search-field.tsx"
     },
     "./inputs/select": {
       "types": "./src/inputs/select.tsx",
@@ -87,11 +82,6 @@
       "types": "./src/inputs/slider.tsx",
       "import": "./src/inputs/slider.tsx",
       "default": "./src/inputs/slider.tsx"
-    },
-    "./inputs/text-field": {
-      "types": "./src/inputs/text-field.tsx",
-      "import": "./src/inputs/text-field.tsx",
-      "default": "./src/inputs/text-field.tsx"
     },
     "./navigation/accordion": {
       "types": "./src/navigation/accordion.tsx",

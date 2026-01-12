@@ -8,6 +8,7 @@ import { FloatingNode, useFloatingNodeId, useMergeRefs } from '@floating-ui/reac
 import { useClipboard } from '@parametric-portal/runtime/hooks/browser';
 import { readCssMs, readCssPx } from '@parametric-portal/runtime/runtime';
 import { AsyncState } from '@parametric-portal/types/async';
+import { Match } from 'effect';
 import { ChevronRight, Clipboard, Copy, Trash2 } from 'lucide-react';
 import { createContext, createElement, type FC, type ReactElement, type ReactNode, type Ref, useCallback, useContext, useMemo, useRef } from 'react';
 import {
@@ -74,6 +75,11 @@ const B = Object.freeze({
 	defaults: Object.freeze({
 		skeletonCount: 3,
 	}),
+	presets: Object.freeze({
+		copy: { icon: { default: Copy }, shortcut: '⌘C' },
+		delete: { icon: { default: Trash2 }, shortcut: '⌘⌫' },
+		paste: { icon: { default: Clipboard }, shortcut: '⌘V' },
+	} as const),
 	slot: {
 		item: cn(
 			'flex items-center gap-(--menu-item-gap) cursor-pointer outline-none',
@@ -204,8 +210,14 @@ const MenuItem: FC<MenuItemProps> = ({
 	const menuCtx = useContext(MenuContext);
 	const clipboard = useClipboard();
 	const slot = Slot.bind(asyncState);
-	const icon: SlotDef | undefined = iconProp ?? ([{ default: Copy }, { default: Clipboard }, { default: Trash2 }] as const).find((_, i) => [copy, paste, deletePreset][i]);
-	const shortcut = shortcutProp ?? (['⌘C', '⌘V', '⌘⌫'] as const).find((_, i) => [copy, paste, deletePreset][i]);
+	const preset = Match.value({ copy, delete: deletePreset, paste }).pipe(
+		Match.when(({ copy: c }) => Boolean(c), () => B.presets.copy),
+		Match.when(({ paste: p }) => Boolean(p), () => B.presets.paste),
+		Match.when(({ delete: d }) => Boolean(d), () => B.presets.delete),
+		Match.orElse(() => null),
+	);
+	const icon: SlotDef | undefined = iconProp ?? preset?.icon;
+	const shortcut = shortcutProp ?? preset?.shortcut;
 	const resolvedSubmenuSize = submenuSize ?? menuCtx?.size;
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const itemRef = useRef<HTMLDivElement>(null);

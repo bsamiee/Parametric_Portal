@@ -11,6 +11,7 @@
  */
 import { useMergeRefs } from '@floating-ui/react';
 import { AsyncState } from '@parametric-portal/types/async';
+import { Match } from 'effect';
 import { Loader2 } from 'lucide-react';
 import type { FC, ReactNode, Ref } from 'react';
 import { useMemo } from 'react';
@@ -77,7 +78,11 @@ const circleGeometry = (sw: number) => ({
 	r: (B.circle - sw) / 2,
 });
 const getMeterZone = (pct: number, warning: number, critical: number): MeterZone =>
-	pct < warning ? 'optimal' : pct < critical ? 'warning' : 'critical';
+	Match.value(pct).pipe(
+		Match.when((p) => p < warning, () => 'optimal' as const),
+		Match.when((p) => p < critical, () => 'warning' as const),
+		Match.orElse(() => 'critical' as const),
+	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

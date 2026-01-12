@@ -1,6 +1,6 @@
 /**
  * Test harness: Minimal component validation with theme integration.
- * Tests: Button (async states), TextField (multiline), Select (searchable), Toolbar, Slider, ColorPicker, DatePicker, Tree, TagGroup, Table, GridList, Breadcrumbs, Progress, Drawer.
+ * Tests: Button (async states), Field (unified text/search/number), Select (searchable), Toolbar, Slider, ColorPicker, DatePicker, Tree, TagGroup, Table, GridList, Breadcrumbs, Progress, Drawer.
  */
 import { Button } from '@parametric-portal/components-next/actions/button';
 import { Toolbar } from '@parametric-portal/components-next/actions/toolbar';
@@ -9,9 +9,9 @@ import { Table } from '@parametric-portal/components-next/collections/table';
 import { TagGroup } from '@parametric-portal/components-next/collections/tag-group';
 import { Tree } from '@parametric-portal/components-next/collections/tree';
 import { Progress } from '@parametric-portal/components-next/feedback/progress';
+import { Field } from '@parametric-portal/components-next/inputs/field';
 import { Select } from '@parametric-portal/components-next/inputs/select';
 import { Slider } from '@parametric-portal/components-next/inputs/slider';
-import { TextField } from '@parametric-portal/components-next/inputs/text-field';
 import { Breadcrumbs } from '@parametric-portal/components-next/navigation/breadcrumbs';
 import { Drawer } from '@parametric-portal/components-next/overlays/drawer';
 import { ColorPicker } from '@parametric-portal/components-next/pickers/color-picker';
@@ -92,12 +92,12 @@ const AsyncButtonDemo: FC = () => {
         </>
     );
 };
-const TextFieldDemo: FC = () => {
+const FieldDemo: FC = () => {
     const asyncMutate = useEffectMutate(() => simulateAsync(1500, false));
     return (
         <>
-            <TextField color='primary' label='Username' placeholder='Enter username...' size='md' />
-            <TextField
+            <Field color='primary' label='Username' placeholder='Enter username...' size='md' type='text' />
+            <Field
                 color='primary'
                 description='Multiline textarea with 4 rows'
                 label='Description'
@@ -105,14 +105,16 @@ const TextFieldDemo: FC = () => {
                 placeholder='Enter description...'
                 rows={4}
                 size='md'
+                type='text'
             />
-            <TextField
+            <Field
                 asyncState={asyncMutate.state}
                 color='primary'
                 label='Async Field'
                 placeholder='Type and submit...'
                 prefix={{ default: Edit, loading: Loader2, success: Check }}
                 size='md'
+                type='text'
             />
             <Button
                 children={{ default: 'Submit' }}
@@ -255,94 +257,68 @@ const SliderDemo: FC = () => (
 );
 const ColorPickerDemo: FC = () => (
     <>
-        <div className='flex flex-col gap-4'>
-            <ColorPicker color='primary' data-testid='color-picker-full' defaultValue='hsb(217, 91%, 96%)' size='md'>
-                <ColorPicker.Area xChannel='saturation' yChannel='brightness'>
-                    <ColorPicker.Thumb tooltip />
-                </ColorPicker.Area>
-                <ColorPicker.Slider channel='hue'>
-                    <ColorPicker.Thumb tooltip />
-                </ColorPicker.Slider>
-                <ColorPicker.Slider channel='alpha'>
-                    <ColorPicker.Thumb tooltip />
-                </ColorPicker.Slider>
-                <ColorPicker.Field label='Hex Color' />
-            </ColorPicker>
-        </div>
-        <div className='flex flex-col gap-4'>
-            <ColorPicker color='primary' data-testid='color-picker-wheel' defaultValue='hsb(161, 84%, 73%)' size='md'>
-                <ColorPicker.Wheel innerRadius={40} outerRadius={80}>
-                    <ColorPicker.WheelTrack />
-                    <ColorPicker.Thumb tooltip />
-                </ColorPicker.Wheel>
-            </ColorPicker>
-        </div>
-        <div className='flex flex-col gap-4'>
-            <ColorPicker color='primary' data-testid='color-picker-swatches' defaultValue='#ef4444' size='md'>
-                <ColorPicker.SwatchPicker>
-                    <ColorPicker.SwatchPickerItem color='#ef4444' name='Red' />
-                    <ColorPicker.SwatchPickerItem color='#f97316' name='Orange' />
-                    <ColorPicker.SwatchPickerItem color='#eab308' name='Yellow' />
-                    <ColorPicker.SwatchPickerItem color='#22c55e' name='Green' />
-                    <ColorPicker.SwatchPickerItem color='#3b82f6' name='Blue' />
-                    <ColorPicker.SwatchPickerItem color='#8b5cf6' name='Purple' />
-                    <ColorPicker.SwatchPickerItem color='#ec4899' name='Pink' />
-                    <ColorPicker.SwatchPickerItem color='#6b7280' name='Gray' />
-                </ColorPicker.SwatchPicker>
-            </ColorPicker>
-        </div>
+        <ColorPicker
+            data-testid='color-picker-area'
+            defaultValue='hsba(217, 91%, 96%, 1)'
+            field={{ label: 'Hex Value' }}
+            mode='area'
+            size='md'
+            sliderLabels={{ alpha: 'Opacity', hue: 'Hue' }}
+            sliderShowOutput
+            sliders={['hue', 'alpha']}
+            swatch
+            thumbTooltip
+            thumbTooltipFormat='hex'
+            tooltip={{ content: 'Select color with area picker' }}
+        />
+        <ColorPicker
+            data-testid='color-picker-wheel'
+            defaultValue='hsb(161, 84%, 73%)'
+            mode='wheel'
+            size='md'
+            sliderLabels={{ brightness: 'Brightness', saturation: 'Saturation' }}
+            sliderShowOutput
+            sliders={['saturation', 'brightness']}
+            thumbTooltip
+            thumbTooltipFormat='rgb'
+            tooltip={{ content: 'Select hue with wheel picker' }}
+        />
+        <ColorPicker
+            data-testid='color-picker-swatches'
+            defaultValue='#bd93f9'
+            size='md'
+            swatch
+            swatches={['#ff79c6', '#ff5555', '#bd93f9', '#8be9fd', '#50fa7b', '#ffb86c']}
+            tooltip={{ content: 'Dracula color palette' }}
+        />
     </>
 );
 const DatePickerDemo: FC = () => (
     <>
-        <div className='flex flex-col gap-2'>
-            <DatePicker color='primary' data-testid='date-picker-single' label='Single Date' size='md'>
-                <DatePicker.Group>
-                    <DatePicker.Field />
-                    <DatePicker.Trigger>
-                        <Calendar className='size-4' />
-                    </DatePicker.Trigger>
-                </DatePicker.Group>
-                <DatePicker.Popover>
-                    <DatePicker.Calendar />
-                </DatePicker.Popover>
-            </DatePicker>
-        </div>
-        <div className='flex flex-col gap-2'>
-            <DatePicker.Range color='primary' data-testid='date-picker-range' label='Date Range' size='md'>
-                <DatePicker.Group>
-                    <DatePicker.RangeField slot='start' />
-                    <span className='px-1 text-(--color-text-600)'>–</span>
-                    <DatePicker.RangeField slot='end' />
-                    <DatePicker.Trigger>
-                        <Calendar className='size-4' />
-                    </DatePicker.Trigger>
-                </DatePicker.Group>
-                <DatePicker.Popover>
-                    <DatePicker.RangeCalendar />
-                </DatePicker.Popover>
-            </DatePicker.Range>
-        </div>
-        <div className='flex flex-col gap-2'>
-            <DatePicker
-                color='primary'
-                data-testid='date-picker-datetime'
-                granularity='minute'
-                label='Date & Time'
-                size='md'
-            >
-                <DatePicker.Group>
-                    <DatePicker.Field />
-                    <DatePicker.Trigger>
-                        <Calendar className='size-4' />
-                    </DatePicker.Trigger>
-                </DatePicker.Group>
-                <DatePicker.Popover>
-                    <DatePicker.Calendar />
-                    <DatePicker.Time label='Time' />
-                </DatePicker.Popover>
-            </DatePicker>
-        </div>
+        <DatePicker
+            data-testid='date-picker-single'
+            label='Single Date'
+            size='md'
+            tooltip={{ content: 'Select a date' }}
+            triggerIcon={Calendar}
+        />
+        <DatePicker
+            data-testid='date-picker-range'
+            label='Date Range'
+            mode='range'
+            size='md'
+            tooltip={{ content: 'Select date range' }}
+            triggerIcon={Calendar}
+        />
+        <DatePicker
+            data-testid='date-picker-datetime'
+            granularity='minute'
+            label='Date & Time'
+            size='md'
+            time={{ label: 'Time' }}
+            tooltip={{ content: 'Select date and time' }}
+            triggerIcon={Calendar}
+        />
     </>
 );
 const TreeDemo: FC = () => (
@@ -1041,8 +1017,8 @@ const AppContent: FC = () => (
             <Section title='Async Button States'>
                 <AsyncButtonDemo />
             </Section>
-            <Section title='TextField Components'>
-                <TextFieldDemo />
+            <Section title='Field Components'>
+                <FieldDemo />
             </Section>
             <Section title='Select Components'>
                 <SelectDemo />

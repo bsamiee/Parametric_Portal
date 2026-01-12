@@ -5,7 +5,7 @@
 
   <technology_stack>
     <technology>React 19 canary, React Aria Components, TypeScript strict, Tailwind CSS v4, Vite, Effect, Nx, Biome, LightningCSS</technology>
-    <technology>Versions in pnpm-workspace.yaml catalog - always check before adding dependencies</technology>
+    <technology>Versions in pnpm-workspace.yaml catalog</technology>
   </technology_stack>
 
   <development_guidelines>
@@ -24,15 +24,12 @@
 
   <anti_patterns>
     <item>NO hand-rolled types → derive from RAC: Omit&lt;RACXProps, 'children'&gt; &amp; {...}</item>
-    <item>NO exposed internals (Thumb, Track, Cell) → auto-render within parent</item>
-    <item>NO separate files for modes → unify with type prop (Field type="text|search|number")</item>
-    <item>NO manual composition for basic usage → props enable features (triggerIcon={Icon})</item>
+    <item>NO exposed internal types/constats</item>
     <item>NO type-only props → every prop MUST affect output</item>
-    <item>NO explicit children for simple cases → data props (colors={[...]}), children for advanced</item>
-    <item>NO deep nesting (5+ levels) → max 4, use Match/dispatch tables</item>
+    <item>NO deep nesting (4+ levels) → max 3, use Match/dispatch tables</item>
     <item>NO nested ternaries (3+ branches) → Effect.Match.value().pipe()</item>
     <item>NO manual null checks → Option.fromNullable().pipe(Option.map, Option.getOrElse)</item>
-    <item>NO hand-rolled utilities → use react-aria mergeProps/useObjectRef, Effect.Array/Record</item>
+    <item>NO hand-rolled utilities → use packages/components-next/src/core, react-aria mergeProps/useObjectRef, Effect.Array/Record</item>
   </anti_patterns>
 
   <gold_standard_reference>
@@ -72,69 +69,3 @@
       <item>REDUCE LOC where better logic achieves same output</item>
     </review>
   </quality_gate>
-
-  <implementation_roadmap>
-    <phase>
-      <name>Phase 0 - Code Quality &amp; Prop Audit</name>
-      <goal>Clean code before consolidation: Effect FP patterns, remove handrolling, verify prop functionality</goal>
-      <files>packages/components-next/src/**/*.tsx</files>
-      <tasks>
-        <task>Code Cleanup - flatten nesting (max 4 levels), nested ternaries → Match, null checks → Option, if/else → dispatch tables, consolidate to B constant</task>
-        <task>Remove Handrolling - audit utils against react-aria (mergeProps, useObjectRef, filterDOMProps) and Effect (Array, Record), keep only: cn(), Slot.bind(), composeTailwindRenderProps()</task>
-        <task>Prop Audit - trace every prop to real output (renders UI, modifies behavior, passes to RAC, sets data-*), remove dead props, implement missing functionality</task>
-        <task>Run quality_gate</task>
-      </tasks>
-    </phase>
-
-    <phase>
-      <name>Phase 1 - Field Unification</name>
-      <goal>Unify TextField + SearchField + NumberField → single Field with type="text|search|number"</goal>
-      <tasks>
-        <task>Create packages/components-next/src/inputs/field.tsx - discriminated union, shared base props, mode-specific props (text: multiline/rows, search: searchIcon/clearIcon, number: incrementIcon/decrementIcon/formatOptions), data-type attribute</task>
-        <task>Delete text-field.tsx, search-field.tsx, number-field.tsx</task>
-        <task>Update packages/theme/src/component-wiring.ts - unified --field-* namespace with data-type overrides</task>
-        <task>Update apps/test-harness/src/app.tsx - Field with type prop</task>
-        <task>Run quality_gate</task>
-      </tasks>
-    </phase>
-
-    <phase>
-      <name>Phase 2 - Slider Simplification</name>
-      <goal>Auto-render Track/Thumb - target 1 line usage</goal>
-      <target><![CDATA[<Slider color='primary' size='md' defaultValue={50} thumbTooltip />
-<Slider color='primary' size='md' defaultValue={[25, 75]} thumbTooltip /> <!-- range auto-detected -->]]></target>
-      <tasks>
-        <task>Update packages/components-next/src/inputs/slider.tsx - add thumbTooltip prop, auto-render Track+Thumb(s) when no children, detect array=range/number=single</task>
-        <task>Update test-harness - one-line usage, keep one advanced Track/Thumb example</task>
-        <task>Run quality_gate</task>
-      </tasks>
-    </phase>
-
-    <phase>
-      <name>Phase 3 - ColorPicker Simplification</name>
-      <goal>Auto-render Thumb in Area/Slider/Wheel, colors prop for SwatchPicker</goal>
-      <target><![CDATA[<ColorPicker.Area thumbTooltip /> <!-- auto-renders Thumb -->
-<ColorPicker.SwatchPicker colors={['#ef4444', '#f97316', '#eab308']} />]]></target>
-      <tasks>
-        <task>Update packages/components-next/src/pickers/color-picker.tsx - thumbTooltip prop on Area/Slider/Wheel (auto-render Thumb), colors prop on SwatchPicker (auto-render items)</task>
-        <task>Remove from export: Thumb, WheelTrack, SwatchPickerItem, Swatch (keep internal)</task>
-        <task>Update test-harness - simplified usage</task>
-        <task>Run quality_gate</task>
-      </tasks>
-    </phase>
-
-    <phase>
-      <name>Phase 4 - DatePicker Simplification</name>
-      <goal>Auto-compose with triggerIcon prop, unify Range via mode prop - target 1 line usage</goal>
-      <target><![CDATA[<DatePicker color='primary' size='md' triggerIcon={Calendar} />
-<DatePicker color='primary' size='md' triggerIcon={Calendar} mode='range' />]]></target>
-      <tasks>
-        <task>Update packages/components-next/src/pickers/date-picker.tsx - triggerIcon prop auto-composes Field+Trigger+Popover+Calendar, mode="single|range" prop replaces DatePicker.Range</task>
-        <task>Remove from export: Group, Popover, Cell, Grid, Header, HeaderCell, Segment, RangeField, RangeCalendar (keep internal)</task>
-        <task>Update test-harness - one-line usage, keep one advanced composition example</task>
-        <task>Run quality_gate</task>
-        <task>Final audit: verify FP patterns consistent across ALL components</task>
-      </tasks>
-    </phase>
-  </implementation_roadmap>
-</project_specification>

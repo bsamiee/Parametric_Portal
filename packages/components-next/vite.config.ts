@@ -26,12 +26,10 @@ export default defineConfig(
                 // --- feedback ---
                 'feedback/progress': './src/feedback/progress.tsx',
                 // --- inputs ---
-                'inputs/number-field': './src/inputs/number-field.tsx',
+                'inputs/field': './src/inputs/field.tsx',
                 'inputs/radio': './src/inputs/radio.tsx',
-                'inputs/search-field': './src/inputs/search-field.tsx',
                 'inputs/select': './src/inputs/select.tsx',
                 'inputs/slider': './src/inputs/slider.tsx',
-                'inputs/text-field': './src/inputs/text-field.tsx',
                 // --- navigation ---
                 'navigation/accordion': './src/navigation/accordion.tsx',
                 'navigation/breadcrumbs': './src/navigation/breadcrumbs.tsx',
