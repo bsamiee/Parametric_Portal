@@ -20,7 +20,7 @@ import { type DialogConfig, useDialog } from '../overlays/dialog';
 import { type TooltipConfig, useTooltip } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
 import { Toast, type ToastTrigger } from '../core/toast';
-import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
+import { Badge, cn, composeTailwindRenderProps, defined, Slot, type BadgeValue, type SlotDef } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -37,7 +37,7 @@ type MenuProps<T extends object> = Omit<RACMenuProps<T>, 'children'> & {
 };
 type MenuItemProps = Omit<RACMenuItemProps, 'children' | 'onAction'> & {
 	readonly asyncState?: AsyncState<unknown, unknown>;
-	readonly badge?: ReactNode | number | string;
+	readonly badge?: BadgeValue;
 	readonly children?: SlotDef<ReactNode> | ((state: MenuItemRenderProps) => ReactNode);
 	readonly confirm?: DialogConfig;
 	readonly copy?: boolean | string;
@@ -231,7 +231,7 @@ const MenuItem: FC<MenuItemProps> = ({
 		() => hasSubmenu ? ({ delay: submenuDelay ?? readCssMs(B.cssVars.submenuDelay), offset: submenuOffset ?? readCssPx(B.cssVars.submenuOffset) }) : null,
 		[hasSubmenu, submenuDelay, submenuOffset],
 	);
-	const badgeMax = useMemo(() => readCssPx(B.cssVars.badgeMax) || 99, []);
+	const badgeLabel = Badge.useLabel(badge, itemRef, B.cssVars.badgeMax);
 	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
 		prefix: 'menu-item',
@@ -270,9 +270,7 @@ const MenuItem: FC<MenuItemProps> = ({
 							: slot.resolve(children)}
 					</span>
 					{hasSubmenu && slot.render(submenuIndicator ?? { default: ChevronRight }, B.slot.submenuIndicator)}
-					{badge !== undefined && !hasSubmenu && (
-						<span className={B.slot.itemBadge}> {typeof badge === 'number' && badge > badgeMax ? `${badgeMax}+` : badge} </span>
-					)}
+					{badgeLabel !== null && !hasSubmenu && <span className={B.slot.itemBadge}>{badgeLabel}</span>}
 					{shortcut && !hasSubmenu && createElement('kbd', { className: B.slot.shortcut }, shortcut)}
 				</>
 			)}

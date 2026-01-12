@@ -6,7 +6,6 @@
  * REQUIRED: color, size props on Tabs - no defaults.
  */
 import { useMergeRefs } from '@floating-ui/react';
-import { readCssPx } from '@parametric-portal/runtime/runtime';
 import { createContext, useContext, useMemo, useRef, type FC, type ReactNode, type Ref } from 'react';
 import {
 	Tab as RACTab, TabList as RACTabList, type TabListProps as RACTabListProps, TabPanel as RACTabPanel,
@@ -17,7 +16,7 @@ import type { TextDropItem } from 'react-aria';
 import { useDrag, useDrop } from 'react-aria';
 import { type TooltipConfig, useTooltip } from '../core/floating';
 import { type GestureProps, useGesture } from '../core/gesture';
-import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
+import { Badge, cn, composeTailwindRenderProps, defined, Slot, type BadgeValue, type SlotDef } from '../core/utils';
 import type { AsyncState } from '@parametric-portal/types/async';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -39,7 +38,7 @@ type TabsProps = Omit<RACTabsProps, 'children'> & {
 };
 type TabProps = Omit<RACTabProps, 'children'> & {
 	readonly asyncState?: AsyncState;
-	readonly badge?: ReactNode | number | string;
+	readonly badge?: BadgeValue;
 	readonly children?: SlotDef<ReactNode> | ((state: TabRenderProps) => ReactNode);
 	readonly gesture?: GestureProps;
 	readonly icon?: SlotDef;
@@ -147,7 +146,7 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 	});
 	const mergedRef = useMergeRefs([ref, tabRef, tooltipProps.ref as Ref<HTMLDivElement>].filter(Boolean) as Array<Ref<HTMLDivElement>>);
 	const isRenderFn = typeof children === 'function';
-	const badgeMax = useMemo(() => readCssPx(B.cssVars.badgeMax) || 99, []);
+	const badgeLabel = Badge.useLabel(badge, tabRef, B.cssVars.badgeMax);
 	return (
 		<>
 			<RACTab
@@ -169,9 +168,7 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 						{isRenderFn
 							? (children as (state: TabRenderProps) => ReactNode)(renderProps)
 							: slot.resolve(children)}
-						{badge !== undefined && (
-							<span className={B.slot.tabBadge}> {typeof badge === 'number' && badge > badgeMax ? `${badgeMax}+` : badge} </span>
-						)}
+						{badgeLabel !== null && <span className={B.slot.tabBadge}>{badgeLabel}</span>}
 					</>
 				)}
 			</RACTab>
