@@ -123,7 +123,7 @@ const extractors = {
     }),
 } as const satisfies Record<MatcherKind, (r: never) => { check: boolean; value: unknown }>;
 
-// --- [TEST_HARNESS] ----------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const EffectTestHarness = Object.freeze({
     adjust: (duration: DurationInput): Effect.Effect<void, never, TestServices.TestServices> =>
@@ -173,8 +173,6 @@ const EffectTestHarness = Object.freeze({
     },
 });
 
-// --- [LAYER_BUILDERS] --------------------------------------------------------
-
 const TestLayers = Object.freeze({
     Const: <I, S>(tag: Context.Tag<I, S>, value: S): { readonly layer: Layer.Layer<I> } => ({
         layer: Layer.succeed(tag, value),
@@ -190,7 +188,7 @@ const TestLayers = Object.freeze({
     }),
 });
 
-// --- [MATCHERS] --------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
 expect.extend({
     toBeFailure(received: Exit.Exit<unknown, unknown>, expected?: unknown): MatcherResult {

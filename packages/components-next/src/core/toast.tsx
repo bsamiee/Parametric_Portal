@@ -15,7 +15,7 @@ import { readCssInt, readCssMs } from '@parametric-portal/runtime/runtime';
 import type { AsyncState } from '@parametric-portal/types/async';
 import { Array as A, Effect, Match, Option, pipe } from 'effect';
 import type { CSSProperties, FC, ReactNode } from 'react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
 	Button, Text, UNSTABLE_Toast as RACToast, UNSTABLE_ToastContent as RACToastContent,
 	UNSTABLE_ToastQueue as RACToastQueue, UNSTABLE_ToastRegion as RACToastRegion,
@@ -131,7 +131,7 @@ const wrapInViewTransition = (fn: () => void): void => {
 	'startViewTransition' in document
 		? (document as Document & { startViewTransition: (fn: () => void) => { ready: Promise<void> } })
 				.startViewTransition(() => flushSync(fn))
-				.ready.catch(() => {})
+				.ready.catch((e) => { import.meta.env.DEV && console.debug('[Toast] View transition aborted:', e); })
 		: fn();
 };
 const resolveTimeout = (value?: number): number =>
@@ -151,12 +151,12 @@ const triggerHandlers = {
 	Success: (t: ToastTrigger) => Option.map(Option.fromNullable(t.success), (m): ToastPayload => ({ ...m, position: t.position, style: t.style, type: B.typeMap.success })),
 } satisfies Record<AsyncState<unknown, unknown>['_tag'], (t: ToastTrigger) => Option.Option<ToastPayload>>;
 
-// --- [GLOBAL_QUEUE] ----------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
 const queueRegistry = new Map<ToastPosition, RACToastQueue<QueueContent>>();
 const contentStore = new Map<string, { content: QueueContent; position: ToastPosition; timeout: number }>();
 const subscriptions = new Set<() => void>();
-const notifySubscribers = (): void => { subscriptions.forEach((fn) => { fn(); }); };
+const notifySubscribers = (): void => { A.map(A.fromIterable(subscriptions), (fn) => { fn(); }); };
 const createQueue = (): RACToastQueue<QueueContent> =>
 	new RACToastQueue<QueueContent>({
 		maxVisibleToasts: pipe(
@@ -175,9 +175,6 @@ const getQueue = (position: ToastPosition): RACToastQueue<QueueContent> =>
 			return queue;
 		}),
 	);
-
-// --- [DIRECT_API] ------------------------------------------------------------
-
 const show = (payload: ToastPayload): string => {
 	const { timeout, onClose, position = B.defaults.position, ...content } = payload;
 	const resolvedTimeout = resolveTimeout(timeout);
@@ -185,48 +182,55 @@ const show = (payload: ToastPayload): string => {
 	contentStore.set(key, { content, position, timeout: resolvedTimeout });
 	return key;
 };
-const update = (key: string, partial: Partial<QueueContent>): void =>
+const update = (key: string, partial: Partial<QueueContent>): boolean =>
 	Option.match(Option.fromNullable(contentStore.get(key)), {
-		onNone: () => {},
+		onNone: () => false,
 		onSome: (entry) => {
 			contentStore.set(key, { ...entry, content: { ...entry.content, ...partial } });
 			notifySubscribers();
+			return true;
 		},
 	});
-const promise = <A, E>(
+const promise = <A,>(
 	thenable: Promise<A>,
-	config: { readonly pending: ToastPayload; readonly success: ToastPayload | ((a: A) => ToastPayload); readonly failure: ToastPayload | ((e: E) => ToastPayload) },
-): Promise<A> => {
+	config: { readonly pending: ToastPayload; readonly success: ToastPayload | ((a: A) => ToastPayload); readonly failure: ToastPayload | ((e: unknown) => ToastPayload) },
+): Promise<Option.Option<A>> => {
 	const key = show({ ...config.pending, type: B.typeMap.pending });
 	return pipe(
-		Effect.tryPromise({ catch: (e) => e as E, try: () => thenable }),
+		Effect.tryPromise({ catch: (e: unknown) => e, try: () => thenable }),
 		Effect.tap((a) => Effect.sync(() => update(key, typeof config.success === 'function' ? config.success(a) : config.success))),
 		Effect.tapError((e) => Effect.sync(() => update(key, typeof config.failure === 'function' ? config.failure(e) : config.failure))),
+		Effect.option,
 		Effect.runPromise,
 	);
 };
 const isActive = (key: string): boolean => contentStore.has(key);
 const dismiss = (key: string, position?: ToastPosition): void => {
+	const storedPosition = position ?? contentStore.get(key)?.position;
 	contentStore.delete(key);
 	pipe(
-		position ? Option.fromNullable(queueRegistry.get(position)) : A.findFirst(A.fromIterable(queueRegistry.values()), (q) => q.visibleToasts.some((t) => t.key === key)),
+		Option.fromNullable(storedPosition),
+		Option.flatMap((p) => Option.fromNullable(queueRegistry.get(p))),
 		Option.map((q) => q.close(key)),
 	);
 };
 const dismissAll = (position?: ToastPosition): void => {
-	const closeAll = (queue: RACToastQueue<QueueContent>): void => {queue.visibleToasts.forEach((t) => { contentStore.delete(t.key); queue.close(t.key); });};
-	position ? Option.map(Option.fromNullable(queueRegistry.get(position)), closeAll) : queueRegistry.forEach(closeAll);
+	const closeAll = (queue: RACToastQueue<QueueContent>): void => {
+		A.map(queue.visibleToasts, (t) => { contentStore.delete(t.key); queue.close(t.key); });
+	};
+	position
+		? Option.map(Option.fromNullable(queueRegistry.get(position)), closeAll)
+		: pipe(A.fromIterable(queueRegistry.values()), A.map(closeAll));
 };
 
-// --- [COMPONENTS] ------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const ToastRegion: FC<ToastRenderConfig> = ({ position = B.defaults.position, style, className }) => {
 	const queue = getQueue(position);
-	const renderTrigger = useRef(0);
+	const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 	useEffect(() => {
-		const sub = (): void => { renderTrigger.current += 1; };
-		subscriptions.add(sub);
-		return () => { subscriptions.delete(sub); };
+		subscriptions.add(forceUpdate);
+		return () => { subscriptions.delete(forceUpdate); };
 	}, []);
 	return (
 		<RACToastRegion queue={queue} className={cn(B.slot.region, className)} data-slot="toast-region" data-position={position} data-style={style}>
@@ -266,21 +270,19 @@ const Provider: FC<ProviderProps> = ({ children, positions = [B.defaults.positio
 		{positions.map((position) => (<ToastRegion key={position} position={position} style={style} />))}
 	</>
 );
-
-// --- [HOOKS] -----------------------------------------------------------------
-
 const useRender = (cfg?: ToastRenderConfig): (() => ReactNode) => useCallback(() => <ToastRegion position={cfg?.position} style={cfg?.style} className={cfg?.className} />, [cfg?.position, cfg?.style, cfg?.className]);
 const useTrigger = (asyncState: AsyncState<unknown, unknown> | undefined, trigger: ToastTrigger | undefined): void => {
 	const prevTagRef = useRef<string | undefined>(undefined);
+	const triggerRef = useRef(trigger);
+	triggerRef.current = trigger;
 	useEffect(() => {
 		const prevTag = prevTagRef.current;
-		prevTagRef.current = asyncState?._tag;
-		asyncState && trigger && prevTag !== undefined && prevTag !== asyncState._tag && Option.map(triggerHandlers[asyncState._tag](trigger), show);
-	}, [asyncState, trigger]);
+		const currentTag = asyncState?._tag;
+		prevTagRef.current = currentTag;
+		const cfg = triggerRef.current;
+		asyncState && cfg && prevTag !== undefined && prevTag !== currentTag && Option.map(triggerHandlers[asyncState._tag](cfg), show);
+	}, [asyncState]);
 };
-
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
 const Toast = Object.freeze({
 	dismiss,
 	dismissAll,

@@ -1113,7 +1113,7 @@ const ToastDemo: FC = () => {
                                 failure: { description: 'Request failed.', title: 'Error!' },
                                 pending: { title: 'Loading...' },
                                 success: { title: 'Done!' },
-                            }).catch(() => {})
+                            })
                         }
                         prefix={Loader2}
                         size='sm'
