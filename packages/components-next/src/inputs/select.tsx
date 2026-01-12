@@ -277,9 +277,8 @@ const SelectItem: FC<SelectItemProps> = ({
 	const ctx = useContext(SelectContext);
 	const isMultiple = ctx?.selectionMode === 'multiple';
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
-	const itemRef = useRef<HTMLDivElement>(null);
-	const badgeLabel = Badge.useLabel(badge, itemRef, B.cssVars.badgeMax);
-	const mergedRef = useMergeRefs([ref, itemRef, tooltipProps.ref as Ref<HTMLDivElement>]);
+	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
+	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
 	const isRenderFn = typeof children === 'function';
 	return (
 		<>

@@ -146,7 +146,7 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 	});
 	const mergedRef = useMergeRefs([ref, tabRef, tooltipProps.ref as Ref<HTMLDivElement>].filter(Boolean) as Array<Ref<HTMLDivElement>>);
 	const isRenderFn = typeof children === 'function';
-	const badgeLabel = Badge.useLabel(badge, tabRef, B.cssVars.badgeMax);
+	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
 	return (
 		<>
 			<RACTab

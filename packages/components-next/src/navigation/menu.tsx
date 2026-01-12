@@ -231,7 +231,7 @@ const MenuItem: FC<MenuItemProps> = ({
 		() => hasSubmenu ? ({ delay: submenuDelay ?? readCssMs(B.cssVars.submenuDelay), offset: submenuOffset ?? readCssPx(B.cssVars.submenuOffset) }) : null,
 		[hasSubmenu, submenuDelay, submenuOffset],
 	);
-	const badgeLabel = Badge.useLabel(badge, itemRef, B.cssVars.badgeMax);
+	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
 	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
 		prefix: 'menu-item',

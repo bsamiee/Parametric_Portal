@@ -9,7 +9,7 @@ import { AsyncState } from '@parametric-portal/types/async';
 import { type ClassValue, clsx } from 'clsx';
 import { Match, Option, pipe, Predicate } from 'effect';
 import type { LucideIcon } from 'lucide-react';
-import { cloneElement, createElement, isValidElement, useLayoutEffect, useState, type ReactElement, type ReactNode, type RefObject } from 'react';
+import { cloneElement, createElement, isValidElement, useLayoutEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { composeRenderProps } from 'react-aria-components';
 import { type ClassNameValue, twMerge } from 'tailwind-merge';
 
@@ -30,10 +30,9 @@ type BadgeValue = { readonly current: number; readonly max?: number };
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-	badge: Object.freeze({
-		numbers: Object.freeze({ radix: 10, zero: 0 }),
-		suffix: Object.freeze({ cap: '+' }),
-	}),
+	badgeCap: '+',
+	badgeRadix: 10,
+	badgeZero: 0,
 });
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -51,15 +50,16 @@ function defined<T extends Record<string, unknown>, R>(obj: T, map?: (v: Exclude
 			.map(([k, v]) => [k, map ? map(v as Exclude<T[keyof T], undefined>) : v]),
 	) as never;
 }
-const computeBadgeLabel = (value: BadgeValue | undefined, el: Element | null, cssVar: string): string | null =>
+const badgeLabel = (value: BadgeValue | undefined, cssVar: string): string | null =>
 	value === undefined
 		? null
 		: (() => {
-			const raw = el ? getComputedStyle(el).getPropertyValue(cssVar).trim() : '';
-			const parsed = Number.parseInt(raw, B.badge.numbers.radix);
-			const cssMax = Number.isNaN(parsed) ? B.badge.numbers.zero : parsed;
-			const max = value.max ?? (cssMax > B.badge.numbers.zero ? cssMax : undefined);
-			return max !== undefined && value.current > max ? `${max}${B.badge.suffix.cap}` : String(value.current);
+			const root = globalThis.document?.documentElement;
+			const raw = root ? getComputedStyle(root).getPropertyValue(cssVar).trim() : '';
+			const parsed = Number.parseInt(raw, B.badgeRadix);
+			const cssMax = Number.isNaN(parsed) ? B.badgeZero : parsed;
+			const max = value.max ?? (cssMax > B.badgeZero ? cssMax : undefined);
+			return max !== undefined && value.current > max ? `${max}${B.badgeCap}` : String(value.current);
 		})();
 
 // --- [SLOT] ------------------------------------------------------------------
@@ -109,15 +109,12 @@ const bind = (state: AsyncState<unknown, unknown> | undefined) =>
 	});
 const Slot = Object.freeze({ bind, content, isSlotDef, normalize, render, resolve });
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [HOOKS] -----------------------------------------------------------------
 
-const useBadgeLabel = (value: BadgeValue | undefined, ref: RefObject<Element | null>, cssVar: string): string | null => {
-	const [label, setLabel] = useState<string | null>(() => computeBadgeLabel(value, ref.current, cssVar));
+const useBadgeLabel = (value: BadgeValue | undefined, cssVar: string): string | null => {
+	const [label, setLabel] = useState<string | null>(() => badgeLabel(value, cssVar));
 	useLayoutEffect(() => {
-		const next = computeBadgeLabel(value, ref.current, cssVar);
-		setLabel((prev) => (prev === next ? prev : next));
-	useLayoutEffect(() => {
-		const next = computeBadgeLabel(value, ref.current, cssVar);
+		const next = badgeLabel(value, cssVar);
 		setLabel((prev) => (prev === next ? prev : next));
 	}, [value, cssVar]);
 	return label;
