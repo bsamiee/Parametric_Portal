@@ -26,9 +26,9 @@ const B = Object.freeze({
     backupCodeAlphabet: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     backupCodeCount: 10,
     backupCodeLength: 8,
-    issuer: 'Parametric Portal',
-    totp: { algorithm: 'sha1', digits: 6, step: 30 } as const,
-    totpWindow: [1, 0] as [number, number],
+    issuer: process.env['APP_NAME'] ?? 'Parametric Portal',
+    totp: { algorithm: 'sha1', digits: 6, period: 30 } as const,
+    totpWindow: [1, 1] as [number, number],
 } as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -53,6 +53,9 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
     dependencies: [MetricsService.Default],
     effect: Effect.gen(function* () {
         const metrics = yield* MetricsService;
+        // Re-enrollment while pending (enabledAt === null) is allowed and will replace
+        // the previous secret and backup codes. This is intentional to allow users to
+        // restart enrollment if they lose access to the authenticator before verifying.
         const enroll = Effect.fn('mfa.enroll')((userId: UserId, email: string) =>
             Effect.gen(function* () {
                 const repo = yield* MfaSecretsRepository;
@@ -86,12 +89,23 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
                 const decrypted = yield* EncryptedKey.decryptBytes(mfa.secretEncrypted);
                 const result = yield* Effect.try({
                     catch: () => new HttpError.Auth({ reason: 'TOTP verification failed' }),
-                    try: () => verifySync({ epochTolerance: B.totpWindow, secret: decrypted, token: code }),
+                    try: () => verifySync({
+                        algorithm: B.totp.algorithm,
+                        digits: B.totp.digits,
+                        epochTolerance: B.totpWindow,
+                        period: B.totp.period,
+                        secret: decrypted,
+                        token: code,
+                    }),
                 });
                 yield* Effect.annotateCurrentSpan('mfa.success', result.valid);
                 yield* result.valid ? Effect.annotateCurrentSpan('mfa.delta', result.delta) : Effect.void;
                 yield* Metric.increment(metrics.mfa.verifications);
                 yield* result.valid ? Effect.void : Effect.fail(new HttpError.Auth({ reason: 'Invalid MFA code' }));
+                // Enable MFA on first successful verification. Note: concurrent requests during
+                // enrollment could theoretically both succeed before enabledAt is set. This is
+                // acceptable since both use the same valid TOTP code within its time window.
+                // For stricter replay prevention, consider tracking used codes per time step.
                 yield* mfa.enabledAt === null
                     ? repo.upsert({ backupCodesHash: [...mfa.backupCodesHash], enabledAt: new Date(), secretEncrypted: mfa.secretEncrypted, userId })
                     : Effect.void;

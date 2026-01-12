@@ -22,9 +22,16 @@ type OAuthService = typeof Middleware.OAuth.Service;
 
 const toUserResponse = (u: User) => Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
 const toApiKeyResponse = (k: ApiKey) => Object.freeze({ createdAt: k.createdAt, id: k.id, name: k.name, provider: k.provider });
-/** Derive mfaVerifiedAt from MFA secret state: null (pending) if MFA enabled, new Date() if not */
+/**
+ * Derive session MFA verification state from MFA enrollment:
+ * - No MFA enrolled (None) → session implicitly verified (new Date())
+ * - MFA enrolled (Some) → session pending verification (null)
+ *
+ * Returns null for ANY enrolled user (pending or enabled) to prevent bypass
+ * where user enrolls but never verifies, then logs out and back in.
+ */
 const deriveMfaVerifiedAt = (mfaOpt: Option.Option<{ readonly enabledAt: Date | null }>): Date | null =>
-    Option.match(mfaOpt, { onNone: () => new Date(), onSome: (m) => m.enabledAt === null ? new Date() : null });
+    Option.match(mfaOpt, { onNone: () => new Date(), onSome: () => null });
 const extractRequestContext = (request: HttpServerRequest.HttpServerRequest) =>
     Object.freeze({
         ipAddress: Option.getOrNull(Headers.get(request.headers, 'x-forwarded-for')),

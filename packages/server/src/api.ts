@@ -184,13 +184,15 @@ const MfaGroup = HttpApiGroup.make('mfa')
             .setPayload(MfaVerifyRequest)
             .addSuccess(MfaVerifyResponse)
             .addError(HttpError.Auth, { status: 401 })
-            .addError(HttpError.Internal, { status: 500 }),
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
     )
     .add(
         HttpApiEndpoint.del('disable', '/')
             .middleware(Middleware.Auth)
             .addSuccess(MfaDisableResponse)
             .addError(HttpError.Auth, { status: 401 })
+            .addError(HttpError.Forbidden, { status: 403 })
             .addError(HttpError.NotFound, { status: 404 })
             .addError(HttpError.Internal, { status: 500 }),
     )
@@ -200,7 +202,8 @@ const MfaGroup = HttpApiGroup.make('mfa')
             .setPayload(MfaRecoverRequest)
             .addSuccess(MfaRecoverResponse)
             .addError(HttpError.Auth, { status: 401 })
-            .addError(HttpError.Internal, { status: 500 }),
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
     );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

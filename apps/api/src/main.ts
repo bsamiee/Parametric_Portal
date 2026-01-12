@@ -82,7 +82,12 @@ const SessionLookupLive = Layer.effect(
                             ),
                     });
                 }).pipe(
-                    Effect.catchAll(() => Effect.succeed(Option.none<AuthContext>())),
+                    Effect.catchAll((error) =>
+                        Effect.gen(function* () {
+                            yield* Effect.logError('Session lookup failed', { error: String(error) });
+                            return Option.none<AuthContext>();
+                        }),
+                    ),
                     Effect.provideService(MetricsService, metrics),
                 ),
         };

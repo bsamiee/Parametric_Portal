@@ -8,6 +8,7 @@ import { HttpError } from '@parametric-portal/server/http-errors';
 import { MetricsService } from '@parametric-portal/server/metrics';
 import { MfaSecretsRepository, MfaService } from '@parametric-portal/server/mfa';
 import { Middleware } from '@parametric-portal/server/middleware';
+import { RateLimit } from '@parametric-portal/server/rate-limit';
 import { Effect, Layer, Option } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -59,21 +60,22 @@ const MfaLive = HttpApiBuilder.group(ParametricApi, 'mfa', (handlers) =>
                     const result = yield* mfa.verify(session.userId, payload.code);
                     yield* db.sessions.markMfaVerified(session.sessionId).pipe(dbError);
                     return result;
-                }),
+                }).pipe(RateLimit.middleware.auth),
             )
             .handle('disable', () =>
                 Effect.gen(function* () {
                     const session = yield* Middleware.Session;
+                    yield* Middleware.requireMfaVerified;
                     return yield* mfa.disable(session.userId);
                 }),
             )
             .handle('recover', ({ payload }) =>
                 Effect.gen(function* () {
                     const session = yield* Middleware.Session;
-                    const result = yield* mfa.useRecoveryCode(session.userId, payload.code);
+                    const result = yield* mfa.useRecoveryCode(session.userId, payload.code.toUpperCase());
                     yield* db.sessions.markMfaVerified(session.sessionId).pipe(dbError);
                     return result;
-                }),
+                }).pipe(RateLimit.middleware.auth),
             );
     }),
 ).pipe(Layer.provide(MfaService.Default), Layer.provide(MfaSecretsRepositoryLive));

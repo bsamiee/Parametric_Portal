@@ -154,9 +154,10 @@ const requireRole = (min: RoleKey): Effect.Effect<void, ForbiddenError | Instanc
 /** Requires MFA verification for the current session if user has MFA enabled. Use for sensitive operations. */
 const requireMfaVerified: Effect.Effect<void, ForbiddenError, Session> = Effect.gen(function* () {
     const session = yield* Session;
-    yield* session.isPendingMfa
-        ? Effect.fail(new HttpError.Forbidden({ reason: 'MFA verification required' }))
-        : Effect.void;
+    yield* Effect.when(
+        Effect.fail(new HttpError.Forbidden({ reason: 'MFA verification required' })),
+        () => session.isPendingMfa,
+    );
 });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
