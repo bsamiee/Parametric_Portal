@@ -19,6 +19,7 @@ import { AsyncAnnouncer } from '../core/announce';
 import { type DialogConfig, useDialog } from '../overlays/dialog';
 import { type TooltipConfig, useTooltip } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
+import { Toast, type ToastTrigger } from '../core/toast';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -55,6 +56,7 @@ type MenuItemProps = Omit<RACMenuItemProps, 'children' | 'onAction'> & {
 	readonly submenuOffset?: number;
 	readonly submenuSize?: string;
 	readonly submenuSkeletonCount?: number;
+	readonly toast?: ToastTrigger;
 	readonly tooltip?: TooltipConfig;
 };
 type MenuSectionProps<T extends object = object> = Omit<RACMenuSectionProps<T>, 'children'> & {
@@ -205,7 +207,8 @@ const MenuRoot = <T extends object>({
 const MenuItem: FC<MenuItemProps> = ({
 	asyncState, badge, children, className, confirm, copy, delete: deletePreset, destructive, gesture, icon: iconProp,
 	isDisabled, onAction, paste, ref, shortcut: shortcutProp, submenu, submenuAsyncState, submenuDelay, submenuIndicator, submenuOffset, submenuSize,
-	submenuSkeletonCount, textValue, tooltip, ...racProps }) => {
+	submenuSkeletonCount, textValue, toast, tooltip, ...racProps }) => {
+	Toast.useTrigger(asyncState, toast);
 	const dialogResult = useDialog(confirm);
 	const menuCtx = useContext(MenuContext);
 	const clipboard = useClipboard();

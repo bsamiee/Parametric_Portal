@@ -8,6 +8,7 @@ import { GridList } from '@parametric-portal/components-next/collections/grid-li
 import { Table } from '@parametric-portal/components-next/collections/table';
 import { TagGroup } from '@parametric-portal/components-next/collections/tag-group';
 import { Tree } from '@parametric-portal/components-next/collections/tree';
+import { Toast } from '@parametric-portal/components-next/core/toast';
 import { Progress } from '@parametric-portal/components-next/feedback/progress';
 import { Field } from '@parametric-portal/components-next/inputs/field';
 import { Select } from '@parametric-portal/components-next/inputs/select';
@@ -21,18 +22,22 @@ import { Runtime } from '@parametric-portal/runtime/runtime';
 import { AsyncState } from '@parametric-portal/types/async';
 import { Duration, Effect, Layer } from 'effect';
 import {
+    AlertCircle,
     AlignCenter,
     AlignLeft,
     AlignRight,
+    Bell,
     Bold,
     Calendar,
     Check,
+    CheckCircle,
     ChevronDown,
     Edit,
     File,
     Folder,
     Home,
     Image,
+    Info,
     Italic,
     Loader2,
     Menu,
@@ -1002,6 +1007,174 @@ const DrawerDemo: FC = () => (
         </Drawer>
     </>
 );
+const ToastDemo: FC = () => {
+    const asyncSuccess = useEffectMutate(() => simulateAsync(1500, false));
+    const asyncFailure = useEffectMutate(() => simulateAsync(1500, true));
+    return (
+        <>
+            {/* Type Variants */}
+            <div className='flex flex-col gap-2'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Type Variants</span>
+                <div className='flex flex-wrap gap-2'>
+                    <Button
+                        children={{ default: 'Info' }}
+                        color='primary'
+                        onPress={() =>
+                            Toast.show({ description: 'Informational message.', title: 'Info', type: 'info' })
+                        }
+                        prefix={Info}
+                        size='sm'
+                        variant='outline'
+                    />
+                    <Button
+                        children={{ default: 'Success' }}
+                        color='success'
+                        onPress={() =>
+                            Toast.show({ description: 'Operation completed.', title: 'Success', type: 'success' })
+                        }
+                        prefix={CheckCircle}
+                        size='sm'
+                        variant='outline'
+                    />
+                    <Button
+                        children={{ default: 'Warning' }}
+                        color='warning'
+                        onPress={() =>
+                            Toast.show({ description: 'Review your changes.', title: 'Warning', type: 'warning' })
+                        }
+                        prefix={AlertCircle}
+                        size='sm'
+                        variant='outline'
+                    />
+                    <Button
+                        children={{ default: 'Error' }}
+                        color='danger'
+                        onPress={() =>
+                            Toast.show({ description: 'Something went wrong.', title: 'Error', type: 'error' })
+                        }
+                        prefix={XCircle}
+                        size='sm'
+                        variant='outline'
+                    />
+                </div>
+            </div>
+            {/* Progress Indicators */}
+            <div className='flex flex-col gap-2'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Progress Indicators</span>
+                <div className='flex flex-wrap gap-2'>
+                    <Button
+                        children={{ default: 'Duration Bar' }}
+                        color='primary'
+                        onPress={() =>
+                            Toast.show({
+                                description: 'Watch the countdown bar.',
+                                showDuration: true,
+                                timeout: 5000,
+                                title: 'Auto-dismiss',
+                            })
+                        }
+                        size='sm'
+                        variant='outline'
+                    />
+                    <Button
+                        children={{ default: 'Controlled 50%' }}
+                        color='primary'
+                        onPress={() =>
+                            Toast.show({ description: 'Progress at 50%.', progress: 0.5, title: 'Upload Progress' })
+                        }
+                        size='sm'
+                        variant='outline'
+                    />
+                </div>
+            </div>
+            {/* Toast.promise API */}
+            <div className='flex flex-col gap-2'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Toast.promise API</span>
+                <div className='flex flex-wrap gap-2'>
+                    <Button
+                        children={{ default: 'Promise (Success)' }}
+                        color='primary'
+                        onPress={() =>
+                            Toast.promise(new Promise((r) => setTimeout(() => r('done'), 2000)), {
+                                failure: { title: 'Failed!' },
+                                pending: { description: 'Processing request...', title: 'Loading...' },
+                                success: { description: 'Request completed.', title: 'Done!' },
+                            })
+                        }
+                        prefix={Loader2}
+                        size='sm'
+                        variant='outline'
+                    />
+                    <Button
+                        children={{ default: 'Promise (Fail)' }}
+                        color='danger'
+                        onPress={() =>
+                            Toast.promise(new Promise((_, rej) => setTimeout(() => rej(new Error('test')), 2000)), {
+                                failure: { description: 'Request failed.', title: 'Error!' },
+                                pending: { title: 'Loading...' },
+                                success: { title: 'Done!' },
+                            })
+                        }
+                        prefix={Loader2}
+                        size='sm'
+                        variant='outline'
+                    />
+                </div>
+            </div>
+            {/* Component Integration */}
+            <div className='flex flex-col gap-2'>
+                <span className='text-xs font-medium text-(--color-text-600)'>
+                    Component Integration (asyncState + toast)
+                </span>
+                <div className='flex flex-wrap gap-2'>
+                    <Button
+                        asyncState={asyncSuccess.state}
+                        children={{ default: 'Save', loading: 'Saving...', success: 'Saved!' }}
+                        color='primary'
+                        onPress={() => asyncSuccess.mutate(undefined)}
+                        prefix={{ default: Bell, loading: Loader2, success: Check }}
+                        size='md'
+                        toast={{ pending: { title: 'Saving...' }, style: 'default', success: { title: 'Saved!' } }}
+                        variant='solid'
+                    />
+                    <Button
+                        asyncState={asyncFailure.state}
+                        children={{ default: 'Delete', failure: 'Failed!', loading: 'Deleting...' }}
+                        color='danger'
+                        onPress={() => asyncFailure.mutate(undefined)}
+                        prefix={{ default: XCircle, failure: AlertCircle, loading: Loader2 }}
+                        size='md'
+                        toast={{
+                            failure: { title: 'Delete Failed' },
+                            pending: { title: 'Deleting...' },
+                            style: 'default',
+                        }}
+                        variant='solid'
+                    />
+                </div>
+            </div>
+            {/* Action Button */}
+            <div className='flex flex-col gap-2'>
+                <span className='text-xs font-medium text-(--color-text-600)'>Toast with Action</span>
+                <Button
+                    children={{ default: 'With Undo Action' }}
+                    color='primary'
+                    onPress={() =>
+                        Toast.show({
+                            action: { label: 'Undo', onClick: () => Toast.show({ title: 'Undone!', type: 'info' }) },
+                            description: 'Document updated.',
+                            timeout: 10000,
+                            title: 'Changes saved',
+                            type: 'success',
+                        })
+                    }
+                    size='sm'
+                    variant='outline'
+                />
+            </div>
+        </>
+    );
+};
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -1061,12 +1234,17 @@ const AppContent: FC = () => (
             <Section title='Drawer Components'>
                 <DrawerDemo />
             </Section>
+            <Section title='Toast Components'>
+                <ToastDemo />
+            </Section>
         </div>
     </main>
 );
 const App: FC = () => (
     <Runtime.Provider disposeOnUnmount runtime={testRuntime}>
-        <AppContent />
+        <Toast.Provider positions={['bottom-right', 'top-center']} style='default'>
+            <AppContent />
+        </Toast.Provider>
     </Runtime.Provider>
 );
 

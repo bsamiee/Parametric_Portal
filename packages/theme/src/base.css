@@ -17,6 +17,10 @@
     0% { left: -35%; }
     100% { left: 100%; }
 }
+@keyframes toast-countdown {                    /* Toast duration countdown bar */
+    from { width: 100%; }
+    to { width: 0%; }
+}
 @media (prefers-reduced-motion: reduce) {       /* Reduced motion: accessibility requirement */
     *, *::before, *::after {
         transition-duration: 0.01ms;

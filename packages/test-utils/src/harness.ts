@@ -1,7 +1,7 @@
 /**
  * Test harness: setup/capture utilities for test isolation.
  */
-import './matchers/effect';
+import './effect-test';
 import { Effect, Exit } from 'effect';
 import { vi } from 'vitest';
 import { TEST_CONSTANTS } from './constants';

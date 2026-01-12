@@ -18,6 +18,7 @@ import {
 import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip, type TooltipConfig } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
+import { Toast, type ToastTrigger } from '../core/toast';
 import { cn, composeTailwindRenderProps, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -33,6 +34,7 @@ type BaseButtonProps = {
 	readonly ref?: Ref<HTMLButtonElement>;
 	readonly size: string;
 	readonly suffix?: SlotInput;
+	readonly toast?: ToastTrigger;
 	readonly tooltip?: TooltipConfig;
 	readonly variant?: string;
 };
@@ -91,8 +93,9 @@ const ButtonGroup: FC<ButtonGroupProps> = ({ children, className, color, size, v
 const ButtonCore: FC<ButtonProps> = (props) => {
 	const {
 		asyncState, bgOpacity, children, className, color, defaultSelected, gesture, id, isDisabled, isSelected, onChange,
-		prefix, ref, size, style: styleProp, suffix, tooltip, variant, ...rest
+		prefix, ref, size, style: styleProp, suffix, toast, tooltip, variant, ...rest
 	} = props;
+	Toast.useTrigger(asyncState, toast);
 	const toggleMode = 'isSelected' in props || 'defaultSelected' in props || 'onChange' in props;
 	const slot = Slot.bind(asyncState);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);

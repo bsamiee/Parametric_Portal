@@ -14,6 +14,7 @@ import { Link as RACLink, type LinkProps as RACLinkProps, } from 'react-aria-com
 import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip, type TooltipConfig } from '../core/floating';
 import { useGesture, type GestureProps } from '../core/gesture';
+import { Toast, type ToastTrigger } from '../core/toast';
 import { cn, composeTailwindRenderProps, defined, isExternalHref, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -27,6 +28,7 @@ type LinkProps = Omit<RACLinkProps, 'children'> & {
 	readonly ref?: Ref<HTMLAnchorElement>;
 	readonly size?: string;
 	readonly suffix?: SlotInput;
+	readonly toast?: ToastTrigger;
 	readonly tooltip?: TooltipConfig;
 	readonly variant?: 'solid' | 'outline' | 'ghost';
 };
@@ -38,6 +40,7 @@ type LinkIconProps = Omit<RACLinkProps, 'children'> & {
 	readonly isDisabled?: boolean;
 	readonly ref?: Ref<HTMLAnchorElement>;
 	readonly size: string;
+	readonly toast?: ToastTrigger;
 	readonly tooltip?: TooltipConfig;
 };
 
@@ -90,7 +93,8 @@ const B = Object.freeze({
 const LinkCore: FC<LinkProps> = (props) => {
 	const {
 		asyncState, children, className, color, gesture, href, isDisabled, prefix, ref, rel: relProp, size,
-		style: styleProp, suffix, target: targetProp, tooltip, variant, ...rest } = props;
+		style: styleProp, suffix, target: targetProp, toast, tooltip, variant, ...rest } = props;
+	Toast.useTrigger(asyncState, toast);
 	const slot = Slot.bind(asyncState);
 	const isButtonMode = variant !== undefined;
 	const isExternal = isExternalHref(href);
@@ -138,7 +142,8 @@ const LinkCore: FC<LinkProps> = (props) => {
 	);
 };
 const LinkIcon: FC<LinkIconProps> = (props) => {
-	const { 'aria-label': ariaLabel, asyncState, children, className, color, href, isDisabled, ref, size, tooltip, ...rest } = props;
+	const { 'aria-label': ariaLabel, asyncState, children, className, color, href, isDisabled, ref, size, toast, tooltip, ...rest } = props;
+	Toast.useTrigger(asyncState, toast);
 	const slot = Slot.bind(asyncState);
 	const isExternal = isExternalHref(href);
 	const target = isExternal ? '_blank' : undefined;

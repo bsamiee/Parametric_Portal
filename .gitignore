@@ -105,6 +105,7 @@ Thumbs.db
 .archive/
 .archive
 .playwright-mcp/
+.automaker/
 
 # Gemini CLI auto-generated files (keep commands/ and extensions/ tracked)
 .gemini/telemetry.log

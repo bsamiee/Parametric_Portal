@@ -8,7 +8,7 @@ import type { DeepReadonly } from 'ts-essentials';
 import { Array as A, Effect, pipe, Record as R, Schema as S } from 'effect';
 import type { Plugin } from 'vite';
 import { OklchColor, ThemeError, type ThemeErrorType } from './colors.ts';
-import { ComponentSpecSchema, generateComponentWiring, generateTooltipWiring, TooltipStyleSpecSchema } from './component-wiring.ts';
+import { ComponentSpecSchema, generateComponentWiring, generateToastWiring, generateTooltipWiring, ToastStyleSpecSchema, TooltipStyleSpecSchema } from './component-wiring.ts';
 import { createParametricPlugin } from './plugin.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -52,6 +52,7 @@ const ThemeConfigSchema = S.Struct({
         pressed: S.Struct({ alpha: S.Number, chroma: S.Number, hue: S.Number, lightness: S.Number }),
         selected: S.Struct({ alpha: S.Number, chroma: S.Number, hue: S.Number, lightness: S.Number }),
     }),
+    toastStyles: S.optional(S.Array(ToastStyleSpecSchema)),
     tooltipGroup: S.Struct({
         boundary: S.optional(S.Union(S.Literal('viewport'), S.Literal('clippingAncestors'))),
         closeDelay: S.Number,
@@ -190,7 +191,10 @@ const generateThemeCSS = (config: ThemeConfig): Effect.Effect<string, ThemeError
             const tooltipBlock = config.tooltipStyles === undefined || config.tooltipStyles.length === 0
                 ? ''
                 : yield* generateTooltipWiring(config.tooltipStyles);
-            return [themeBlock, wiringBlock, tooltipBlock].filter(Boolean).join('\n\n');
+            const toastBlock = config.toastStyles === undefined || config.toastStyles.length === 0
+                ? ''
+                : yield* generateToastWiring(config.toastStyles);
+            return [themeBlock, wiringBlock, tooltipBlock, toastBlock].filter(Boolean).join('\n\n');
         }),
         Effect.mapError((e) => ThemeError.Generation({ category: 'theme', message: String(e), phase: 'color' })),
     );
@@ -210,4 +214,4 @@ const defineTheme = (config: ThemeConfig, watchFiles?: readonly string[]): Plugi
 
 export { defineTheme };
 export type { ThemeConfig };
-export type { ComponentSpec, TooltipStyleSpec } from './component-wiring.ts';
+export type { ComponentSpec, ToastStyleSpec, TooltipStyleSpec } from './component-wiring.ts';

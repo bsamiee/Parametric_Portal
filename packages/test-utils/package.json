@@ -4,7 +4,7 @@
   "type": "module",
   "sideEffects": [
     "./src/setup.ts",
-    "./src/matchers/effect.ts"
+    "./src/effect-test.ts"
   ],
   "exports": {
     "./arbitraries": {
@@ -15,13 +15,13 @@
       "types": "./src/constants.ts",
       "import": "./src/constants.ts"
     },
+    "./effect-test": {
+      "types": "./src/effect-test.ts",
+      "import": "./src/effect-test.ts"
+    },
     "./harness": {
       "types": "./src/harness.ts",
       "import": "./src/harness.ts"
-    },
-    "./matchers/effect": {
-      "types": "./src/matchers/effect.ts",
-      "import": "./src/matchers/effect.ts"
     },
     "./mocks/fetch": {
       "types": "./src/mocks/fetch.ts",
