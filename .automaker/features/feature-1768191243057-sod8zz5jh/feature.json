@@ -1,0 +1,26 @@
+{
+    "category": "refactor",
+    "description": "Create Effect service wrapping OpenTelemetry SDK with automatic span creation from Effect.fn calls. Wire into existing Effect.log calls to emit structured logs with trace correlation. Add metrics collection for service boundaries (DB query latency, API response times). Provide development-mode console reporter and production OTLP exporter layers.\n\n**Rationale:** Effect pipelines naturally support tracing via spans, but project lacks instrumentation infrastructure. Centralized observability enables production debugging of distributed operations (auth flows, API chains). Automatic correlation between logs, traces, and metrics reduces mean-time-to-resolution.",
+    "descriptionHistory": [
+        {
+            "description": "Create Effect service wrapping OpenTelemetry SDK with automatic span creation from Effect.fn calls. Wire into existing Effect.log calls to emit structured logs with trace correlation. Add metrics collection for service boundaries (DB query latency, API response times). Provide development-mode console reporter and production OTLP exporter layers.\n\n**Rationale:** Effect pipelines naturally support tracing via spans, but project lacks instrumentation infrastructure. Centralized observability enables production debugging of distributed operations (auth flows, API chains). Automatic correlation between logs, traces, and metrics reduces mean-time-to-resolution.",
+            "source": "initial",
+            "timestamp": "2026-01-12T04:14:03.058Z"
+        }
+    ],
+    "id": "feature-1768191243057-sod8zz5jh",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "lite",
+    "priority": 2,
+    "reasoningEffort": "none",
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "startedAt": "2026-01-12T10:29:00.219Z",
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "low",
+    "title": "Centralized observability layer with OpenTelemetry integration",
+    "updatedAt": "2026-01-12T10:33:51.264Z",
+    "workMode": "current"
+}

@@ -1,0 +1,24 @@
+{
+    "category": "refactor",
+    "description": "Build codegen tool consuming HttpApiGroup definitions from server/api.ts to emit type-safe client SDK with automatic serialization/deserialization. Generate Effect-based methods matching server endpoints with branded type validation. Support multiple output formats (React hooks, vanilla Effect, Promise-based for non-Effect consumers).\n\n**Rationale:** API contract exists as single source of truth (ParametricApi) but clients manually implement fetch logic. Generated clients eliminate drift between server schema and consumer code. Effect integration ensures client-side validation matches server-side rules, catching errors at request construction time.",
+    "descriptionHistory": [
+        {
+            "description": "Build codegen tool consuming HttpApiGroup definitions from server/api.ts to emit type-safe client SDK with automatic serialization/deserialization. Generate Effect-based methods matching server endpoints with branded type validation. Support multiple output formats (React hooks, vanilla Effect, Promise-based for non-Effect consumers).\n\n**Rationale:** API contract exists as single source of truth (ParametricApi) but clients manually implement fetch logic. Generated clients eliminate drift between server schema and consumer code. Effect integration ensures client-side validation matches server-side rules, catching errors at request construction time.",
+            "source": "initial",
+            "timestamp": "2026-01-12T04:14:28.578Z"
+        }
+    ],
+    "id": "feature-1768191268577-drvou6o2j",
+    "imagePaths": [],
+    "model": "sonnet",
+    "planningMode": "lite",
+    "priority": 2,
+    "reasoningEffort": "none",
+    "requirePlanApproval": false,
+    "skipTests": false,
+    "status": "backlog",
+    "textFilePaths": [],
+    "thinkingLevel": "medium",
+    "title": "Schema-driven API client generator from ParametricApi definition",
+    "workMode": "current"
+}
