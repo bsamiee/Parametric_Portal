@@ -37,6 +37,7 @@ export default Effect.flatMap(
         token_hash TEXT NOT NULL,
         expires_at TIMESTAMPTZ NOT NULL,
         revoked_at TIMESTAMPTZ,
+        mfa_verified_at TIMESTAMPTZ,
         ip_address TEXT,
         user_agent TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -124,5 +125,16 @@ export default Effect.flatMap(
     CREATE INDEX idx_audit_entity ON audit_logs(entity_type, entity_id) INCLUDE (operation, created_at);
     CREATE INDEX idx_audit_actor ON audit_logs(actor_id) INCLUDE (entity_type, created_at);
     CREATE INDEX idx_audit_created ON audit_logs(created_at DESC);
+
+    -- MFA Secrets
+    CREATE TABLE mfa_secrets (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        secret_encrypted BYTEA NOT NULL,
+        backup_codes_hash TEXT[] NOT NULL,
+        enabled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX idx_mfa_secrets_user_id ON mfa_secrets(user_id) INCLUDE (enabled_at);
 `,
 );

@@ -8,7 +8,7 @@ import { SqlClient } from '@effect/sql/SqlClient';
 import type { SqlError } from '@effect/sql/SqlError';
 import * as SqlResolver from '@effect/sql/SqlResolver';
 import { MetricsService } from '@parametric-portal/server/metrics';
-import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, assets, auditLogs, IdFactory, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
+import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, assets, auditLogs, IdFactory, type MfaSecretInsert, mfaSecrets, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { Chunk, type Context, Duration, Effect, identity, Layer, Option, type Schema as S, Stream } from 'effect';
@@ -171,6 +171,7 @@ const makeSessionRepo = (db: DrizzleDb, resolver: Resolvers['session']) => ({
     findValidByTokenHash: (hash: Hex64) => withDbOps('db.sessions.findValidByTokenHash', 'read', db.query.sessions.findFirst({ where: and(eq(sessions.tokenHash, hash), gt(sessions.expiresAt, sql`now()`), isNull(sessions.revokedAt)) })).pipe(Effect.map(opt)),
     findValidByTokenHashWithUser: (hash: Hex64) => withDbOps('db.sessions.findValidByTokenHashWithUser', 'read', db.query.sessions.findFirst({ where: and(eq(sessions.tokenHash, hash), gt(sessions.expiresAt, sql`now()`), isNull(sessions.revokedAt)), with: { user: true } })).pipe(Effect.map((r) => opt(r as SessionWithUser | undefined))),
     insert: (data: SessionInsert) => withDbOps('db.sessions.insert', 'write', db.insert(sessions).values(data).returning()).pipe(Effect.map(first)),
+    markMfaVerified: (id: Session['id']) => withDbOps('db.sessions.markMfaVerified', 'write', db.update(sessions).set({ mfaVerifiedAt: sql`now()` }).where(eq(sessions.id, id))).pipe(Effect.asVoid),
     revoke: (id: Session['id']) => withDbOps('db.sessions.revoke', 'write', db.update(sessions).set({ revokedAt: sql`now()` }).where(eq(sessions.id, id))).pipe(Effect.asVoid),
     revokeAllByUserId: (userId: User['id']) => withDbOps('db.sessions.revokeAllByUserId', 'write', db.update(sessions).set({ revokedAt: sql`now()` }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))).pipe(Effect.asVoid),
     updateLastActivity: (id: Session['id']) => withDbOps('db.sessions.updateLastActivity', 'write', db.update(sessions).set({ lastActivityAt: sql`now()` }).where(eq(sessions.id, id))).pipe(Effect.asVoid),
@@ -218,6 +219,11 @@ const makeAuditRepo = (db: DrizzleDb, resolvers: Resolvers) => ({
     findByEntity: (entityType: string, entityId: string) => withDbOps('db.audit.findByEntity', 'read', db.query.auditLogs.findMany({ orderBy: desc(auditLogs.createdAt), where: and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)) })),
     log: resolvers.insertAudit.execute,
 });
+const makeMfaSecretsRepo = (db: DrizzleDb) => ({
+    delete: (userId: User['id']) => withDbOps('db.mfaSecrets.delete', 'delete', db.delete(mfaSecrets).where(eq(mfaSecrets.userId, userId))).pipe(Effect.asVoid),
+    findByUserId: (userId: User['id']) => withDbOps('db.mfaSecrets.findByUserId', 'read', db.query.mfaSecrets.findFirst({ where: eq(mfaSecrets.userId, userId) })).pipe(Effect.map(opt)),
+    upsert: (data: MfaSecretInsert) => withDbOps('db.mfaSecrets.upsert', 'write', db.insert(mfaSecrets).values(data).onConflictDoUpdate({ set: { backupCodesHash: data.backupCodesHash, enabledAt: data.enabledAt, secretEncrypted: data.secretEncrypted }, target: mfaSecrets.userId }).returning()).pipe(Effect.map(first)),
+});
 
 // --- [DERIVED_TYPES] ---------------------------------------------------------
 
@@ -228,10 +234,12 @@ type OAuthAccountRepository = ReturnType<typeof makeOAuthAccountRepo>;
 type RefreshTokenRepository = ReturnType<typeof makeRefreshTokenRepo>;
 type AssetRepository = ReturnType<typeof makeAssetRepo>;
 type AuditRepository = ReturnType<typeof makeAuditRepo>;
+type MfaSecretsRepository = ReturnType<typeof makeMfaSecretsRepo>;
 type DatabaseServiceShape = {
     readonly apiKeys: ApiKeyRepository;
     readonly assets: AssetRepository;
     readonly audit: AuditRepository;
+    readonly mfaSecrets: MfaSecretsRepository;
     readonly oauthAccounts: OAuthAccountRepository;
     readonly refreshTokens: RefreshTokenRepository;
     readonly sessions: SessionRepository;
@@ -251,6 +259,7 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
             apiKeys: makeApiKeyRepo(db, resolvers.apiKey),
             assets: makeAssetRepo(db, resolvers),
             audit: makeAuditRepo(db, resolvers),
+            mfaSecrets: makeMfaSecretsRepo(db),
             oauthAccounts: makeOAuthAccountRepo(db),
             refreshTokens: makeRefreshTokenRepo(db),
             sessions: makeSessionRepo(db, resolvers.session),
@@ -266,6 +275,6 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 
 export { DatabaseService };
 export type {
-    ApiKeyRepository, AssetRepository, AuditRepository, DatabaseServiceShape, OAuthAccountRepository, RefreshTokenRepository, SessionRepository,
+    ApiKeyRepository, AssetRepository, AuditRepository, DatabaseServiceShape, MfaSecretsRepository, OAuthAccountRepository, RefreshTokenRepository, SessionRepository,
     UserRepository, WithTransaction,
 };

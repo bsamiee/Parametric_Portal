@@ -1,14 +1,11 @@
 {
-    "category": "ui",
-    "description": "Extend the existing authentication system with hierarchical roles and permission policies. Define resource-level permissions using Effect services with compile-time type safety. Create an admin UI for managing roles, permissions, and user assignments with audit logging.\n\n**Rationale:** Beyond basic authentication, enterprise users need fine-grained control over who can view, edit, or delete specific resources. The existing session management provides a foundation, but RBAC is essential for multi-tenant or team-based applications.",
-    "descriptionHistory": [
-        {
-            "description": "Extend the existing authentication system with hierarchical roles and permission policies. Define resource-level permissions using Effect services with compile-time type safety. Create an admin UI for managing roles, permissions, and user assignments with audit logging.\n\n**Rationale:** Beyond basic authentication, enterprise users need fine-grained control over who can view, edit, or delete specific resources. The existing session management provides a foundation, but RBAC is essential for multi-tenant or team-based applications.",
-            "source": "initial",
-            "timestamp": "2026-01-12T14:58:28.019Z"
-        }
-    ],
+    "category": "backend",
+    "dependencies": [],
+    "description": "Add role enforcement middleware that gates endpoints by minimum role level.\n\nCurrently: `B.roleLevels` in `packages/types/src/schema.ts:28` maps roles to numeric levels. `Session` Tag in `packages/server/src/middleware.ts:57` provides `AuthContext` with `userId` only (no role). User role stored in `users.role` column. `DatabaseService.users.findById` in `packages/database/src/repos.ts:159` returns user with role.\n\nDeliverables:\n1. Add `requireRole(min: RoleKey) => HttpApiMiddleware` function in `packages/server/src/middleware.ts`\n2. Middleware uses `Session` to get `userId`, then calls `DatabaseService.users.findById(userId)` to fetch user role\n3. Compare `B.roleLevels[user.role]` against `B.roleLevels[min]`\n4. Return `HttpError.Auth({ reason: 'Insufficient permissions' })` when level too low\n5. Export `requireRole` from middleware.ts\n6. Add `PATCH /api/users/:id/role` endpoint in `apps/api` guarded by `requireRole('admin')`\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p server,api` passes. Member calling admin endpoint returns 403.",
+    "descriptionHistory": [],
     "id": "feature-1768229908018-ojk6u5d2n",
-    "status": "backlog",
-    "title": "Granular role-based access control (RBAC)"
+    "startedAt": "2026-01-12T18:59:18.186Z",
+    "status": "verified",
+    "title": "Role enforcement middleware",
+    "updatedAt": "2026-01-12T19:14:52.715Z"
 }

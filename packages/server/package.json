@@ -28,6 +28,11 @@
       "import": "./src/metrics.ts",
       "default": "./src/metrics.ts"
     },
+    "./mfa": {
+      "types": "./src/mfa.ts",
+      "import": "./src/mfa.ts",
+      "default": "./src/mfa.ts"
+    },
     "./middleware": {
       "types": "./src/middleware.ts",
       "import": "./src/middleware.ts",
@@ -58,7 +63,9 @@
     "@effect/sql": "catalog:",
     "@parametric-portal/types": "workspace:*",
     "effect": "catalog:",
-    "ioredis": "catalog:"
+    "ioredis": "catalog:",
+    "nanoid": "catalog:",
+    "otplib": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

@@ -82,7 +82,7 @@ class Validation extends S.TaggedError<Validation>()(
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-/** Generic error chain - maps any error to specified HTTP error type. */
+/** Convert any error to specified HttpError type. Use at infra boundaries. */
 const chain = <C extends new (props: never) => unknown>(
     ErrorClass: C,
     props: ConstructorParameters<C>[0],

@@ -39,3 +39,15 @@ usageStats:
 - **Rejected:** Fluent builder pattern TestLayers.custom(...).merge(...).merge(...) which is common in other libraries but less compatible with Effect ecosystem conventions
 - **Trade-offs:** Functional API requires more imports (TestLayers.merge, TestLayers.mergeAll) but aligns with Effect conventions. Easier to compose programmatically with variadic functions.
 - **Breaking if changed:** If changed to fluent pattern, would break compatibility with functional composition patterns used in the codebase
+
+#### [Pattern] Role enforcement via Effect.Tag dependency injection with runtime role level comparison against SCHEMA_TUNING.roleLevels hierarchy (2026-01-12)
+- **Problem solved:** Needed to gate endpoints by minimum required role while maintaining type safety and dependency injection
+- **Why this works:** Effect.Tag enables compile-time role validation with runtime level checking. Centralizing role hierarchy in SCHEMA_TUNING prevents drift between authorization logic and role definitions. Allows middleware to be composable across different handlers.
+- **Trade-offs:** Requires fetching user from database on each protected request vs caching. Gained: centralized role authority, type safety, testability. Lost: request performance per protected call.
+
+### Injected MfaSecretsRepository via Effect.Tag rather than direct database access, indicating future Effect-based dependency injection (2026-01-12)
+- **Context:** Codebase appears to be migrating toward or using Effect for dependency injection
+- **Why:** Testability (can mock repository), loose coupling, enables request-level transaction scoping, consistent with codebase patterns
+- **Rejected:** Direct database queries (tight coupling, harder to test), class-based DI (less functional)
+- **Trade-offs:** Requires Effect runtime setup; adds abstraction layer; enables composition patterns
+- **Breaking if changed:** Removing Effect.Tag requires rewriting all consumers; changing to direct queries loses testing capabilities

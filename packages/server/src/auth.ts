@@ -43,10 +43,23 @@ const OAuthProviderConfig = S.Struct({
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class AuthContext extends S.Class<AuthContext>('AuthContext')({ sessionId: SessionId.schema, userId: UserId.schema }) {
-    static readonly Tokens = S.Struct({ accessToken: S.String, expiresAt: S.DateTimeUtc });
-    static readonly fromSession = (s: { readonly id: SessionId; readonly userId: UserId }) =>
-        new AuthContext({ sessionId: s.id, userId: s.userId });
+class AuthContext extends S.Class<AuthContext>('AuthContext')({
+    mfaRequired: S.Boolean,
+    mfaVerified: S.Boolean,
+    sessionId: SessionId.schema,
+    userId: UserId.schema,
+}) {
+    static readonly Tokens = S.Struct({ accessToken: S.String, expiresAt: S.DateTimeUtc, mfaPending: S.Boolean });
+    static readonly fromSession = (s: {
+        readonly id: SessionId;
+        readonly mfaRequired: boolean;
+        readonly mfaVerifiedAt: Date | null;
+        readonly userId: UserId;
+    }) => new AuthContext({ mfaRequired: s.mfaRequired, mfaVerified: s.mfaVerifiedAt !== null, sessionId: s.id, userId: s.userId });
+    /** Check if session requires MFA verification but hasn't completed it */
+    get isPendingMfa(): boolean {
+        return this.mfaRequired && !this.mfaVerified;
+    }
 }
 class OAuthResult extends S.Class<OAuthResult>('OAuthResult')({
     accessToken: S.String,
