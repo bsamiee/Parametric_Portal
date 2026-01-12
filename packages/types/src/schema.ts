@@ -4,7 +4,7 @@
  */
 
 import { relations, sql } from 'drizzle-orm';
-import { customType, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { customType, jsonb, pgEnum, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 import { Duration, Effect, Schema as S } from 'effect';
 import { Hex64, Uuidv7 } from './types.ts';
 
@@ -21,7 +21,7 @@ const B = Object.freeze({
         aiProvider: ['anthropic', 'openai', 'gemini'] as const,
         assetType: ['icon', 'image', 'document'] as const,
         auditOperation: ['create', 'update', 'delete', 'revoke'] as const,
-        idBrands: ['ApiKeyId', 'AssetId', 'MfaSecretId', 'OAuthAccountId', 'RefreshTokenId', 'SessionId', 'UserId'] as const,
+        idBrands: ['ApiKeyId', 'AppId', 'AssetId', 'MfaSecretId', 'OAuthAccountId', 'RefreshTokenId', 'SessionId', 'UserId'] as const,
         oauthProvider: ['google', 'github', 'microsoft', 'apple'] as const,
         role: ['guest', 'viewer', 'member', 'admin', 'owner'] as const,
     },
@@ -51,6 +51,7 @@ const IdFactory = Object.freeze(
     Object.fromEntries(B.enums.idBrands.map((brand) => [brand, makeId(brand)])) as unknown as { readonly [K in IdBrand]: ReturnType<typeof makeId<K>>; },
 );
 const ApiKeyId = IdFactory.ApiKeyId;
+const AppId = IdFactory.AppId;
 const AssetId = IdFactory.AssetId;
 const MfaSecretId = IdFactory.MfaSecretId;
 const OAuthAccountId = IdFactory.OAuthAccountId;
@@ -82,6 +83,7 @@ const BufferSchema: S.Schema<Buffer, Buffer> = S.instanceOf(BufferRuntime) as S.
 // --- [ROW_SCHEMAS] -----------------------------------------------------------
 
 const UserRowSchema = S.Struct({
+    appId: AppId.schema,
     createdAt: S.DateFromSelf,
     deletedAt: NullableDate,
     email: S.String,
@@ -132,6 +134,7 @@ const RefreshTokenRowSchema = S.Struct({
     userId: UserId.schema,
 });
 const AssetRowSchema = S.Struct({
+    appId: AppId.schema,
     assetType: AssetType,
     content: S.String,
     createdAt: S.DateFromSelf,
@@ -142,6 +145,7 @@ const AssetRowSchema = S.Struct({
 });
 const AuditLogRowSchema = S.Struct({
     actorId: S.NullOr(UserId.schema),
+    appId: AppId.schema,
     changes: S.NullOr(S.Record({ key: S.String, value: S.Unknown })),
     createdAt: S.DateFromSelf,
     entityId: S.UUID,
@@ -159,6 +163,13 @@ const MfaSecretRowSchema = S.Struct({
     secretEncrypted: BufferSchema,
     userId: UserId.schema,
 });
+const AppRowSchema = S.Struct({
+    createdAt: S.DateFromSelf,
+    id: AppId.schema,
+    name: S.String,
+    settings: S.NullOr(S.Record({ key: S.String, value: S.Unknown })),
+    slug: S.String,
+});
 
 // --- [INSERT_SCHEMAS] --------------------------------------------------------
 // Derived from RowSchemas - omit DB-generated fields for insert operations
@@ -171,16 +182,28 @@ const OAuthAccountInsertSchema = OAuthAccountRowSchema.pipe(S.omit('createdAt', 
 const ApiKeyInsertSchema = ApiKeyRowSchema.pipe(S.omit('createdAt', 'id', 'lastUsedAt'));
 const AuditLogInsertSchema = AuditLogRowSchema.pipe(S.omit('id', 'createdAt'));
 const MfaSecretInsertSchema = MfaSecretRowSchema.pipe(S.omit('createdAt', 'id'));
+const AppInsertSchema = AppRowSchema.pipe(S.omit('createdAt', 'id'));
 
 // --- [TABLES] ----------------------------------------------------------------
 
+const apps = pgTable('apps', {
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    id: uuid('id').primaryKey().default(sql`uuidv7()`).$type<AppId>(),
+    name: text('name').notNull(),
+    settings: jsonb('settings').$type<Record<string, unknown>>(),
+    slug: text('slug').notNull().unique(),
+});
 const users = pgTable('users', {
+    appId: uuid('app_id')
+        .notNull()
+        .references(() => apps.id)
+        .$type<AppId>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
-    email: text('email').notNull().unique(),
+    email: text('email').notNull(),
     id: uuid('id').primaryKey().default(sql`uuidv7()`).$type<UserId>(),
     role: roleEnum('role').notNull().default('viewer'),
-});
+}, (t) => [unique('users_app_email_unique').on(t.appId, t.email)]);
 const sessions = pgTable('sessions', {
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -237,6 +260,10 @@ const refreshTokens = pgTable('refresh_tokens', {
         .$type<UserId>(),
 });
 const assets = pgTable('assets', {
+    appId: uuid('app_id')
+        .notNull()
+        .references(() => apps.id)
+        .$type<AppId>(),
     assetType: assetTypeEnum('asset_type').notNull(),
     content: text('content').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -251,6 +278,10 @@ const auditLogs = pgTable('audit_logs', {
     actorId: uuid('actor_id')
         .references(() => users.id)
         .$type<UserId>(),
+    appId: uuid('app_id')
+        .notNull()
+        .references(() => apps.id)
+        .$type<AppId>(),
     changes: jsonb('changes').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     entityId: uuid('entity_id').notNull(),
@@ -275,8 +306,14 @@ const mfaSecrets = pgTable('mfa_secrets', {
 
 // --- [RELATIONS] -------------------------------------------------------------
 
+const appsRelations = relations(apps, ({ many }) => ({
+    assets: many(assets),
+    auditLogs: many(auditLogs),
+    users: many(users),
+}));
 const usersRelations = relations(users, ({ many, one }) => ({
     apiKeys: many(apiKeys),
+    app: one(apps, { fields: [users.appId], references: [apps.id] }),
     assets: many(assets),
     mfaSecret: one(mfaSecrets),
     oauthAccounts: many(oauthAccounts),
@@ -287,8 +324,8 @@ const sessionsRelations = relations(sessions, ({ one }) => ({ user: one(users, {
 const apiKeysRelations = relations(apiKeys, ({ one }) => ({ user: one(users, { fields: [apiKeys.userId], references: [users.id] }), }));
 const oauthAccountsRelations = relations(oauthAccounts, ({ one }) => ({ user: one(users, { fields: [oauthAccounts.userId], references: [users.id] }), }));
 const refreshTokensRelations = relations(refreshTokens, ({ one }) => ({ user: one(users, { fields: [refreshTokens.userId], references: [users.id] }), }));
-const assetsRelations = relations(assets, ({ one }) => ({ user: one(users, { fields: [assets.userId], references: [users.id] }), }));
-const auditLogsRelations = relations(auditLogs, ({ one }) => ({ actor: one(users, { fields: [auditLogs.actorId], references: [users.id] }), }));
+const assetsRelations = relations(assets, ({ one }) => ({ app: one(apps, { fields: [assets.appId], references: [apps.id] }), user: one(users, { fields: [assets.userId], references: [users.id] }), }));
+const auditLogsRelations = relations(auditLogs, ({ one }) => ({ actor: one(users, { fields: [auditLogs.actorId], references: [users.id] }), app: one(apps, { fields: [auditLogs.appId], references: [apps.id] }), }));
 const mfaSecretsRelations = relations(mfaSecrets, ({ one }) => ({ user: one(users, { fields: [mfaSecrets.userId], references: [users.id] }), }));
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -296,6 +333,7 @@ const mfaSecretsRelations = relations(mfaSecrets, ({ one }) => ({ user: one(user
 type IdBrand = (typeof B.enums.idBrands)[number];
 type RoleKey = keyof typeof B.roleLevels;
 type ApiKeyId = S.Schema.Type<typeof ApiKeyId.schema>;
+type AppId = S.Schema.Type<typeof AppId.schema>;
 type AssetId = S.Schema.Type<typeof AssetId.schema>;
 type MfaSecretId = S.Schema.Type<typeof MfaSecretId.schema>;
 type OAuthAccountId = S.Schema.Type<typeof OAuthAccountId.schema>;
@@ -307,6 +345,8 @@ type OAuthProvider = typeof OAuthProvider.Type;
 type AiProvider = typeof AiProvider.Type;
 type AssetType = typeof AssetType.Type;
 type AuditOperation = typeof AuditOperation.Type;
+type App = typeof apps.$inferSelect;
+type AppInsert = typeof apps.$inferInsert;
 type User = typeof users.$inferSelect;
 type UserInsert = typeof users.$inferInsert;
 type Session = typeof sessions.$inferSelect;
@@ -331,6 +371,7 @@ type RefreshTokenRow = S.Schema.Type<typeof RefreshTokenRowSchema>;
 type AssetRow = S.Schema.Type<typeof AssetRowSchema>;
 type AuditLogRow = S.Schema.Type<typeof AuditLogRowSchema>;
 type MfaSecretRow = S.Schema.Type<typeof MfaSecretRowSchema>;
+type AppRow = S.Schema.Type<typeof AppRowSchema>;
 type UserWithSessions = User & { readonly sessions: ReadonlyArray<Session> };
 type UserWithApiKeys = User & { readonly apiKeys: ReadonlyArray<ApiKey> };
 type UserWithOAuthAccounts = User & { readonly oauthAccounts: ReadonlyArray<OAuthAccount> };
@@ -339,14 +380,14 @@ type SessionWithUser = Session & { readonly user: User };
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as SCHEMA_TUNING, IdFactory };
-export { AiProvider, ApiKeyId, AssetId, AssetType, AuditOperation, MfaSecretId, OAuthAccountId, OAuthProvider, RefreshTokenId, Role, SessionId, UserId, };
+export { AiProvider, ApiKeyId, AppId, AssetId, AssetType, AuditOperation, MfaSecretId, OAuthAccountId, OAuthProvider, RefreshTokenId, Role, SessionId, UserId, };
 export { aiProviderEnum, assetTypeEnum, auditOperationEnum, oauthProviderEnum, roleEnum };
-export { apiKeys, assets, auditLogs, mfaSecrets, oauthAccounts, refreshTokens, sessions, users };
-export { apiKeysRelations, assetsRelations, auditLogsRelations, mfaSecretsRelations, oauthAccountsRelations, refreshTokensRelations, sessionsRelations, usersRelations, };
-export { ApiKeyRowSchema, AssetRowSchema, AuditLogRowSchema, MfaSecretRowSchema, OAuthAccountRowSchema, RefreshTokenRowSchema, SessionRowSchema, UserRowSchema };
-export { ApiKeyInsertSchema, AssetInsertSchema, AuditLogInsertSchema, MfaSecretInsertSchema, OAuthAccountInsertSchema, RefreshTokenInsertSchema, SessionInsertSchema, UserInsertSchema };
+export { apiKeys, apps, assets, auditLogs, mfaSecrets, oauthAccounts, refreshTokens, sessions, users };
+export { apiKeysRelations, appsRelations, assetsRelations, auditLogsRelations, mfaSecretsRelations, oauthAccountsRelations, refreshTokensRelations, sessionsRelations, usersRelations, };
+export { ApiKeyRowSchema, AppRowSchema, AssetRowSchema, AuditLogRowSchema, MfaSecretRowSchema, OAuthAccountRowSchema, RefreshTokenRowSchema, SessionRowSchema, UserRowSchema };
+export { ApiKeyInsertSchema, AppInsertSchema, AssetInsertSchema, AuditLogInsertSchema, MfaSecretInsertSchema, OAuthAccountInsertSchema, RefreshTokenInsertSchema, SessionInsertSchema, UserInsertSchema };
 export type {
-    IdBrand, ApiKey, ApiKeyInsert, ApiKeyRow, Asset, AssetInsert, AssetRow, AuditLog, AuditLogInsert, AuditLogRow, MfaSecret,
+    IdBrand, ApiKey, ApiKeyInsert, ApiKeyRow, App, AppInsert, AppRow, Asset, AssetInsert, AssetRow, AuditLog, AuditLogInsert, AuditLogRow, MfaSecret,
     MfaSecretInsert, MfaSecretRow, OAuthAccount, OAuthAccountInsert, OAuthAccountRow, RefreshToken, RefreshTokenInsert,
     RefreshTokenRow, RoleKey, Session, SessionInsert, SessionRow, SessionWithUser, User, UserInsert, UserRow, UserWithApiKeys,
     UserWithOAuthAccounts, UserWithSessions,

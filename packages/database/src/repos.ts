@@ -8,7 +8,7 @@ import { SqlClient } from '@effect/sql/SqlClient';
 import type { SqlError } from '@effect/sql/SqlError';
 import * as SqlResolver from '@effect/sql/SqlResolver';
 import { MetricsService } from '@parametric-portal/server/metrics';
-import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, assets, auditLogs, IdFactory, type MfaSecretInsert, mfaSecrets, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
+import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type App, type AppInsert, AppInsertSchema, AppRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, apps, assets, auditLogs, IdFactory, type MfaSecretInsert, mfaSecrets, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { Chunk, type Context, Duration, Effect, identity, Layer, Option, type Schema as S, Stream } from 'effect';
@@ -28,9 +28,7 @@ const B = Object.freeze({ ...DATABASE_TUNING } as const);
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const opt = <T>(row: T | undefined): Option.Option<T> => Option.fromNullable(row);
-/** Extract first row from INSERT RETURNING (always non-empty for single-row insert); throws if empty (programming error) */
 const first = <T>(rows: readonly T[]): T => Option.getOrThrow(Option.fromNullable(rows[0]));
-/** SqlResolver.grouped requires sync callback; getOrThrow is data integrity guard (userId filtered in WHERE clause) */
 const userIdOrThrow = (asset: Asset): User['id'] => Option.getOrThrow(Option.fromNullable(asset.userId));
 const withDbOps = <A, E, R>(opName: string, opType: OpType, effect: Effect.Effect<A, E, R>) =>
     Effect.fn(opName)(() =>
@@ -50,7 +48,6 @@ const withDbOps = <A, E, R>(opName: string, opType: OpType, effect: Effect.Effec
 
 const makeResolvers = (db: DrizzleDb) =>
     Effect.all({
-        // READ: findById resolvers
         apiKey: SqlResolver.findById('ApiKeyById', {
             execute: (ids) => withDbOps('db.apiKeys.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.query.apiKeys.findMany({ where: inArray(apiKeys.id, ids as ApiKey['id'][]) })),
             Id: IdFactory.ApiKeyId.schema,
@@ -58,13 +55,19 @@ const makeResolvers = (db: DrizzleDb) =>
             ResultId: (row) => row.id,
             withContext: true,
         }),
-        // READ: grouped resolvers
         apiKeysByUserId: SqlResolver.grouped('ApiKeysByUserId', {
             execute: (userIds) => withDbOps('db.apiKeys.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.query.apiKeys.findMany({ where: inArray(apiKeys.userId, userIds as User['id'][]) })),
             Request: IdFactory.UserId.schema,
             RequestGroupKey: (userId) => userId,
             Result: ApiKeyRowSchema,
             ResultGroupKey: (apiKey) => apiKey.userId,
+            withContext: true,
+        }),
+        app: SqlResolver.findById('AppById', {
+            execute: (ids) => withDbOps('db.apps.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly App[]) : db.query.apps.findMany({ where: inArray(apps.id, ids as App['id'][]) })),
+            Id: IdFactory.AppId.schema,
+            Result: AppRowSchema,
+            ResultId: (row) => row.id,
             withContext: true,
         }),
         asset: SqlResolver.findById('AssetById', {
@@ -82,11 +85,16 @@ const makeResolvers = (db: DrizzleDb) =>
             ResultGroupKey: userIdOrThrow,
             withContext: true,
         }),
-        // WRITE: ordered resolvers (INSERT RETURNING - auto-batched)
         insertApiKey: SqlResolver.ordered('ApiKeyInsert', {
             execute: (reqs) => withDbOps('db.apiKeys.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.insert(apiKeys).values([...reqs] as ApiKeyInsert[]).returning()),
             Request: ApiKeyInsertSchema,
             Result: ApiKeyRowSchema,
+            withContext: true,
+        }),
+        insertApp: SqlResolver.ordered('AppInsert', {
+            execute: (reqs) => withDbOps('db.apps.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly App[]) : db.insert(apps).values([...reqs] as AppInsert[]).returning()),
+            Request: AppInsertSchema,
+            Result: AppRowSchema,
             withContext: true,
         }),
         insertAsset: SqlResolver.ordered('AssetInsert', {
@@ -95,7 +103,6 @@ const makeResolvers = (db: DrizzleDb) =>
             Result: AssetRowSchema,
             withContext: true,
         }),
-        // WRITE: ordered resolver for audit (INSERT RETURNING - auto-batched)
         insertAudit: SqlResolver.ordered('AuditInsert', {
             execute: (logs) => withDbOps('db.audit.insert', 'write', logs.length === 0 ? Effect.succeed([]) : db.insert(auditLogs).values([...logs] as AuditLogInsert[]).returning()),
             Request: AuditLogInsertSchema,
@@ -152,6 +159,12 @@ const makeResolvers = (db: DrizzleDb) =>
 
 // --- [REPOSITORIES] ----------------------------------------------------------
 
+const makeAppRepo = (db: DrizzleDb, resolver: Resolvers['app']) => ({
+    create: (data: AppInsert) => withDbOps('db.apps.create', 'write', db.insert(apps).values(data).returning()).pipe(Effect.map(first)),
+    findById: resolver.execute,
+    findBySlug: (slug: string) => withDbOps('db.apps.findBySlug', 'read', db.query.apps.findFirst({ where: eq(apps.slug, slug) })).pipe(Effect.map(opt)),
+    updateSettings: (id: App['id'], settings: Record<string, unknown>) => withDbOps('db.apps.updateSettings', 'write', db.update(apps).set({ settings }).where(eq(apps.id, id)).returning()).pipe(Effect.map((rows) => opt(rows[0]))),
+});
 const makeUserRepo = (db: DrizzleDb, resolver: Resolvers['user']) => ({
     delete: (id: User['id']) => withDbOps('db.users.delete', 'delete', db.delete(users).where(eq(users.id, id))).pipe(Effect.asVoid),
     findActiveByEmail: (email: string) => withDbOps('db.users.findActiveByEmail', 'read', db.query.users.findFirst({ where: and(eq(users.email, email), isNull(users.deletedAt)) })).pipe(Effect.map(opt)),
@@ -227,6 +240,7 @@ const makeMfaSecretsRepo = (db: DrizzleDb) => ({
 
 // --- [DERIVED_TYPES] ---------------------------------------------------------
 
+type AppRepository = ReturnType<typeof makeAppRepo>;
 type UserRepository = ReturnType<typeof makeUserRepo>;
 type SessionRepository = ReturnType<typeof makeSessionRepo>;
 type ApiKeyRepository = ReturnType<typeof makeApiKeyRepo>;
@@ -237,6 +251,7 @@ type AuditRepository = ReturnType<typeof makeAuditRepo>;
 type MfaSecretsRepository = ReturnType<typeof makeMfaSecretsRepo>;
 type DatabaseServiceShape = {
     readonly apiKeys: ApiKeyRepository;
+    readonly apps: AppRepository;
     readonly assets: AssetRepository;
     readonly audit: AuditRepository;
     readonly mfaSecrets: MfaSecretsRepository;
@@ -257,6 +272,7 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
         const resolvers = yield* makeResolvers(db);
         return {
             apiKeys: makeApiKeyRepo(db, resolvers.apiKey),
+            apps: makeAppRepo(db, resolvers.app),
             assets: makeAssetRepo(db, resolvers),
             audit: makeAuditRepo(db, resolvers),
             mfaSecrets: makeMfaSecretsRepo(db),
@@ -275,6 +291,6 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 
 export { DatabaseService };
 export type {
-    ApiKeyRepository, AssetRepository, AuditRepository, DatabaseServiceShape, MfaSecretsRepository, OAuthAccountRepository, RefreshTokenRepository, SessionRepository,
+    ApiKeyRepository, AppRepository, AssetRepository, AuditRepository, DatabaseServiceShape, MfaSecretsRepository, OAuthAccountRepository, RefreshTokenRepository, SessionRepository,
     UserRepository, WithTransaction,
 };

@@ -13,7 +13,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { AuthContext } from '@parametric-portal/server/auth';
 import { EncryptionKeyService } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { createMetricsMiddleware, MetricsService } from '@parametric-portal/server/metrics';
+import { MetricsService } from '@parametric-portal/server/metrics';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { RateLimit } from '@parametric-portal/server/rate-limit';
 import { TelemetryLive } from '@parametric-portal/server/telemetry';
@@ -46,9 +46,10 @@ const composeMiddleware = <E, R>(app: HttpApp.Default<E, R>) =>
     app.pipe(
         Middleware.xForwardedHeaders,
         Middleware.trace,
-        createMetricsMiddleware(),
         Middleware.security(),
+        Middleware.requestContext(),
         Middleware.requestId(),
+        Middleware.metrics,
         HttpMiddleware.logger,
     );
 
@@ -106,6 +107,20 @@ const UserLookupLive = Layer.effect(
         };
     }),
 );
+const AppLookupLive = Layer.effect(
+    Middleware.AppLookupService,
+    Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const metrics = yield* MetricsService;
+        return {
+            findBySlug: (slug: string) =>
+                db.apps.findBySlug(slug).pipe(
+                    Effect.map(Option.map((app) => ({ id: app.id, slug: app.slug }))),
+                    Effect.provideService(MetricsService, metrics),
+                ),
+        };
+    }),
+);
 const DatabaseLive = DatabaseService.layer;
 const SessionAuthLive = Middleware.Auth.layer.pipe(Layer.provide(SessionLookupLive), Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
@@ -143,12 +158,14 @@ const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
     Layer.provide(InfraLayers),
 );
 const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
+const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive));
 const ServerLive = HttpApiBuilder.serve(composeMiddleware).pipe(
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),
     Layer.provide(SessionAuthLive),
     Layer.provide(UserLookupServiceLive),
+    Layer.provide(AppLookupServiceLive),
     Layer.provide(MetricsService.layer),
     Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port }).pipe(HttpServer.withLogAddress)),
 );

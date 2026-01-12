@@ -45,3 +45,13 @@ usageStats:
 - **Situation:** MFA is backend-only feature; no UI to test; endpoints require authentication context and database state
 - **Root cause:** TOTP verification is time-dependent and cryptographic; needs real service state, not mocked; difficult to test without full stack
 - **How to avoid:** Tests are slower and more brittle; require infrastructure; cannot run in lightweight CI; catch real integration issues
+
+#### [Gotcha] Feature validated through TypeScript compilation only, not Playwright integration tests, because it's backend schema/type change (2026-01-12)
+- **Situation:** Implementation completed but no UI/browser tests were created
+- **Root cause:** AppId type and apps table are pure infrastructure - no UI to test. TypeScript compilation validates type safety and schema correctness which are the actual contract guarantees
+- **How to avoid:** Faster validation through typecheck (seconds vs minutes), but no runtime verification that schema actually works with database. Requires integration tests at application level before deployment
+
+#### [Gotcha] Playwright E2E tests created with TODO comments for full validation since middleware not yet integrated into API app - test file later becomes orphaned/stale (2026-01-12)
+- **Situation:** Implementation completes at server package level but requires integration in API app for meaningful E2E verification
+- **Root cause:** Tests written as placeholder to document expected behavior but marked for deletion since integration incomplete. However, leaving commented tests means actual integration work must remember to implement exact test expectations.
+- **How to avoid:** Gained: clear specification of expected behavior. Lost: stale test file creates documentation debt (file marked for deletion but never deleted).

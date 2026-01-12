@@ -2,9 +2,11 @@
  * Unified MetricsService via Effect.Service pattern.
  * Single source of truth for all observability metrics: HTTP, crypto, DB, rate-limit.
  * Uses Metric.trackDuration for automatic duration tracking and Metric.trackErrorWith for error categorization.
+ * Supports app label from RequestContext for multi-app metric segmentation.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Duration, Effect, Metric, MetricBoundaries, MetricLabel } from 'effect';
+import { Duration, Effect, Metric, MetricBoundaries, MetricLabel, Option } from 'effect';
+import { RequestContext } from './context.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -88,24 +90,38 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 
 // --- [MIDDLEWARE] ------------------------------------------------------------
 
-const createMetricsMiddleware = () =>
-    HttpMiddleware.make((app) =>
-        Effect.gen(function* () {
-            const metrics = yield* MetricsService;
-            const request = yield* HttpServerRequest.HttpServerRequest;
-            const path = request.url.split('?')[0] ?? '/';
-            yield* Metric.increment(metrics.http.active);
-            const labeledDuration = metrics.http.duration.pipe(Metric.tagged('method', request.method), Metric.tagged('path', path));
-            return yield* app.pipe(
-                Metric.trackDuration(labeledDuration),
-                Metric.trackErrorWith(metrics.errors, (e) => (typeof e === 'object' && e !== null && '_tag' in e ? String(e._tag) : 'UnknownError')),
-                Effect.tap((response) => Metric.update(metrics.http.requests.pipe(Metric.tagged('method', request.method), Metric.tagged('path', path), Metric.tagged('status', String(response.status))), 1)),
-                Effect.ensuring(Metric.incrementBy(metrics.http.active, -1)),
-            );
-        }),
-    );
+const metricsMiddleware = HttpMiddleware.make((app) =>
+    Effect.gen(function* () {
+        const metrics = yield* MetricsService;
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const path = request.url.split('?')[0] ?? '/';
+        const ctxOpt = yield* Effect.serviceOption(RequestContext);
+        const appLabel = Option.isSome(ctxOpt) ? ctxOpt.value.appId : 'unknown';
+        const activeGauge = metrics.http.active.pipe(Metric.tagged('app', appLabel));
+        yield* Metric.update(activeGauge, 1);
+        const labeledDuration = metrics.http.duration.pipe(
+            Metric.tagged('method', request.method),
+            Metric.tagged('path', path),
+            Metric.tagged('app', appLabel),
+        );
+        return yield* app.pipe(
+            Metric.trackDuration(labeledDuration),
+            Metric.trackErrorWith(metrics.errors.pipe(Metric.tagged('app', appLabel)), (e) => (typeof e === 'object' && e !== null && '_tag' in e ? String(e._tag) : 'UnknownError')),
+            Effect.tap((response) => Metric.update(
+                metrics.http.requests.pipe(
+                    Metric.tagged('method', request.method),
+                    Metric.tagged('path', path),
+                    Metric.tagged('status', String(response.status)),
+                    Metric.tagged('app', appLabel),
+                ),
+                1,
+            )),
+            Effect.ensuring(Metric.update(activeGauge, -1)),
+        );
+    }),
+);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as METRICS_TUNING, createMetricsMiddleware, MetricsService };
+export { B as METRICS_TUNING, metricsMiddleware, MetricsService };
 export type { MetricEvent, MetricsShape };

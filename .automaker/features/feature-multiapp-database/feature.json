@@ -4,6 +4,8 @@
     "description": "Add AppId branded type, apps table, and AppRepository for multi-tenant data isolation.\n\nCurrently: `B.enums.idBrands` in `packages/types/src/schema.ts:15` has 6 ID types (ApiKeyId, AssetId, OAuthAccountId, RefreshTokenId, SessionId, UserId). No `AppId` or `apps` table exists. All data scoped by `userId` only. `makeUserRepo` in `packages/database/src/repos.ts:149-175` shows repository pattern. Migration `0001_initial.ts` exists in `packages/database/migrations/`.\n\nDeliverables:\n1. Add `'AppId'` to `B.enums.idBrands` array in `packages/types/src/schema.ts:15`\n2. Add `apps` pgTable in `packages/types/src/schema.ts`: `id` (AppId PK), `name` (text NOT NULL), `slug` (text unique NOT NULL), `createdAt` (timestamp default now), `settings` (jsonb nullable)\n3. Add `appId` column (NOT NULL, FK to apps.id) to existing tables: `users`, `assets`, `audit_logs`\n4. Add composite unique constraint `(appId, email)` on `users` table (same email can exist in different apps)\n5. Create migration `packages/database/migrations/NNNN_multi_app.ts` (use next sequential number after existing migrations)\n6. Add `AppRowSchema`, `AppInsertSchema` in schema.ts following pattern at line 90-100\n7. Add `makeAppRepo` in `packages/database/src/repos.ts` with methods: `findById(id)`, `findBySlug(slug)`, `create(data)`, `updateSettings(id, settings)`\n8. Add `apps: AppRepository` to `DatabaseServiceShape` type and wire in `DatabaseService` class\n9. Export types: `AppId`, `App`, `AppInsert`, `AppRepository`\n\nAcceptance: `pnpm exec nx run database:typecheck` passes. `AppId.generateSync()` returns branded UUID. `DatabaseService.apps.findBySlug('test')` compiles.",
     "descriptionHistory": [],
     "id": "feature-multiapp-database",
-    "status": "backlog",
-    "title": "AppId type and apps table"
+    "startedAt": "2026-01-12T22:55:15.603Z",
+    "status": "verified",
+    "title": "AppId type and apps table",
+    "updatedAt": "2026-01-12T23:01:20.231Z"
 }

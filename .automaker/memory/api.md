@@ -38,3 +38,15 @@ usageStats:
 - **Rejected:** Single endpoint with action parameter (less RESTful, harder to document, conflates concerns)
 - **Trade-offs:** More endpoints to maintain; client must handle multiple endpoints; easier to add MFA-specific middleware (rate limiting, audit logging)
 - **Breaking if changed:** Combining into single endpoint requires version bump; loses granular metrics/monitoring per operation
+
+#### [Pattern] AppRepository methods (findById, findBySlug, create, updateSettings) follow Effect-TS pattern with withDbOps for metrics and tracing (2026-01-12)
+- **Problem solved:** Existing repository pattern in DatabaseService used Effect for error handling and observability
+- **Why this works:** withDbOps wraps queries with metrics collection and distributed tracing - essential for observability in multi-tenant system where you need to track app-specific performance. Consistent with existing patterns
+- **Trade-offs:** Effect wrapper adds small overhead but provides production debugging capability. Requires Effect knowledge from developers but enforced by existing codebase
+
+### X-App-Id header validation returns 400 (Validation error) for missing header and 404 (NotFound) for invalid slug - different error codes for different failure modes (2026-01-12)
+- **Context:** Middleware needs to communicate why app context establishment failed
+- **Why:** 400 signals client error (missing required header - caller should fix). 404 signals data error (app slug doesn't exist in system - app was deleted or misconfigured). Allows caller to distinguish recoverable from permanent failures.
+- **Rejected:** Using single error code (400 or 404 for both) - loses semantic information about failure mode
+- **Trade-offs:** Gained: caller can distinguish between client config issue vs deleted resource. Lost: slight API complexity (two error codes for one validation step).
+- **Breaking if changed:** If error codes changed (both become 400), callers cannot distinguish between 'fix the header' vs 'app was deleted' failure modes
