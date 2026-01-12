@@ -13,7 +13,7 @@
  */
 import { readCssInt, readCssMs } from '@parametric-portal/runtime/runtime';
 import type { AsyncState } from '@parametric-portal/types/async';
-import { Array as A, Match, Option, pipe } from 'effect';
+import { Array as A, Effect, Match, Option, pipe } from 'effect';
 import type { CSSProperties, FC, ReactNode } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
 import {
@@ -198,9 +198,11 @@ const promise = <A, E>(
 	config: { readonly pending: ToastPayload; readonly success: ToastPayload | ((a: A) => ToastPayload); readonly failure: ToastPayload | ((e: E) => ToastPayload) },
 ): Promise<A> => {
 	const key = show({ ...config.pending, type: B.typeMap.pending });
-	return thenable.then(
-		(a) => { update(key, typeof config.success === 'function' ? config.success(a) : config.success); return a; },
-		(e) => { update(key, typeof config.failure === 'function' ? config.failure(e as E) : config.failure); return Promise.reject(e); },
+	return pipe(
+		Effect.tryPromise({ catch: (e) => e as E, try: () => thenable }),
+		Effect.tap((a) => Effect.sync(() => update(key, typeof config.success === 'function' ? config.success(a) : config.success))),
+		Effect.tapError((e) => Effect.sync(() => update(key, typeof config.failure === 'function' ? config.failure(e) : config.failure))),
+		Effect.runPromise,
 	);
 };
 const isActive = (key: string): boolean => contentStore.has(key);
