@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Enable CSV/JSON bulk data import with schema validation via Effect pipelines. Stream processing with progress updates via Server-Sent Events. Export filtered datasets with async job queue. Provide template downloads and error reporting with row-level details.\n\n**Rationale:** Users migrating from other systems or performing batch operations expect bulk tooling. Manual one-by-one entry is friction. Progress visibility prevents abandonment during long-running operations.",
+    "descriptionHistory": [
+        {
+            "description": "Enable CSV/JSON bulk data import with schema validation via Effect pipelines. Stream processing with progress updates via Server-Sent Events. Export filtered datasets with async job queue. Provide template downloads and error reporting with row-level details.\n\n**Rationale:** Users migrating from other systems or performing batch operations expect bulk tooling. Manual one-by-one entry is friction. Progress visibility prevents abandonment during long-running operations.",
+            "source": "initial",
+            "timestamp": "2026-01-12T15:01:21.449Z"
+        }
+    ],
+    "id": "feature-1768230081448-bfw4x6hs6",
+    "status": "backlog",
+    "title": "Bulk import/export with progress tracking"
+}

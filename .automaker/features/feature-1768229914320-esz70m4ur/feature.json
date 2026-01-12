@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Track all user actions and system events with timestamps, user attribution, and change deltas. Display a real-time activity feed in the UI using the existing Effect pipeline infrastructure. Store logs in the database with retention policies and export capabilities for compliance.\n\n**Rationale:** Users need visibility into what changed, when, and by whom for accountability and debugging. Audit logs are critical for compliance in regulated industries and help teams understand system behavior over time.",
+    "descriptionHistory": [
+        {
+            "description": "Track all user actions and system events with timestamps, user attribution, and change deltas. Display a real-time activity feed in the UI using the existing Effect pipeline infrastructure. Store logs in the database with retention policies and export capabilities for compliance.\n\n**Rationale:** Users need visibility into what changed, when, and by whom for accountability and debugging. Audit logs are critical for compliance in regulated industries and help teams understand system behavior over time.",
+            "source": "initial",
+            "timestamp": "2026-01-12T14:58:34.321Z"
+        }
+    ],
+    "id": "feature-1768229914320-esz70m4ur",
+    "status": "backlog",
+    "title": "Comprehensive activity feed and audit logs"
+}

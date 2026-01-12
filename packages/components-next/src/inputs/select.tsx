@@ -17,7 +17,7 @@ import {
 } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
-import { cn, composeTailwindRenderProps, defined, Slot, type SlotDef } from '../core/utils';
+import { Badge, cn, composeTailwindRenderProps, defined, Slot, type BadgeValue, type SlotDef } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -43,7 +43,7 @@ type SelectProps<T extends SelectOption = SelectOption> = Omit<RACSelectProps<T>
 	readonly variant?: string;
 };
 type SelectItemProps = Omit<ListBoxItemProps, 'children'> & {
-	readonly badge?: ReactNode | number | string;
+	readonly badge?: BadgeValue;
 	readonly children?: ReactNode | ((state: ListBoxItemRenderProps) => ReactNode);
 	readonly description?: ReactNode;
 	readonly destructive?: boolean;
@@ -276,8 +276,8 @@ const SelectItem: FC<SelectItemProps> = ({
 	badge, children, className, description, destructive, icon, ref, tooltip, ...racProps }) => {
 	const ctx = useContext(SelectContext);
 	const isMultiple = ctx?.selectionMode === 'multiple';
-	const badgeMax = readCssPx(B.cssVars.badgeMax) || 99;
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
+	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
 	const isRenderFn = typeof children === 'function';
 	return (
@@ -304,11 +304,7 @@ const SelectItem: FC<SelectItemProps> = ({
 							: children}
 							{description && <span className={B.slot.itemDescription}>{description}</span>}
 						</span>
-						{badge !== undefined && (
-							<span className={B.slot.itemBadge}>
-								{typeof badge === 'number' && badgeMax !== undefined && badge > badgeMax ? `${badgeMax}+` : badge}
-							</span>
-						)}
+						{badgeLabel !== null && <span className={B.slot.itemBadge}>{badgeLabel}</span>}
 					</>
 				)}
 			</ListBoxItem>

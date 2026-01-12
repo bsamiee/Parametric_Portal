@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Enable users to export filtered datasets and reports in common formats. Implement server-side generation using Effect pipelines with streaming for large datasets. Support scheduled exports via the job queue and email delivery with presigned download URLs.\n\n**Rationale:** Users need to analyze data in external tools or share reports with stakeholders. Export functionality is a baseline expectation in data-driven applications, especially for business intelligence and compliance reporting.",
+    "descriptionHistory": [
+        {
+            "description": "Enable users to export filtered datasets and reports in common formats. Implement server-side generation using Effect pipelines with streaming for large datasets. Support scheduled exports via the job queue and email delivery with presigned download URLs.\n\n**Rationale:** Users need to analyze data in external tools or share reports with stakeholders. Export functionality is a baseline expectation in data-driven applications, especially for business intelligence and compliance reporting.",
+            "source": "initial",
+            "timestamp": "2026-01-12T14:59:57.820Z"
+        }
+    ],
+    "id": "feature-1768229997819-r7c0q43xw",
+    "status": "backlog",
+    "title": "Data export to multiple formats (CSV, JSON, PDF)"
+}

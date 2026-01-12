@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Add TOTP-based 2FA during login flow using Effect-wrapped crypto primitives. Generate QR codes for authenticator apps, provide recovery codes on setup, and enforce MFA for sensitive operations. Support account recovery flow with email verification fallback.\n\n**Rationale:** Security-conscious users demand MFA to protect against credential compromise. Increasingly expected baseline security, especially for applications handling sensitive data or financial operations. Reduces support burden from compromised accounts.",
+    "descriptionHistory": [
+        {
+            "description": "Add TOTP-based 2FA during login flow using Effect-wrapped crypto primitives. Generate QR codes for authenticator apps, provide recovery codes on setup, and enforce MFA for sensitive operations. Support account recovery flow with email verification fallback.\n\n**Rationale:** Security-conscious users demand MFA to protect against credential compromise. Increasingly expected baseline security, especially for applications handling sensitive data or financial operations. Reduces support burden from compromised accounts.",
+            "source": "initial",
+            "timestamp": "2026-01-12T15:01:28.234Z"
+        }
+    ],
+    "id": "feature-1768230088234-0sdpvv4na",
+    "status": "backlog",
+    "title": "Multi-factor authentication (TOTP and backup codes)"
+}

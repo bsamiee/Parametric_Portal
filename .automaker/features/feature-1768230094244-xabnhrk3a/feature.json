@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Implement full-text search using PostgreSQL tsvector/tsquery or dedicated engine (Meilisearch, Typesense). Support fuzzy matching, typo tolerance, faceted filtering, and relevance ranking. Expose via paginated API with highlight snippets. Add search analytics (popular queries, no-result queries).\n\n**Rationale:** Users expect fast, forgiving search as dataset grows. Exact-match queries frustrate users who misremember terms. Search analytics reveal content gaps and UX issues. Essential for apps with >100 searchable entities.",
+    "descriptionHistory": [
+        {
+            "description": "Implement full-text search using PostgreSQL tsvector/tsquery or dedicated engine (Meilisearch, Typesense). Support fuzzy matching, typo tolerance, faceted filtering, and relevance ranking. Expose via paginated API with highlight snippets. Add search analytics (popular queries, no-result queries).\n\n**Rationale:** Users expect fast, forgiving search as dataset grows. Exact-match queries frustrate users who misremember terms. Search analytics reveal content gaps and UX issues. Essential for apps with >100 searchable entities.",
+            "source": "initial",
+            "timestamp": "2026-01-12T15:01:34.244Z"
+        }
+    ],
+    "id": "feature-1768230094244-xabnhrk3a",
+    "status": "backlog",
+    "title": "Search with fuzzy matching and filters"
+}

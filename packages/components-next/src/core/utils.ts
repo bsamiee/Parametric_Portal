@@ -9,7 +9,7 @@ import { AsyncState } from '@parametric-portal/types/async';
 import { type ClassValue, clsx } from 'clsx';
 import { Match, Option, pipe, Predicate } from 'effect';
 import type { LucideIcon } from 'lucide-react';
-import { cloneElement, createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { cloneElement, createElement, isValidElement, useLayoutEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { composeRenderProps } from 'react-aria-components';
 import { type ClassNameValue, twMerge } from 'tailwind-merge';
 
@@ -25,6 +25,15 @@ type SlotDef<T extends Renderable = Renderable> = {
 	readonly success?: T;
 	readonly failure?: T;
 };
+type BadgeValue = { readonly current: number; readonly max?: number };
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const B = Object.freeze({
+	badgeCap: '+',
+	badgeRadix: 10,
+	badgeZero: 0,
+});
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -41,6 +50,17 @@ function defined<T extends Record<string, unknown>, R>(obj: T, map?: (v: Exclude
 			.map(([k, v]) => [k, map ? map(v as Exclude<T[keyof T], undefined>) : v]),
 	) as never;
 }
+const badgeLabel = (value: BadgeValue | undefined, cssVar: string): string | null =>
+	value === undefined
+		? null
+		: (() => {
+			const root = globalThis.document?.documentElement;
+			const raw = root ? getComputedStyle(root).getPropertyValue(cssVar).trim() : '';
+			const parsed = Number.parseInt(raw, B.badgeRadix);
+			const cssMax = Number.isNaN(parsed) ? B.badgeZero : parsed;
+			const max = value.max ?? (cssMax > B.badgeZero ? cssMax : undefined);
+			return max !== undefined && value.current > max ? `${max}${B.badgeCap}` : String(value.current);
+		})();
 
 // --- [SLOT] ------------------------------------------------------------------
 
@@ -89,7 +109,19 @@ const bind = (state: AsyncState<unknown, unknown> | undefined) =>
 	});
 const Slot = Object.freeze({ bind, content, isSlotDef, normalize, render, resolve });
 
+// --- [HOOKS] -----------------------------------------------------------------
+
+const useBadgeLabel = (value: BadgeValue | undefined, cssVar: string): string | null => {
+	const [label, setLabel] = useState<string | null>(() => badgeLabel(value, cssVar));
+	useLayoutEffect(() => {
+		const next = badgeLabel(value, cssVar);
+		setLabel((prev) => (prev === next ? prev : next));
+	}, [value, cssVar]);
+	return label;
+};
+const Badge = Object.freeze({ useLabel: useBadgeLabel });
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { cn, composeTailwindRenderProps, defined, isExternalHref, Slot };
-export type { SlotDef, SlotInput };
+export { Badge, cn, composeTailwindRenderProps, defined, isExternalHref, Slot };
+export type { BadgeValue, SlotDef, SlotInput };

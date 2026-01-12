@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Extend the existing authentication system with hierarchical roles and permission policies. Define resource-level permissions using Effect services with compile-time type safety. Create an admin UI for managing roles, permissions, and user assignments with audit logging.\n\n**Rationale:** Beyond basic authentication, enterprise users need fine-grained control over who can view, edit, or delete specific resources. The existing session management provides a foundation, but RBAC is essential for multi-tenant or team-based applications.",
+    "descriptionHistory": [
+        {
+            "description": "Extend the existing authentication system with hierarchical roles and permission policies. Define resource-level permissions using Effect services with compile-time type safety. Create an admin UI for managing roles, permissions, and user assignments with audit logging.\n\n**Rationale:** Beyond basic authentication, enterprise users need fine-grained control over who can view, edit, or delete specific resources. The existing session management provides a foundation, but RBAC is essential for multi-tenant or team-based applications.",
+            "source": "initial",
+            "timestamp": "2026-01-12T14:58:28.019Z"
+        }
+    ],
+    "id": "feature-1768229908018-ojk6u5d2n",
+    "status": "backlog",
+    "title": "Granular role-based access control (RBAC)"
+}

@@ -1,0 +1,14 @@
+{
+    "category": "ui",
+    "description": "Centralized in-app notification system showing activity feed (mentions, updates, system alerts). Support multiple channels (in-app, email, push) with per-event-type preferences. Track read/unread state, allow batch actions (mark all read, dismiss). Implement digest emails for low-priority events.\n\n**Rationale:** Users need awareness of system events without constant polling. Email-only notifications create overload; in-app center provides control. Granular preferences prevent opt-out fatigue. Expected pattern in B2B SaaS.",
+    "descriptionHistory": [
+        {
+            "description": "Centralized in-app notification system showing activity feed (mentions, updates, system alerts). Support multiple channels (in-app, email, push) with per-event-type preferences. Track read/unread state, allow batch actions (mark all read, dismiss). Implement digest emails for low-priority events.\n\n**Rationale:** Users need awareness of system events without constant polling. Email-only notifications create overload; in-app center provides control. Granular preferences prevent opt-out fatigue. Expected pattern in B2B SaaS.",
+            "source": "initial",
+            "timestamp": "2026-01-12T15:01:53.028Z"
+        }
+    ],
+    "id": "feature-1768230113027-9swc8ovhk",
+    "status": "backlog",
+    "title": "Notification center with preference management"
+}
