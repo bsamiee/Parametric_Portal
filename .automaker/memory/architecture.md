@@ -5,9 +5,9 @@ relevantTo: [architecture]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 1
-  referenced: 1
-  successfulFeatures: 1
+  loaded: 2
+  referenced: 2
+  successfulFeatures: 2
 ---
 # architecture
 
@@ -39,3 +39,17 @@ usageStats:
 - **Rejected:** Fluent builder pattern TestLayers.custom(...).merge(...).merge(...) which is common in other libraries but less compatible with Effect ecosystem conventions
 - **Trade-offs:** Functional API requires more imports (TestLayers.merge, TestLayers.mergeAll) but aligns with Effect conventions. Easier to compose programmatically with variadic functions.
 - **Breaking if changed:** If changed to fluent pattern, would break compatibility with functional composition patterns used in the codebase
+
+### Used generic wrapper pattern (`withResolverTracing`) rather than inline instrumentation in each resolver (2026-01-12)
+- **Context:** Need to add batch coalescing telemetry to 14 different SqlResolver functions without duplicating instrumentation logic
+- **Why:** Generic wrapper enables consistent metric collection across all resolvers while maintaining DRY principle. Single source of truth for tracing logic reduces maintenance burden and ensures uniform span attributes/annotations across all resolver types
+- **Rejected:** Inline instrumentation would require modifying execute function bodies in 14 places, creating code duplication and increasing drift risk if tracing requirements change
+- **Trade-offs:** Wrapper adds one layer of indirection (minor performance overhead) but eliminates duplication. Makes future tracing changes trivial - update wrapper once instead of 14 locations
+- **Breaking if changed:** If wrapper is removed, all 14 resolvers lose batch tracing immediately. Conversely, cannot easily remove tracing from individual resolvers without modifying wrapper
+
+### Stored batch metrics in MetricsService rather than DatabaseService, with `getBatchMetrics` only reading the stored state (2026-01-12)
+- **Context:** Need runtime observability of batch performance metrics that can be queried at any time
+- **Why:** MetricsService owns all metric state and definitions (histograms, counters, timers). DatabaseService only owns data access patterns. This maintains separation of concerns - DatabaseService queries metrics instead of storing them. `getBatchMetrics` acts as a read-only snapshot API
+- **Rejected:** Storing metrics in DatabaseService would conflate telemetry concerns with data access, making it harder to reason about what each service owns. Also makes it unclear whether metrics are transient or persistent
+- **Trade-offs:** Requires DatabaseService to reference MetricsService (dependency), but metrics remain consistent with how other application metrics are tracked. Makes testing metrics independent of database layer
+- **Breaking if changed:** If MetricsService is refactored, batch metrics definitions must move with it. If `getBatchMetrics` API changes signature, callers break. Metrics are lost if MetricsService is reset/cleared

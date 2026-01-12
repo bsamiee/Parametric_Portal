@@ -2,17 +2,8 @@
   <project_name>Parametric Portal</project_name>
 
   <overview>
-    Multi-application platform built as Nx monorepo. Provides universal infrastructure
-    (packages/) enabling rapid development of multiple independent apps (apps/). Goal:
-    80-90% of requirements pre-built—auth, database, API, components, theming, telemetry—
-    so new apps are composition, not implementation.
+    Multi-application platform built as Nx monorepo. Architecture: packages/ = universal infrastructure (app-agnostic), apps/ = individual applications (compose from packages/). All design decisions support multi-app scenarios, never single-app. Goal: 80-90% of requirements pre-built—auth, database, API, components, theming, telemetry—so new apps are composition, not implementation. Heavy lifting happens once in packages/, apps just compose.
   </overview>
-
-  <architecture>
-    <principle>packages/ = universal infrastructure (app-agnostic)</principle>
-    <principle>apps/ = individual applications (compose from packages/)</principle>
-    <principle>All design decisions support multi-app scenarios, never single-app</principle>
-  </architecture>
 
   <technology_stack>
     <technology>Nx monorepo, pnpm workspaces, TypeScript 6.0-dev strict</technology>
@@ -23,16 +14,6 @@
     <technology>Catalog-managed deps via pnpm-workspace.yaml</technology>
   </technology_stack>
 
-  <packages_infrastructure>
-    <package name="components-next">Universal React components with built-in tooltips, gestures, async state handling</package>
-    <package name="server">HTTP middleware, API contracts, error handling for multi-app backend</package>
-    <package name="database">Drizzle client, repositories, migrations supporting multi-app isolation</package>
-    <package name="types">Branded primitives, schemas, cross-app type definitions</package>
-    <package name="theme">OKLCH color system, runtime theming, Tailwind integration</package>
-    <package name="runtime">React-Effect bridge, universal state management patterns</package>
-    <package name="ai">Effect-based AI service integrations (Anthropic, OpenAI)</package>
-  </packages_infrastructure>
-
   <core_capabilities>
     <capability>Universal component library with async-aware rendering via Slot.bind</capability>
     <capability>Multi-app HTTP API with Effect-based middleware and routing</capability>
@@ -42,30 +23,101 @@
     <capability>Telemetry and metrics infrastructure (app-scoped, cross-app aggregation)</capability>
   </core_capabilities>
 
+  <implemented_features>
+    <feature>
+      <name>Universal Component Library (components-next)</name>
+      <description>RAC wrappers with built-in tooltips, gestures, async state handling via Slot.bind, compound patterns, frozen B constant derivation</description>
+      <file_locations>
+        <location>packages/components-next/src/actions/button.tsx</location>
+        <location>packages/components-next/src/core/slot.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>Database Layer (database)</name>
+      <description>Drizzle ORM client, repositories with SqlResolver batching, migrations supporting multi-app isolation</description>
+      <file_locations>
+        <location>packages/database/src/client.ts</location>
+        <location>packages/database/src/repos.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>Type System (types)</name>
+      <description>Branded primitives (DurationMs, Timestamp, Email, Hex8, Uuidv7), database schemas, AppError, AsyncState, cross-app type definitions</description>
+      <file_locations>
+        <location>packages/types/src/types.ts</location>
+        <location>packages/types/src/schema.ts</location>
+        <location>packages/types/src/app-error.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>HTTP Server Infrastructure (server)</name>
+      <description>API contracts, HTTP error handling, middleware for multi-app backend architecture</description>
+      <file_locations>
+        <location>packages/server/src/api.ts</location>
+        <location>packages/server/src/http-errors.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>Theme System (theme)</name>
+      <description>OKLCH color engine with runtime customization, Tailwind v4 integration, data-* attribute theming</description>
+      <file_locations>
+        <location>packages/theme/src/colors.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>React-Effect Bridge (runtime)</name>
+      <description>Runtime.Provider and Runtime.use patterns for connecting Effect services to React components</description>
+      <file_locations>
+        <location>packages/runtime/src/runtime.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>AI Service Integration (ai)</name>
+      <description>Effect-based AI service integrations for Anthropic and OpenAI APIs</description>
+    </feature>
+    <feature>
+      <name>Testing Infrastructure (test-utils)</name>
+      <description>Effect test harness with TestContext/TestClock, Vitest matchers for Effect types, fast-check arbitraries, MSW mocks</description>
+      <file_locations>
+        <location>packages/test-utils/src/effect-test.ts</location>
+        <location>packages/test-utils/src/arbitraries.ts</location>
+      </file_locations>
+    </feature>
+    <feature>
+      <name>Backend API (apps/api)</name>
+      <description>Express 5 HTTP server with Effect middleware, OAuth implementation, serves all apps</description>
+      <file_locations>
+        <location>apps/api/src/main.ts</location>
+        <location>apps/api/src/oauth.ts</location>
+      </file_locations>
+    </feature>
+  </implemented_features>
+
+  <additional_requirements>
+    <requirement>Packages (@parametric-portal/components-next, server, database, types, theme, runtime, ai, test-utils, devtools) provide universal infrastructure</requirement>
+    <requirement>Apps (api, parametric_icons, test-harness) compose from packages/ - more apps planned</requirement>
+    <requirement>All package code must be app-agnostic to support multiple applications</requirement>
+    <requirement>Server/database/API designed for multi-app architecture with proper isolation</requirement>
+    <requirement>Reference implementation: packages/components-next/src/actions/button.tsx (168 lines, gold standard)</requirement>
+  </additional_requirements>
+
   <development_guidelines>
     <guideline>MULTI-APP FIRST: packages/ code is infrastructure for many apps, never app-specific logic</guideline>
     <guideline>EFFECT-FIRST: Effect.pipe, Match, Option over imperative if/else/try-catch</guideline>
     <guideline>ALGORITHMIC: Derive values from frozen B constant per file, zero hardcoded literals</guideline>
     <guideline>USE INFRASTRUCTURE: Search packages/ before creating utilities—no duplication</guideline>
     <guideline>BRANDED TYPES: Use @parametric-portal/types (DurationMs, Timestamp, UserId, etc.)</guideline>
-    <guideline>COMPOUND PATTERNS: Object.assign(Root, {{ Item, Section }}) for component composition</guideline>
+    <guideline>COMPOUND PATTERNS: Object.assign(Root, { Item, Section }) for component composition</guideline>
     <guideline>ONE-LINE USAGE: Common cases require single JSX line, composition only for advanced</guideline>
     <guideline>DATA ATTRIBUTES: Use data-slot, data-color, data-size, data-async-state for styling</guideline>
+    <guideline>NO BARREL FILES: Import directly from source files, index.ts forbidden</guideline>
     <guideline>QUALITY: Sub-3-min builds (Nx cache), 80% coverage, typecheck + check before completion</guideline>
+    <guideline>ANTI-PATTERN: Hardcoding app-specific logic in packages/ (breaks universal infrastructure)</guideline>
+    <guideline>ANTI-PATTERN: Designing server/database/API for single app (limits multi-app scaling)</guideline>
+    <guideline>ANTI-PATTERN: Hand-rolled types—derive from RAC: Omit&lt;RACXProps, 'children'&gt; &amp; {}</guideline>
+    <guideline>ANTI-PATTERN: Deep nesting (4+ levels) or nested ternaries—use Match/dispatch tables</guideline>
+    <guideline>ANTI-PATTERN: Manual null checks—use Option.fromNullable().pipe()</guideline>
+    <guideline>ANTI-PATTERN: Duplicating utilities from packages/ or external libs (RAC, Effect)</guideline>
+    <guideline>ANTI-PATTERN: Type-only props—every prop must affect rendered output</guideline>
   </development_guidelines>
-
-  <anti_patterns>
-    <item>Hardcoding app-specific logic in packages/ (breaks universal infrastructure)</item>
-    <item>Designing server/database/API for single app (limits multi-app scaling)</item>
-    <item>Hand-rolled types—derive from RAC: Omit&lt;RACXProps, 'children'&gt; &amp; {{}}</item>
-    <item>Deep nesting (4+ levels) or nested ternaries—use Match/dispatch tables</item>
-    <item>Manual null checks—use Option.fromNullable().pipe()</item>
-    <item>Duplicating utilities from packages/ or external libs (RAC, Effect)</item>
-    <item>Type-only props—every prop must affect rendered output</item>
-  </anti_patterns>
-
-  <reference_implementation>
-    <file>packages/components-next/src/actions/button.tsx</file>
-    <description>Gold standard: 168 lines, handles standard/toggle/async modes, tooltips, gestures, icons—one component, zero composition required for common cases</description>
-  </reference_implementation>
 </project_specification>

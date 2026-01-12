@@ -9,6 +9,7 @@ import { Duration, Effect, Metric, MetricBoundaries, MetricLabel } from 'effect'
 // --- [TYPES] -----------------------------------------------------------------
 
 type MetricEvent =
+    | { readonly _tag: 'BatchCoalesce'; readonly batchSize: number; readonly deduplicationRatio: number; readonly durationSec: number; readonly originalRequests: number; readonly resolverName: string }
     | { readonly _tag: 'DbQuery'; readonly durationSec: number; readonly operation: string; readonly status: 'error' | 'success' }
     | { readonly _tag: 'Error'; readonly errorType: string }
     | { readonly _tag: 'PoolConnections'; readonly count: number }
@@ -16,6 +17,13 @@ type MetricEvent =
     | { readonly _tag: 'RateLimitRejection'; readonly preset: string; readonly remaining?: number }
     | { readonly _tag: 'RateLimitStoreFailure'; readonly preset: string };
 type MetricsShape = {
+    readonly batch: {
+        readonly batchSize: Metric.Metric.Histogram<number>;
+        readonly coalesceDuration: ReturnType<typeof Metric.timer>;
+        readonly deduplicationRatio: Metric.Metric.Histogram<number>;
+        readonly n1Warnings: Metric.Metric.Counter<number>;
+        readonly totalBatches: Metric.Metric.Counter<number>;
+    };
     readonly crypto: { readonly duration: ReturnType<typeof Metric.timer> };
     readonly db: { readonly poolConnections: Metric.Metric.Gauge<number>; readonly queryDuration: Metric.Metric.Histogram<number>; readonly queryErrors: Metric.Metric.Counter<number> };
     readonly errors: Metric.Metric.Frequency<string>;
@@ -27,15 +35,25 @@ type MetricsShape = {
 
 const B = Object.freeze({
     boundaries: {
+        batchSize: MetricBoundaries.linear({ count: 10, start: 1, width: 5 }), // 1, 6, 11, 16, 21, 26, 31, 36, 41, 46
         db: MetricBoundaries.exponential({ count: 8, factor: 2, start: 0.01 }),
+        deduplication: MetricBoundaries.linear({ count: 10, start: 0, width: 0.1 }), // 0%, 10%, 20%, ..., 90%, 100%
         http: MetricBoundaries.exponential({ count: 10, factor: 2, start: 0.005 }),
     },
+    thresholds: { n1BatchSize: 1 }, // Single-item batches indicate potential N+1 pattern
 } as const);
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', {
     effect: Effect.succeed({
+        batch: {
+            batchSize: Metric.histogram('resolver_batch_size', B.boundaries.batchSize),
+            coalesceDuration: Metric.timer('resolver_coalesce_duration_seconds'),
+            deduplicationRatio: Metric.histogram('resolver_deduplication_ratio', B.boundaries.deduplication),
+            n1Warnings: Metric.counter('resolver_n1_warnings_total'),
+            totalBatches: Metric.counter('resolver_batches_total'),
+        },
         crypto: { duration: Metric.timer('crypto_op_duration_seconds') },
         db: {
             poolConnections: Metric.gauge('db_pool_connections'),
@@ -60,6 +78,15 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
         MetricsService.pipe(
             Effect.flatMap((m) => {
                 const handlers: Record<MetricEvent['_tag'], Effect.Effect<void>> = {
+                    BatchCoalesce: Effect.gen(function* () {
+                        const e = event as Extract<MetricEvent, { _tag: 'BatchCoalesce' }>;
+                        const labels = [MetricLabel.make('resolver', e.resolverName)];
+                        yield* Metric.update(m.batch.batchSize.pipe(Metric.taggedWithLabels(labels)), e.batchSize);
+                        yield* Metric.update(m.batch.deduplicationRatio.pipe(Metric.taggedWithLabels(labels)), e.deduplicationRatio);
+                        yield* Metric.update(m.batch.coalesceDuration.pipe(Metric.taggedWithLabels(labels)), Duration.seconds(e.durationSec));
+                        yield* Metric.update(m.batch.totalBatches.pipe(Metric.taggedWithLabels(labels)), 1);
+                        e.batchSize <= B.thresholds.n1BatchSize && (yield* Metric.update(m.batch.n1Warnings.pipe(Metric.taggedWithLabels(labels)), 1));
+                    }),
                     DbQuery: Effect.gen(function* () {
                         const e = event as Extract<MetricEvent, { _tag: 'DbQuery' }>;
                         const labels = [MetricLabel.make('operation', e.operation), MetricLabel.make('status', e.status)];
@@ -77,6 +104,15 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
         );
     static readonly trackDbQuery = (operation: string, duration: Duration.Duration, status: 'error' | 'success') =>
         MetricsService.track({ _tag: 'DbQuery', durationSec: Duration.toSeconds(duration), operation, status });
+    static readonly trackBatchCoalesce = (resolverName: string, originalRequests: number, batchSize: number, duration: Duration.Duration) =>
+        MetricsService.track({
+            _tag: 'BatchCoalesce',
+            batchSize,
+            deduplicationRatio: originalRequests > 0 ? (originalRequests - batchSize) / originalRequests : 0,
+            durationSec: Duration.toSeconds(duration),
+            originalRequests,
+            resolverName,
+        });
 }
 
 // --- [MIDDLEWARE] ------------------------------------------------------------

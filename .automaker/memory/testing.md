@@ -5,9 +5,9 @@ relevantTo: [testing]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 0
-  referenced: 0
-  successfulFeatures: 0
+  loaded: 1
+  referenced: 1
+  successfulFeatures: 1
 ---
 # testing
 
@@ -35,3 +35,8 @@ usageStats:
 - **Problem solved:** Tests need to assert services were called with specific arguments. Choice between reference equality vs deep equality comparison
 - **Why this works:** Recording raw arguments preserves Effect instances and complex object references needed for verification. Deep equality comparison would require serialization strategy and could be slow.
 - **Trade-offs:** Reference equality works well for simple values and Effect instances but fails for equivalent but different object references. Users can use getCalls() and manually inspect for complex assertions.
+
+#### [Gotcha] Verification script tests deduplication logic in isolation with hardcoded test cases rather than integration tests (2026-01-12)
+- **Situation:** Need confidence that batch coalescing telemetry layer works correctly across 14 resolvers
+- **Root cause:** Unit-level verification catches calculation bugs before they propagate to production metrics. Tests edge cases (0 original requests) that might not occur in normal operation but would break calculation if they did. Isolated tests run fast for rapid iteration
+- **How to avoid:** Unit tests don't prove metrics actually flow through resolvers correctly, but prevent systematic calculation errors. Playwright tests verify end-to-end correctness. Both needed for confidence

@@ -1,0 +1,14 @@
+{
+    "category": "refactor",
+    "description": "Define RuntimeConfig schema with validation rules for all Layer dependencies. Replace imperative Layer.mergeAll calls with declarative config-driven runtime assembly. Generate TypeScript errors for missing Layer provisions at build time.\n\n**Rationale:** Runtime assembly is scattered across app entry points. Declarative schema centralizes dependency graphs, enables compile-time validation of Layer completeness, and auto-generates documentation of required environment variables.",
+    "descriptionHistory": [
+        {
+            "description": "Define RuntimeConfig schema with validation rules for all Layer dependencies. Replace imperative Layer.mergeAll calls with declarative config-driven runtime assembly. Generate TypeScript errors for missing Layer provisions at build time.\n\n**Rationale:** Runtime assembly is scattered across app entry points. Declarative schema centralizes dependency graphs, enables compile-time validation of Layer completeness, and auto-generates documentation of required environment variables.",
+            "source": "initial",
+            "timestamp": "2026-01-12T11:47:56.298Z"
+        }
+    ],
+    "id": "feature-1768218476297-3nwzgrhym",
+    "status": "backlog",
+    "title": "Extract Runtime.Provider configuration to declarative schema"
+}

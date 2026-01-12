@@ -11,7 +11,7 @@ import { MetricsService } from '@parametric-portal/server/metrics';
 import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, assets, auditLogs, IdFactory, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
-import { Chunk, type Context, Duration, Effect, identity, Layer, Option, type Schema as S, Stream } from 'effect';
+import { Chunk, type Context, Duration, Effect, identity, Layer, Metric, Option, type Schema as S, Stream } from 'effect';
 import { DATABASE_TUNING, Drizzle, PgLive } from './client.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -44,6 +44,39 @@ const withDbOps = <A, E, R>(opName: string, opType: OpType, effect: Effect.Effec
             Effect.tapError(() => MetricsService.trackDbQuery(opName, Duration.zero, 'error')),
         ),
     )();
+/**
+ * Wraps SqlResolver execute function to track batch coalescing efficiency. Captures: batch size, deduplication ratio, query execution timing.
+ * Emits N+1 warnings for single-item batches via MetricsService.
+ * Note: This wrapper intercepts the execute function BEFORE it reaches SqlResolver, tracking the batch that SqlResolver creates from coalesced requests.
+ */
+const withResolverTracing = <T extends readonly unknown[], R extends readonly unknown[], E>(
+    resolverName: string,
+    execute: (requests: T) => Effect.Effect<R, E, MetricsService>,
+): ((requests: T) => Effect.Effect<R, E, MetricsService>) =>
+    (requests: T) =>
+        Effect.flatMap(
+            Effect.Do,
+            () => {
+                const originalCount = requests.length;
+                const uniqueCount = new Set(requests.map((r) => JSON.stringify(r))).size;
+                return execute(requests).pipe(
+                    Effect.tap(() => Effect.annotateCurrentSpan('resolver.name', resolverName)),
+                    Effect.tap(() => Effect.annotateCurrentSpan('resolver.original_requests', originalCount)),
+                    Effect.tap(() => Effect.annotateCurrentSpan('resolver.batch_size', uniqueCount)),
+                    Effect.tap(() => Effect.annotateCurrentSpan('resolver.deduplication_ratio', originalCount > 0 ? ((originalCount - uniqueCount) / originalCount).toFixed(2) : '0')),
+                    Effect.tap(() => originalCount === 1 ? Effect.annotateCurrentSpan('resolver.n1_warning', true) : Effect.void),
+                    Effect.timed,
+                    Effect.flatMap(([duration, result]) =>
+                        Effect.gen(function* () {
+                            yield* Effect.annotateCurrentSpan('resolver.duration_ms', Duration.toMillis(duration));
+                            yield* MetricsService.trackBatchCoalesce(resolverName, originalCount, uniqueCount, duration);
+                            return result;
+                        }),
+                    ),
+                    Effect.withSpan(`resolver.${resolverName}`),
+                );
+            },
+        );
 
 // --- [RESOLVERS] -------------------------------------------------------------
 // Unified resolver factory: read (findById, grouped) + write (ordered, void), SqlResolver auto-batches concurrent execute() calls into single DB query
@@ -52,7 +85,7 @@ const makeResolvers = (db: DrizzleDb) =>
     Effect.all({
         // READ: findById resolvers
         apiKey: SqlResolver.findById('ApiKeyById', {
-            execute: (ids) => withDbOps('db.apiKeys.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.query.apiKeys.findMany({ where: inArray(apiKeys.id, ids as ApiKey['id'][]) })),
+            execute: withResolverTracing('ApiKeyById', (ids) => withDbOps('db.apiKeys.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.query.apiKeys.findMany({ where: inArray(apiKeys.id, ids as ApiKey['id'][]) }))),
             Id: IdFactory.ApiKeyId.schema,
             Result: ApiKeyRowSchema,
             ResultId: (row) => row.id,
@@ -60,7 +93,7 @@ const makeResolvers = (db: DrizzleDb) =>
         }),
         // READ: grouped resolvers
         apiKeysByUserId: SqlResolver.grouped('ApiKeysByUserId', {
-            execute: (userIds) => withDbOps('db.apiKeys.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.query.apiKeys.findMany({ where: inArray(apiKeys.userId, userIds as User['id'][]) })),
+            execute: withResolverTracing('ApiKeysByUserId', (userIds) => withDbOps('db.apiKeys.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.query.apiKeys.findMany({ where: inArray(apiKeys.userId, userIds as User['id'][]) }))),
             Request: IdFactory.UserId.schema,
             RequestGroupKey: (userId) => userId,
             Result: ApiKeyRowSchema,
@@ -68,14 +101,14 @@ const makeResolvers = (db: DrizzleDb) =>
             withContext: true,
         }),
         asset: SqlResolver.findById('AssetById', {
-            execute: (ids) => withDbOps('db.assets.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly Asset[]) : db.query.assets.findMany({ where: inArray(assets.id, ids as Asset['id'][]) })),
+            execute: withResolverTracing('AssetById', (ids) => withDbOps('db.assets.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly Asset[]) : db.query.assets.findMany({ where: inArray(assets.id, ids as Asset['id'][]) }))),
             Id: IdFactory.AssetId.schema,
             Result: AssetRowSchema,
             ResultId: (row) => row.id,
             withContext: true,
         }),
         assetsByUserId: SqlResolver.grouped('AssetsByUserId', {
-            execute: (userIds) => withDbOps('db.assets.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly Asset[]) : db.query.assets.findMany({ orderBy: desc(assets.createdAt), where: and(inArray(assets.userId, userIds as User['id'][]), isNull(assets.deletedAt)) })),
+            execute: withResolverTracing('AssetsByUserId', (userIds) => withDbOps('db.assets.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly Asset[]) : db.query.assets.findMany({ orderBy: desc(assets.createdAt), where: and(inArray(assets.userId, userIds as User['id'][]), isNull(assets.deletedAt)) }))),
             Request: IdFactory.UserId.schema,
             RequestGroupKey: (userId) => userId,
             Result: AssetRowSchema,
@@ -84,57 +117,57 @@ const makeResolvers = (db: DrizzleDb) =>
         }),
         // WRITE: ordered resolvers (INSERT RETURNING - auto-batched)
         insertApiKey: SqlResolver.ordered('ApiKeyInsert', {
-            execute: (reqs) => withDbOps('db.apiKeys.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.insert(apiKeys).values([...reqs] as ApiKeyInsert[]).returning()),
+            execute: withResolverTracing('ApiKeyInsert', (reqs) => withDbOps('db.apiKeys.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly ApiKey[]) : db.insert(apiKeys).values([...reqs] as ApiKeyInsert[]).returning())),
             Request: ApiKeyInsertSchema,
             Result: ApiKeyRowSchema,
             withContext: true,
         }),
         insertAsset: SqlResolver.ordered('AssetInsert', {
-            execute: (reqs) => withDbOps('db.assets.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly Asset[]) : db.insert(assets).values([...reqs] as AssetInsert[]).returning()),
+            execute: withResolverTracing('AssetInsert', (reqs) => withDbOps('db.assets.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly Asset[]) : db.insert(assets).values([...reqs] as AssetInsert[]).returning())),
             Request: AssetInsertSchema,
             Result: AssetRowSchema,
             withContext: true,
         }),
         // WRITE: ordered resolver for audit (INSERT RETURNING - auto-batched)
         insertAudit: SqlResolver.ordered('AuditInsert', {
-            execute: (logs) => withDbOps('db.audit.insert', 'write', logs.length === 0 ? Effect.succeed([]) : db.insert(auditLogs).values([...logs] as AuditLogInsert[]).returning()),
+            execute: withResolverTracing('AuditInsert', (logs) => withDbOps('db.audit.insert', 'write', logs.length === 0 ? Effect.succeed([]) : db.insert(auditLogs).values([...logs] as AuditLogInsert[]).returning())),
             Request: AuditLogInsertSchema,
             Result: AuditLogRowSchema,
             withContext: true,
         }),
         insertOAuthAccount: SqlResolver.ordered('OAuthAccountInsert', {
-            execute: (reqs) => withDbOps('db.oauthAccounts.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly OAuthAccount[]) : db.insert(oauthAccounts).values([...reqs] as OAuthAccountInsert[]).returning()),
+            execute: withResolverTracing('OAuthAccountInsert', (reqs) => withDbOps('db.oauthAccounts.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly OAuthAccount[]) : db.insert(oauthAccounts).values([...reqs] as OAuthAccountInsert[]).returning())),
             Request: OAuthAccountInsertSchema,
             Result: OAuthAccountRowSchema,
             withContext: true,
         }),
         insertRefreshToken: SqlResolver.ordered('RefreshTokenInsert', {
-            execute: (reqs) => withDbOps('db.refreshTokens.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly RefreshToken[]) : db.insert(refreshTokens).values([...reqs] as RefreshTokenInsert[]).returning()),
+            execute: withResolverTracing('RefreshTokenInsert', (reqs) => withDbOps('db.refreshTokens.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly RefreshToken[]) : db.insert(refreshTokens).values([...reqs] as RefreshTokenInsert[]).returning())),
             Request: RefreshTokenInsertSchema,
             Result: RefreshTokenRowSchema,
             withContext: true,
         }),
         insertSession: SqlResolver.ordered('SessionInsert', {
-            execute: (reqs) => withDbOps('db.sessions.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly Session[]) : db.insert(sessions).values([...reqs] as SessionInsert[]).returning()),
+            execute: withResolverTracing('SessionInsert', (reqs) => withDbOps('db.sessions.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly Session[]) : db.insert(sessions).values([...reqs] as SessionInsert[]).returning())),
             Request: SessionInsertSchema,
             Result: SessionRowSchema,
             withContext: true,
         }),
         insertUser: SqlResolver.ordered('UserInsert', {
-            execute: (reqs) => withDbOps('db.users.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly User[]) : db.insert(users).values([...reqs] as UserInsert[]).returning()),
+            execute: withResolverTracing('UserInsert', (reqs) => withDbOps('db.users.insert', 'write', reqs.length === 0 ? Effect.succeed([] as readonly User[]) : db.insert(users).values([...reqs] as UserInsert[]).returning())),
             Request: UserInsertSchema,
             Result: UserRowSchema,
             withContext: true,
         }),
         session: SqlResolver.findById('SessionById', {
-            execute: (ids) => withDbOps('db.sessions.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly Session[]) : db.query.sessions.findMany({ where: inArray(sessions.id, ids as Session['id'][]) })),
+            execute: withResolverTracing('SessionById', (ids) => withDbOps('db.sessions.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly Session[]) : db.query.sessions.findMany({ where: inArray(sessions.id, ids as Session['id'][]) }))),
             Id: IdFactory.SessionId.schema,
             Result: SessionRowSchema,
             ResultId: (row) => row.id,
             withContext: true,
         }),
         sessionsByUserId: SqlResolver.grouped('SessionsByUserId', {
-            execute: (userIds) => withDbOps('db.sessions.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly Session[]) : db.query.sessions.findMany({ where: and(inArray(sessions.userId, userIds as User['id'][]), isNull(sessions.revokedAt)) })),
+            execute: withResolverTracing('SessionsByUserId', (userIds) => withDbOps('db.sessions.byUserIds', 'read', userIds.length === 0 ? Effect.succeed([] as readonly Session[]) : db.query.sessions.findMany({ where: and(inArray(sessions.userId, userIds as User['id'][]), isNull(sessions.revokedAt)) }))),
             Request: IdFactory.UserId.schema,
             RequestGroupKey: (userId) => userId,
             Result: SessionRowSchema,
@@ -142,7 +175,7 @@ const makeResolvers = (db: DrizzleDb) =>
             withContext: true,
         }),
         user: SqlResolver.findById('UserById', {
-            execute: (ids) => withDbOps('db.users.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly User[]) : db.query.users.findMany({ where: inArray(users.id, ids as User['id'][]) })),
+            execute: withResolverTracing('UserById', (ids) => withDbOps('db.users.batch', 'read', ids.length === 0 ? Effect.succeed([] as readonly User[]) : db.query.users.findMany({ where: inArray(users.id, ids as User['id'][]) }))),
             Id: IdFactory.UserId.schema,
             Result: UserRowSchema,
             ResultId: (row) => row.id,
@@ -260,6 +293,22 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
     }),
 }) {
     static readonly layer = this.Default.pipe(Layer.provide(Drizzle.Default), Layer.provide(PgLive), Layer.provide(MetricsService.layer));
+    /** Returns batch coalescing metrics snapshot for runtime observability. Use this to diagnose N+1 patterns and optimize resolver access patterns. */
+    static readonly getBatchMetrics = Effect.gen(function* () {
+        const metrics = yield* MetricsService;
+        const [batchSize, deduplicationRatio, n1Warnings, totalBatches] = yield* Effect.all([
+            Metric.value(metrics.batch.batchSize),
+            Metric.value(metrics.batch.deduplicationRatio),
+            Metric.value(metrics.batch.n1Warnings),
+            Metric.value(metrics.batch.totalBatches),
+        ]);
+        return {
+            batchSize: batchSize as unknown as { readonly buckets: ReadonlyArray<readonly [number, number]>; readonly count: number; readonly max: number; readonly min: number; readonly sum: number },
+            deduplicationRatio: deduplicationRatio as unknown as { readonly buckets: ReadonlyArray<readonly [number, number]>; readonly count: number; readonly max: number; readonly min: number; readonly sum: number },
+            n1Warnings: n1Warnings as unknown as number,
+            totalBatches: totalBatches as unknown as number,
+        };
+    });
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
