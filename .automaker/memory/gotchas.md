@@ -5,7 +5,7 @@ relevantTo: [error, bug, fix, issue, problem]
 importance: 0.9
 relatedFiles: []
 usageStats:
-  loaded: 5
+  loaded: 7
   referenced: 2
   successfulFeatures: 2
 ---
