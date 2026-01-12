@@ -20,6 +20,7 @@ type MetricsShape = {
     readonly db: { readonly poolConnections: Metric.Metric.Gauge<number>; readonly queryDuration: Metric.Metric.Histogram<number>; readonly queryErrors: Metric.Metric.Counter<number> };
     readonly errors: Metric.Metric.Frequency<string>;
     readonly http: { readonly active: Metric.Metric.Gauge<number>; readonly duration: ReturnType<typeof Metric.timer>; readonly requests: Metric.Metric.Counter<number> };
+    readonly mfa: { readonly disabled: Metric.Metric.Counter<number>; readonly enrollments: Metric.Metric.Counter<number>; readonly recoveryUsed: Metric.Metric.Counter<number>; readonly verifications: Metric.Metric.Counter<number> };
     readonly rateLimit: { readonly checkDuration: ReturnType<typeof Metric.timer>; readonly rejections: Metric.Metric.Frequency<string>; readonly storeFailures: Metric.Metric.Counter<number> };
 };
 
@@ -47,6 +48,12 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
             active: Metric.gauge('http_requests_active'),
             duration: Metric.timer('http_request_duration_seconds'),
             requests: Metric.counter('http_requests_total'),
+        },
+        mfa: {
+            disabled: Metric.counter('mfa_disabled_total'),
+            enrollments: Metric.counter('mfa_enrollments_total'),
+            recoveryUsed: Metric.counter('mfa_recovery_used_total'),
+            verifications: Metric.counter('mfa_verifications_total'),
         },
         rateLimit: {
             checkDuration: Metric.timer('rate_limit_check_duration_seconds'),

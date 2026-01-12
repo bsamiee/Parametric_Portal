@@ -23,6 +23,8 @@ import { OAuthLive } from './oauth.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
 import { TelemetryRouteLive } from './routes/telemetry.ts';
+import { UsersLive } from './routes/users.ts';
+import { MfaLive } from './routes/mfa.ts';
 import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -59,9 +61,46 @@ const SessionLookupLive = Layer.effect(
         const metrics = yield* MetricsService;
         return {
             lookup: (tokenHash: Hex64) =>
-                db.sessions.findValidByTokenHash(tokenHash).pipe(
-                    Effect.map(Option.map(AuthContext.fromSession)),
-                    Effect.catchAll(() => Effect.succeed(Option.none<AuthContext>())),
+                Effect.gen(function* () {
+                    const sessionOpt = yield* db.sessions.findValidByTokenHash(tokenHash);
+                    return yield* Option.match(sessionOpt, {
+                        onNone: () => Effect.succeed(Option.none<AuthContext>()),
+                        onSome: (session) =>
+                            db.mfaSecrets.findByUserId(session.userId).pipe(
+                                Effect.map((mfaOpt) => {
+                                    const mfaRequired = Option.match(mfaOpt, {
+                                        onNone: () => false,
+                                        onSome: (mfa) => mfa.enabledAt !== null,
+                                    });
+                                    return Option.some(AuthContext.fromSession({
+                                        id: session.id,
+                                        mfaRequired,
+                                        mfaVerifiedAt: session.mfaVerifiedAt,
+                                        userId: session.userId,
+                                    }));
+                                }),
+                            ),
+                    });
+                }).pipe(
+                    Effect.catchAll((error) =>
+                        Effect.gen(function* () {
+                            yield* Effect.logError('Session lookup failed', { error: String(error) });
+                            return Option.none<AuthContext>();
+                        }),
+                    ),
+                    Effect.provideService(MetricsService, metrics),
+                ),
+        };
+    }),
+);
+const UserLookupLive = Layer.effect(
+    Middleware.UserLookupService,
+    Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const metrics = yield* MetricsService;
+        return {
+            findById: (userId: string) =>
+                db.users.findById(userId as Parameters<typeof db.users.findById>[0]).pipe(
                     Effect.provideService(MetricsService, metrics),
                 ),
         };
@@ -99,15 +138,17 @@ const RateLimitLive = RateLimit.layer;
 const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyService.layer, RateLimitLive);
 const RouteDependencies = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive);
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
-    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, TelemetryRouteLive)),
+    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MfaLive, TelemetryRouteLive, UsersLive)),
     Layer.provide(RouteDependencies),
     Layer.provide(InfraLayers),
 );
+const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const ServerLive = HttpApiBuilder.serve(composeMiddleware).pipe(
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),
     Layer.provide(SessionAuthLive),
+    Layer.provide(UserLookupServiceLive),
     Layer.provide(MetricsService.layer),
     Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port }).pipe(HttpServer.withLogAddress)),
 );

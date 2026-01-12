@@ -5,9 +5,9 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 2
-  referenced: 1
-  successfulFeatures: 1
+  loaded: 4
+  referenced: 3
+  successfulFeatures: 3
 ---
 # api
 
@@ -24,3 +24,17 @@ usageStats:
 - **Rejected:** Single array parameter assertCalledWith(method, [...args]) would be more uniform but less readable and breaks user familiarity with standard assertion libraries
 - **Trade-offs:** Variadic signature requires spread operator in internal implementation but provides better DX at call sites
 - **Breaking if changed:** If changed to array parameter, all existing assertCalledWith() calls would break
+
+### UserLookupService is separate injectable tag rather than calling user repository directly from middleware (2026-01-12)
+- **Context:** Middleware needed to fetch user record to check role, but had to abstract the data access layer
+- **Why:** Follows Effect dependency injection pattern in codebase. Allows different implementations (database, cache, service) to be swapped via Layer composition. Makes middleware testable in isolation.
+- **Rejected:** Direct repository call from middleware - would couple middleware to data layer. Harder to mock/test.
+- **Trade-offs:** Gained: testability, loose coupling, impl flexibility. Lost: one extra layer of indirection, requires layer provider setup.
+- **Breaking if changed:** If UserLookupService is not provided in layers, requireRole fails at runtime with Service not found. User endpoint works fine - only protected endpoints fail.
+
+### Split MFA into separate endpoints (enroll, verify, recover, disable) rather than single state-machine endpoint (2026-01-12)
+- **Context:** MFA has multiple distinct operations with different request/response shapes and business logic
+- **Why:** Clearer semantics, easier to version independently, matches REST principles, simpler error handling per operation, allows rate-limiting per operation
+- **Rejected:** Single endpoint with action parameter (less RESTful, harder to document, conflates concerns)
+- **Trade-offs:** More endpoints to maintain; client must handle multiple endpoints; easier to add MFA-specific middleware (rate limiting, audit logging)
+- **Breaking if changed:** Combining into single endpoint requires version bump; loses granular metrics/monitoring per operation

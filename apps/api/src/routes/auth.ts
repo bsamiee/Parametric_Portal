@@ -20,18 +20,26 @@ type OAuthService = typeof Middleware.OAuth.Service;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const toUserResponse = (u: User) =>
-    Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
-const toApiKeyResponse = (k: ApiKey) =>
-    Object.freeze({ createdAt: k.createdAt, id: k.id, name: k.name, provider: k.provider });
+const toUserResponse = (u: User) => Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
+const toApiKeyResponse = (k: ApiKey) => Object.freeze({ createdAt: k.createdAt, id: k.id, name: k.name, provider: k.provider });
+/**
+ * Derive session MFA verification state from MFA enrollment:
+ * - No MFA enrolled (None) → session implicitly verified (new Date())
+ * - MFA enrolled (Some) → session pending verification (null)
+ *
+ * Returns null for ANY enrolled user (pending or enabled) to prevent bypass
+ * where user enrolls but never verifies, then logs out and back in.
+ */
+const deriveMfaVerifiedAt = (mfaOpt: Option.Option<{ readonly enabledAt: Date | null }>): Date | null =>
+    Option.match(mfaOpt, { onNone: () => new Date(), onSome: () => null });
 const extractRequestContext = (request: HttpServerRequest.HttpServerRequest) =>
     Object.freeze({
         ipAddress: Option.getOrNull(Headers.get(request.headers, 'x-forwarded-for')),
         userAgent: Option.getOrNull(Headers.get(request.headers, 'user-agent')),
     });
-const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7) =>
+const buildAuthResponse = (accessToken: Uuidv7, expiresAt: Date, refreshToken: Uuidv7, mfaPending: boolean) =>
     pipe(
-        HttpServerResponse.json({ accessToken, expiresAt: DateTime.unsafeFromDate(expiresAt) }),
+        HttpServerResponse.json({ accessToken, expiresAt: DateTime.unsafeFromDate(expiresAt), mfaPending }),
         Effect.flatMap((response) =>
             HttpServerResponse.setCookie(response, AUTH_TUNING.cookie.name, refreshToken, {
                 httpOnly: true,
@@ -69,12 +77,15 @@ const createAuthTokenPairs = () =>
 const rotateTokens = (
     repos: DatabaseServiceShape,
     userId: UserId,
-    revokeTokenId?: RefreshTokenId,
-    ctx?: { readonly ipAddress: string | null; readonly userAgent: string | null },
+    opts: {
+        readonly ctx?: { readonly ipAddress: string | null; readonly userAgent: string | null };
+        readonly mfaVerifiedAt: Date | null;
+        readonly revokeTokenId?: RefreshTokenId;
+    },
 ) =>
     Effect.gen(function* () {
-        const ipAddress = ctx?.ipAddress ?? null;
-        const userAgent = ctx?.userAgent ?? null;
+        const ipAddress = opts.ctx?.ipAddress ?? null;
+        const userAgent = opts.ctx?.userAgent ?? null;
         const { refreshHash, refreshToken, sessionHash, sessionToken } = yield* createAuthTokenPairs();
         const sessionExpiresAt = Timestamp.expiresAtDate(AUTH_TUNING.durations.sessionMs);
         const refreshExpiresAt = Timestamp.expiresAtDate(AUTH_TUNING.durations.refreshTokenMs);
@@ -84,6 +95,7 @@ const rotateTokens = (
                     .insert({
                         expiresAt: sessionExpiresAt,
                         ipAddress,
+                        mfaVerifiedAt: opts.mfaVerifiedAt,
                         revokedAt: null,
                         tokenHash: sessionHash,
                         userAgent,
@@ -93,10 +105,10 @@ const rotateTokens = (
                 yield* repos.refreshTokens
                     .insert({ expiresAt: refreshExpiresAt, revokedAt: null, tokenHash: refreshHash, userId })
                     .pipe(Effect.asVoid);
-                yield* revokeTokenId === undefined ? Effect.void : repos.refreshTokens.revoke(revokeTokenId);
+                yield* opts.revokeTokenId === undefined ? Effect.void : repos.refreshTokens.revoke(opts.revokeTokenId);
             }),
         );
-        return { refreshToken, sessionExpiresAt, sessionToken };
+        return { mfaPending: opts.mfaVerifiedAt === null, refreshToken, sessionExpiresAt, sessionToken };
     });
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
@@ -184,12 +196,15 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                 }),
                 Effect.mapError(() => httpErr('Audit log failed')),
             );
-            const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
-                rotateTokens(repos, userId, undefined, ctx),
+            // Check MFA status: mfaVerifiedAt = null means pending, new Date() means implicitly verified
+            const mfaOpt = yield* pipe(repos.mfaSecrets.findByUserId(userId), Effect.mapError(() => httpErr('MFA status check failed')));
+            const mfaVerifiedAt = deriveMfaVerifiedAt(mfaOpt);
+            const { mfaPending, refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
+                rotateTokens(repos, userId, { ctx, mfaVerifiedAt }),
                 Effect.mapError(() => httpErr('Token generation failed')),
             );
             const response = yield* pipe(
-                buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
+                buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken, mfaPending),
                 Effect.mapError(() => httpErr('Response build failed')),
             );
             return yield* pipe(
@@ -227,12 +242,15 @@ const handleRefresh = Effect.fn('auth.refresh')((repos: DatabaseServiceShape) =>
             onNone: () => Effect.fail(new HttpError.Auth({ reason: 'Invalid refresh token' })),
             onSome: Effect.succeed,
         });
-        const { refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
-            rotateTokens(repos, token.userId, token.id, ctx),
+        // Check MFA status: mfaVerifiedAt = null means pending, new Date() means implicitly verified
+        const mfaOpt = yield* pipe(repos.mfaSecrets.findByUserId(token.userId), HttpError.chain(HttpError.Auth, { reason: 'MFA status check failed' }));
+        const mfaVerifiedAt = deriveMfaVerifiedAt(mfaOpt);
+        const { mfaPending, refreshToken, sessionExpiresAt, sessionToken } = yield* pipe(
+            rotateTokens(repos, token.userId, { ctx, mfaVerifiedAt, revokeTokenId: token.id }),
             HttpError.chain(HttpError.Auth, { reason: 'Token generation failed' }),
         );
         return yield* pipe(
-            buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken),
+            buildAuthResponse(sessionToken, sessionExpiresAt, refreshToken, mfaPending),
             HttpError.chain(HttpError.Auth, { reason: 'Response build failed' }),
         );
     }),

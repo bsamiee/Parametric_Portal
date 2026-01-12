@@ -20,7 +20,7 @@ export default Effect.flatMap(
 
     -- Users
     CREATE TABLE users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         email TEXT NOT NULL,
         role role NOT NULL DEFAULT 'viewer',
         deleted_at TIMESTAMPTZ,
@@ -32,11 +32,12 @@ export default Effect.flatMap(
 
     -- Sessions
     CREATE TABLE sessions (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         token_hash TEXT NOT NULL,
         expires_at TIMESTAMPTZ NOT NULL,
         revoked_at TIMESTAMPTZ,
+        mfa_verified_at TIMESTAMPTZ,
         ip_address TEXT,
         user_agent TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -50,7 +51,7 @@ export default Effect.flatMap(
 
     -- API Keys
     CREATE TABLE api_keys (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         provider ai_provider NOT NULL,
@@ -68,7 +69,7 @@ export default Effect.flatMap(
 
     -- OAuth Accounts
     CREATE TABLE oauth_accounts (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         provider oauth_provider NOT NULL,
         provider_account_id TEXT NOT NULL,
@@ -85,7 +86,7 @@ export default Effect.flatMap(
 
     -- Refresh Tokens
     CREATE TABLE refresh_tokens (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         token_hash TEXT NOT NULL,
         expires_at TIMESTAMPTZ NOT NULL,
@@ -98,7 +99,7 @@ export default Effect.flatMap(
 
     -- Assets
     CREATE TABLE assets (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         user_id UUID REFERENCES users(id) ON DELETE SET NULL,
         asset_type asset_type NOT NULL,
         content TEXT NOT NULL,
@@ -111,7 +112,7 @@ export default Effect.flatMap(
 
     -- Audit Logs
     CREATE TABLE audit_logs (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
         operation audit_operation NOT NULL,
         entity_type TEXT NOT NULL,
         entity_id UUID NOT NULL,
@@ -124,5 +125,16 @@ export default Effect.flatMap(
     CREATE INDEX idx_audit_entity ON audit_logs(entity_type, entity_id) INCLUDE (operation, created_at);
     CREATE INDEX idx_audit_actor ON audit_logs(actor_id) INCLUDE (entity_type, created_at);
     CREATE INDEX idx_audit_created ON audit_logs(created_at DESC);
+
+    -- MFA Secrets
+    CREATE TABLE mfa_secrets (
+        id UUID PRIMARY KEY DEFAULT uuidv7(),
+        user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        secret_encrypted BYTEA NOT NULL,
+        backup_codes_hash TEXT[] NOT NULL,
+        enabled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX idx_mfa_secrets_user_id ON mfa_secrets(user_id) INCLUDE (enabled_at);
 `,
 );
