@@ -3,7 +3,7 @@
  * Uses React Aria Components Dialog with ModalOverlay for focus management.
  * useDialog hook provides deferred action pattern for confirmation workflows.
  */
-import { AsyncState, type AsyncStateType } from '@parametric-portal/types/async';
+import { AsyncState } from '@parametric-portal/types/async';
 import type { CSSProperties, FC, ReactNode, Ref, RefObject } from 'react';
 import { createContext, useContext, useMemo, useRef, useState } from 'react';
 import {
@@ -34,7 +34,7 @@ type DialogRenderContext = {
 	readonly isPending: boolean;
 };
 type DialogConfig = {
-	readonly asyncState?: AsyncStateType<unknown, unknown>;
+	readonly asyncState?: AsyncState<unknown, unknown>;
 	readonly backdropBlur?: boolean;
 	readonly buttons?: readonly DialogButton[];
 	readonly className?: string;

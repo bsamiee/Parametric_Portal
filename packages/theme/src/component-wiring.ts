@@ -26,10 +26,7 @@ const ColorSlotRefSchema = S.Union(
 	S.Literal('disabled'),
 );
 const AsyncStyleKeySchema = S.Union(S.Literal('idle'), S.Literal('loading'), S.Literal('success'), S.Literal('failure'));
-const FocusRingOverrideSchema = S.Struct({
-	color: S.optional(S.String), offset: S.optional(S.String),
-	width: S.optional(S.String), z: S.optional(S.String),
-});
+const FocusRingOverrideSchema = S.Struct({color: S.optional(S.String), offset: S.optional(S.String), width: S.optional(S.String), z: S.optional(S.String),});
 const TooltipStyleSpecSchema = S.Struct({
 	arrow: S.optional(S.Struct({
 		color: S.String, height: S.String, path: S.optional(S.String), staticOffset: S.optional(S.String), stroke: S.optional(S.String),
@@ -39,6 +36,22 @@ const TooltipStyleSpecSchema = S.Struct({
 	name: CssIdentifierSchema,
 	positioning: S.optional(S.Struct({ arrowPadding: S.optional(S.String), offset: S.optional(S.String), shiftPadding: S.optional(S.String), })),
 	transition: S.Struct({ duration: S.String, easing: S.String, initialOpacity: S.String, initialTransform: S.String, }),
+});
+const ToastStyleSpecSchema = S.Struct({
+	base: S.Record({ key: S.String, value: S.String }),
+	name: CssIdentifierSchema,
+	progress: S.optional(S.Struct({
+		bg: S.String,
+		height: S.String,
+		position: S.optional(S.Union(S.Literal('bottom'), S.Literal('top'))),
+		radius: S.optional(S.String),
+	})),
+	stacked: S.optional(S.Struct({ offset: S.String, scale: S.String })),
+	transition: S.Struct({ duration: S.String, easing: S.String }),
+	types: S.optional(S.Record({
+		key: S.Union(S.Literal('info'), S.Literal('success'), S.Literal('warning'), S.Literal('error')),
+		value: S.Record({ key: S.String, value: S.String }),
+	})),
 });
 const ComponentSpecSchema = S.Struct({
 	asyncStyles: S.optional(S.Record({ key: AsyncStyleKeySchema, value: S.Record({ key: S.String, value: S.String }) })),
@@ -68,12 +81,22 @@ type RuleResult = { readonly selector: string; readonly entries: readonly (reado
 type FocusRingOverride = S.Schema.Type<typeof FocusRingOverrideSchema>;
 type ComponentSpec = S.Schema.Type<typeof ComponentSpecSchema>;
 type TooltipStyleSpec = S.Schema.Type<typeof TooltipStyleSpecSchema>;
+type ToastStyleSpec = S.Schema.Type<typeof ToastStyleSpecSchema>;
+type ToastPosition = 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-center' | 'top-left' | 'top-right';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
 	focusRingKeys: ['width', 'color', 'offset', 'z'] as const,
-}) satisfies DeepReadonly<{ focusRingKeys: readonly string[] }>;
+	toastPosition: Object.freeze({
+		'bottom-center': 'bottom: 0; left: 50%; transform: translateX(-50%); align-items: center;',
+		'bottom-left': 'bottom: 0; left: 0; align-items: flex-start;',
+		'bottom-right': 'bottom: 0; right: 0; align-items: flex-end;',
+		'top-center': 'top: 0; left: 50%; transform: translateX(-50%); align-items: center;',
+		'top-left': 'top: 0; left: 0; align-items: flex-start;',
+		'top-right': 'top: 0; right: 0; align-items: flex-end;',
+	}),
+}) satisfies DeepReadonly<{ focusRingKeys: readonly string[]; toastPosition: Record<ToastPosition, string> }>;
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -178,6 +201,27 @@ const generateSingleTooltipWiring = (spec: TooltipStyleSpec): string => {
 		'\n\n',
 	);
 };
+const generateSingleToastWiring = (spec: ToastStyleSpec): string => {
+	const selector = `[data-slot="toast"][data-style="${spec.name}"]`;
+	const allVars = [
+		...A.map(R.toEntries(spec.base), ([k, v]) => `  --toast-${k}: ${v};`),
+		`  --toast-transition-duration: ${spec.transition.duration};`,
+		`  --toast-transition-easing: ${spec.transition.easing};`,
+		...optionalMappedVars(spec.progress, 'toast', [['progress-bg', (p) => p.bg], ['progress-height', (p) => p.height], ['progress-radius', (p) => p.radius], ['progress-position', (p) => p.position ?? 'bottom']]),
+		...optionalMappedVars(spec.stacked, 'toast', [['stack-offset', (s) => s.offset], ['stack-scale', (s) => s.scale]]),
+	];
+	const baseRule = `${selector} {\n${A.join(allVars, '\n')}\n}`;
+	const typeRules = optionalArray(spec.types, (types) =>
+		A.map(R.toEntries(types), ([type, values]) => `${selector}[data-toast-type="${type}"] {\n${A.join(A.map(R.toEntries(values), ([k, v]) => `  --toast-${k}: ${v};`), '\n')}\n}`),
+	);
+	return A.join([baseRule, ...typeRules], '\n\n');
+};
+const generatePositionWiring = (): string =>
+	pipe(
+		R.toEntries(B.toastPosition) as [ToastPosition, string][],
+		A.map(([pos, css]) => `[data-slot="toast-region"][data-position="${pos}"] {\n  ${css}\n}`),
+		A.join('\n\n'),
+	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -218,8 +262,18 @@ const generateTooltipWiring = (specs: readonly unknown[]): Effect.Effect<string,
 		),
 		Effect.map((validated) => pipe(validated, A.map(generateSingleTooltipWiring), A.join('\n\n'))),
 	);
+const generateToastWiring = (specs: readonly unknown[]): Effect.Effect<string, ThemeErrorType> =>
+	pipe(
+		Effect.forEach(specs, (raw, idx) =>
+			pipe(
+				S.decodeUnknown(ToastStyleSpecSchema)(raw),
+				Effect.mapError((e) => ThemeError.Validation({ cause: e, field: `toastStyles[${idx}]`, message: `Invalid toast style spec at index ${idx}`, received: raw })),
+			),
+		),
+		Effect.map((validated) => A.join([generatePositionWiring(), ...A.map(validated, generateSingleToastWiring)], '\n\n')),
+	);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ComponentSpecSchema, generateComponentWiring, generateTooltipWiring, TooltipStyleSpecSchema };
-export type { ComponentSpec, TooltipStyleSpec };
+export { ComponentSpecSchema, generateComponentWiring, generateToastWiring, generateTooltipWiring, ToastStyleSpecSchema, TooltipStyleSpecSchema };
+export type { ComponentSpec, ToastStyleSpec, TooltipStyleSpec };

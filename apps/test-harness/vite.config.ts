@@ -1660,6 +1660,125 @@ const B = Object.freeze({
             pressed: { alpha: 0, chroma: 0.02, hue: 0, lightness: -0.05 },
             selected: { alpha: 0, chroma: 0.03, hue: 0, lightness: -0.08 },
         },
+        toastStyles: [
+            {
+                base: {
+                    // Action
+                    'action-color': 'currentColor',
+                    'action-weight': '500',
+                    // Appearance
+                    bg: 'var(--color-surface-700)',
+                    'border-color': 'var(--color-surface-600)',
+                    'border-width': '1px',
+                    'content-gap': '0.125rem',
+                    // Description
+                    'description-color': 'var(--color-text-600)',
+                    'description-size': '0.75rem',
+                    'dismiss-color': 'var(--color-text-600)',
+                    'dismiss-hover-bg': 'var(--color-surface-600)',
+                    'dismiss-icon-size': '1rem',
+                    'dismiss-radius': '0.25rem',
+                    // Dismiss
+                    'dismiss-size': '1.5rem',
+                    fg: 'var(--color-text-500)',
+                    'focus-ring-color': 'var(--color-primary-400)',
+                    'font-size': '0.875rem',
+                    gap: '0.75rem',
+                    'icon-color': 'var(--color-text-600)',
+                    // Icon
+                    'icon-size': '1.25rem',
+                    'inner-gap': '0.75rem',
+                    // Layout
+                    'max-width': '24rem',
+                    offset: '1rem',
+                    'padding-x': '1rem',
+                    'padding-y': '0.75rem',
+                    radius: '0.5rem',
+                    shadow: '0 4px 12px rgb(0 0 0 / 0.15)',
+                    // Title
+                    'title-color': 'inherit',
+                    'title-weight': '600',
+                    'z-index': '9999',
+                },
+                name: 'default',
+                progress: { bg: 'var(--color-primary-500)', height: '3px', radius: '0 0 0.5rem 0.5rem' },
+                transition: { duration: '200ms', easing: 'ease-out' },
+                types: {
+                    error: {
+                        bg: 'var(--color-danger-600)',
+                        'border-color': 'var(--color-danger-700)',
+                        'dismiss-color': 'var(--color-text-50)',
+                        'dismiss-hover-bg': 'var(--color-danger-500)',
+                        fg: 'var(--color-text-50)',
+                        'icon-color': 'var(--color-text-50)',
+                    },
+                    info: {
+                        bg: 'var(--color-surface-700)',
+                        'border-color': 'var(--color-primary-500)',
+                        fg: 'var(--color-text-500)',
+                        'icon-color': 'var(--color-primary-400)',
+                    },
+                    success: {
+                        bg: 'var(--color-success-600)',
+                        'border-color': 'var(--color-success-700)',
+                        'dismiss-color': 'var(--color-text-50)',
+                        'dismiss-hover-bg': 'var(--color-success-500)',
+                        fg: 'var(--color-text-50)',
+                        'icon-color': 'var(--color-text-50)',
+                    },
+                    warning: {
+                        bg: 'var(--color-warning-500)',
+                        'border-color': 'var(--color-warning-600)',
+                        'dismiss-color': 'var(--color-surface-900)',
+                        'dismiss-hover-bg': 'var(--color-warning-400)',
+                        fg: 'var(--color-surface-900)',
+                        'icon-color': 'var(--color-surface-900)',
+                    },
+                },
+            },
+            {
+                base: {
+                    // Action
+                    'action-color': 'currentColor',
+                    'action-weight': '500',
+                    // Appearance
+                    bg: 'var(--color-surface-800)',
+                    'border-color': 'transparent',
+                    'border-width': '0',
+                    'content-gap': '0.0625rem',
+                    // Description
+                    'description-color': 'var(--color-text-300)',
+                    'description-size': '0.75rem',
+                    'dismiss-color': 'var(--color-text-400)',
+                    'dismiss-hover-bg': 'var(--color-surface-700)',
+                    'dismiss-icon-size': '0.875rem',
+                    'dismiss-radius': '0.25rem',
+                    // Dismiss
+                    'dismiss-size': '1.25rem',
+                    fg: 'var(--color-text-50)',
+                    'focus-ring-color': 'var(--color-primary-400)',
+                    'font-size': '0.875rem',
+                    gap: '0.5rem',
+                    'icon-color': 'var(--color-text-400)',
+                    // Icon
+                    'icon-size': '1rem',
+                    'inner-gap': '0.5rem',
+                    // Layout
+                    'max-width': '20rem',
+                    offset: '0.75rem',
+                    'padding-x': '0.875rem',
+                    'padding-y': '0.625rem',
+                    radius: '0.375rem',
+                    shadow: '0 2px 8px rgb(0 0 0 / 0.2)',
+                    // Title
+                    'title-color': 'inherit',
+                    'title-weight': '500',
+                    'z-index': '9999',
+                },
+                name: 'compact',
+                transition: { duration: '150ms', easing: 'ease-out' },
+            },
+        ],
         tooltipGroup: { boundary: 'viewport', closeDelay: 0, openDelay: 300, timeout: 200 },
         tooltipStyles: [
             {

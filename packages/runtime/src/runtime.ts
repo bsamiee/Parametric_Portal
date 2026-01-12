@@ -1,6 +1,7 @@
 /**
  * Bridge Effect ManagedRuntime to React context.
  * Provides unified Runtime object with UI coordination (FloatingDelayGroup).
+ * CSS variable readers exported for component hooks (floating, toast).
  */
 import { FloatingDelayGroup, FloatingTree } from '@floating-ui/react';
 import { type Layer, ManagedRuntime, Option } from 'effect';
@@ -42,6 +43,10 @@ const readCssMs = (name: string): number => {
 };
 const readCssPx = (name: string): number => {
     const parsed = Number.parseFloat(readCssVar(name).replace('px', ''));
+    return Number.isNaN(parsed) ? 0 : parsed;
+};
+const readCssInt = (name: string): number => {
+    const parsed = Number.parseInt(readCssVar(name), 10);
     return Number.isNaN(parsed) ? 0 : parsed;
 };
 const Provider = <R, E>({ children, disposeOnUnmount, runtime }: ProviderProps<R, E>): ReactNode => {
@@ -95,5 +100,5 @@ const Runtime = Object.freeze({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as RUNTIME_TUNING, clamp, readCssMs, readCssPx, readCssVar, Runtime };
+export { B as RUNTIME_TUNING, clamp, readCssInt, readCssMs, readCssPx, readCssVar, Runtime };
 export type { ProviderProps as RuntimeProviderProps };

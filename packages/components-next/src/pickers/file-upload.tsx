@@ -10,6 +10,7 @@ import { useCallback, useMemo } from 'react';
 import type { DragTypes, DropItem, DropOperation, FileDropItem } from 'react-aria';
 import { useClipboard } from 'react-aria';
 import { DropZone, FileTrigger } from 'react-aria-components';
+import { Toast, type ToastTrigger } from '../core/toast';
 import { cn, defined } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -30,6 +31,7 @@ type FileUploadProps = {
 	readonly onFilesChange: (files: ReadonlyArray<File>) => void;
 	readonly progress?: number;
 	readonly ref?: Ref<HTMLDivElement>;
+	readonly toast?: ToastTrigger;
 	readonly trigger?: ReactNode;
 };
 
@@ -61,8 +63,9 @@ const acceptTypes = (...types: readonly string[]) =>
 		types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
 const FileUpload: FC<FileUploadProps> = ({
 	accept, acceptDirectory, asyncState, children, className, defaultCamera, isDisabled,
-	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, progress = 0, ref, trigger,
+	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, progress = 0, ref, toast, trigger,
 }) => {
+	Toast.useTrigger(asyncState, toast);
 	const onDropHandler = useCallback(
 		(e: { items: readonly DropItem[] }) => void extractFiles(e.items).then((f) => f.length > 0 && onFilesChange(f)),
 		[onFilesChange],

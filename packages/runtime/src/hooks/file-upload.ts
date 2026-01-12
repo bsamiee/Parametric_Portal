@@ -4,7 +4,7 @@
  * Progress derived from per-file completion (completedFiles / totalFiles).
  */
 import type { AppError } from '@parametric-portal/types/app-error';
-import { AsyncState, type AsyncStateType } from '@parametric-portal/types/async';
+import { AsyncState } from '@parametric-portal/types/async';
 import type { FileUploadConfig, MimeType, ValidatedFile } from '@parametric-portal/types/files';
 import { Effect } from 'effect';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -24,7 +24,7 @@ type FileUploadHookConfig<T extends MimeType> = FileUploadConfig<T> & {
 type FileUploadProps<T extends MimeType> = {
     readonly accept: ReadonlyArray<T>;
     readonly acceptDirectory?: boolean;
-    readonly asyncState: AsyncStateType<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>;
+    readonly asyncState: AsyncState<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>;
     readonly defaultCamera?: 'environment' | 'user';
     readonly multiple?: boolean;
     readonly onFilesChange: (files: ReadonlyArray<File>) => void;
@@ -44,7 +44,7 @@ type FileUploadReturn<T extends MimeType> = {
 
 const useFileUpload = <T extends MimeType = MimeType>(config: FileUploadHookConfig<T> = {}): FileUploadReturn<T> => {
     const runtime = Runtime.use<FileOps, never>();
-    const [state, setState] = useState<AsyncStateType<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>>(
+    const [state, setState] = useState<AsyncState<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>>(
         AsyncState.Idle(),
     );
     const [progress, setProgress] = useState(0);

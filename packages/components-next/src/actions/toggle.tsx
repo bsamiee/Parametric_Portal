@@ -15,6 +15,7 @@ import {
 import { AsyncAnnouncer } from '../core/announce';
 import { type TooltipConfig, useTooltip } from '../core/floating';
 import { type GestureProps, useGesture } from '../core/gesture';
+import { Toast, type ToastTrigger } from '../core/toast';
 import { cn, composeTailwindRenderProps, defined, Slot, type SlotInput } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -26,6 +27,7 @@ type SwitchProps = Omit<RACSwitchProps, 'children'> & {
 	readonly gesture?: GestureProps;
 	readonly ref?: Ref<HTMLLabelElement>;
 	readonly size: string;
+	readonly toast?: ToastTrigger;
 	readonly tooltip?: TooltipConfig;
 	readonly variant?: string;
 };
@@ -38,6 +40,7 @@ type CheckboxProps = Omit<RACCheckboxProps, 'children'> & {
 	readonly iconIndeterminate?: LucideIcon | ReactNode;
 	readonly ref?: Ref<HTMLLabelElement>;
 	readonly size: string;
+	readonly toast?: ToastTrigger;
 	readonly tooltip?: TooltipConfig;
 	readonly variant?: string;
 };
@@ -96,7 +99,8 @@ const B = Object.freeze({
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Switch: FC<SwitchProps> = ({
-	asyncState, children, className, color, gesture, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
+	asyncState, children, className, color, gesture, isDisabled, ref, size, toast, tooltip, variant, ...racProps }) => {
+	Toast.useTrigger(asyncState, toast);
 	const slot = Slot.bind(asyncState);
 	const activeChildren = slot.resolve(children);
 	const switchRef = useRef<HTMLLabelElement>(null);
@@ -133,7 +137,8 @@ const Switch: FC<SwitchProps> = ({
 	);
 };
 const Checkbox: FC<CheckboxProps> = ({
-	asyncState, children, className, color, gesture, icon, iconIndeterminate, isDisabled, ref, size, tooltip, variant, ...racProps }) => {
+	asyncState, children, className, color, gesture, icon, iconIndeterminate, isDisabled, ref, size, toast, tooltip, variant, ...racProps }) => {
+	Toast.useTrigger(asyncState, toast);
 	const slot = Slot.bind(asyncState);
 	const activeChildren = slot.resolve(children);
 	const checkboxRef = useRef<HTMLLabelElement>(null);

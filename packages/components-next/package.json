@@ -48,6 +48,11 @@
       "import": "./src/core/floating.tsx",
       "default": "./src/core/floating.tsx"
     },
+    "./core/toast": {
+      "types": "./src/core/toast.tsx",
+      "import": "./src/core/toast.tsx",
+      "default": "./src/core/toast.tsx"
+    },
     "./core/gesture": {
       "types": "./src/core/gesture.ts",
       "import": "./src/core/gesture.ts",

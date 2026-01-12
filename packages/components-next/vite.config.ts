@@ -22,6 +22,7 @@ export default defineConfig(
                 'core/announce': './src/core/announce.tsx',
                 'core/floating': './src/core/floating.tsx',
                 'core/gesture': './src/core/gesture.ts',
+                'core/toast': './src/core/toast.tsx',
                 'core/utils': './src/core/utils.ts',
                 // --- feedback ---
                 'feedback/progress': './src/feedback/progress.tsx',

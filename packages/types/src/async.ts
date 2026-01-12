@@ -177,4 +177,4 @@ const AsyncState = Object.freeze({
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { AsyncState, AsyncStateSchema };
-export type { AsyncHookReturn, AsyncState as AsyncStateType, AsyncStateTag, MutateActions, NotReady };
+export type { AsyncHookReturn, AsyncStateTag, MutateActions, NotReady };
