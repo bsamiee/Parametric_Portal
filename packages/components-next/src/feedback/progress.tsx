@@ -15,9 +15,7 @@ import { Match } from 'effect';
 import { Loader2 } from 'lucide-react';
 import type { FC, ReactNode, Ref } from 'react';
 import { useMemo } from 'react';
-import {
-	Label, Meter as RACMeter, type MeterProps as RACMeterProps, ProgressBar as RACProgressBar, type ProgressBarProps as RACProgressBarProps,
-} from 'react-aria-components';
+import { Label, Meter as RACMeter, type MeterProps as RACMeterProps, ProgressBar as RACProgressBar, type ProgressBarProps as RACProgressBarProps, } from 'react-aria-components';
 import { AsyncAnnouncer } from '../core/announce';
 import { useTooltip, type TooltipConfig } from '../core/floating';
 import { cn, Slot, type SlotInput } from '../core/utils';
