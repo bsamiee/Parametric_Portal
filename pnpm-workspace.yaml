@@ -80,7 +80,7 @@ catalog:
   lefthook: 2.0.14
   lightningcss: 1.30.2
   lucide-react: 0.562.0
-  motion: 12.28.1
+  motion: 12.26.1
   msw: 2.12.7
   nanoid: 5.1.6
   nuqs: 2.8.6
@@ -92,7 +92,6 @@ catalog:
   react-compiler-runtime: 1.0.0
   react-dom: 19.3.0-canary-f93b9fd4-20251217
   react-error-boundary: 6.0.3
-  vaul: 1.1.2
   react-stately: 3.43.0
   rollup-plugin-visualizer: 6.0.5
   sharp: 0.34.5
@@ -108,6 +107,7 @@ catalog:
   type-fest: 5.4.0
   typescript: 6.0.0-dev.20251125
   unplugin-auto-import: 20.3.0
+  vaul: 1.1.2
   vite: 7.3.1
   vite-plugin-compression: 0.5.1
   vite-plugin-csp: 1.1.2
