@@ -116,7 +116,10 @@ const useBadgeLabel = (value: BadgeValue | undefined, ref: RefObject<Element | n
 	useLayoutEffect(() => {
 		const next = computeBadgeLabel(value, ref.current, cssVar);
 		setLabel((prev) => (prev === next ? prev : next));
-	});
+	useLayoutEffect(() => {
+		const next = computeBadgeLabel(value, ref.current, cssVar);
+		setLabel((prev) => (prev === next ? prev : next));
+	}, [value, cssVar]);
 	return label;
 };
 const Badge = Object.freeze({ useLabel: useBadgeLabel });
