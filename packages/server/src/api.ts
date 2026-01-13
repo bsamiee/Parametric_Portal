@@ -268,7 +268,8 @@ const TransferGroup = HttpApiGroup.make('transfer')
             .addSuccess(ExportResult.schema)
             .addError(HttpError.Auth, { status: 401 })
             .addError(HttpError.Internal, { status: 500 })
-            .addError(HttpError.RateLimit, { status: 429 }),
+            .addError(HttpError.RateLimit, { status: 429 })
+            .annotate(OpenApi.Description, 'Export assets in specified format. For xlsx/zip: returns JSON with base64-encoded data matching ExportResult schema. For csv/ndjson: returns raw streaming response with Content-Disposition header (schema not applicable).'),
     )
     .add(
         HttpApiEndpoint.post('import', '/import')

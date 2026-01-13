@@ -1,10 +1,10 @@
 /**
  * Transfer: Streaming import/export with resilience guarantees.
  * - Chunked streaming for memory efficiency (never holds full dataset)
- * - Preventive ZIP bomb protection (size checked before decompression)
- * - Comprehensive CSV formula injection protection
+ * - Preventive ZIP bomb protection (byte-accurate size tracking)
+ * - Comprehensive CSV formula injection protection (tab prefix)
  * - Transactional batch processing with rollback support
- * - O(1) row mapping via Map
+ * - O(1) row mapping via HashMap
  */
 import { TransferAssetInput, TRANSFER_MIME, type TransferFailure, type TransferFormat } from '@parametric-portal/types/files';
 import type { AppId, Asset, AssetInsert, AssetType, UserId } from '@parametric-portal/types/schema';
@@ -52,18 +52,30 @@ type Manifest = typeof ManifestV1Schema.Type;
 const B = Object.freeze({
     batching: { exportChunkSize: 500, importBatchSize: 100 },
     csv: {
-        dangerousPrefixes: ['=', '+', '-', '@', '\t', '\r', '\0', ' =', ' +', ' -', ' @'],
+        dangerousPrefixes: ['=', '+', '-', '@', '\t', '\r', '\0'],
         headers: ['id', 'assetType', 'content', 'createdAt', 'updatedAt'] as const,
     },
     limits: { maxDecompressedBytes: 100 * 1024 * 1024, maxImportBytes: 10 * 1024 * 1024, maxZipEntryBytes: 5 * 1024 * 1024 },
     streamBatchSize: 1000,
+    xlsx: {
+        columns: [
+            { header: 'AssetType', key: 'assetType', width: 20 },
+            { header: 'Content', key: 'content', width: 60 },
+            { header: 'ID', key: 'id', width: 40 },
+            { header: 'CreatedAt', key: 'createdAt', width: 25 },
+            { header: 'UpdatedAt', key: 'updatedAt', width: 25 },
+        ] as Array<{ header: string; key: string; width: number }>,
+        expectedHeaders: new Set(['assettype', 'content', 'id', 'createdat', 'updatedat']),
+    },
     zip: {
         compressionLevels: { high: 9, medium: 6, store: 0 } as const,
         highCompressTypes: new Set(['svg', 'json', 'html', 'xml', 'txt', 'md', 'css', 'js', 'ts', 'yaml', 'yml']),
     },
 } as const);
+const sanitizeFormulaInjection = (value: string): string =>
+    B.csv.dangerousPrefixes.some((p) => value.startsWith(p)) ? `\t${value}` : value;
 const formatSerializers: Record<StreamableFormat, (asset: Asset) => string> = {
-    csv: (a) => [a.id, a.assetType, escapeCsvField(a.content), a.createdAt.toISOString(), a.updatedAt.toISOString()].join(','),
+    csv: (a) => Papa.unparse([[a.id, a.assetType, sanitizeFormulaInjection(a.content), a.createdAt.toISOString(), a.updatedAt.toISOString()]], { header: false }),
     ndjson: (a) => JSON.stringify({ assetType: a.assetType, content: a.content, createdAt: a.createdAt.toISOString(), id: a.id, updatedAt: a.updatedAt.toISOString() }),
 };
 const formatHeaders: Record<StreamableFormat, string> = { csv: `${B.csv.headers.join(',')}\n`, ndjson: '' };
@@ -90,11 +102,7 @@ const hashContent = (content: string): Effect.Effect<string> =>
         const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
         return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
     });
-const escapeCsvField = (value: string): string => {
-    const escaped = value.replaceAll('"', '""');
-    const sanitized = B.csv.dangerousPrefixes.some((p) => escaped.startsWith(p)) ? `'${escaped}` : escaped;
-    return sanitized.includes(',') || sanitized.includes('"') || sanitized.includes('\n') || sanitized.includes('\r') ? `"${sanitized}"` : sanitized;
-};
+const byteLength = (str: string): number => new TextEncoder().encode(str).length;
 const migrateManifest = (raw: unknown): Either.Either<Manifest, string> =>
     pipe(
         S.decodeUnknownEither(ManifestV1Schema)(raw),
@@ -113,9 +121,6 @@ const buildFilterPredicates = (appId: AppId, filters: TransferFilters): Readonly
     Option.match(filters.beforeDate, { onNone: () => () => true, onSome: (d) => (a: Asset) => a.createdAt <= d }),
     Option.match(filters.assetIds, { onNone: () => () => true, onSome: (ids) => (a: Asset) => ids.includes(a.id) }),
 ];
-
-// --- [DECODE_HELPERS] --------------------------------------------------------
-
 const stripBom = (line: string, row: number): string => row === 1 && line.codePointAt(0) === 0xfeff ? line.slice(1) : line;
 const decodeAssetInsert = (input: unknown): Either.Either<AssetInsert, string> =>
     pipe(
@@ -128,8 +133,10 @@ const buildInsertInput = (appId: AppId, userId: UserId, assetType: string, conte
     content,
     userId,
 });
+const isXlsxHeaderRow = (cells: readonly string[]): boolean =>
+    cells.length >= 2 && B.xlsx.expectedHeaders.has(cells[0]?.toLowerCase() ?? '') && B.xlsx.expectedHeaders.has(cells[1]?.toLowerCase() ?? '');
 
-// --- [PARSERS] ---------------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const parseCsvRows = (content: string, appId: AppId, userId: UserId): readonly ParsedRow[] => {
     const result = Papa.parse<Record<string, string>>(content, { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim().toLowerCase() });
@@ -162,7 +169,7 @@ const verifyChecksum = (content: string, expectedHash: string | undefined, row: 
         : pipe(
             hashContent(content),
             Effect.flatMap((actualHash) =>
-                actualHash.startsWith(expectedHash)
+                actualHash === expectedHash
                     ? Effect.void
                     : Effect.fail(failure(row, 'Checksum mismatch', { actual: actualHash.slice(0, 8), expected: expectedHash.slice(0, 8), file })),
             ),
@@ -174,14 +181,16 @@ const parseZipEntry = (zip: JSZip, entry: ManifestEntry, idx: number, appId: App
         const row = idx + 1;
         const fileOpt = Option.fromNullable(zip.file(entry.file));
         const file = yield* Option.match(fileOpt, { onNone: () => Effect.succeed(Option.none<JSZip.JSZipObject>()), onSome: (f) => Effect.succeed(Option.some(f)) });
-        const declaredSize = Option.match(file, { onNone: () => 0, onSome: (f) => (f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? entry.size ?? 0 });
         yield* Option.isNone(file) ? Effect.fail(failure(row, 'Missing file in archive', { file: entry.file })) : Effect.void;
-        yield* declaredSize > B.limits.maxZipEntryBytes ? Effect.fail(failure(row, 'File too large', { file: entry.file, maxSize: B.limits.maxZipEntryBytes, size: declaredSize })) : Effect.void;
-        const currentSize = yield* Ref.get(sizeRef);
-        yield* currentSize + declaredSize > B.limits.maxDecompressedBytes ? Effect.fail(failure(row, 'Archive decompressed size limit exceeded', { limit: B.limits.maxDecompressedBytes, projected: currentSize + declaredSize })) : Effect.void;
+        const declaredSize = entry.size ?? 0;
+        yield* declaredSize > B.limits.maxZipEntryBytes ? Effect.fail(failure(row, 'File too large (declared)', { file: entry.file, maxSize: B.limits.maxZipEntryBytes, size: declaredSize })) : Effect.void;
         const content = yield* Effect.tryPromise({ catch: (e) => failure(row, `Decompression failed: ${e instanceof Error ? e.message : String(e)}`, { file: entry.file }), try: () => Option.getOrThrow(file).async('text') });
+        const actualBytes = byteLength(content);
+        yield* actualBytes > B.limits.maxZipEntryBytes ? Effect.fail(failure(row, 'File too large (actual)', { file: entry.file, maxSize: B.limits.maxZipEntryBytes, size: actualBytes })) : Effect.void;
+        const currentSize = yield* Ref.get(sizeRef);
+        yield* currentSize + actualBytes > B.limits.maxDecompressedBytes ? Effect.fail(failure(row, 'Archive decompressed size limit exceeded', { limit: B.limits.maxDecompressedBytes, projected: currentSize + actualBytes })) : Effect.void;
         yield* verifyChecksum(content, entry.contentHash, row, entry.file);
-        yield* Ref.update(sizeRef, (n) => n + content.length);
+        yield* Ref.update(sizeRef, (n) => n + actualBytes);
         return decodeZipContent(content, appId, userId, entry.type, entry.file, row);
     }).pipe(Effect.catchAll((err) => Effect.succeed(err)));
 const parseZipRows = (zipData: ArrayBuffer, appId: AppId, userId: UserId): Effect.Effect<readonly ParsedRow[], ParseError> =>
@@ -200,8 +209,10 @@ const xlsxRowHandlers: Record<'header' | 'empty' | 'data', (rowIdx: number, asse
     empty: (rowIdx) => failure(rowIdx, 'Missing assetType'),
     header: (rowIdx) => failure(rowIdx, 'Header row skipped'),
 };
-const parseXlsxRow = (rowIdx: number, assetType: string, content: string, appId: AppId, userId: UserId): ParsedRow => {
-    const isHeader = rowIdx === 1 && assetType.toLowerCase() === 'assettype';
+const parseXlsxRow = (rowIdx: number, cells: readonly string[], appId: AppId, userId: UserId): ParsedRow => {
+    const isHeader = rowIdx === 1 && isXlsxHeaderRow(cells);
+    const assetType = cells[0] ?? '';
+    const content = cells[1] ?? '';
     const baseKind: 'empty' | 'data' = assetType.length === 0 ? 'empty' : 'data';
     const kind: 'header' | 'empty' | 'data' = isHeader ? 'header' : baseKind;
     return xlsxRowHandlers[kind](rowIdx, assetType, content, appId, userId);
@@ -215,7 +226,10 @@ const parseXlsxRows = (xlsxData: ArrayBuffer, appId: AppId, userId: UserId): Eff
         });
         const sheet = workbook.worksheets[0];
         const rows: ParsedRow[] = [];
-        sheet?.eachRow((row, rowNumber) => rows.push(parseXlsxRow(rowNumber, String(row.getCell(1).value ?? '').trim(), String(row.getCell(2).value ?? ''), appId, userId)));
+        sheet?.eachRow((row, rowNumber) => {
+            const cells = [String(row.getCell(1).value ?? '').trim(), String(row.getCell(2).value ?? '')];
+            rows.push(parseXlsxRow(rowNumber, cells, appId, userId));
+        });
         return rows.filter((r) => !(r.row === 1 && Either.isLeft(r.result)));
     });
 const formatParsers: Record<TransferFormat, (content: string | ArrayBuffer, appId: AppId, userId: UserId) => Effect.Effect<readonly ParsedRow[], ParseError>> = {
@@ -224,8 +238,6 @@ const formatParsers: Record<TransferFormat, (content: string | ArrayBuffer, appI
     xlsx: (content, appId, userId) => parseXlsxRows(content as ArrayBuffer, appId, userId),
     zip: (content, appId, userId) => parseZipRows(content as ArrayBuffer, appId, userId),
 };
-
-// --- [PARTITION] -------------------------------------------------------------
 
 const lookupRow = (rowMap: RowMap, index: number): number => Option.getOrElse(HashMap.get(rowMap, index), () => index + 1);
 const partitionParsed = (rows: readonly ParsedRow[]): PartitionResult =>
@@ -238,8 +250,6 @@ const partitionParsed = (rows: readonly ParsedRow[]): PartitionResult =>
             rowMap: HashMap.fromIterable(A.map(successPairs, (pair, idx) => Tuple.make(idx, Tuple.getSecond(pair)))),
         }),
     );
-
-// --- [STREAMING_EXPORT] ------------------------------------------------------
 
 const streamChunks = <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, filters: TransferFilters, format: StreamableFormat): Stream.Stream<ExportChunk, E, R> => {
     const predicates = buildFilterPredicates(appId, filters);
@@ -261,7 +271,7 @@ const buildXlsxArchive = <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId,
         const predicates = buildFilterPredicates(appId, filters);
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('Assets');
-        sheet.columns = [{ header: 'ID', key: 'id', width: 40 }, { header: 'AssetType', key: 'assetType', width: 20 }, { header: 'Content', key: 'content', width: 60 }, { header: 'CreatedAt', key: 'createdAt', width: 25 }, { header: 'UpdatedAt', key: 'updatedAt', width: 25 }];
+        sheet.columns = [...B.xlsx.columns];
         const countRef = yield* Ref.make(0);
         yield* pipe(input, Stream.filter((a) => matchesFilters(a, predicates)), Stream.runForEach((asset) => addXlsxRow(sheet, asset, countRef)));
         const buffer = yield* Effect.promise(() => workbook.xlsx.writeBuffer());
@@ -296,12 +306,10 @@ const buildZipArchive = <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, 
         return { base64, count: finalState.index };
     });
 
-// --- [IMPORT_BATCHING] -------------------------------------------------------
-
 const importBatched = (items: readonly AssetInsert[], rowMap: RowMap): Stream.Stream<{ readonly batch: readonly AssetInsert[]; readonly rows: readonly number[] }> =>
     pipe(Stream.fromIterable(A.map(items, (item, idx) => Tuple.make(item, lookupRow(rowMap, idx)))), Stream.grouped(B.batching.importBatchSize), Stream.map((chunk) => { const entries = Chunk.toArray(chunk); return { batch: A.map(entries, Tuple.getFirst), rows: A.map(entries, Tuple.getSecond) }; }));
 
-// --- [NAMESPACE] -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Transfer = Object.freeze({
     batched: importBatched,

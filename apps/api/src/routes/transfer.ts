@@ -55,7 +55,7 @@ const extractExportContext = (repos: DatabaseServiceShape, params: ExportQuery) 
         };
     });
 
-// --- [EXPORT_HANDLERS] -------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const handleStreamExport = Effect.fn('transfer.export.stream')(
     (repos: DatabaseServiceShape, params: ExportQuery & { format: 'csv' | 'ndjson' }) =>
@@ -114,20 +114,16 @@ const handleZipExport = Effect.fn('transfer.export.zip')(
             ),
         ),
 );
-const binaryFormatHandlers = {
-    xlsx: handleXlsxExport,
-    zip: handleZipExport,
-} as const;
 const isBinaryFormat = (format: TransferFormat): format is BinaryFormat => format === 'xlsx' || format === 'zip';
-const handleExport = Effect.fn('transfer.export')(
-    (repos: DatabaseServiceShape, params: ExportQuery) =>
+const handleExport = Effect.fn('transfer.export')( (repos: DatabaseServiceShape, params: ExportQuery) =>
         isBinaryFormat(params.format)
             ? binaryFormatHandlers[params.format](repos, params)
             : handleStreamExport(repos, { ...params, format: params.format }),
 );
-
-// --- [TRANSACTIONAL_IMPORT] --------------------------------------------------
-
+const binaryFormatHandlers = {
+    xlsx: handleXlsxExport,
+    zip: handleZipExport,
+} as const;
 const processBatchInTransaction = (
     repos: DatabaseServiceShape, batch: readonly AssetInsert[],
     rows: readonly number[], ) =>
@@ -182,8 +178,11 @@ const handleImport = Effect.fn('transfer.import')(
                 Effect.mapError((e: ParseError) => new HttpError.Validation({ field: 'body', message: `Row ${e.row}: ${e.error}` })),
             );
             const { failures, items, rowMap } = Transfer.partition(parsedRows);
-            yield* items.length === 0 && failures.length > 0
-                ? Effect.fail(new HttpError.Validation({ field: 'body', message: `All ${failures.length} rows failed validation` }))
+            yield* items.length === 0
+                ? Effect.fail(new HttpError.Validation({
+                      field: 'body',
+                      message: failures.length > 0 ? `All ${failures.length} rows failed validation` : 'Empty file - no data to import',
+                  }))
                 : Effect.void;
             const result: BatchResult = dryRun
                 ? { assets: [], dbFailures: [] }
@@ -191,9 +190,14 @@ const handleImport = Effect.fn('transfer.import')(
                       processAllBatches(repos, items, rowMap),
                       HttpError.chain(HttpError.Internal, { message: 'Import processing failed' }),
                   );
-            yield* dryRun
-                ? Effect.void
-                : Audit.log(repos.audit, { actorId: session.userId, assets: result.assets, operation: 'create' });
+            yield* Audit.log(repos.audit, {
+                actorId: session.userId,
+                appId,
+                changes: { dryRun, failedCount: failures.length, format, itemCount: items.length },
+                entityId: session.userId,
+                entityType: 'asset',
+                operation: dryRun ? 'import' : 'create',
+            });
             const importResult: ImportResult = {
                 failed: [...failures, ...result.dbFailures],
                 imported: dryRun ? items.length : result.assets.length,
@@ -202,7 +206,7 @@ const handleImport = Effect.fn('transfer.import')(
         }),
 );
 
-// --- [LAYER] -----------------------------------------------------------------
+// --- [LAYERS] ----------------------------------------------------------------
 
 const TransferLive = HttpApiBuilder.group(ParametricApi, 'transfer', (handlers) =>
     Effect.gen(function* () {

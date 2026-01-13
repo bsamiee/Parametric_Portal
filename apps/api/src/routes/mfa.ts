@@ -47,7 +47,10 @@ const MfaLive = HttpApiBuilder.group(ParametricApi, 'mfa', (handlers) =>
                     const ctx = yield* getClientInfo;
                     const appId = yield* getAppId;
                     const userOpt = yield* db.users.findById(session.userId).pipe(dbError);
-                    const user = Option.getOrThrow(userOpt);
+                    const user = yield* Option.match(userOpt, {
+                        onNone: () => Effect.fail(new HttpError.Auth({ reason: 'User not found' })),
+                        onSome: Effect.succeed,
+                    });
                     const result = yield* mfa.enroll(user.id, user.email);
                     yield* Audit.log(db.audit, {
                         actorId: session.userId,
@@ -60,10 +63,7 @@ const MfaLive = HttpApiBuilder.group(ParametricApi, 'mfa', (handlers) =>
                         userAgent: ctx.userAgent,
                     });
                     return result;
-                }).pipe(
-                    Effect.mapError(() => new HttpError.Auth({ reason: 'User not found' })),
-                    RateLimit.middleware.mfa,
-                ),
+                }).pipe(RateLimit.middleware.mfa),
             )
             .handle('verify', ({ payload }) =>
                 Effect.gen(function* () {

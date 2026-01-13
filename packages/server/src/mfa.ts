@@ -97,8 +97,8 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
             );
         const verify = (userId: UserId, code: string) =>
             pipe(
-                Effect.all({ mfa: getMfaOrFail(userId), replayGuard: TotpReplayGuard, repo: MfaSecretsRepository }),
-                Effect.flatMap(({ mfa, repo, replayGuard }) =>
+                Effect.all({ mfa: getMfaOrFail(userId), replayGuard: TotpReplayGuard, repo: MfaSecretsRepository, timeStep: Effect.sync(currentTimeStep) }),
+                Effect.flatMap(({ mfa, repo, replayGuard, timeStep }) =>
                     pipe(
                         EncryptedKey.decryptBytes(mfa.secretEncrypted),
                         Effect.flatMap((decrypted) =>
@@ -113,7 +113,7 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
                             Metric.increment(metrics.mfa.verifications),
                         ], { discard: true })),
                         Effect.filterOrFail((r) => r.valid, () => new HttpError.Auth({ reason: 'Invalid MFA code' })),
-                        Effect.flatMap((result) => replayGuard.checkAndMark(userId, currentTimeStep() + (result.delta ?? 0), code)),
+                        Effect.flatMap((result) => replayGuard.checkAndMark(userId, timeStep + (result.delta ?? 0), code)),
                         Effect.filterOrFail(({ alreadyUsed }) => !alreadyUsed, () => new HttpError.Auth({ reason: 'TOTP code already used' })),
                         Effect.tap(() => Effect.when(
                             pipe(repo.upsert({ backupCodesHash: [...mfa.backupCodesHash], enabledAt: new Date(), secretEncrypted: mfa.secretEncrypted, userId }), Effect.asVoid),

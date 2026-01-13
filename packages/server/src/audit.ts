@@ -27,16 +27,18 @@ type AuditInput = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const FAILURE_THRESHOLD = 5;
-const BATCH_CONCURRENCY = 10;
-const MAX_CONTENT_LENGTH = 10000;
+const B = Object.freeze({
+    batch: { concurrency: 10 },
+    content: { maxLength: 10000 },
+    failures: { threshold: 5 },
+} as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const isValidEntityId = (id: string): boolean =>
     Uuidv7.is(id) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const truncateContent = (content: string): string =>
-    content.length > MAX_CONTENT_LENGTH ? `${content.slice(0, MAX_CONTENT_LENGTH)}...[truncated]` : content;
+    content.length > B.content.maxLength ? `${content.slice(0, B.content.maxLength)}...[truncated]` : content;
 const prepareAssetChanges = (asset: Asset, operation: AuditLogInsert['operation']): Record<string, unknown> | null =>
     operation === 'delete' ? null : { assetType: asset.assetType, contentLength: asset.content.length, contentPreview: truncateContent(asset.content) };
 const normalizeAssets = (assets: Asset | readonly Asset[]): readonly Asset[] =>
@@ -68,7 +70,7 @@ const handleFailure = (error: unknown, input: AuditInput, requestId: string) =>
                     pipe(
                         Ref.get(alertEmitted),
                         Effect.flatMap((alreadyAlerted) =>
-                            count >= FAILURE_THRESHOLD && !alreadyAlerted
+                            count >= B.failures.threshold && !alreadyAlerted
                                 ? pipe(
                                     Ref.set(alertEmitted, true),
                                     Effect.andThen(Effect.logError('AUDIT_FAILURE_ALERT', {
@@ -76,7 +78,7 @@ const handleFailure = (error: unknown, input: AuditInput, requestId: string) =>
                                         lastError: error instanceof Error ? error.message : String(error),
                                         message: `Audit logging has failed ${count} consecutive times`,
                                         requestId,
-                                        threshold: FAILURE_THRESHOLD,
+                                        threshold: B.failures.threshold,
                                     })),
                                 )
                                 : Effect.logError('AUDIT_FAILURE', {
@@ -138,7 +140,7 @@ const logAssets = (
                             entityType: 'asset',
                             operation,
                         })),
-                        { concurrency: BATCH_CONCURRENCY, discard: true },
+                        { concurrency: B.batch.concurrency, discard: true },
                     ),
                     Effect.tap(() => Effect.logDebug('Audit batch complete', { count: items.length, operation })),
                     Effect.catchAll(() => Effect.void),
@@ -150,7 +152,7 @@ const log = (repo: AuditRepo, target: AuditLogTarget): Effect.Effect<void, never
         ? logAssets(repo, target.assets, target.actorId, target.operation)
         : logSingle(repo, target);
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Audit = Object.freeze({ log } as const);
 

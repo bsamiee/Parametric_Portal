@@ -31,10 +31,11 @@ const ttlSeconds = Math.ceil(ttlMs / 1000);
 const makeKey = (userId: UserId, timeStep: number, code: string): string => [userId, timeStep, code].join(B.keyDelimiter);
 const makeRedisKey = (userId: UserId, timeStep: number, code: string): string => `${B.keyPrefix}${makeKey(userId, timeStep, code)}`;
 const isExpired = (entry: CacheEntry): boolean => Date.now() > entry.expiresAt;
-const cleanupExpired = (cache: ReplayCache): void => MutableHashMap.forEach(cache, (entry, key) => {isExpired(entry) && MutableHashMap.remove(cache, key);});
-
-// --- [BACKENDS] --------------------------------------------------------------
-
+const cleanupExpiredSafe = (cache: ReplayCache): void => {
+    const expiredKeys: string[] = [];
+    MutableHashMap.forEach(cache, (entry, key) => { isExpired(entry) && expiredKeys.push(key); });
+    expiredKeys.forEach((key) => { MutableHashMap.remove(cache, key); });
+};
 const createMemoryBackend = () => {
     const cache: ReplayCache = MutableHashMap.empty();
     return {
@@ -43,10 +44,10 @@ const createMemoryBackend = () => {
             const key = makeKey(userId, timeStep, code);
             const existing = MutableHashMap.get(cache, key);
             const alreadyUsed = existing._tag === 'Some' && !isExpired(existing.value);
-            alreadyUsed || MutableHashMap.set(cache, key, { expiresAt: Date.now() + ttlMs });
+            alreadyUsed ? undefined : MutableHashMap.set(cache, key, { expiresAt: Date.now() + ttlMs });
             return { alreadyUsed, backend: 'memory' as const };
         },
-        cleanup: Effect.sync(() => { MutableHashMap.size(cache) > B.cleanup.threshold && cleanupExpired(cache); }),
+        cleanup: Effect.sync(() => { MutableHashMap.size(cache) > B.cleanup.threshold && cleanupExpiredSafe(cache); }),
     };
 };
 const createRedisBackend = (redis: Redis) => ({

@@ -18,7 +18,7 @@ const TRANSFER_MIME = { csv: 'text/csv', ndjson: 'application/x-ndjson', xlsx: '
 const MIME_CONFIG = {
     archive: ['application/zip', 'application/gzip'],
     code: ['text/javascript', 'text/typescript', 'text/css'],
-    document: ['application/json', 'application/pdf', 'text/plain', 'text/csv', 'text/markdown', 'text/html', 'text/xml'],
+    document: ['application/json', 'application/pdf', 'text/plain', 'text/csv', 'text/markdown', 'text/html', 'text/xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
     image: ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif', 'image/tiff', 'image/bmp', 'image/x-icon'],
     model: ['model/gltf+json', 'model/gltf-binary', 'application/octet-stream'],
 } as const;
@@ -106,11 +106,9 @@ const validateFile = (
         return yield* decodeMetadata(file);
     });
 
-// --- [ASYNC_EXPORT_TYPES] ----------------------------------------------------
-
 /** Foundation types for async export job system (webhooks/callbacks). */
 type AsyncExportStatus = 'pending' | 'processing' | 'completed' | 'failed';
-type AsyncExportJob = {
+type AsyncExportJob<TUserId extends string = string> = {
     readonly completedAt: Date | null;
     readonly createdAt: Date;
     readonly error: string | null;
@@ -119,7 +117,7 @@ type AsyncExportJob = {
     readonly progress: number;
     readonly resultUrl: string | null;
     readonly status: AsyncExportStatus;
-    readonly userId: string;
+    readonly userId: TUserId;
     readonly webhookUrl: string | null;
 };
 type AsyncExportRequest = {

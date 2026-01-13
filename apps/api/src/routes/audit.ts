@@ -68,7 +68,7 @@ const handleGetMine = Effect.fn('audit.getMine')(
         }),
 );
 
-// --- [LAYER] -----------------------------------------------------------------
+// --- [LAYERS] ----------------------------------------------------------------
 
 const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
     Effect.gen(function* () {

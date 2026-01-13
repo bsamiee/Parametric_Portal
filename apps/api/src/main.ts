@@ -11,6 +11,7 @@ import { AuthContext } from '@parametric-portal/server/auth';
 import { EncryptionKeyStore } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { MetricsService } from '@parametric-portal/server/metrics';
+import { AuditState } from '@parametric-portal/server/audit';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { RateLimit } from '@parametric-portal/server/rate-limit';
 import { TelemetryLive } from '@parametric-portal/server/telemetry';
@@ -116,7 +117,7 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
     }),
 );
 const RateLimitLive = RateLimit.layer;
-const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyStore.layer, RateLimitLive, MetricsService.layer, TotpReplayGuard.Default);
+const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyStore.layer, RateLimitLive, MetricsService.layer, TotpReplayGuard.Default, AuditState.Default);
 const RouteDependencies = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive);
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
     Layer.provide(Layer.mergeAll(AuditLive, AuthLive, HealthLive, IconsLive, MfaLive, TelemetryRouteLive, TransferLive, UsersLive)),
@@ -125,6 +126,16 @@ const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
 );
 const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
+/**
+ * Middleware order is critical - do not reorder without understanding the dependencies:
+ * 1. xForwardedHeaders - Must be first to extract real client IP from proxy headers
+ * 2. trace - OpenTelemetry span creation, needs client IP from step 1
+ * 3. security - HSTS/X-Content-Type-Options headers, stateless
+ * 4. requestId - Generates unique ID, used by subsequent middleware for correlation
+ * 5. requestContext - Builds RequestContext using IP (1) and requestId (4)
+ * 6. metrics - Records request metrics, uses context from step 5
+ * 7. logger - Structured logging, uses all above context
+ */
 const ServerLive = HttpApiBuilder.serve((app) =>
     app.pipe(
         Middleware.xForwardedHeaders,
