@@ -1,6 +1,5 @@
 /**
- * Bridge Effect execution with React state via managed fibers.
- * Unified fiber execution pipeline with auto-cleanup.
+ * Bridge Effect execution to React state via managed fibers with auto-cleanup.
  */
 import { type AsyncHookReturn, AsyncState, type MutateActions } from '@parametric-portal/types/async';
 import { Effect, Fiber, type ManagedRuntime } from 'effect';
@@ -61,7 +60,7 @@ const runFiber = <A, E, R>(
     );
 };
 
-// --- [HOOKS] -----------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 const useEffectRun = <A, E, R>(
     effect: Effect.Effect<A, E, R>,

@@ -25,6 +25,9 @@ const B = Object.freeze({
 		STORAGE_READ: { code: 'STORAGE_READ' as const, message: 'Failed to read from storage' },
 		STORAGE_WRITE: { code: 'STORAGE_WRITE' as const, message: 'Failed to write to storage' },
 	},
+	Database: {
+		NOT_FOUND: { code: 'NOT_FOUND' as const, message: 'Record not found' },
+	},
 	File: {
 		FILE_EMPTY: { code: 'FILE_EMPTY' as const, message: 'File is empty' },
 		FILE_TOO_LARGE: { code: 'FILE_TOO_LARGE' as const, message: 'File exceeds size limit' },
@@ -47,25 +50,19 @@ class AppError<D extends ErrorDomain = ErrorDomain> extends Data.TaggedError('Ap
 	readonly message: string;
 }> {
 	/** Format error for logging/display with domain:code prefix. */
-	get formatted(): string {
-		return `[${this.domain}:${String(this.code)}] ${this.message}`;
-	}
+	get formatted(): string { return `[${this.domain}:${String(this.code)}] ${this.message}`; }
 	/** Construct from domain-scoped error code with optional message override. */
 	static from<D extends ErrorDomain>(domain: D, key: ErrorCode<D>, message?: string): AppError<D> {
 		const entry = B[domain][key] as { readonly code: string; readonly message: string };
 		return new AppError({ code: entry.code as ErrorCode<D>, domain, message: message ?? entry.message });
 	}
 	/** Append API context to message for failed external calls. */
-	static withApi(msg: string, api: string): string {
-		return `${msg} (${api})`;
-	}
+	static withApi(msg: string, api: string): string { return `${msg} (${api})`; }
 	/** Append MIME type to message using brackets for machine-readable context. */
-	static withMimeType(msg: string, type: string): string {
-		return `${msg} [${type}]`;
-	}
+	static withMimeType(msg: string, type: string): string { return `${msg} [${type}]`; }
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { ErrorCode, ErrorDomain };
-export { AppError, B as APP_ERROR_TUNING };
+export { AppError };

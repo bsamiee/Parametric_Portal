@@ -1,6 +1,5 @@
 /**
- * Configure Vite build for runtime package.
- * Exports multiple entry points for browser hooks, stores, and services.
+ * Vite build config with multiple entry points for runtime library package.
  */
 import { Effect } from 'effect';
 import type { UserConfig } from 'vite';
@@ -32,7 +31,6 @@ const config = Effect.runSync(
             '@effect/platform',
             '@effect/platform-browser',
             '@floating-ui/react',
-            '@parametric-portal/database',
             '@parametric-portal/types',
             'effect',
             'idb-keyval',

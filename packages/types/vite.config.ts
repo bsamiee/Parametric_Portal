@@ -23,7 +23,7 @@ const config = Effect.runSync(
             types: './src/types.ts',
             ui: './src/ui.ts',
         },
-        external: ['@effect/experimental', 'drizzle-orm', 'effect', 'isomorphic-dompurify'],
+        external: ['@effect/experimental', 'drizzle-orm', 'effect', 'happy-dom', 'isomorphic-dompurify'],
         mode: 'library',
         name: 'ParametricTypes',
     }),

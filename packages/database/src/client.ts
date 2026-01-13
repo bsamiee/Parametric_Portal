@@ -13,7 +13,8 @@ import { make as makeDrizzle } from '@effect/sql-drizzle/Pg';
 import { PgClient } from '@effect/sql-pg';
 import * as schema from '@parametric-portal/types/schema';
 import { DurationMs, NonNegativeInt } from '@parametric-portal/types/types';
-import { Config, type ConfigError, Duration, Effect, Layer, Option, String as S, Schedule, type Stream } from 'effect';
+import { MetricsService, type PoolStats } from '@parametric-portal/server/metrics';
+import { Config, type ConfigError, Duration, Effect, type Fiber, Layer, Option, pipe, Schedule, String as S, type Stream } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -29,6 +30,11 @@ const B = Object.freeze({
     app: { name: 'parametric-portal' },
     defaults: { database: 'parametric', host: 'localhost', port: 5432, username: 'postgres' },
     durations: { healthTimeout: Duration.seconds(5), poolReserveTimeout: Duration.millis(100), queryTimeout: Duration.seconds(30) },
+    monitoring: {
+        enabled: process.env['POOL_MONITORING_ENABLED'] !== 'false',
+        intervalMs: Number.parseInt(process.env['POOL_MONITORING_INTERVAL_MS'] ?? '60000', 10),
+        minIntervalMs: 10000,
+    },
     pool: { connectionTtlMs: DurationMs.fromMillis(900000), connectTimeoutMs: DurationMs.fromMillis(5000), idleTimeoutMs: DurationMs.fromMillis(30000), max: NonNegativeInt.decodeSync(10), min: NonNegativeInt.decodeSync(2) } satisfies PoolConfig,
     retry: {
         query: Schedule.exponential(Duration.millis(50)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3))),
@@ -66,6 +72,40 @@ const checkHealth: Effect.Effect<HealthStatus, never, SqlClient> = Effect.gen(fu
     const pool = yield* sql.reserve.pipe(Effect.flatMap((c) => c.execute('SELECT 1', [], undefined)), Effect.scoped, Effect.as(true), Effect.timeout(B.durations.poolReserveTimeout), Effect.catchAll(() => Effect.succeed(false)));
     return { database, pool, ready: database && pool };
 });
+const queryPoolStats: Effect.Effect<PoolStats, SqlError, SqlClient> = pipe(
+    SqlClient,
+    Effect.flatMap((sql) =>
+        sql<{ active: number; idle: number; total: number; waiting: number }>`
+            SELECT
+                COALESCE(SUM(CASE WHEN state != 'idle' AND state IS NOT NULL THEN 1 ELSE 0 END), 0)::int AS active,
+                COALESCE(SUM(CASE WHEN state = 'idle' THEN 1 ELSE 0 END), 0)::int AS idle,
+                COUNT(*)::int AS total,
+                COALESCE(SUM(CASE WHEN wait_event_type IS NOT NULL OR state = 'idle in transaction' THEN 1 ELSE 0 END), 0)::int AS waiting
+            FROM pg_stat_activity
+            WHERE application_name = ${B.app.name}
+              AND pid != pg_backend_pid()
+        `.pipe(Effect.map((rows) => rows[0] ?? { active: 0, idle: 0, total: 0, waiting: 0 })),
+    ),
+);
+const startPoolMonitoring: Effect.Effect<Fiber.RuntimeFiber<void, never>, never, MetricsService | SqlClient> =
+    B.monitoring.enabled
+        ? pipe(
+              Effect.logInfo('Pool monitoring started', { intervalMs: Math.max(B.monitoring.intervalMs, B.monitoring.minIntervalMs) }),
+              Effect.andThen(
+                  pipe(
+                      queryPoolStats,
+                      Effect.flatMap(MetricsService.trackPoolStats),
+                      Effect.catchAll(() => Effect.void),
+                      Effect.repeat(Schedule.spaced(Duration.millis(Math.max(B.monitoring.intervalMs, B.monitoring.minIntervalMs)))),
+                      Effect.asVoid,
+                      Effect.forkDaemon,
+                  ),
+              ),
+          )
+        : pipe(
+              Effect.logInfo('Pool monitoring disabled'),
+              Effect.andThen(Effect.forkDaemon(Effect.void)),
+          );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -92,5 +132,5 @@ const PgLiveWithRetry: PgClientLayer = PgLive.pipe(Layer.retry(B.retry.startup))
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as DATABASE_TUNING, checkHealth, Database, Drizzle, PgLive, PgLiveWithRetry };
+export { B as DATABASE_TUNING, checkHealth, Database, Drizzle, PgLive, PgLiveWithRetry, queryPoolStats, startPoolMonitoring };
 export type { HealthStatus, PgClientLayer, PoolConfig, SslConfig, TransformConfig };

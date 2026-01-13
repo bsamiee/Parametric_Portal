@@ -8,12 +8,7 @@
  */
 import { Option, ParseResult, pipe, Schema as S } from 'effect';
 import DOMPurify from 'isomorphic-dompurify';
-import { Hex8, Uuidv7 } from './types.ts';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type Svg = S.Schema.Type<typeof SvgSchema>
-type SvgAsset = S.Schema.Type<typeof SvgAssetSchema>
+import { companion, Hex8, Uuidv7 } from './types.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -33,8 +28,10 @@ const SvgSchema = pipe(
 	S.filter((s) => s.includes('<svg') && s.includes('</svg>'), { message: () => 'Invalid SVG markup' }),
 	S.brand('Svg'),
 );
+type Svg = typeof SvgSchema.Type;
+
 const SvgAssetSchema = S.Struct({ id: Uuidv7.schema, name: S.NonEmptyTrimmedString, svg: SvgSchema });
-const SvgAssetInputSchema = S.Struct({ name: S.NonEmptyTrimmedString, svg: S.String });
+type SvgAsset = typeof SvgAssetSchema.Type;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -55,12 +52,11 @@ const rewriteNode = (node: Element, idMap: Map<string, string>, scope: string): 
 		const val = node.getAttribute?.(attr);
 		val?.includes('url(#') && node.setAttribute?.(attr, replaceUrlRefs(val, idMap));
 	});
-	node.tagName?.toLowerCase() === 'style' && node.textContent?.includes('url(#') && (() => {
-		// biome-ignore lint/style/noParameterAssign: DOMPurify hooks require in-place DOM mutation
-		node.textContent = replaceUrlRefs(node.textContent, idMap);
-	})();
+	// biome-ignore lint/style/noParameterAssign: DOMPurify hooks require in-place DOM mutation
+	node.tagName?.toLowerCase() === 'style' && node.textContent?.includes('url(#') && (() => { node.textContent = replaceUrlRefs(node.textContent, idMap);})();
 };
-const sanitize = (raw: string, seed?: string): Option.Option<Svg> => { 	/** Sanitize SVG and scope all IDs to prevent collisions. Pure when seed provided, uses generateSync otherwise. */
+/** Sanitize SVG and scope all IDs to prevent collisions. Pure when seed provided, uses generateSync otherwise. */
+const sanitize = (raw: string, seed?: string): Option.Option<Svg> => {
 	const scope = seed === undefined ? Hex8.generateSync() : Hex8.derive(seed);
 	const idMap = new Map<string, string>();
 	DOMPurify.addHook('afterSanitizeAttributes', (node) => rewriteNode(node, idMap, scope));
@@ -72,19 +68,11 @@ const sanitize = (raw: string, seed?: string): Option.Option<Svg> => { 	/** Sani
 	DOMPurify.removeAllHooks();
 	return result.includes('<svg') && result.includes('</svg>') ? Option.some(result as Svg) : Option.none();
 };
-const make = <A, I>(schema: S.Schema<A, I, never>) => Object.freeze({ 	/** Create schema utilities object with common encode/decode/is helpers. */
-	decode: S.decodeUnknown(schema),
-	decodeSync: S.decodeUnknownSync(schema),
-	encode: S.encode(schema),
-	encodeSync: S.encodeSync(schema),
-	is: S.is(schema),
-	schema,
-});
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const Svg = Object.freeze({
-	...make(SvgSchema),
+	...companion(SvgSchema),
 	sanitize,
 	sanitizedSchema: S.transformOrFail(S.String, SvgSchema, {
 		decode: (raw, _, ast) => Option.match(sanitize(raw), {
@@ -96,10 +84,10 @@ const Svg = Object.freeze({
 	}),
 });
 const SvgAsset = Object.freeze({
-	...make(SvgAssetSchema),
+	...companion(SvgAssetSchema),
 	/** Create new asset with generated ID. Returns None if SVG sanitization fails. */
 	create: (name: string, svg: string): Option.Option<SvgAsset> => Option.map(Svg.sanitize(svg), (sanitized) => ({ id: Uuidv7.generateSync(), name, svg: sanitized })),
-	inputSchema: SvgAssetInputSchema,
+	inputSchema: S.Struct({ name: S.NonEmptyTrimmedString, svg: S.String }),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------

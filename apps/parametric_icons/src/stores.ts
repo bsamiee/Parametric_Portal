@@ -6,15 +6,7 @@ import type { ExportFormat } from '@parametric-portal/runtime/services/browser';
 import { createStore } from '@parametric-portal/runtime/store/factory';
 import { ColorMode, Intent, OutputMode } from '@parametric-portal/types/icons';
 import { Svg, SvgAsset } from '@parametric-portal/types/svg';
-import {
-    Index,
-    PositiveInt,
-    Timestamp,
-    TYPES_TUNING,
-    Uuidv7,
-    VariantCount,
-    ZoomFactor,
-} from '@parametric-portal/types/types';
+import { Index, PositiveInt, Timestamp, Uuidv7, VariantCount, ZoomFactor } from '@parametric-portal/types/types';
 import { Option, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -96,7 +88,7 @@ type UiActions = {
 
 const MessageSchema = S.Struct({
     content: S.String,
-    id: S.typeSchema(Uuidv7.schema),
+    id: Uuidv7.schema,
     role: S.Literal('user', 'assistant'),
     timestamp: Timestamp.schema,
 });
@@ -111,11 +103,13 @@ const PreviewStateSchema = S.Struct({
 });
 const ContextStateSchema = S.Struct({
     attachments: S.Array(SvgAsset.schema),
-    colorMode: ColorMode,
-    intent: Intent,
-    output: OutputMode,
+    colorMode: ColorMode.schema,
+    intent: Intent.schema,
+    output: OutputMode.schema,
 });
-const SubmittedContextSchema = S.NullOr(S.Struct({ context: ContextStateSchema, intent: Intent, prompt: S.String }));
+const SubmittedContextSchema = S.NullOr(
+    S.Struct({ context: ContextStateSchema, intent: Intent.schema, prompt: S.String }),
+);
 const UiStateSchema = S.Struct({
     activeTab: S.Literal('history', 'inspector', 'library', 'session'),
     exportFormat: S.Literal('png', 'svg', 'zip'),
@@ -132,8 +126,8 @@ const UiStateSchema = S.Struct({
 });
 const AssetSchema = S.Struct({
     context: ContextStateSchema,
-    id: S.typeSchema(Uuidv7.schema),
-    intent: Intent,
+    id: Uuidv7.schema,
+    intent: Intent.schema,
     prompt: S.String,
     selectedVariantIndex: S.optional(Index.schema),
     timestamp: Timestamp.schema,
@@ -176,7 +170,7 @@ const B = Object.freeze({
         uploadState: 'idle',
     } as UiState,
     variantCount: { batch: VariantCount.decodeSync(3), single: VariantCount.decodeSync(1) },
-    zoom: { factor: 1.25, max: TYPES_TUNING.bounds.zoomFactor.max, min: TYPES_TUNING.bounds.zoomFactor.min },
+    zoom: { factor: 1.25, max: ZoomFactor.max, min: ZoomFactor.min },
 } as const);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

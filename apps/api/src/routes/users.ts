@@ -45,9 +45,7 @@ const handleUpdateRole = Effect.fn('users.updateRole')(
 const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
     Effect.gen(function* () {
         const repos = yield* DatabaseService;
-        return handlers.handle('updateRole', ({ path: { id }, payload: { role } }) =>
-            handleUpdateRole(repos, id, role),
-        );
+        return handlers.handle('updateRole', ({ path: { id }, payload: { role } }) => handleUpdateRole(repos, id, role), );
     }),
 );
 

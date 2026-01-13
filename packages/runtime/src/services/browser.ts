@@ -1,6 +1,5 @@
 /**
- * Provide browser services for download and export operations.
- * Single polymorphic service with dispatch table for export formats.
+ * Browser download and export service with polymorphic dispatch table.
  */
 import { Clipboard } from '@effect/platform-browser';
 import { AppError } from '@parametric-portal/types/app-error';
@@ -146,5 +145,5 @@ const BrowserServicesLive = Layer.mergeAll(Clipboard.layer, BrowserLive);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Browser, BrowserServicesLive, buildFilename, sanitizeFilename };
+export { Browser, BrowserServicesLive, sanitizeFilename };
 export type { BrowserService, ExportFormat, ExportInput };

@@ -1,7 +1,5 @@
 /**
- * Expose browser APIs through React hooks with Effect-based error handling.
- * Bridges Clipboard and Browser services for declarative UI consumption.
- * Uses AsyncState for unified lifecycle management.
+ * Browser API hooks with Effect error handling and AsyncState lifecycle.
  */
 import { Clipboard } from '@effect/platform-browser';
 import { AppError } from '@parametric-portal/types/app-error';

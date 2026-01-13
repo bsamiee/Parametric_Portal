@@ -4,7 +4,7 @@
  */
 
 import { AUTH_TUNING, OAuthResult } from '@parametric-portal/server/auth';
-import { Crypto, EncryptedKey, EncryptionKeyService } from '@parametric-portal/server/crypto';
+import { Crypto, EncryptedKey, EncryptionKeyStore } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { MetricsService } from '@parametric-portal/server/metrics';
 import { OAuth } from '@parametric-portal/server/middleware';
@@ -15,18 +15,8 @@ import { Config, type ConfigError, Effect, Layer, Redacted, Schema as S } from '
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const GitHubUser = S.Struct({
-    avatarUrl: S.optional(S.String).pipe(S.fromKey('avatar_url')),
-    email: S.NullishOr(S.String),
-    id: S.Number,
-    name: S.NullishOr(S.String),
-});
-const OIDCClaims = S.Struct({
-    email: S.optional(S.String),
-    name: S.optional(S.String),
-    picture: S.optional(S.String),
-    sub: S.String,
-});
+const GitHubUser = S.Struct({ avatarUrl: S.optional(S.String).pipe(S.fromKey('avatar_url')), email: S.NullishOr(S.String), id: S.Number, name: S.NullishOr(S.String), });
+const OIDCClaims = S.Struct({ email: S.optional(S.String), name: S.optional(S.String), picture: S.optional(S.String), sub: S.String, });
 
 // --- [CLASSES] ---------------------------------------------------------------
 
@@ -37,7 +27,7 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
     verifier: S.optional(S.String),
 }) {
     static readonly encrypt = Effect.fn('oauth.state.encrypt')(
-        (provider: typeof OAuthProvider.Type, state: string, verifier?: string) =>
+        (provider: OAuthProvider, state: string, verifier?: string) =>
             Crypto.Key.encrypt(
                 JSON.stringify({
                     exp: Timestamp.addDuration(Timestamp.nowSync(), AUTH_TUNING.durations.pkce),
@@ -51,7 +41,7 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
                 Effect.mapError(() => mkErr(provider, 'OAuth state encryption failed', 'STATE_ENCRYPT_FAILED')),
             ),
     );
-    static readonly decrypt = Effect.fn('oauth.state.decrypt')((provider: typeof OAuthProvider.Type, encrypted: string) =>
+    static readonly decrypt = Effect.fn('oauth.state.decrypt')((provider: OAuthProvider, encrypted: string) =>
         EncryptedKey.decryptBytes(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
             Effect.flatMap((json) => S.decodeUnknown(OAuthState)(JSON.parse(json))),
             Effect.filterOrFail(
@@ -69,11 +59,22 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const mkErr = (provider: typeof OAuthProvider.Type, reason: string, _code: string, _cause?: unknown) => new HttpError.OAuth({ provider, reason });
+const isPkceProvider = (p: OAuthProvider): p is 'google' | 'microsoft' => p === 'google' || p === 'microsoft';
+const mkErr = (provider: OAuthProvider, reason: string, _code: string, _cause?: unknown) => new HttpError.OAuth({ provider, reason });
+const mapArctic = (p: OAuthProvider, e: unknown) => arcticHandlers.find(([guard]) => guard(e))?.[1](p, e as never) ?? new HttpError.OAuth({ provider: p, reason: e instanceof Error ? e.message : 'Unknown error' });
 const handler = <T>(
     guard: (e: unknown) => e is T,
-    fn: (p: typeof OAuthProvider.Type, e: T) => InstanceType<typeof HttpError.OAuth>,
+    fn: (p: OAuthProvider, e: T) => InstanceType<typeof HttpError.OAuth>,
 ) => [guard, fn] as const;
+const extractResult = (t: OAuth2Tokens, user: { readonly id: string; readonly email?: string | null }) =>
+    OAuthResult.fromProvider(
+        {
+            accessToken: t.accessToken(),
+            expiresAt: 'expires_in' in t.data ? t.accessTokenExpiresAt() : undefined,
+            refreshToken: t.hasRefreshToken() ? t.refreshToken() : undefined,
+        },
+        { email: user.email, providerAccountId: user.id },
+    );
 const arcticHandlers = [
     handler(
         (e): e is OAuth2RequestError => e instanceof OAuth2RequestError,
@@ -92,32 +93,15 @@ const arcticHandlers = [
         (p, e) => mkErr(p, `Unexpected error: HTTP ${e.status}`, 'UNEXPECTED_ERROR_BODY'),
     ),
 ] as const;
-const isPkceProvider = (p: typeof OAuthProvider.Type): p is 'google' | 'microsoft' => p === 'google' || p === 'microsoft';
-const mapArctic = (p: typeof OAuthProvider.Type, e: unknown) =>
-    arcticHandlers.find(([guard]) => guard(e))?.[1](p, e as never) ??
-    new HttpError.OAuth({ provider: p, reason: e instanceof Error ? e.message : 'Unknown error' });
-const extractResult = (t: OAuth2Tokens, user: { readonly id: string; readonly email?: string | null }) =>
-    OAuthResult.fromProvider(
-        {
-            accessToken: t.accessToken(),
-            expiresAt: 'expires_in' in t.data ? t.accessTokenExpiresAt() : undefined,
-            refreshToken: t.hasRefreshToken() ? t.refreshToken() : undefined,
-        },
-        { email: user.email, providerAccountId: user.id },
-    );
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const oidcResult = (provider: typeof OAuthProvider.Type, tokens: OAuth2Tokens) =>
+const oidcResult = (provider: OAuthProvider, tokens: OAuth2Tokens) =>
     Effect.try({
         catch: () => mkErr(provider, 'idToken() not available', 'NO_ID_TOKEN'),
         try: () => decodeIdToken(tokens.idToken()),
     }).pipe(
-        Effect.flatMap((claims) =>
-            S.decodeUnknown(OIDCClaims)(claims).pipe(
-                Effect.mapError(() => mkErr(provider, 'Invalid token claims', 'INVALID_CLAIMS')),
-            ),
-        ),
+        Effect.flatMap((claims) => S.decodeUnknown(OIDCClaims)(claims).pipe(Effect.mapError(() => mkErr(provider, 'Invalid token claims', 'INVALID_CLAIMS')),), ),
         Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: d.sub })),
     );
 const githubResult = (tokens: OAuth2Tokens) =>
@@ -129,15 +113,8 @@ const githubResult = (tokens: OAuth2Tokens) =>
             }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
     }).pipe(
         Effect.retry(AUTH_TUNING.oauth.retry),
-        Effect.timeoutFail({
-            duration: AUTH_TUNING.oauth.timeout,
-            onTimeout: () => mkErr('github', 'Request timeout', 'TIMEOUT'),
-        }),
-        Effect.flatMap((r) =>
-            S.decodeUnknown(GitHubUser)(r).pipe(
-                Effect.mapError(() => mkErr('github', 'Invalid response', 'INVALID_RESPONSE')),
-            ),
-        ),
+        Effect.timeoutFail({duration: AUTH_TUNING.oauth.timeout, onTimeout: () => mkErr('github', 'Request timeout', 'TIMEOUT'),}),
+        Effect.flatMap((r) => S.decodeUnknown(GitHubUser)(r).pipe(Effect.mapError(() => mkErr('github', 'Invalid response', 'INVALID_RESPONSE')),), ),
         Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: String(d.id) })),
     );
 const extractAuth = Object.freeze({
@@ -145,11 +122,8 @@ const extractAuth = Object.freeze({
     github: githubResult,
     google: (t: OAuth2Tokens) => oidcResult('google', t),
     microsoft: (t: OAuth2Tokens) => oidcResult('microsoft', t),
-} satisfies Record<
-    typeof OAuthProvider.Type,
-    (t: OAuth2Tokens) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>>
->);
-const validateState = (provider: typeof OAuthProvider.Type, state: string, stateCookie: string) =>
+} satisfies Record< OAuthProvider, (t: OAuth2Tokens) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>> >);
+const validateState = (provider: OAuthProvider, state: string, stateCookie: string) =>
     OAuthState.decrypt(provider, stateCookie).pipe(
         Effect.filterOrFail(
             (p) => p.state === state,
@@ -179,7 +153,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
             loadAppleCreds,
             Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common')),
         ]);
-        const redirect = (p: typeof OAuthProvider.Type) => `${baseUrl}/api/auth/oauth/${p}/callback`;
+        const redirect = (p: OAuthProvider) => `${baseUrl}/api/auth/oauth/${p}/callback`;
         const applePrivateKey = new TextEncoder().encode(Redacted.value(appleCreds.privateKey));
         const clients = Object.freeze({
             apple: new Apple(appleCreds.clientId, appleCreds.teamId, appleCreds.keyId, applePrivateKey, redirect('apple')),
@@ -192,7 +166,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                 redirect('microsoft'),
             ),
         });
-        const exchange = (provider: typeof OAuthProvider.Type, fn: () => Promise<OAuth2Tokens>) =>
+        const exchange = (provider: OAuthProvider, fn: () => Promise<OAuth2Tokens>) =>
             Effect.tryPromise({ catch: (e) => mapArctic(provider, e), try: fn }).pipe(
                 Effect.retry(AUTH_TUNING.oauth.retry),
                 Effect.timeoutFail({
@@ -204,14 +178,13 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
             apple: (_token: string) => Promise.reject(new Error('Apple does not support refresh tokens')),
             github: (token: string) => clients.github.refreshAccessToken(token),
             google: (token: string) => clients.google.refreshAccessToken(token),
-            microsoft: (token: string) =>
-                clients.microsoft.refreshAccessToken(token, [...AUTH_TUNING.oauth.scopes.oidc]),
-        } satisfies Record<typeof OAuthProvider.Type, (token: string) => Promise<OAuth2Tokens>>);
-        const createAuthUrl = (provider: typeof OAuthProvider.Type, state: string, verifier: string | undefined, scopes: string[]): URL =>
+            microsoft: (token: string) => clients.microsoft.refreshAccessToken(token, [...AUTH_TUNING.oauth.scopes.oidc]),
+        } satisfies Record<OAuthProvider, (token: string) => Promise<OAuth2Tokens>>);
+        const createAuthUrl = (provider: OAuthProvider, state: string, verifier: string | undefined, scopes: string[]): URL =>
             isPkceProvider(provider)
                 ? clients[provider].createAuthorizationURL(state, verifier as string, scopes)
                 : clients[provider].createAuthorizationURL(state, scopes);
-        const validateCode = (provider: typeof OAuthProvider.Type, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
+        const validateCode = (provider: OAuthProvider, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
             isPkceProvider(provider)
                 ? clients[provider].validateAuthorizationCode(code, verifier as string)
                 : clients[provider].validateAuthorizationCode(code);
@@ -224,7 +197,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                         : Effect.void);
                     const rawTokens = yield* exchange(provider, () => validateCode(provider, code, verifier));
                     return yield* extractAuth[provider](rawTokens);
-                }).pipe(Effect.provide(EncryptionKeyService.layer), Effect.provide(MetricsService.layer)),
+                }).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.layer)),
             createAuthorizationUrl: (provider) =>
                 Effect.gen(function* () {
                     const state = generateState();
@@ -233,7 +206,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
                     const stateCookie = yield* OAuthState.encrypt(provider, state, verifier);
                     const url = createAuthUrl(provider, state, verifier, scopes);
                     return { stateCookie, url };
-                }).pipe(Effect.provide(EncryptionKeyService.layer), Effect.provide(MetricsService.layer)),
+                }).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.layer)),
             refreshToken: (provider, token) =>
                 exchange(provider, () => refreshHandlers[provider](token)).pipe(
                     Effect.map((t) => extractResult(t, { email: null, id: '' })),

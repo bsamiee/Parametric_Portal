@@ -1,7 +1,5 @@
-/**
- * API server entry point with Layer composition.
- * Uses DatabaseService.layer and static layer patterns.
- */
+/** API server entry point with Layer composition. Uses DatabaseService.layer and static layer patterns. */
+
 import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
@@ -10,20 +8,23 @@ import { PgLive } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { AuthContext } from '@parametric-portal/server/auth';
-import { EncryptionKeyService } from '@parametric-portal/server/crypto';
+import { EncryptionKeyStore } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { MetricsService } from '@parametric-portal/server/metrics';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { RateLimit } from '@parametric-portal/server/rate-limit';
 import { TelemetryLive } from '@parametric-portal/server/telemetry';
+import { TotpReplayGuard } from '@parametric-portal/server/totp-replay';
 import { DurationMs, type Hex64 } from '@parametric-portal/types/types';
 import { Config, Effect, Layer, Option } from 'effect';
 import { OAuthLive } from './oauth.ts';
+import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
 import { IconsLive } from './routes/icons.ts';
-import { TelemetryRouteLive } from './routes/telemetry.ts';
-import { UsersLive } from './routes/users.ts';
 import { MfaLive } from './routes/mfa.ts';
+import { TelemetryRouteLive } from './routes/telemetry.ts';
+import { TransferLive } from './routes/transfer.ts';
+import { UsersLive } from './routes/users.ts';
 import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -48,33 +49,17 @@ const SessionLookupLive = Layer.effect(
         const metrics = yield* MetricsService;
         return {
             lookup: (tokenHash: Hex64) =>
-                Effect.gen(function* () {
-                    const sessionOpt = yield* db.sessions.findValidByTokenHash(tokenHash);
-                    return yield* Option.match(sessionOpt, {
+                db.sessions.findValidByTokenHash(tokenHash).pipe(
+                    Effect.flatMap(Option.match({
                         onNone: () => Effect.succeed(Option.none<AuthContext>()),
-                        onSome: (session) =>
-                            db.mfaSecrets.findByUserId(session.userId).pipe(
-                                Effect.map((mfaOpt) => {
-                                    const mfaRequired = Option.match(mfaOpt, {
-                                        onNone: () => false,
-                                        onSome: (mfa) => mfa.enabledAt !== null,
-                                    });
-                                    return Option.some(AuthContext.fromSession({
-                                        id: session.id,
-                                        mfaRequired,
-                                        mfaVerifiedAt: session.mfaVerifiedAt,
-                                        userId: session.userId,
-                                    }));
-                                }),
-                            ),
-                    });
-                }).pipe(
-                    Effect.catchAll((error) =>
-                        Effect.gen(function* () {
-                            yield* Effect.logError('Session lookup failed', { error: String(error) });
-                            return Option.none<AuthContext>();
-                        }),
-                    ),
+                        onSome: (session) => db.mfaSecrets.findByUserId(session.userId).pipe(Effect.map((mfaOpt) => Option.some(AuthContext.fromSession({
+                            id: session.id,
+                            mfaRequired: Option.isSome(mfaOpt) && mfaOpt.value.enabledAt !== null,
+                            mfaVerifiedAt: session.mfaVerifiedAt,
+                            userId: session.userId,
+                        })))),
+                    })),
+                    Effect.catchAll((error) => Effect.logError('Session lookup failed', { error: String(error) }).pipe(Effect.as(Option.none<AuthContext>()))),
                     Effect.provideService(MetricsService, metrics),
                 ),
         };
@@ -85,12 +70,7 @@ const UserLookupLive = Layer.effect(
     Effect.gen(function* () {
         const db = yield* DatabaseService;
         const metrics = yield* MetricsService;
-        return {
-            findById: (userId: string) =>
-                db.users.findById(userId as Parameters<typeof db.users.findById>[0]).pipe(
-                    Effect.provideService(MetricsService, metrics),
-                ),
-        };
+        return { findById: (userId: string) => db.users.findById(userId as Parameters<typeof db.users.findById>[0]).pipe( Effect.provideService(MetricsService, metrics), ), };
     }),
 );
 const AppLookupLive = Layer.effect(
@@ -136,24 +116,16 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
     }),
 );
 const RateLimitLive = RateLimit.layer;
-const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyService.layer, RateLimitLive);
+const InfraLayers = Layer.mergeAll(PgLive, TelemetryLive, EncryptionKeyStore.layer, RateLimitLive, MetricsService.layer, TotpReplayGuard.Default);
 const RouteDependencies = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive);
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
-    Layer.provide(Layer.mergeAll(HealthLive, AuthLive, IconsLive, MfaLive, TelemetryRouteLive, UsersLive)),
+    Layer.provide(Layer.mergeAll(AuditLive, AuthLive, HealthLive, IconsLive, MfaLive, TelemetryRouteLive, TransferLive, UsersLive)),
     Layer.provide(RouteDependencies),
     Layer.provide(InfraLayers),
 );
 const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const ServerLive = HttpApiBuilder.serve((app) =>
-    // CRITICAL: Middleware order matters - dependencies flow top-to-bottom:
-    // 1. xForwardedHeaders - Extract real client IP/proto for logging/tracing
-    // 2. trace - Start request tracing span
-    // 3. security - Apply security headers
-    // 4. requestId - Generate/extract request ID (MUST precede requestContext)
-    // 5. requestContext - Provides RequestContext service (depends on requestId)
-    // 6. metrics - Record HTTP metrics (uses RequestContext for app label)
-    // 7. logger - Log request/response (uses all above context)
     app.pipe(
         Middleware.xForwardedHeaders,
         Middleware.trace,
@@ -164,14 +136,14 @@ const ServerLive = HttpApiBuilder.serve((app) =>
         HttpMiddleware.logger,
     ),
 ).pipe(
+    Layer.provide(Layer.mergeAll(AppLookupServiceLive, MetricsService.layer)),
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),
     Layer.provide(SessionAuthLive),
     Layer.provide(UserLookupServiceLive),
-    Layer.provide(AppLookupServiceLive),
-    Layer.provide(MetricsService.layer),
-    Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port }).pipe(HttpServer.withLogAddress)),
+    HttpServer.withLogAddress,
+    Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
 );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

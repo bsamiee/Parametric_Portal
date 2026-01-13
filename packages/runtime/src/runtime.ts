@@ -1,7 +1,5 @@
 /**
- * Bridge Effect ManagedRuntime to React context.
- * Provides unified Runtime object with UI coordination (FloatingDelayGroup).
- * CSS variable readers exported for component hooks (floating, toast).
+ * Bridge Effect ManagedRuntime to React with FloatingUI coordination.
  */
 import { FloatingDelayGroup, FloatingTree } from '@floating-ui/react';
 import { type Layer, ManagedRuntime, Option } from 'effect';
@@ -32,7 +30,6 @@ const ctx = createContext<ManagedRuntime.ManagedRuntime<any, any> | null>(null);
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const clamp = (v: number, min: number, max: number): number => Math.max(min, Math.min(max, v));
-
 const readCssVar = (name: string): string => {
     const root = globalThis.document?.documentElement;
     return root === undefined ? '' : getComputedStyle(root).getPropertyValue(name).trim();

@@ -1,6 +1,5 @@
 /**
- * Handle cross-origin iframe/window messaging with type safety.
- * Provides Effect Stream for continuous listening with Schema validation.
+ * Cross-origin messaging with Effect Streams and Schema validation.
  */
 import { AppError } from '@parametric-portal/types/app-error';
 import { DurationMs, Timestamp } from '@parametric-portal/types/types';
@@ -10,21 +9,14 @@ import type { StoreApi } from 'zustand';
 import { Runtime } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
-type MessagePayload<T = unknown> = {
-    readonly data: T;
-    readonly timestamp: Timestamp;
-    readonly type: string;
-};
 type MessageListenerOptions<T = unknown> = {
     // biome-ignore lint/suspicious/noExplicitAny: Schema generic escape
     readonly schema?: S.Schema<T, any>;
     readonly targetOrigin?: string;
     readonly typeFilter?: string;
 };
-type StoreSyncConfig<T> = {
-    readonly debounceMs?: DurationMs;
-    readonly keys?: ReadonlyArray<keyof T>;
-};
+type StoreSyncConfig<T> = { readonly debounceMs?: DurationMs; readonly keys?: ReadonlyArray<keyof T> };
+type MessagePayload<T = unknown> = { readonly data: T; readonly timestamp: Timestamp; readonly type: string };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -149,12 +141,4 @@ const useStoreReceiver = <T, R = never>(onReceive: (state: T) => void): void =>
 // --- [EXPORT] ----------------------------------------------------------------
 
 export type { MessageListenerOptions, MessagePayload, StoreSyncConfig };
-export {
-    B as MESSAGING_TUNING,
-    createMessageStream,
-    createPayload,
-    sendMessage,
-    useMessageListener,
-    useStoreReceiver,
-    useStoreSync,
-};
+export { B as MESSAGING_TUNING, useMessageListener, useStoreReceiver, useStoreSync };

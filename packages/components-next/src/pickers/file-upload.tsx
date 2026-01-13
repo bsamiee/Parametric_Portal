@@ -7,7 +7,7 @@
 import { AsyncState } from '@parametric-portal/types/async';
 import type { FC, ReactNode, Ref } from 'react';
 import { useCallback, useMemo } from 'react';
-import type { DragTypes, DropItem, DropOperation, FileDropItem } from 'react-aria';
+import type { DirectoryDropItem, DragTypes, DropItem, DropOperation, FileDropItem } from 'react-aria';
 import { useClipboard } from 'react-aria';
 import { DropZone, FileTrigger } from 'react-aria-components';
 import { Toast, type ToastTrigger } from '../core/toast';
@@ -54,17 +54,34 @@ const B = Object.freeze({
 	}),
 });
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const extractFiles = async (items: readonly DropItem[]): Promise<readonly File[]> =>
-	Promise.all(items.filter((i): i is FileDropItem => i.kind === 'file').map((i) => i.getFile()));
+const walkDirectory = async (dir: DirectoryDropItem, basePath = ''): Promise<ReadonlyArray<File>> => {
+	// biome-ignore lint/nursery/useAwaitThenable: AsyncIterable requires Array.fromAsync which returns Promise
+	const entries = await Array.fromAsync(dir.getEntries());
+	const makePath = (name: string) => (basePath ? `${basePath}/${name}` : name);
+	const handlers = {
+		directory: (entry: DirectoryDropItem, path: string) => walkDirectory(entry, path),
+		file: async (entry: { getFile: () => Promise<File> }, _path: string) => [await entry.getFile()],
+	} as const;
+	const results = await Promise.all(
+		entries.map((entry) => handlers[entry.kind]?.(entry as never, makePath(entry.name)) ?? Promise.resolve([])),
+	);
+	return results.flat();
+};
+const extractFiles = async (items: readonly DropItem[]): Promise<readonly File[]> => {
+	const files = await Promise.all(items.filter((i): i is FileDropItem => i.kind === 'file').map((i) => i.getFile()));
+	const directories = items.filter((i): i is DirectoryDropItem => i.kind === 'directory');
+	const directoryFiles = await Promise.all(directories.map((d) => walkDirectory(d)));
+	return [...files, ...directoryFiles.flat()];
+};
+
+// --- [ENTRY_POINT] -----------------------------------------------------------
 const acceptTypes = (...types: readonly string[]) =>
-	(dragTypes: DragTypes, allowed: DropOperation[]): DropOperation =>
-		types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
+	(dragTypes: DragTypes, allowed: DropOperation[]): DropOperation => types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
 const FileUpload: FC<FileUploadProps> = ({
 	accept, acceptDirectory, asyncState, children, className, defaultCamera, isDisabled,
-	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, progress = 0, ref, toast, trigger,
-}) => {
+	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, progress = 0, ref, toast, trigger, }) => {
 	Toast.useTrigger(asyncState, toast);
 	const onDropHandler = useCallback(
 		(e: { items: readonly DropItem[] }) => void extractFiles(e.items).then((f) => f.length > 0 && onFilesChange(f)),

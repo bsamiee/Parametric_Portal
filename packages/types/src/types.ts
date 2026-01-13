@@ -1,6 +1,8 @@
 /**
  * Export branded primitives with schema validation and generation.
  * Unifies type/value exports via Effect Schema for domain safety.
+ *
+ * Pattern: Brand.X() returns frozen companion object, typeof X.Type extracts type.
  */
 import { DateTime, Effect, pipe, Schema as S } from 'effect';
 
@@ -30,16 +32,7 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const sb = Object.freeze({
-	boundedInt: <T extends string>(label: T, min: number, max: number) => pipe(S.Number, S.int(), S.between(min, max), S.brand(label)),
-	boundedNumber: <T extends string>(label: T, min: number, max: number) => pipe(S.Number, S.between(min, max), S.brand(label)),
-	nonNegativeInt: <T extends string>(label: T) => pipe(S.Number, S.int(), S.nonNegative(), S.brand(label)),
-	nonNegativeNumber: <T extends string>(label: T) => pipe(S.Number, S.nonNegative(), S.brand(label)),
-	pattern: <T extends string>(label: T, regex: RegExp) => pipe(S.String, S.pattern(regex), S.brand(label)),
-	positiveInt: <T extends string>(label: T) => pipe(S.Number, S.int(), S.positive(), S.brand(label)),
-	positiveNumber: <T extends string>(label: T) => pipe(S.Number, S.positive(), S.brand(label)),
-} as const);
-const make = <A, I>(schema: S.Schema<A, I, never>) =>
+const companion = <A, I>(schema: S.Schema<A, I, never>) =>
 	Object.freeze({
 		decode: S.decodeUnknown(schema),
 		decodeEither: S.decodeUnknownEither(schema),
@@ -48,16 +41,25 @@ const make = <A, I>(schema: S.Schema<A, I, never>) =>
 		encodeSync: S.encodeSync(schema),
 		is: S.is(schema),
 		schema,
+		Type: undefined as unknown as A,
 	});
-const schemaDefaults = <T>(schema: S.Schema<T, unknown, never>, fallback: T): T => Effect.runSync(Effect.try({ catch: () => fallback, try: () => S.decodeUnknownSync(schema)({}) }));
-const makeGeneratable = <A, I>(schema: S.Schema<A, I, never>, generateSync: () => A) => Object.freeze({ ...make(schema), generate: Effect.sync(generateSync), generateSync });
+const Brand = Object.freeze({
+	boundedInt: <T extends string>(label: T, min: number, max: number) => companion(pipe(S.Number, S.int(), S.between(min, max), S.brand(label))),
+	boundedNumber: <T extends string>(label: T, min: number, max: number) => companion(pipe(S.Number, S.between(min, max), S.brand(label))),
+	nonNegativeInt: <T extends string>(label: T) => companion(pipe(S.Number, S.int(), S.nonNegative(), S.brand(label))),
+	nonNegativeNumber: <T extends string>(label: T) => companion(pipe(S.Number, S.nonNegative(), S.brand(label))),
+	pattern: <T extends string>(label: T, regex: RegExp) => companion(pipe(S.String, S.pattern(regex), S.brand(label))),
+	positiveInt: <T extends string>(label: T) => companion(pipe(S.Number, S.int(), S.positive(), S.brand(label))),
+	positiveNumber: <T extends string>(label: T) => companion(pipe(S.Number, S.positive(), S.brand(label))),
+});
+const withGen = <A, I, Gen extends () => A>(base: ReturnType<typeof companion<A, I>>, generateSync: Gen) => Object.freeze({ ...base, generate: Effect.sync(generateSync), generateSync });
 
 // --- [DURATION_MS] -----------------------------------------------------------
 
-const DurationMsSchema = sb.nonNegativeNumber('DurationMs');
-type DurationMs = S.Schema.Type<typeof DurationMsSchema>
+const _DurationMs = Brand.nonNegativeNumber('DurationMs');
+type DurationMs = typeof _DurationMs.Type;
 const DurationMs = Object.freeze({
-	...make(DurationMsSchema),
+	..._DurationMs,
 	add: (a: DurationMs, b: DurationMs): DurationMs => (a + b) as DurationMs,
 	clamp: (d: DurationMs, min: DurationMs, max: DurationMs): DurationMs => Math.max(min, Math.min(max, d)) as DurationMs,
 	fromMillis: (ms: number): DurationMs => ms as DurationMs,
@@ -71,145 +73,130 @@ const DurationMs = Object.freeze({
 
 // --- [EMAIL] -----------------------------------------------------------------
 
-const EmailSchema = sb.pattern('Email', B.patterns.email);
-type Email = S.Schema.Type<typeof EmailSchema>
-const Email = Object.freeze(make(EmailSchema));
+const Email = Brand.pattern('Email', B.patterns.email);
+type Email = typeof Email.Type;
 
 // --- [HEX8] ------------------------------------------------------------------
 
-const Hex8Schema = sb.pattern('Hex8', B.patterns.hex8);
-type Hex8 = S.Schema.Type<typeof Hex8Schema>
+const _Hex8 = Brand.pattern('Hex8', B.patterns.hex8);
+type Hex8 = typeof _Hex8.Type;
 const hex8GenerateSync = (): Hex8 => [...crypto.getRandomValues(new Uint8Array(B.hex.length8 / 2))].map((b) => b.toString(B.hex.radix).padStart(2, '0')).join('') as Hex8;
-/** Derive deterministic 8-character hex from seed string. */
 const hex8Derive = (seed: string): Hex8 => {
 	const mod = B.hex.radix ** B.hex.length8;
 	const hash = Array.from(seed).reduce<number>((a, c) => (a * 31 + (c.codePointAt(0) ?? 0)) % mod, 0);
 	return hash.toString(B.hex.radix).padStart(B.hex.length8, '0').slice(-B.hex.length8) as Hex8;
 };
-const Hex8 = Object.freeze({ ...makeGeneratable(Hex8Schema, hex8GenerateSync), derive: hex8Derive });
+const Hex8 = Object.freeze({ ...withGen(_Hex8, hex8GenerateSync), derive: hex8Derive });
 
 // --- [HEX64] -----------------------------------------------------------------
 
-const Hex64Schema = sb.pattern('Hex64', B.patterns.hex64);
-type Hex64 = S.Schema.Type<typeof Hex64Schema>
+const _Hex64 = Brand.pattern('Hex64', B.patterns.hex64);
+type Hex64 = typeof _Hex64.Type;
 const Hex64 = Object.freeze({
-	...make(Hex64Schema),
+	..._Hex64,
 	fromBase64: (base64: string): Uint8Array => Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0),
-	fromBytes: (bytes: Uint8Array): Hex64 => S.decodeSync(Hex64Schema)([...bytes].map((b) => b.toString(B.hex.radix).padStart(2, '0')).join('')),
+	fromBytes: (bytes: Uint8Array): Hex64 => [...bytes].map((b) => b.toString(B.hex.radix).padStart(2, '0')).join('') as Hex64,
 });
 
 // --- [HEX_COLOR] -------------------------------------------------------------
 
-const HexColorSchema = sb.pattern('HexColor', B.patterns.hexColor);
-type HexColor = S.Schema.Type<typeof HexColorSchema>
-const HexColor = Object.freeze(make(HexColorSchema));
+const HexColor = Brand.pattern('HexColor', B.patterns.hexColor);
+type HexColor = typeof HexColor.Type;
 
 // --- [HTML_ID] ---------------------------------------------------------------
 
-const HtmlIdSchema = sb.pattern('HtmlId', B.patterns.htmlId);
-type HtmlId = S.Schema.Type<typeof HtmlIdSchema>
-const HtmlId = Object.freeze(make(HtmlIdSchema));
+const HtmlId = Brand.pattern('HtmlId', B.patterns.htmlId);
+type HtmlId = typeof HtmlId.Type;
 
 // --- [INDEX] -----------------------------------------------------------------
 
-const IndexSchema = sb.boundedInt('Index', B.bounds.index.min, B.bounds.index.max);
-type Index = S.Schema.Type<typeof IndexSchema>
-const Index = Object.freeze(make(IndexSchema));
+const Index = Brand.boundedInt('Index', B.bounds.index.min, B.bounds.index.max);
+type Index = typeof Index.Type;
 
 // --- [ISO_DATE] --------------------------------------------------------------
 
-const IsoDateSchema = sb.pattern('IsoDate', B.patterns.isoDate);
-type IsoDate = S.Schema.Type<typeof IsoDateSchema>
-const IsoDate = Object.freeze(make(IsoDateSchema));
+const IsoDate = Brand.pattern('IsoDate', B.patterns.isoDate);
+type IsoDate = typeof IsoDate.Type;
 
 // --- [NON_NEGATIVE_INT] ------------------------------------------------------
 
-const NonNegativeIntSchema = sb.nonNegativeInt('NonNegativeInt');
-type NonNegativeInt = S.Schema.Type<typeof NonNegativeIntSchema>
-const NonNegativeInt = Object.freeze(make(NonNegativeIntSchema));
+const NonNegativeInt = Brand.nonNegativeInt('NonNegativeInt');
+type NonNegativeInt = typeof NonNegativeInt.Type;
 
 // --- [PERCENTAGE] ------------------------------------------------------------
 
-const PercentageSchema = sb.boundedNumber('Percentage', B.bounds.percentage.min, B.bounds.percentage.max);
-type Percentage = S.Schema.Type<typeof PercentageSchema>
-const Percentage = Object.freeze(make(PercentageSchema));
+const Percentage = Brand.boundedNumber('Percentage', B.bounds.percentage.min, B.bounds.percentage.max);
+type Percentage = typeof Percentage.Type;
 
 // --- [POSITIVE_INT] ----------------------------------------------------------
 
-const PositiveIntSchema = sb.positiveInt('PositiveInt');
-type PositiveInt = S.Schema.Type<typeof PositiveIntSchema>
-const PositiveInt = Object.freeze(make(PositiveIntSchema));
+const PositiveInt = Brand.positiveInt('PositiveInt');
+type PositiveInt = typeof PositiveInt.Type;
 
 // --- [SAFE_INTEGER] ----------------------------------------------------------
 
-const SafeIntegerSchema = sb.boundedInt('SafeInteger', B.bounds.safeInteger.min, B.bounds.safeInteger.max);
-type SafeInteger = S.Schema.Type<typeof SafeIntegerSchema>
-const SafeInteger = Object.freeze(make(SafeIntegerSchema));
+const SafeInteger = Brand.boundedInt('SafeInteger', B.bounds.safeInteger.min, B.bounds.safeInteger.max);
+type SafeInteger = typeof SafeInteger.Type;
 
 // --- [SLUG] ------------------------------------------------------------------
 
-const SlugSchema = sb.pattern('Slug', B.patterns.slug);
-type Slug = S.Schema.Type<typeof SlugSchema>
-const Slug = Object.freeze(make(SlugSchema));
+const Slug = Brand.pattern('Slug', B.patterns.slug);
+type Slug = typeof Slug.Type;
 
 // --- [TIMESTAMP] -------------------------------------------------------------
 
-const TimestampSchema = sb.positiveNumber('Timestamp');
-type Timestamp = S.Schema.Type<typeof TimestampSchema>
+const _Timestamp = Brand.positiveNumber('Timestamp');
+type Timestamp = typeof _Timestamp.Type;
 const timestampNowSync = (): Timestamp => Date.now() as Timestamp;
 const Timestamp = Object.freeze({
-	...makeGeneratable(TimestampSchema, timestampNowSync),
+	...withGen(_Timestamp, timestampNowSync),
 	addDuration: (ts: Timestamp, d: DurationMs): Timestamp => (ts + d) as Timestamp,
 	diff: (later: Timestamp, earlier: Timestamp): DurationMs => (later - earlier) as DurationMs,
 	expiresAt: (durationMs: DurationMs): Timestamp => (timestampNowSync() + durationMs) as Timestamp,
 	expiresAtDate: (durationMs: DurationMs): Date => new Date(timestampNowSync() + durationMs),
-	fromDate: S.transform(S.DateFromSelf, TimestampSchema, {
+	fromDate: S.transform(S.DateFromSelf, _Timestamp.schema, {
 		decode: (date) => date.getTime() as Timestamp,
 		encode: (ts) => new Date(ts),
 		strict: true,
 	}),
 	fromDateTime: (dt: DateTime.Utc): Timestamp => DateTime.toEpochMillis(dt) as Timestamp,
-	now: Effect.sync(timestampNowSync),
 	nowSync: timestampNowSync,
 });
 
 // --- [URL] -------------------------------------------------------------------
 
-const UrlSchema = sb.pattern('Url', B.patterns.url);
-type Url = S.Schema.Type<typeof UrlSchema>
-const Url = Object.freeze(make(UrlSchema));
+const Url = Brand.pattern('Url', B.patterns.url);
+type Url = typeof Url.Type;
 
 // --- [UUIDV7] ----------------------------------------------------------------
 
-const Uuidv7Schema = sb.pattern('Uuidv7', B.patterns.uuidv7);
-type Uuidv7 = S.Schema.Type<typeof Uuidv7Schema>
-/** Generate token-safe UUID via crypto.randomUUID(). DB IDs use PostgreSQL uuidv7(). */
+const _Uuidv7 = Brand.pattern('Uuidv7', B.patterns.uuidv7);
+type Uuidv7 = typeof _Uuidv7.Type;
 const uuidv7GenerateSync = (): Uuidv7 => crypto.randomUUID() as Uuidv7;
-const Uuidv7 = Object.freeze(makeGeneratable(Uuidv7Schema, uuidv7GenerateSync));
+const Uuidv7 = withGen(_Uuidv7, uuidv7GenerateSync);
 
 // --- [VARIANT_COUNT] ---------------------------------------------------------
 
-const VariantCountSchema = sb.boundedInt('VariantCount', B.bounds.variantCount.min, B.bounds.variantCount.max);
-type VariantCount = S.Schema.Type<typeof VariantCountSchema>
-const VariantCount = Object.freeze(make(VariantCountSchema));
+const VariantCount = Brand.boundedInt('VariantCount', B.bounds.variantCount.min, B.bounds.variantCount.max);
+type VariantCount = typeof VariantCount.Type;
 
 // --- [ZOOM_FACTOR] -----------------------------------------------------------
 
-const ZoomFactorSchema = sb.boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
-type ZoomFactor = S.Schema.Type<typeof ZoomFactorSchema>
+const _ZoomFactor = Brand.boundedNumber('ZoomFactor', B.bounds.zoomFactor.min, B.bounds.zoomFactor.max);
+type ZoomFactor = typeof _ZoomFactor.Type;
 const ZoomFactor = Object.freeze({
-	...make(ZoomFactorSchema),
+	..._ZoomFactor,
 	clamp: (z: ZoomFactor, min: ZoomFactor, max: ZoomFactor): ZoomFactor => Math.max(min, Math.min(max, z)) as ZoomFactor,
 	max: B.bounds.zoomFactor.max as ZoomFactor,
 	min: B.bounds.zoomFactor.min as ZoomFactor,
 	one: 1 as ZoomFactor,
-	scale: (z: ZoomFactor, factor: number): ZoomFactor => S.decodeSync(ZoomFactorSchema)(z * factor),
+	scale: (z: ZoomFactor, factor: number): ZoomFactor => _ZoomFactor.decodeSync(z * factor),
 });
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TYPES_TUNING, schemaDefaults };
+export { Brand, companion };
 export {
-	DurationMs, Email, Hex64, Hex8, HexColor, HtmlId, Index, IsoDate, NonNegativeInt, Percentage, PositiveInt, SafeInteger, Slug,
-	Timestamp, Url, Uuidv7, VariantCount, ZoomFactor,
+	DurationMs, Email, Hex64, Hex8, HexColor, HtmlId, Index, IsoDate, NonNegativeInt, Percentage,
+	PositiveInt, SafeInteger, Slug, Timestamp, Url, Uuidv7, VariantCount, ZoomFactor,
 };

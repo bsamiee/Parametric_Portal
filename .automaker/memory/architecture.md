@@ -82,3 +82,8 @@ usageStats:
 - **Situation:** Feature extracts X-App-Id from header but userId/sessionId extraction happens separately (presumably in other middleware)
 - **Root cause:** RequestContext is app-level context singleton - created once per request when middleware runs. userId/sessionId are only available if auth middleware ran first and provided them. By making optional, context can be created immediately without blocking on auth.
 - **How to avoid:** Gained: flexible middleware composition order. Lost: downstream code must handle optional userId/sessionId (require null checks everywhere).
+
+#### [Pattern] Audit logging integrated at repository layer, not route handler layer (2026-01-13)
+- **Problem solved:** Audit logs needed for asset operations (create, update, delete) to track changes with appId
+- **Why this works:** Repository layer placement ensures ALL operations through that repo are audited, preventing gaps from multiple route handlers or direct calls. Single point of instrumentation.
+- **Trade-offs:** Easier: Guaranteed coverage of all repo operations. Harder: Requires passing context (appId, actorId) through repo method signatures, creating coupling between audit requirements and repo interface

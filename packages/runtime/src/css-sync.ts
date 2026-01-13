@@ -1,6 +1,5 @@
 /**
- * Sync Zustand store state to DOM CSS variables.
- * Subscribes to store changes and applies values to root element.
+ * Sync Zustand store state to DOM CSS variables via subscription.
  */
 import { HtmlId } from '@parametric-portal/types/types';
 import { useCallback, useEffect, useMemo } from 'react';
@@ -8,10 +7,7 @@ import type { StoreApi } from 'zustand';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ClassNameResult = {
-    readonly add?: ReadonlyArray<string>;
-    readonly remove?: ReadonlyArray<string>;
-};
+type ClassNameResult = { readonly add?: ReadonlyArray<string>; readonly remove?: ReadonlyArray<string> };
 type CssSyncConfig<T> = {
     readonly classNames?: (state: T) => ClassNameResult;
     readonly prefix?: string;

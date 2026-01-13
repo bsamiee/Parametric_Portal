@@ -5,9 +5,9 @@ relevantTo: [database]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 2
-  referenced: 2
-  successfulFeatures: 2
+  loaded: 4
+  referenced: 3
+  successfulFeatures: 3
 ---
 # database
 
@@ -43,3 +43,10 @@ usageStats:
 - **Situation:** Complex indexes were created for apps table queries with appId
 - **Root cause:** Covering indexes include all columns needed for app-scoped queries without fetching main table - critical performance for multi-tenant queries that must filter by appId. Reduces table lookups
 - **How to avoid:** Larger index size and slower writes/updates, but dramatically faster reads for most app-scoped queries. Worth it for read-heavy multi-tenant systems
+
+### appId passed as parameter to audit log methods rather than derived from context/session (2026-01-13)
+- **Context:** Audit endpoint needs to filter logs by appId, requiring appId on all audit records
+- **Why:** Explicit parameter passing makes appId mandatory and visible in signatures. Prevents accidental logs without app scope. Enables batch operations (insertMany) where single appId covers multiple records.
+- **Rejected:** Deriving appId from ExecutionContext - would be implicit, harder to test, doesn't work for batch operations or system-initiated changes
+- **Trade-offs:** Easier: Type-safe, explicit, testable. Harder: Repo methods must receive appId, increasing parameter count
+- **Breaking if changed:** If appId removed from audit signature, endpoint's getAppId filter becomes meaningless - would audit logs from all apps or fail to query them

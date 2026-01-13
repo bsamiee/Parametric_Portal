@@ -1,16 +1,18 @@
 /**
  * Icons group handlers for listing and generating icons via multi-provider AI.
  * Supports Anthropic, OpenAI, and Gemini via @parametric-portal/ai registry.
+ * Includes audit logging for asset creation.
  */
 import { HttpApiBuilder } from '@effect/platform';
 import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/database/repos';
 import { type Pagination, ParametricApi } from '@parametric-portal/server/api';
+import { Audit } from '@parametric-portal/server/audit';
+import { getAppId } from '@parametric-portal/server/context';
 import { EncryptedKey } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { getAppId } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
-import type { AiProvider, ApiKey, UserId } from '@parametric-portal/types/schema';
-import { Config, type Context, Effect, Option } from 'effect';
+import { AssetType, type AiProvider, type ApiKey, type UserId } from '@parametric-portal/types/schema';
+import { Config, type Context, Effect, Option, pipe } from 'effect';
 import { IconGenerationService, type ServiceInput } from '../services/icons.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -20,7 +22,7 @@ type IconGenerationServiceType = Context.Tag.Service<typeof IconGenerationServic
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const getUserApiKey = Effect.fn('icons.apiKey.get')(
-    (repos: DatabaseServiceShape, userId: UserId, provider: typeof AiProvider.Type) =>
+    (repos: DatabaseServiceShape, userId: UserId, provider: AiProvider) =>
         Effect.gen(function* () {
             const apiKeyOpt = yield* repos.apiKeys.findByUserIdAndProvider(userId, provider).pipe(
                 Effect.tapError((e) =>
@@ -72,20 +74,24 @@ const handleGenerate = Effect.fn('icons.generate')(
                         : Effect.fail(new HttpError.Internal({ message: `Missing ${provider} API key` })),
                 onSome: (apiKey) => Effect.succeed({ ...input, apiKey, provider }),
             });
-            const result = yield* iconService.generate(generateInput).pipe(
+            const result = yield* pipe(
+                iconService.generate(generateInput),
                 Effect.filterOrFail(
                     (r) => r.variants.length > 0,
                     () => new HttpError.Internal({ message: 'No icon variants generated' }),
                 ),
             );
-            const insertedAssets = yield* repos.assets.insertMany(
-                result.variants.map((variant) => ({
-                    appId,
-                    assetType: 'icon' as const,
-                    content: variant.svg,
-                    userId: session.userId,
-                })),
-            ).pipe(Effect.catchAll(() => Effect.fail(new HttpError.Internal({ message: 'Asset storage failed' }))));
+            const insertedAssets = yield* repos.assets
+                .insertMany(
+                    result.variants.map((variant) => ({
+                        appId,
+                        assetType: AssetType.decodeSync('icon'),
+                        content: variant.svg,
+                        userId: session.userId,
+                    })),
+                )
+                .pipe(HttpError.chain(HttpError.Internal, { message: 'Asset storage failed' }));
+            yield* Audit.log(repos.audit, { actorId: session.userId, assets: insertedAssets, operation: 'create' });
             const primaryId = insertedAssets[0]?.id;
             return yield* primaryId
                 ? Effect.succeed({ id: primaryId, variants: result.variants })

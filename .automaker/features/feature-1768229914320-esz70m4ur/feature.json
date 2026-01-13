@@ -1,9 +1,0 @@
-{
-    "category": "backend",
-    "dependencies": ["feature-1768229908018-ojk6u5d2n", "feature-multiapp-context"],
-    "description": "Wire existing audit repository to write operations with appId tracking.\n\nCurrently (after dependencies): `audit_logs` table in `packages/types/src/schema.ts:238-250` now has `appId` column (added by multiapp-database). `AuditRepository` in `packages/database/src/repos.ts:217-220` has `log(data)` and `findByEntity(type, id)`. `RequestContext` service provides `appId` (from multiapp-context). `requireRole` middleware exists (from role-middleware feature).\n\nDeliverables:\n1. Update `AuditLogInsertSchema` in `packages/types/src/schema.ts` to include `appId: AppId` field\n2. Update `makeAuditRepo.log` signature to require `appId` parameter\n3. Update `makeAssetRepo` in `packages/database/src/repos.ts`: wrap `insert` with `Effect.tap` calling `audit.log({ appId, entityType: 'asset', entityId, operation: 'create', ... })`\n4. Wire `audit.log` to `update` and `softDelete` methods, reading `appId` from `RequestContext`\n5. Update `findByEntity(type, id)` to accept `appId` parameter for app-scoped queries\n6. Add `GET /api/audit/:entityType/:entityId` endpoint in `packages/server/src/api.ts`\n7. Guard endpoint with `requireRole('admin')` middleware\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p database,server` passes. Audit logs include appId. Query returns only current app's audit records.",
-    "descriptionHistory": [],
-    "id": "feature-1768229914320-esz70m4ur",
-    "status": "backlog",
-    "title": "Audit logging integration"
-}

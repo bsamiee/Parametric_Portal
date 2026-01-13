@@ -3,10 +3,20 @@
   "version": "2.0.0",
   "type": "module",
   "exports": {
+    "./totp-replay": {
+      "types": "./src/totp-replay.ts",
+      "import": "./src/totp-replay.ts",
+      "default": "./src/totp-replay.ts"
+    },
     "./api": {
       "types": "./src/api.ts",
       "import": "./src/api.ts",
       "default": "./src/api.ts"
+    },
+    "./audit": {
+      "types": "./src/audit.ts",
+      "import": "./src/audit.ts",
+      "default": "./src/audit.ts"
     },
     "./context": {
       "types": "./src/context.ts",
@@ -52,6 +62,11 @@
       "types": "./src/telemetry.ts",
       "import": "./src/telemetry.ts",
       "default": "./src/telemetry.ts"
+    },
+    "./transfer": {
+      "types": "./src/transfer.ts",
+      "import": "./src/transfer.ts",
+      "default": "./src/transfer.ts"
     }
   },
   "scripts": {
@@ -68,11 +83,15 @@
     "@effect/sql": "catalog:",
     "@parametric-portal/types": "workspace:*",
     "effect": "catalog:",
+    "exceljs": "catalog:",
     "ioredis": "catalog:",
+    "jszip": "catalog:",
     "nanoid": "catalog:",
-    "otplib": "catalog:"
+    "otplib": "catalog:",
+    "papaparse": "catalog:"
   },
   "devDependencies": {
+    "@types/papaparse": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

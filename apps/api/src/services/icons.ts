@@ -16,6 +16,7 @@ const AiResponseSchema = S.Struct({ variants: S.Array(SvgAsset.inputSchema).pipe
 
 // --- [TYPES] -----------------------------------------------------------------
 
+type IconGenerationServiceInterface = { readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InstanceType<typeof HttpError.Internal>>; };
 type ServiceInput = S.Schema.Type<typeof ServiceInputSchema>;
 type ServiceOutput = { readonly variants: ReadonlyArray<SvgAsset> };
 type PromptContext = {
@@ -25,9 +26,6 @@ type PromptContext = {
     readonly prompt: string;
     readonly referenceSvg?: string;
     readonly variantCount: number;
-};
-type IconGenerationServiceInterface = {
-    readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InstanceType<typeof HttpError.Internal>>;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -213,9 +211,7 @@ const IconGenerationServiceLive = Layer.succeed(
         generate: Effect.fn('icons.generate')((input: ServiceInput) =>
             Effect.gen(function* () {
                 const response = yield* generateWithAi(input);
-                return {
-                    variants: A.filterMap(response.variants, (v) => SvgAsset.create(v.name, v.svg)),
-                } satisfies ServiceOutput;
+                return { variants: A.filterMap(response.variants, (v) => SvgAsset.create(v.name, v.svg)), } satisfies ServiceOutput;
             }),
         ),
     }),
@@ -223,5 +219,5 @@ const IconGenerationServiceLive = Layer.succeed(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as ICON_GENERATION_TUNING, IconGenerationService, IconGenerationServiceLive };
+export { IconGenerationService, IconGenerationServiceLive };
 export type { ServiceInput, ServiceOutput };

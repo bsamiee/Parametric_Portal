@@ -55,3 +55,8 @@ usageStats:
 - **Situation:** Implementation completes at server package level but requires integration in API app for meaningful E2E verification
 - **Root cause:** Tests written as placeholder to document expected behavior but marked for deletion since integration incomplete. However, leaving commented tests means actual integration work must remember to implement exact test expectations.
 - **How to avoid:** Gained: clear specification of expected behavior. Lost: stale test file creates documentation debt (file marked for deletion but never deleted).
+
+#### [Gotcha] Playwright e2e test required @opentelemetry/sdk-trace-web dependency that wasn't available in environment, preventing test execution (2026-01-13)
+- **Situation:** Wanted to verify audit endpoint works end-to-end but server failed to start during test setup
+- **Root cause:** Server had missing or broken dependencies unrelated to audit feature. Root cause: pre-existing environment/dependency issues.
+- **How to avoid:** Easier: Created test scaffold showing expected behavior. Harder: No actual test execution, relying on typecheck only

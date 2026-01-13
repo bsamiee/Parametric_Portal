@@ -1,10 +1,8 @@
 /**
- * File I/O and validation as Effect service.
- * Handles: read operations, metadata validation, SVG sanitization.
+ * File I/O and validation service with SVG sanitization support.
  */
 import { AppError } from '@parametric-portal/types/app-error';
 import {
-    FILES_TUNING,
     type FileMetadata,
     type FileUploadConfig,
     type MimeType,
@@ -13,7 +11,6 @@ import {
 } from '@parametric-portal/types/files';
 import { Svg } from '@parametric-portal/types/svg';
 import { Context, Effect, Layer, Option, pipe } from 'effect';
-import type { DirectoryDropItem } from 'react-aria';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -28,7 +25,6 @@ type FileOpsService = {
     readonly toDataUrl: (file: File) => Effect.Effect<string, AppError<'File'>>;
     readonly toText: (file: File) => Effect.Effect<string, AppError<'File'>>;
 };
-type FileWithPath = { readonly file: File; readonly path: string };
 
 // --- [CLASSES] ---------------------------------------------------------------
 
@@ -36,19 +32,6 @@ class FileOps extends Context.Tag('FileOps')<FileOps, FileOpsService>() {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const walkDirectory = async (dir: DirectoryDropItem, basePath: string = ''): Promise<ReadonlyArray<FileWithPath>> => {
-    // biome-ignore lint/nursery/useAwaitThenable: AsyncIterable requires Array.fromAsync which returns Promise
-    const entries = await Array.fromAsync(dir.getEntries());
-    const makePath = (name: string) => (basePath ? `${basePath}/${name}` : name);
-    const handlers = {
-        directory: async (entry: DirectoryDropItem, path: string) => walkDirectory(entry, path),
-        file: async (entry: { getFile: () => Promise<File> }, path: string) => [{ file: await entry.getFile(), path }],
-    } as const;
-    const results = await Promise.all(
-        entries.map((entry) => handlers[entry.kind]?.(entry as never, makePath(entry.name)) ?? Promise.resolve([])),
-    );
-    return results.flat();
-};
 const validateContent = (mimeType: MimeType, content: string): Effect.Effect<string, AppError<'File'>> =>
     mimeType === 'image/svg+xml'
         ? Svg.sanitize(content).pipe(
@@ -73,7 +56,7 @@ const fileOpsImpl: FileOpsService = {
         Effect.all(
             files.map((file) =>
                 pipe(
-                    validateFile(file, config.maxSizeBytes ?? FILES_TUNING.limits.maxSizeBytes),
+                    validateFile(file, config.maxSizeBytes),
                     Effect.filterOrFail(
                         (m): m is FileMetadata & { readonly mimeType: T } =>
                             config.allowedTypes == null || config.allowedTypes.includes(m.mimeType as T),
@@ -125,5 +108,5 @@ const FileOpsLive = Layer.succeed(FileOps, fileOpsImpl);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { FileOpsService, FileWithPath };
-export { FileOps, FileOpsLive, validateContent, walkDirectory };
+export type { FileOpsService };
+export { FileOps, FileOpsLive, validateContent };
