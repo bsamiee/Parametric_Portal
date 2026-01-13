@@ -4,7 +4,7 @@
  * Enables telemetry/metrics to distinguish originating app.
  */
 import type { AppId, SessionId, UserId } from '@parametric-portal/types/schema';
-import { Effect } from 'effect';
+import { Effect, Option } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -19,7 +19,18 @@ type RequestContextShape = {
 
 class RequestContext extends Effect.Tag('server/RequestContext')<RequestContext, RequestContextShape>() {}
 
+// --- [UTILITIES] -------------------------------------------------------------
+
+const getAppId: Effect.Effect<AppId, never, never> = Effect.serviceOption(RequestContext).pipe(
+    Effect.map(
+        Option.match({
+            onNone: () => 'system' as AppId,
+            onSome: (rc) => rc.appId,
+        }),
+    ),
+);
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { RequestContext };
+export { getAppId, RequestContext };
 export type { RequestContextShape };

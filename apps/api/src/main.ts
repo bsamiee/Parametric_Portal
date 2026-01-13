@@ -146,6 +146,14 @@ const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
 const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const ServerLive = HttpApiBuilder.serve((app) =>
+    // CRITICAL: Middleware order matters - dependencies flow top-to-bottom:
+    // 1. xForwardedHeaders - Extract real client IP/proto for logging/tracing
+    // 2. trace - Start request tracing span
+    // 3. security - Apply security headers
+    // 4. requestId - Generate/extract request ID (MUST precede requestContext)
+    // 5. requestContext - Provides RequestContext service (depends on requestId)
+    // 6. metrics - Record HTTP metrics (uses RequestContext for app label)
+    // 7. logger - Log request/response (uses all above context)
     app.pipe(
         Middleware.xForwardedHeaders,
         Middleware.trace,

@@ -76,16 +76,22 @@ const TelemetryLive = Layer.unwrapEffect(
 // --- [UTILITIES] -------------------------------------------------------------
 
 const annotateSpanWithApp: Effect.Effect<void, never, never> = Effect.serviceOption(RequestContext).pipe(
-    Effect.flatMap(
+    Effect.map(
         Option.match({
             onNone: () => Effect.void,
             onSome: (ctx) => Effect.annotateCurrentSpan('app.id', ctx.appId),
         }),
     ),
+    Effect.flatten,
 );
 const withAppSpan = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     Effect.serviceOption(RequestContext).pipe(
-        Effect.map(Option.match({ onNone: () => ({}), onSome: (ctx) => ({ 'app.id': ctx.appId }) })),
+        Effect.map(
+            Option.match({
+                onNone: () => ({}),
+                onSome: (ctx) => ({ 'app.id': ctx.appId }),
+            }),
+        ),
         Effect.flatMap((attributes) => Effect.withSpan(effect, name, { attributes })),
     );
 

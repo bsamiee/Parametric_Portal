@@ -168,9 +168,7 @@ const makeAppRepo = (db: DrizzleDb, resolver: Resolvers['app']) => ({
 const makeUserRepo = (db: DrizzleDb, resolver: Resolvers['user']) => ({
     delete: (id: User['id']) => withDbOps('db.users.delete', 'delete', db.delete(users).where(eq(users.id, id))).pipe(Effect.asVoid),
     findActiveByAppAndEmail: (appId: App['id'], email: string) => withDbOps('db.users.findActiveByAppAndEmail', 'read', db.query.users.findFirst({ where: and(eq(users.appId, appId), eq(users.email, email), isNull(users.deletedAt)) })).pipe(Effect.map(opt)),
-    findActiveByEmail: (email: string) => withDbOps('db.users.findActiveByEmail', 'read', db.query.users.findFirst({ where: and(eq(users.email, email), isNull(users.deletedAt)) })).pipe(Effect.map(opt)),
     findByAppAndEmail: (appId: App['id'], email: string) => withDbOps('db.users.findByAppAndEmail', 'read', db.query.users.findFirst({ where: and(eq(users.appId, appId), eq(users.email, email)) })).pipe(Effect.map(opt)),
-    findByEmail: (email: string) => withDbOps('db.users.findByEmail', 'read', db.query.users.findFirst({ where: eq(users.email, email) })).pipe(Effect.map(opt)),
     findById: resolver.execute,
     findByIdWithApiKeys: (id: User['id']) => withDbOps('db.users.findByIdWithApiKeys', 'read', db.query.users.findFirst({ where: eq(users.id, id), with: { apiKeys: true } })).pipe(Effect.map((r) => opt(r as UserWithApiKeys | undefined))),
     findByIdWithOAuthAccounts: (id: User['id']) => withDbOps('db.users.findByIdWithOAuthAccounts', 'read', db.query.users.findFirst({ where: eq(users.id, id), with: { oauthAccounts: true } })).pipe(Effect.map((r) => opt(r as UserWithOAuthAccounts | undefined))),

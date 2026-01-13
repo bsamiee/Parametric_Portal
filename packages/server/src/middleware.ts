@@ -39,6 +39,12 @@ type OAuthService = {
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    appId: {
+        sentinel: {
+            system: 'system' as const,
+            unknown: 'unknown' as const,
+        },
+    },
     cors: {
         allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-App-Id'],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -113,14 +119,14 @@ const requestContext = (header = B.headers.appId) =>
             const sessionOpt = yield* Effect.serviceOption(Session);
             const slugOpt = Headers.get(req.headers, header);
             const appId: AppId = yield* Option.match(slugOpt, {
-                onNone: () => Effect.succeed('system' as AppId),
+                onNone: () => Effect.succeed(B.appId.sentinel.system as AppId),
                 onSome: (slug) =>
                     Effect.gen(function* () {
                         const appLookup = yield* AppLookupService;
                         const appInfoOpt = yield* appLookup.findBySlug(slug).pipe(Effect.orElseSucceed(() => Option.none()));
                         return Option.getOrElse(
                             Option.map(appInfoOpt, (info) => info.id),
-                            () => 'unknown' as AppId,
+                            () => B.appId.sentinel.unknown as AppId,
                         );
                     }),
             });

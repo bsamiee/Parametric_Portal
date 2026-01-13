@@ -8,10 +8,10 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { AUTH_TUNING } from '@parametric-portal/server/auth';
 import { Crypto, EncryptedKey, TokenPair } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { RequestContext } from '@parametric-portal/server/context';
+import { getAppId } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { RateLimit } from '@parametric-portal/server/rate-limit';
-import type { AiProvider, ApiKey, ApiKeyId, AppId, OAuthProvider, RefreshTokenId, User, UserId, } from '@parametric-portal/types/schema';
+import type { AiProvider, ApiKey, ApiKeyId, OAuthProvider, RefreshTokenId, User, UserId } from '@parametric-portal/types/schema';
 import { Email, Timestamp, Url, type Uuidv7 } from '@parametric-portal/types/types';
 import { DateTime, Effect, Option, pipe, Schema as S } from 'effect';
 
@@ -145,11 +145,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                 }),
             );
             const ctx = extractRequestContext(request);
-            const reqCtxOpt = yield* Effect.serviceOption(RequestContext);
-            const appId = Option.match(reqCtxOpt, {
-                onNone: () => 'system' as AppId,
-                onSome: (rc) => rc.appId,
-            });
+            const appId = yield* getAppId;
             const result = yield* oauth.authenticate(provider, code, state, stateCookie);
             const emailRaw = yield* Option.match(result.email, {
                 onNone: () => Effect.fail(httpErr('Email not provided by provider')),
@@ -163,7 +159,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                 .withTransaction(
                     Effect.gen(function* () {
                         const existingUserOpt = yield* pipe(
-                            repos.users.findByEmail(email),
+                            repos.users.findByAppAndEmail(appId, email),
                             Effect.mapError(() => httpErr('User lookup failed')),
                         );
                         const isNew = Option.isNone(existingUserOpt);
