@@ -93,7 +93,6 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
         ),
     );
 }
-const errorResponse = (status: number, body: Record<string, unknown>) => HttpServerResponse.json(body, { status }).pipe(Effect.orDie);
 const security = (hsts: typeof B.security.hsts | false = B.security.hsts) => HttpMiddleware.make((app) => Effect.map(app, (r) => applySecurityHeaders(r, hsts)));
 const withTracerDisabled = <A, E, R>(layer: Layer.Layer<A, E, R>, urls = B.tracerDisabledUrls) => HttpMiddleware.withTracerDisabledForUrls(layer, urls);
 const requestId = (header = B.headers.requestId) =>
@@ -110,32 +109,28 @@ const requestContext = (header = B.headers.appId) =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
             const req = yield* HttpServerRequest.HttpServerRequest;
-            const appLookup = yield* AppLookupService;
-            const reqId = yield* RequestId;
+            const reqIdOpt = yield* Effect.serviceOption(RequestId);
+            const sessionOpt = yield* Effect.serviceOption(Session);
             const slugOpt = Headers.get(req.headers, header);
-            return yield* Option.match(slugOpt, {
-                onNone: () => errorResponse(400, { _tag: 'Validation', field: header, message: 'X-App-Id header is required' }),
+            const appId: AppId = yield* Option.match(slugOpt, {
+                onNone: () => Effect.succeed('system' as AppId),
                 onSome: (slug) =>
-                    appLookup.findBySlug(slug).pipe(
-                        Effect.orElseSucceed(() => Option.none<{ readonly id: AppId; readonly slug: string }>()),
-                        Effect.flatMap((appOpt) =>
-                            Option.match(appOpt, {
-                                onNone: () => errorResponse(404, { _tag: 'NotFound', id: slug, resource: 'App' }),
-                                onSome: (appInfo) =>
-                                    Effect.serviceOption(Session).pipe(
-                                        Effect.flatMap((sessionOpt) =>
-                                            Effect.provideService(app, RequestContext, {
-                                                appId: appInfo.id,
-                                                requestId: reqId,
-                                                sessionId: Option.getOrNull(Option.map(sessionOpt, (s) => s.sessionId)),
-                                                userId: Option.getOrNull(Option.map(sessionOpt, (s) => s.userId)),
-                                            }),
-                                        ),
-                                    ),
-                            }),
-                        ),
-                    ),
+                    Effect.gen(function* () {
+                        const appLookup = yield* AppLookupService;
+                        const appInfoOpt = yield* appLookup.findBySlug(slug).pipe(Effect.orElseSucceed(() => Option.none()));
+                        return Option.getOrElse(
+                            Option.map(appInfoOpt, (info) => info.id),
+                            () => 'unknown' as AppId,
+                        );
+                    }),
             });
+            const ctx: typeof RequestContext.Service = {
+                appId,
+                requestId: Option.getOrElse(reqIdOpt, () => crypto.randomUUID()),
+                sessionId: Option.getOrNull(Option.map(sessionOpt, (s) => s.sessionId)),
+                userId: Option.getOrNull(Option.map(sessionOpt, (s) => s.userId)),
+            };
+            return yield* app.pipe(Effect.provideService(RequestContext, ctx));
         }),
     );
 const applySecurityHeaders = (response: HttpServerResponse.HttpServerResponse, hsts: typeof B.security.hsts | false = B.security.hsts): HttpServerResponse.HttpServerResponse => {

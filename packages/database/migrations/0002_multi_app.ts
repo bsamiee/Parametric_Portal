@@ -24,8 +24,13 @@ export default Effect.flatMap(
     );
     CREATE INDEX idx_apps_slug ON apps(slug) INCLUDE (id, name);
 
-    -- Add app_id column to users (NOT NULL requires existing data migration)
-    ALTER TABLE users ADD COLUMN app_id UUID NOT NULL REFERENCES apps(id);
+    -- Create default app for backfilling existing data
+    INSERT INTO apps (name, slug) VALUES ('default', 'default') ON CONFLICT DO NOTHING;
+
+    -- Migrate users table with three-step backfill strategy
+    ALTER TABLE users ADD COLUMN app_id UUID REFERENCES apps(id);
+    UPDATE users SET app_id = (SELECT id FROM apps WHERE slug = 'default') WHERE app_id IS NULL;
+    ALTER TABLE users ALTER COLUMN app_id SET NOT NULL;
 
     -- Drop existing email unique constraint and replace with composite unique
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_unique;
@@ -36,16 +41,20 @@ export default Effect.flatMap(
     CREATE INDEX idx_users_email ON users(app_id, email) INCLUDE (id, role) WHERE deleted_at IS NULL;
     CREATE INDEX idx_users_app_id ON users(app_id) INCLUDE (id, email) WHERE deleted_at IS NULL;
 
-    -- Add app_id column to assets
-    ALTER TABLE assets ADD COLUMN app_id UUID NOT NULL REFERENCES apps(id);
+    -- Migrate assets table with three-step backfill strategy
+    ALTER TABLE assets ADD COLUMN app_id UUID REFERENCES apps(id);
+    UPDATE assets SET app_id = (SELECT id FROM apps WHERE slug = 'default') WHERE app_id IS NULL;
+    ALTER TABLE assets ALTER COLUMN app_id SET NOT NULL;
 
     -- Update assets index for app-scoped lookups
     DROP INDEX IF EXISTS idx_assets_user_id;
     CREATE INDEX idx_assets_user_id ON assets(app_id, user_id) INCLUDE (id, asset_type) WHERE deleted_at IS NULL;
     CREATE INDEX idx_assets_app_id ON assets(app_id) INCLUDE (id, asset_type) WHERE deleted_at IS NULL;
 
-    -- Add app_id column to audit_logs
-    ALTER TABLE audit_logs ADD COLUMN app_id UUID NOT NULL REFERENCES apps(id);
+    -- Migrate audit_logs table with three-step backfill strategy
+    ALTER TABLE audit_logs ADD COLUMN app_id UUID REFERENCES apps(id);
+    UPDATE audit_logs SET app_id = (SELECT id FROM apps WHERE slug = 'default') WHERE app_id IS NULL;
+    ALTER TABLE audit_logs ALTER COLUMN app_id SET NOT NULL;
 
     -- Update audit_logs indexes for app-scoped lookups
     DROP INDEX IF EXISTS idx_audit_entity;

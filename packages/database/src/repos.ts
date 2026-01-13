@@ -167,7 +167,9 @@ const makeAppRepo = (db: DrizzleDb, resolver: Resolvers['app']) => ({
 });
 const makeUserRepo = (db: DrizzleDb, resolver: Resolvers['user']) => ({
     delete: (id: User['id']) => withDbOps('db.users.delete', 'delete', db.delete(users).where(eq(users.id, id))).pipe(Effect.asVoid),
+    findActiveByAppAndEmail: (appId: App['id'], email: string) => withDbOps('db.users.findActiveByAppAndEmail', 'read', db.query.users.findFirst({ where: and(eq(users.appId, appId), eq(users.email, email), isNull(users.deletedAt)) })).pipe(Effect.map(opt)),
     findActiveByEmail: (email: string) => withDbOps('db.users.findActiveByEmail', 'read', db.query.users.findFirst({ where: and(eq(users.email, email), isNull(users.deletedAt)) })).pipe(Effect.map(opt)),
+    findByAppAndEmail: (appId: App['id'], email: string) => withDbOps('db.users.findByAppAndEmail', 'read', db.query.users.findFirst({ where: and(eq(users.appId, appId), eq(users.email, email)) })).pipe(Effect.map(opt)),
     findByEmail: (email: string) => withDbOps('db.users.findByEmail', 'read', db.query.users.findFirst({ where: eq(users.email, email) })).pipe(Effect.map(opt)),
     findById: resolver.execute,
     findByIdWithApiKeys: (id: User['id']) => withDbOps('db.users.findByIdWithApiKeys', 'read', db.query.users.findFirst({ where: eq(users.id, id), with: { apiKeys: true } })).pipe(Effect.map((r) => opt(r as UserWithApiKeys | undefined))),
@@ -218,18 +220,18 @@ const makeRefreshTokenRepo = (db: DrizzleDb) => ({
 });
 const makeAssetRepo = (db: DrizzleDb, resolvers: Resolvers) => ({
     countByUserId: (userId: User['id']) => withDbOps('db.assets.countByUserId', 'read', db.select({ count: sql<number>`count(*)::int` }).from(assets).where(and(eq(assets.userId, userId), isNull(assets.deletedAt)))).pipe(Effect.map((rows) => rows[0]?.count ?? 0)),
-    delete: (id: Asset['id']) => withDbOps('db.assets.delete', 'delete', db.delete(assets).where(eq(assets.id, id))).pipe(Effect.asVoid),
+    delete: (id: Asset['id'], appId: App['id']) => withDbOps('db.assets.delete', 'delete', db.delete(assets).where(and(eq(assets.id, id), eq(assets.appId, appId)))).pipe(Effect.asVoid),
     findAllByUserId: (userId: User['id'], limit: number, offset: number) => withDbOps('db.assets.findAllByUserId', 'read', db.query.assets.findMany({ limit, offset, orderBy: desc(assets.createdAt), where: and(eq(assets.userId, userId), isNull(assets.deletedAt)) })),
     findById: resolvers.asset.execute,
     insert: (data: AssetInsert) => resolvers.insertAsset.execute(data as S.Schema.Type<typeof AssetInsertSchema>),
     insertMany: (items: readonly AssetInsert[]) => Effect.all(items.map((item) => resolvers.insertAsset.execute(item as S.Schema.Type<typeof AssetInsertSchema>))),
-    restore: (id: Asset['id']) => withDbOps('db.assets.restore', 'write', db.update(assets).set({ deletedAt: null, updatedAt: sql`now()` }).where(eq(assets.id, id))).pipe(Effect.asVoid),
-    softDelete: (id: Asset['id']) => withDbOps('db.assets.softDelete', 'write', db.update(assets).set({ deletedAt: sql`now()`, updatedAt: sql`now()` }).where(eq(assets.id, id))).pipe(Effect.asVoid),
+    restore: (id: Asset['id'], appId: App['id']) => withDbOps('db.assets.restore', 'write', db.update(assets).set({ deletedAt: null, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId)))).pipe(Effect.asVoid),
+    softDelete: (id: Asset['id'], appId: App['id']) => withDbOps('db.assets.softDelete', 'write', db.update(assets).set({ deletedAt: sql`now()`, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId)))).pipe(Effect.asVoid),
     streamByUserId: (userId: User['id'], batchSize = 1000) => Stream.paginateChunkEffect(0, (offset) => withDbOps('db.assets.streamByUserId', 'read', db.query.assets.findMany({ limit: batchSize, offset, orderBy: desc(assets.createdAt), where: and(eq(assets.userId, userId), isNull(assets.deletedAt)) })).pipe(Effect.map((rows) => [Chunk.fromIterable(rows), rows.length < batchSize ? Option.none() : Option.some(offset + batchSize)]))),
-    update: (id: Asset['id'], data: Partial<AssetInsert>) => withDbOps('db.assets.update', 'write', db.update(assets).set({ ...data, updatedAt: sql`now()` }).where(eq(assets.id, id)).returning()).pipe(Effect.map((rows) => opt(rows[0]))),
+    update: (id: Asset['id'], appId: App['id'], data: Partial<AssetInsert>) => withDbOps('db.assets.update', 'write', db.update(assets).set({ ...data, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId))).returning()).pipe(Effect.map((rows) => opt(rows[0]))),
 });
 const makeAuditRepo = (db: DrizzleDb, resolvers: Resolvers) => ({
-    findByEntity: (entityType: string, entityId: string) => withDbOps('db.audit.findByEntity', 'read', db.query.auditLogs.findMany({ orderBy: desc(auditLogs.createdAt), where: and(eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)) })),
+    findByEntity: (appId: App['id'], entityType: string, entityId: string) => withDbOps('db.audit.findByEntity', 'read', db.query.auditLogs.findMany({ orderBy: desc(auditLogs.createdAt), where: and(eq(auditLogs.appId, appId), eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)) })),
     log: resolvers.insertAudit.execute,
 });
 const makeMfaSecretsRepo = (db: DrizzleDb) => ({

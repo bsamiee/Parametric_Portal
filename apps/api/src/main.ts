@@ -3,7 +3,6 @@
  * Uses DatabaseService.layer and static layer patterns.
  */
 import { createServer } from 'node:http';
-import type { HttpApp } from '@effect/platform';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
@@ -39,19 +38,6 @@ const serverConfig = Effect.runSync(
         port: Config.number('PORT').pipe(Config.withDefault(B.defaults.port)),
     }),
 );
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const composeMiddleware = <E, R>(app: HttpApp.Default<E, R>) =>
-    app.pipe(
-        Middleware.xForwardedHeaders,
-        Middleware.trace,
-        Middleware.security(),
-        Middleware.requestContext(),
-        Middleware.requestId(),
-        Middleware.metrics,
-        HttpMiddleware.logger,
-    );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -158,8 +144,18 @@ const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
     Layer.provide(InfraLayers),
 );
 const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
-const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive));
-const ServerLive = HttpApiBuilder.serve(composeMiddleware).pipe(
+const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
+const ServerLive = HttpApiBuilder.serve((app) =>
+    app.pipe(
+        Middleware.xForwardedHeaders,
+        Middleware.trace,
+        Middleware.security(),
+        Middleware.requestId(),
+        Middleware.requestContext(),
+        Middleware.metrics,
+        HttpMiddleware.logger,
+    ),
+).pipe(
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),

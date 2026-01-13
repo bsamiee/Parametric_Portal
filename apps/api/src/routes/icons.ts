@@ -7,8 +7,9 @@ import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/d
 import { type Pagination, ParametricApi } from '@parametric-portal/server/api';
 import { EncryptedKey } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
+import { RequestContext } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
-import type { AiProvider, ApiKey, UserId } from '@parametric-portal/types/schema';
+import type { AiProvider, ApiKey, AppId, UserId } from '@parametric-portal/types/schema';
 import { Config, type Context, Effect, Option } from 'effect';
 import { IconGenerationService, type ServiceInput } from '../services/icons.ts';
 
@@ -61,6 +62,11 @@ const handleGenerate = Effect.fn('icons.generate')(
     (repos: DatabaseServiceShape, iconService: IconGenerationServiceType, input: ServiceInput, allowEnvKeys: boolean) =>
         Effect.gen(function* () {
             const session = yield* Middleware.Session;
+            const reqCtxOpt = yield* Effect.serviceOption(RequestContext);
+            const appId = Option.match(reqCtxOpt, {
+                onNone: () => 'system' as AppId,
+                onSome: (rc) => rc.appId,
+            });
             const provider = input.provider ?? 'anthropic';
             const userApiKeyOpt = yield* getUserApiKey(repos, session.userId, provider);
             const generateInput: ServiceInput = yield* Option.match(userApiKeyOpt, {
@@ -78,6 +84,7 @@ const handleGenerate = Effect.fn('icons.generate')(
             );
             const insertedAssets = yield* repos.assets.insertMany(
                 result.variants.map((variant) => ({
+                    appId,
                     assetType: 'icon' as const,
                     content: variant.svg,
                     userId: session.userId,

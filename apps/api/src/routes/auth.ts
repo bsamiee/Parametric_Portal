@@ -8,9 +8,10 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { AUTH_TUNING } from '@parametric-portal/server/auth';
 import { Crypto, EncryptedKey, TokenPair } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
+import { RequestContext } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { RateLimit } from '@parametric-portal/server/rate-limit';
-import type { AiProvider, ApiKey, ApiKeyId, OAuthProvider, RefreshTokenId, User, UserId, } from '@parametric-portal/types/schema';
+import type { AiProvider, ApiKey, ApiKeyId, AppId, OAuthProvider, RefreshTokenId, User, UserId, } from '@parametric-portal/types/schema';
 import { Email, Timestamp, Url, type Uuidv7 } from '@parametric-portal/types/types';
 import { DateTime, Effect, Option, pipe, Schema as S } from 'effect';
 
@@ -144,6 +145,11 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                 }),
             );
             const ctx = extractRequestContext(request);
+            const reqCtxOpt = yield* Effect.serviceOption(RequestContext);
+            const appId = Option.match(reqCtxOpt, {
+                onNone: () => 'system' as AppId,
+                onSome: (rc) => rc.appId,
+            });
             const result = yield* oauth.authenticate(provider, code, state, stateCookie);
             const emailRaw = yield* Option.match(result.email, {
                 onNone: () => Effect.fail(httpErr('Email not provided by provider')),
@@ -163,7 +169,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
                         const isNew = Option.isNone(existingUserOpt);
                         const user = yield* isNew
                             ? pipe(
-                                  repos.users.insert({ deletedAt: null, email, role: 'member' }),
+                                  repos.users.insert({ appId, deletedAt: null, email, role: 'member' }),
                                   Effect.mapError(() => httpErr('User creation failed')),
                               )
                             : Effect.succeed(existingUserOpt.value);
@@ -178,6 +184,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
             yield* pipe(
                 repos.audit.log({
                     actorId: userId,
+                    appId,
                     changes: { email, provider },
                     entityId: userId,
                     entityType: 'user',
