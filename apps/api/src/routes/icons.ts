@@ -7,6 +7,7 @@ import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/d
 import { type Pagination, ParametricApi } from '@parametric-portal/server/api';
 import { EncryptedKey } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
+import { getAppId } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
 import type { AiProvider, ApiKey, UserId } from '@parametric-portal/types/schema';
 import { Config, type Context, Effect, Option } from 'effect';
@@ -61,6 +62,7 @@ const handleGenerate = Effect.fn('icons.generate')(
     (repos: DatabaseServiceShape, iconService: IconGenerationServiceType, input: ServiceInput, allowEnvKeys: boolean) =>
         Effect.gen(function* () {
             const session = yield* Middleware.Session;
+            const appId = yield* getAppId;
             const provider = input.provider ?? 'anthropic';
             const userApiKeyOpt = yield* getUserApiKey(repos, session.userId, provider);
             const generateInput: ServiceInput = yield* Option.match(userApiKeyOpt, {
@@ -78,6 +80,7 @@ const handleGenerate = Effect.fn('icons.generate')(
             );
             const insertedAssets = yield* repos.assets.insertMany(
                 result.variants.map((variant) => ({
+                    appId,
                     assetType: 'icon' as const,
                     content: variant.svg,
                     userId: session.userId,

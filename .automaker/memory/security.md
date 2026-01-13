@@ -36,3 +36,8 @@ usageStats:
 - **Rejected:** Allow re-fetching backup codes (increases attack surface), return partial data (confusing UX)
 - **Trade-offs:** User cannot retrieve lost backup codes without re-enrolling; simpler, more secure; may require user education
 - **Breaking if changed:** Adding code retrieval endpoint doubles attack surface; changing to always-returnable makes codes easier to intercept
+
+#### [Gotcha] Health/liveness endpoints must be excluded from requestContext middleware validation to prevent unbootable servers (2026-01-12)
+- **Situation:** Implemented requestContext that returns 400 for missing X-App-Id header, but health probes have no app context
+- **Root cause:** Kubernetes and container orchestration use health endpoints to determine if server is alive. If health endpoint requires valid app context, failed app lookups prevent health probe success and crash container in orchestration systems.
+- **How to avoid:** Gained: server remains orchestration-compatible. Lost: health endpoints bypass app validation (minor security/observability issue).

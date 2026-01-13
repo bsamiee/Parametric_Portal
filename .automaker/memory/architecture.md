@@ -51,3 +51,34 @@ usageStats:
 - **Rejected:** Direct database queries (tight coupling, harder to test), class-based DI (less functional)
 - **Trade-offs:** Requires Effect runtime setup; adds abstraction layer; enables composition patterns
 - **Breaking if changed:** Removing Effect.Tag requires rewriting all consumers; changing to direct queries loses testing capabilities
+
+#### [Pattern] AppId as branded UUID type in same pattern as other entity IDs (UserId, etc) (2026-01-12)
+- **Problem solved:** System already had branded ID types for type safety - extending pattern to new entity
+- **Why this works:** Leverages existing infrastructure - same IdFactory pattern, same benefits (compile-time safety prevents mixing IDs, documentation via type name). Consistency reduces cognitive load
+- **Trade-offs:** Slight boilerplate to create IdFactory.AppId and add to enums, but pays off with type safety across entire system. Every app reference is now checked by TypeScript
+
+### AppRepository added to DatabaseService as resolver pattern, not passed as parameter (2026-01-12)
+- **Context:** Existing DatabaseService pattern where repos are methods on the service, not injected parameters
+- **Why:** Maintains consistency with existing repo pattern (UsersRepository, etc). Single DatabaseService instance becomes complete accessor for all repos. Reduces dependency parameter chains
+- **Rejected:** Injecting AppRepository as parameter would require updating all DatabaseService consumers, fragmenting the pattern
+- **Trade-offs:** All code sees all repos through DatabaseService (less granular dependency control), but simpler service construction and consistency with existing code
+- **Breaking if changed:** Code expecting DatabaseService without apps accessor will fail. New repos added later must follow same pattern or require refactoring existing code
+
+### RequestContext implemented as Effect.Tag with shape {appId, userId, sessionId, requestId} rather than passing values through middleware chain (2026-01-12)
+- **Context:** Thread app needs to propagate application identity through request lifecycle for telemetry, metrics, and authorization
+- **Why:** Effect.Tag provides dependency injection pattern that automatically threads context through all downstream effects without explicit parameter passing. Eliminates threading burden across deeply nested call stacks.
+- **Rejected:** Passing context as middleware return value or request property - would require manual threading through every function signature
+- **Trade-offs:** Gained: automatic context propagation, clean separation of concerns. Lost: explicit visibility of context dependencies (implicit dependencies harder to discover).
+- **Breaking if changed:** Removing Effect.Tag pattern forces all downstream code to accept context as explicit parameter - cascading signature changes across entire codebase
+
+### AppLookupService injected as dependency in middleware rather than passed directly from caller or resolved at request time (2026-01-12)
+- **Context:** Middleware needs to resolve app by slug but doesn't own the database layer
+- **Why:** Effect Layer pattern allows dependency to be satisfied at application startup. Enables different implementations (MockAppLookup for testing, LiveAppLookup for production) and keeps middleware pure.
+- **Rejected:** Direct database call in middleware - would couple middleware to concrete database implementation and make testing harder
+- **Trade-offs:** Gained: testability, loose coupling, explicit dependency declaration. Lost: middleware implementation complexity increases (requires Layer composition).
+- **Breaking if changed:** If AppLookupService layer isn't provided to ServerLive, entire server fails to start - not a runtime error but a startup constraint
+
+#### [Gotcha] RequestContext Effect.Tag shape includes both userId and sessionId as optional (union with null) despite app-level authorization needing both (2026-01-12)
+- **Situation:** Feature extracts X-App-Id from header but userId/sessionId extraction happens separately (presumably in other middleware)
+- **Root cause:** RequestContext is app-level context singleton - created once per request when middleware runs. userId/sessionId are only available if auth middleware ran first and provided them. By making optional, context can be created immediately without blocking on auth.
+- **How to avoid:** Gained: flexible middleware composition order. Lost: downstream code must handle optional userId/sessionId (require null checks everywhere).

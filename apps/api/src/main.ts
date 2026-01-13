@@ -3,7 +3,6 @@
  * Uses DatabaseService.layer and static layer patterns.
  */
 import { createServer } from 'node:http';
-import type { HttpApp } from '@effect/platform';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { SqlClient } from '@effect/sql';
@@ -13,7 +12,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { AuthContext } from '@parametric-portal/server/auth';
 import { EncryptionKeyService } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { createMetricsMiddleware, MetricsService } from '@parametric-portal/server/metrics';
+import { MetricsService } from '@parametric-portal/server/metrics';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { RateLimit } from '@parametric-portal/server/rate-limit';
 import { TelemetryLive } from '@parametric-portal/server/telemetry';
@@ -39,18 +38,6 @@ const serverConfig = Effect.runSync(
         port: Config.number('PORT').pipe(Config.withDefault(B.defaults.port)),
     }),
 );
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const composeMiddleware = <E, R>(app: HttpApp.Default<E, R>) =>
-    app.pipe(
-        Middleware.xForwardedHeaders,
-        Middleware.trace,
-        createMetricsMiddleware(),
-        Middleware.security(),
-        Middleware.requestId(),
-        HttpMiddleware.logger,
-    );
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -106,6 +93,20 @@ const UserLookupLive = Layer.effect(
         };
     }),
 );
+const AppLookupLive = Layer.effect(
+    Middleware.AppLookupService,
+    Effect.gen(function* () {
+        const db = yield* DatabaseService;
+        const metrics = yield* MetricsService;
+        return {
+            findBySlug: (slug: string) =>
+                db.apps.findBySlug(slug).pipe(
+                    Effect.map(Option.map((app) => ({ id: app.id, slug: app.slug }))),
+                    Effect.provideService(MetricsService, metrics),
+                ),
+        };
+    }),
+);
 const DatabaseLive = DatabaseService.layer;
 const SessionAuthLive = Middleware.Auth.layer.pipe(Layer.provide(SessionLookupLive), Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
@@ -143,12 +144,32 @@ const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(
     Layer.provide(InfraLayers),
 );
 const UserLookupServiceLive = UserLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
-const ServerLive = HttpApiBuilder.serve(composeMiddleware).pipe(
+const AppLookupServiceLive = AppLookupLive.pipe(Layer.provide(DatabaseLive), Layer.provide(MetricsService.layer));
+const ServerLive = HttpApiBuilder.serve((app) =>
+    // CRITICAL: Middleware order matters - dependencies flow top-to-bottom:
+    // 1. xForwardedHeaders - Extract real client IP/proto for logging/tracing
+    // 2. trace - Start request tracing span
+    // 3. security - Apply security headers
+    // 4. requestId - Generate/extract request ID (MUST precede requestContext)
+    // 5. requestContext - Provides RequestContext service (depends on requestId)
+    // 6. metrics - Record HTTP metrics (uses RequestContext for app label)
+    // 7. logger - Log request/response (uses all above context)
+    app.pipe(
+        Middleware.xForwardedHeaders,
+        Middleware.trace,
+        Middleware.security(),
+        Middleware.requestId(),
+        Middleware.requestContext(),
+        Middleware.metrics,
+        HttpMiddleware.logger,
+    ),
+).pipe(
     Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
     Layer.provide(ApiLive),
     Layer.provide(Middleware.cors({ allowedOrigins: serverConfig.corsOrigins })),
     Layer.provide(SessionAuthLive),
     Layer.provide(UserLookupServiceLive),
+    Layer.provide(AppLookupServiceLive),
     Layer.provide(MetricsService.layer),
     Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port }).pipe(HttpServer.withLogAddress)),
 );

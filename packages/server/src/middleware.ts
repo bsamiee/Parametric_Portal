@@ -3,20 +3,23 @@
  * Effect.Tag + HttpApiMiddleware.Tag + frozen dispatch table.
  */
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
-import type { OAuthProvider, RoleKey } from '@parametric-portal/types/schema';
+import type { AppId, OAuthProvider, RoleKey } from '@parametric-portal/types/schema';
 import { SCHEMA_TUNING } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { Effect, Layer, Option, Redacted } from 'effect';
 import type { AuthContext, OAuthResult } from './auth.ts';
+import { RequestContext } from './context.ts';
 import { Crypto } from './crypto.ts';
 import { HttpError } from './http-errors.ts';
-import { MetricsService } from './metrics.ts';
+import { metricsMiddleware, MetricsService } from './metrics.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
 type OAuthError = InstanceType<typeof HttpError.OAuth>;
 type ForbiddenError = InstanceType<typeof HttpError.Forbidden>;
+type AppLookup = { readonly findBySlug: (slug: string) => Effect.Effect<Option.Option<{ readonly id: AppId; readonly slug: string }>, unknown> };
 type UserLookup = { readonly findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: RoleKey }>, unknown> };
+type SessionLookupService = { readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<AuthContext>> };
 type OAuthService = {
     readonly authenticate: (
         provider: typeof OAuthProvider.Type,
@@ -32,19 +35,24 @@ type OAuthService = {
         refreshToken: string,
     ) => Effect.Effect<OAuthResult, OAuthError>;
 };
-type SessionLookupService = { readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<AuthContext>> };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    appId: {
+        sentinel: {
+            system: 'system' as const,
+            unknown: 'unknown' as const,
+        },
+    },
     cors: {
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-App-Id'],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
         allowedOrigins: ['*'],
         credentials: true,
         maxAge: 86400,
     },
-    headers: { requestId: 'x-request-id' },
+    headers: { appId: 'x-app-id', requestId: 'x-request-id' },
     security: {
         frameOptions: 'DENY',
         hsts: { includeSubDomains: true, maxAge: 31536000 },
@@ -55,6 +63,7 @@ const B = Object.freeze({
 
 // --- [CLASSES] ---------------------------------------------------------------
 
+class AppLookupService extends Effect.Tag('server/AppLookup')<AppLookupService, AppLookup>() {}
 class OAuth extends Effect.Tag('server/OAuth')<OAuth, OAuthService>() {}
 class RequestId extends Effect.Tag('server/RequestId')<RequestId, string>() {}
 class Session extends Effect.Tag('server/Session')<Session, AuthContext>() {}
@@ -90,6 +99,8 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
         ),
     );
 }
+const security = (hsts: typeof B.security.hsts | false = B.security.hsts) => HttpMiddleware.make((app) => Effect.map(app, (r) => applySecurityHeaders(r, hsts)));
+const withTracerDisabled = <A, E, R>(layer: Layer.Layer<A, E, R>, urls = B.tracerDisabledUrls) => HttpMiddleware.withTracerDisabledForUrls(layer, urls);
 const requestId = (header = B.headers.requestId) =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
@@ -98,6 +109,34 @@ const requestId = (header = B.headers.requestId) =>
             return yield* Effect.provideService(app, RequestId, id).pipe(
                 Effect.map((r) => HttpServerResponse.setHeader(r, header, id)),
             );
+        }),
+    );
+const requestContext = (header = B.headers.appId) =>
+    HttpMiddleware.make((app) =>
+        Effect.gen(function* () {
+            const req = yield* HttpServerRequest.HttpServerRequest;
+            const reqIdOpt = yield* Effect.serviceOption(RequestId);
+            const sessionOpt = yield* Effect.serviceOption(Session);
+            const slugOpt = Headers.get(req.headers, header);
+            const appId: AppId = yield* Option.match(slugOpt, {
+                onNone: () => Effect.succeed(B.appId.sentinel.system as AppId),
+                onSome: (slug) =>
+                    Effect.gen(function* () {
+                        const appLookup = yield* AppLookupService;
+                        const appInfoOpt = yield* appLookup.findBySlug(slug).pipe(Effect.orElseSucceed(() => Option.none()));
+                        return Option.getOrElse(
+                            Option.map(appInfoOpt, (info) => info.id),
+                            () => B.appId.sentinel.unknown as AppId,
+                        );
+                    }),
+            });
+            const ctx: typeof RequestContext.Service = {
+                appId,
+                requestId: Option.getOrElse(reqIdOpt, () => crypto.randomUUID()),
+                sessionId: Option.getOrNull(Option.map(sessionOpt, (s) => s.sessionId)),
+                userId: Option.getOrNull(Option.map(sessionOpt, (s) => s.userId)),
+            };
+            return yield* app.pipe(Effect.provideService(RequestContext, ctx));
         }),
     );
 const applySecurityHeaders = (response: HttpServerResponse.HttpServerResponse, hsts: typeof B.security.hsts | false = B.security.hsts): HttpServerResponse.HttpServerResponse => {
@@ -111,8 +150,6 @@ const applySecurityHeaders = (response: HttpServerResponse.HttpServerResponse, h
         : baseHeaders;
     return headers.reduce((acc, [k, v]) => HttpServerResponse.setHeader(acc, k, v), response);
 };
-const security = (hsts: typeof B.security.hsts | false = B.security.hsts) =>
-    HttpMiddleware.make((app) => Effect.map(app, (r) => applySecurityHeaders(r, hsts)));
 const trace = HttpMiddleware.make((app) =>
     Effect.gen(function* () {
         const req = yield* HttpServerRequest.HttpServerRequest;
@@ -127,12 +164,9 @@ const trace = HttpMiddleware.make((app) =>
         return Option.isSome(spanOpt) ? HttpServerResponse.setHeaders(res, HttpTraceContext.toHeaders(spanOpt.value)) : res;
     }),
 );
-const withTracerDisabled = <A, E, R>(layer: Layer.Layer<A, E, R>, urls = B.tracerDisabledUrls) =>
-    HttpMiddleware.withTracerDisabledForUrls(layer, urls);
 
 // --- [ROLE_ENFORCEMENT] ------------------------------------------------------
 
-/** Creates role enforcement middleware that gates endpoints by minimum role level. Requires `Session` (provided by `SessionAuth`) and `UserLookupService` to be available. */
 const requireRole = (min: RoleKey): Effect.Effect<void, ForbiddenError | InstanceType<typeof HttpError.Internal>, Session | UserLookupService> =>
     Effect.gen(function* () {
         const { userId } = yield* Session;
@@ -151,7 +185,6 @@ const requireRole = (min: RoleKey): Effect.Effect<void, ForbiddenError | Instanc
 
 // --- [MFA_ENFORCEMENT] -------------------------------------------------------
 
-/** Requires MFA verification for the current session if user has MFA enabled. Use for sensitive operations. */
 const requireMfaVerified: Effect.Effect<void, ForbiddenError, Session> = Effect.gen(function* () {
     const session = yield* Session;
     yield* Effect.when(
@@ -163,6 +196,7 @@ const requireMfaVerified: Effect.Effect<void, ForbiddenError, Session> = Effect.
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const Middleware = Object.freeze({
+    AppLookupService,
     Auth: SessionAuth,
     cors: (config?: { readonly allowedOrigins?: ReadonlyArray<string> }) => {
         const allowedOrigins = (config?.allowedOrigins ?? B.cors.allowedOrigins)
@@ -176,8 +210,11 @@ const Middleware = Object.freeze({
         });
     },
     log: HttpMiddleware.logger,
+    metrics: metricsMiddleware,
     OAuth,
+    RequestContext,
     RequestId,
+    requestContext,
     requestId,
     requireMfaVerified,
     requireRole,
@@ -192,5 +229,5 @@ const Middleware = Object.freeze({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as MIDDLEWARE_TUNING, Middleware, OAuth, requireMfaVerified, requireRole };
-export type { OAuthService, SessionLookupService, UserLookup };
+export { AppLookupService, B as MIDDLEWARE_TUNING, Middleware, OAuth, requestContext, requireMfaVerified, requireRole };
+export type { AppLookup, OAuthService, SessionLookupService, UserLookup };

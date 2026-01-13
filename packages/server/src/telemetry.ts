@@ -1,10 +1,12 @@
 /**
  * OpenTelemetry: Traces, Metrics, Logs via unified Otlp.layer.
  * Config-driven with environment-aware intervals and semantic convention compliant attributes.
+ * Provides utilities to annotate spans with RequestContext (app identity).
  */
 import { Otlp } from '@effect/opentelemetry';
 import { FetchHttpClient } from '@effect/platform';
-import { Config, Duration, Effect, Layer } from 'effect';
+import { Config, Duration, Effect, Layer, Option } from 'effect';
+import { RequestContext } from './context.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -71,6 +73,28 @@ const TelemetryLive = Layer.unwrapEffect(
     }),
 ).pipe(Layer.provide(FetchHttpClient.layer));
 
+// --- [UTILITIES] -------------------------------------------------------------
+
+const annotateSpanWithApp: Effect.Effect<void, never, never> = Effect.serviceOption(RequestContext).pipe(
+    Effect.map(
+        Option.match({
+            onNone: () => Effect.void,
+            onSome: (ctx) => Effect.annotateCurrentSpan('app.id', ctx.appId),
+        }),
+    ),
+    Effect.flatten,
+);
+const withAppSpan = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.serviceOption(RequestContext).pipe(
+        Effect.map(
+            Option.match({
+                onNone: () => ({}),
+                onSome: (ctx) => ({ 'app.id': ctx.appId }),
+            }),
+        ),
+        Effect.flatMap((attributes) => Effect.withSpan(effect, name, { attributes })),
+    );
+
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as TELEMETRY_TUNING, TelemetryLive };
+export { annotateSpanWithApp, B as TELEMETRY_TUNING, TelemetryLive, withAppSpan };
