@@ -1,6 +1,5 @@
 /**
- * Browser telemetry layer factory for OTLP trace export.
- * Apps compose this layer to enable Effect span export to API proxy.
+ * Browser telemetry layer factory for OTLP trace export to API proxy.
  */
 
 import { layer } from '@effect/opentelemetry/Otlp';

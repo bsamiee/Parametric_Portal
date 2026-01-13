@@ -3,7 +3,7 @@
  * Pure presentation - content pre-sanitized by useFileUpload hook.
  * Accepts either individual props OR a `file` object from useFileUpload.
  */
-import { type FileMetadata, type MimeCategory, type MimeType, mimeToCategory } from '@parametric-portal/types/files';
+import { type FileMetadata, MimeType } from '@parametric-portal/types/files';
 import { Match } from 'effect';
 import type { LucideIcon } from 'lucide-react';
 import { Archive, Code, File, FileText, Image } from 'lucide-react';
@@ -12,12 +12,8 @@ import { cn, Slot } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type PreviewMode = MimeCategory | 'svg' | 'unknown';
-type ValidatedFileInput = {
-	readonly content: string;
-	readonly dataUrl: string;
-	readonly metadata: FileMetadata;
-};
+type PreviewMode = keyof typeof MimeType.config | 'svg' | 'unknown';
+type ValidatedFileInput = { readonly content: string; readonly dataUrl: string; readonly metadata: FileMetadata; };
 type FilePreviewProps = {
 	readonly className?: string;
 	readonly content?: string;
@@ -66,7 +62,7 @@ const B = Object.freeze({
 const detectMode = (mimeType: string): PreviewMode =>
 	Match.value(mimeType).pipe(
 		Match.when('image/svg+xml', () => 'svg' as const),
-		Match.orElse(() => (mimeToCategory[mimeType as MimeType] as PreviewMode | undefined) ?? 'unknown'),
+		Match.orElse(() => (MimeType.toCategory[mimeType as MimeType] as PreviewMode | undefined) ?? 'unknown'),
 	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

@@ -7,11 +7,13 @@
 import { SqlClient } from '@effect/sql/SqlClient';
 import type { SqlError } from '@effect/sql/SqlError';
 import * as SqlResolver from '@effect/sql/SqlResolver';
+import { API_TUNING } from '@parametric-portal/server/api';
 import { MetricsService } from '@parametric-portal/server/metrics';
-import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type App, type AppInsert, AppInsertSchema, AppRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, apps, assets, auditLogs, IdFactory, type MfaSecretInsert, mfaSecrets, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
+import { type ApiKey, type ApiKeyInsert, ApiKeyInsertSchema, ApiKeyRowSchema, type App, type AppInsert, AppInsertSchema, AppRowSchema, type Asset, type AssetInsert, AssetInsertSchema, AssetRowSchema, type AuditLog, type AuditLogInsert, AuditLogInsertSchema, AuditLogRowSchema, apiKeys, apps, assets, auditLogs, IdFactory, type MfaSecretInsert, mfaSecrets, type OAuthAccount, type OAuthAccountInsert, OAuthAccountInsertSchema, OAuthAccountRowSchema, oauthAccounts, type RefreshToken, type RefreshTokenInsert, RefreshTokenInsertSchema, RefreshTokenRowSchema, refreshTokens, type Session, type SessionInsert, SessionInsertSchema, SessionRowSchema, type SessionWithUser, sessions, type User, type UserInsert, UserInsertSchema, UserRowSchema, type UserWithApiKeys, type UserWithOAuthAccounts, type UserWithSessions, users } from '@parametric-portal/types/schema';
+import { AppError } from '@parametric-portal/types/app-error';
 import type { Hex64 } from '@parametric-portal/types/types';
-import { and, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
-import { Chunk, type Context, Duration, Effect, identity, Layer, Option, type Schema as S, Stream } from 'effect';
+import { and, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
+import { Chunk, type Context, Duration, Effect, identity, Layer, Option, pipe, type Schema as S, Stream } from 'effect';
 import { DATABASE_TUNING, Drizzle, PgLive } from './client.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -20,16 +22,95 @@ type DrizzleDb = Context.Tag.Service<typeof Drizzle>;
 type OpType = 'read' | 'write' | 'delete';
 type WithTransaction = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | SqlError, R>;
 type Resolvers = Effect.Effect.Success<ReturnType<typeof makeResolvers>>;
+type AuditFilter = { readonly after?: Date | undefined; readonly before?: Date | undefined; readonly operation?: AuditLog['operation'] | undefined };
+type CursorPaginationInput<T> = { readonly cursor?: T | undefined; readonly direction?: CursorDirection | undefined; readonly limit?: number | undefined; };
+type CursorDirection = 'forward' | 'backward';
+type PaginationResult = {
+    readonly clamped: boolean;
+    readonly limit: number;
+    readonly offset: number;
+    readonly requestedLimit: number;
+    readonly requestedOffset: number;
+};
+type CursorPaginationResult<T, C> = {
+    readonly data: readonly T[];
+    readonly hasNextPage: boolean;
+    readonly hasPreviousPage: boolean;
+    readonly limit: number;
+    readonly nextCursor: C | null;
+    readonly previousCursor: C | null;
+};
+type AuditWithCount = {
+    readonly clamped: boolean;
+    readonly data: readonly AuditLog[];
+    readonly limit: number;
+    readonly offset: number;
+    readonly total: number;
+};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({ ...DATABASE_TUNING } as const);
+const B = Object.freeze({
+    ...DATABASE_TUNING,
+    pagination: { ...API_TUNING.pagination, maxOffset: 10000, minOffset: 0 },
+} as const);
+const allAuditFields = Object.freeze({
+    actorEmail: auditLogs.actorEmail,
+    actorId: auditLogs.actorId,
+    appId: auditLogs.appId,
+    changes: auditLogs.changes,
+    createdAt: auditLogs.createdAt,
+    entityId: auditLogs.entityId,
+    entityType: auditLogs.entityType,
+    id: auditLogs.id,
+    ipAddress: auditLogs.ipAddress,
+    operation: auditLogs.operation,
+    userAgent: auditLogs.userAgent,
+} as const);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const opt = <T>(row: T | undefined): Option.Option<T> => Option.fromNullable(row);
-const first = <T>(rows: readonly T[]): T => Option.getOrThrow(Option.fromNullable(rows[0]));
 const userIdOrThrow = (asset: Asset): User['id'] => Option.getOrThrow(Option.fromNullable(asset.userId));
+const clampCursorLimit = (limit: number | undefined): number => Math.min(Math.max(B.pagination.minLimit, limit ?? B.pagination.defaultLimit), B.pagination.maxLimit);
+const firstE = <T>(rows: readonly T[]): Effect.Effect<T, AppError<'Database'>> =>
+    pipe(
+        Option.fromNullable(rows[0]),
+        Option.match({
+            onNone: () => Effect.fail(AppError.from('Database', 'NOT_FOUND')),
+            onSome: Effect.succeed,
+        }),
+    );
+const clampPagination = (limit: number, offset: number): PaginationResult => {
+    const clampedLimit = Math.min(Math.max(B.pagination.minLimit, limit), B.pagination.maxLimit);
+    const clampedOffset = Math.min(Math.max(B.pagination.minOffset, offset), B.pagination.maxOffset);
+    return {
+        clamped: clampedLimit !== limit || clampedOffset !== offset,
+        limit: clampedLimit,
+        offset: clampedOffset,
+        requestedLimit: limit,
+        requestedOffset: offset,
+    };
+};
+const buildCursorResult = <T extends { readonly id: string }, C extends string>(
+    data: readonly T[], limit: number, direction: CursorDirection,
+    getCursor: (item: T) => C, ): CursorPaginationResult<T, C> => {
+    const hasMore = data.length > limit;
+    const trimmedData = hasMore ? data.slice(0, limit) : data;
+    const isForward = direction === 'forward';
+    return {
+        data: trimmedData,
+        hasNextPage: isForward ? hasMore : trimmedData.length > 0,
+        hasPreviousPage: isForward ? trimmedData.length > 0 : hasMore,
+        limit,
+        nextCursor: trimmedData.length > 0 ? getCursor(trimmedData.at(-1) as T) : null,
+        previousCursor: trimmedData.length > 0 ? getCursor(trimmedData[0] as T) : null,
+    };
+};
+const findWithCount = <T, E, R>(
+    dataQuery: Effect.Effect<readonly T[], E, R>,
+    countQuery: Effect.Effect<{ count: number }[], E, R>, ): Effect.Effect<{ data: readonly T[]; total: number }, E, R> =>
+    Effect.all({ data: dataQuery, total: countQuery.pipe(Effect.map((rows) => rows[0]?.count ?? 0)) }, { concurrency: 2 });
 const withDbOps = <A, E, R>(opName: string, opType: OpType, effect: Effect.Effect<A, E, R>) =>
     Effect.fn(opName)(() =>
         effect.pipe(
@@ -160,7 +241,7 @@ const makeResolvers = (db: DrizzleDb) =>
 // --- [REPOSITORIES] ----------------------------------------------------------
 
 const makeAppRepo = (db: DrizzleDb, resolver: Resolvers['app']) => ({
-    create: (data: AppInsert) => withDbOps('db.apps.create', 'write', db.insert(apps).values(data).returning()).pipe(Effect.map(first)),
+    create: (data: AppInsert) => withDbOps('db.apps.create', 'write', db.insert(apps).values(data).returning()).pipe(Effect.flatMap(firstE)),
     findById: resolver.execute,
     findBySlug: (slug: string) => withDbOps('db.apps.findBySlug', 'read', db.query.apps.findFirst({ where: eq(apps.slug, slug) })).pipe(Effect.map(opt)),
     updateSettings: (id: App['id'], settings: Record<string, unknown>) => withDbOps('db.apps.updateSettings', 'write', db.update(apps).set({ settings }).where(eq(apps.id, id)).returning()).pipe(Effect.map((rows) => opt(rows[0]))),
@@ -173,7 +254,7 @@ const makeUserRepo = (db: DrizzleDb, resolver: Resolvers['user']) => ({
     findByIdWithApiKeys: (id: User['id']) => withDbOps('db.users.findByIdWithApiKeys', 'read', db.query.users.findFirst({ where: eq(users.id, id), with: { apiKeys: true } })).pipe(Effect.map((r) => opt(r as UserWithApiKeys | undefined))),
     findByIdWithOAuthAccounts: (id: User['id']) => withDbOps('db.users.findByIdWithOAuthAccounts', 'read', db.query.users.findFirst({ where: eq(users.id, id), with: { oauthAccounts: true } })).pipe(Effect.map((r) => opt(r as UserWithOAuthAccounts | undefined))),
     findByIdWithSessions: (id: User['id']) => withDbOps('db.users.findByIdWithSessions', 'read', db.query.users.findFirst({ where: eq(users.id, id), with: { sessions: { where: isNull(sessions.revokedAt) } } })).pipe(Effect.map((r) => opt(r as UserWithSessions | undefined))),
-    insert: (data: UserInsert) => withDbOps('db.users.insert', 'write', db.insert(users).values(data).returning()).pipe(Effect.map(first)),
+    insert: (data: UserInsert) => withDbOps('db.users.insert', 'write', db.insert(users).values(data).returning()).pipe(Effect.flatMap(firstE)),
     restore: (id: User['id']) => withDbOps('db.users.restore', 'write', db.update(users).set({ deletedAt: null }).where(eq(users.id, id))).pipe(Effect.asVoid),
     softDelete: (id: User['id']) => withDbOps('db.users.softDelete', 'write', db.update(users).set({ deletedAt: sql`now()` }).where(eq(users.id, id))).pipe(Effect.asVoid),
     update: (id: User['id'], data: Partial<UserInsert>) => withDbOps('db.users.update', 'write', db.update(users).set(data).where(eq(users.id, id)).returning()).pipe(Effect.map((rows) => opt(rows[0]))),
@@ -183,7 +264,7 @@ const makeSessionRepo = (db: DrizzleDb, resolver: Resolvers['session']) => ({
     findById: resolver.execute,
     findValidByTokenHash: (hash: Hex64) => withDbOps('db.sessions.findValidByTokenHash', 'read', db.query.sessions.findFirst({ where: and(eq(sessions.tokenHash, hash), gt(sessions.expiresAt, sql`now()`), isNull(sessions.revokedAt)) })).pipe(Effect.map(opt)),
     findValidByTokenHashWithUser: (hash: Hex64) => withDbOps('db.sessions.findValidByTokenHashWithUser', 'read', db.query.sessions.findFirst({ where: and(eq(sessions.tokenHash, hash), gt(sessions.expiresAt, sql`now()`), isNull(sessions.revokedAt)), with: { user: true } })).pipe(Effect.map((r) => opt(r as SessionWithUser | undefined))),
-    insert: (data: SessionInsert) => withDbOps('db.sessions.insert', 'write', db.insert(sessions).values(data).returning()).pipe(Effect.map(first)),
+    insert: (data: SessionInsert) => withDbOps('db.sessions.insert', 'write', db.insert(sessions).values(data).returning()).pipe(Effect.flatMap(firstE)),
     markMfaVerified: (id: Session['id']) => withDbOps('db.sessions.markMfaVerified', 'write', db.update(sessions).set({ mfaVerifiedAt: sql`now()` }).where(eq(sessions.id, id))).pipe(Effect.asVoid),
     revoke: (id: Session['id']) => withDbOps('db.sessions.revoke', 'write', db.update(sessions).set({ revokedAt: sql`now()` }).where(eq(sessions.id, id))).pipe(Effect.asVoid),
     revokeAllByUserId: (userId: User['id']) => withDbOps('db.sessions.revokeAllByUserId', 'write', db.update(sessions).set({ revokedAt: sql`now()` }).where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)))).pipe(Effect.asVoid),
@@ -196,7 +277,7 @@ const makeApiKeyRepo = (db: DrizzleDb, resolver: Resolvers['apiKey']) => ({
     findByIdAndUserId: (id: ApiKey['id'], userId: User['id']) => withDbOps('db.apiKeys.findByIdAndUserId', 'read', db.query.apiKeys.findFirst({ where: and(eq(apiKeys.id, id), eq(apiKeys.userId, userId)) })).pipe(Effect.map(opt)),
     findByUserIdAndProvider: (userId: User['id'], provider: ApiKey['provider']) => withDbOps('db.apiKeys.findByUserIdAndProvider', 'read', db.query.apiKeys.findFirst({ where: and(eq(apiKeys.userId, userId), eq(apiKeys.provider, provider), or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, sql`now()`))) })).pipe(Effect.map(opt)),
     findValidByKeyHash: (hash: Hex64) => withDbOps('db.apiKeys.findValidByKeyHash', 'read', db.query.apiKeys.findFirst({ where: and(eq(apiKeys.keyHash, hash), or(isNull(apiKeys.expiresAt), gt(apiKeys.expiresAt, sql`now()`))) })).pipe(Effect.map(opt)),
-    insert: (data: ApiKeyInsert) => withDbOps('db.apiKeys.insert', 'write', db.insert(apiKeys).values(data).returning()).pipe(Effect.map(first)),
+    insert: (data: ApiKeyInsert) => withDbOps('db.apiKeys.insert', 'write', db.insert(apiKeys).values(data).returning()).pipe(Effect.flatMap(firstE)),
     updateLastUsed: (id: ApiKey['id']) => withDbOps('db.apiKeys.updateLastUsed', 'write', db.update(apiKeys).set({ lastUsedAt: sql`now()` }).where(eq(apiKeys.id, id))).pipe(Effect.asVoid),
 });
 const makeOAuthAccountRepo = (db: DrizzleDb) => ({
@@ -205,37 +286,91 @@ const makeOAuthAccountRepo = (db: DrizzleDb) => ({
     findAllByUserId: (userId: User['id']) => withDbOps('db.oauthAccounts.findAllByUserId', 'read', db.query.oauthAccounts.findMany({ where: eq(oauthAccounts.userId, userId) })),
     findById: (id: OAuthAccount['id']) => withDbOps('db.oauthAccounts.findById', 'read', db.query.oauthAccounts.findFirst({ where: eq(oauthAccounts.id, id) })).pipe(Effect.map(opt)),
     findByProviderAccountId: (provider: OAuthAccount['provider'], providerAccountId: string) => withDbOps('db.oauthAccounts.findByProviderAccountId', 'read', db.query.oauthAccounts.findFirst({ where: and(eq(oauthAccounts.provider, provider), eq(oauthAccounts.providerAccountId, providerAccountId)) })).pipe(Effect.map(opt)),
-    insert: (data: OAuthAccountInsert) => withDbOps('db.oauthAccounts.insert', 'write', db.insert(oauthAccounts).values(data).returning()).pipe(Effect.map(first)),
-    upsert: (data: OAuthAccountInsert) => withDbOps('db.oauthAccounts.upsert', 'write', db.insert(oauthAccounts).values(data).onConflictDoUpdate({ set: { accessToken: data.accessToken, accessTokenExpiresAt: data.accessTokenExpiresAt, refreshToken: data.refreshToken, updatedAt: sql`now()` }, target: [oauthAccounts.provider, oauthAccounts.providerAccountId] }).returning()).pipe(Effect.map(first)),
+    insert: (data: OAuthAccountInsert) => withDbOps('db.oauthAccounts.insert', 'write', db.insert(oauthAccounts).values(data).returning()).pipe(Effect.flatMap(firstE)),
+    upsert: (data: OAuthAccountInsert) => withDbOps('db.oauthAccounts.upsert', 'write', db.insert(oauthAccounts).values(data).onConflictDoUpdate({ set: { accessTokenEncrypted: data.accessTokenEncrypted, accessTokenExpiresAt: data.accessTokenExpiresAt, refreshTokenEncrypted: data.refreshTokenEncrypted, updatedAt: sql`now()` }, target: [oauthAccounts.provider, oauthAccounts.providerAccountId] }).returning()).pipe(Effect.flatMap(firstE)),
 });
 const makeRefreshTokenRepo = (db: DrizzleDb) => ({
     delete: (id: RefreshToken['id']) => withDbOps('db.refreshTokens.delete', 'delete', db.delete(refreshTokens).where(eq(refreshTokens.id, id))).pipe(Effect.asVoid),
     findById: (id: RefreshToken['id']) => withDbOps('db.refreshTokens.findById', 'read', db.query.refreshTokens.findFirst({ where: eq(refreshTokens.id, id) })).pipe(Effect.map(opt)),
     findValidByTokenHash: (hash: Hex64) => withDbOps('db.refreshTokens.findValidByTokenHash', 'read', db.query.refreshTokens.findFirst({ where: and(eq(refreshTokens.tokenHash, hash), gt(refreshTokens.expiresAt, sql`now()`), isNull(refreshTokens.revokedAt)) })).pipe(Effect.map(opt)),
-    insert: (data: RefreshTokenInsert) => withDbOps('db.refreshTokens.insert', 'write', db.insert(refreshTokens).values(data).returning()).pipe(Effect.map(first)),
+    insert: (data: RefreshTokenInsert) => withDbOps('db.refreshTokens.insert', 'write', db.insert(refreshTokens).values(data).returning()).pipe(Effect.flatMap(firstE)),
     revoke: (id: RefreshToken['id']) => withDbOps('db.refreshTokens.revoke', 'write', db.update(refreshTokens).set({ revokedAt: sql`now()` }).where(eq(refreshTokens.id, id))).pipe(Effect.asVoid),
     revokeAllByUserId: (userId: User['id']) => withDbOps('db.refreshTokens.revokeAllByUserId', 'write', db.update(refreshTokens).set({ revokedAt: sql`now()` }).where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)))).pipe(Effect.asVoid),
 });
 const makeAssetRepo = (db: DrizzleDb, resolvers: Resolvers) => ({
-    countByUserId: (userId: User['id']) => withDbOps('db.assets.countByUserId', 'read', db.select({ count: sql<number>`count(*)::int` }).from(assets).where(and(eq(assets.userId, userId), isNull(assets.deletedAt)))).pipe(Effect.map((rows) => rows[0]?.count ?? 0)),
+    countByUserId: (userId: User['id']) => withDbOps('db.assets.countByUserId', 'read', db.select({ count: sql<number>`count(*)::int` }).from(assets).where(and(eq(assets.userId, userId), isNull(assets.deletedAt)))).pipe( Effect.map((rows) => rows[0]?.count ?? 0), ),
     delete: (id: Asset['id'], appId: App['id']) => withDbOps('db.assets.delete', 'delete', db.delete(assets).where(and(eq(assets.id, id), eq(assets.appId, appId)))).pipe(Effect.asVoid),
-    findAllByUserId: (userId: User['id'], limit: number, offset: number) => withDbOps('db.assets.findAllByUserId', 'read', db.query.assets.findMany({ limit, offset, orderBy: desc(assets.createdAt), where: and(eq(assets.userId, userId), isNull(assets.deletedAt)) })),
+    findAllByUserId: (userId: User['id'], limit: number, offset: number) => {
+        const clamped = clampPagination(limit, offset);
+        return withDbOps('db.assets.findAllByUserId', 'read', db.query.assets.findMany({ limit: clamped.limit, offset: clamped.offset, orderBy: desc(assets.createdAt), where: and(eq(assets.userId, userId), isNull(assets.deletedAt)) }));
+    },
+    findAllByUserIdCursor: (userId: User['id'], input: CursorPaginationInput<Asset['id']>) => {
+        const limit = clampCursorLimit(input.limit);
+        const direction = input.direction ?? 'forward';
+        const baseWhere = and(eq(assets.userId, userId), isNull(assets.deletedAt));
+        const cursorCondition = input.cursor
+            ? direction === 'forward'
+                ? and(baseWhere, gt(assets.id, input.cursor))
+                : and(baseWhere, lte(assets.id, input.cursor))
+            : baseWhere;
+        return withDbOps( 'db.assets.findAllByUserIdCursor', 'read',
+            db.query.assets.findMany({
+                limit: limit + 1, // Fetch one extra to detect hasMore
+                orderBy: direction === 'forward' ? [assets.id] : [desc(assets.id)],
+                where: cursorCondition,
+            }),
+        ).pipe( Effect.map((rows) => buildCursorResult(rows, limit, direction, (a) => a.id)), );
+    },
     findById: resolvers.asset.execute,
     insert: (data: AssetInsert) => resolvers.insertAsset.execute(data as S.Schema.Type<typeof AssetInsertSchema>),
-    insertMany: (items: readonly AssetInsert[]) => Effect.all(items.map((item) => resolvers.insertAsset.execute(item as S.Schema.Type<typeof AssetInsertSchema>))),
+    /** Batch insert with single query. Returns all created assets. */
+    insertMany: (items: readonly AssetInsert[]) =>
+        withDbOps( 'db.assets.insertMany', 'write',
+            items.length === 0
+                ? Effect.succeed([] as Asset[])
+                : db.insert(assets).values([...items]).returning(),
+        ),
     restore: (id: Asset['id'], appId: App['id']) => withDbOps('db.assets.restore', 'write', db.update(assets).set({ deletedAt: null, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId)))).pipe(Effect.asVoid),
     softDelete: (id: Asset['id'], appId: App['id']) => withDbOps('db.assets.softDelete', 'write', db.update(assets).set({ deletedAt: sql`now()`, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId)))).pipe(Effect.asVoid),
-    streamByUserId: (userId: User['id'], batchSize = 1000) => Stream.paginateChunkEffect(0, (offset) => withDbOps('db.assets.streamByUserId', 'read', db.query.assets.findMany({ limit: batchSize, offset, orderBy: desc(assets.createdAt), where: and(eq(assets.userId, userId), isNull(assets.deletedAt)) })).pipe(Effect.map((rows) => [Chunk.fromIterable(rows), rows.length < batchSize ? Option.none() : Option.some(offset + batchSize)]))),
-    update: (id: Asset['id'], appId: App['id'], data: Partial<AssetInsert>) => withDbOps('db.assets.update', 'write', db.update(assets).set({ ...data, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId))).returning()).pipe(Effect.map((rows) => opt(rows[0]))),
+    streamByUserId: (userId: User['id'], batchSize = 1000) => Stream.paginateChunkEffect(0, (offset) => db.query.assets.findMany({ limit: batchSize, offset, orderBy: desc(assets.createdAt), where: and(eq(assets.userId, userId), isNull(assets.deletedAt)) }).pipe(Effect.timeout(B.durations.queryTimeout), Effect.retry(B.retry.query), Effect.map((rows) => [Chunk.fromIterable(rows), rows.length < batchSize ? Option.none() : Option.some(offset + batchSize)]))),
+    update: (id: Asset['id'], appId: App['id'], data: Partial<AssetInsert>) => withDbOps('db.assets.update', 'write', db.update(assets).set({ ...data, updatedAt: sql`now()` }).where(and(eq(assets.id, id), eq(assets.appId, appId))).returning()).pipe( Effect.map((rows) => opt(rows[0])), ),
 });
+const buildAuditFilters = (appId: App['id'], base: readonly ReturnType<typeof eq>[], filter: AuditFilter) => {
+    const conditions = [...base, eq(auditLogs.appId, appId)];
+    filter.after && conditions.push(gte(auditLogs.createdAt, filter.after));
+    filter.before && conditions.push(lte(auditLogs.createdAt, filter.before));
+    filter.operation && conditions.push(eq(auditLogs.operation, filter.operation));
+    return and(...conditions);
+};
 const makeAuditRepo = (db: DrizzleDb, resolvers: Resolvers) => ({
-    findByEntity: (appId: App['id'], entityType: string, entityId: string) => withDbOps('db.audit.findByEntity', 'read', db.query.auditLogs.findMany({ orderBy: desc(auditLogs.createdAt), where: and(eq(auditLogs.appId, appId), eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)) })),
-    log: resolvers.insertAudit.execute,
+    findByActor: (appId: App['id'], actorId: User['id'], limit: number, offset: number, filter: AuditFilter = {}) => {
+        const pagination = clampPagination(limit, offset);
+        const whereClause = buildAuditFilters(appId, [eq(auditLogs.actorId, actorId)], filter);
+        const dataQuery = withDbOps('db.audit.findByActor', 'read',
+            db.select({ ...allAuditFields }).from(auditLogs)
+              .where(whereClause).orderBy(desc(auditLogs.createdAt))
+              .limit(pagination.limit).offset(pagination.offset),
+        );
+        const countQuery = withDbOps('db.audit.findByActor.count', 'read', db.select({ count: sql<number>`count(*)::int` }).from(auditLogs).where(whereClause), );
+        return findWithCount(dataQuery, countQuery).pipe( Effect.map(({ data, total }) => ({ clamped: pagination.clamped, data, limit: pagination.limit, offset: pagination.offset, total })), );
+    },
+    findByEntity: (appId: App['id'], entityType: AuditLog['entityType'], entityId: string, limit: number, offset: number, filter: AuditFilter = {}) => {
+        const pagination = clampPagination(limit, offset);
+        const whereClause = buildAuditFilters(appId, [eq(auditLogs.entityType, entityType), eq(auditLogs.entityId, entityId)], filter);
+        const dataQuery = withDbOps('db.audit.findByEntity', 'read',
+            db.select({ ...allAuditFields }).from(auditLogs)
+              .where(whereClause).orderBy(desc(auditLogs.createdAt))
+              .limit(pagination.limit).offset(pagination.offset),
+        );
+        const countQuery = withDbOps('db.audit.findByEntity.count', 'read', db.select({ count: sql<number>`count(*)::int` }).from(auditLogs).where(whereClause), );
+        return findWithCount(dataQuery, countQuery).pipe( Effect.map(({ data, total }) => ({ clamped: pagination.clamped, data, limit: pagination.limit, offset: pagination.offset, total })), );
+    },
+    log: (data: AuditLogInsert) => resolvers.insertAudit.execute(data as S.Schema.Type<typeof AuditLogInsertSchema>),
 });
 const makeMfaSecretsRepo = (db: DrizzleDb) => ({
     delete: (userId: User['id']) => withDbOps('db.mfaSecrets.delete', 'delete', db.delete(mfaSecrets).where(eq(mfaSecrets.userId, userId))).pipe(Effect.asVoid),
     findByUserId: (userId: User['id']) => withDbOps('db.mfaSecrets.findByUserId', 'read', db.query.mfaSecrets.findFirst({ where: eq(mfaSecrets.userId, userId) })).pipe(Effect.map(opt)),
-    upsert: (data: MfaSecretInsert) => withDbOps('db.mfaSecrets.upsert', 'write', db.insert(mfaSecrets).values(data).onConflictDoUpdate({ set: { backupCodesHash: data.backupCodesHash, enabledAt: data.enabledAt, secretEncrypted: data.secretEncrypted }, target: mfaSecrets.userId }).returning()).pipe(Effect.map(first)),
+    upsert: (data: MfaSecretInsert) => withDbOps('db.mfaSecrets.upsert', 'write', db.insert(mfaSecrets).values(data).onConflictDoUpdate({ set: { backupCodesHash: data.backupCodesHash, enabledAt: data.enabledAt, secretEncrypted: data.secretEncrypted }, target: mfaSecrets.userId }).returning()).pipe(Effect.flatMap(firstE)),
 });
 
 // --- [DERIVED_TYPES] ---------------------------------------------------------
@@ -291,6 +426,6 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 
 export { DatabaseService };
 export type {
-    ApiKeyRepository, AppRepository, AssetRepository, AuditRepository, DatabaseServiceShape, MfaSecretsRepository, OAuthAccountRepository, RefreshTokenRepository, SessionRepository,
+    ApiKeyRepository, AppRepository, AssetRepository, AuditFilter, AuditRepository, AuditWithCount, CursorDirection, CursorPaginationInput, CursorPaginationResult, DatabaseServiceShape, MfaSecretsRepository, OAuthAccountRepository, PaginationResult, RefreshTokenRepository, SessionRepository,
     UserRepository, WithTransaction,
 };

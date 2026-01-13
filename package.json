@@ -119,8 +119,7 @@
     },
     "knip": {
         "ignoreBinaries": [
-            "hadolint",
-            "mise"
+            "hadolint"
         ],
         "ignore": [
             ".nx/**"

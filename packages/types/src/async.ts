@@ -38,9 +38,8 @@ const AsyncStateSchema = <A extends S.Schema.Any, E extends S.Schema.Any>(dataSc
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class NotReady extends Data.TaggedError('NotReady')<{ /** NotReady error for ROP bridges when state is Idle or Loading. */
-	readonly state: 'Idle' | 'Loading';
-}> {}
+/** NotReady error for ROP bridges when state is Idle or Loading. */
+class NotReady extends Data.TaggedError('NotReady')<{ readonly state: 'Idle' | 'Loading'; }> {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -60,14 +59,12 @@ const isFailure = <A = unknown, E = unknown>(s: AsyncState<A, E> | undefined): b
 const isIdle = <A = unknown, E = unknown>(s: AsyncState<A, E> | undefined): boolean => s != null && $is('Idle')(s);
 
 // --- [ACCESSORS]
-
 const toAttr = <A = unknown, E = unknown>(s: AsyncState<A, E> | undefined): Lowercase<AsyncStateTag> => s == null ? 'idle' : (s._tag.toLowerCase() as Lowercase<AsyncStateTag>);
 const getData = <A, E>(s: AsyncState<A, E>): Option.Option<A> => s._tag === 'Success' ? Option.some(s.data) : Option.none();
 const getError = <A, E>(s: AsyncState<A, E>): Option.Option<E> => s._tag === 'Failure' ? Option.some(s.error) : Option.none();
 const getOrElse = <A, E>(s: AsyncState<A, E>, fallback: A): A => s._tag === 'Success' ? s.data : fallback;
 
 // --- [ALGEBRA]
-
 /** Functor: Transform success data while preserving timestamp and other variants. */
 const mapSuccess = <A, E, B>(s: AsyncState<A, E>, f: (a: A) => B): AsyncState<B, E> =>
 	$match(s, {
@@ -103,7 +100,6 @@ const match = <A, E, R>(
 	}) as R;
 
 // --- [ROP_BRIDGES]
-
 const toOption = <A, E>(s: AsyncState<A, E>): Option.Option<A> => s._tag === 'Success' ? Option.some(s.data) : Option.none();
 const toEither = <A, E>(s: AsyncState<A, E>): Either.Either<A, E | NotReady> =>
 	$match(s, {

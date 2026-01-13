@@ -1,7 +1,5 @@
 /**
- * Bridge file upload to React state with progress tracking.
- * Uses FileOps service for processing, returns component-ready props.
- * Progress derived from per-file completion (completedFiles / totalFiles).
+ * File upload hooks with progress tracking and FileOps service integration.
  */
 import type { AppError } from '@parametric-portal/types/app-error';
 import { AsyncState } from '@parametric-portal/types/async';
@@ -56,25 +54,23 @@ const useFileUpload = <T extends MimeType = MimeType>(config: FileUploadHookConf
             setProgress(0);
             completedRef.current = 0;
             const total = files.length;
+            const trackProgress = Effect.sync(() => {
+                completedRef.current += 1;
+                setProgress((completedRef.current / total) * 100);
+            });
+            const extractFirst = (r: ReadonlyArray<ValidatedFile<T>>): ValidatedFile<T> => r[0] as ValidatedFile<T>;
             runtime.runFork(
-                Effect.gen(function* () {
-                    const ops = yield* FileOps;
-                    const results = yield* Effect.all(
-                        files.map((file) =>
-                            ops.processUpload<T>([file], config).pipe(
-                                Effect.tap(() =>
-                                    Effect.sync(() => {
-                                        completedRef.current += 1;
-                                        setProgress((completedRef.current / total) * 100);
-                                    }),
-                                ),
-                                Effect.map((r) => r[0] as ValidatedFile<T>),
-                            ),
+                FileOps.pipe(
+                    Effect.flatMap((ops) =>
+                        Effect.forEach(
+                            files,
+                            (file) =>
+                                ops
+                                    .processUpload<T>([file], config)
+                                    .pipe(Effect.tap(trackProgress), Effect.map(extractFirst)),
+                            { concurrency: 'unbounded' },
                         ),
-                        { concurrency: 'unbounded' },
-                    );
-                    return results as ReadonlyArray<ValidatedFile<T>>;
-                }).pipe(
+                    ),
                     Effect.tap((data) => Effect.sync(() => setState(AsyncState.Success(data)))),
                     Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(e)))),
                 ),

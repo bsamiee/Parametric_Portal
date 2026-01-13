@@ -1,6 +1,5 @@
 /**
- * Manage URL state with type-safe search params.
- * Provides branded parsers for domain primitives and React hooks.
+ * Type-safe URL search params with branded parsers for domain primitives.
  */
 import { ApiKeyId, AssetId, OAuthAccountId, RefreshTokenId, SessionId, UserId } from '@parametric-portal/types/schema';
 import {
@@ -148,5 +147,5 @@ const createUrlLoader = <T extends Record<string, SingleParserBuilder<unknown>>>
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as URL_TUNING, createBrandedNumberParser, createBrandedStringParser, createUrlLoader, parsers, useUrl };
+export { B as URL_TUNING, createUrlLoader, parsers, useUrl };
 export type { UrlHistory, UrlStateOptions };

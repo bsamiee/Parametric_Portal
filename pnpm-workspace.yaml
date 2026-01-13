@@ -48,7 +48,8 @@ catalog:
   '@tanstack/react-table': 8.21.3
   '@tanstack/react-virtual': 3.13.18
   '@testing-library/react': 16.3.1
-  '@types/node': 25.0.6
+  '@types/node': 25.0.7
+  '@types/papaparse': 5.5.2
   '@types/react': 19.2.8
   '@types/react-dom': 19.2.3
   '@use-gesture/react': 10.3.1
@@ -67,6 +68,7 @@ catalog:
   drizzle-kit: 0.31.8
   drizzle-orm: 0.45.1
   effect: 3.19.14
+  exceljs: 4.4.0
   fake-indexeddb: 6.2.5
   fast-check: 4.5.3
   happy-dom: 20.1.0
@@ -86,6 +88,7 @@ catalog:
   nuqs: 2.8.6
   nx: 22.3.3
   otplib: 13.1.0
+  papaparse: 5.5.2
   react: 19.3.0-canary-f93b9fd4-20251217
   react-aria: 3.45.0
   react-aria-components: 1.14.0

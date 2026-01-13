@@ -1,34 +1,33 @@
 /**
  * Cryptographic utilities: hashing, encryption, token generation/validation.
- * Effect.fn for tracing, Schema.Class for domain models, Layer.effect for services.
+ * Supports versioned encryption keys for seamless rotation.
  */
 import { Hex64, Uuidv7 } from '@parametric-portal/types/types';
-import { Config, Context, Effect, Layer, Metric, Option, ParseResult, Redacted, Schema as S } from 'effect';
+import { Config, Context, Effect, Layer, Option, ParseResult, Redacted, Schema as S } from 'effect';
 import { HttpError } from './http-errors.ts';
-import { MetricsService } from './metrics.ts';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type TokenValidation<T> = {
-    readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<T>, InstanceType<typeof HttpError.Auth>>;
-    readonly messages: { readonly notFound: string; readonly expired: string };
-};
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
+    algorithm: 'aes-256-gcm' as const,
+    currentKeyVersion: 1,
     ivLength: 12,
     keyAlgorithm: { length: 256, name: 'AES-GCM' },
-    minEncryptedLength: 13,
+    keyVersionHeader: 1,
+    minEncryptedLength: 14, // 1 (version) + 12 (iv) + 1 (min ciphertext)
+    versionLength: 1,
 } as const);
 
 // --- [CLASSES] ---------------------------------------------------------------
 
-class TokenPair extends S.Class<TokenPair>('TokenPair')({ hash: Hex64.schema, token: Uuidv7.schema }) {
+class TokenPair extends S.Class<TokenPair>('TokenPair')({
+    hash: Hex64.schema,
+    token: Uuidv7.schema,
+}) {
     static readonly create = Effect.gen(function* () {
         const token = Uuidv7.generateSync();
         const hashBuffer = yield* Effect.tryPromise({
-            catch: (_cause) => new HttpError.Internal({ message: 'Hashing failed' }),
+            catch: () => new HttpError.Internal({ message: 'Hashing failed' }),
             try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)),
         });
         return new TokenPair({ hash: Hex64.fromBytes(new Uint8Array(hashBuffer)), token });
@@ -36,133 +35,148 @@ class TokenPair extends S.Class<TokenPair>('TokenPair')({ hash: Hex64.schema, to
 }
 class EncryptedKey extends S.Class<EncryptedKey>('EncryptedKey')({
     ciphertext: S.Uint8ArrayFromSelf,
-    iv: S.Uint8ArrayFromSelf.pipe(
-        S.filter((arr) => arr.length === B.ivLength, { message: () => `IV must be ${B.ivLength} bytes` }),
-    ),
+    iv: S.Uint8ArrayFromSelf.pipe(S.filter((arr) => arr.length === B.ivLength, { message: () => `IV must be ${B.ivLength} bytes` }),),
+    version: S.Number.pipe(S.int(), S.between(1, 255)),
 }) {
-    /** Decode Uint8Array (iv || ciphertext) ↔ EncryptedKey. Encode receives struct shape, not instance. */
     static readonly fromBytes = S.transformOrFail(S.Uint8ArrayFromSelf, EncryptedKey, {
         decode: (bytes) =>
             bytes.length < B.minEncryptedLength
-                ? ParseResult.fail(
-                      new ParseResult.Type(
-                          S.Uint8ArrayFromSelf.ast,
-                          bytes,
-                          `Expected at least ${B.minEncryptedLength} bytes`,
-                      ),
-                  )
-                : ParseResult.succeed(
-                      new EncryptedKey({ ciphertext: bytes.slice(B.ivLength), iv: bytes.slice(0, B.ivLength) }),
-                  ),
-        encode: ({ ciphertext, iv }) => ParseResult.succeed(new Uint8Array([...iv, ...ciphertext])),
+                ? ParseResult.fail(new ParseResult.Type(S.Uint8ArrayFromSelf.ast, bytes, `Expected at least ${B.minEncryptedLength} bytes`))
+                : ParseResult.succeed(new EncryptedKey({
+                      ciphertext: bytes.slice(B.versionLength + B.ivLength),
+                      iv: bytes.slice(B.versionLength, B.versionLength + B.ivLength),
+                      version: bytes[0] ?? 1,
+                  })),
+        encode: ({ ciphertext, iv, version }) => ParseResult.succeed(new Uint8Array([version, ...iv, ...ciphertext])),
         strict: true,
     });
-    /** Static: decrypt from raw bytes (parses then decrypts). */
-    static readonly decryptBytes = Effect.fn('crypto.decrypt.bytes')((bytes: Uint8Array) =>
+    static readonly decryptBytes = (bytes: Uint8Array) =>
         Effect.gen(function* () {
             const encrypted = yield* S.decodeUnknown(EncryptedKey.fromBytes)(bytes).pipe(
                 Effect.mapError(() => new HttpError.Internal({ message: 'Invalid encrypted data format' })),
             );
             return yield* encrypted.decrypt();
-        }),
-    );
-    /** Instance: decrypt this encrypted key (requires EncryptionKeyService in context). */
-    decrypt(): Effect.Effect<string, InstanceType<typeof HttpError.Internal>, EncryptionKeyService> {
-        const { iv, ciphertext } = this;
-        return Effect.fn('crypto.decrypt')(() =>
-            Effect.gen(function* () {
-                const key = yield* EncryptionKeyService;
-                return yield* Effect.tryPromise({
-                    catch: (_cause) => new HttpError.Internal({ message: 'Encryption failed' }),
-                    try: () => crypto.subtle.decrypt({ iv: iv.slice(), name: 'AES-GCM' }, key, ciphertext.slice()),
-                }).pipe(Effect.map((buf) => new TextDecoder().decode(buf)));
-            }),
-        )();
+        }).pipe(Effect.withSpan('crypto.decrypt.bytes'));
+    decrypt(): Effect.Effect<string, InstanceType<typeof HttpError.Internal>, EncryptionKeyStore> {
+        const { ciphertext, iv, version } = this;
+        return Effect.gen(function* () {
+            const store = yield* EncryptionKeyStore;
+            const key = yield* store.getKey(version);
+            const decrypted = yield* Effect.tryPromise({
+                catch: () => new HttpError.Internal({ message: 'Decryption failed' }),
+                try: () => crypto.subtle.decrypt({ iv: iv.slice(), name: 'AES-GCM' }, key, ciphertext.slice()),
+            });
+            return new TextDecoder().decode(decrypted);
+        }).pipe(Effect.withSpan('crypto.decrypt'));
     }
-    /** Serialize to bytes (iv || ciphertext) for storage/transmission. */
-    toBytes(): Uint8Array {
-        return new Uint8Array([...this.iv, ...this.ciphertext]);
-    }
+    toBytes(): Uint8Array {return new Uint8Array([this.version, ...this.iv, ...this.ciphertext]);}
 }
-class EncryptionKeyService extends Context.Tag('crypto/EncryptionKey')<EncryptionKeyService, CryptoKey>() {
-    /** Layer fails as defect if ENCRYPTION_KEY missing/invalid - this is a startup configuration error, not runtime. */
+class EncryptionKeyStore extends Context.Tag('crypto/EncryptionKeyStore')<EncryptionKeyStore, {
+    readonly currentVersion: number;
+    readonly getKey: (version: number) => Effect.Effect<CryptoKey, InstanceType<typeof HttpError.Internal>>;
+}>() {
     static readonly layer = Layer.effect(
         this,
         Effect.gen(function* () {
-            const redacted = yield* Config.redacted('ENCRYPTION_KEY');
-            return yield* Effect.tryPromise({
-                catch: (cause) => cause,
-                try: () =>
-                    crypto.subtle.importKey(
-                        'raw',
-                        Hex64.fromBase64(Redacted.value(redacted)).slice(),
-                        B.keyAlgorithm,
-                        false,
-                        ['encrypt', 'decrypt'],
+            const keys = new Map<number, CryptoKey>();
+            const importKey = (keyB64: string) =>
+                Effect.tryPromise({
+                    catch: (cause) => cause,
+                    try: () => crypto.subtle.importKey('raw', Hex64.fromBase64(keyB64).slice(), B.keyAlgorithm, false, ['encrypt', 'decrypt']),
+                });
+            const storeKey = (v: number, key: CryptoKey) => Effect.sync(() => keys.set(v, key));
+            const importAndStore = (v: number, keyB64: string) => importKey(keyB64).pipe(Effect.flatMap((key) => storeKey(v, key)), Effect.catchAll(() => Effect.void));
+            const loadHistoricalKey = (v: number) =>
+                Effect.gen(function* () {
+                    const opt = yield* Config.option(Config.redacted(`ENCRYPTION_KEY_V${v}`));
+                    yield* Option.isSome(opt) ? importAndStore(v, Redacted.value(opt.value)) : Effect.void;
+                });
+            const currentRedacted = yield* Config.redacted('ENCRYPTION_KEY');
+            const currentKey = yield* importKey(Redacted.value(currentRedacted));
+            keys.set(B.currentKeyVersion, currentKey);
+            const maxHistorical = 10;
+            const historicalVersions = Array.from({ length: maxHistorical }, (_, i) => i + 1).filter((v) => v !== B.currentKeyVersion);
+            yield* Effect.all(historicalVersions.map(loadHistoricalKey), { concurrency: 'unbounded' });
+            yield* Effect.logInfo('EncryptionKeyStore initialized', { versions: Array.from(keys.keys()).sort((a, b) => a - b) });
+            return {
+                currentVersion: B.currentKeyVersion,
+                getKey: (version: number) =>
+                    Effect.fromNullable(keys.get(version)).pipe(
+                        Effect.mapError(() => new HttpError.Internal({ message: `Encryption key version ${version} not found` })),
                     ),
-            });
+            };
         }).pipe(Effect.orDie),
     );
 }
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const hash = Effect.fn('crypto.hash')((input: string) =>
+const hash = (input: string) =>
+    Effect.tryPromise({
+        catch: () => new HttpError.Internal({ message: 'Hashing failed' }),
+        try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
+    }).pipe(
+        Effect.map((hashBuffer) => Hex64.fromBytes(new Uint8Array(hashBuffer))),
+        Effect.withSpan('crypto.hash'),
+    );
+const encrypt = (plaintext: string) =>
     Effect.gen(function* () {
-        const metrics = yield* MetricsService;
-        return yield* Effect.tryPromise({
-            catch: (_cause) => new HttpError.Internal({ message: 'Hashing failed' }),
-            try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
-        }).pipe(
-            Effect.map((buf) => Hex64.fromBytes(new Uint8Array(buf))),
-            Metric.trackDuration(metrics.crypto.duration.pipe(Metric.tagged('operation', 'hash'))),
-        );
-    }),
-);
-const encrypt = Effect.fn('crypto.encrypt')(function* (plaintext: string) {
-    const metrics = yield* MetricsService;
-    const key = yield* EncryptionKeyService;
-    const iv = crypto.getRandomValues(new Uint8Array(B.ivLength));
-    const ciphertext = yield* Effect.tryPromise({
-        catch: (_cause) => new HttpError.Internal({ message: 'Encryption failed' }),
-        try: () =>
-            crypto.subtle
-                .encrypt({ iv, name: 'AES-GCM' }, key, new TextEncoder().encode(plaintext))
+        const store = yield* EncryptionKeyStore;
+        const key = yield* store.getKey(store.currentVersion);
+        const iv = crypto.getRandomValues(new Uint8Array(B.ivLength));
+        const ciphertext = yield* Effect.tryPromise({
+            catch: () => new HttpError.Internal({ message: 'Encryption failed' }),
+            try: () => crypto.subtle.encrypt({ iv, name: 'AES-GCM' }, key, new TextEncoder().encode(plaintext))
                 .then((buf) => new Uint8Array(buf)),
-    }).pipe(Metric.trackDuration(metrics.crypto.duration.pipe(Metric.tagged('operation', 'encrypt'))));
-    return new EncryptedKey({ ciphertext, iv });
-});
-const validate =
-    <T extends { readonly expiresAt?: Date | Option.Option<Date> }>({ lookup, messages }: TokenValidation<T>) =>
-    (tokenHash: Hex64) =>
-        lookup(tokenHash).pipe(
-            Effect.flatMap(
-                Option.match({
-                    onNone: () => Effect.fail(new HttpError.Auth({ reason: messages.notFound })),
-                    onSome: Effect.succeed,
-                }),
-            ),
-            Effect.filterOrFail(
-                (result) => {
-                    const expiresAt =
-                        result.expiresAt instanceof Date
-                            ? Option.some(result.expiresAt)
-                            : (result.expiresAt ?? Option.none<Date>());
-                    const exp = Option.getOrUndefined(expiresAt);
-                    return exp === undefined || exp > new Date();
-                },
-                () => new HttpError.Auth({ reason: messages.expired }),
-            ),
-        );
+        });
+        return new EncryptedKey({ ciphertext, iv, version: store.currentVersion });
+    }).pipe(Effect.withSpan('crypto.encrypt'));
+const validate = <T extends { readonly expiresAt?: Date | Option.Option<Date> }>(config: {
+    readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<T>, InstanceType<typeof HttpError.Auth>>;
+    readonly messages: { readonly notFound: string; readonly expired: string }; }) => (tokenHash: Hex64) =>
+    config.lookup(tokenHash).pipe(
+        Effect.andThen(Option.match({
+            onNone: () => Effect.fail(new HttpError.Auth({ reason: config.messages.notFound })),
+            onSome: Effect.succeed,
+        })),
+        Effect.filterOrFail(
+            (result) => {
+                const expiresAt = result.expiresAt instanceof Date
+                    ? Option.some(result.expiresAt)
+                    : (result.expiresAt ?? Option.none<Date>());
+                const exp = Option.getOrUndefined(expiresAt);
+                return exp === undefined || exp > new Date();
+            },
+            () => new HttpError.Auth({ reason: config.messages.expired }),
+        ),
+    );
+const migrateEncrypted = (encryptedBytes: Uint8Array) =>
+    Effect.gen(function* () {
+        const store = yield* EncryptionKeyStore;
+        const encrypted = yield* S.decodeUnknown(EncryptedKey.fromBytes)(encryptedBytes).pipe(Effect.mapError(() => new HttpError.Internal({ message: 'Invalid encrypted data format' })),);
+        const needsMigration = encrypted.version !== store.currentVersion;
+        return needsMigration
+            ? yield* encrypted.decrypt().pipe(
+                  Effect.flatMap((plaintext) =>
+                      encrypt(plaintext).pipe(
+                          Effect.map((newEncrypted) => ({
+                              migrated: true as const,
+                              newEncrypted: newEncrypted.toBytes(),
+                              plaintext,
+                          })),
+                      ),
+                  ),
+              )
+            : { migrated: false as const };
+    }).pipe(Effect.withSpan('crypto.migrate'));
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const Crypto = Object.freeze({
-    Key: { encrypt, Service: EncryptionKeyService },
+    Key: { encrypt, migrate: migrateEncrypted, Store: EncryptionKeyStore },
     Token: { generate: Uuidv7.generateSync, hash, Pair: TokenPair, validate },
 } as const);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Crypto, EncryptedKey, EncryptionKeyService, TokenPair };
-export type { TokenValidation };
+export { Crypto, EncryptedKey, EncryptionKeyStore, TokenPair };

@@ -3,8 +3,8 @@
  * Effect.Tag + HttpApiMiddleware.Tag + frozen dispatch table.
  */
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
+import { Role } from '@parametric-portal/types/schema';
 import type { AppId, OAuthProvider, RoleKey } from '@parametric-portal/types/schema';
-import { SCHEMA_TUNING } from '@parametric-portal/types/schema';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { Effect, Layer, Option, Redacted } from 'effect';
 import type { AuthContext, OAuthResult } from './auth.ts';
@@ -15,36 +15,19 @@ import { metricsMiddleware, MetricsService } from './metrics.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type OAuthError = InstanceType<typeof HttpError.OAuth>;
-type ForbiddenError = InstanceType<typeof HttpError.Forbidden>;
 type AppLookup = { readonly findBySlug: (slug: string) => Effect.Effect<Option.Option<{ readonly id: AppId; readonly slug: string }>, unknown> };
 type UserLookup = { readonly findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: RoleKey }>, unknown> };
 type SessionLookupService = { readonly lookup: (hash: Hex64) => Effect.Effect<Option.Option<AuthContext>> };
 type OAuthService = {
-    readonly authenticate: (
-        provider: typeof OAuthProvider.Type,
-        code: string,
-        state: string,
-        stateCookie: string,
-    ) => Effect.Effect<OAuthResult, OAuthError>;
-    readonly createAuthorizationUrl: (
-        provider: typeof OAuthProvider.Type,
-    ) => Effect.Effect<{ readonly stateCookie: string; readonly url: URL }, OAuthError>;
-    readonly refreshToken: (
-        provider: typeof OAuthProvider.Type,
-        refreshToken: string,
-    ) => Effect.Effect<OAuthResult, OAuthError>;
+    readonly authenticate: (provider: OAuthProvider, code: string, state: string, stateCookie: string) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>>;
+    readonly createAuthorizationUrl: (provider: OAuthProvider) => Effect.Effect<{ readonly stateCookie: string; readonly url: URL }, InstanceType<typeof HttpError.OAuth>>;
+    readonly refreshToken: (provider: OAuthProvider, refreshToken: string) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>>;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const B = Object.freeze({
-    appId: {
-        sentinel: {
-            system: 'system' as const,
-            unknown: 'unknown' as const,
-        },
-    },
+    appId: { sentinel: { system: 'system' as const, unknown: 'unknown' as const } },
     cors: {
         allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-App-Id'],
         allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -53,12 +36,18 @@ const B = Object.freeze({
         maxAge: 86400,
     },
     headers: { appId: 'x-app-id', requestId: 'x-request-id' },
+    ipHeaders: ['cf-connecting-ip', 'x-real-ip', 'x-forwarded-for'] as const,
     security: {
         frameOptions: 'DENY',
         hsts: { includeSubDomains: true, maxAge: 31536000 },
         referrerPolicy: 'strict-origin-when-cross-origin',
     },
     tracerDisabledUrls: ['/health', '/ready', '/metrics'],
+    trustedProxy: {
+        enabled: process.env['TRUSTED_PROXY_ENABLED'] === 'true',
+        trustedCidrs: (process.env['TRUSTED_PROXY_CIDRS'] ?? '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32').split(',').map((s) => s.trim()),
+        trustedHops: Number.parseInt(process.env['TRUSTED_PROXY_HOPS'] ?? '1', 10),
+    },
 } as const);
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -79,23 +68,19 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('SessionAuth', {
 }) {
     static readonly layer = Layer.effect(
         this,
-        Effect.all([SessionLookup, MetricsService]).pipe(
-            Effect.map(([{ lookup }, metrics]) =>
-                SessionAuth.of({
-                    bearer: (token: Redacted.Redacted<string>) =>
-                        Crypto.Token.hash(Redacted.value(token)).pipe(
-                            Effect.mapError(() => new HttpError.Auth({ reason: 'Token hashing failed' })),
-                            Effect.flatMap(lookup),
-                            Effect.flatMap(
-                                Option.match({
-                                    onNone: () => Effect.fail(new HttpError.Auth({ reason: 'Invalid session' })),
-                                    onSome: Effect.succeed,
-                                }),
-                            ),
-                            Effect.provideService(MetricsService, metrics),
-                        ),
-                }),
-            ),
+        Effect.map(Effect.all([SessionLookup, MetricsService]), ([{ lookup }, metrics]) =>
+            SessionAuth.of({
+                bearer: (token: Redacted.Redacted<string>) =>
+                    Crypto.Token.hash(Redacted.value(token)).pipe(
+                        Effect.mapError(() => new HttpError.Auth({ reason: 'Token hashing failed' })),
+                        Effect.andThen(lookup),
+                        Effect.andThen(Option.match({
+                            onNone: () => Effect.fail(new HttpError.Auth({ reason: 'Invalid session' })),
+                            onSome: Effect.succeed,
+                        })),
+                        Effect.provideService(MetricsService, metrics),
+                    ),
+            }),
         ),
     );
 }
@@ -111,6 +96,35 @@ const requestId = (header = B.headers.requestId) =>
             );
         }),
     );
+const ipInCidr = (ip: string, cidr: string): boolean => {
+    const [range, bitsStr] = cidr.split('/');
+    const bits = Number.parseInt(bitsStr ?? '32', 10);
+    const ipParts = ip.split('.').map(Number);
+    const rangeParts = (range ?? '').split('.').map(Number);
+    const mask = ~((1 << (32 - bits)) - 1) >>> 0;
+    const ipNum = ((ipParts[0] ?? 0) << 24) | ((ipParts[1] ?? 0) << 16) | ((ipParts[2] ?? 0) << 8) | (ipParts[3] ?? 0);
+    const rangeNum = ((rangeParts[0] ?? 0) << 24) | ((rangeParts[1] ?? 0) << 16) | ((rangeParts[2] ?? 0) << 8) | (rangeParts[3] ?? 0);
+    return (ipNum & mask) === (rangeNum & mask);
+};
+const extractClientIp = (headers: Headers.Headers, directIp?: string): string | null => {
+    const xForwardedFor = Option.getOrNull(Headers.get(headers, 'x-forwarded-for'));
+    const isFromTrustedProxy = directIp && B.trustedProxy.trustedCidrs.some((cidr) => ipInCidr(directIp, cidr));
+    const shouldTrustHeaders = !B.trustedProxy.enabled || isFromTrustedProxy;
+    const useDirectIp = !shouldTrustHeaders && directIp;
+    const returnDirectIp = useDirectIp ? directIp : null;
+    const noXff = !xForwardedFor;
+    const fallbackResult = noXff
+        ? (Option.getOrNull(Headers.get(headers, 'cf-connecting-ip')) ??
+           Option.getOrNull(Headers.get(headers, 'x-real-ip')) ??
+           returnDirectIp)
+        : null;
+    const ips = xForwardedFor?.split(',').map((ip) => ip.trim()).filter((ip) => ip.length > 0) ?? [];
+    const clientIpIndex = B.trustedProxy.enabled
+        ? Math.max(0, ips.length - B.trustedProxy.trustedHops)
+        : 0;
+    const clientIp = ips[clientIpIndex] ?? null;
+    return fallbackResult ?? (shouldTrustHeaders ? clientIp : returnDirectIp);
+};
 const requestContext = (header = B.headers.appId) =>
     HttpMiddleware.make((app) =>
         Effect.gen(function* () {
@@ -121,25 +135,27 @@ const requestContext = (header = B.headers.appId) =>
             const appId: AppId = yield* Option.match(slugOpt, {
                 onNone: () => Effect.succeed(B.appId.sentinel.system as AppId),
                 onSome: (slug) =>
-                    Effect.gen(function* () {
-                        const appLookup = yield* AppLookupService;
-                        const appInfoOpt = yield* appLookup.findBySlug(slug).pipe(Effect.orElseSucceed(() => Option.none()));
-                        return Option.getOrElse(
-                            Option.map(appInfoOpt, (info) => info.id),
-                            () => B.appId.sentinel.unknown as AppId,
-                        );
-                    }),
+                    AppLookupService.pipe(
+                        Effect.andThen((svc) => svc.findBySlug(slug)),
+                        Effect.orElseSucceed(() => Option.none()),
+                        Effect.map((opt) => Option.getOrElse(Option.map(opt, (info) => info.id), () => B.appId.sentinel.unknown as AppId)),
+                    ),
             });
             const ctx: typeof RequestContext.Service = {
                 appId,
+                ipAddress: extractClientIp(req.headers),
                 requestId: Option.getOrElse(reqIdOpt, () => crypto.randomUUID()),
                 sessionId: Option.getOrNull(Option.map(sessionOpt, (s) => s.sessionId)),
+                userAgent: Option.getOrNull(Headers.get(req.headers, 'user-agent')),
                 userId: Option.getOrNull(Option.map(sessionOpt, (s) => s.userId)),
             };
             return yield* app.pipe(Effect.provideService(RequestContext, ctx));
         }),
     );
-const applySecurityHeaders = (response: HttpServerResponse.HttpServerResponse, hsts: typeof B.security.hsts | false = B.security.hsts): HttpServerResponse.HttpServerResponse => {
+const applySecurityHeaders = (
+    response: HttpServerResponse.HttpServerResponse,
+    hsts: typeof B.security.hsts | false = B.security.hsts,
+): HttpServerResponse.HttpServerResponse => {
     const baseHeaders: ReadonlyArray<readonly [string, string]> = [
         ['x-content-type-options', 'nosniff'],
         ['x-frame-options', B.security.frameOptions],
@@ -167,25 +183,25 @@ const trace = HttpMiddleware.make((app) =>
 
 // --- [ROLE_ENFORCEMENT] ------------------------------------------------------
 
-const requireRole = (min: RoleKey): Effect.Effect<void, ForbiddenError | InstanceType<typeof HttpError.Internal>, Session | UserLookupService> =>
+const requireRole = (min: RoleKey): Effect.Effect<void, InstanceType<typeof HttpError.Forbidden> | InstanceType<typeof HttpError.Internal>, Session | UserLookupService> =>
     Effect.gen(function* () {
         const { userId } = yield* Session;
         const { findById } = yield* UserLookupService;
         const user = yield* findById(userId).pipe(
             Effect.mapError(() => new HttpError.Internal({ message: 'User lookup failed' })),
-            Effect.flatMap(Option.match({
+            Effect.andThen(Option.match({
                 onNone: () => Effect.fail(new HttpError.Forbidden({ reason: 'User not found' })),
                 onSome: Effect.succeed,
             })),
         );
-        yield* SCHEMA_TUNING.roleLevels[user.role] >= SCHEMA_TUNING.roleLevels[min]
+        yield* Role.hasMinRole(user.role, min)
             ? Effect.void
             : Effect.fail(new HttpError.Forbidden({ reason: 'Insufficient permissions' }));
     });
 
 // --- [MFA_ENFORCEMENT] -------------------------------------------------------
 
-const requireMfaVerified: Effect.Effect<void, ForbiddenError, Session> = Effect.gen(function* () {
+const requireMfaVerified: Effect.Effect<void, InstanceType<typeof HttpError.Forbidden>, Session> = Effect.gen(function* () {
     const session = yield* Session;
     yield* Effect.when(
         Effect.fail(new HttpError.Forbidden({ reason: 'MFA verification required' })),
@@ -229,5 +245,5 @@ const Middleware = Object.freeze({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { AppLookupService, B as MIDDLEWARE_TUNING, Middleware, OAuth, requestContext, requireMfaVerified, requireRole };
+export { AppLookupService, Middleware, OAuth, requestContext, requireMfaVerified, requireRole };
 export type { AppLookup, OAuthService, SessionLookupService, UserLookup };

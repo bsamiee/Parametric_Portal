@@ -73,7 +73,7 @@ const PgLive = PgClient.layerConfig({
 ---
 ## [5][CONSTANT_PATTERN]
 
-**Single frozen B per file:**
+**Single frozen B per file (internal only, never exported):**
 ```typescript
 const B = Object.freeze({
     bounds: Object.freeze({ min: 0, max: 100 }),
@@ -81,7 +81,7 @@ const B = Object.freeze({
 }) satisfies DeepReadonly<{...}>;
 ```
 
-**Export as `*_TUNING`:** `export { B as DOMAIN_TUNING };`
+**B constants are module-internal configuration. Never export B constants.**
 
 ---
 ## [6][NAMESPACE_PATTERN]

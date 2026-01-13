@@ -1,6 +1,5 @@
 /**
- * Create Zustand stores with composable middleware chain.
- * Applies immer → computed → persist → temporal → subscribeWithSelector → devtools in canonical order.
+ * Zustand store factory with canonical middleware chain composition.
  */
 import type { XOR } from '@parametric-portal/types/props';
 import { PositiveInt } from '@parametric-portal/types/types';
@@ -15,6 +14,20 @@ import { createStorage, type StorageType } from './storage';
 
 // --- [TYPES] -----------------------------------------------------------------
 
+// biome-ignore lint/suspicious/noExplicitAny: Zustand middleware typing
+type MiddlewareApplicator = (creator: any, ctx: MiddlewareContext) => any;
+// biome-ignore lint/suspicious/noExplicitAny: Slice type inference
+type AnySlice = ReturnType<typeof createSlice<any, any, any>>;
+type DevtoolsConfig = { readonly enabled?: boolean };
+type SlicedStoreConfig<T, C = object> = Omit<StoreConfig<T, C>, 'immer'> & { readonly immer?: boolean };
+type ExtractState<S> = S extends { getState: () => infer T } ? T : never;
+type WithSelectors<S> = S & { readonly use: { readonly [K in keyof ExtractState<S>]: () => ExtractState<S>[K] } };
+type StoreApi<T, C = object> = WithSelectors<UseBoundStore<ZustandStoreApi<T & C>>>;
+type MiddlewareKey = 'immer' | 'computed' | 'persist' | 'temporal' | 'subscribeWithSelector' | 'devtools';
+type SliceStateUnion<S extends AnySlice[]> = S[number] extends { value: infer V } ? V : never;
+type SlicedStoreReturn<S extends AnySlice[], C extends object> = StoreApi<SliceStateUnion<S>, C> &
+    TemporalApi<SliceStateUnion<S> & C>;
+type TemporalApi<T> = { readonly temporal: { getState: () => TemporalState<Partial<T>> } };
 type PersistFilter = XOR<
     { readonly exclude: ReadonlyArray<string | RegExp> },
     { readonly include: ReadonlyArray<string | RegExp> }
@@ -24,17 +37,11 @@ type PersistConfig<T = unknown> = {
     readonly schema?: S.Schema<T, T>;
     readonly storage?: StorageType;
 } & Partial<PersistFilter>;
-type ComputedConfig<T, C> = {
-    readonly compute: (state: T) => C;
-    readonly keys?: ReadonlyArray<keyof T>;
-};
+type ComputedConfig<T, C> = { readonly compute: (state: T) => C; readonly keys?: ReadonlyArray<keyof T> };
 type TemporalConfig<T> = {
     readonly enabled?: boolean;
     readonly limit?: PositiveInt;
     readonly partialize?: (state: T) => Partial<T>;
-};
-type DevtoolsConfig = {
-    readonly enabled?: boolean;
 };
 type StoreConfig<T, C = object> = {
     readonly computed?: ComputedConfig<T, C>;
@@ -43,27 +50,6 @@ type StoreConfig<T, C = object> = {
     readonly name: string;
     readonly persist?: boolean | PersistConfig<T>;
     readonly temporal?: boolean | TemporalConfig<T>;
-};
-type SlicedStoreConfig<T, C = object> = Omit<StoreConfig<T, C>, 'immer'> & {
-    readonly immer?: boolean;
-};
-type ExtractState<S> = S extends { getState: () => infer T } ? T : never;
-type WithSelectors<S> = S & {
-    readonly use: { readonly [K in keyof ExtractState<S>]: () => ExtractState<S>[K] };
-};
-// biome-ignore lint/suspicious/noExplicitAny: Zustand middleware typing
-type MiddlewareApplicator = (creator: any, ctx: MiddlewareContext) => any;
-// biome-ignore lint/suspicious/noExplicitAny: Slice type inference
-type AnySlice = ReturnType<typeof createSlice<any, any, any>>;
-type StoreApi<T, C = object> = WithSelectors<UseBoundStore<ZustandStoreApi<T & C>>>;
-type MiddlewareKey = 'immer' | 'computed' | 'persist' | 'temporal' | 'subscribeWithSelector' | 'devtools';
-type SliceStateUnion<S extends AnySlice[]> = S[number] extends { value: infer V } ? V : never;
-type SlicedStoreReturn<S extends AnySlice[], C extends object> = StoreApi<SliceStateUnion<S>, C> &
-    TemporalApi<SliceStateUnion<S> & C>;
-type TemporalApi<T> = {
-    readonly temporal: {
-        getState: () => TemporalState<Partial<T>>;
-    };
 };
 type MiddlewareContext = {
     readonly name: string;
@@ -92,7 +78,6 @@ const StoreNameSchema = S.String.pipe(
         message: () => 'Store name must be lowercase alphanumeric with hyphens/colons',
     }),
 );
-const HistoryLimitSchema = S.Number.pipe(S.int(), S.between(1, 1000));
 const validateStoreName = (name: string): boolean => Either.isRight(S.decodeUnknownEither(StoreNameSchema)(name));
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -258,15 +243,7 @@ const createSchemaStore = <T extends object, C extends object = object>(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export {
-    B as STORE_FACTORY_TUNING,
-    createSchemaStore,
-    createSlicedStore,
-    createStore,
-    HistoryLimitSchema,
-    StoreNameSchema,
-    validateStoreName,
-};
+export { B as STORE_FACTORY_TUNING, createSchemaStore, createSlicedStore, createStore };
 export type {
     ComputedConfig,
     DevtoolsConfig,

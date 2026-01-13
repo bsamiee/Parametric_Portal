@@ -19,7 +19,7 @@ import { Config, type Effect, Layer, Redacted, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type AiProviderType = typeof AiProvider.Type;
+type AiProviderType = AiProvider;
 type AiModelConfig = {
     readonly apiKey?: string;
     readonly maxTokens?: number;
@@ -99,7 +99,7 @@ const modelCreators = {
 /** Build prompt with optional system message using library combinator. */
 const buildPrompt = (userPrompt: Prompt.RawInput, system?: string): Prompt.Prompt =>
     system === undefined ? Prompt.make(userPrompt) : Prompt.make(userPrompt).pipe(Prompt.setSystem(system));
-/** Model Layer type inferred from factory functions. Provides LanguageModel, may fail with ConfigError. */
+/** #TODO: FIX NAMNG OF THIS TO NOT BE CONFUSING. Model Layer type inferred from factory functions. Provides LanguageModel, may fail with ConfigError. */
 type AiModelLayer = ReturnType<typeof createAnthropicModel>;
 
 // --- [TOOL_BUILDERS] ---------------------------------------------------------
@@ -134,7 +134,6 @@ const createToolHandlers = <Tools extends Record<string, Tool.Any>>(
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-/** Create model Layer with optional config override. */
 const createModelLayer = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer =>
     modelCreators[provider](config);
 const getModel = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer => createModelLayer(provider, config);

@@ -1,11 +1,5 @@
 /**
- * Bridge React 19 Suspense with Effect execution via stable client-side caching.
- * Provides direct suspension with use() hook and resource pattern with preload/read/status APIs.
- *
- * Note: Status type ('idle'|'pending'|'resolved'|'rejected') is intentionally distinct from AsyncState.
- * - AsyncState: React hook state management with timestamps, monadic ops, ROP bridges
- * - Status: Suspense promise cache state for React's use() hook and throw-promise semantics
- * These patterns are complementary: AsyncState for UI state, Status for Suspense coordination.
+ * Bridge React 19 Suspense with Effect via client-side caching and resource pattern.
  */
 import { Timestamp } from '@parametric-portal/types/types';
 import { Duration, type Effect } from 'effect';

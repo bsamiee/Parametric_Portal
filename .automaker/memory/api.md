@@ -5,9 +5,9 @@ relevantTo: [api]
 importance: 0.7
 relatedFiles: []
 usageStats:
-  loaded: 4
-  referenced: 3
-  successfulFeatures: 3
+  loaded: 6
+  referenced: 4
+  successfulFeatures: 4
 ---
 # api
 
@@ -50,3 +50,8 @@ usageStats:
 - **Rejected:** Using single error code (400 or 404 for both) - loses semantic information about failure mode
 - **Trade-offs:** Gained: caller can distinguish between client config issue vs deleted resource. Lost: slight API complexity (two error codes for one validation step).
 - **Breaking if changed:** If error codes changed (both become 400), callers cannot distinguish between 'fix the header' vs 'app was deleted' failure modes
+
+#### [Pattern] API endpoint accepts dynamic entityType and entityId as path parameters rather than query string (2026-01-13)
+- **Problem solved:** Audit logs need to be queryable by entity type and specific entity instance
+- **Why this works:** RESTful path structure (`/api/audit/:entityType/:entityId`) makes entity identity part of the resource URI. Enables caching, clear REST semantics, and prevents confusion about filtering vs routing.
+- **Trade-offs:** Easier: Clear REST semantics. Harder: Requires route parameter validation, less flexible for multi-entity queries

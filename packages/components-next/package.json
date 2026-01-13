@@ -172,12 +172,12 @@
     "motion": "catalog:",
     "react-aria": "catalog:",
     "react-aria-components": "catalog:",
-    "vaul": "catalog:",
     "tailwind-merge": "catalog:",
     "ts-essentials": "catalog:",
     "ts-toolbelt": "catalog:",
     "tw-animate-css": "catalog:",
-    "type-fest": "catalog:"
+    "type-fest": "catalog:",
+    "vaul": "catalog:"
   },
   "devDependencies": {
     "@types/react": "catalog:",

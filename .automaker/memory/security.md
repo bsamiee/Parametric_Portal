@@ -41,3 +41,10 @@ usageStats:
 - **Situation:** Implemented requestContext that returns 400 for missing X-App-Id header, but health probes have no app context
 - **Root cause:** Kubernetes and container orchestration use health endpoints to determine if server is alive. If health endpoint requires valid app context, failed app lookups prevent health probe success and crash container in orchestration systems.
 - **How to avoid:** Gained: server remains orchestration-compatible. Lost: health endpoints bypass app validation (minor security/observability issue).
+
+### Admin-only access enforcement via requireRole('admin') middleware in route handler, not in repository (2026-01-13)
+- **Context:** Audit logs contain sensitive operation history; need to prevent non-admins from viewing them
+- **Why:** Route layer is correct place for authorization. Prevents accidental exposure if repo audit query called directly. Separates concerns: data layer doesn't enforce access control.
+- **Rejected:** Authorization in repository layer - would mix security concerns with data access, making repo harder to test and reuse
+- **Trade-offs:** Easier: Clean separation of concerns. Harder: Authorization is implicit in route, not discoverable from repo signature
+- **Breaking if changed:** If requireRole check removed, endpoint becomes open to all authenticated users - audit logs readable by non-admins

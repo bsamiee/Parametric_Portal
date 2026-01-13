@@ -4,7 +4,8 @@
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from '@effect/platform';
 import { IconRequest, IconResponse } from '@parametric-portal/types/icons';
-import { AiProvider, ApiKeyId, AssetId, OAuthProvider, Role, UserId } from '@parametric-portal/types/schema';
+import { AiProvider, ApiKeyId, AppId, AssetId, AssetType, AuditEntityType, AuditOperation, OAuthProvider, Role, UserId } from '@parametric-portal/types/schema';
+import { ExportResult, ImportResult, TransferFormat } from '@parametric-portal/types/files';
 import { Email, Url } from '@parametric-portal/types/types';
 import { pipe, Schema as S } from 'effect';
 import { AuthContext } from './auth.ts';
@@ -17,18 +18,14 @@ const B = Object.freeze({ pagination: { defaultLimit: 20, defaultOffset: 0, maxL
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const UserResponse = S.Struct({ createdAt: S.DateFromSelf, email: Email.schema, id: UserId.schema, role: Role });
-const UpdateRoleRequest = S.Struct({ role: Role });
+const UserResponse = S.Struct({ createdAt: S.DateFromSelf, email: Email.schema, id: UserId.schema, role: Role.schema });
+const UpdateRoleRequest = S.Struct({ role: Role.schema });
 const MfaVerifyRequest = S.Struct({ code: S.String.pipe(S.pattern(/^\d{6}$/)) });
 const MfaVerifyResponse = S.Struct({ success: S.Literal(true) });
 const MfaRecoverRequest = S.Struct({ code: S.NonEmptyTrimmedString });
 const MfaRecoverResponse = S.Struct({ remainingCodes: S.Int, success: S.Literal(true) });
 const MfaDisableResponse = S.Struct({ success: S.Literal(true) });
-const MfaEnrollResponse = S.Struct({
-    backupCodes: S.Array(S.String),
-    qrDataUrl: S.String,
-    secret: S.String,
-});
+const MfaEnrollResponse = S.Struct({ backupCodes: S.Array(S.String), qrDataUrl: S.String, secret: S.String, });
 const MfaStatusResponse = S.Union(
     S.Struct({ enabled: S.Literal(false), enrolled: S.Literal(false) }),
     S.Struct({ enabled: S.Boolean, enrolled: S.Literal(true), remainingBackupCodes: S.Int }),
@@ -37,12 +34,34 @@ const ApiKeyResponse = S.Struct({
     createdAt: S.DateFromSelf,
     id: ApiKeyId.schema,
     name: S.NonEmptyTrimmedString,
-    provider: AiProvider,
+    provider: AiProvider.schema,
 });
 const ApiKeyCreateRequest = S.Struct({
     key: S.NonEmptyTrimmedString,
     name: S.NonEmptyTrimmedString,
-    provider: AiProvider,
+    provider: AiProvider.schema,
+});
+const AuditLogResponse = S.Struct({
+    actorId: S.NullOr(UserId.schema),
+    appId: AppId.schema,
+    changes: S.NullOr(S.Record({ key: S.String, value: S.Unknown })),
+    createdAt: S.DateFromSelf,
+    entityId: S.UUID,
+    entityType: AuditEntityType.schema,
+    id: S.UUID,
+    ipAddress: S.NullOr(S.String),
+    operation: AuditOperation.schema,
+    userAgent: S.NullOr(S.String),
+});
+const TransferExportQuery = S.Struct({
+    after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
+    before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
+    format: S.optionalWith(HttpApiSchema.param('format', TransferFormat.schema), { default: () => 'ndjson' as const }),
+    type: S.optionalWith(HttpApiSchema.param('type', AssetType.schema), { as: 'Option' }),
+});
+const TransferImportQuery = S.Struct({
+    dryRun: S.optionalWith(HttpApiSchema.param('dryRun', S.BooleanFromString), { as: 'Option' }),
+    format: S.optionalWith(HttpApiSchema.param('format', TransferFormat.schema), { default: () => 'ndjson' as const }),
 });
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -52,16 +71,17 @@ class Pagination extends S.Class<Pagination>('Pagination')({
     offset: pipe(S.Int, S.nonNegative()),
 }) {
     static readonly Query = S.Struct({
-        limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(B.pagination.minLimit, B.pagination.maxLimit))), {
-            default: () => B.pagination.defaultLimit,
-        }),
-        offset: S.optionalWith(HttpApiSchema.param('offset', S.NumberFromString.pipe(S.int(), S.nonNegative())), {
-            default: () => B.pagination.defaultOffset,
-        }),
+        limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(B.pagination.minLimit, B.pagination.maxLimit))), { default: () => B.pagination.defaultLimit, }),
+        offset: S.optionalWith(HttpApiSchema.param('offset', S.NumberFromString.pipe(S.int(), S.nonNegative())), { default: () => B.pagination.defaultOffset, }),
     });
-    static readonly Response = <A, I, R>(item: S.Schema<A, I, R>) =>
-        S.Struct({ data: S.Array(item), limit: S.Int, offset: S.Int, total: S.Int });
+    static readonly Response = <A, I, R>(item: S.Schema<A, I, R>) => S.Struct({ data: S.Array(item), limit: S.Int, offset: S.Int, total: S.Int });
 }
+const AuditFilterQuery = S.Struct({
+    ...Pagination.Query.fields,
+    after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
+    before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
+    operation: S.optionalWith(HttpApiSchema.param('operation', AuditOperation.schema), { as: 'Option' }),
+});
 
 // --- [GROUPS] ----------------------------------------------------------------
 
@@ -69,14 +89,14 @@ const AuthGroup = HttpApiGroup.make('auth')
     .prefix('/auth')
     .add(
         HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
-            .setPath(S.Struct({ provider: OAuthProvider }))
+            .setPath(S.Struct({ provider: OAuthProvider.schema }))
             .addSuccess(S.Struct({ url: Url.schema }))
             .addError(HttpError.OAuth, { status: 400 })
             .addError(HttpError.RateLimit, { status: 429 }),
     )
     .add(
         HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
-            .setPath(S.Struct({ provider: OAuthProvider }))
+            .setPath(S.Struct({ provider: OAuthProvider.schema }))
             .setUrlParams(S.Struct({ code: S.String, state: S.String }))
             .addSuccess(AuthContext.Tokens)
             .addError(HttpError.OAuth, { status: 400 })
@@ -176,7 +196,8 @@ const MfaGroup = HttpApiGroup.make('mfa')
             .addSuccess(MfaEnrollResponse)
             .addError(HttpError.Auth, { status: 401 })
             .addError(HttpError.Conflict, { status: 409 })
-            .addError(HttpError.Internal, { status: 500 }),
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
     )
     .add(
         HttpApiEndpoint.post('verify', '/verify')
@@ -205,15 +226,72 @@ const MfaGroup = HttpApiGroup.make('mfa')
             .addError(HttpError.Internal, { status: 500 })
             .addError(HttpError.RateLimit, { status: 429 }),
     );
+const AuditGroup = HttpApiGroup.make('audit')
+    .prefix('/audit')
+    .add(
+        HttpApiEndpoint.get('getByEntity', '/entity/:entityType/:entityId')
+            .middleware(Middleware.Auth)
+            .setPath(S.Struct({ entityId: S.UUID, entityType: AuditEntityType.schema }))
+            .setUrlParams(AuditFilterQuery)
+            .addSuccess(Pagination.Response(AuditLogResponse))
+            .addError(HttpError.Auth, { status: 401 })
+            .addError(HttpError.Forbidden, { status: 403 })
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
+    )
+    .add(
+        HttpApiEndpoint.get('getByActor', '/actor/:actorId')
+            .middleware(Middleware.Auth)
+            .setPath(S.Struct({ actorId: UserId.schema }))
+            .setUrlParams(AuditFilterQuery)
+            .addSuccess(Pagination.Response(AuditLogResponse))
+            .addError(HttpError.Auth, { status: 401 })
+            .addError(HttpError.Forbidden, { status: 403 })
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
+    )
+    .add(
+        HttpApiEndpoint.get('getMine', '/me')
+            .middleware(Middleware.Auth)
+            .setUrlParams(AuditFilterQuery)
+            .addSuccess(Pagination.Response(AuditLogResponse))
+            .addError(HttpError.Auth, { status: 401 })
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
+    );
+const TransferGroup = HttpApiGroup.make('transfer')
+    .prefix('/transfer')
+    .add(
+        HttpApiEndpoint.get('export', '/export')
+            .middleware(Middleware.Auth)
+            .setUrlParams(TransferExportQuery)
+            .addSuccess(ExportResult.schema)
+            .addError(HttpError.Auth, { status: 401 })
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 })
+            .annotate(OpenApi.Description, 'Export assets in specified format. For xlsx/zip: returns JSON with base64-encoded data matching ExportResult schema. For csv/ndjson: returns raw streaming response with Content-Disposition header (schema not applicable).'),
+    )
+    .add(
+        HttpApiEndpoint.post('import', '/import')
+            .middleware(Middleware.Auth)
+            .setUrlParams(TransferImportQuery)
+            .addSuccess(ImportResult.schema)
+            .addError(HttpError.Auth, { status: 401 })
+            .addError(HttpError.Validation, { status: 400 })
+            .addError(HttpError.Internal, { status: 500 })
+            .addError(HttpError.RateLimit, { status: 429 }),
+    );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const ParametricApi = HttpApi.make('ParametricApi')
+    .add(AuditGroup)
     .add(AuthGroup)
     .add(IconsGroup)
     .add(HealthGroup)
     .add(MfaGroup)
     .add(TelemetryGroup)
+    .add(TransferGroup)
     .add(UsersGroup)
     .prefix('/api')
     .annotate(OpenApi.Title, 'Parametric Portal API');
@@ -224,24 +302,7 @@ export type { TypeId } from '@effect/platform/HttpApiMiddleware';
 // Re-export internal symbols for declaration emit compatibility
 export type { TagTypeId } from 'effect/Context';
 export {
-    ApiKeyCreateRequest,
-    ApiKeyResponse,
-    B as API_TUNING,
-    AuthGroup,
-    HealthGroup,
-    IconsGroup,
-    MfaDisableResponse,
-    MfaEnrollResponse,
-    MfaGroup,
-    MfaRecoverRequest,
-    MfaRecoverResponse,
-    MfaStatusResponse,
-    MfaVerifyRequest,
-    MfaVerifyResponse,
-    Pagination,
-    ParametricApi,
-    TelemetryGroup,
-    UpdateRoleRequest,
-    UserResponse,
-    UsersGroup,
+    ApiKeyCreateRequest, ApiKeyResponse, AuditFilterQuery, AuditGroup, AuditLogResponse, B as API_TUNING, AuthGroup, HealthGroup, IconsGroup, MfaDisableResponse, MfaEnrollResponse,
+    MfaGroup, MfaRecoverRequest, MfaRecoverResponse, MfaStatusResponse, MfaVerifyRequest, MfaVerifyResponse, Pagination, ParametricApi, TelemetryGroup, TransferExportQuery,
+    TransferGroup, TransferImportQuery, UpdateRoleRequest, UserResponse, UsersGroup,
 };

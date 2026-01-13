@@ -5,10 +5,8 @@
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type TWValue<K extends keyof typeof TW> =
-	(typeof TW)[K] extends readonly (infer U)[] ? U : never;
-type RACValue<K extends keyof typeof RAC.nonBoolean> =
-	(typeof RAC.nonBoolean)[K][number];
+type TWValue<K extends keyof typeof TW> = (typeof TW)[K] extends readonly (infer U)[] ? U : never;
+type RACValue<K extends keyof typeof RAC.nonBoolean> = (typeof RAC.nonBoolean)[K][number];
 type RacBooleanState = (typeof RAC.boolean)[number];
 type RACKey = keyof typeof RAC.nonBoolean;
 type ColorSlotRef =

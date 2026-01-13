@@ -1,36 +1,38 @@
 /**
- * RequestContext: Unified request identity for app threading through requests.
- * Uses Effect.Tag pattern for simple context injection.
+ * RequestContext: Unified request identity threaded through requests.
  * Enables telemetry/metrics to distinguish originating app.
+ * Includes client info (IP, User-Agent) for audit logging.
  */
 import type { AppId, SessionId, UserId } from '@parametric-portal/types/schema';
 import { Effect, Option } from 'effect';
 
-// --- [TYPES] -----------------------------------------------------------------
-
-type RequestContextShape = {
-    readonly appId: AppId;
-    readonly userId: UserId | null;
-    readonly sessionId: SessionId | null;
-    readonly requestId: string;
-};
-
 // --- [CLASSES] ---------------------------------------------------------------
 
-class RequestContext extends Effect.Tag('server/RequestContext')<RequestContext, RequestContextShape>() {}
+class RequestContext extends Effect.Tag('server/RequestContext')<RequestContext, {
+    readonly appId: AppId;
+    readonly ipAddress: string | null;
+    readonly requestId: string;
+    readonly sessionId: SessionId | null;
+    readonly userAgent: string | null;
+    readonly userId: UserId | null;
+}>() {}
 
-// --- [UTILITIES] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const getAppId: Effect.Effect<AppId, never, never> = Effect.serviceOption(RequestContext).pipe(
-    Effect.map(
-        Option.match({
-            onNone: () => 'system' as AppId,
-            onSome: (rc) => rc.appId,
-        }),
-    ),
+    Effect.map(Option.match({
+        onNone: () => 'system' as AppId,
+        onSome: (rc) => rc.appId,
+    })),
 );
+const getClientInfo: Effect.Effect<{ readonly ipAddress: string | null; readonly userAgent: string | null }, never, never> =
+    Effect.serviceOption(RequestContext).pipe(
+        Effect.map(Option.match({
+            onNone: () => ({ ipAddress: null, userAgent: null }),
+            onSome: (rc) => ({ ipAddress: rc.ipAddress, userAgent: rc.userAgent }),
+        })),
+    );
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { getAppId, RequestContext };
-export type { RequestContextShape };
+export { getAppId, getClientInfo, RequestContext };
