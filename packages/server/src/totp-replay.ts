@@ -1,105 +1,77 @@
 /**
- * TOTP Replay Guard: Prevents code reuse within validity window.
- * Supports pluggable backends: Redis for multi-instance, in-memory fallback.
- * Key pattern: userId:timeStep:code with TTL covering full TOTP window.
+ * Guard against TOTP replay and brute-force attacks.
+ * Redis primary (atomic SET NX EX), memory fallback; exponential lockout on failures.
  */
-import type { UserId } from '@parametric-portal/types/schema';
-import { Config, Duration, Effect, MutableHashMap, Option, pipe, Redacted, Schedule } from 'effect';
+import { Config, Duration, Effect, MutableHashMap, Option, Redacted, Schedule } from 'effect';
 import Redis from 'ioredis';
+import { HttpError } from './http-errors.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type CacheEntry = { readonly expiresAt: number };
-type ReplayCache = MutableHashMap.MutableHashMap<string, CacheEntry>;
-type CheckResult = { readonly alreadyUsed: boolean; readonly backend: 'memory' | 'redis' };
+type _CheckResult = { readonly alreadyUsed: boolean; readonly backend: 'memory' | 'redis' };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    cleanup: { interval: Duration.minutes(1), threshold: 1000 },
-    keyDelimiter: ':',
-    keyPrefix: 'totp:replay:',
-    redis: { connectTimeout: 5000, enableOfflineQueue: false, maxRetriesPerRequest: 1 },
-    totp: { periodSec: 30, windowFuture: 2, windowPast: 2 },
-} as const);
-const ttlWindows = B.totp.windowPast + B.totp.windowFuture + 1;
-const ttlMs = B.totp.periodSec * ttlWindows * 1000;
-const ttlSeconds = Math.ceil(ttlMs / 1000);
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const makeKey = (userId: UserId, timeStep: number, code: string): string => [userId, timeStep, code].join(B.keyDelimiter);
-const makeRedisKey = (userId: UserId, timeStep: number, code: string): string => `${B.keyPrefix}${makeKey(userId, timeStep, code)}`;
-const isExpired = (entry: CacheEntry): boolean => Date.now() > entry.expiresAt;
-const cleanupExpiredSafe = (cache: ReplayCache): void => {
-    const expiredKeys: string[] = [];
-    MutableHashMap.forEach(cache, (entry, key) => { isExpired(entry) && expiredKeys.push(key); });
-    expiredKeys.forEach((key) => { MutableHashMap.remove(cache, key); });
-};
-const createMemoryBackend = () => {
-    const cache: ReplayCache = MutableHashMap.empty();
-    return {
-        cache,
-        checkAndMark: (userId: UserId, timeStep: number, code: string): CheckResult => {
-            const key = makeKey(userId, timeStep, code);
-            const existing = MutableHashMap.get(cache, key);
-            const alreadyUsed = existing._tag === 'Some' && !isExpired(existing.value);
-            alreadyUsed ? undefined : MutableHashMap.set(cache, key, { expiresAt: Date.now() + ttlMs });
-            return { alreadyUsed, backend: 'memory' as const };
-        },
-        cleanup: Effect.sync(() => { MutableHashMap.size(cache) > B.cleanup.threshold && cleanupExpiredSafe(cache); }),
-    };
-};
-const createRedisBackend = (redis: Redis) => ({
-    checkAndMark: (userId: UserId, timeStep: number, code: string) =>
-        Effect.tryPromise({
-            catch: () => 'redis_error' as const,
-            try: async () => {
-                const key = makeRedisKey(userId, timeStep, code);
-                // biome-ignore lint/nursery/useAwaitThenable: ioredis set() returns Promise<"OK" | null>
-                const result = await redis.set(key, '1', 'EX', ttlSeconds, 'NX');
-                return { alreadyUsed: result === null, backend: 'redis' as const };
-            },
-        }),
-    quit: Effect.promise(() => redis.quit()).pipe(Effect.catchAll(() => Effect.void)),
-});
+const config = {
+	cleanup: { interval: Duration.minutes(1), threshold: 1000 },
+	keyPrefix: 'totp:replay:',
+	lockout: { baseMs: 30_000, maxAttempts: 5, maxMs: 900_000 },
+	redis: { connectTimeout: 5000, enableOfflineQueue: false, lazyConnect: true, maxRetriesPerRequest: 1 },
+	ttl: { ms: 150_000, sec: 150 },
+} as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class TotpReplayGuard extends Effect.Service<TotpReplayGuard>()('server/TotpReplayGuard', {
-    scoped: Effect.gen(function* () {
-        const redisUrlOpt = yield* Config.option(Config.redacted('REDIS_URL'));
-        const memoryBackend = createMemoryBackend();
-        const redisBackend = Option.isSome(redisUrlOpt)
-            ? yield* Effect.try({
-                  catch: () => null,
-                  try: () => {
-                      const redis = new Redis(Redacted.value(redisUrlOpt.value), {
-                          connectTimeout: B.redis.connectTimeout,
-                          enableOfflineQueue: B.redis.enableOfflineQueue,
-                          maxRetriesPerRequest: B.redis.maxRetriesPerRequest,
-                      });
-                      return createRedisBackend(redis);
-                  },
-              })
-            : null;
-        yield* pipe(memoryBackend.cleanup, Effect.repeat(Schedule.spaced(B.cleanup.interval)), Effect.forkScoped);
-        // Redis cleanup on scope close
-        yield* redisBackend
-            ? Effect.addFinalizer(() => redisBackend.quit.pipe(Effect.tap(() => Effect.logInfo('TotpReplayGuard Redis connection closed'))))
-            : Effect.void;
-        yield* Effect.logInfo('TotpReplayGuard initialized', { backend: redisBackend ? 'redis' : 'memory' });
-        const checkAndMark = (userId: UserId, timeStep: number, code: string): Effect.Effect<CheckResult> =>
-            redisBackend
-                ? redisBackend.checkAndMark(userId, timeStep, code).pipe(
-                      Effect.catchAll(() => Effect.sync(() => memoryBackend.checkAndMark(userId, timeStep, code))),
-                  )
-                : Effect.sync(() => memoryBackend.checkAndMark(userId, timeStep, code));
-        return { checkAndMark };
-    }),
+	scoped: Effect.gen(function* () {
+		const replayCache = MutableHashMap.empty<string, number>();
+		const lockoutCache = MutableHashMap.empty<string, { readonly count: number; readonly lockedUntil: number }>();
+		const redisOpt = yield* Config.option(Config.redacted('REDIS_URL')).pipe(
+			Effect.map(Option.map((url) => new Redis(Redacted.value(url), { ...config.redis, keyPrefix: config.keyPrefix }))),
+		);
+		const memReplayCheck = (key: string): _CheckResult => {
+			const now = Date.now();
+			const alreadyUsed = Option.exists(MutableHashMap.get(replayCache, key), (expiry) => now <= expiry);
+			!alreadyUsed && MutableHashMap.set(replayCache, key, now + config.ttl.ms);
+			return { alreadyUsed, backend: 'memory' };
+		};
+		const redisReplayCheck = (redis: Redis, key: string) =>
+			Effect.tryPromise({ catch: () => null, try: () => redis.set(key, '1', 'EX', config.ttl.sec, 'NX') }).pipe(
+				Effect.map((result): _CheckResult => ({ alreadyUsed: result === null, backend: 'redis' })),
+				Effect.catchAll(() => Effect.succeed(memReplayCheck(key))),
+			);
+		yield* Effect.repeat(Effect.sync(() => {
+			const now = Date.now();
+			MutableHashMap.size(replayCache) > config.cleanup.threshold && MutableHashMap.forEach(replayCache, (expiry, cacheKey) => { now > expiry && MutableHashMap.remove(replayCache, cacheKey); });
+			MutableHashMap.forEach(lockoutCache, (state, key) => { state.lockedUntil > 0 && now > state.lockedUntil + config.lockout.maxMs && MutableHashMap.remove(lockoutCache, key); });
+		}), Schedule.spaced(config.cleanup.interval)).pipe(Effect.forkScoped);
+		yield* Option.match(redisOpt, {
+			onNone: () => Effect.void,
+			onSome: (redis) => Effect.addFinalizer(() => Effect.promise(() => redis.quit()).pipe(Effect.ignore, Effect.andThen(Effect.logInfo('TotpReplayGuard Redis closed')))),
+		});
+		yield* Effect.logInfo('TotpReplayGuard initialized', { backend: Option.isSome(redisOpt) ? 'redis' : 'memory' });
+		return {
+			checkAndMark: (userId: string, timeStep: number, code: string): Effect.Effect<_CheckResult> => {
+				const key = `${userId}:${timeStep}:${code}`;
+				return Option.match(redisOpt, { onNone: () => Effect.succeed(memReplayCheck(key)), onSome: (redis) => redisReplayCheck(redis, key) });
+			},
+			checkLockout: (userId: string): Effect.Effect<void, HttpError.RateLimit> =>
+				Effect.suspend(() => Option.match(Option.flatMap(MutableHashMap.get(lockoutCache, userId), (state) => Option.liftPredicate(state.lockedUntil - Date.now(), (remaining) => remaining > 0)), {
+					onNone: () => Effect.void,
+					onSome: (remainingMs) => Effect.fail(HttpError.rateLimit(remainingMs, { recoveryAction: 'email-verify' })),
+				})),
+			recordFailure: (userId: string): Effect.Effect<void> => Effect.sync(() => {
+				const now = Date.now();
+				const { count } = Option.getOrElse(MutableHashMap.get(lockoutCache, userId), () => ({ count: 0, lockedUntil: 0 }));
+				const newCount = count + 1;
+				const lockedUntil = newCount >= config.lockout.maxAttempts ? now + Math.min(config.lockout.baseMs * (2 ** (newCount - config.lockout.maxAttempts)), config.lockout.maxMs) : 0;
+				MutableHashMap.set(lockoutCache, userId, { count: newCount, lockedUntil });
+			}),
+			recordSuccess: (userId: string): Effect.Effect<void> => Effect.sync(() => MutableHashMap.remove(lockoutCache, userId)),
+		};
+	}),
 }) {}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { TotpReplayGuard };
-export type { CheckResult };

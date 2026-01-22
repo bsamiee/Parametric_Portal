@@ -1,9 +1,0 @@
-{
-    "category": "infrastructure",
-    "dependencies": ["feature-multiapp-session"],
-    "description": "Create API factory for composable route group registration.\n\nCurrently: `packages/server/src/api.ts` defines groups individually (`AuthGroup` line 53, `IconsGroup` line 111, `HealthGroup` line 127, `TelemetryGroup` line 134) then hardcodes them into `ParametricApi` (line 140-145). Groups ARE exported but composition is fixed. `HttpApi.make(name).add(...groups)` is the Effect pattern for composition.\n\nDeliverables:\n1. Update `packages/server/src/api.ts`: export groups individually (already done: verify `AuthGroup`, `IconsGroup`, `HealthGroup`, `TelemetryGroup` exports)\n2. Create `packages/server/src/app-factory.ts` with `createApp` factory function\n3. Factory signature: `createApp<Groups extends HttpApiGroup.Any[]>(config: { name: string; groups: Groups; prefix?: string }) => HttpApi`\n4. Factory implementation: `HttpApi.make(config.name).add(...config.groups).prefix(config.prefix ?? '/api')`\n5. Update `apps/api/src/main.ts`: import `createApp` and groups, replace `ParametricApi` with `createApp({ name: 'ParametricApi', groups: [AuthGroup, IconsGroup, HealthGroup, TelemetryGroup] })`\n6. Keep `ParametricApi` export in api.ts for backwards compatibility\n\nAcceptance: `pnpm exec nx run api:serve` starts successfully. All existing endpoints respond identically to before refactor.",
-    "descriptionHistory": [],
-    "id": "feature-multiapp-api-factory",
-    "status": "backlog",
-    "title": "Composable API factory"
-}

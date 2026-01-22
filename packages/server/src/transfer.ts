@@ -1,332 +1,267 @@
 /**
- * Transfer: Streaming import/export with resilience guarantees.
- * - Chunked streaming for memory efficiency (never holds full dataset)
- * - Preventive ZIP bomb protection (byte-accurate size tracking)
- * - Comprehensive CSV formula injection protection (tab prefix)
- * - Transactional batch processing with rollback support
- * - O(1) row mapping via HashMap
+ * Stream file parsing and serialization for bulk import/export.
+ * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
  */
-import { TransferAssetInput, TRANSFER_MIME, type TransferFailure, type TransferFormat } from '@parametric-portal/types/files';
-import type { AppId, Asset, AssetInsert, AssetType, UserId } from '@parametric-portal/types/schema';
-import { Array as A, Chunk, Effect, Either, HashMap, Option, pipe, Ref, Schema as S, Stream, Tuple } from 'effect';
-import ExcelJS from 'exceljs';
-import JSZip from 'jszip';
-import Papa from 'papaparse';
+import { Codec, Metadata } from '@parametric-portal/types/files';
+import { Array as A, Chunk, Data, Effect, Either, Option, Ref, Schema as S, Stream } from 'effect';
+import type JSZip from 'jszip';
+import { PassThrough, Readable } from 'node:stream';
+import { Crypto } from './crypto.ts';
+
+// --- [DRIVERS] ---------------------------------------------------------------
+
+const _drivers = {
+	excel: () => Effect.promise(() => import('exceljs')),
+	papa:  () => Effect.promise(() => import('papaparse')),
+	sax:   () => Effect.promise(() => import('sax')),
+	yaml:  () => Effect.promise(() => import('yaml')),
+	zip:   () => Effect.promise(async () => (await import('jszip')).default),
+} as const;
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type TransferFilters = {
-    readonly afterDate: Option.Option<Date>;
-    readonly assetIds: Option.Option<readonly string[]>;
-    readonly beforeDate: Option.Option<Date>;
-    readonly type: Option.Option<AssetType>;
-};
-type ParsedRow = { readonly result: Either.Either<AssetInsert, TransferFailure>; readonly row: number };
-type RowMap = HashMap.HashMap<number, number>;
-type PartitionResult = { readonly failures: readonly TransferFailure[]; readonly items: readonly AssetInsert[]; readonly rowMap: RowMap };
-type ExportChunk = { readonly data: string };
-type ParseError = { readonly error: string; readonly row: number };
-type ZipProgress = { readonly percent: number; readonly currentFile: string | null };
-type ZipBuildOptions = { readonly onProgress?: ZipProgressCallback };
-type ZipProgressCallback = (progress: ZipProgress) => void;
-type StreamableFormat = 'csv' | 'ndjson';
+type _Row = Either.Either<Asset, TransferError.Parse>;
+type _Stream = Stream.Stream<_Row, TransferError.Fatal>;
+interface Asset { readonly content: string; readonly hash?: string; readonly kind: string; readonly name?: string; readonly ordinal: number }
+interface ImportOpts { readonly mode?: 'file' | 'rows'; readonly kind?: string; readonly format?: Codec.Ext }
+interface BinaryResult { readonly data: string; readonly name: string; readonly count: number }
 
-// --- [SCHEMA] ----------------------------------------------------------------
+// --- [ERRORS] ----------------------------------------------------------------
 
-const ManifestEntrySchema = S.Struct({
-    contentHash: S.optional(S.String),
-    createdAt: S.optional(S.String),
-    file: S.String,
-    id: S.String,
-    size: S.optional(S.Number),
-    type: S.String,
-    updatedAt: S.optional(S.String),
-});
-const ManifestV1Schema = S.Struct({ entries: S.Array(ManifestEntrySchema), version: S.Literal(1) });
-const ManifestV0Schema = S.Struct({ assets: S.Array(ManifestEntrySchema) });
-type ManifestEntry = typeof ManifestEntrySchema.Type;
-type Manifest = typeof ManifestV1Schema.Type;
+class Parse extends Data.TaggedError('Parse')<{
+	readonly code: 'DECOMPRESS' | 'HASH_MISMATCH' | 'INVALID_PATH' | 'INVALID_RECORD' | 'MISSING_KIND' | 'SCHEMA_MISMATCH' | 'TOO_LARGE';
+	readonly ordinal?: number;
+	readonly detail?: string;
+}> { override get message() { return this.detail ? `Parse[${this.code}]@${this.ordinal}: ${this.detail}` : `Parse[${this.code}]@${this.ordinal}`; }}
+
+class Fatal extends Data.TaggedError('Fatal')<{
+	readonly code: 'ARCHIVE_LIMIT' | 'COMPRESSION_RATIO' | 'INVALID_FORMAT' | 'INVALID_MANIFEST' | 'PARSER_ERROR' | 'ROW_LIMIT' | 'UNSUPPORTED';
+	readonly detail?: string;
+}> { override get message() { return this.detail ? `Fatal[${this.code}]: ${this.detail}` : `Fatal[${this.code}]`; }}
+
+class Import extends Data.TaggedError('Import')<{
+	readonly code: 'BATCH_FAILED';
+	readonly rows: readonly number[];
+	readonly cause?: unknown;
+}> { override get message() { return `Import[${this.code}] rows: ${this.rows.join(', ')}`; }}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    batching: { exportChunkSize: 500, importBatchSize: 100 },
-    csv: {
-        dangerousPrefixes: ['=', '+', '-', '@', '\t', '\r', '\0'],
-        headers: ['id', 'assetType', 'content', 'createdAt', 'updatedAt'] as const,
-    },
-    limits: { maxDecompressedBytes: 100 * 1024 * 1024, maxImportBytes: 10 * 1024 * 1024, maxZipEntryBytes: 5 * 1024 * 1024 },
-    streamBatchSize: 1000,
-    xlsx: {
-        columns: [
-            { header: 'AssetType', key: 'assetType', width: 20 },
-            { header: 'Content', key: 'content', width: 60 },
-            { header: 'ID', key: 'id', width: 40 },
-            { header: 'CreatedAt', key: 'createdAt', width: 25 },
-            { header: 'UpdatedAt', key: 'updatedAt', width: 25 },
-        ] as Array<{ header: string; key: string; width: number }>,
-        expectedHeaders: new Set(['assettype', 'content', 'id', 'createdat', 'updatedat']),
-    },
-    zip: {
-        compressionLevels: { high: 9, medium: 6, store: 0 } as const,
-        highCompressTypes: new Set(['svg', 'json', 'html', 'xml', 'txt', 'md', 'css', 'js', 'ts', 'yaml', 'yml']),
-    },
-} as const);
-const sanitizeFormulaInjection = (value: string): string =>
-    B.csv.dangerousPrefixes.some((p) => value.startsWith(p)) ? `\t${value}` : value;
-const formatSerializers: Record<StreamableFormat, (asset: Asset) => string> = {
-    csv: (a) => Papa.unparse([[a.id, a.assetType, sanitizeFormulaInjection(a.content), a.createdAt.toISOString(), a.updatedAt.toISOString()]], { header: false }),
-    ndjson: (a) => JSON.stringify({ assetType: a.assetType, content: a.content, createdAt: a.createdAt.toISOString(), id: a.id, updatedAt: a.updatedAt.toISOString() }),
+const limits = { batchSize: 500, compressionRatio: 100, entryBytes: 5 * 1024 * 1024, maxItems: 10_000, totalBytes: 50 * 1024 * 1024 } as const satisfies Codec.Limits;
+const parserError = (err: unknown): Fatal => {
+	const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : String(err);
+	return new Fatal({ code: 'PARSER_ERROR', detail: msg });
 };
-const formatHeaders: Record<StreamableFormat, string> = { csv: `${B.csv.headers.join(',')}\n`, ndjson: '' };
+const _validPath = (name: string) => !name.includes('..') && !name.startsWith('/');
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [PARSERS] ---------------------------------------------------------------
 
-const buildFilters = (type: Option.Option<AssetType>, afterDate: Option.Option<Date>, beforeDate: Option.Option<Date>, assetIds: Option.Option<readonly string[]>): TransferFilters => ({ afterDate, assetIds, beforeDate, type });
-const emptyFilters = (): TransferFilters => buildFilters(Option.none(), Option.none(), Option.none(), Option.none());
-const matchesFilters = (asset: Asset, predicates: ReadonlyArray<(a: Asset) => boolean>): boolean => predicates.every((p) => p(asset));
-const getCompressionLevel = (assetType: string): number => B.zip.highCompressTypes.has(assetType.toLowerCase()) ? B.zip.compressionLevels.high : B.zip.compressionLevels.medium;
-const failure = (row: number, error: string, context?: Record<string, unknown>): ParsedRow => ({
-    result: Either.left({ error: context ? `${error} ${JSON.stringify(context)}` : error, row }) as ParsedRow['result'],
-    row,
-});
-const success = (row: number, item: AssetInsert): ParsedRow => ({
-    result: Either.right(item) as ParsedRow['result'],
-    row,
-});
-const sanitizeFilename = (id: string, type: string, index: number, hash: string): string =>
-    `${String(index).padStart(5, '0')}_${id.replaceAll(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32)}_${hash.slice(0, 8)}.${type.replaceAll(/[^a-zA-Z0-9_-]/g, '_').slice(0, 16)}`;
-const hashContent = (content: string): Effect.Effect<string> =>
-    Effect.promise(async () => {
-        // biome-ignore lint/nursery/useAwaitThenable: crypto.subtle.digest returns Promise<ArrayBuffer>
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
-        return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
-    });
-const byteLength = (str: string): number => new TextEncoder().encode(str).length;
-const migrateManifest = (raw: unknown): Either.Either<Manifest, string> =>
-    pipe(
-        S.decodeUnknownEither(ManifestV1Schema)(raw),
-        Either.orElse(() =>
-            pipe(
-                S.decodeUnknownEither(ManifestV0Schema)(raw),
-                Either.map((v0): Manifest => ({ entries: v0.assets, version: 1 })),
-            ),
-        ),
-        Either.mapLeft(() => 'Invalid manifest format - expected {version: 1, entries: [...]} or legacy {assets: [...]}'),
-    );
-const buildFilterPredicates = (appId: AppId, filters: TransferFilters): ReadonlyArray<(a: Asset) => boolean> => [
-    (a) => a.appId === appId,
-    Option.match(filters.type, { onNone: () => () => true, onSome: (t) => (a: Asset) => a.assetType === t }),
-    Option.match(filters.afterDate, { onNone: () => () => true, onSome: (d) => (a: Asset) => a.createdAt >= d }),
-    Option.match(filters.beforeDate, { onNone: () => () => true, onSome: (d) => (a: Asset) => a.createdAt <= d }),
-    Option.match(filters.assetIds, { onNone: () => () => true, onSome: (ids) => (a: Asset) => ids.includes(a.id) }),
-];
-const stripBom = (line: string, row: number): string => row === 1 && line.codePointAt(0) === 0xfeff ? line.slice(1) : line;
-const decodeAssetInsert = (input: unknown): Either.Either<AssetInsert, string> =>
-    pipe(
-        S.decodeUnknownEither(S.Struct({ appId: S.String, assetType: S.NonEmptyTrimmedString, content: S.String, userId: S.String }))(input),
-        Either.mapBoth({ onLeft: (e) => e.message, onRight: (v) => v as AssetInsert }),
-    );
-const buildInsertInput = (appId: AppId, userId: UserId, assetType: string, content: string): unknown => ({
-    appId,
-    assetType: assetType.trim(),
-    content,
-    userId,
-});
-const isXlsxHeaderRow = (cells: readonly string[]): boolean =>
-    cells.length >= 2 && B.xlsx.expectedHeaders.has(cells[0]?.toLowerCase() ?? '') && B.xlsx.expectedHeaders.has(cells[1]?.toLowerCase() ?? '');
+const _parseRecord = (line: string, ordinal: number, kind: string, parse: (str: string) => unknown = JSON.parse): _Row =>
+	Either.try({ catch: () => new Parse({ code: 'INVALID_RECORD', ordinal }), try: () => parse(line) }).pipe(
+		Either.flatMap((obj) => {
+			const parsed = obj as Record<string, unknown>;
+			const assetKind = (parsed['kind'] as string) ?? kind;
+			const content = String(parsed['content'] ?? line);
+			return assetKind ? Either.right({ content, kind: assetKind, ordinal }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal }));
+		}),
+	);
+const _delimited = (codec: Codec.Of<'delimited'>, input: Codec.Input, kind: string): _Stream =>
+	Stream.unwrap(_drivers.papa().pipe(Effect.map((Papa) => {
+		const result = Papa.parse<Record<string, string>>(codec.content(input), { delimiter: codec.sep, header: true, skipEmptyLines: 'greedy', transformHeader: (header) => header.trim().toLowerCase().replaceAll('_', '') });
+		if (result.errors.length > 0) return Stream.fail(parserError(result.errors[0]));
+		return Stream.fromIterable(result.data).pipe(
+			Stream.zipWithIndex,
+			Stream.map(([data, idx]) => {
+				const ordinal = idx + 1, assetKind = data['kind'] ?? kind;
+				return assetKind ? Either.right({ content: data['content'] ?? '', kind: assetKind, ordinal }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal }));
+			}),
+		);
+	})));
+const _streamed = (codec: Codec.Of<'stream'>, input: Codec.Input, kind: string): _Stream =>
+	Stream.unwrap((codec.lib ? _drivers[codec.lib as 'yaml']() : Effect.succeed({ parse: JSON.parse })).pipe(Effect.map((mod) =>
+		(codec.sep === '\n'
+			? codec.bytes(input).pipe(Stream.decodeText(), Stream.splitLines)
+			: Stream.fromIterable(codec.content(input).split(codec.sep))
+		).pipe(Stream.zipWithIndex, Stream.filterMap(([line, idx]) => {
+			const trimmed = line.trim(), ordinal = idx + 1;
+			if (!trimmed) return Option.none();
+			if (Codec.size(trimmed) > limits.entryBytes) return Option.some(Either.left(new Parse({ code: 'TOO_LARGE', ordinal })));
+			return Option.some(_parseRecord(trimmed, ordinal, kind, mod.parse));
+		})),
+	)));
+const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, kind: string): _Stream =>
+	Stream.unwrap(_drivers.sax().pipe(Effect.map((sax) =>
+		Stream.async<_Row, Fatal>((emit) => {
+			const parser = sax.parser(true, { trim: true });
+			const tags = new Set<string>(codec.nodes);
+			let current: { content: string; kind: string } | null = null;
+			let idx = 0;
+			parser.onopentag = (tag) => { if (tags.has(tag.name.toLowerCase())) { const attr = tag.attributes['kind']; current = { content: '', kind: (typeof attr === 'string' ? attr : attr?.value) ?? kind }; } };
+			parser.ontext = (text: string) => { if (current) current.content += text; };
+			parser.oncdata = (text: string) => { if (current) current.content += text; };
+			parser.onclosetag = (name: string) => {
+				if (current && tags.has(name.toLowerCase())) {
+					idx += 1;
+					emit.single(current.kind ? Either.right({ ...current, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal: idx })));
+					current = null;
+				}
+			};
+			parser.onerror = (err: Error) => void emit.fail(parserError(err));
+			parser.onend = () => void emit.end();
+			parser.write(codec.content(input)).close();
+		}),
+	)));
+const _xlsx = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string): _Stream =>
+	Stream.unwrap(_drivers.excel().pipe(Effect.map((ExcelJS) => {
+		const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from(codec.buf(input)), { hyperlinks: 'ignore', sharedStrings: 'cache', styles: 'ignore', worksheets: 'emit' });
+		return Stream.fromAsyncIterable(reader as AsyncIterable<AsyncIterable<{ values: unknown[] }>>, parserError).pipe(
+			Stream.take(1),
+			Stream.flatMap((worksheet) => Stream.fromAsyncIterable(worksheet, parserError)),
+			Stream.drop(1),
+			Stream.zipWithIndex,
+			Stream.map(([row, idx]) => {
+				const assetKind = String(row.values?.[1] ?? kind);
+				return assetKind ? Either.right({ content: String(row.values?.[2] ?? ''), kind: assetKind, ordinal: idx + 2 }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal: idx + 2 }));
+			}),
+		);
+	})));
+const _zipNoManifest = (zip: JSZip, kind: string): _Stream =>
+	Stream.fromIterable(Object.values(zip.files).filter((file) => !file.dir)).pipe(
+		Stream.zipWithIndex,
+		Stream.map(([file, idx]) => ({ file, name: file.name, ordinal: idx + 1 })),
+		Stream.mapEffect(({ file, name, ordinal }) =>
+			Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', ordinal }), try: () => file.async('text') }).pipe(
+				Effect.map((content) => Either.right({ content, kind: Codec(name.split('.').pop() ?? kind).ext, ordinal })),
+				Effect.catchAll((err) => Effect.succeed(Either.left(err))),
+			),
+		),
+	);
+const _zipWithManifest = (zip: JSZip, manifest: { entries: readonly Metadata[]; version: 1 }, buf: Buffer): _Stream =>
+	Stream.unwrap(Ref.make(0).pipe(Effect.map((sizeRef) =>
+		Stream.fromIterable(manifest.entries).pipe(
+			Stream.filter((entry) => entry.name !== 'manifest.json'),
+			Stream.zipWithIndex,
+			Stream.map(([entry, idx]) => ({ entry, name: entry.name, ordinal: idx + 1 })),
+			Stream.mapEffect(({ entry, name, ordinal }) => Effect.gen(function* () {
+				const file = yield* Effect.filterOrFail(Effect.succeed(zip.file(name)), (zipFile): zipFile is JSZip.JSZipObject => zipFile != null && !zipFile.dir && _validPath(name), () => new Parse({ code: 'INVALID_PATH', detail: name, ordinal }));
+				yield* Effect.filterOrFail(Effect.succeed(entry.size), (size) => size <= limits.entryBytes, () => new Parse({ code: 'TOO_LARGE', detail: name, ordinal }));
+				const raw = yield* Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', detail: name, ordinal }), try: () => file.async('arraybuffer') });
+				const cur = yield* Ref.updateAndGet(sizeRef, (count) => count + raw.byteLength);
+				yield* Effect.filterOrFail(Effect.succeed(cur), (cumulative) => cumulative <= limits.totalBytes, () => new Fatal({ code: 'ARCHIVE_LIMIT' }));
+				yield* Effect.filterOrFail(Effect.succeed(cur), (cumulative) => !buf.byteLength || cumulative / buf.byteLength <= limits.compressionRatio, () => new Fatal({ code: 'COMPRESSION_RATIO' }));
+				const content = entry.codec.content(raw);
+				yield* entry.hash ? Crypto.Token.hash(content).pipe(Effect.orDie, Effect.filterOrFail((hash) => hash === entry.hash, () => new Parse({ code: 'HASH_MISMATCH', detail: name, ordinal }))) : Effect.void;
+				const kind = yield* Effect.filterOrFail(Effect.succeed(entry.kind), (assetKind): assetKind is string => assetKind != null, () => new Parse({ code: 'MISSING_KIND', detail: name, ordinal }));
+				return Either.right({ content, kind, name, ordinal, ...(entry.hash && { hash: entry.hash }) });
+			}).pipe(Effect.catchTag('Parse', (err) => Effect.succeed(Either.left(err))))),
+		),
+	)));
+const _zip = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string): _Stream =>
+	Stream.unwrap(Effect.gen(function* () {
+		const JSZip = yield* _drivers.zip();
+		const buf = codec.buf(input);
+		const zip = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_FORMAT', detail: String(err) }), try: () => JSZip.loadAsync(buf) });
+		const manifestFile = zip.file('manifest.json');
+		if (!manifestFile) return _zipNoManifest(zip, kind);
+		const text = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) }), try: () => manifestFile.async('text') });
+		const manifest = yield* S.decodeUnknown(S.parseJson(Codec.Manifest))(text).pipe(Effect.mapError((err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) })));
+		return _zipWithManifest(zip, manifest, buf);
+	}));
+const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string): _Stream =>
+	codec.lib === 'exceljs' ? _xlsx(codec, input, kind) : _zip(codec, input, kind);
 
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [IMPORT] ----------------------------------------------------------------
 
-const parseCsvRows = (content: string, appId: AppId, userId: UserId): readonly ParsedRow[] => {
-    const result = Papa.parse<Record<string, string>>(content, { header: true, skipEmptyLines: 'greedy', transformHeader: (h) => h.trim().toLowerCase() });
-    const parserErrors = A.filterMap(result.errors, (err) => err.row === undefined ? Option.none() : Option.some(failure(err.row + 2, 'CSV parse error', { code: err.code, message: err.message })));
-    const dataRows = A.map(result.data, (record, idx) => {
-        const row = idx + 2;
-        const assetType = record['assettype'] ?? record['asset_type'] ?? '';
-        const recordContent = record['content'] ?? '';
-        return assetType.trim().length === 0
-            ? failure(row, 'Missing assetType')
-            : pipe(
-                decodeAssetInsert(buildInsertInput(appId, userId, assetType, recordContent)),
-                Either.match({ onLeft: (e) => failure(row, e), onRight: (item) => success(row, item) }),
-            );
-    });
-    return [...parserErrors, ...dataRows];
-};
-const parseNdjsonRow = (line: string, row: number, appId: AppId, userId: UserId): ParsedRow =>
-    pipe(
-        Either.try({ catch: () => 'Invalid JSON syntax', try: () => JSON.parse(stripBom(line, row)) as unknown }),
-        Either.flatMap((parsed) => pipe(TransferAssetInput.decodeEither(parsed), Either.mapLeft(() => 'Missing required fields (assetType, content)'))),
-        Either.flatMap((input) => decodeAssetInsert(buildInsertInput(appId, userId, input.assetType, input.content))),
-        Either.match({ onLeft: (e) => failure(row, e), onRight: (item) => success(row, item) }),
-    );
-const parseNdjsonRows = (content: string, appId: AppId, userId: UserId): readonly ParsedRow[] =>
-    pipe(content.split('\n'), A.filter((line) => line.trim().length > 0), A.map((line, idx) => parseNdjsonRow(line, idx + 1, appId, userId)));
-const verifyChecksum = (content: string, expectedHash: string | undefined, row: number, file: string): Effect.Effect<void, ParsedRow> =>
-    expectedHash === undefined
-        ? Effect.void
-        : pipe(
-            hashContent(content),
-            Effect.flatMap((actualHash) =>
-                actualHash === expectedHash
-                    ? Effect.void
-                    : Effect.fail(failure(row, 'Checksum mismatch', { actual: actualHash.slice(0, 8), expected: expectedHash.slice(0, 8), file })),
-            ),
-        );
-const decodeZipContent = (content: string, appId: AppId, userId: UserId, entryType: string, file: string, row: number): ParsedRow =>
-    pipe(decodeAssetInsert(buildInsertInput(appId, userId, entryType, content)), Either.match({ onLeft: (e) => failure(row, e, { file }), onRight: (item) => success(row, item) }));
-const parseZipEntry = (zip: JSZip, entry: ManifestEntry, idx: number, appId: AppId, userId: UserId, sizeRef: Ref.Ref<number>): Effect.Effect<ParsedRow> =>
-    Effect.gen(function* () {
-        const row = idx + 1;
-        const fileOpt = Option.fromNullable(zip.file(entry.file));
-        const file = yield* Option.match(fileOpt, { onNone: () => Effect.succeed(Option.none<JSZip.JSZipObject>()), onSome: (f) => Effect.succeed(Option.some(f)) });
-        yield* Option.isNone(file) ? Effect.fail(failure(row, 'Missing file in archive', { file: entry.file })) : Effect.void;
-        const declaredSize = entry.size ?? 0;
-        yield* declaredSize > B.limits.maxZipEntryBytes ? Effect.fail(failure(row, 'File too large (declared)', { file: entry.file, maxSize: B.limits.maxZipEntryBytes, size: declaredSize })) : Effect.void;
-        const content = yield* Effect.tryPromise({ catch: (e) => failure(row, `Decompression failed: ${e instanceof Error ? e.message : String(e)}`, { file: entry.file }), try: () => Option.getOrThrow(file).async('text') });
-        const actualBytes = byteLength(content);
-        yield* actualBytes > B.limits.maxZipEntryBytes ? Effect.fail(failure(row, 'File too large (actual)', { file: entry.file, maxSize: B.limits.maxZipEntryBytes, size: actualBytes })) : Effect.void;
-        const currentSize = yield* Ref.get(sizeRef);
-        yield* currentSize + actualBytes > B.limits.maxDecompressedBytes ? Effect.fail(failure(row, 'Archive decompressed size limit exceeded', { limit: B.limits.maxDecompressedBytes, projected: currentSize + actualBytes })) : Effect.void;
-        yield* verifyChecksum(content, entry.contentHash, row, entry.file);
-        yield* Ref.update(sizeRef, (n) => n + actualBytes);
-        return decodeZipContent(content, appId, userId, entry.type, entry.file, row);
-    }).pipe(Effect.catchAll((err) => Effect.succeed(err)));
-const parseZipRows = (zipData: ArrayBuffer, appId: AppId, userId: UserId): Effect.Effect<readonly ParsedRow[], ParseError> =>
-    Effect.gen(function* () {
-        const zip = yield* Effect.tryPromise({ catch: () => ({ error: 'Invalid or corrupted ZIP archive', row: 0 }), try: () => JSZip.loadAsync(zipData) });
-        const manifestOpt = Option.fromNullable(zip.file('manifest.json'));
-        const manifestFile = yield* Option.match(manifestOpt, { onNone: () => Effect.fail({ error: 'ZIP missing manifest.json - not a valid transfer archive', row: 0 }), onSome: Effect.succeed });
-        const manifestText = yield* Effect.tryPromise({ catch: () => ({ error: 'Failed to read manifest.json', row: 0 }), try: () => manifestFile.async('text') });
-        const manifestResult = pipe(Either.try({ catch: () => 'Invalid JSON in manifest.json', try: () => JSON.parse(manifestText) as unknown }), Either.flatMap(migrateManifest));
-        const manifest = yield* Either.match(manifestResult, { onLeft: (error) => Effect.fail({ error, row: 0 }), onRight: Effect.succeed });
-        const sizeRef = yield* Ref.make(0);
-        return yield* Effect.forEach(A.map(manifest.entries, (entry, idx) => Tuple.make(idx, entry)), ([idx, entry]) => parseZipEntry(zip, entry, idx, appId, userId, sizeRef), { concurrency: 1 });
-    });
-const xlsxRowHandlers: Record<'header' | 'empty' | 'data', (rowIdx: number, assetType: string, content: string, appId: AppId, userId: UserId) => ParsedRow> = {
-    data: (rowIdx, assetType, content, appId, userId) => pipe(decodeAssetInsert(buildInsertInput(appId, userId, assetType, content)), Either.match({ onLeft: (e) => failure(rowIdx, e), onRight: (item) => success(rowIdx, item) })),
-    empty: (rowIdx) => failure(rowIdx, 'Missing assetType'),
-    header: (rowIdx) => failure(rowIdx, 'Header row skipped'),
-};
-const parseXlsxRow = (rowIdx: number, cells: readonly string[], appId: AppId, userId: UserId): ParsedRow => {
-    const isHeader = rowIdx === 1 && isXlsxHeaderRow(cells);
-    const assetType = cells[0] ?? '';
-    const content = cells[1] ?? '';
-    const baseKind: 'empty' | 'data' = assetType.length === 0 ? 'empty' : 'data';
-    const kind: 'header' | 'empty' | 'data' = isHeader ? 'header' : baseKind;
-    return xlsxRowHandlers[kind](rowIdx, assetType, content, appId, userId);
-};
-const parseXlsxRows = (xlsxData: ArrayBuffer, appId: AppId, userId: UserId): Effect.Effect<readonly ParsedRow[], ParseError> =>
-    Effect.gen(function* () {
-        const workbook = yield* Effect.tryPromise({
-            catch: () => ({ error: 'Invalid or corrupted XLSX file', row: 0 }),
-            // biome-ignore lint/nursery/useAwaitThenable: ExcelJS.Workbook.xlsx.load returns Promise
-            try: async () => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(xlsxData); return wb; },
-        });
-        const sheet = workbook.worksheets[0];
-        const rows: ParsedRow[] = [];
-        sheet?.eachRow((row, rowNumber) => {
-            const cells = [String(row.getCell(1).value ?? '').trim(), String(row.getCell(2).value ?? '')];
-            rows.push(parseXlsxRow(rowNumber, cells, appId, userId));
-        });
-        return rows.filter((r) => !(r.row === 1 && Either.isLeft(r.result)));
-    });
-const formatParsers: Record<TransferFormat, (content: string | ArrayBuffer, appId: AppId, userId: UserId) => Effect.Effect<readonly ParsedRow[], ParseError>> = {
-    csv: (content, appId, userId) => Effect.succeed(parseCsvRows(content as string, appId, userId)),
-    ndjson: (content, appId, userId) => Effect.succeed(parseNdjsonRows(content as string, appId, userId)),
-    xlsx: (content, appId, userId) => parseXlsxRows(content as ArrayBuffer, appId, userId),
-    zip: (content, appId, userId) => parseZipRows(content as ArrayBuffer, appId, userId),
+const import_ = (input: Codec.Input | readonly Codec.Input[], opts: ImportOpts = {}): _Stream => {
+	const inputs = Array.isArray(input) ? input : [input];
+	const kind = opts.kind ?? 'unknown';
+	return Stream.fromIterable(inputs).pipe(
+		Stream.flatMap((item): Stream.Stream<_Row, Fatal> => {
+			const codec = Codec(opts.format ?? Codec.detect(item));
+			const result = opts.mode === 'file'
+				? Stream.make(Either.right({ content: codec.content(item), kind, ordinal: 1 }))
+				: Codec.dispatch(codec.ext, item, {
+						archive: (detected, raw) => _archive(detected, raw, kind),
+						delimited: (detected, raw) => _delimited(detected, raw, kind),
+						none: (detected, raw) => Stream.make(Either.right({ content: detected.content(raw), kind: kind === 'unknown' ? detected.ext : kind, ordinal: 1 })),
+						stream: (detected, raw) => _streamed(detected, raw, kind),
+						tree: (detected, raw) => _tree(detected, raw, kind),
+					});
+			return opts.format
+				? result : Stream.fromEffect(Effect.logDebug('Transfer: auto-detected', { format: codec.ext })).pipe(Stream.flatMap(() => result));
+		}),
+		Stream.zipWithIndex,
+		Stream.mapEffect(([row, idx]) => idx >= limits.maxItems ? Effect.fail(new Fatal({ code: 'ROW_LIMIT' })) : Effect.succeed(row)),
+	);
 };
 
-const lookupRow = (rowMap: RowMap, index: number): number => Option.getOrElse(HashMap.get(rowMap, index), () => index + 1);
-const partitionParsed = (rows: readonly ParsedRow[]): PartitionResult =>
-    pipe(
-        rows,
-        A.partitionMap(({ result, row }) => Either.match(result, { onLeft: (f) => Either.left(f), onRight: (item) => Either.right(Tuple.make(item, row)) })),
-        ([failures, successPairs]) => ({
-            failures,
-            items: A.map(successPairs, Tuple.getFirst),
-            rowMap: HashMap.fromIterable(A.map(successPairs, (pair, idx) => Tuple.make(idx, Tuple.getSecond(pair)))),
-        }),
-    );
+// --- [SERIALIZERS] -----------------------------------------------------------
 
-const streamChunks = <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, filters: TransferFilters, format: StreamableFormat): Stream.Stream<ExportChunk, E, R> => {
-    const predicates = buildFilterPredicates(appId, filters);
-    const serializer = formatSerializers[format];
-    const header = formatHeaders[format];
-    return pipe(
-        header.length > 0 ? Stream.succeed({ data: header }) : Stream.empty,
-        Stream.concat(pipe(
-            input,
-            Stream.filter((a) => matchesFilters(a, predicates)),
-            Stream.grouped(B.batching.exportChunkSize),
-            Stream.map((chunk) => ({ data: `${A.map(Chunk.toArray(chunk), serializer).join('\n')}\n` })),
-        )),
-    );
+type _Out<E, R> = Stream.Stream<Asset & { id: string; updatedAt: number }, E, R>;
+const serializeExport = (asset: Asset & { id: string; updatedAt: number }) => ({ content: asset.content, id: asset.id, kind: asset.kind, updatedAt: new Date(asset.updatedAt).toISOString() });
+
+const _text = {
+	csv: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.papa().pipe(Effect.map((papa) => Stream.grouped(stream, limits.batchSize).pipe(Stream.zipWithIndex, Stream.map(([chunk, idx]) => `${papa.unparse(Chunk.toArray(chunk).map(serializeExport), { header: idx === 0, quotes: true })}\n`))))),
+	ndjson: <E, R>(stream: _Out<E, R>) => Stream.grouped(stream, limits.batchSize).pipe(Stream.map((chunk) => `${Chunk.toArray(chunk).map((asset) => JSON.stringify(serializeExport(asset))).join('\n')}\n`)),
+	xml: <E, R>(stream: _Out<E, R>) => Stream.make('<?xml version="1.0" encoding="UTF-8"?>\n<assets>\n').pipe(
+		Stream.concat(Stream.map(stream, (asset) => `  <asset kind="${asset.kind}" id="${asset.id}"><![CDATA[${asset.content}]]></asset>\n`)),
+		Stream.concat(Stream.make('</assets>\n')),
+	),
+	yaml: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.yaml().pipe(Effect.map((yaml) => Stream.map(stream, (asset) => `---\n${yaml.stringify(serializeExport(asset))}`)))),
+} as const;
+const _binary = {
+	xlsx: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<BinaryResult, E, R> => Effect.gen(function* () {
+		const excel = yield* _drivers.excel();
+		const chunks: Buffer[] = [];
+		const pt = new PassThrough();
+		pt.on('data', (buf: Buffer) => chunks.push(buf));
+		const wb = new excel.stream.xlsx.WorkbookWriter({ stream: pt, useSharedStrings: false, useStyles: false });
+		const sheet = wb.addWorksheet('Assets');
+		sheet.columns = [{ header: 'Kind', key: 'kind', width: 20 }, { header: 'Id', key: 'id', width: 40 }, { header: 'Content', key: 'content', width: 60 }, { header: 'UpdatedAt', key: 'updatedAt', width: 24 }];
+		const count = yield* Stream.runFold(stream, 0, (rowCount, asset) => { sheet.addRow(serializeExport(asset)).commit(); return rowCount + 1; });
+		sheet.commit();
+		yield* Effect.promise(() => wb.commit());
+		return { count, data: Buffer.concat(chunks).toString('base64'), name: name ?? `export-${Date.now()}.xlsx` };
+	}),
+	zip: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<BinaryResult, E, R> => Effect.gen(function* () {
+		const ZipClass = yield* _drivers.zip();
+		const zip = new ZipClass();
+		const entries: Metadata[] = [];
+		const count = yield* Stream.runFoldEffect(stream, 0, (entryCount, asset) =>
+			(asset.hash == null ? Crypto.Token.hash(asset.content).pipe(Effect.orDie) : Effect.succeed(asset.hash)).pipe(Effect.map((hash) => {
+				const entryName = asset.name ?? `${String(entryCount).padStart(5, '0')}_${hash.slice(0, 8)}.txt`;
+				zip.file(entryName, asset.content, { compression: 'DEFLATE' });
+				entries.push(Metadata.from(asset.content, { hash, kind: asset.kind, name: entryName }));
+				return entryCount + 1;
+			})),
+		);
+		zip.file('manifest.json', JSON.stringify({ entries, version: 1 }, null, 2));
+		const data = yield* Effect.promise(() => zip.generateAsync({ compression: 'DEFLATE', type: 'base64' }));
+		return { count, data, name: name ?? `export-${Date.now()}.zip` };
+	}),
+} as const;
+const exportText = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _text): Stream.Stream<Uint8Array, E, R> => Stream.map(_text[fmt](stream), new TextEncoder().encode);
+const exportBinary = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _binary, opts?: { readonly name?: string }): Effect.Effect<BinaryResult, E, R> => _binary[fmt](stream, opts?.name);
+
+// --- [PARTITION] -------------------------------------------------------------
+
+const partition = <T extends Asset>(rows: readonly Either.Either<T, Parse>[]) => {
+	const [failures, rights] = A.separate(rows);
+	return { failures, items: rights, ordinalMap: A.map(rights, (row) => row.ordinal) };
 };
-const addXlsxRow = (sheet: ExcelJS.Worksheet, asset: Asset, countRef: Ref.Ref<number>) => Effect.sync(() => sheet.addRow({ assetType: asset.assetType, content: asset.content, createdAt: asset.createdAt.toISOString(), id: asset.id, updatedAt: asset.updatedAt.toISOString() })).pipe(Effect.andThen(Ref.update(countRef, (n) => n + 1)));
-const buildXlsxArchive = <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, filters: TransferFilters): Effect.Effect<{ readonly base64: string; readonly count: number }, E, R> =>
-    Effect.gen(function* () {
-        const predicates = buildFilterPredicates(appId, filters);
-        const workbook = new ExcelJS.Workbook();
-        const sheet = workbook.addWorksheet('Assets');
-        sheet.columns = [...B.xlsx.columns];
-        const countRef = yield* Ref.make(0);
-        yield* pipe(input, Stream.filter((a) => matchesFilters(a, predicates)), Stream.runForEach((asset) => addXlsxRow(sheet, asset, countRef)));
-        const buffer = yield* Effect.promise(() => workbook.xlsx.writeBuffer());
-        return { base64: Buffer.from(buffer).toString('base64'), count: yield* Ref.get(countRef) };
-    });
-const addZipEntry = (zip: JSZip, asset: Asset, stateRef: Ref.Ref<{ readonly entries: readonly ManifestEntry[]; readonly index: number }>) =>
-    Effect.gen(function* () {
-        const hash = yield* hashContent(asset.content);
-        const state = yield* Ref.get(stateRef);
-        const entry: ManifestEntry = { contentHash: hash, createdAt: asset.createdAt.toISOString(), file: sanitizeFilename(asset.id, asset.assetType, state.index, hash), id: asset.id, size: asset.content.length, type: asset.assetType, updatedAt: asset.updatedAt.toISOString() };
-        zip.file(entry.file, asset.content, { compression: 'DEFLATE', compressionOptions: { level: getCompressionLevel(asset.assetType) } });
-        yield* Ref.update(stateRef, (s) => ({ entries: [...s.entries, entry], index: s.index + 1 }));
-    });
-const buildZipArchive = <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, filters: TransferFilters, options: ZipBuildOptions = {}): Effect.Effect<{ readonly base64: string; readonly count: number }, E, R> =>
-    Effect.gen(function* () {
-        const predicates = buildFilterPredicates(appId, filters);
-        const zip = new JSZip();
-        const stateRef = yield* Ref.make<{ readonly entries: readonly ManifestEntry[]; readonly index: number }>({ entries: [], index: 0 });
-        yield* pipe(input, Stream.filter((a) => matchesFilters(a, predicates)), Stream.runForEach((asset) => addZipEntry(zip, asset, stateRef)));
-        const finalState = yield* Ref.get(stateRef);
-        zip.file('manifest.json', JSON.stringify({ entries: finalState.entries, version: 1 } satisfies Manifest, null, 2), {
-            compression: 'DEFLATE',
-            compressionOptions: { level: B.zip.compressionLevels.high },
-        });
-        const progressCallback = options.onProgress;
-        const base64 = yield* Effect.promise(() =>
-            zip.generateAsync(
-                { compression: 'DEFLATE', compressionOptions: { level: B.zip.compressionLevels.medium }, streamFiles: true, type: 'base64' },
-                progressCallback === undefined ? undefined : (metadata) => progressCallback({ currentFile: metadata.currentFile, percent: metadata.percent }),
-            ),
-        );
-        return { base64, count: finalState.index };
-    });
 
-const importBatched = (items: readonly AssetInsert[], rowMap: RowMap): Stream.Stream<{ readonly batch: readonly AssetInsert[]; readonly rows: readonly number[] }> =>
-    pipe(Stream.fromIterable(A.map(items, (item, idx) => Tuple.make(item, lookupRow(rowMap, idx)))), Stream.grouped(B.batching.importBatchSize), Stream.map((chunk) => { const entries = Chunk.toArray(chunk); return { batch: A.map(entries, Tuple.getFirst), rows: A.map(entries, Tuple.getSecond) }; }));
+// --- [NAMESPACE] -------------------------------------------------------------
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
-const Transfer = Object.freeze({
-    batched: importBatched,
-    buildFilters,
-    buildXlsx: buildXlsxArchive,
-    buildZip: buildZipArchive,
-    emptyFilters,
-    FormatMime: TRANSFER_MIME,
-    lookupRow,
-    parse: (content: string | ArrayBuffer, format: TransferFormat, appId: AppId, userId: UserId) => formatParsers[format](content, appId, userId),
-    partition: partitionParsed,
-    streamCsv: <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, filters: TransferFilters) => streamChunks(input, appId, filters, 'csv'),
-    streamNdjson: <E, R>(input: Stream.Stream<Asset, E, R>, appId: AppId, filters: TransferFilters) => streamChunks(input, appId, filters, 'ndjson'),
-    tuning: { ...B, streamBatchSize: B.streamBatchSize },
-} as const);
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const TransferError = { Fatal, Import, Parse } as const;
+namespace TransferError {
+	export type Any = Fatal | Import | Parse;
+	export type Fatal = InstanceType<typeof TransferError.Fatal>;
+	export type Import = InstanceType<typeof TransferError.Import>;
+	export type Parse = InstanceType<typeof TransferError.Parse>;
+}
+const Transfer = { exportBinary, exportText, import: import_, limits, partition } as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Transfer };
-export type { ExportChunk, Manifest, ManifestEntry, ParsedRow, ParseError, PartitionResult, RowMap, TransferFilters, ZipBuildOptions, ZipProgress, ZipProgressCallback };
+export { Transfer, TransferError };

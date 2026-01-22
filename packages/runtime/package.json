@@ -110,6 +110,7 @@
     "@vitest/browser-playwright": "catalog:",
     "fake-indexeddb": "catalog:",
     "fast-check": "catalog:",
+    "ts-essentials": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",

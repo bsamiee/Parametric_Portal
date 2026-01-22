@@ -20,12 +20,12 @@ type MessagePayload<T = unknown> = { readonly data: T; readonly timestamp: Times
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     defaults: {
         debounceMs: DurationMs.fromMillis(100),
         targetOrigin: '*',
     },
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -45,20 +45,20 @@ const sendMessage = <T>(
     type: string,
     data: T,
     options?: { schema?: S.Schema<T, unknown>; targetOrigin?: string },
-): Effect.Effect<void, AppError<'Messaging'>> =>
+): Effect.Effect<void, AppError.Messaging> =>
     Effect.gen(function* () {
         const { schema, targetOrigin = B.defaults.targetOrigin } = options ?? {};
         const validated = schema
             ? yield* S.decodeUnknown(schema)(data).pipe(
-                  Effect.mapError(() => AppError.from('Messaging', 'VALIDATION_FAILED', 'Send validation failed')),
+                  Effect.mapError((e) => AppError.messaging('VALIDATION_FAILED', undefined, e)),
               )
             : data;
         yield* Effect.sync(() => window.parent?.postMessage(createPayload(type, validated), targetOrigin));
     });
 const createMessageStream = <T>(
     options?: MessageListenerOptions<T>,
-): Stream.Stream<MessagePayload<T>, AppError<'Messaging'>> =>
-    Stream.asyncScoped<MessagePayload<T>, AppError<'Messaging'>>((emit) =>
+): Stream.Stream<MessagePayload<T>, AppError.Messaging> =>
+    Stream.asyncScoped<MessagePayload<T>, AppError.Messaging>((emit) =>
         Effect.acquireRelease(
             Effect.sync(() => {
                 const { schema, targetOrigin = B.defaults.targetOrigin, typeFilter } = options ?? {};
@@ -73,7 +73,7 @@ const createMessageStream = <T>(
                                   timestamp: event.data?.timestamp ?? Timestamp.nowSync(),
                                   type: event.data?.type ?? 'message',
                               })
-                            : emit.fail(AppError.from('Messaging', 'VALIDATION_FAILED', 'Invalid message data')));
+                            : emit.fail(AppError.messaging('VALIDATION_FAILED')));
                 };
                 window.addEventListener('message', handler);
                 return handler;

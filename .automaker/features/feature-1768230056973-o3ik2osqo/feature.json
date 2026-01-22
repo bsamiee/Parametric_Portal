@@ -1,9 +1,0 @@
-{
-    "category": "backend",
-    "dependencies": ["feature-multiapp-context"],
-    "description": "Add app-scoped push notification subscription storage and delivery service.\n\nCurrently (after multiapp-context): `RequestContext` service provides `appId`. `apps` table exists with `AppId` type. `@effect/platform` in catalog provides `HttpClient` for VAPID push delivery. `vite-plugin-pwa: 1.2.0` in catalog. No push subscription storage exists.\n\nDeliverables:\n1. Add `push_subscriptions` pgTable in `packages/types/src/schema.ts`: `id` (UUID PK), `appId` (FK apps NOT NULL), `userId` (FK users NOT NULL), `endpoint` (text NOT NULL), `p256dh` (text NOT NULL), `auth` (text NOT NULL), `createdAt` (timestamp default now)\n2. Add unique constraint `(appId, userId, endpoint)` on push_subscriptions\n3. Create migration `packages/database/migrations/NNNN_push_subscriptions.ts` (use next sequential number)\n4. Add `PushSubscriptionRepository` in repos.ts with methods: `create(data)`, `findByAppAndUser(appId, userId)`, `deleteByEndpoint(appId, endpoint)`\n5. Create `packages/server/src/push.ts` with `PushService` class extending `Effect.Service`:\n   - `subscribe(subscription)` - reads `appId` from `RequestContext`, creates record\n   - `unsubscribe(endpoint)` - reads `appId` from `RequestContext`, deletes record\n   - `send(userId, payload)` - fetches subscriptions for appId+userId, POSTs to each endpoint with VAPID headers\n6. Use `@effect/platform` HttpClient (NOT web-push npm) for VAPID-signed POST\n7. Add endpoints: `POST /api/push/subscribe` (201 or 409 duplicate), `DELETE /api/push/subscribe`\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p database,server` passes. Subscription scoped to app. Same user in App A and App B can have separate subscriptions.",
-    "descriptionHistory": [],
-    "id": "feature-1768230056973-o3ik2osqo",
-    "status": "backlog",
-    "title": "Push notification subscriptions"
-}

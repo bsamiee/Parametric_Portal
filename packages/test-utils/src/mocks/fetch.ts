@@ -1,5 +1,6 @@
 /**
- * Fetch mock utilities: type-safe mock factories for HTTP testing.
+ * Create type-safe fetch mock factories for HTTP testing.
+ * JSON, text, blob, and error response builders with install/restore lifecycle.
  */
 import { Effect, pipe } from 'effect';
 import { vi } from 'vitest';

@@ -1,38 +1,25 @@
 /**
- * RequestContext: Unified request identity threaded through requests.
- * Enables telemetry/metrics to distinguish originating app.
- * Includes client info (IP, User-Agent) for audit logging.
+ * Thread request identity through Effect fiber context.
+ * Enables telemetry segmentation by app; provides IP/User-Agent for audit.
  */
-import type { AppId, SessionId, UserId } from '@parametric-portal/types/schema';
+import { Client } from '@parametric-portal/database/client';
 import { Effect, Option } from 'effect';
 
-// --- [CLASSES] ---------------------------------------------------------------
+// --- [TAGS] ------------------------------------------------------------------
 
 class RequestContext extends Effect.Tag('server/RequestContext')<RequestContext, {
-    readonly appId: AppId;
-    readonly ipAddress: string | null;
-    readonly requestId: string;
-    readonly sessionId: SessionId | null;
-    readonly userAgent: string | null;
-    readonly userId: UserId | null;
-}>() {}
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const getAppId: Effect.Effect<AppId, never, never> = Effect.serviceOption(RequestContext).pipe(
-    Effect.map(Option.match({
-        onNone: () => 'system' as AppId,
-        onSome: (rc) => rc.appId,
-    })),
-);
-const getClientInfo: Effect.Effect<{ readonly ipAddress: string | null; readonly userAgent: string | null }, never, never> =
-    Effect.serviceOption(RequestContext).pipe(
-        Effect.map(Option.match({
-            onNone: () => ({ ipAddress: null, userAgent: null }),
-            onSome: (rc) => ({ ipAddress: rc.ipAddress, userAgent: rc.userAgent }),
-        })),
-    );
+	readonly appId: string;
+	readonly ipAddress: Option.Option<string>;
+	readonly requestId: string;
+	readonly sessionId: Option.Option<string>;
+	readonly userAgent: Option.Option<string>;
+	readonly userId: Option.Option<string>;
+}>() {
+	static readonly Id = Object.assign(() => Client.tenant.id.default, { system: Client.tenant.id.system });
+	static readonly app = Effect.serviceOption(RequestContext).pipe(Effect.map(Option.match({ onNone: () => Client.tenant.id.system, onSome: (ctx) => ctx.appId })));
+	static readonly client = Effect.serviceOption(RequestContext).pipe(Effect.map(Option.match({ onNone: () => ({ ipAddress: null, userAgent: null }), onSome: (ctx) => ({ ipAddress: Option.getOrNull(ctx.ipAddress), userAgent: Option.getOrNull(ctx.userAgent) }) })));
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { getAppId, getClientInfo, RequestContext };
+export { RequestContext };

@@ -16,7 +16,63 @@ description: >-
 
 Invokes gh CLI commands through Python wrapper.
 
-[IMPORTANT] Zero-arg commands default to `state=open`, `limit=30`. System auto-configures OAuth scopes.
+[IMPORTANT] Zero-arg commands default to `state=open`, `limit=30`. All commands use positional args.
+
+---
+## [1][COMMANDS]
+
+| [CMD]              | [ARGS]                           | [PURPOSE]                    |
+| ------------------ | -------------------------------- | ---------------------------- |
+| issue-list         | `[state] [limit]`                | List issues                  |
+| issue-view         | `<number>`                       | View issue details           |
+| issue-create       | `<title> [body]`                 | Create issue                 |
+| issue-comment      | `<number> <body>`                | Comment on issue             |
+| issue-close        | `<number>`                       | Close issue                  |
+| issue-edit         | `<number> [title] [body]`        | Edit issue                   |
+| issue-reopen       | `<number>`                       | Reopen issue                 |
+| pr-list            | `[state] [limit]`                | List PRs                     |
+| pr-view            | `<number>`                       | View PR details              |
+| pr-create          | `<title> [body] [base]`          | Create PR                    |
+| pr-diff            | `<number>`                       | Get PR diff                  |
+| pr-files           | `<number>`                       | List PR files                |
+| pr-checks          | `<number>`                       | View PR checks               |
+| pr-merge           | `<number>`                       | Merge PR (squash)            |
+| pr-review          | `<number> <event> [body]`        | Review PR                    |
+| pr-close           | `<number>`                       | Close PR                     |
+| pr-ready           | `<number>`                       | Mark PR ready                |
+| run-list           | `[limit]`                        | List workflow runs           |
+| run-view           | `<run_id>`                       | View run details             |
+| run-logs           | `<run_id> [failed]`              | Get run logs                 |
+| run-rerun          | `<run_id>`                       | Rerun failed jobs            |
+| run-cancel         | `<run_id>`                       | Cancel run                   |
+| workflow-list      | —                                | List workflows               |
+| workflow-view      | `<workflow>`                     | View workflow YAML           |
+| workflow-run       | `<workflow> [ref]`               | Trigger workflow             |
+| search-repos       | `<query> [limit]`                | Search repositories          |
+| search-code        | `<query> [limit]`                | Search code                  |
+| search-issues      | `<query> [limit]`                | Search issues                |
+| project-list       | `[owner]`                        | List projects                |
+| project-view       | `<project> [owner]`              | View project                 |
+| project-item-list  | `<project> [owner]`              | List project items           |
+| project-create     | `<title> [owner]`                | Create project               |
+| project-close      | `<project> [owner]`              | Close project                |
+| project-item-add   | `<project> <url> [owner]`        | Add item to project          |
+| project-field-list | `<project> [owner]`              | List project fields          |
+| release-list       | `[limit]`                        | List releases                |
+| release-view       | `<tag>`                          | View release                 |
+| cache-list         | `[limit]`                        | List caches                  |
+| cache-delete       | `<cache_key>`                    | Delete cache                 |
+| label-list         | —                                | List labels                  |
+| repo-view          | `[repo]`                         | View repository              |
+| api                | `<endpoint> [method]`            | Raw API call                 |
+| discussion-list    | `[category] [limit]`             | List discussions             |
+| discussion-view    | `<number>`                       | View discussion              |
+| discussion-create  | `<category_id> <title> <body>`   | Create discussion            |
+| discussion-comment | `<discussion_id> <body>`         | Comment on discussion        |
+| discussion-close   | `<discussion_id>`                | Close discussion             |
+
+---
+## [2][USAGE]
 
 ```bash
 # Zero-arg commands
@@ -26,148 +82,36 @@ uv run .claude/skills/github-tools/scripts/gh.py run-list
 uv run .claude/skills/github-tools/scripts/gh.py workflow-list
 uv run .claude/skills/github-tools/scripts/gh.py label-list
 uv run .claude/skills/github-tools/scripts/gh.py release-list
-uv run .claude/skills/github-tools/scripts/gh.py cache-list
-uv run .claude/skills/github-tools/scripts/gh.py project-list
 uv run .claude/skills/github-tools/scripts/gh.py repo-view
+
+# With positional args
+uv run .claude/skills/github-tools/scripts/gh.py issue-list closed 50
+uv run .claude/skills/github-tools/scripts/gh.py issue-view 42
+uv run .claude/skills/github-tools/scripts/gh.py issue-create "Bug report" "Details here"
+uv run .claude/skills/github-tools/scripts/gh.py issue-comment 42 "This is a comment"
+uv run .claude/skills/github-tools/scripts/gh.py issue-close 42
+
+uv run .claude/skills/github-tools/scripts/gh.py pr-view 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-create "Feature" "Description" main
+uv run .claude/skills/github-tools/scripts/gh.py pr-merge 99
+uv run .claude/skills/github-tools/scripts/gh.py pr-review 99 APPROVE "LGTM"
+
+uv run .claude/skills/github-tools/scripts/gh.py run-list 10
+uv run .claude/skills/github-tools/scripts/gh.py run-view 12345
+uv run .claude/skills/github-tools/scripts/gh.py run-logs 12345 failed
+uv run .claude/skills/github-tools/scripts/gh.py workflow-run ci.yml main
+
+uv run .claude/skills/github-tools/scripts/gh.py search-repos "nx monorepo" 10
+uv run .claude/skills/github-tools/scripts/gh.py search-code "dispatch table" 10
+
+uv run .claude/skills/github-tools/scripts/gh.py project-view 1
+uv run .claude/skills/github-tools/scripts/gh.py project-item-list 1
+
+uv run .claude/skills/github-tools/scripts/gh.py api "/repos/{owner}/{repo}/issues" GET
 ```
 
 ---
-## [1][ISSUES]
-
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py issue-list --state closed
-uv run .claude/skills/github-tools/scripts/gh.py issue-view --number 42
-uv run .claude/skills/github-tools/scripts/gh.py issue-create --title "Bug report" --body "Details"
-uv run .claude/skills/github-tools/scripts/gh.py issue-comment --number 42 --body "Comment"
-uv run .claude/skills/github-tools/scripts/gh.py issue-close --number 42
-uv run .claude/skills/github-tools/scripts/gh.py issue-edit --number 42 --title "New title" --labels "bug,urgent"
-```
-
----
-## [2][PULL_REQUESTS]
-
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py pr-list --state closed
-uv run .claude/skills/github-tools/scripts/gh.py pr-view --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-create --title "Feature" --body "Description" --base main
-uv run .claude/skills/github-tools/scripts/gh.py pr-diff --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-files --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-checks --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-merge --number 99
-uv run .claude/skills/github-tools/scripts/gh.py pr-review --number 99 --event APPROVE --body "LGTM"
-```
-
----
-## [3][WORKFLOWS]
-
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py run-list --limit 10
-uv run .claude/skills/github-tools/scripts/gh.py run-view --run-id 12345
-uv run .claude/skills/github-tools/scripts/gh.py run-logs --run-id 12345 --failed
-uv run .claude/skills/github-tools/scripts/gh.py run-rerun --run-id 12345
-uv run .claude/skills/github-tools/scripts/gh.py workflow-view --workflow ci.yml
-uv run .claude/skills/github-tools/scripts/gh.py workflow-run --workflow ci.yml --ref main
-```
-
----
-## [4][SEARCH]
-
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py search-repos --query "nx monorepo" --limit 10
-uv run .claude/skills/github-tools/scripts/gh.py search-code --query "dispatch table" --limit 10
-uv run .claude/skills/github-tools/scripts/gh.py search-issues --query "is:open label:bug" --limit 10
-```
-
----
-## [5][DISCUSSIONS]
-
-**Queries**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-list
-uv run .claude/skills/github-tools/scripts/gh.py discussion-list --category "D_kwDOCat123" --limit 10 --answered
-uv run .claude/skills/github-tools/scripts/gh.py discussion-view --number 42
-uv run .claude/skills/github-tools/scripts/gh.py discussion-category-list
-uv run .claude/skills/github-tools/scripts/gh.py discussion-pinned
-```
-
-**Lifecycle**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-create --category-id "D_kwDOCat123" --title "Topic" --body "Content"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-update --discussion-id "D_kwDOABC123" --title "New title" --body "Updated"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-delete --discussion-id "D_kwDOABC123"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-close --discussion-id "D_kwDOABC123" --reason RESOLVED
-uv run .claude/skills/github-tools/scripts/gh.py discussion-reopen --discussion-id "D_kwDOABC123"
-```
-
-**Moderation**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-lock --discussion-id "D_kwDOABC123" --reason SPAM
-uv run .claude/skills/github-tools/scripts/gh.py discussion-unlock --discussion-id "D_kwDOABC123"
-```
-
-**Comments**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-comment --discussion-id "D_kwDOABC123" --body "Comment"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-comment --discussion-id "D_kwDOABC123" --body "Reply" --reply-to "DC_kwDOCmt456"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-comment-update --comment-id "DC_kwDOCmt456" --body "Edited"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-comment-delete --comment-id "DC_kwDOCmt456"
-```
-
-**Answers**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-mark-answer --comment-id "DC_kwDOCmt456"
-uv run .claude/skills/github-tools/scripts/gh.py discussion-unmark-answer --comment-id "DC_kwDOCmt456"
-```
-
-**Labels**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-add-label --discussion-id "D_kwDOABC123" --label-ids '["LA_kwDOLbl789"]'
-uv run .claude/skills/github-tools/scripts/gh.py discussion-remove-label --discussion-id "D_kwDOABC123" --label-ids '["LA_kwDOLbl789"]'
-```
-
-**Reactions**
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py discussion-react --subject-id "D_kwDOABC123" --reaction THUMBS_UP
-```
-
-[NOTE] Get `discussion-id` from `discussion-view` output `id` field. Get `category-id` from `discussion-category-list`. Get `comment-id` from comment nodes in `discussion-view`. Get `label-ids` from `label-list` (use `node_id` field). Reaction values: `THUMBS_UP`, `THUMBS_DOWN`, `LAUGH`, `HOORAY`, `CONFUSED`, `HEART`, `ROCKET`, `EYES`.
-
----
-## [6][PROJECTS_V2]
-
-```bash
-# View/List
-uv run .claude/skills/github-tools/scripts/gh.py project-view --project 1
-uv run .claude/skills/github-tools/scripts/gh.py project-item-list --project 1
-uv run .claude/skills/github-tools/scripts/gh.py project-field-list --project 1
-
-# CRUD
-uv run .claude/skills/github-tools/scripts/gh.py project-create --title "Sprint 1"
-uv run .claude/skills/github-tools/scripts/gh.py project-close --project 1
-uv run .claude/skills/github-tools/scripts/gh.py project-delete --project 1
-
-# Items
-uv run .claude/skills/github-tools/scripts/gh.py project-item-add --project 1 --url "https://github.com/owner/repo/issues/42"
-uv run .claude/skills/github-tools/scripts/gh.py project-item-edit --id ITEM_ID --project-id PROJECT_NODE_ID --field-id FIELD_ID --single-select-option-id OPT_ID
-uv run .claude/skills/github-tools/scripts/gh.py project-item-delete --project 1 --id ITEM_ID
-uv run .claude/skills/github-tools/scripts/gh.py project-item-archive --project 1 --id ITEM_ID
-
-# Fields
-uv run .claude/skills/github-tools/scripts/gh.py project-field-create --project 1 --name "Priority" --data-type SINGLE_SELECT --single-select-options "High,Medium,Low"
-```
-
-[NOTE] Get `ITEM_ID`, `FIELD_ID` from `project-item-list`/`project-field-list`. Get `PROJECT_NODE_ID` from `project-view` output `id` field. Field edit supports: `--text`, `--number`, `--date`, `--single-select-option-id`, `--iteration-id`.
-
----
-## [7][OTHER]
-
-```bash
-uv run .claude/skills/github-tools/scripts/gh.py release-view --tag v1.0.0
-uv run .claude/skills/github-tools/scripts/gh.py api --endpoint "/repos/{owner}/{repo}/issues" --method GET
-```
-
----
-## [8][OUTPUT]
+## [3][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 

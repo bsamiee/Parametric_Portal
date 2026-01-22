@@ -11,10 +11,13 @@ import { createBrowserTelemetryLayer } from '@parametric-portal/runtime/services
 import { type AuthState, useAuthStore } from '@parametric-portal/runtime/stores/auth';
 import { ParametricApi } from '@parametric-portal/server/api';
 import type { IconRequest } from '@parametric-portal/types/icons';
-import type { ApiKeyId, OAuthProvider } from '@parametric-portal/types/schema';
 import { DurationMs } from '@parametric-portal/types/types';
 import { DateTime, Duration, Effect, Fiber, Layer, Option } from 'effect';
 import { useEffect } from 'react';
+
+// --- [LOCAL_TYPES] -----------------------------------------------------------
+
+type OauthProvider = 'apple' | 'github' | 'google' | 'microsoft';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -22,20 +25,20 @@ type AppServices = Browser | Clipboard.Clipboard | HttpClient.HttpClient;
 type GenerateInput = IconRequest & { readonly signal?: AbortSignal };
 type AuthResult = {
     readonly accessToken: string;
-    readonly expiresAt: Date;
+    readonly expiresAt: DateTime.Utc;
     readonly user: NonNullable<AuthState['user']>;
 } | null;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     auth: { refreshBuffer: DurationMs.fromMillis(60_000) },
     baseUrl: import.meta.env.VITE_API_URL ?? 'http://localhost:4000',
     otel: {
         enabled: import.meta.env['VITE_OTEL_ENABLED'] === 'true',
         serviceName: 'parametric-icons',
     },
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -65,18 +68,14 @@ const AppLayer = Layer.mergeAll(TracedHttpClientLive, BrowserServicesLive, Brows
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const auth = {
-    createApiKey: (token: string, body: { readonly key: string; readonly name: string; readonly provider: string }) =>
+    createApiKey: (token: string, body: { readonly apiKey: string; readonly name: string }) =>
         Effect.gen(function* () {
             const client = yield* makeAuthenticatedClient(token);
             return yield* client.auth.createApiKey({
-                payload: {
-                    key: body.key,
-                    name: body.name,
-                    provider: body.provider as 'anthropic' | 'gemini' | 'openai',
-                },
+                payload: { apiKey: body.apiKey, name: body.name },
             });
         }).pipe(Effect.withSpan('api.apiKeys.create')),
-    deleteApiKey: (token: string, id: ApiKeyId) =>
+    deleteApiKey: (token: string, id: string) =>
         Effect.gen(function* () {
             const client = yield* makeAuthenticatedClient(token);
             return yield* client.auth.deleteApiKey({ path: { id } });
@@ -86,7 +85,7 @@ const auth = {
             const client = yield* makeAuthenticatedClient(token);
             return yield* client.auth.me();
         }).pipe(Effect.withSpan('api.auth.me')),
-    initiateOAuth: (provider: OAuthProvider) =>
+    initiateOAuth: (provider: OauthProvider) =>
         Effect.gen(function* () {
             const client = yield* makeClient();
             return yield* client.auth.oauthStart({ path: { provider } });
@@ -121,10 +120,11 @@ const refreshAuthEffect = Effect.gen(function* () {
     return yield* Option.isSome(sessionResult)
         ? Effect.gen(function* () {
               const userResult = yield* auth.getCurrentUser(sessionResult.value.accessToken).pipe(Effect.option);
+              const expiresAt = sessionResult.value.expiresAt;
               return Option.isSome(userResult)
                   ? {
                         accessToken: sessionResult.value.accessToken,
-                        expiresAt: DateTime.toDate(sessionResult.value.expiresAt),
+                        expiresAt,
                         user: userResult.value,
                     }
                   : null;
@@ -134,7 +134,7 @@ const refreshAuthEffect = Effect.gen(function* () {
 const handleAuthResult = (
     result: AuthResult,
     clearAuth: () => void,
-    setAuth: (token: string, expiresAt: Date, user: NonNullable<AuthState['user']>) => void,
+    setAuth: (token: string, expiresAt: DateTime.Utc, user: NonNullable<AuthState['user']>) => void,
 ): void =>
     Option.fromNullable(result).pipe(
         Option.match({
@@ -171,7 +171,7 @@ const useAuthInit = (): void => {
     useEffect(() => {
         const refreshMs =
             accessToken !== null && expiresAt !== null
-                ? Math.max(0, expiresAt.getTime() - Date.now() - B.auth.refreshBuffer)
+                ? Math.max(0, DateTime.toEpochMillis(expiresAt) - Date.now() - B.auth.refreshBuffer)
                 : 0;
         const fiber =
             refreshMs > 0

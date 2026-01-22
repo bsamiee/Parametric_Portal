@@ -1,6 +1,6 @@
 /**
- * Augment Vite environment with build-time values.
- * Centralized type definitions eliminate per-app vite-env.d.ts duplication.
+ * Augment Vite ImportMetaEnv with build-time values.
+ * Centralized definitions eliminate per-app vite-env.d.ts duplication.
  */
 
 /// <reference types="vite/client" />

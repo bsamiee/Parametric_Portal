@@ -1,95 +1,94 @@
 /**
- * Sanitize SVG markup with scoped ID rewriting.
- * Prevents ID collisions across multiple SVG assets via DOMPurify hooks.
- *
- * - Pure constructors (*At) require explicit IDs/scopes for referential transparency
- * - Option-returning variants (*Option) for strict FP composition
- * - Convenience variants use generateSync() internally (pragmatic for React)
+ * Sanitize SVG markup with scoped ID rewriting via DOMPurify.
+ * Companion bundles schema + sanitize operation returning Option<Svg>.
  */
 import { Option, ParseResult, pipe, Schema as S } from 'effect';
 import DOMPurify from 'isomorphic-dompurify';
-import { companion, Hex8, Uuidv7 } from './types.ts';
+import { Hex8 } from './types.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	purify: {
-		ADD_ATTR: ['href', 'xlink:href'],
-		ADD_TAGS: ['use'],
-		USE_PROFILES: { svg: true },
-	},
-	xlinkNs: 'http://www.w3.org/1999/xlink',
-} as const);
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const SvgSchema = pipe(
-	S.String,
-	S.filter((s) => s.includes('<svg') && s.includes('</svg>'), { message: () => 'Invalid SVG markup' }),
-	S.brand('Svg'),
-);
-type Svg = typeof SvgSchema.Type;
-
-const SvgAssetSchema = S.Struct({ id: Uuidv7.schema, name: S.NonEmptyTrimmedString, svg: SvgSchema });
-type SvgAsset = typeof SvgAssetSchema.Type;
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
+const PURIFY_CONFIG = {
+	ADD_ATTR: ['href', 'xlink:href'],
+	ADD_TAGS: ['use'],
+	USE_PROFILES: { svg: true },
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-/** Rewrite url(#id) references using scoped ID map to prevent collisions. */
-const replaceUrlRefs = (val: string, idMap: Map<string, string>): string => val.replaceAll(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${idMap.get(id) ?? id})`);
-/** Mutate DOM node IDs and references in-place during sanitization. */
+const replaceUrlRefs = (val: string, idMap: Map<string, string>): string =>
+	val.replaceAll(/url\(#([^)]+)\)/g, (_, id: string) => `url(#${idMap.get(id) ?? id})`);
 const rewriteNode = (node: Element, idMap: Map<string, string>, scope: string): void => {
-	const oldId = node.getAttribute?.('id');
-	oldId && (() => { idMap.set(oldId, `${oldId}_${scope}`); node.setAttribute('id', `${oldId}_${scope}`); })();
-	['href', 'xlink:href'].forEach((attr) => {
-		const val = attr === 'xlink:href' ? node.getAttributeNS?.(B.xlinkNs, 'href') : node.getAttribute?.(attr);
-		const refId = val?.startsWith('#') ? val.slice(1) : undefined;
-		refId && idMap.has(refId) && (attr === 'xlink:href'
-			? node.setAttributeNS?.(B.xlinkNs, 'xlink:href', `#${idMap.get(refId)}`)
-			: node.setAttribute?.(attr, `#${idMap.get(refId)}`));
+	Option.fromNullable(node.getAttribute?.('id')).pipe(
+		Option.map((id) => {
+			idMap.set(id, `${id}_${scope}`);
+			return node.setAttribute('id', `${id}_${scope}`);
+		}),
+	);
+	(['href', 'xlink:href'] as const).forEach((attr) => {
+		Option.fromNullable( attr === 'href' ? node.getAttribute?.('href') : node.getAttributeNS?.(XLINK_NS, 'href'),
+		).pipe(
+			Option.filter((value) => value.startsWith('#')),
+			Option.map((value) => value.slice(1)),
+			Option.filter((id) => idMap.has(id)),
+			Option.map((id) =>
+				attr === 'href'
+					? node.setAttribute('href', `#${id}`)
+					: node.setAttributeNS?.(XLINK_NS, 'xlink:href', `#${id}`),
+			),
+		);
 	});
-	['fill', 'stroke', 'clip-path', 'mask', 'filter'].forEach((attr) => {
-		const val = node.getAttribute?.(attr);
-		val?.includes('url(#') && node.setAttribute?.(attr, replaceUrlRefs(val, idMap));
+	(['fill', 'stroke', 'clip-path', 'mask', 'filter'] as const).forEach((attr) => {
+		Option.fromNullable(node.getAttribute?.(attr)).pipe(
+			Option.filter((value) => value.includes('url(#')),
+			Option.map((value) => node.setAttribute(attr, replaceUrlRefs(value, idMap))),
+		);
 	});
-	// biome-ignore lint/style/noParameterAssign: DOMPurify hooks require in-place DOM mutation
-	node.tagName?.toLowerCase() === 'style' && node.textContent?.includes('url(#') && (() => { node.textContent = replaceUrlRefs(node.textContent, idMap);})();
-};
-/** Sanitize SVG and scope all IDs to prevent collisions. Pure when seed provided, uses generateSync otherwise. */
-const sanitize = (raw: string, seed?: string): Option.Option<Svg> => {
-	const scope = seed === undefined ? Hex8.generateSync() : Hex8.derive(seed);
-	const idMap = new Map<string, string>();
-	DOMPurify.addHook('afterSanitizeAttributes', (node) => rewriteNode(node, idMap, scope));
-	const result = DOMPurify.sanitize(raw, {
-		ADD_ATTR: [...B.purify.ADD_ATTR],
-		ADD_TAGS: [...B.purify.ADD_TAGS],
-		USE_PROFILES: B.purify.USE_PROFILES,
-	});
-	DOMPurify.removeAllHooks();
-	return result.includes('<svg') && result.includes('</svg>') ? Option.some(result as Svg) : Option.none();
+	Option.fromNullable(node.textContent).pipe(
+		Option.filter(() => node.tagName?.toLowerCase() === 'style'),
+		Option.filter((value) => value.includes('url(#')),
+		Option.map((text) => {
+			// biome-ignore lint/style/noParameterAssign: DOMPurify hooks require in-place DOM mutation
+			node.textContent = replaceUrlRefs(text, idMap);
+			return undefined;
+		}),
+	);
 };
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
+// --- [COMPANIONS] ------------------------------------------------------------
 
-const Svg = Object.freeze({
-	...companion(SvgSchema),
-	sanitize,
-	sanitizedSchema: S.transformOrFail(S.String, SvgSchema, {
+const Svg = (() => {
+	const schema = pipe(
+		S.String,
+		S.filter((markup) => markup.includes('<svg') && markup.includes('</svg>'), { message: () => 'Invalid SVG markup' }),
+		S.brand('Svg'),
+	);
+	type T = typeof schema.Type;
+	const sanitize = (raw: string, seed?: string): Option.Option<T> => {
+		const scope = seed === undefined ? Hex8.generateSync() : Hex8.derive(seed);
+		const idMap = new Map<string, string>();
+		DOMPurify.addHook('afterSanitizeAttributes', (node) => rewriteNode(node, idMap, scope));
+		const result = DOMPurify.sanitize(raw, {
+			ADD_ATTR: [...PURIFY_CONFIG.ADD_ATTR],
+			ADD_TAGS: [...PURIFY_CONFIG.ADD_TAGS],
+			USE_PROFILES: PURIFY_CONFIG.USE_PROFILES,
+		});
+		DOMPurify.removeAllHooks();
+		return result.includes('<svg') && result.includes('</svg>') ? Option.some(result as T) : Option.none();
+	};
+	const sanitizedSchema = S.transformOrFail(S.String, schema, {
 		decode: (raw, _, ast) => Option.match(sanitize(raw), {
 			onNone: () => ParseResult.fail(new ParseResult.Type(ast, raw, 'Invalid SVG')),
 			onSome: ParseResult.succeed,
 		}),
 		encode: ParseResult.succeed,
 		strict: true,
-	}),
-});
-const SvgAsset = Object.freeze({
-	...companion(SvgAssetSchema),
-	/** Create new asset with generated ID. Returns None if SVG sanitization fails. */
-	create: (name: string, svg: string): Option.Option<SvgAsset> => Option.map(Svg.sanitize(svg), (sanitized) => ({ id: Uuidv7.generateSync(), name, svg: sanitized })),
-	inputSchema: S.Struct({ name: S.NonEmptyTrimmedString, svg: S.String }),
-});
+	});
+	return { sanitize, sanitizedSchema, schema } as const;
+})();
+type Svg = typeof Svg.schema.Type;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { Svg, SvgAsset };
+export { Svg };

@@ -67,6 +67,11 @@
       "types": "./src/transfer.ts",
       "import": "./src/transfer.ts",
       "default": "./src/transfer.ts"
+    },
+    "./circuit": {
+      "types": "./src/circuit.ts",
+      "import": "./src/circuit.ts",
+      "default": "./src/circuit.ts"
     }
   },
   "scripts": {
@@ -81,17 +86,26 @@
     "@effect/opentelemetry": "catalog:",
     "@effect/platform": "catalog:",
     "@effect/sql": "catalog:",
+    "@parametric-portal/database": "workspace:*",
     "@parametric-portal/types": "workspace:*",
+    "cockatiel": "catalog:",
     "effect": "catalog:",
     "exceljs": "catalog:",
+    "ipaddr.js": "catalog:",
     "ioredis": "catalog:",
     "jszip": "catalog:",
     "nanoid": "catalog:",
     "otplib": "catalog:",
-    "papaparse": "catalog:"
+    "papaparse": "catalog:",
+    "rfc6902": "catalog:",
+    "sax": "catalog:",
+    "ts-essentials": "catalog:",
+    "yaml": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "@types/papaparse": "catalog:",
+    "@types/sax": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

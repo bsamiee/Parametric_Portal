@@ -5,7 +5,7 @@
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     fonts: {
         geist: {
             mono: 'https://cdn.jsdelivr.net/npm/geist@1.4.1/dist/fonts/geist-mono/GeistMono-Variable.woff2',
@@ -19,7 +19,7 @@ const B = Object.freeze({
         stack: { gap: 4 },
         toolbar: { gap: 2 },
     },
-} as const);
+} as const;
 
 // --- [THEME_CONFIG] ----------------------------------------------------------
 

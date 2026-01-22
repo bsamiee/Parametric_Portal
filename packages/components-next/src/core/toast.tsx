@@ -1,15 +1,6 @@
 /**
- * Toast notification system with lazy multi-queue architecture.
- * Direct API: Toast.show/dismiss work anywhere (no hook needed).
- * Provider API: Toast.Provider wraps app, renders regions for configured positions.
- * Hook API: Toast.useTrigger for component integration, Toast.useRender for manual region placement.
- * CSS variable driven styling via --toast-* namespace.
- *
- * Component integration pattern:
- *   <Button
- *     asyncState={saveState}
- *     toast={{ pending: { title: 'Saving...' }, success: { title: 'Done!' }, position: 'bottom-right' }}
- *   />
+ * Multi-queue toast system with lazy initialization and CSS variable theming.
+ * Direct API: Toast.show/dismiss. Provider API: Toast.Provider renders regions.
  */
 import { readCssInt, readCssMs } from '@parametric-portal/runtime/runtime';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -28,52 +19,52 @@ import { cn, Slot, type SlotInput } from './utils';
 type ToastPosition = 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-center' | 'top-left' | 'top-right';
 type QueueContent = Omit<ToastPayload, 'timeout' | 'onClose' | 'position'>;
 type ToastType = 'error' | 'info' | 'success' | 'warning';
-type ToastRenderConfig = { readonly position?: ToastPosition | undefined; readonly style?: string | undefined; readonly className?: string | undefined; };
+type ToastRenderConfig = { readonly position?: ToastPosition; readonly style?: string; readonly className?: string };
 type ToastMessage = {
 	readonly title: string;
-	readonly description?: string | undefined;
-	readonly dismissible?: boolean | undefined;
-	readonly closeIcon?: SlotInput | false | undefined;
-	readonly action?: { readonly label: string; readonly onClick: () => void } | undefined;
-	readonly timeout?: number | undefined;
-	readonly onClose?: (() => void) | undefined;
-	readonly icon?: SlotInput | false | undefined;
+	readonly description?: string;
+	readonly dismissible?: boolean;
+	readonly closeIcon?: SlotInput | false;
+	readonly action?: { readonly label: string; readonly onClick: () => void };
+	readonly timeout?: number;
+	readonly onClose?: () => void;
+	readonly icon?: SlotInput | false;
 };
 type ToastPayload = ToastMessage & {
-	readonly type?: ToastType | undefined;
-	readonly style?: string | undefined;
-	readonly position?: ToastPosition | undefined;
-	readonly progress?: number | undefined;
-	readonly showDuration?: boolean | undefined;
+	readonly type?: ToastType;
+	readonly style?: string;
+	readonly position?: ToastPosition;
+	readonly progress?: number;
+	readonly showDuration?: boolean;
 };
 type ToastTrigger = {
-	readonly pending?: ToastMessage | undefined;
-	readonly success?: ToastMessage | undefined;
-	readonly failure?: ToastMessage | undefined;
-	readonly style?: string | undefined;
-	readonly position?: ToastPosition | undefined;
+	readonly pending?: ToastMessage;
+	readonly success?: ToastMessage;
+	readonly failure?: ToastMessage;
+	readonly style?: string;
+	readonly position?: ToastPosition;
 };
 type ProviderProps = {
 	readonly children: ReactNode;
-	readonly positions?: readonly ToastPosition[] | undefined;
-	readonly style?: string | undefined;
+	readonly positions?: readonly ToastPosition[];
+	readonly style?: string;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	cssVars: Object.freeze({
+const _B = {
+	cssVars: {
 		maxVisible: '--toast-max-visible',
 		timeout: '--toast-timeout',
-	}),
-	defaults: Object.freeze({
+	},
+	defaults: {
 		dismissible: true,
 		maxVisible: 5,
 		position: 'bottom-right' as ToastPosition,
 		timeout: 5000,
 		type: 'info' as ToastType,
-	}),
-	slot: Object.freeze({
+	},
+	slot: {
 		action: cn(
 			'shrink-0',
 			'text-(--toast-action-color) font-(--toast-action-weight)',
@@ -115,18 +106,18 @@ const B = Object.freeze({
 			'transition-all duration-(--toast-transition-duration) ease-(--toast-transition-easing)',
 			'outline-none data-[focus-visible]:outline-2 data-[focus-visible]:outline-(--toast-focus-ring-color)',
 		),
-	}),
-	typeMap: Object.freeze({
+	},
+	typeMap: {
 		failure: 'error' as ToastType,
 		pending: 'info' as ToastType,
 		success: 'success' as ToastType,
-	}),
-});
+	},
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const renderIcon = (content: QueueContent): ReactNode => content.icon === false ? null : Slot.render(content.icon, undefined, B.slot.icon);
-const renderCloseIcon = (content: QueueContent): ReactNode => content.closeIcon === false ? null : Slot.render(content.closeIcon, undefined, B.slot.closeIcon) ?? <span aria-hidden className={B.slot.closeIcon}>×</span>;
+const renderIcon = (content: QueueContent): ReactNode => content.icon === false ? null : Slot.render(content.icon, undefined, _B.slot.icon);
+const renderCloseIcon = (content: QueueContent): ReactNode => content.closeIcon === false ? null : Slot.render(content.closeIcon, undefined, _B.slot.closeIcon) ?? <span aria-hidden className={_B.slot.closeIcon}>×</span>;
 const wrapInViewTransition = (fn: () => void): void => {
 	'startViewTransition' in document
 		? (document as Document & { startViewTransition: (fn: () => void) => { ready: Promise<void> } })
@@ -137,19 +128,19 @@ const wrapInViewTransition = (fn: () => void): void => {
 const resolveTimeout = (value?: number): number =>
 	pipe(
 		Option.fromNullable(value),
-		Option.filter((v) => v > 0),
-		Option.orElse(() => pipe(Option.some(readCssMs(B.cssVars.timeout)), Option.filter((v) => v > 0))),
-		Option.getOrElse(() => B.defaults.timeout),
+		Option.filter((val) => val > 0),
+		Option.orElse(() => pipe(Option.some(readCssMs(_B.cssVars.timeout)), Option.filter((val) => val > 0))),
+		Option.getOrElse(() => _B.defaults.timeout),
 	);
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
 const triggerHandlers = {
-	Failure: (t: ToastTrigger) => Option.map(Option.fromNullable(t.failure), (m): ToastPayload => ({ ...m, position: t.position, style: t.style, type: B.typeMap.failure })),
+	Failure: (trigger: ToastTrigger) => Option.map(Option.fromNullable(trigger.failure), (msg): ToastPayload => ({ ...msg, position: trigger.position, progress: undefined, showDuration: undefined, style: trigger.style, type: _B.typeMap.failure })),
 	Idle: () => Option.none<ToastPayload>(),
-	Loading: (t: ToastTrigger) => Option.map(Option.fromNullable(t.pending), (m): ToastPayload => ({ ...m, position: t.position, style: t.style, type: B.typeMap.pending })),
-	Success: (t: ToastTrigger) => Option.map(Option.fromNullable(t.success), (m): ToastPayload => ({ ...m, position: t.position, style: t.style, type: B.typeMap.success })),
-} satisfies Record<AsyncState<unknown, unknown>['_tag'], (t: ToastTrigger) => Option.Option<ToastPayload>>;
+	Loading: (trigger: ToastTrigger) => Option.map(Option.fromNullable(trigger.pending), (msg): ToastPayload => ({ ...msg, position: trigger.position, progress: undefined, showDuration: undefined, style: trigger.style, type: _B.typeMap.pending })),
+	Success: (trigger: ToastTrigger) => Option.map(Option.fromNullable(trigger.success), (msg): ToastPayload => ({ ...msg, position: trigger.position, progress: undefined, showDuration: undefined, style: trigger.style, type: _B.typeMap.success })),
+} satisfies Record<AsyncState<unknown, unknown>['_tag'], (trigger: ToastTrigger) => Option.Option<ToastPayload>>;
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -160,9 +151,9 @@ const notifySubscribers = (): void => { A.map(A.fromIterable(subscriptions), (fn
 const createQueue = (): RACToastQueue<QueueContent> =>
 	new RACToastQueue<QueueContent>({
 		maxVisibleToasts: pipe(
-			Option.some(readCssInt(B.cssVars.maxVisible)),
-			Option.filter((v) => v > 0),
-			Option.getOrElse(() => B.defaults.maxVisible),
+			Option.some(readCssInt(_B.cssVars.maxVisible)),
+			Option.filter((val) => val > 0),
+			Option.getOrElse(() => _B.defaults.maxVisible),
 		),
 		wrapUpdate: wrapInViewTransition,
 	});
@@ -176,7 +167,7 @@ const getQueue = (position: ToastPosition): RACToastQueue<QueueContent> =>
 		}),
 	);
 const show = (payload: ToastPayload): string => {
-	const { timeout, onClose, position = B.defaults.position, ...content } = payload;
+	const { timeout, onClose, position = _B.defaults.position, ...content } = payload;
 	const resolvedTimeout = resolveTimeout(timeout);
 	const key = getQueue(position).add(content, { timeout: resolvedTimeout, ...(onClose !== undefined && { onClose }) });
 	contentStore.set(key, { content, position, timeout: resolvedTimeout });
@@ -193,13 +184,13 @@ const update = (key: string, partial: Partial<QueueContent>): boolean =>
 	});
 const promise = <A,>(
 	thenable: Promise<A>,
-	config: { readonly pending: ToastPayload; readonly success: ToastPayload | ((a: A) => ToastPayload); readonly failure: ToastPayload | ((e: unknown) => ToastPayload) },
+	config: { readonly pending: ToastPayload; readonly success: ToastPayload | ((result: A) => ToastPayload); readonly failure: ToastPayload | ((error: unknown) => ToastPayload) },
 ): Promise<Option.Option<A>> => {
-	const key = show({ ...config.pending, type: B.typeMap.pending });
+	const key = show({ ...config.pending, type: _B.typeMap.pending });
 	return pipe(
-		Effect.tryPromise({ catch: (e: unknown) => e, try: () => thenable }),
-		Effect.tap((a) => Effect.sync(() => update(key, typeof config.success === 'function' ? config.success(a) : config.success))),
-		Effect.tapError((e) => Effect.sync(() => update(key, typeof config.failure === 'function' ? config.failure(e) : config.failure))),
+		Effect.tryPromise({ catch: (error: unknown) => error, try: () => thenable }),
+		Effect.tap((result) => Effect.sync(() => update(key, typeof config.success === 'function' ? config.success(result) : config.success))),
+		Effect.tapError((error) => Effect.sync(() => update(key, typeof config.failure === 'function' ? config.failure(error) : config.failure))),
 		Effect.option,
 		Effect.runPromise,
 	);
@@ -210,13 +201,13 @@ const dismiss = (key: string, position?: ToastPosition): void => {
 	contentStore.delete(key);
 	pipe(
 		Option.fromNullable(storedPosition),
-		Option.flatMap((p) => Option.fromNullable(queueRegistry.get(p))),
-		Option.map((q) => q.close(key)),
+		Option.flatMap((pos) => Option.fromNullable(queueRegistry.get(pos))),
+		Option.map((queue) => queue.close(key)),
 	);
 };
 const dismissAll = (position?: ToastPosition): void => {
 	const closeAll = (queue: RACToastQueue<QueueContent>): void => {
-		A.map(queue.visibleToasts, (t) => { contentStore.delete(t.key); queue.close(t.key); });
+		A.map(queue.visibleToasts, (toastItem) => { contentStore.delete(toastItem.key); queue.close(toastItem.key); });
 	};
 	position
 		? Option.map(Option.fromNullable(queueRegistry.get(position)), closeAll)
@@ -225,7 +216,7 @@ const dismissAll = (position?: ToastPosition): void => {
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const ToastRegion: FC<ToastRenderConfig> = ({ position = B.defaults.position, style, className }) => {
+const ToastRegion: FC<ToastRenderConfig> = ({ position = _B.defaults.position, style, className }) => {
 	const queue = getQueue(position);
 	const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 	useEffect(() => {
@@ -233,11 +224,11 @@ const ToastRegion: FC<ToastRenderConfig> = ({ position = B.defaults.position, st
 		return () => { subscriptions.delete(forceUpdate); };
 	}, []);
 	return (
-		<RACToastRegion queue={queue} className={cn(B.slot.region, className)} data-slot="toast-region" data-position={position} data-style={style}>
+		<RACToastRegion queue={queue} className={cn(_B.slot.region, className)} data-slot="toast-region" data-position={position} data-style={style}>
 			{({ toast }) => {
 				const entry = contentStore.get(toast.key);
 				const content = entry?.content ?? toast.content;
-				const timeout = entry?.timeout ?? B.defaults.timeout;
+				const timeout = entry?.timeout ?? _B.defaults.timeout;
 				const progressMode = Match.value({ d: content.showDuration, p: content.progress }).pipe(
 					Match.when(({ p }) => typeof p === 'number', () => 'controlled' as const),
 					Match.when(({ d }) => d === true, () => 'duration' as const),
@@ -249,28 +240,28 @@ const ToastRegion: FC<ToastRenderConfig> = ({ position = B.defaults.position, st
 					Match.orElse(() => undefined),
 				);
 				return (
-					<RACToast toast={toast} className={B.slot.toast} data-slot="toast" data-style={content.style ?? style} data-toast-type={content.type ?? B.defaults.type} style={{ viewTransitionName: toast.key }}>
+					<RACToast toast={toast} className={_B.slot.toast} data-slot="toast" data-style={content.style ?? style} data-toast-type={content.type ?? _B.defaults.type} style={{ viewTransitionName: toast.key }}>
 						{renderIcon(content)}
-						<RACToastContent className={B.slot.content} data-slot="toast-content">
-							<Text slot="title" className={B.slot.title} data-slot="toast-title"> {content.title} </Text>
-							{content.description !== undefined && (<Text slot="description" className={B.slot.description} data-slot="toast-description"> {content.description} </Text>)}
+						<RACToastContent className={_B.slot.content} data-slot="toast-content">
+							<Text slot="title" className={_B.slot.title} data-slot="toast-title"> {content.title} </Text>
+							{content.description !== undefined && (<Text slot="description" className={_B.slot.description} data-slot="toast-description"> {content.description} </Text>)}
 						</RACToastContent>
-						{content.action !== undefined && (<Button className={B.slot.action} data-slot="toast-action" onPress={content.action.onClick}> {content.action.label} </Button>)}
-						{(content.dismissible ?? B.defaults.dismissible) && (<Button slot="close" className={B.slot.close} data-slot="toast-close" aria-label="Dismiss notification">{renderCloseIcon(content)}</Button>)}
-						{progressMode !== undefined && (<div className={B.slot.progress} data-slot="toast-progress" data-progress-mode={progressMode} style={progressStyle} />)}
+						{content.action !== undefined && (<Button className={_B.slot.action} data-slot="toast-action" onPress={content.action.onClick}> {content.action.label} </Button>)}
+						{(content.dismissible ?? _B.defaults.dismissible) && (<Button slot="close" className={_B.slot.close} data-slot="toast-close" aria-label="Dismiss notification">{renderCloseIcon(content)}</Button>)}
+						{progressMode !== undefined && (<div className={_B.slot.progress} data-slot="toast-progress" data-progress-mode={progressMode} style={progressStyle} />)}
 					</RACToast>
 				);
 			}}
 		</RACToastRegion>
 	);
 };
-const Provider: FC<ProviderProps> = ({ children, positions = [B.defaults.position], style }) => (
+const Provider: FC<ProviderProps> = ({ children, positions = [_B.defaults.position], style }) => (
 	<>
 		{children}
-		{positions.map((position) => (<ToastRegion key={position} position={position} style={style} />))}
+		{positions.map((position) => (<ToastRegion key={position} position={position} style={style} className={undefined} />))}
 	</>
 );
-const useRender = (cfg?: ToastRenderConfig): (() => ReactNode) => useCallback(() => <ToastRegion position={cfg?.position} style={cfg?.style} className={cfg?.className} />, [cfg?.position, cfg?.style, cfg?.className]);
+const useRender = (renderConfig?: ToastRenderConfig): (() => ReactNode) => useCallback(() => <ToastRegion position={renderConfig?.position} style={renderConfig?.style} className={renderConfig?.className} />, [renderConfig?.position, renderConfig?.style, renderConfig?.className]);
 const useTrigger = (asyncState: AsyncState<unknown, unknown> | undefined, trigger: ToastTrigger | undefined): void => {
 	const prevTagRef = useRef<string | undefined>(undefined);
 	const triggerRef = useRef(trigger);

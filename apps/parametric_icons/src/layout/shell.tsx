@@ -14,13 +14,13 @@ import { CommandBar, Sidebar, Stage } from './panels.tsx';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     styles: {
         main: 'relative flex-1 h-full overflow-hidden flex flex-col',
         root: 'h-screen w-screen overflow-hidden flex bg-(--panel-bg-medium) text-(--panel-text-primary)',
         workspace: 'w-full h-full flex flex-col items-center gap-6 px-12 pt-12 max-w-[1920px] mx-auto',
     },
-} as const);
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

@@ -1,125 +1,108 @@
 /**
- * Rate limiting via @effect/experimental with pluggable backend.
- * Config-driven: RATE_LIMIT_STORE=redis uses Redis, otherwise in-memory.
- * Fail-open pattern when store unavailable for better availability.
- * Exposes full ConsumeResult (limit, remaining, resetAfter) for response headers.
+ * Apply rate limiting via @effect/experimental RateLimiter.
+ * Table-driven presets; Redis primary, memory fallback; FiberRef propagates headers.
  */
-import { layerStoreMemory, makeWithRateLimiter, RateLimitExceeded, type RateLimiter, RateLimitStoreError, layer as rateLimiterLayer } from '@effect/experimental/RateLimiter';
+import { type ConsumeResult, layer as rateLimiterLayer, layerStoreMemory, RateLimiter, type RateLimiterError } from '@effect/experimental/RateLimiter';
 import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
-import { Headers, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { DurationMs } from '@parametric-portal/types/types';
-import { Config, Duration, Effect, Layer, Metric, Option } from 'effect';
+import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import { Config, Duration, Effect, FiberRef, Layer, Metric, Option, Redacted } from 'effect';
+import { RequestContext } from './context.ts';
 import { HttpError } from './http-errors.ts';
 import { MetricsService } from './metrics.ts';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [TABLE] -----------------------------------------------------------------
 
-type RateLimitPreset = {
-    readonly algorithm: 'fixed-window' | 'token-bucket';
-    readonly limit: number;
-    readonly recoveryAction?: 'email-verify' | 'support-ticket';
-    readonly tokens: number;
-    readonly window: Duration.Duration;
-};
+const presets = {
+	api: { algorithm: 'token-bucket', limit: 100, recoveryAction: undefined, tokens: 1, window: Duration.minutes(1) },
+	auth: { algorithm: 'fixed-window', limit: 5, recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
+	mfa: { algorithm: 'fixed-window', limit: 5, recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
+	mutation: { algorithm: 'token-bucket', limit: 100, recoveryAction: undefined, tokens: 5, window: Duration.minutes(1) },
+} as const satisfies Record<string, {
+	algorithm: 'fixed-window' | 'token-bucket';
+	limit: number;
+	recoveryAction: 'email-verify' | 'support-ticket' | undefined;
+	tokens: number;
+	window: Duration.Duration;
+}>;
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [STATE] -----------------------------------------------------------------
 
-const B = Object.freeze({
-    presets: {
-        api: { algorithm: 'token-bucket', limit: 100, tokens: 1, window: Duration.minutes(1) },
-        auth: { algorithm: 'fixed-window', limit: 5, recoveryAction: 'email-verify', tokens: 1, window: Duration.minutes(15) },
-        mfa: { algorithm: 'fixed-window', limit: 5, recoveryAction: 'email-verify', tokens: 1, window: Duration.minutes(15) },
-        mutation: { algorithm: 'token-bucket', limit: 100, tokens: 5, window: Duration.minutes(1) },
-    } as const satisfies Record<string, RateLimitPreset>,
-    redis: { prefix: 'rl:' },
-} as const);
-type Preset = keyof typeof B.presets;
+const headerRef = FiberRef.unsafeMake(Option.none<ConsumeResult>());
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [LAYER] -----------------------------------------------------------------
 
-const extractClientKey = (request: HttpServerRequest.HttpServerRequest, prefix: string): string =>`${prefix}:${Option.getOrElse(Headers.get(request.headers, 'x-forwarded-for'), () => 'unknown')}`;
-const addRateLimitHeaders = (
-    response: HttpServerResponse.HttpServerResponse,
-    result: { limit: number; remaining: number; resetAfterMs: number },
-): HttpServerResponse.HttpServerResponse =>
-    HttpServerResponse.setHeaders(response, {
-        'X-RateLimit-Limit': String(result.limit),
-        'X-RateLimit-Remaining': String(result.remaining),
-        'X-RateLimit-Reset': String(Math.ceil(result.resetAfterMs / 1000)),
-    });
+const layer = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
+	Config.string('RATE_LIMIT_STORE').pipe(Config.withDefault('memory'), Effect.map((store) => store === 'redis'
+		? layerStoreRedis({
+			connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(5000)),
+			enableReadyCheck: Config.boolean('REDIS_READY_CHECK').pipe(Config.withDefault(true)),
+			host: Config.string('REDIS_HOST').pipe(Config.withDefault('localhost')),
+			lazyConnect: Config.boolean('REDIS_LAZY_CONNECT').pipe(Config.withDefault(false)),
+			maxRetriesPerRequest: Config.integer('REDIS_MAX_RETRIES').pipe(Config.withDefault(3)),
+			password: Config.redacted('REDIS_PASSWORD').pipe(Config.option, Config.map(Option.map(Redacted.value)), Config.map(Option.getOrUndefined)),
+			port: Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
+			prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')),
+			retryStrategy: Config.integer('REDIS_RETRY_DELAY').pipe(Config.withDefault(100), Config.map((delay) => (tries: number) => tries > 3 ? null : Math.min(tries * delay, 2000))),
+		})
+		: layerStoreMemory,
+	)),
+)));
 
-// --- [LAYERS] ----------------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-const storeLayerMemory = layerStoreMemory;
-const storeLayerRedis = layerStoreRedis({
-    host: Config.string('REDIS_HOST').pipe(Config.withDefault('localhost')),
-    password: Config.string('REDIS_PASSWORD').pipe(Config.option, Config.map(Option.getOrUndefined)),
-    port: Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
-    prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault(B.redis.prefix)),
-});
-const storeLayer = Layer.unwrapEffect(
-    Config.string('RATE_LIMIT_STORE').pipe(
-        Config.withDefault('memory'),
-        Effect.map((store) => (store === 'redis' ? storeLayerRedis : storeLayerMemory)),
-    ),
+const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, E, R>): Effect.Effect<
+	A, E | HttpError.RateLimit, R | HttpServerRequest.HttpServerRequest | RateLimiter | MetricsService
+> => Effect.gen(function* () {
+	const metrics = yield* MetricsService;
+	const limiter = yield* RateLimiter;
+	const { ipAddress } = yield* RequestContext.client;
+	const request = yield* HttpServerRequest.HttpServerRequest;
+	const config = presets[preset];
+	const key = `${preset}:${ipAddress ?? Option.getOrElse(request.remoteAddress, () => 'unknown')}`;
+	const result = yield* limiter.consume({ algorithm: config.algorithm, key, limit: config.limit, onExceeded: 'fail', tokens: config.tokens, window: config.window }).pipe(
+		Metric.trackDuration(metrics.rateLimit.checkDuration.pipe(Metric.tagged('preset', preset))),
+		Effect.catchAll((err: RateLimiterError) => err.reason === 'Exceeded' ? Effect.gen(function* () {
+			const headerResult = { delay: Duration.zero, limit: err.limit, remaining: err.remaining, resetAfter: err.retryAfter };
+			yield* FiberRef.set(headerRef, Option.some(headerResult));
+			yield* Metric.update(metrics.rateLimit.rejections, preset);
+			return yield* Effect.fail(HttpError.rateLimit(Duration.toMillis(err.retryAfter), {
+				limit: err.limit, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter),
+				...(presets[preset].recoveryAction ? { recoveryAction: presets[preset].recoveryAction } : {}),
+			}));
+		}) : Effect.gen(function* () {
+			yield* Effect.logWarning('Rate limit store unavailable (fail-open)', { error: String(err), preset });
+			yield* Metric.update(metrics.rateLimit.storeFailures.pipe(Metric.tagged('preset', preset)), 1);
+			return { delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window };
+		})),
+	);
+	yield* FiberRef.set(headerRef, Option.some(result));
+	return yield* handler;
+}).pipe(Effect.withSpan(`rate-limit.${preset}`, { attributes: { 'rate-limit.preset': preset } }));
+const headers = HttpMiddleware.make((app) =>
+	Effect.locally(headerRef, Option.none<ConsumeResult>())(
+		app.pipe(
+			Effect.flatMap((response) => FiberRef.get(headerRef).pipe(
+				Effect.map((opt) => Option.match(opt, {
+					onNone: () => response,
+					onSome: (result) => HttpServerResponse.setHeaders(response, {
+						'X-RateLimit-Limit': String(result.limit),
+						'X-RateLimit-Remaining': String(Math.max(0, result.remaining)),
+						'X-RateLimit-Reset': String(Math.ceil(Duration.toMillis(result.resetAfter) / 1000)),
+					}),
+				})),
+			)),
+		),
+	),
 );
 
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
-const applyRateLimit = <A, E, R>(
-    preset: Preset,
-    handler: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | InstanceType<typeof HttpError.RateLimit>, R | HttpServerRequest.HttpServerRequest | RateLimiter | MetricsService> =>
-    Effect.gen(function* () {
-        const metrics = yield* MetricsService;
-        const limiter = yield* makeWithRateLimiter;
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const key = extractClientKey(request, preset);
-        const config = B.presets[preset];
-        const labeledCheckDuration = metrics.rateLimit.checkDuration.pipe(Metric.tagged('preset', preset));
-        return yield* limiter({ ...config, key, onExceeded: 'fail' })(handler).pipe(Metric.trackDuration(labeledCheckDuration));
-    }).pipe(
-        Effect.catchIf(
-            (e): e is RateLimitExceeded => e instanceof RateLimitExceeded,
-            (e) => {
-                const config: RateLimitPreset = B.presets[preset];
-                return MetricsService.track({ _tag: 'RateLimitRejection', preset, remaining: e.remaining }).pipe(
-                    Effect.zipRight(Effect.fail(new HttpError.RateLimit({
-                        limit: config.limit,
-                        recoveryAction: config.recoveryAction,
-                        remaining: e.remaining,
-                        resetAfterMs: DurationMs.fromMillis(Duration.toMillis(e.retryAfter)),
-                        retryAfterMs: DurationMs.fromMillis(Duration.toMillis(e.retryAfter)),
-                    }))),
-                );
-            },
-        ),
-        Effect.catchIf(
-            (e): e is RateLimitStoreError => e instanceof RateLimitStoreError,
-            (e) =>
-                Effect.logWarning('Rate limit store unavailable, allowing request (fail-open)', { error: String(e), preset }).pipe(
-                    Effect.andThen(MetricsService.track({ _tag: 'RateLimitStoreFailure', preset })),
-                    Effect.andThen(handler),
-                ),
-        ),
-        Effect.withSpan(`rate-limit.${preset}`, { attributes: { 'rate-limit.preset': preset } }),
-    ) as Effect.Effect<A, E | InstanceType<typeof HttpError.RateLimit>, R | HttpServerRequest.HttpServerRequest | RateLimiter | MetricsService>;
-
-// --- [DISPATCH_TABLES] -------------------------------------------------------
-
-const middleware = Object.freeze({
-    api: <A, E, R>(handler: Effect.Effect<A, E, R>) => applyRateLimit('api', handler),
-    auth: <A, E, R>(handler: Effect.Effect<A, E, R>) => applyRateLimit('auth', handler),
-    mfa: <A, E, R>(handler: Effect.Effect<A, E, R>) => applyRateLimit('mfa', handler),
-    mutation: <A, E, R>(handler: Effect.Effect<A, E, R>) => applyRateLimit('mutation', handler),
-} as const);
-const RateLimit = Object.freeze({
-    addHeaders: addRateLimitHeaders,
-    layer: rateLimiterLayer.pipe(Layer.provide(storeLayer)),
-    middleware,
-    storeLayerMemory,
-    storeLayerRedis,
-} as const);
+const RateLimit = {
+	apply,
+	headers,
+	layer,
+	presets
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

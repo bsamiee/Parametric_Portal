@@ -5,38 +5,39 @@
 import { HttpApiBuilder } from '@effect/platform';
 import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
+import { Audit } from '@parametric-portal/server/audit';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { requireRole } from '@parametric-portal/server/middleware';
-import type { RoleKey, User, UserId } from '@parametric-portal/types/schema';
-import { Email } from '@parametric-portal/types/types';
+import { Middleware } from '@parametric-portal/server/middleware';
 import { Effect, Option, pipe } from 'effect';
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [TYPES] -----------------------------------------------------------------
 
-const toUserResponse = (u: User) => Object.freeze({ createdAt: u.createdAt, email: Email.decodeSync(u.email), id: u.id, role: u.role });
+type _RoleType = 'admin' | 'guest' | 'member' | 'owner' | 'viewer';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const handleUpdateRole = Effect.fn('users.updateRole')(
-    (repos: DatabaseServiceShape, targetUserId: UserId, newRole: RoleKey) =>
+    (repos: DatabaseServiceShape, requireRole: ReturnType<typeof Middleware.makeRequireRole>, targetUserId: string, newRole: string) =>
         Effect.gen(function* () {
+            yield* Middleware.requireMfaVerified;
             yield* requireRole('admin');
-            const userOpt = yield* pipe(
+            const user = yield* pipe(
                 repos.users.findById(targetUserId),
-                HttpError.chain(HttpError.Internal, { message: 'User lookup failed' }),
+                Effect.mapError((e) => HttpError.internal('User lookup failed', e)),
+                Effect.flatMap((opt) => Option.match(opt, {
+                    onNone: () => Effect.fail(HttpError.notFound('user', targetUserId)),
+                    onSome: Effect.succeed,
+                })),
             );
-            const user = yield* Option.match(userOpt, {
-                onNone: () => Effect.fail(new HttpError.NotFound({ id: targetUserId, resource: 'user' })),
-                onSome: Effect.succeed,
-            });
-            const updatedUserOpt = yield* pipe(
-                repos.users.update(user.id, { role: newRole }),
-                HttpError.chain(HttpError.Internal, { message: 'Role update failed' }),
+            const updatedUser = yield* pipe(
+                repos.users.update({ ...user, role: newRole, updatedAt: undefined }),
+                Effect.mapError((e) => HttpError.internal('Role update failed', e)),
             );
-            return yield* Option.match(updatedUserOpt, {
-                onNone: () => Effect.fail(new HttpError.Internal({ message: 'User update returned empty result' })),
-                onSome: (updatedUser) => Effect.succeed(toUserResponse(updatedUser)),
+            yield* Audit.log(repos.audit, 'User', targetUserId, 'update', {
+                after: { email: updatedUser.email, role: updatedUser.role },
+                before: { email: user.email, role: user.role },
             });
+            return { appId: updatedUser.appId, email: updatedUser.email, id: updatedUser.id, role: updatedUser.role, state: updatedUser.state } as { appId: string; email: string; id: string; role: _RoleType; state: string };
         }),
 );
 
@@ -45,7 +46,8 @@ const handleUpdateRole = Effect.fn('users.updateRole')(
 const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
     Effect.gen(function* () {
         const repos = yield* DatabaseService;
-        return handlers.handle('updateRole', ({ path: { id }, payload: { role } }) => handleUpdateRole(repos, id, role), );
+        const requireRole = Middleware.makeRequireRole((id) => repos.users.findById(id).pipe(Effect.map(Option.map((u) => ({ role: u.role as _RoleType })))));
+        return handlers.handle('updateRole', ({ path: { id }, payload: { role } }) => handleUpdateRole(repos, requireRole, id, role));
     }),
 );
 

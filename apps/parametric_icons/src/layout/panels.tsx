@@ -8,17 +8,17 @@ import { useClipboard, useExport } from '@parametric-portal/runtime/hooks/browse
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import { sanitizeFilename } from '@parametric-portal/runtime/services/browser';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
-import { AsyncState } from '@parametric-portal/types/async';
 import type { IconResponse, Intent } from '@parametric-portal/types/icons';
-import { Svg, type SvgAsset } from '@parametric-portal/types/svg';
+import { Svg } from '@parametric-portal/types/svg';
 import { Index, Timestamp, Uuidv7, VariantCount, type ZoomFactor } from '@parametric-portal/types/types';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option, pipe, Schema as S } from 'effect';
 import type { ReactNode } from 'react';
 import { createElement, useCallback, useEffect, useRef } from 'react';
 import { type GenerateInput, generateIcon } from '../infrastructure.ts';
 import {
     type Asset,
     type ContextState,
+    type LocalSvg,
     type MessageRole,
     type SidebarTab,
     STORE_TUNING,
@@ -64,15 +64,14 @@ type HistoryPanelProps = {
     readonly onSelect: (id: string) => void;
 };
 type LibraryPanelProps = {
-    readonly customAssets: ReadonlyArray<SvgAsset>;
-    readonly onAddAttachment: (asset: SvgAsset) => void;
+    readonly customAssets: ReadonlyArray<LocalSvg>;
+    readonly onAddAttachment: (ref: LocalSvg) => void;
     readonly onOpenUpload: () => void;
     readonly onRemoveCustomAsset: (id: string) => void;
     readonly onRemoveSaved: (id: string) => void;
     readonly savedAssets: ReadonlyArray<Asset>;
 };
 type AttachmentThumbProps = {
-    readonly name: string;
     readonly onRemove: () => void;
     readonly scopeSeed: string;
     readonly svg: string;
@@ -99,7 +98,7 @@ type ViewportHUDProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     header: { subtitle: 'ICON GENERATOR', title: 'Parametric Arsenal' },
     inputBarCls:
         'h-14 items-center border-none px-6 gap-4 text-(--panel-text-strong) [&_input]:text-(--panel-text-strong) [&_input]:placeholder:text-(--panel-text-placeholder) [&>span:first-child]:flex [&>span:first-child]:items-center [&>span:first-child]:justify-center [&>span:first-child]:mr-3 [&>span:first-child]:text-(--panel-text-secondary) [&>button]:bg-(--submit-btn-bg) [&>button]:rounded-lg [&>button]:w-9 [&>button]:h-9 [&>button]:flex [&>button]:items-center [&>button]:justify-center [&>button]:text-(--submit-btn-text)',
@@ -111,7 +110,7 @@ const B = Object.freeze({
         { icon: 'Heart', key: 'library', tooltip: 'Library' },
         { icon: 'SquareTerminal', key: 'session', tooltip: 'Session' },
     ] as ReadonlyArray<{ readonly icon: SidebarIconName; readonly key: SidebarTab; readonly tooltip: string }>,
-} as const);
+} as const;
 const modeOptions = [
     { icon: <Icon name='Sparkles' className='w-4 h-4' />, key: 'create', label: 'Create' },
     { icon: <Icon name='Pencil' className='w-4 h-4' />, key: 'refine', label: 'Refine' },
@@ -140,14 +139,14 @@ const CadReticle = (): ReactNode => (
         ))}
     </div>
 );
-const AttachmentThumb = ({ name, onRemove, scopeSeed, svg }: AttachmentThumbProps): ReactNode =>
+const AttachmentThumb = ({ onRemove, scopeSeed, svg }: AttachmentThumbProps): ReactNode =>
     createElement(
         Thumb,
         {
             action: createElement(Icon, { className: 'w-2.5 h-2.5', name: 'X' }),
             className: 'w-11 h-11 [&>div:first-child]:p-1.5',
             onAction: onRemove,
-            tooltip: name || 'Reference',
+            tooltip: 'Reference',
             tooltipSide: 'top',
         },
         createElement(SvgPreview, {
@@ -281,7 +280,7 @@ const LibraryContent = ({
                                             />
                                         }
                                     >
-                                        <p className='text-sm text-(--panel-text-secondary) truncate'>{asset.name}</p>
+                                        <p className='text-sm text-(--panel-text-secondary) truncate'>Custom SVG</p>
                                     </ListItem>
                                 ))}
                             </>
@@ -299,9 +298,7 @@ const LibraryContent = ({
                                             key={asset.id}
                                             className='sidebar-item'
                                             onClick={() => onRemoveSaved(asset.id)}
-                                            onAction={() =>
-                                                svg && onAddAttachment({ id: asset.id, name: asset.prompt, svg })
-                                            }
+                                            onAction={() => svg && onAddAttachment({ id: asset.id, svg })}
                                             thumbnail={
                                                 svg ? (
                                                     <SvgPreview
@@ -502,8 +499,8 @@ const Sidebar = (): ReactNode => {
         [assets, selectAsset, setSvg, setContext],
     );
     const handleUpload = useCallback(
-        (name: string, svg: string) => {
-            addCustomAsset(name, svg);
+        (_name: string, svg: string) => {
+            addCustomAsset(svg);
         },
         [addCustomAsset],
     );
@@ -627,11 +624,11 @@ const CommandBar = (): ReactNode => {
                 const ctx = submittedContextRef.current;
                 ctx === null ||
                     (() => {
-                        const { variants } = response;
-                        const firstVariant = variants[0];
-                        firstVariant && setSvg(firstVariant.svg);
+                        const { assets } = response;
+                        const first = assets[0];
+                        first && setSvg(first.svg);
                         addMessage({
-                            content: `Generated ${variants.length} variant${variants.length > 1 ? 's' : ''}: ${variants.map((v: SvgAsset) => v.name).join(', ')}`,
+                            content: `Generated ${assets.length} icon${assets.length > 1 ? 's' : ''}`,
                             id: generateId(),
                             role: 'assistant',
                             timestamp: Timestamp.nowSync(),
@@ -641,13 +638,9 @@ const CommandBar = (): ReactNode => {
                             id: generateId(),
                             intent: ctx.intent,
                             prompt: ctx.prompt,
-                            selectedVariantIndex: Index.decodeSync(0),
+                            selectedVariantIndex: S.decodeSync(Index)(0),
                             timestamp: Timestamp.nowSync(),
-                            variants: variants.map((v: SvgAsset) => ({
-                                id: generateId(),
-                                name: v.name,
-                                svg: v.svg,
-                            })),
+                            variants: assets.map((a) => ({ id: generateId(), svg: a.svg })),
                         });
                         setSubmittedContext(null);
                         abortControllerRef.current = null;
@@ -655,7 +648,7 @@ const CommandBar = (): ReactNode => {
             },
         },
     );
-    const isGenerating = AsyncState.isPending(state);
+    const isGenerating = state._tag === 'Loading';
     const variantCount = output === 'batch' ? STORE_TUNING.variantCount.batch : STORE_TUNING.variantCount.single;
     const abortControllerRef = useRef<AbortController | null>(null);
     const handleOpenLibrary = useCallback(() => {
@@ -717,13 +710,13 @@ const CommandBar = (): ReactNode => {
                             timestamp: Timestamp.nowSync(),
                         });
                         mutate({
-                            attachments: attachments.length > 0 ? attachments : undefined,
+                            assetType: 'icon',
                             colorMode,
                             intent,
                             prompt: trimmed,
                             referenceSvg: intent === 'refine' ? (currentSvg ?? undefined) : undefined,
                             signal: controller.signal,
-                            variantCount: VariantCount.decodeSync(variantCount),
+                            variantCount: S.decodeSync(VariantCount)(variantCount),
                         });
                         setInput('');
                     },
@@ -757,7 +750,6 @@ const CommandBar = (): ReactNode => {
                         {attachments.map((ref) => (
                             <AttachmentThumb
                                 key={ref.id}
-                                name={ref.name}
                                 scopeSeed={ref.id}
                                 svg={ref.svg}
                                 onRemove={() => removeAttachment(ref.id)}

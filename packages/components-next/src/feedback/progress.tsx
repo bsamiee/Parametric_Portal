@@ -1,13 +1,6 @@
 /**
- * Progress: Unified progress/meter display with shape modes.
- * CSS variable inheritance - color/size/variant set on root, visual derived.
- * REQUIRED: color, size props on Progress root.
- *
- * Shape modes: shape="linear" (default) | shape="circular"
- * Meter mode: Auto-detected from threshold prop presence (Button-style pattern).
- *
- * Meter mode exposes data-meter-zone (optimal|warning|critical) for threshold-based styling.
- * Indeterminate: Auto-derived from asyncState.Loading + no value. No explicit prop.
+ * Progress/meter display with linear and circular shape modes.
+ * Requires color and size props. Meter mode auto-detected from threshold prop.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import { AsyncState } from '@parametric-portal/types/async';
@@ -46,7 +39,7 @@ type ProgressProps = Omit<RACMeterProps & RACProgressBarProps, 'children' | 'isI
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const _B = Object.freeze({
 	circle: 44,
 	slot: Object.freeze({
 		bar: cn('relative overflow-hidden', 'h-(--progress-track-height) w-full', 'bg-(--progress-track-bg)', 'rounded-(--progress-track-radius)'),
@@ -70,15 +63,15 @@ const B = Object.freeze({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const circleGeometry = (sw: number) => ({
-	c: 2 * Math.PI * ((B.circle - sw) / 2),
-	center: B.circle / 2,
-	r: (B.circle - sw) / 2,
+const circleGeometry = (strokeWidth: number) => ({
+	center: _B.circle / 2,
+	circumference: 2 * Math.PI * ((_B.circle - strokeWidth) / 2),
+	radius: (_B.circle - strokeWidth) / 2,
 });
-const getMeterZone = (pct: number, warning: number, critical: number): MeterZone =>
-	Match.value(pct).pipe(
-		Match.when((p) => p < warning, () => 'optimal' as const),
-		Match.when((p) => p < critical, () => 'warning' as const),
+const getMeterZone = (percentage: number, warning: number, critical: number): MeterZone =>
+	Match.value(percentage).pipe(
+		Match.when((pct) => pct < warning, () => 'optimal' as const),
+		Match.when((pct) => pct < critical, () => 'warning' as const),
 		Match.orElse(() => 'critical' as const),
 	);
 
@@ -90,7 +83,7 @@ const Progress: FC<ProgressProps> = (props) => {
 		isDisabled, label, ref, shape = 'linear', showValue = false,
 		size, strokeWidth = 4, tooltip, variant, warningThreshold, ...racProps } = props;
 	const meterMode = 'warningThreshold' in props || 'criticalThreshold' in props;
-	const isIndeterminate = !meterMode && AsyncState.isPending(asyncState) && racProps.value === undefined;
+	const isIndeterminate = !meterMode && asyncState != null && AsyncState.$is('Loading')(asyncState) && racProps.value === undefined;
 	const slot = Slot.bind(asyncState);
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
@@ -98,7 +91,7 @@ const Progress: FC<ProgressProps> = (props) => {
 	const isCircular = shape === 'circular';
 	const sharedProps = {
 		...(tooltipProps as object),
-		className: cn(isCircular ? B.slot.rootCircular : B.slot.root, className),
+		className: cn(isCircular ? _B.slot.rootCircular : _B.slot.root, className),
 		'data-async-state': slot.attr,
 		'data-color': color,
 		'data-disabled': isDisabled || undefined,
@@ -108,64 +101,64 @@ const Progress: FC<ProgressProps> = (props) => {
 		'data-variant': variant,
 		ref: mergedRef,
 	};
-	const renderContent = ({ percentage = 0, valueText = '' }: { percentage?: number | undefined; valueText?: string | undefined }): ReactNode => {
+	const renderContent = ({ percentage = 0, valueText = '' }: { percentage: number | undefined; valueText: string | undefined }): ReactNode => {
 		const display = formatValue?.(percentage) ?? valueText;
-		const zone = meterMode ? getMeterZone(percentage, warningThreshold ?? B.threshold.warning, criticalThreshold ?? B.threshold.critical) : undefined;
+		const zone = meterMode ? getMeterZone(percentage, warningThreshold ?? _B.threshold.warning, criticalThreshold ?? _B.threshold.critical) : undefined;
 		return isCircular ? (
 			<>
 				<div
-					className={B.slot.circle}
+					className={_B.slot.circle}
 					data-indeterminate={isIndeterminate || undefined}
 					data-meter-zone={zone}
 					data-slot="progress-circle"
 					data-value={isIndeterminate ? undefined : percentage}
 				>
 					{isIndeterminate
-						? slot.render(indeterminateIcon ?? { default: Loader2 }, B.slot.circleIndeterminateIcon)
+						? slot.render(indeterminateIcon ?? { default: Loader2 }, _B.slot.circleIndeterminateIcon)
 						: (
 							<>
-								<svg aria-hidden="true" className={B.slot.circleSvg} data-slot="progress-circle-svg" fill="none" viewBox={`0 0 ${B.circle} ${B.circle}`}>
-									<circle className={B.slot.circleTrack} cx={geo.center} cy={geo.center} data-slot="progress-circle-track" fill="none" r={geo.r} stroke="var(--progress-circle-track-stroke)" strokeWidth={strokeWidth} />
+								<svg aria-hidden="true" className={_B.slot.circleSvg} data-slot="progress-circle-svg" fill="none" viewBox={`0 0 ${_B.circle} ${_B.circle}`}>
+									<circle className={_B.slot.circleTrack} cx={geo.center} cy={geo.center} data-slot="progress-circle-track" fill="none" r={geo.radius} stroke="var(--progress-circle-track-stroke)" strokeWidth={strokeWidth} />
 									<circle
-										className={B.slot.circleIndicator}
+										className={_B.slot.circleIndicator}
 										cx={geo.center}
 										cy={geo.center}
 										data-meter-zone={zone}
 										data-slot="progress-circle-indicator"
 										fill="none"
-										r={geo.r}
+										r={geo.radius}
 										stroke="var(--progress-circle-indicator-stroke)"
-										strokeDasharray={geo.c}
-										strokeDashoffset={geo.c * (1 - percentage / 100)}
+										strokeDasharray={geo.circumference}
+										strokeDashoffset={geo.circumference * (1 - percentage / 100)}
 										strokeLinecap="round"
 										strokeWidth={strokeWidth}
 									/>
 								</svg>
-								{centerIcon && <span className={B.slot.circleValue} data-slot="progress-circle-center">{slot.render(centerIcon, B.slot.circleCenterIcon)}</span>}
-								{!centerIcon && showValue && <span className={B.slot.circleValue} data-meter-zone={zone} data-slot="progress-circle-value">{display}</span>}
+								{centerIcon && <span className={_B.slot.circleValue} data-slot="progress-circle-center">{slot.render(centerIcon, _B.slot.circleCenterIcon)}</span>}
+								{!centerIcon && showValue && <span className={_B.slot.circleValue} data-meter-zone={zone} data-slot="progress-circle-value">{display}</span>}
 							</>
 						)}
 				</div>
-				{label && <Label className={B.slot.label} data-slot="progress-label">{label}</Label>}
+				{label && <Label className={_B.slot.label} data-slot="progress-label">{label}</Label>}
 			</>
 		) : (
 			<>
 				{(label || showValue) && (
-					<div className={B.slot.header} data-slot="progress-header">
-						{label && <Label className={B.slot.label} data-slot="progress-label">{label}</Label>}
-						{showValue && !isIndeterminate && <span className={B.slot.value} data-meter-zone={zone} data-slot="progress-value">{display}</span>}
+					<div className={_B.slot.header} data-slot="progress-header">
+						{label && <Label className={_B.slot.label} data-slot="progress-label">{label}</Label>}
+						{showValue && !isIndeterminate && <span className={_B.slot.value} data-meter-zone={zone} data-slot="progress-value">{display}</span>}
 					</div>
 				)}
 				<div
-					className={B.slot.bar}
+					className={_B.slot.bar}
 					data-indeterminate={isIndeterminate || undefined}
 					data-meter-zone={zone}
 					data-slot="progress-bar"
 					data-value={isIndeterminate ? undefined : percentage}
 				>
 					{isIndeterminate
-						? <div className={B.slot.fillIndeterminate} data-slot="progress-fill" />
-						: <div className={B.slot.fill} data-meter-zone={zone} data-slot="progress-fill" style={{ width: `${percentage}%` }} />}
+						? <div className={_B.slot.fillIndeterminate} data-slot="progress-fill" />
+						: <div className={_B.slot.fill} data-meter-zone={zone} data-slot="progress-fill" style={{ width: `${percentage}%` }} />}
 				</div>
 			</>
 		);

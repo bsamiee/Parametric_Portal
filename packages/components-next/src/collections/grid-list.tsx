@@ -1,12 +1,6 @@
 /**
- * GridList: Grid-based item selection component for displaying items in a 2D grid layout.
- * Compound component pattern - GridList.Item, GridList.LoadMore, GridList.Checkbox.
- * Wraps RAC GridList with theme-driven CSS variable styling.
- *
- * RAC props pass through directly - we only add: theme (color/size/variant), tooltip, gesture, async.
- * Supports keyboard 2D navigation (arrow keys), selection modes (single/multiple/none), and data-* attributes.
- * Enhanced with: emptyState shorthand, href links, actions slot, label/description, infinite scroll.
- * Ideal for image galleries, icon grids, and card selections.
+ * 2D grid selection with keyboard navigation and async state support.
+ * Compound component: GridList.Item, GridList.LoadMore, GridList.Checkbox.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -63,8 +57,8 @@ type GridListCheckboxProps = Omit<RACCheckboxProps, 'children' | 'slot'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		checkbox: cn(
 			'group/checkbox inline-flex items-center justify-center shrink-0',
 			'size-(--grid-list-checkbox-size)',
@@ -138,8 +132,8 @@ const B = Object.freeze({
 			'gap-(--grid-list-gap)',
 			'grid-cols-(--grid-list-columns)',
 		),
-	}),
-});
+	},
+} as const;
 const GridListContext = createContext<GridListContextValue | null>(null);
 
 // --- [SUB-COMPONENTS] --------------------------------------------------------
@@ -147,11 +141,11 @@ const GridListContext = createContext<GridListContextValue | null>(null);
 const GridListCheckbox = ({ children, className, ...racProps }: GridListCheckboxProps): ReactNode => (
 	<RACCheckbox
 		{...(racProps as RACCheckboxProps)}
-		className={composeTailwindRenderProps(className, B.slot.checkbox)}
+		className={composeTailwindRenderProps(className, _B.slot.checkbox)}
 		data-slot="grid-list-checkbox"
 		slot="selection"
 	>
-		{children ?? <Check className={B.slot.checkboxIcon} data-slot="grid-list-checkbox-icon" />}
+		{children ?? <Check className={_B.slot.checkboxIcon} data-slot="grid-list-checkbox-icon" />}
 	</RACCheckbox>
 );
 const GridListItem = ({
@@ -184,7 +178,7 @@ const GridListItem = ({
 		<>
 			<RACGridListItem
 				{...({ ...racProps, ...tooltipPropsWithoutRef, ...gesturePropsWithoutRef } as unknown as RACGridListItemProps)}
-				className={composeTailwindRenderProps(className, B.slot.item)}
+				className={composeTailwindRenderProps(className, _B.slot.item)}
 				data-async-state={slot.attr}
 				data-color={resolvedColor}
 				data-size={resolvedSize}
@@ -195,18 +189,18 @@ const GridListItem = ({
 				{...(gestureStyle && { style: gestureStyle })}
 				{...defined({ download, href, hrefLang, id, onAction, ping, referrerPolicy, rel, target, textValue })}
 			>
-				{slot.render(prefix, B.slot.itemIcon)}
+				{slot.render(prefix, _B.slot.itemIcon)}
 				{hasLabelShorthand ? (
-					<span className={B.slot.itemContent} data-slot="grid-list-item-content">
-						{label && <span className={B.slot.itemLabel} data-slot="grid-list-item-label">{label}</span>}
-						{description && <span className={B.slot.itemDescription} data-slot="grid-list-item-description">{description}</span>}
+					<span className={_B.slot.itemContent} data-slot="grid-list-item-content">
+						{label && <span className={_B.slot.itemLabel} data-slot="grid-list-item-label">{label}</span>}
+						{description && <span className={_B.slot.itemDescription} data-slot="grid-list-item-description">{description}</span>}
 					</span>
 				) : (
-					<span className={B.slot.itemLabel} data-slot="grid-list-item-label">{slot.render(children)}</span>
+					<span className={_B.slot.itemLabel} data-slot="grid-list-item-label">{slot.render(children)}</span>
 				)}
-				{slot.render(suffix, B.slot.itemIcon)}
-				{shouldShowExternalIcon && <ExternalLink className={B.slot.itemExternalIcon} data-slot="grid-list-item-external-icon" />}
-				{actions && <div className={B.slot.itemActions} data-slot="grid-list-item-actions">{actions}</div>}
+				{slot.render(suffix, _B.slot.itemIcon)}
+				{shouldShowExternalIcon && <ExternalLink className={_B.slot.itemExternalIcon} data-slot="grid-list-item-external-icon" />}
+				{actions && <div className={_B.slot.itemActions} data-slot="grid-list-item-actions">{actions}</div>}
 			</RACGridListItem>
 			<AsyncAnnouncer asyncState={asyncState} />
 			{renderTooltip?.()}
@@ -215,12 +209,12 @@ const GridListItem = ({
 };
 const GridListLoadMore = ({ children, className, isLoading, onLoadMore, scrollOffset, }: GridListLoadMoreProps): ReactNode => (
 	<RACGridListLoadMoreItem
-		className={cn(B.slot.loadMore, className)}
+		className={cn(_B.slot.loadMore, className)}
 		data-loading={isLoading || undefined}
 		data-slot="grid-list-load-more"
 		{...defined({ isLoading, onLoadMore, scrollOffset })}
 	>
-		{children ?? (isLoading && <Loader2 className={B.slot.loadMoreSpinner} data-slot="grid-list-load-more-spinner" />)}
+		{children ?? (isLoading && <Loader2 className={_B.slot.loadMoreSpinner} data-slot="grid-list-load-more-spinner" />)}
 	</RACGridListLoadMoreItem>
 );
 
@@ -228,14 +222,12 @@ const GridListLoadMore = ({ children, className, isLoading, onLoadMore, scrollOf
 
 const GridListRoot = <T extends object>({ children, className, color, emptyState, size, variant, ...racProps }: GridListProps<T>): ReactNode => {
 	const contextValue = useMemo(() => ({ color, size, variant }), [color, size, variant]);
-	const renderEmptyState = emptyState === undefined ? undefined
-		: typeof emptyState === 'function' ? emptyState
-		: () => <div className={B.slot.empty} data-slot="grid-list-empty">{emptyState}</div>;
+	const renderEmptyState = emptyState && (typeof emptyState === 'function' ? emptyState : () => <div className={_B.slot.empty} data-slot="grid-list-empty">{emptyState}</div>) || undefined;
 	return (
 		<GridListContext.Provider value={contextValue}>
 			<RACGridList
 				{...(racProps as RACGridListProps<T>)}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-color={color}
 				data-size={size}
 				data-slot="grid-list"

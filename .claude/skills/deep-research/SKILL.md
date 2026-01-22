@@ -2,7 +2,6 @@
 name: deep-research
 type: simple
 depth: extended
-context: fork
 user-invocable: false
 description: >-
   Orchestrates two-round parallel agent research for comprehensive topic exploration.
@@ -62,7 +61,7 @@ Produce facet list (6-10 independent research areas) for Round 1.
 
 Dispatch 6-10 sub-agents via `parallel-dispatch`. Assign each agent unique scope from orient facets.
 
-**Agent Count:** Scale by task complexity (default: 8).
+**Agent Count:** Scale by task complexity (default: 6).
 
 **Agent Prompt:**
 ```
@@ -134,9 +133,7 @@ Constraint: DO NOT write files—return text only
 Main agent (NOT sub-agent) compiles final research output and writes to `OutputPath`.
 
 **Integrate:** Merge Round 2 → skeleton. Cross-reference rounds. Resolve conflicts (prioritize sourced, current, convergent).
-
 **Filter:** Remove duplicates, out-of-scope content, superseded items, unresolved conflicts.
-
 **Write:** Single file to `OutputPath` with structure:
 - `## [1][FINDINGS]` — Synthesized research by domain
 - `## [2][CONFIDENCE]` — High (convergent) | Medium (single-source) | Low (gaps)

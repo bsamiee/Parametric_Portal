@@ -1,218 +1,238 @@
 /**
  * OAuth implementation using Arctic library.
- * Schema.Class for PKCE state, unified error factory, Arctic-native integration.
+ * [PATTERN] Schema.Class for PKCE state, Match for error mapping, single circuit for GitHub.
  */
-
-import { AUTH_TUNING, OAuthResult } from '@parametric-portal/server/auth';
+import { Auth } from '@parametric-portal/server/auth';
+import { Circuit } from '@parametric-portal/server/circuit';
 import { Crypto, EncryptedKey, EncryptionKeyStore } from '@parametric-portal/server/crypto';
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { MetricsService } from '@parametric-portal/server/metrics';
 import { OAuth } from '@parametric-portal/server/middleware';
-import type { OAuthProvider } from '@parametric-portal/types/schema';
 import { Timestamp } from '@parametric-portal/types/types';
-import { Apple, ArcticFetchError, decodeIdToken, GitHub, Google, generateCodeVerifier, generateState, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, } from 'arctic';
-import { Config, type ConfigError, Effect, Layer, Redacted, Schema as S } from 'effect';
+import { Apple, ArcticFetchError, decodeIdToken, GitHub, Google, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, generateCodeVerifier, generateState } from 'arctic';
+import { Config, type ConfigError, Duration, Effect, Layer, Match, Option as O, Redacted, Schema as S } from 'effect';
+
+// --- [PRIVATE_SCHEMAS] -------------------------------------------------------
+
+const _OAuthProvider = { apple: 'apple', github: 'github', google: 'google', microsoft: 'microsoft' } as const;
+type _OAuthProviderType = typeof _OAuthProvider[keyof typeof _OAuthProvider];
+
+const _oauth = {
+	apple:     { oidc: true,  pkce: true  },
+	github:    { oidc: false, pkce: false },
+	google:    { oidc: true,  pkce: true  },
+	microsoft: { oidc: true,  pkce: true  },
+} as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const GitHubUser = S.Struct({ avatarUrl: S.optional(S.String).pipe(S.fromKey('avatar_url')), email: S.NullishOr(S.String), id: S.Number, name: S.NullishOr(S.String), });
-const OIDCClaims = S.Struct({ email: S.optional(S.String), name: S.optional(S.String), picture: S.optional(S.String), sub: S.String, });
+const GitHubUser = S.Struct({
+	avatarUrl: S.optional(S.String).pipe(S.fromKey('avatar_url')),
+	email: S.NullishOr(S.String),
+	id: S.Number,
+	name: S.NullishOr(S.String),
+});
+const OIDCClaims = S.Struct({
+	email: S.optional(S.String),
+	name: S.optional(S.String),
+	picture: S.optional(S.String),
+	sub: S.String,
+});
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const B = {
+	http: {
+		bodyPreviewMax: 200,
+		status: { rateLimit: 429, serverErrorMin: 500 },
+	},
+} as const;
+const GitHubCircuitPolicy = Circuit.handleType(ArcticFetchError)
+	.orType(UnexpectedResponseError, (e: UnexpectedResponseError) => e.status >= B.http.status.serverErrorMin || e.status === B.http.status.rateLimit)
+	.orType(UnexpectedErrorResponseBodyError, (e: UnexpectedErrorResponseBodyError) => e.status >= B.http.status.serverErrorMin || e.status === B.http.status.rateLimit);
 
 // --- [CLASSES] ---------------------------------------------------------------
 
 class OAuthState extends S.Class<OAuthState>('OAuthState')({
-    exp: Timestamp.schema,
-    provider: S.String,
-    state: S.String,
-    verifier: S.optional(S.String),
+	exp: Timestamp.schema,
+	provider: S.String,
+	state: S.String,
+	verifier: S.optional(S.String),
 }) {
-    static readonly encrypt = Effect.fn('oauth.state.encrypt')(
-        (provider: OAuthProvider, state: string, verifier?: string) =>
-            Crypto.Key.encrypt(
-                JSON.stringify({
-                    exp: Timestamp.addDuration(Timestamp.nowSync(), AUTH_TUNING.durations.pkce),
-                    provider,
-                    state,
-                    ...(verifier === undefined ? {} : { verifier }),
-                }),
-            ).pipe(
-                Effect.flatMap((enc) => S.encode(EncryptedKey.fromBytes)(enc)),
-                Effect.map((bytes) => Buffer.from(bytes).toString('base64url')),
-                Effect.mapError(() => mkErr(provider, 'OAuth state encryption failed', 'STATE_ENCRYPT_FAILED')),
-            ),
-    );
-    static readonly decrypt = Effect.fn('oauth.state.decrypt')((provider: OAuthProvider, encrypted: string) =>
-        EncryptedKey.decryptBytes(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
-            Effect.flatMap((json) => S.decodeUnknown(OAuthState)(JSON.parse(json))),
-            Effect.filterOrFail(
-                (p) => Timestamp.nowSync() <= p.exp,
-                () => mkErr(provider, 'OAuth state expired', 'STATE_EXPIRED'),
-            ),
-            Effect.filterOrFail(
-                (p) => p.provider === provider,
-                () => mkErr(provider, 'OAuth state provider mismatch', 'STATE_PROVIDER'),
-            ),
-            Effect.mapError(() => mkErr(provider, 'OAuth state invalid', 'STATE_INVALID')),
-        ),
-    );
+	static readonly encrypt = Effect.fn('oauth.state.encrypt')(
+		(provider: _OAuthProviderType, state: string, verifier?: string) =>
+			Crypto.Key.encrypt(
+				JSON.stringify({
+					exp: Timestamp.add(Timestamp.nowSync(), Duration.toMillis(Auth.durations.pkce)),
+					provider,
+					state,
+					...(verifier === undefined ? {} : { verifier }),
+				}),
+			).pipe(
+				Effect.map((enc) => Buffer.from(enc.toBytes()).toString('base64url')),
+				Effect.mapError((e) => HttpError.oauth(provider, 'State encryption failed', e)),
+			),
+	);
+	static readonly decrypt = Effect.fn('oauth.state.decrypt')(
+		(provider: _OAuthProviderType, encrypted: string) =>
+			EncryptedKey.decryptBytes(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
+				Effect.flatMap((json) =>
+					Effect.try({ catch: (e) => HttpError.oauth(provider, 'Invalid state JSON', e), try: () => JSON.parse(json) as unknown }).pipe(
+						Effect.flatMap((parsed) => S.decodeUnknown(OAuthState)(parsed)),
+					),
+				),
+				Effect.filterOrFail(
+					(p) => Timestamp.nowSync() <= p.exp,
+					() => HttpError.oauth(provider, 'State expired'),
+				),
+				Effect.filterOrFail(
+					(p) => p.provider === provider,
+					() => HttpError.oauth(provider, 'State provider mismatch'),
+				),
+				Effect.mapError((e) => e instanceof HttpError.OAuth ? e : HttpError.oauth(provider, 'Invalid state', e)),
+			),
+	);
 }
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-const isPkceProvider = (p: OAuthProvider): p is 'google' | 'microsoft' => p === 'google' || p === 'microsoft';
-const mkErr = (provider: OAuthProvider, reason: string, _code: string, _cause?: unknown) => new HttpError.OAuth({ provider, reason });
-const mapArctic = (p: OAuthProvider, e: unknown) => arcticHandlers.find(([guard]) => guard(e))?.[1](p, e as never) ?? new HttpError.OAuth({ provider: p, reason: e instanceof Error ? e.message : 'Unknown error' });
-const handler = <T>(
-    guard: (e: unknown) => e is T,
-    fn: (p: OAuthProvider, e: T) => InstanceType<typeof HttpError.OAuth>,
-) => [guard, fn] as const;
-const extractResult = (t: OAuth2Tokens, user: { readonly id: string; readonly email?: string | null }) =>
-    OAuthResult.fromProvider(
-        {
-            accessToken: t.accessToken(),
-            expiresAt: 'expires_in' in t.data ? t.accessTokenExpiresAt() : undefined,
-            refreshToken: t.hasRefreshToken() ? t.refreshToken() : undefined,
-        },
-        { email: user.email, providerAccountId: user.id },
-    );
-const arcticHandlers = [
-    handler(
-        (e): e is OAuth2RequestError => e instanceof OAuth2RequestError,
-        (p, e) => mkErr(p, `OAuth2: ${e.code}`, e.code, e.description),
-    ),
-    handler(
-        (e): e is ArcticFetchError => e instanceof ArcticFetchError,
-        (p, e) => mkErr(p, 'Fetch failed', 'FETCH_ERROR', e.cause instanceof Error ? e.cause.message : String(e.cause)),
-    ),
-    handler(
-        (e): e is UnexpectedResponseError => e instanceof UnexpectedResponseError,
-        (p, e) => mkErr(p, 'Unexpected response', 'UNEXPECTED_RESPONSE', `HTTP ${e.status}`),
-    ),
-    handler(
-        (e): e is UnexpectedErrorResponseBodyError => e instanceof UnexpectedErrorResponseBodyError,
-        (p, e) => mkErr(p, `Unexpected error: HTTP ${e.status}`, 'UNEXPECTED_ERROR_BODY'),
-    ),
-] as const;
-
-// --- [DISPATCH_TABLES] -------------------------------------------------------
-
-const oidcResult = (provider: OAuthProvider, tokens: OAuth2Tokens) =>
-    Effect.try({
-        catch: () => mkErr(provider, 'idToken() not available', 'NO_ID_TOKEN'),
-        try: () => decodeIdToken(tokens.idToken()),
-    }).pipe(
-        Effect.flatMap((claims) => S.decodeUnknown(OIDCClaims)(claims).pipe(Effect.mapError(() => mkErr(provider, 'Invalid token claims', 'INVALID_CLAIMS')),), ),
-        Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: d.sub })),
-    );
-const githubResult = (tokens: OAuth2Tokens) =>
-    Effect.tryPromise({
-        catch: (e) => mapArctic('github', e),
-        try: () =>
-            fetch(AUTH_TUNING.endpoints.githubApi, {
-                headers: { Authorization: `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0' },
-            }).then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))),
-    }).pipe(
-        Effect.retry(AUTH_TUNING.oauth.retry),
-        Effect.timeoutFail({duration: AUTH_TUNING.oauth.timeout, onTimeout: () => mkErr('github', 'Request timeout', 'TIMEOUT'),}),
-        Effect.flatMap((r) => S.decodeUnknown(GitHubUser)(r).pipe(Effect.mapError(() => mkErr('github', 'Invalid response', 'INVALID_RESPONSE')),), ),
-        Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: String(d.id) })),
-    );
-const extractAuth = Object.freeze({
-    apple: (t: OAuth2Tokens) => oidcResult('apple', t),
-    github: githubResult,
-    google: (t: OAuth2Tokens) => oidcResult('google', t),
-    microsoft: (t: OAuth2Tokens) => oidcResult('microsoft', t),
-} satisfies Record< OAuthProvider, (t: OAuth2Tokens) => Effect.Effect<OAuthResult, InstanceType<typeof HttpError.OAuth>> >);
-const validateState = (provider: OAuthProvider, state: string, stateCookie: string) =>
-    OAuthState.decrypt(provider, stateCookie).pipe(
-        Effect.filterOrFail(
-            (p) => p.state === state,
-            () => mkErr(provider, 'OAuth state mismatch', 'STATE_MISMATCH'),
-        ),
-    );
+const mapOAuthError = (provider: _OAuthProviderType) => {
+	const handlers: ReadonlyArray<readonly [(e: unknown) => boolean, (e: unknown) => HttpError.OAuth]> = [
+		[Circuit.isOpen, () => HttpError.oauth(provider, 'Service unavailable')],
+		[Circuit.isCancelled, () => HttpError.oauth(provider, 'Request cancelled')],
+		[(e): e is OAuth2RequestError => e instanceof OAuth2RequestError, (e) => HttpError.oauth(provider, `OAuth2: ${(e as OAuth2RequestError).code}`, (e as OAuth2RequestError).description)],
+		[(e): e is ArcticFetchError => e instanceof ArcticFetchError, (e) => HttpError.oauth(provider, 'Fetch failed', (e as ArcticFetchError).cause)],
+		[(e): e is UnexpectedResponseError => e instanceof UnexpectedResponseError, (e) => HttpError.oauth(provider, `Unexpected response: HTTP ${(e as UnexpectedResponseError).status}`, e)],
+		[(e): e is UnexpectedErrorResponseBodyError => e instanceof UnexpectedErrorResponseBodyError, (e) => HttpError.oauth(provider, `Unexpected error: HTTP ${(e as UnexpectedErrorResponseBodyError).status}`, e)],
+	];
+	return (e: unknown): HttpError.OAuth => handlers.find(([pred]) => pred(e))?.[1](e) ?? HttpError.oauth(provider, e instanceof Error ? e.message : 'Unknown error', e);
+};
+const extractResult = (tokens: OAuth2Tokens, user: { readonly id: string; readonly email?: string | null }) => ({
+	access: tokens.accessToken(),
+	email: O.fromNullable(user.email),
+	expiresAt: O.fromNullable('expires_in' in tokens.data ? tokens.accessTokenExpiresAt() : undefined),
+	externalId: user.id,
+	refresh: O.fromNullable(tokens.hasRefreshToken() ? tokens.refreshToken() : undefined),
+}) as const;
+const oidcResult = (provider: _OAuthProviderType, tokens: OAuth2Tokens) =>
+	Effect.try({ catch: () => HttpError.oauth(provider, 'idToken() not available'), try: () => decodeIdToken(tokens.idToken()) }).pipe(
+		Effect.flatMap((claims) => S.decodeUnknown(OIDCClaims)(claims).pipe(Effect.mapError(() => HttpError.oauth(provider, 'Invalid token claims')))),
+		Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: d.sub })),
+	);
+const githubResult = (tokens: OAuth2Tokens, circuit: Circuit.Instance) =>
+	circuit
+		.execute(async ({ signal }) => {
+			const r = await Promise.resolve(fetch(Auth.endpoints.githubApi, {
+				headers: { Authorization: `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0' },
+				signal,
+			})).catch((error_) => { throw new ArcticFetchError(error_); });
+			if (r.ok) return r.json();
+			const body = await Promise.resolve(r.text()).catch(() => '');
+			throw body
+				? new UnexpectedErrorResponseBodyError(r.status, body.slice(0, B.http.bodyPreviewMax))
+				: new UnexpectedResponseError(r.status);
+		})
+		.pipe(
+			Effect.mapError(mapOAuthError('github')),
+			Effect.retry(Auth.oauth.retry),
+			Effect.timeoutFail({ duration: Auth.oauth.timeout, onTimeout: () => HttpError.oauth('github', 'Request timeout') }),
+			Effect.flatMap((r) => S.decodeUnknown(GitHubUser)(r).pipe(Effect.mapError(() => HttpError.oauth('github', 'Invalid response')))),
+			Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: String(d.id) })),
+		);
+const validateState = (provider: _OAuthProviderType, state: string, stateCookie: string) =>
+	OAuthState.decrypt(provider, stateCookie).pipe(
+		Effect.filterOrFail(
+			(p) => Crypto.safeCompare(p.state, state),
+			() => HttpError.oauth(provider, 'State mismatch'),
+		),
+	);
 
 // --- [LAYER] -----------------------------------------------------------------
 
 const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
-    OAuth,
-    Effect.gen(function* () {
-        const baseUrl = yield* Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000'));
-        const loadCreds = (k: string) =>
-            Effect.all({
-                id: Config.string(`OAUTH_${k}_CLIENT_ID`).pipe(Config.withDefault('')),
-                secret: Config.redacted(`OAUTH_${k}_CLIENT_SECRET`).pipe(Config.withDefault(Redacted.make(''))),
-            });
-        const loadAppleCreds = Effect.all({
-            clientId: Config.string('OAUTH_APPLE_CLIENT_ID').pipe(Config.withDefault('')),
-            keyId: Config.string('OAUTH_APPLE_KEY_ID').pipe(Config.withDefault('')),
-            privateKey: Config.redacted('OAUTH_APPLE_PRIVATE_KEY').pipe(Config.withDefault(Redacted.make(''))),
-            teamId: Config.string('OAUTH_APPLE_TEAM_ID').pipe(Config.withDefault('')),
-        });
-        const [creds, appleCreds, tenant] = yield* Effect.all([
-            Effect.all({ github: loadCreds('GITHUB'), google: loadCreds('GOOGLE'), microsoft: loadCreds('MICROSOFT') }),
-            loadAppleCreds,
-            Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common')),
-        ]);
-        const redirect = (p: OAuthProvider) => `${baseUrl}/api/auth/oauth/${p}/callback`;
-        const applePrivateKey = new TextEncoder().encode(Redacted.value(appleCreds.privateKey));
-        const clients = Object.freeze({
-            apple: new Apple(appleCreds.clientId, appleCreds.teamId, appleCreds.keyId, applePrivateKey, redirect('apple')),
-            github: new GitHub(creds.github.id, Redacted.value(creds.github.secret), redirect('github')),
-            google: new Google(creds.google.id, Redacted.value(creds.google.secret), redirect('google')),
-            microsoft: new MicrosoftEntraId(
-                tenant,
-                creds.microsoft.id,
-                Redacted.value(creds.microsoft.secret),
-                redirect('microsoft'),
-            ),
-        });
-        const exchange = (provider: OAuthProvider, fn: () => Promise<OAuth2Tokens>) =>
-            Effect.tryPromise({ catch: (e) => mapArctic(provider, e), try: fn }).pipe(
-                Effect.retry(AUTH_TUNING.oauth.retry),
-                Effect.timeoutFail({
-                    duration: AUTH_TUNING.oauth.timeout,
-                    onTimeout: () => mkErr(provider, 'Token exchange timeout', 'TIMEOUT'),
-                }),
-            );
-        const refreshHandlers = Object.freeze({
-            apple: (_token: string) => Promise.reject(new Error('Apple does not support refresh tokens')),
-            github: (token: string) => clients.github.refreshAccessToken(token),
-            google: (token: string) => clients.google.refreshAccessToken(token),
-            microsoft: (token: string) => clients.microsoft.refreshAccessToken(token, [...AUTH_TUNING.oauth.scopes.oidc]),
-        } satisfies Record<OAuthProvider, (token: string) => Promise<OAuth2Tokens>>);
-        const createAuthUrl = (provider: OAuthProvider, state: string, verifier: string | undefined, scopes: string[]): URL =>
-            isPkceProvider(provider)
-                ? clients[provider].createAuthorizationURL(state, verifier as string, scopes)
-                : clients[provider].createAuthorizationURL(state, scopes);
-        const validateCode = (provider: OAuthProvider, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
-            isPkceProvider(provider)
-                ? clients[provider].validateAuthorizationCode(code, verifier as string)
-                : clients[provider].validateAuthorizationCode(code);
-        return OAuth.of({
-            authenticate: (provider, code, state, stateCookie) =>
-                Effect.gen(function* () {
-                    const { verifier } = yield* validateState(provider, state, stateCookie);
-                    yield* (isPkceProvider(provider) && verifier === undefined
-                        ? Effect.fail(mkErr(provider, 'Missing PKCE verifier', 'PKCE_MISSING'))
-                        : Effect.void);
-                    const rawTokens = yield* exchange(provider, () => validateCode(provider, code, verifier));
-                    return yield* extractAuth[provider](rawTokens);
-                }).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.layer)),
-            createAuthorizationUrl: (provider) =>
-                Effect.gen(function* () {
-                    const state = generateState();
-                    const scopes = provider === 'github' ? [...AUTH_TUNING.oauth.scopes.github] : [...AUTH_TUNING.oauth.scopes.oidc];
-                    const verifier = isPkceProvider(provider) ? generateCodeVerifier() : undefined;
-                    const stateCookie = yield* OAuthState.encrypt(provider, state, verifier);
-                    const url = createAuthUrl(provider, state, verifier, scopes);
-                    return { stateCookie, url };
-                }).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.layer)),
-            refreshToken: (provider, token) =>
-                exchange(provider, () => refreshHandlers[provider](token)).pipe(
-                    Effect.map((t) => extractResult(t, { email: null, id: '' })),
-                ),
-        });
-    }),
+	OAuth,
+	Effect.gen(function* () {
+		const baseUrl = yield* Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000'));
+		const loadCreds = (k: string) =>
+			Effect.all({
+				id: Config.string(`OAUTH_${k}_CLIENT_ID`).pipe(Config.withDefault('')),
+				secret: Config.redacted(`OAUTH_${k}_CLIENT_SECRET`).pipe(Config.withDefault(Redacted.make(''))),
+			});
+		const [creds, appleCreds, tenant] = yield* Effect.all([
+			Effect.all({ github: loadCreds('GITHUB'), google: loadCreds('GOOGLE'), microsoft: loadCreds('MICROSOFT') }),
+			Effect.all({
+				clientId: Config.string('OAUTH_APPLE_CLIENT_ID').pipe(Config.withDefault('')),
+				keyId: Config.string('OAUTH_APPLE_KEY_ID').pipe(Config.withDefault('')),
+				privateKey: Config.redacted('OAUTH_APPLE_PRIVATE_KEY').pipe(Config.withDefault(Redacted.make(''))),
+				teamId: Config.string('OAUTH_APPLE_TEAM_ID').pipe(Config.withDefault('')),
+			}),
+			Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common')),
+		]);
+		const redirect = (p: _OAuthProviderType) => `${baseUrl}/api/auth/oauth/${p}/callback`;
+		const applePrivateKey = new TextEncoder().encode(Redacted.value(appleCreds.privateKey));
+		const clients = {
+			apple: new Apple(appleCreds.clientId, appleCreds.teamId, appleCreds.keyId, applePrivateKey, redirect('apple')),
+			github: new GitHub(creds.github.id, Redacted.value(creds.github.secret), redirect('github')),
+			google: new Google(creds.google.id, Redacted.value(creds.google.secret), redirect('google')),
+			microsoft: new MicrosoftEntraId(tenant, creds.microsoft.id, Redacted.value(creds.microsoft.secret), redirect('microsoft')),
+		} as const;
+		// Only GitHub needs circuit breaker (makes external API call for user profile)
+		const githubCircuit = Circuit.make('oauth.github', { policy: GitHubCircuitPolicy });
+		const extractAuth = {
+			apple: (t: OAuth2Tokens) => oidcResult('apple', t),
+			github: (t: OAuth2Tokens) => githubResult(t, githubCircuit),
+			google: (t: OAuth2Tokens) => oidcResult('google', t),
+			microsoft: (t: OAuth2Tokens) => oidcResult('microsoft', t),
+		} satisfies Record<_OAuthProviderType, (t: OAuth2Tokens) => Effect.Effect<ReturnType<typeof extractResult>, HttpError.OAuth>>;
+		const exchange = (provider: _OAuthProviderType, fn: () => Promise<OAuth2Tokens>): Effect.Effect<OAuth2Tokens, HttpError.OAuth> =>
+			provider === 'github'
+				? githubCircuit.execute(fn).pipe(
+						Effect.mapError(mapOAuthError(provider)),
+						Effect.retry(Auth.oauth.retry),
+						Effect.timeoutFail({ duration: Auth.oauth.timeout, onTimeout: () => HttpError.oauth(provider, 'Token exchange timeout') }),
+					)
+				: Effect.tryPromise({ catch: mapOAuthError(provider), try: fn }).pipe(
+						Effect.retry(Auth.oauth.retry),
+						Effect.timeoutFail({ duration: Auth.oauth.timeout, onTimeout: () => HttpError.oauth(provider, 'Token exchange timeout') }),
+					);
+		// Apple: OIDC with internal PKCE (no verifier params in Arctic API)
+		// GitHub: OAuth2 without PKCE
+		// Google/Microsoft: OIDC with explicit PKCE verifier
+		const createAuthUrl = (provider: _OAuthProviderType, state: string, verifier: string | undefined, scopes: string[]): URL =>
+			Match.value(provider).pipe(
+				Match.when('github', () => clients.github.createAuthorizationURL(state, scopes)),
+				Match.when('apple', () => clients.apple.createAuthorizationURL(state, scopes)),
+				Match.when('google', () => clients.google.createAuthorizationURL(state, verifier as string, scopes)),
+				Match.when('microsoft', () => clients.microsoft.createAuthorizationURL(state, verifier as string, scopes)),
+				Match.exhaustive,
+			);
+		const validateCode = (provider: _OAuthProviderType, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
+			Match.value(provider).pipe(
+				Match.when('github', () => clients.github.validateAuthorizationCode(code)),
+				Match.when('apple', () => clients.apple.validateAuthorizationCode(code)),
+				Match.when('google', () => clients.google.validateAuthorizationCode(code, verifier as string)),
+				Match.when('microsoft', () => clients.microsoft.validateAuthorizationCode(code, verifier as string)),
+				Match.exhaustive,
+			);
+		return OAuth.of({
+			authenticate: (provider, code, state, stateCookie) =>
+				Effect.gen(function* () {
+					const { verifier } = yield* validateState(provider, state, stateCookie);
+					yield* _oauth[provider].pkce && verifier === undefined ? Effect.fail(HttpError.oauth(provider, 'Missing PKCE verifier')) : Effect.void;
+					const rawTokens = yield* exchange(provider, () => validateCode(provider, code, verifier));
+					return yield* extractAuth[provider](rawTokens);
+				}).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.Default)),
+			createAuthorizationUrl: (provider) =>
+				Effect.gen(function* () {
+					const state = generateState();
+					const scopes = _oauth[provider].oidc ? [...Auth.oauth.scopes.oidc] : [...Auth.oauth.scopes.github];
+					const verifier = _oauth[provider].pkce ? generateCodeVerifier() : undefined;
+					const stateCookie = yield* OAuthState.encrypt(provider, state, verifier);
+					const url = createAuthUrl(provider, state, verifier, scopes);
+					return { stateCookie, url };
+				}).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.Default)),
+		});
+	}),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

@@ -7,7 +7,7 @@ import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import type { ExportFormat } from '@parametric-portal/runtime/services/browser';
 import { validateContent } from '@parametric-portal/runtime/services/file';
 import { Index, VariantCount } from '@parametric-portal/types/types';
-import { Effect } from 'effect';
+import { Effect, Schema as S } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
 import { type UploadState, useHistoryStore, usePreviewStore, useUiStore } from '../stores.ts';
@@ -38,7 +38,7 @@ type StateRendererProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     export: {
         formats: [
             { key: 'svg', label: 'SVG (Vector)' },
@@ -53,7 +53,7 @@ const B = Object.freeze({
         errorPrefix: 'Invalid SVG:',
         title: 'Upload SVG',
     },
-} as const);
+} as const;
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -129,8 +129,8 @@ const useExportDialog = (): ExportDialogProps => {
             filename: currentAsset?.prompt ?? '',
             format,
             pngSize: B.export.pngSize,
-            variantCount: VariantCount.decodeSync(variants.length),
-            variantIndex: Index.decodeSync(currentAsset?.selectedVariantIndex ?? 0),
+            variantCount: S.decodeSync(VariantCount)(variants.length),
+            variantIndex: S.decodeSync(Index)(currentAsset?.selectedVariantIndex ?? 0),
             variants,
             ...(currentSvg !== null && { svg: currentSvg }),
         });

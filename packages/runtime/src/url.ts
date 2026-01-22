@@ -1,7 +1,6 @@
 /**
  * Type-safe URL search params with branded parsers for domain primitives.
  */
-import { ApiKeyId, AssetId, OAuthAccountId, RefreshTokenId, SessionId, UserId } from '@parametric-portal/types/schema';
 import {
     Email,
     Hex8,
@@ -56,7 +55,7 @@ type UrlStateOptions = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     defaults: {
         clearOnDefault: true,
         history: 'replace' as UrlHistory,
@@ -64,7 +63,7 @@ const B = Object.freeze({
         shallow: true,
         throttleMs: 50,
     },
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -89,31 +88,26 @@ const buildOptions = (opts?: UrlStateOptions): Options => ({
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
-const brandedParsers = Object.freeze({
-    apiKeyId: createBrandedStringParser(ApiKeyId.schema),
-    assetId: createBrandedStringParser(AssetId.schema),
-    email: createBrandedStringParser(Email.schema),
+const brandedParsers = {
+    email: createBrandedStringParser(Email),
     hex8: createBrandedStringParser(Hex8.schema),
     hex64: createBrandedStringParser(Hex64.schema),
-    hexColor: createBrandedStringParser(HexColor.schema),
-    htmlId: createBrandedStringParser(HtmlId.schema),
-    index: createBrandedNumberParser(Index.schema),
-    isoDate: createBrandedStringParser(IsoDate.schema),
-    nonNegativeInt: createBrandedNumberParser(NonNegativeInt.schema),
-    oauthAccountId: createBrandedStringParser(OAuthAccountId.schema),
-    percentage: createBrandedNumberParser(Percentage.schema),
-    positiveInt: createBrandedNumberParser(PositiveInt.schema),
-    refreshTokenId: createBrandedStringParser(RefreshTokenId.schema),
-    safeInteger: createBrandedNumberParser(SafeInteger.schema),
-    sessionId: createBrandedStringParser(SessionId.schema),
-    slug: createBrandedStringParser(Slug.schema),
-    url: createBrandedStringParser(Url.schema),
-    userId: createBrandedStringParser(UserId.schema),
+    hexColor: createBrandedStringParser(HexColor),
+    htmlId: createBrandedStringParser(HtmlId),
+    id: createBrandedStringParser(S.UUID),
+    index: createBrandedNumberParser(Index),
+    isoDate: createBrandedStringParser(IsoDate),
+    nonNegativeInt: createBrandedNumberParser(NonNegativeInt),
+    percentage: createBrandedNumberParser(Percentage),
+    positiveInt: createBrandedNumberParser(PositiveInt),
+    safeInteger: createBrandedNumberParser(SafeInteger),
+    slug: createBrandedStringParser(Slug),
+    url: createBrandedStringParser(Url),
     uuidv7: createBrandedStringParser(Uuidv7.schema),
-    variantCount: createBrandedNumberParser(VariantCount.schema),
+    variantCount: createBrandedNumberParser(VariantCount),
     zoomFactor: createBrandedNumberParser(ZoomFactor.schema),
-} as const);
-const parsers = Object.freeze({
+} as const;
+const parsers = {
     arrayOf: <T>(itemParser: SingleParserBuilder<T>) => parseAsArrayOf(itemParser),
     boolean: parseAsBoolean,
     float: parseAsFloat,
@@ -127,7 +121,7 @@ const parsers = Object.freeze({
     stringLiteral: <T extends string>(values: T[]) => parseAsStringLiteral(values),
     timestamp: parseAsTimestamp,
     ...brandedParsers,
-} as const);
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

@@ -16,7 +16,7 @@ import { createUtility } from '@parametric-portal/components/utility';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     algo: {
         iconGapMul: 3,
     },
@@ -48,7 +48,7 @@ const B = Object.freeze({
         radiusMultiplier: 0.25,
         scale: 5,
     },
-} as const);
+} as const;
 const ICON_GAP = `${B.iconScale.scale * B.algo.iconGapMul * B.iconScale.density * B.iconScale.baseUnit}rem`;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

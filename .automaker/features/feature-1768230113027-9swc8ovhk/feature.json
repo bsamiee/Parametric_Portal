@@ -1,9 +1,0 @@
-{
-    "category": "backend",
-    "dependencies": ["feature-multiapp-context"],
-    "description": "Add app-scoped in-app notification storage and retrieval API.\n\nCurrently (after multiapp-context): `RequestContext` service provides `appId`. `users` table has `appId` column (from multiapp-database). `SessionAuth` middleware in `packages/server/src/middleware.ts:62-88`. `Pagination` class in `packages/server/src/api.ts:35-49`. No notification infrastructure exists.\n\nDeliverables:\n1. Add `notifications` pgTable in `packages/types/src/schema.ts`: `id` (UUID PK), `appId` (FK apps NOT NULL), `userId` (FK users NOT NULL), `type` (text NOT NULL), `title` (text NOT NULL), `body` (text NOT NULL), `data` (jsonb nullable), `readAt` (timestamp nullable), `createdAt` (timestamp default now)\n2. Add `notification_preferences` pgTable: composite PK `(appId, userId, type)`, `enabled` (boolean default true)\n3. Create migration `packages/database/migrations/NNNN_notifications.ts` (use next sequential number)\n4. Add `NotificationRepository` in repos.ts with methods: `create(data)`, `findByAppAndUser(appId, userId, pagination)`, `markRead(id)`, `countUnread(appId, userId)`\n5. Create `packages/server/src/notification.ts` with `NotificationService` class extending `Effect.Service`:\n   - All methods read `appId` from `RequestContext`\n   - `list(pagination)`, `markRead(id)`, `getUnreadCount()`, `getPreferences()`, `updatePreferences(prefs)`\n6. Add endpoints in `packages/server/src/api.ts`: `GET /api/notifications` (paginated), `PATCH /api/notifications/:id/read`, `GET /api/notifications/preferences`, `PUT /api/notifications/preferences`\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p database,server` passes. User in App A cannot see App B notifications. Unread count is app-scoped.",
-    "descriptionHistory": [],
-    "id": "feature-1768230113027-9swc8ovhk",
-    "status": "backlog",
-    "title": "In-app notification API"
-}

@@ -4,7 +4,6 @@ import { HttpApiBuilder } from '@effect/platform';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Audit } from '@parametric-portal/server/audit';
-import { getAppId, getClientInfo } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/http-errors';
 import { MetricsService } from '@parametric-portal/server/metrics';
 import { MfaSecretsRepository, MfaService } from '@parametric-portal/server/mfa';
@@ -14,7 +13,7 @@ import { Effect, Layer, Option } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const dbError = HttpError.chain(HttpError.Internal, { message: 'Database operation failed' });
+const withDbError = Effect.catchAll((e: unknown) => Effect.fail(HttpError.internal('Database operation failed', e)));
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -24,12 +23,12 @@ const MfaSecretsRepositoryLive = Layer.effect(
         const db = yield* DatabaseService;
         const metrics = yield* MetricsService;
         return {
-            delete: (userId: Parameters<typeof db.mfaSecrets.delete>[0]) => db.mfaSecrets.delete(userId).pipe(Effect.provideService(MetricsService, metrics), dbError),
-            findByUserId: (userId: Parameters<typeof db.mfaSecrets.findByUserId>[0]) => db.mfaSecrets.findByUserId(userId).pipe(Effect.provideService(MetricsService, metrics), dbError),
-            upsert: (data: Parameters<typeof db.mfaSecrets.upsert>[0]) => db.mfaSecrets.upsert(data).pipe(Effect.provideService(MetricsService, metrics), dbError),
+            byUser: (userId: Parameters<typeof db.mfaSecrets.byUser>[0]) => db.mfaSecrets.byUser(userId).pipe(Effect.provideService(MetricsService, metrics), withDbError),
+            deleteByUser: (userId: string) => db.mfaSecrets.softDelete(userId).pipe(Effect.provideService(MetricsService, metrics), withDbError),
+            upsert: (data: Parameters<typeof db.mfaSecrets.upsert>[0]) => db.mfaSecrets.upsert(data).pipe(Effect.provideService(MetricsService, metrics), withDbError),
         };
     }),
-).pipe(Layer.provide(MetricsService.layer));
+).pipe(Layer.provide(MetricsService.Default));
 const MfaLive = HttpApiBuilder.group(ParametricApi, 'mfa', (handlers) =>
     Effect.gen(function* () {
         const mfa = yield* MfaService;
@@ -42,88 +41,42 @@ const MfaLive = HttpApiBuilder.group(ParametricApi, 'mfa', (handlers) =>
                 }),
             )
             .handle('enroll', () =>
-                Effect.gen(function* () {
+                RateLimit.apply('mfa', Effect.gen(function* () {
                     const session = yield* Middleware.Session;
-                    const ctx = yield* getClientInfo;
-                    const appId = yield* getAppId;
-                    const userOpt = yield* db.users.findById(session.userId).pipe(dbError);
-                    const user = yield* Option.match(userOpt, {
-                        onNone: () => Effect.fail(new HttpError.Auth({ reason: 'User not found' })),
-                        onSome: Effect.succeed,
-                    });
+                    const userOpt = yield* db.users.findById(session.userId).pipe(withDbError);
+                    const user = yield* Option.match(userOpt, { onNone: () => Effect.fail(HttpError.notFound('user', session.userId)), onSome: Effect.succeed });
                     const result = yield* mfa.enroll(user.id, user.email);
-                    yield* Audit.log(db.audit, {
-                        actorId: session.userId,
-                        appId,
-                        changes: null,
-                        entityId: session.userId,
-                        entityType: 'mfa_secret',
-                        ipAddress: ctx.ipAddress,
-                        operation: 'mfa_enroll',
-                        userAgent: ctx.userAgent,
-                    });
+                    yield* Audit.log(db.audit, 'MfaSecret', session.userId, 'enroll');
                     return result;
-                }).pipe(RateLimit.middleware.mfa),
+                })),
             )
             .handle('verify', ({ payload }) =>
-                Effect.gen(function* () {
+                RateLimit.apply('mfa', Effect.gen(function* () {
                     const session = yield* Middleware.Session;
-                    const ctx = yield* getClientInfo;
-                    const appId = yield* getAppId;
-                    // Verify MFA and mark session atomically
                     const result = yield* db.withTransaction(
-                        Effect.gen(function* () {
-                            const verifyResult = yield* mfa.verify(session.userId, payload.code);
-                            yield* db.sessions.markMfaVerified(session.sessionId).pipe(dbError);
-                            return verifyResult;
-                        }),
-                    ).pipe(dbError);
-                    yield* Audit.log(db.audit, {
-                        actorId: session.userId,
-                        appId,
-                        changes: null,
-                        entityId: session.userId,
-                        entityType: 'mfa_secret',
-                        ipAddress: ctx.ipAddress,
-                        operation: 'mfa_verify',
-                        userAgent: ctx.userAgent,
-                    });
+                        Effect.zipLeft(mfa.verify(session.userId, payload.code), db.sessions.verify(session.sessionId).pipe(withDbError)),
+                    ).pipe(withDbError);
+                    yield* Audit.log(db.audit, 'MfaSecret', session.userId, 'verify');
                     return result;
-                }).pipe(RateLimit.middleware.mfa),
+                })),
             )
             .handle('disable', () =>
                 Effect.gen(function* () {
                     const session = yield* Middleware.Session;
-                    const ctx = yield* getClientInfo;
-                    const appId = yield* getAppId;
                     yield* Middleware.requireMfaVerified;
                     const result = yield* mfa.disable(session.userId);
-                    yield* Audit.log(db.audit, {
-                        actorId: session.userId,
-                        appId,
-                        changes: null,
-                        entityId: session.userId,
-                        entityType: 'mfa_secret',
-                        ipAddress: ctx.ipAddress,
-                        operation: 'mfa_disable',
-                        userAgent: ctx.userAgent,
-                    });
+                    yield* Audit.log(db.audit, 'MfaSecret', session.userId, 'disable');
                     return result;
                 }),
             )
             .handle('recover', ({ payload }) =>
-                Effect.gen(function* () {
+                RateLimit.apply('mfa', Effect.gen(function* () {
                     const session = yield* Middleware.Session;
-                    // Use recovery code and mark session atomically
                     const result = yield* db.withTransaction(
-                        Effect.gen(function* () {
-                            const recoverResult = yield* mfa.useRecoveryCode(session.userId, payload.code.toUpperCase());
-                            yield* db.sessions.markMfaVerified(session.sessionId).pipe(dbError);
-                            return recoverResult;
-                        }),
-                    ).pipe(dbError);
+                        Effect.zipLeft(mfa.useRecoveryCode(session.userId, payload.code.toUpperCase()), db.sessions.verify(session.sessionId).pipe(withDbError)),
+                    ).pipe(withDbError);
                     return result;
-                }).pipe(RateLimit.middleware.mfa),
+                })),
             );
     }),
 ).pipe(Layer.provide(MfaService.Default), Layer.provide(MfaSecretsRepositoryLive));

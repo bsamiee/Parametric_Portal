@@ -1,7 +1,6 @@
 /**
- * Toggle components: Switch + Checkbox + CheckboxGroup.
- * Pure presentation - async state from external useEffectMutate hook.
- * REQUIRED: color, size, and icon props - no defaults, no hardcoded mappings.
+ * Boolean selection primitives: Switch, Checkbox, CheckboxGroup.
+ * Requires color, size, icon props. Wraps RAC with CSS variable theming.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -47,7 +46,7 @@ type CheckboxProps = Omit<RACCheckboxProps, 'children'> & {
 type CheckboxGroupProps = Omit<RACCheckboxGroupProps, 'children'> & {
 	readonly children: ReactNode;
 	readonly color: string;
-	readonly errorMessage?: ReactNode | ((v: ValidationResult) => ReactNode);
+	readonly errorMessage?: ReactNode | ((validation: ValidationResult) => ReactNode);
 	readonly orientation?: 'horizontal' | 'vertical';
 	readonly size: string;
 	readonly variant?: string;
@@ -55,7 +54,7 @@ type CheckboxGroupProps = Omit<RACCheckboxGroupProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const _B = {
 	slot: {
 		checkboxBase: cn(
 			'group inline-flex items-center gap-(--checkbox-gap) cursor-pointer',
@@ -93,8 +92,8 @@ const B = Object.freeze({
 			'group-selected:bg-(--switch-selected-bg)',
 			'group-focus-visible:ring-(--focus-ring-width) group-focus-visible:ring-(--focus-ring-color)',
 		),
-	} as const,
-});
+	},
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -117,7 +116,7 @@ const Switch: FC<SwitchProps> = ({
 		<>
 			<RACSwitch
 				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACSwitchProps)}
-				className={composeTailwindRenderProps(className, B.slot.switchBase)}
+				className={composeTailwindRenderProps(className, _B.slot.switchBase)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
@@ -126,10 +125,10 @@ const Switch: FC<SwitchProps> = ({
 				isDisabled={isDisabled || slot.pending}
 				ref={mergedRef}
 			>
-				<span className={B.slot.switchTrack}>
-					<span className={B.slot.switchThumb} />
+				<span className={_B.slot.switchTrack}>
+					<span className={_B.slot.switchThumb} />
 				</span>
-				{activeChildren && <span className={B.slot.switchLabel}>{activeChildren}</span>}
+				{activeChildren && <span className={_B.slot.switchLabel}>{activeChildren}</span>}
 			</RACSwitch>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
@@ -155,7 +154,7 @@ const Checkbox: FC<CheckboxProps> = ({
 		<>
 			<RACCheckbox
 				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACCheckboxProps)}
-				className={composeTailwindRenderProps(className, B.slot.checkboxBase)}
+				className={composeTailwindRenderProps(className, _B.slot.checkboxBase)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
@@ -166,13 +165,13 @@ const Checkbox: FC<CheckboxProps> = ({
 			>
 				{({ isSelected: selected, isIndeterminate: indeterminate }) => (
 					<>
-						<span className={B.slot.checkboxBox}>
+						<span className={_B.slot.checkboxBox}>
 							{Slot.content(
 								(indeterminate && iconIndeterminate) || (selected && icon) || null,
-								B.slot.checkboxIcon,
+								_B.slot.checkboxIcon,
 							)}
 						</span>
-						{activeChildren && <span className={B.slot.checkboxLabel}>{activeChildren}</span>}
+						{activeChildren && <span className={_B.slot.checkboxLabel}>{activeChildren}</span>}
 					</>
 				)}
 			</RACCheckbox>
@@ -185,7 +184,7 @@ const CheckboxGroup: FC<CheckboxGroupProps> = ({
 	children, className, color, errorMessage, orientation, size, variant, ...racProps }) => (
 	<RACCheckboxGroup
 		{...(racProps as RACCheckboxGroupProps)}
-		className={composeTailwindRenderProps(className, B.slot.group)}
+		className={composeTailwindRenderProps(className, _B.slot.group)}
 		data-color={color}
 		data-orientation={orientation}
 		data-size={size}
@@ -194,7 +193,7 @@ const CheckboxGroup: FC<CheckboxGroupProps> = ({
 		{...defined({ orientation })}
 	>
 		{children}
-		<FieldError className={B.slot.checkboxError} data-slot='checkbox-group-error'>{errorMessage}</FieldError>
+		<FieldError className={_B.slot.checkboxError} data-slot='checkbox-group-error'>{errorMessage}</FieldError>
 	</RACCheckboxGroup>
 );
 

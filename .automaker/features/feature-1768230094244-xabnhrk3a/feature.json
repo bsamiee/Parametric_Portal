@@ -1,9 +1,0 @@
-{
-    "category": "backend",
-    "dependencies": ["feature-multiapp-context"],
-    "description": "Add full-text search for assets using PostgreSQL tsvector with appId scoping.\n\nCurrently (after multiapp-context): `RequestContext` service provides `appId`. `assets` table in `packages/types/src/schema.ts:227-237` has `content` (text), `assetType`, and `appId` columns. Drizzle supports raw SQL via `sql` template tag (imported in repos.ts:13). No search infrastructure exists.\n\nDeliverables:\n1. Create migration `packages/database/migrations/NNNN_search.ts` (use next sequential number):\n   - Add `search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED` column to assets\n   - Create GIN index: `CREATE INDEX assets_search_idx ON assets USING GIN (search_vector)`\n2. Add `SearchRepository` in `packages/database/src/repos.ts` with method: `search(appId, query, filters, pagination)`\n3. WHERE clause MUST include `appId = $appId` for multi-app isolation\n4. Use `plainto_tsquery('english', query)` for query parsing, `ts_rank_cd(search_vector, query)` for ranking\n5. Create `packages/server/src/search.ts` with `SearchService` class extending `Effect.Service`:\n   - `search(query, filters, pagination)` - reads `appId` from `RequestContext`\n6. Add `GET /api/search` endpoint in api.ts with params: `q` (required string), `type` (optional AssetType), `limit` (default 20), `offset` (default 0)\n\nAcceptance: `pnpm exec nx run-many -t typecheck -p database,server` passes. Search only returns assets from current app. Search with valid query in App A returns 0 results for assets only in App B.",
-    "descriptionHistory": [],
-    "id": "feature-1768230094244-xabnhrk3a",
-    "status": "backlog",
-    "title": "PostgreSQL full-text search"
-}

@@ -1,11 +1,6 @@
 /**
- * TagGroup: Collection component for displaying and managing tags/chips.
- * Compound component pattern - TagGroup.Tag, TagGroup.List, TagGroup.Label.
- * Wraps RAC TagGroup/Tag/TagList with theme-driven CSS variable styling.
- *
- * RAC props pass through directly - we only add: theme (color/size/variant), tooltip, gesture, async.
- * Supports keyboard navigation, selection modes, removable tags, and link tags.
- * Tag accepts href for navigation - auto-detects external links and adds security attributes.
+ * Tag collection with removable tags, selection, and keyboard navigation.
+ * Compound component: TagGroup.Tag, TagGroup.List, TagGroup.Label.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -58,8 +53,8 @@ type TagGroupTagProps = Omit<RACTagProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		label: cn(
 			'text-(--tag-group-label-font-size) font-(--tag-group-label-font-weight)',
 			'text-(--tag-group-label-fg)',
@@ -99,8 +94,8 @@ const B = Object.freeze({
 		),
 		tagIcon: cn('size-(--tag-icon-size) shrink-0'),
 		tagLabel: cn('truncate'),
-	}),
-});
+	},
+} as const;
 const TagGroupContext = createContext<TagGroupContextValue | null>(null);
 
 // --- [SUB-COMPONENTS] --------------------------------------------------------
@@ -132,7 +127,7 @@ const TagGroupTag: FC<TagGroupTagProps> = ({
 				{...(racProps as RACTagProps)}
 				{...(tooltipProps as object)}
 				{...(gestureProps as object)}
-				className={composeTailwindRenderProps(className, B.slot.tag)}
+				className={composeTailwindRenderProps(className, _B.slot.tag)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
@@ -143,15 +138,15 @@ const TagGroupTag: FC<TagGroupTagProps> = ({
 			>
 				{({ allowsRemoving }) => (
 					<>
-						{slot.render(prefix, B.slot.tagIcon)}
-						<span className={B.slot.tagLabel}>{slot.resolve(children)}</span>
+						{slot.render(prefix, _B.slot.tagIcon)}
+						<span className={_B.slot.tagLabel}>{slot.resolve(children)}</span>
 						{allowsRemoving && (
 							<RACButton
-								className={B.slot.removeButton}
+								className={_B.slot.removeButton}
 								data-slot="tag-remove"
 								slot="remove"
 							>
-								{slot.render(removeIcon ?? { default: X }, B.slot.tagIcon)}
+								{slot.render(removeIcon ?? { default: X }, _B.slot.tagIcon)}
 							</RACButton>
 						)}
 					</>
@@ -164,7 +159,7 @@ const TagGroupTag: FC<TagGroupTagProps> = ({
 };
 const TagGroupLabel: FC<TagGroupLabelProps> = ({ children, className }) => (
 	<Label
-		className={cn(B.slot.label, className)}
+		className={cn(_B.slot.label, className)}
 		data-slot="tag-group-label"
 	>
 		{children}
@@ -173,7 +168,7 @@ const TagGroupLabel: FC<TagGroupLabelProps> = ({ children, className }) => (
 const TagGroupList = <T extends object>({ children, className, renderEmptyState, ...racProps }: TagGroupListProps<T>): ReactNode => (
 	<RACTagList
 		{...(racProps as RACTagListProps<T>)}
-		className={cn(B.slot.list, className)}
+		className={cn(_B.slot.list, className)}
 		data-slot="tag-group-list"
 		{...defined({ renderEmptyState })}
 	>
@@ -189,7 +184,7 @@ const TagGroupRoot = ({ children, className, color, onRemove, size, variant, ...
 		<TagGroupContext.Provider value={contextValue}>
 			<RACTagGroup
 				{...(racProps as RACTagGroupProps)}
-				className={cn(B.slot.root, className)}
+				className={cn(_B.slot.root, className)}
 				data-color={color}
 				data-size={size}
 				data-slot="tag-group"

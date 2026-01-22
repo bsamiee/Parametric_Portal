@@ -6,16 +6,16 @@
 import type { HttpClient } from '@effect/platform';
 import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
 import { useAuthStore } from '@parametric-portal/runtime/stores/auth';
-import type { OAuthProvider } from '@parametric-portal/types/schema';
 import { Option, pipe } from 'effect';
 import type { ReactNode } from 'react';
 import { useCallback } from 'react';
 import { auth } from '../infrastructure.ts';
 import { Avatar, Button, Icon, Modal, Spinner, Stack } from '../ui.ts';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [LOCAL_TYPES] -----------------------------------------------------------
 
-type OAuthConfig = {
+type OauthProvider = 'apple' | 'github' | 'google' | 'microsoft';
+type OauthConfig = {
     readonly bg: string;
     readonly icon: string;
     readonly label: string;
@@ -27,7 +27,7 @@ type UserAvatarProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     oauth: {
         allowedDomains: ['accounts.google.com', 'github.com', 'login.microsoftonline.com'],
     },
@@ -40,8 +40,8 @@ const B = Object.freeze({
         github: { bg: 'bg-neutral-800', icon: 'Github', label: 'Continue with GitHub', text: 'text-white' },
         google: { bg: 'bg-white', icon: 'Globe', label: 'Continue with Google', text: 'text-neutral-800' },
         microsoft: { bg: 'bg-blue-600', icon: 'Laptop', label: 'Continue with Microsoft', text: 'text-white' },
-    } satisfies Record<OAuthProvider, OAuthConfig>,
-} as const);
+    } satisfies Record<OauthProvider, OauthConfig>,
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -56,10 +56,10 @@ const getInitials = (email: string): string => {
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const OAuthButton = ({ provider }: { readonly provider: OAuthProvider }): ReactNode => {
+const OauthButton = ({ provider }: { readonly provider: OauthProvider }): ReactNode => {
     const setLoading = useAuthStore((s) => s.setLoading);
     const config = B.providers[provider];
-    const oauthMutation = useEffectMutate<{ url: string }, OAuthProvider, unknown, HttpClient.HttpClient>(
+    const oauthMutation = useEffectMutate<{ url: string }, OauthProvider, unknown, HttpClient.HttpClient>(
         (p) => auth.initiateOAuth(p),
         {
             onError: () => setLoading(false),
@@ -102,8 +102,8 @@ const AuthOverlay = (): ReactNode => {
                 </Stack>
             ) : (
                 <Stack gap className='py-2'>
-                    {(Object.keys(B.providers) as ReadonlyArray<OAuthProvider>).map((provider) => (
-                        <OAuthButton key={provider} provider={provider} />
+                    {(Object.keys(B.providers) as ReadonlyArray<OauthProvider>).map((provider) => (
+                        <OauthButton key={provider} provider={provider} />
                     ))}
                 </Stack>
             )}

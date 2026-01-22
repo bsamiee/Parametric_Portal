@@ -1,26 +1,30 @@
 /**
  * Icon generation service: Rhino/Grasshopper/CAD SVG icons via multi-provider AI.
  * Contains prompt engineering, palette management, and provider-agnostic AI integration.
+ * Returns sanitized SVG content - route handler stores in DB and returns AssetIds.
  */
 import { LanguageModel } from '@effect/ai';
-import { type AiProviderType, buildPrompt, getModel } from '@parametric-portal/ai/registry';
+import { buildPrompt, getModel } from '@parametric-portal/ai/registry';
 import { HttpError } from '@parametric-portal/server/http-errors';
-import { IconServiceInput, Icons } from '@parametric-portal/types/icons';
-import { Svg, SvgAsset } from '@parametric-portal/types/svg';
+import { ICON_DESIGN, IconServiceInput } from '@parametric-portal/types/icons';
+import { Svg } from '@parametric-portal/types/svg';
 import { Array as A, Context, Effect, Layer, Option, pipe, Schema as S } from 'effect';
+
+// --- [PRIVATE_SCHEMAS] -------------------------------------------------------
+
+type _AiProviderType = 'anthropic' | 'gemini' | 'openai';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const ServiceInputSchema = S.extend(IconServiceInput, S.Struct({ signal: S.optional(S.instanceOf(AbortSignal)) }));
-const AiResponseSchema = S.Struct({ variants: S.Array(SvgAsset.inputSchema).pipe(S.minItems(1)) });
+const AiResponseSchema = S.Struct({ variants: S.Array(S.Struct({ name: S.NonEmptyTrimmedString, svg: S.String })).pipe(S.minItems(1)) });
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type IconGenerationServiceInterface = { readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, InstanceType<typeof HttpError.Internal>>; };
+type IconGenerationServiceInterface = { readonly generate: (input: ServiceInput) => Effect.Effect<ServiceOutput, ReturnType<typeof HttpError.internal>>; };
 type ServiceInput = S.Schema.Type<typeof ServiceInputSchema>;
-type ServiceOutput = { readonly variants: ReadonlyArray<SvgAsset> };
+type ServiceOutput = { readonly svgs: ReadonlyArray<Svg> };
 type PromptContext = {
-    readonly attachments?: ReadonlyArray<SvgAsset>;
     readonly colorMode: 'dark' | 'light';
     readonly intent: 'create' | 'refine';
     readonly prompt: string;
@@ -30,20 +34,20 @@ type PromptContext = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const ICONS_CONFIG = {
     defaults: {
-        colorMode: 'dark' as const,
-        intent: 'create' as const,
-        provider: 'anthropic' as AiProviderType,
+        colorMode: 'dark',
+        intent: 'create',
+        provider: 'anthropic' satisfies _AiProviderType,
         variantCount: 1,
     },
     errors: { aiGeneration: (provider: string, e: unknown) => `AI generation failed (${provider}): ${String(e)}` },
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-type Palette = (typeof Icons.design.palettes)['dark'];
-const getPalette = (mode: 'dark' | 'light'): Palette => Icons.design.palettes[mode];
+type Palette = (typeof ICON_DESIGN.palettes)['dark'];
+const getPalette = (mode: 'dark' | 'light'): Palette => ICON_DESIGN.palettes[mode];
 const minifySvgForPrompt = (svgContent: string): string =>
     Option.match(Svg.sanitize(svgContent), {
         onNone: () => '',
@@ -51,7 +55,7 @@ const minifySvgForPrompt = (svgContent: string): string =>
     });
 const buildSystemPrompt = (ctx: PromptContext): string => {
     const palette = getPalette(ctx.colorMode);
-    const { layers } = Icons.design;
+    const { layers } = ICON_DESIGN;
     return `You generate professional Rhino/Grasshopper-style CAD toolbar icons as SVG.
 
 <canvas>
@@ -154,14 +158,6 @@ const buildUserMessage = (ctx: PromptContext): string => {
           )
         : parts.push(`<task>Create icon for: "${ctx.prompt}"</task>`);
 
-    ctx.attachments?.length &&
-        parts.push(
-            `<style_references>
-Learn from these reference icons. Match their visual language, stroke weights, grip placement patterns, and overall design quality:
-${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att.svg)}`).join('\n\n')}
-</style_references>`,
-        );
-
     parts.push(`
 <requirements>
 1. ANALYZE: What TOOL_TYPE is this? Count the USER INPUT points.
@@ -175,18 +171,18 @@ ${ctx.attachments.map((att, i) => `Reference ${i + 1}:\n${minifySvgForPrompt(att
 };
 
 const buildContext = (input: ServiceInput): PromptContext => ({
-    ...(input.attachments !== undefined && { attachments: input.attachments }),
-    colorMode: input.colorMode ?? B.defaults.colorMode,
-    intent: input.intent ?? B.defaults.intent,
+    colorMode: input.colorMode ?? ICONS_CONFIG.defaults.colorMode,
+    intent: input.intent ?? ICONS_CONFIG.defaults.intent,
     prompt: input.prompt,
     ...(input.referenceSvg !== undefined && { referenceSvg: input.referenceSvg }),
-    variantCount: input.variantCount ?? B.defaults.variantCount,
+    variantCount: input.variantCount ?? ICONS_CONFIG.defaults.variantCount,
 });
+const sanitizeAiSvg = (raw: { svg: string }): Option.Option<Svg> => Svg.sanitize(raw.svg);
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const generateWithAi = Effect.fn('icons.ai')((validInput: ServiceInput) => {
-    const provider = validInput.provider ?? B.defaults.provider;
+    const provider = validInput.provider ?? ICONS_CONFIG.defaults.provider;
     const ctx = buildContext(validInput);
     return pipe(
         LanguageModel.generateObject({
@@ -195,7 +191,7 @@ const generateWithAi = Effect.fn('icons.ai')((validInput: ServiceInput) => {
         }),
         Effect.map((response) => response.value),
         Effect.provide(getModel(provider, validInput.apiKey === undefined ? {} : { apiKey: validInput.apiKey })),
-        Effect.mapError((e) => new HttpError.Internal({ message: B.errors.aiGeneration(provider, e) })),
+        Effect.mapError((e) => HttpError.internal(ICONS_CONFIG.errors.aiGeneration(provider, e), e)),
     );
 });
 
@@ -211,7 +207,7 @@ const IconGenerationServiceLive = Layer.succeed(
         generate: Effect.fn('icons.generate')((input: ServiceInput) =>
             Effect.gen(function* () {
                 const response = yield* generateWithAi(input);
-                return { variants: A.filterMap(response.variants, (v) => SvgAsset.create(v.name, v.svg)), } satisfies ServiceOutput;
+                return { svgs: A.filterMap(response.variants, sanitizeAiSvg) } satisfies ServiceOutput;
             }),
         ),
     }),

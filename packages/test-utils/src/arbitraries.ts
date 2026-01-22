@@ -1,7 +1,6 @@
 /**
- * Arbitraries: reusable fast-check generators for property-based tests.
- * Note: Effect's Arbitrary.make uses Node Buffer internally - browser-incompatible.
- * All arbitraries here use pure fast-check for browser test compatibility.
+ * Generate reusable fast-check arbitraries for property-based tests.
+ * Pure fast-check generators ensure browser test compatibility.
  */
 import fc from 'fast-check';
 

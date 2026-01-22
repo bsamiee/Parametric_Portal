@@ -4,9 +4,9 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes Exa AI search queries via unified Python CLI. Use when searching the
-  web for current information, finding code examples, researching APIs, SDKs,
-  or retrieving programming context for any library or framework.
+  Executes Exa AI search queries via Python CLI. Use when searching the web for
+  current information, finding code examples, researching APIs, SDKs, or
+  retrieving programming context for any library or framework.
 ---
 
 # [H1][EXA-TOOLS]
@@ -14,29 +14,50 @@ description: >-
 
 <br>
 
-Execute Exa AI search queries via unified Python CLI.
+Execute Exa AI search queries via Python CLI. API key auto-injected via 1Password.
 
-[IMPORTANT] Commands require `--query`. API key auto-injected via 1Password.
+---
+## [1][COMMANDS]
+
+| [CMD]    | [ARGS]                        | [RETURNS]                     |
+| -------- | ----------------------------- | ----------------------------- |
+| search   | `<query> [type] [num]`        | Web results with text content |
+| code     | `<query> [num]`               | GitHub code context           |
+
+---
+## [2][USAGE]
 
 ```bash
 # Web search (default: auto type, 8 results)
-uv run .claude/skills/exa-tools/scripts/exa.py search --query "Vite 7 new features"
+uv run .claude/skills/exa-tools/scripts/exa.py search "Vite 7 new features"
 
 # Neural search for concepts
-uv run .claude/skills/exa-tools/scripts/exa.py search --query "Effect-TS best practices" --type neural
+uv run .claude/skills/exa-tools/scripts/exa.py search "Effect-TS best practices" neural
 
-# Keyword search with more results
-uv run .claude/skills/exa-tools/scripts/exa.py search --query "React 19 release notes" --type keyword --num-results 15
+# Keyword search with custom result count
+uv run .claude/skills/exa-tools/scripts/exa.py search "React 19 release notes" keyword 15
 
 # Code context search (GitHub)
-uv run .claude/skills/exa-tools/scripts/exa.py code --query "React useState hook examples"
+uv run .claude/skills/exa-tools/scripts/exa.py code "React useState hook examples"
 
 # Code search with custom results
-uv run .claude/skills/exa-tools/scripts/exa.py code --query "Effect pipe examples" --num-results 20
+uv run .claude/skills/exa-tools/scripts/exa.py code "Effect pipe examples" 20
 ```
 
 ---
-## [1][OUTPUT]
+## [3][ARGUMENTS]
+
+**search**: `<query> [type] [num]`
+- `query` — Search query (required)
+- `type` — Search type: `auto`, `neural`, `keyword` (default: `auto`)
+- `num` — Number of results (default: `8`)
+
+**code**: `<query> [num]`
+- `query` — Code search query (required)
+- `num` — Number of results (default: `10`)
+
+---
+## [4][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 

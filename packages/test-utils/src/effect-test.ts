@@ -1,4 +1,7 @@
-/** Effect testing utilities: TestContext, TestClock, layer builders, and Vitest matchers. */
+/**
+ * Provide Effect testing utilities and Vitest matchers.
+ * TestContext, TestClock, layer builders, Exit/Option/Either assertions.
+ */
 import {
     type Context,
     Effect,

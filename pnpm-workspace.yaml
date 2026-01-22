@@ -16,13 +16,13 @@ catalog:
   '@effect/platform-browser': 0.74.0
   '@effect/platform-node': 0.104.0
   '@effect/sql': 0.49.0
-  '@effect/sql-drizzle': 0.48.0
   '@effect/sql-pg': 0.50.1
   '@effect/vitest': 0.27.0
   '@fast-check/vitest': 0.2.4
   '@floating-ui/react': 0.27.16
   '@floating-ui/react-dom': 2.1.6
   '@formkit/auto-animate': 0.9.0
+  '@gltf-transform/core': 4.3.0
   '@internationalized/date': 3.10.1
   '@mermaid-js/mermaid-cli': 11.12.0
   '@nx/docker': 22.3.3
@@ -48,39 +48,41 @@ catalog:
   '@tanstack/react-table': 8.21.3
   '@tanstack/react-virtual': 3.13.18
   '@testing-library/react': 16.3.1
-  '@types/node': 25.0.7
+  '@types/node': 25.0.9
   '@types/papaparse': 5.5.2
   '@types/react': 19.2.8
   '@types/react-dom': 19.2.3
+  '@types/sax': 1.2.7
   '@use-gesture/react': 10.3.1
   '@vitejs/plugin-react': 5.1.2
   '@vitest/browser-playwright': 4.0.17
   '@vitest/coverage-v8': 4.0.17
   '@vitest/ui': 4.0.17
+  '@xmldom/xmldom': 0.8.11
   arctic: 3.7.0
   babel-plugin-react-compiler: 1.0.0
   browserslist: 4.28.1
   class-variance-authority: 0.7.1
   clsx: 2.1.1
   cmdk: 1.1.1
+  cockatiel: 3.2.1
   colorjs.io: 0.6.0
   date-fns: 4.1.0
-  drizzle-kit: 0.31.8
-  drizzle-orm: 0.45.1
   effect: 3.19.14
   exceljs: 4.4.0
   fake-indexeddb: 6.2.5
   fast-check: 4.5.3
-  happy-dom: 20.1.0
+  happy-dom: 20.3.0
   idb-keyval: 6.2.2
   immer: 11.1.3
   ioredis: 5.9.1
+  ipaddr.js: 2.2.0
   isomorphic-dompurify: 2.35.0
   jspdf: 4.0.0
   jszip: 3.10.1
-  knip: 5.80.2
-  lefthook: 2.0.14
-  lightningcss: 1.30.2
+  knip: 5.81.0
+  lefthook: 2.0.15
+  lightningcss: 1.31.0
   lucide-react: 0.562.0
   motion: 12.26.1
   msw: 2.12.7
@@ -96,9 +98,11 @@ catalog:
   react-dom: 19.3.0-canary-f93b9fd4-20251217
   react-error-boundary: 6.0.3
   react-stately: 3.43.0
+  rfc6902: 5.1.1
   rollup-plugin-visualizer: 6.0.5
+  sax: 1.4.4
   sharp: 0.34.5
-  sherif: 1.9.0
+  sherif: 1.10.0
   tailwind-merge: 3.4.0
   tailwindcss: 4.1.18
   tailwindcss-react-aria-components: 2.0.1
@@ -110,6 +114,7 @@ catalog:
   type-fest: 5.4.0
   typescript: 6.0.0-dev.20251125
   unplugin-auto-import: 20.3.0
+  uuid: 11.1.0
   vaul: 1.1.2
   vite: 7.3.1
   vite-plugin-compression: 0.5.1
@@ -122,6 +127,7 @@ catalog:
   vite-tsconfig-paths: 6.0.4
   vitest: 4.0.17
   vitest-browser-react: 2.0.2
+  yaml: 2.7.1
   zundo: 2.3.0
   zustand: 5.0.10
   zustand-computed: 2.1.1
