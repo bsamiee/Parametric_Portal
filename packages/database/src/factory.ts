@@ -73,19 +73,22 @@ const repo = <M extends Model.AnyNoContext>(model: M, table: string, config: Con
 		const $lock = (lock: Lock) => lock ? ({ nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[lock] : sql``;
 		// --- Predicate → Fragment --------------------------------------------
 		const cmp = { containedBy: sql`<@`, contains: sql`@>`, eq: sql`=`, gt: sql`>`, gte: sql`>=`, lt: sql`<`, lte: sql`<=` } as const;
-		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: <Necessary>
-		const toFrag = (pred: Pred): Statement.Fragment => {
-			if ('raw' in pred) return pred.raw;
-			if (Array.isArray(pred)) return sql`${sql(pred[0])} = ${pred[1]}`;
-			const { field, op = 'eq', value, values = [], cast, wrap } = pred;
-			const col = wrap ? sql`${sql.literal(wrap)}(${sql(field)})` : sql`${sql(field)}`;
-			if (op === 'null' || op === 'notNull') return sql`${col} ${op === 'null' ? sql`IS NULL` : sql`IS NOT NULL`}`;
-			if (op === 'in') return values.length === 0 ? sql`FALSE` : sql`${col} IN ${sql.in(values)}`;
-			if (op === 'hasKeys') return values.length === 0 ? sql`TRUE` : sql`${col} ?& ARRAY[${sql.csv(values.map(key => sql`${key}`))}]::text[]`;
-			if (op === 'hasKey') return sql`${col} ? ${value}`;
-			if (op === 'contains' || op === 'containedBy') return sql`${col} ${cmp[op]} ${value}::jsonb`;
-			return sql`${col} ${cmp[op]} ${value}${cast ? sql`::${sql.literal(cast)}` : sql``}`;
-		};
+		const toFrag = (pred: Pred): Statement.Fragment =>
+			'raw' in pred ? pred.raw
+			: Array.isArray(pred) ? sql`${sql(pred[0])} = ${pred[1]}`
+			: (({ field, op = 'eq', value, values = [], cast, wrap }) => {
+				const col = wrap ? sql`${sql.literal(wrap)}(${sql(field)})` : sql`${sql(field)}`;
+				const ops: Record<string, () => Statement.Fragment> = {
+					containedBy: () => sql`${col} ${cmp.containedBy} ${value}::jsonb`,
+					contains: () => sql`${col} ${cmp.contains} ${value}::jsonb`,
+					hasKey: () => sql`${col} ? ${value}`,
+					hasKeys: () => values.length === 0 ? sql`TRUE` : sql`${col} ?& ARRAY[${sql.csv(values.map(key => sql`${key}`))}]::text[]`,
+					in: () => values.length === 0 ? sql`FALSE` : sql`${col} IN ${sql.in(values)}`,
+					notNull: () => sql`${col} IS NOT NULL`,
+					null: () => sql`${col} IS NULL`,
+				};
+				return ops[op]?.() ?? sql`${col} ${cmp[op as keyof typeof cmp]} ${value}${cast ? sql`::${sql.literal(cast)}` : sql``}`;
+			})(pred);
 		const $where = (pred: Pred | readonly Pred[]) => {
 			const preds = _isPredArray(pred) ? pred : [pred];
 			return preds.length > 0 ? sql.and(preds.map(toFrag)) : sql`TRUE`;
@@ -93,18 +96,17 @@ const repo = <M extends Model.AnyNoContext>(model: M, table: string, config: Con
 		/** Convert single target or bulk predicate to WHERE fragment */
 		const $input = (input: string | Pred | readonly Pred[]) => _isSingle(input) ? $target(input) : $where(input);
 		// --- Update entries with NOW/INC/JSONB support -----------------------
-		const $entries = (updates: Record<string, unknown>) => Object.entries(updates).map(([col, val]) => {
-			if (val === Update.now) return sql`${sql(col)} = NOW()`;
-			if (typeof val !== 'object' || val === null) return sql`${sql(col)} = ${val}`;
-			if (_INC_SYM in val) return sql`${sql(col)} = ${sql(col)} + ${(val as { [_INC_SYM]: number })[_INC_SYM]}`;
-			if (_JSONB_SYM in val) {
-				const jsonOp = val as { [_JSONB_SYM]: 'set' | 'del'; path: string[]; value?: unknown };
-				const path = `{${jsonOp.path.join(',')}}`;
-				return jsonOp[_JSONB_SYM] === 'del' ? sql`${sql(col)} = ${sql(col)} #- ${path}::text[]` : sql`${sql(col)} = jsonb_set(${sql(col)}, ${path}::text[], ${JSON.stringify(jsonOp.value)}::jsonb)`;
-			}
-			// Plain objects → wrap with pg.json() for JSONB column compatibility
-		return sql`${sql(col)} = ${pg.json(val)}`;
-		});
+		const $entries = (updates: Record<string, unknown>) => Object.entries(updates).map(([col, val]) =>
+			val === Update.now ? sql`${sql(col)} = NOW()`
+			: typeof val !== 'object' || val === null ? sql`${sql(col)} = ${val}`
+			: _INC_SYM in val ? sql`${sql(col)} = ${sql(col)} + ${(val as { [_INC_SYM]: number })[_INC_SYM]}`
+			: _JSONB_SYM in val ? ((op: { [_JSONB_SYM]: 'set' | 'del'; path: string[]; value?: unknown }) =>
+				op[_JSONB_SYM] === 'del'
+					? sql`${sql(col)} = ${sql(col)} #- ${`{${op.path.join(',')}}`}::text[]`
+					: sql`${sql(col)} = jsonb_set(${sql(col)}, ${`{${op.path.join(',')}}`}::text[], ${JSON.stringify(op.value)}::jsonb)`
+			)(val as { [_JSONB_SYM]: 'set' | 'del'; path: string[]; value?: unknown })
+			: sql`${sql(col)} = ${pg.json(val)}` // Plain objects → pg.json() for JSONB
+		);
 		/** Build EXCLUDED column assignments for upsert */
 		const $excluded = (keys: string[], only?: string[]) => {
 			const excl = new Set(['id', ...keys]);
@@ -162,11 +164,10 @@ const repo = <M extends Model.AnyNoContext>(model: M, table: string, config: Con
 			SqlSchema.single({ execute: () => sql`SELECT EXISTS(SELECT 1 FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}) AS exists`, Request: S.Void, Result: _ExistsSchema })(undefined)
 				.pipe(Effect.map(row => row.exists));
 		const agg = <T extends AggSpec>(pred: Pred | readonly Pred[], spec: T): Effect.Effect<AggResult<T>, SqlError | ParseError> => {
-			const selects = Object.entries(spec).map(([aggName, colName]) => {
-				if (aggName === 'count') return sql`COUNT(*)::int AS count`;
-				const fnSql = sql.literal(aggName.toUpperCase()), col = sql(colName as string), alias = sql(aggName);
-				return aggName === 'sum' || aggName === 'avg' ? sql`${fnSql}(${col})::numeric AS ${alias}` : sql`${fnSql}(${col}) AS ${alias}`;
-			});
+			const selects = Object.entries(spec).map(([aggName, colName]) =>
+				aggName === 'count' ? sql`COUNT(*)::int AS count`
+				: ((fnSql, col, alias) => aggName === 'sum' || aggName === 'avg' ? sql`${fnSql}(${col})::numeric AS ${alias}` : sql`${fnSql}(${col}) AS ${alias}`)(sql.literal(aggName.toUpperCase()), sql(colName as string), sql(aggName))
+			);
 			return sql`SELECT ${sql.csv(selects)} FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([row]) => row as AggResult<T>));
 		};
 		const pageOffset = (pred: Pred | readonly Pred[], opts: { limit?: number; offset?: number; asc?: boolean } = {}) => {
@@ -180,30 +181,22 @@ const repo = <M extends Model.AnyNoContext>(model: M, table: string, config: Con
 				}));
 		};
 		// --- Mutation methods ------------------------------------------------
-		const put = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[], conflict?: { keys: string[]; only?: string[]; occ?: Date }) => {
-			const isArray = Array.isArray(data), items = isArray ? data : [data];
-			if (items.length === 0) return Effect.succeed(isArray ? [] : undefined);
-			if (!conflict) {
-				return SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} RETURNING *`, Request: S.Array(model.insert), Result: model })(items as S.Schema.Type<typeof model.insert>[])
-					.pipe(Effect.map(rows => isArray ? rows : rows[0]));
-			}
-			const updates = $excluded(conflict.keys, conflict.only);
-			const occCheck = conflict.occ ? sql` WHERE ${sql(table)}.updated_at = ${conflict.occ}` : sql``;
-			return SqlSchema.single({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(conflict.keys)}) DO UPDATE SET ${sql.csv(updates)}${$touch}${occCheck} RETURNING *`, Request: model.insert, Result: model })(items[0])
-				.pipe(Effect.map(row => isArray ? [row] : row));
-		};
+		const put = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[], conflict?: { keys: string[]; only?: string[]; occ?: Date }) =>
+			((isArray, items) =>
+				items.length === 0 ? Effect.succeed(isArray ? [] : undefined)
+				: conflict ? ((updates, occCheck) => SqlSchema.single({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(conflict.keys)}) DO UPDATE SET ${sql.csv(updates)}${$touch}${occCheck} RETURNING *`, Request: model.insert, Result: model })(items[0]).pipe(Effect.map(row => isArray ? [row] : row)))($excluded(conflict.keys, conflict.only), conflict.occ ? sql` WHERE ${sql(table)}.updated_at = ${conflict.occ}` : sql``) : SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} RETURNING *`, Request: S.Array(model.insert), Result: model })(items as S.Schema.Type<typeof model.insert>[]).pipe(Effect.map(rows => isArray ? rows : rows[0]))
+			)(Array.isArray(data), Array.isArray(data) ? data : [data]);
 		/** Polymorphic update: single → T, bulk → count */
-		const set = (input: string | Target | Pred | readonly Pred[], updates: Record<string, unknown>, scope?: Scope) => {
-			const entries = $entries(updates), $pred = $input(input), single = _isSingle(input);
-			if (entries.length === 0) {
-				return single
-					? SqlSchema.single({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$pred}${$scope(scope)}${$active}`, Request: S.Void, Result: model })(undefined)
-					: SqlSchema.single({ execute: () => sql`SELECT COUNT(*)::int AS count FROM ${sql(table)} WHERE ${$pred}${$scope(scope)}${$active}`, Request: S.Void, Result: _CountSchema })(undefined).pipe(Effect.map(row => row.count));
-			}
-			return single
-				? SqlSchema.single({ execute: () => sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$pred}${$scope(scope)}${$active} RETURNING *`, Request: S.Void, Result: model })(undefined)
-				: sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$pred}${$scope(scope)}${$active} RETURNING 1`.pipe(_$count);
-		};
+		const set = (input: string | Target | Pred | readonly Pred[], updates: Record<string, unknown>, scope?: Scope) =>
+			((entries, $pred, single) =>
+				entries.length === 0
+					? single
+						? SqlSchema.single({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$pred}${$scope(scope)}${$active}`, Request: S.Void, Result: model })(undefined)
+						: SqlSchema.single({ execute: () => sql`SELECT COUNT(*)::int AS count FROM ${sql(table)} WHERE ${$pred}${$scope(scope)}${$active}`, Request: S.Void, Result: _CountSchema })(undefined).pipe(Effect.map(row => row.count))
+					: single
+						? SqlSchema.single({ execute: () => sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$pred}${$scope(scope)}${$active} RETURNING *`, Request: S.Void, Result: model })(undefined)
+						: sql`UPDATE ${sql(table)} SET ${sql.csv(entries)}${$touch} WHERE ${$pred}${$scope(scope)}${$active} RETURNING 1`.pipe(_$count)
+			)($entries(updates), $input(input), _isSingle(input));
 		/** Conditional update: applies only when guard predicate holds (e.g., idempotent verify). Single-target only, returns T. */
 		const setIf = (target: Target, updates: Record<string, unknown>, when: Pred | readonly Pred[], scope?: Scope) => {
 			const entries = $entries(updates), $pred = $target(target), $guard = sql` AND ${$where(when)}`;
@@ -234,12 +227,10 @@ const repo = <M extends Model.AnyNoContext>(model: M, table: string, config: Con
 					SqlSchema.single({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(upsertCfg.keys)}) DO UPDATE SET ${sql.csv(upsertCfg.updates)}${$touch}${occ ? sql` WHERE ${sql(table)}.updated_at = ${occ}` : sql``} RETURNING *`, Request: model.insert, Result: model })(data),
 			}),
 			...(config.fn && ((fns => ({
-				fn: (name: string, params: Record<string, unknown>) => {
-					const spec = fns[name];
-					if (!spec) return Effect.fail(new Error(`Unknown fn: ${name}`));
-					const args = spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`);
-					return SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${sql.csv(args)}) AS count`, Request: spec.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count));
-				},
+				fn: (name: string, params: Record<string, unknown>) =>
+					((spec) => spec
+						? ((args) => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${sql.csv(args)}) AS count`, Request: spec.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count)))(spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`)) : Effect.fail(new Error(`Unknown fn: ${name}`))
+					)(fns[name]),
 			}))(config.fn))),
 		};
 	});

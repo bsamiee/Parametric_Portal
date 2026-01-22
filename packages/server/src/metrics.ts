@@ -36,11 +36,11 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		tags: Record<string, string>,
 	): Stream.Stream<A, E, R> =>
 		Stream.unwrap(Effect.sync(() => {
-			let count = 0;
+			const state = { count: 0 };
 			const tagged = Object.entries(tags).reduce((metric, [key, val]) => metric.pipe(Metric.tagged(key, val)), counter);
 			return stream.pipe(
-				Stream.tap(() => Effect.sync(() => { count += 1; })),
-				Stream.ensuring(Metric.update(tagged, count)),
+				Stream.tap(() => Effect.sync(() => { state.count += 1; })),
+				Stream.ensuring(Metric.update(tagged, state.count)),
 			);
 		}));
 }

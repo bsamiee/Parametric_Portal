@@ -121,17 +121,19 @@ const oidcResult = (provider: _OAuthProviderType, tokens: OAuth2Tokens) =>
 	);
 const githubResult = (tokens: OAuth2Tokens, circuit: Circuit.Instance) =>
 	circuit
-		.execute(async ({ signal }) => {
-			const r = await Promise.resolve(fetch(Auth.endpoints.githubApi, {
+		.execute(({ signal }) =>
+			fetch(Auth.endpoints.githubApi, {
 				headers: { Authorization: `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0' },
 				signal,
-			})).catch((error_) => { throw new ArcticFetchError(error_); });
-			if (r.ok) return r.json();
-			const body = await Promise.resolve(r.text()).catch(() => '');
-			throw body
-				? new UnexpectedErrorResponseBodyError(r.status, body.slice(0, B.http.bodyPreviewMax))
-				: new UnexpectedResponseError(r.status);
-		})
+			})
+				.catch((err) => Promise.reject(new ArcticFetchError(err)))
+				.then((r) => r.ok
+					? r.json()
+					: r.text().catch(() => '').then((body) => Promise.reject(body
+						? new UnexpectedErrorResponseBodyError(r.status, body.slice(0, B.http.bodyPreviewMax))
+						: new UnexpectedResponseError(r.status)))
+				)
+		)
 		.pipe(
 			Effect.mapError(mapOAuthError('github')),
 			Effect.retry(Auth.oauth.retry),

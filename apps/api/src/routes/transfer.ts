@@ -41,8 +41,8 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 		})));
 		const auditExport = (name: string, count?: number) =>
 			Audit.log(repos.audit, 'Asset', appId, 'export', { after: { count: count ?? null, format: codec.ext, name, userId: session.userId } });
-		if (codec.binary) {
-			return yield* withAppSpan(`transfer.serialize.${codec.ext}`, Transfer.exportBinary(stream, codec.ext)).pipe(
+		return yield* codec.binary
+			? withAppSpan(`transfer.serialize.${codec.ext}`, Transfer.exportBinary(stream, codec.ext)).pipe(
 				Effect.tap((result) => Effect.all([
 					Effect.annotateCurrentSpan('transfer.format', codec.ext),
 					Effect.annotateCurrentSpan('transfer.rows', result.count),
@@ -52,24 +52,25 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 				Effect.mapError((err) => HttpError.internal(`${codec.ext.toUpperCase()} generation failed`, err)),
 				Effect.tap((result) => auditExport(result.name, result.count)),
 				Effect.map((result) => ({ ...result, format: codec.ext })),
-			);
-		}
-		const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
-		const tracked = MetricsService.trackStream(stream, metrics.transfer.rows, { app: appId, outcome: 'exported' });
-		const body = Transfer.exportText(tracked, codec.ext).pipe(
-			Stream.tapError((err) => Effect.all([
-				Effect.logError(`${codec.ext.toUpperCase()} export stream error`, { error: String(err) }),
-				Metric.update(metrics.errors.pipe(Metric.tagged('app', appId), Metric.tagged('operation', 'export')), 'StreamError'),
-			], { discard: true })),
-		);
-		return yield* HttpServerResponse.stream(body, { contentType: codec.mime }).pipe(
-			Effect.flatMap((res) => HttpServerResponse.setHeader(res, 'Content-Disposition', `attachment; filename="${filename}"`)),
-			Effect.tap(() => Effect.all([
-				Effect.annotateCurrentSpan('transfer.format', codec.ext),
-				Metric.update(metrics.transfer.exports.pipe(Metric.tagged('format', codec.ext), Metric.tagged('app', appId)), 1),
-			], { discard: true })),
-			Effect.tap(() => auditExport(filename)),
-		);
+			)
+			: (() => {
+				const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
+				const tracked = MetricsService.trackStream(stream, metrics.transfer.rows, { app: appId, outcome: 'exported' });
+				const body = Transfer.exportText(tracked, codec.ext).pipe(
+					Stream.tapError((err) => Effect.all([
+						Effect.logError(`${codec.ext.toUpperCase()} export stream error`, { error: String(err) }),
+						Metric.update(metrics.errors.pipe(Metric.tagged('app', appId), Metric.tagged('operation', 'export')), 'StreamError'),
+					], { discard: true })),
+				);
+				return HttpServerResponse.stream(body, { contentType: codec.mime }).pipe(
+					Effect.flatMap((res) => HttpServerResponse.setHeader(res, 'Content-Disposition', `attachment; filename="${filename}"`)),
+					Effect.tap(() => Effect.all([
+						Effect.annotateCurrentSpan('transfer.format', codec.ext),
+						Metric.update(metrics.transfer.exports.pipe(Metric.tagged('format', codec.ext), Metric.tagged('app', appId)), 1),
+					], { discard: true })),
+					Effect.tap(() => auditExport(filename)),
+				);
+			})();
 	}),
 );
 const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, search: typeof SearchService.Service, params: typeof TransferQuery.Type) =>

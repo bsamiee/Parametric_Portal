@@ -159,7 +159,7 @@ const requireMfaVerified = Session.pipe(Effect.filterOrFail((session) => !sessio
 const makeTenantContext = <R>(setTenant: (appId: string) => Effect.Effect<void, unknown, R>) =>
 	HttpMiddleware.make((app) => Effect.gen(function* () {
 		const ctx = yield* Effect.serviceOption(RequestContext);
-		if (Option.isSome(ctx)) yield* setTenant(ctx.value.appId).pipe(Effect.catchAll(() => Effect.void));
+		yield* Option.match(ctx, { onNone: () => Effect.void, onSome: (c) => setTenant(c.appId).pipe(Effect.catchAll(() => Effect.void)) });
 		return yield* app;
 	}));
 

@@ -53,11 +53,9 @@ const getCredential = Effect.fn('icons.credential.get')(
                     })),
                     Effect.catchAll(() => Effect.succeed(Option.none<CredentialResult>())),
                 );
-            // Return OAuth if found
-            if (Option.isSome(oauthResult)) return oauthResult;
-            // Try API key (unless prefer === 'oauth')
-            return prefer === 'oauth'
-                ? Option.none<CredentialResult>()
+            // Return OAuth if found, otherwise try API key (unless prefer === 'oauth')
+            return Option.isSome(oauthResult) ? oauthResult
+                : prefer === 'oauth' ? Option.none<CredentialResult>()
                 : yield* repos.apiKeys.byUser(session.userId).pipe(
                     Effect.map((keys) => A.findFirst(keys, (k) => k.name === provider)),
                     Effect.flatMap(Option.match({

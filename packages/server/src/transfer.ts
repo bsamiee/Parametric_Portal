@@ -66,28 +66,25 @@ const _parseRecord = (line: string, ordinal: number, kind: string, parse: (str: 
 		}),
 	);
 const _delimited = (codec: Codec.Of<'delimited'>, input: Codec.Input, kind: string): _Stream =>
-	Stream.unwrap(_drivers.papa().pipe(Effect.map((Papa) => {
-		const result = Papa.parse<Record<string, string>>(codec.content(input), { delimiter: codec.sep, header: true, skipEmptyLines: 'greedy', transformHeader: (header) => header.trim().toLowerCase().replaceAll('_', '') });
-		if (result.errors.length > 0) return Stream.fail(parserError(result.errors[0]));
-		return Stream.fromIterable(result.data).pipe(
-			Stream.zipWithIndex,
-			Stream.map(([data, idx]) => {
-				const ordinal = idx + 1, assetKind = data['kind'] ?? kind;
-				return assetKind ? Either.right({ content: data['content'] ?? '', kind: assetKind, ordinal }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal }));
-			}),
-		);
-	})));
+	Stream.unwrap(_drivers.papa().pipe(Effect.map((Papa) => ((result) =>
+		result.errors.length > 0
+			? Stream.fail(parserError(result.errors[0]))
+			: Stream.fromIterable(result.data).pipe(
+				Stream.zipWithIndex,
+				Stream.map(([data, idx]) => ((ordinal, assetKind) =>
+					assetKind ? Either.right({ content: data['content'] ?? '', kind: assetKind, ordinal }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal }))
+				)(idx + 1, data['kind'] ?? kind)),
+			)
+	)(Papa.parse<Record<string, string>>(codec.content(input), { delimiter: codec.sep, header: true, skipEmptyLines: 'greedy', transformHeader: (header) => header.trim().toLowerCase().replaceAll('_', '') })))));
 const _streamed = (codec: Codec.Of<'stream'>, input: Codec.Input, kind: string): _Stream =>
 	Stream.unwrap((codec.lib ? _drivers[codec.lib as 'yaml']() : Effect.succeed({ parse: JSON.parse })).pipe(Effect.map((mod) =>
 		(codec.sep === '\n'
 			? codec.bytes(input).pipe(Stream.decodeText(), Stream.splitLines)
 			: Stream.fromIterable(codec.content(input).split(codec.sep))
-		).pipe(Stream.zipWithIndex, Stream.filterMap(([line, idx]) => {
-			const trimmed = line.trim(), ordinal = idx + 1;
-			if (!trimmed) return Option.none();
-			if (Codec.size(trimmed) > limits.entryBytes) return Option.some(Either.left(new Parse({ code: 'TOO_LARGE', ordinal })));
-			return Option.some(_parseRecord(trimmed, ordinal, kind, mod.parse));
-		})),
+		).pipe(Stream.zipWithIndex, Stream.filterMap(([line, idx]) => ((trimmed, ordinal) =>
+			trimmed ? Codec.size(trimmed) > limits.entryBytes ? Option.some(Either.left(new Parse({ code: 'TOO_LARGE', ordinal })))
+			: Option.some(_parseRecord(trimmed, ordinal, kind, mod.parse)) : Option.none()
+		)(line.trim(), idx + 1))),
 	)));
 const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, kind: string): _Stream =>
 	Stream.unwrap(_drivers.sax().pipe(Effect.map((sax) =>
@@ -99,13 +96,7 @@ const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, kind: string): _Stre
 			parser.onopentag = (tag) => { if (tags.has(tag.name.toLowerCase())) { const attr = tag.attributes['kind']; current = { content: '', kind: (typeof attr === 'string' ? attr : attr?.value) ?? kind }; } };
 			parser.ontext = (text: string) => { if (current) current.content += text; };
 			parser.oncdata = (text: string) => { if (current) current.content += text; };
-			parser.onclosetag = (name: string) => {
-				if (current && tags.has(name.toLowerCase())) {
-					idx += 1;
-					emit.single(current.kind ? Either.right({ ...current, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal: idx })));
-					current = null;
-				}
-			};
+			parser.onclosetag = (name: string) => { if (current && tags.has(name.toLowerCase())) { idx += 1; emit.single(current.kind ? Either.right({ ...current, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal: idx }))); current = null; } };
 			parser.onerror = (err: Error) => void emit.fail(parserError(err));
 			parser.onend = () => void emit.end();
 			parser.write(codec.content(input)).close();
@@ -161,11 +152,14 @@ const _zip = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string): _St
 		const JSZip = yield* _drivers.zip();
 		const buf = codec.buf(input);
 		const zip = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_FORMAT', detail: String(err) }), try: () => JSZip.loadAsync(buf) });
-		const manifestFile = zip.file('manifest.json');
-		if (!manifestFile) return _zipNoManifest(zip, kind);
-		const text = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) }), try: () => manifestFile.async('text') });
-		const manifest = yield* S.decodeUnknown(S.parseJson(Codec.Manifest))(text).pipe(Effect.mapError((err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) })));
-		return _zipWithManifest(zip, manifest, buf);
+		return yield* Option.match(Option.fromNullable(zip.file('manifest.json')), {
+			onNone: () => Effect.succeed(_zipNoManifest(zip, kind)),
+			onSome: (manifestFile) => Effect.gen(function* () {
+				const text = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) }), try: () => manifestFile.async('text') });
+				const manifest = yield* S.decodeUnknown(S.parseJson(Codec.Manifest))(text).pipe(Effect.mapError((err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) })));
+				return _zipWithManifest(zip, manifest, buf);
+			}),
+		});
 	}));
 const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string): _Stream =>
 	codec.lib === 'exceljs' ? _xlsx(codec, input, kind) : _zip(codec, input, kind);

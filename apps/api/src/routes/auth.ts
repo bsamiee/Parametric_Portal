@@ -59,11 +59,10 @@ const verifyCsrf = (req: HttpServerRequest.HttpServerRequest) =>
 		() => HttpError.auth('Missing or invalid CSRF header'),
 	).pipe(Effect.asVoid);
 const authResponse = (token: Uuidv7, expiresAt: Date, refresh: Uuidv7, mfaPending: boolean, clearOAuth = false) =>
-	Effect.gen(function* () {
-		let res = yield* HttpServerResponse.json({ accessToken: token, expiresAt: DateTime.unsafeFromDate(expiresAt), mfaPending });
-		if (clearOAuth) res = yield* setCookie('oauth', '', true)(res);
-		return yield* setCookie('refresh', refresh)(res);
-	});
+	HttpServerResponse.json({ accessToken: token, expiresAt: DateTime.unsafeFromDate(expiresAt), mfaPending }).pipe(
+		Effect.flatMap((res) => clearOAuth ? setCookie('oauth', '', true)(res) : Effect.succeed(res)),
+		Effect.flatMap(setCookie('refresh', refresh)),
+	);
 const logoutResponse = () => HttpServerResponse.json({ success: true }).pipe(Effect.flatMap(setCookie('refresh', '', true)));
 const rotateTokens = (repos: DatabaseServiceShape, userId: string, opts: {
 	readonly mfaVerifiedAt: Option.Option<Date>;
@@ -175,7 +174,6 @@ const handleLogout = Effect.fn('auth.logout')((repos: DatabaseServiceShape) =>
 		return yield* logoutResponse().pipe(Effect.mapError((e) => HttpError.internal('Response build failed', e)));
 	}),
 );
-
 const handleMe = Effect.fn('auth.me')((repos: DatabaseServiceShape) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
@@ -199,8 +197,7 @@ const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
 	(repos: DatabaseServiceShape, input: { apiKey?: string; name: string }) =>
 		Effect.gen(function* () {
 			yield* Middleware.requireMfaVerified;
-			if (!input.apiKey) return yield* Effect.fail(HttpError.validation('apiKey', 'API key is required'));
-			const apiKey = input.apiKey;
+			const apiKey = yield* input.apiKey ? Effect.succeed(input.apiKey) : Effect.fail(HttpError.validation('apiKey', 'API key is required'));
 			const [{ userId }, metrics] = yield* Effect.all([Middleware.Session, MetricsService]);
 			const [keyHash, encrypted] = yield* Effect.all([
 				Crypto.Token.hash(apiKey).pipe(Effect.mapError((e) => HttpError.internal('Key hashing failed', e))),

@@ -27,15 +27,10 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
         const endpoint = yield* CollectorEndpoint;
         const json = yield* request.json;
         const payload = yield* S.decodeUnknown(OtlpPayload)(json);
-        yield* TelemetryCircuit.execute(async ({ signal }) => {
-            const response = await fetch(`${endpoint}/v1/traces`, {
-                body: JSON.stringify(payload),
-                headers: { 'Content-Type': 'application/json' },
-                method: 'POST',
-                signal,
-            });
-            if (!response.ok) throw new Error(`OTLP collector HTTP ${response.status}`);
-        });
+        yield* TelemetryCircuit.execute(async ({ signal }) =>
+            fetch(`${endpoint}/v1/traces`, { body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' }, method: 'POST', signal })
+                .then((r) => r.ok ? undefined : Promise.reject(new Error(`OTLP collector HTTP ${r.status}`))),
+        );
         return HttpServerResponse.empty({ status: 202 });
     }).pipe(
         Effect.tapError((e) => Effect.logWarning('Telemetry proxy failed', { error: String(e) })),
