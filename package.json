@@ -9,7 +9,6 @@
     ],
     "scripts": {
         "clean": "rm -rf .nx/cache node_modules/.cache packages/*/dist apps/*/dist packages/*/.vite-inspect apps/*/.vite-inspect",
-        "dev:icons": "nx dev @parametric-portal/parametric-icons",
         "e2e": "nx e2e",
         "e2e:report": "playwright show-report test-results/e2e-report",
         "e2e:ui": "nx e2e --ui",

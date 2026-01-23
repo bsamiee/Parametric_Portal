@@ -6,8 +6,8 @@ import { type ConsumeResult, layer as rateLimiterLayer, layerStoreMemory, RateLi
 import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { Config, Duration, Effect, FiberRef, Layer, Metric, Option, Redacted } from 'effect';
-import { RequestContext } from './context.ts';
-import { HttpError } from './http-errors.ts';
+import { Tenant } from '../tenant.ts';
+import { HttpError } from '../errors.ts';
 import { MetricsService } from './metrics.ts';
 
 // --- [TABLE] -----------------------------------------------------------------
@@ -27,11 +27,11 @@ const presets = {
 
 // --- [STATE] -----------------------------------------------------------------
 
-const headerRef = FiberRef.unsafeMake(Option.none<ConsumeResult>());
+const _headerRef = FiberRef.unsafeMake(Option.none<ConsumeResult>());
 
 // --- [LAYER] -----------------------------------------------------------------
 
-const layer = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
+const Default = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
 	Config.string('RATE_LIMIT_STORE').pipe(Config.withDefault('memory'), Effect.map((store) => store === 'redis'
 		? layerStoreRedis({
 			connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(5000)),
@@ -50,12 +50,10 @@ const layer = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, E, R>): Effect.Effect<
-	A, E | HttpError.RateLimit, R | HttpServerRequest.HttpServerRequest | RateLimiter | MetricsService
-> => Effect.gen(function* () {
+const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, E, R>) => Effect.gen(function* () {
 	const metrics = yield* MetricsService;
 	const limiter = yield* RateLimiter;
-	const { ipAddress } = yield* RequestContext.client;
+	const { ipAddress } = yield* Tenant.Context;
 	const request = yield* HttpServerRequest.HttpServerRequest;
 	const config = presets[preset];
 	const key = `${preset}:${ipAddress ?? Option.getOrElse(request.remoteAddress, () => 'unknown')}`;
@@ -63,7 +61,7 @@ const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, 
 		Metric.trackDuration(metrics.rateLimit.checkDuration.pipe(Metric.tagged('preset', preset))),
 		Effect.catchAll((err: RateLimiterError) => err.reason === 'Exceeded' ? Effect.gen(function* () {
 			const headerResult = { delay: Duration.zero, limit: err.limit, remaining: err.remaining, resetAfter: err.retryAfter };
-			yield* FiberRef.set(headerRef, Option.some(headerResult));
+			yield* FiberRef.set(_headerRef, Option.some(headerResult));
 			yield* Metric.update(metrics.rateLimit.rejections, preset);
 			return yield* Effect.fail(HttpError.rateLimit(Duration.toMillis(err.retryAfter), {
 				limit: err.limit, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter),
@@ -75,13 +73,13 @@ const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, 
 			return { delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window };
 		})),
 	);
-	yield* FiberRef.set(headerRef, Option.some(result));
+	yield* FiberRef.set(_headerRef, Option.some(result));
 	return yield* handler;
 }).pipe(Effect.withSpan(`rate-limit.${preset}`, { attributes: { 'rate-limit.preset': preset } }));
 const headers = HttpMiddleware.make((app) =>
-	Effect.locally(headerRef, Option.none<ConsumeResult>())(
+	Effect.locally(_headerRef, Option.none<ConsumeResult>())(
 		app.pipe(
-			Effect.flatMap((response) => FiberRef.get(headerRef).pipe(
+			Effect.flatMap((response) => FiberRef.get(_headerRef).pipe(
 				Effect.map((opt) => Option.match(opt, {
 					onNone: () => response,
 					onSome: (result) => HttpServerResponse.setHeaders(response, {
@@ -97,12 +95,20 @@ const headers = HttpMiddleware.make((app) =>
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const RateLimit = {
 	apply,
+	Default,
 	headers,
-	layer,
-	presets
+	presets,
 } as const;
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
+namespace RateLimit {
+	export type Preset = keyof typeof RateLimit.presets;
+	export type PresetConfig = typeof RateLimit.presets[Preset];
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

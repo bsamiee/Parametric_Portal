@@ -3,8 +3,8 @@
  * Segments by app label from RequestContext for multi-tenant analysis.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Effect, Metric, Option, Stream } from 'effect';
-import { RequestContext } from './context.ts';
+import { Effect, Metric, Stream } from 'effect';
+import { Tenant } from '../tenant.ts';
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -30,7 +30,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		},
 	}),
 }) {
-	static readonly trackStream = <A, E, R>( 	/** Universal stream counter - tracks items processed through any stream with configurable tags. */
+	static readonly trackStream = <A, E, R>(					/** Universal stream counter - tracks items processed through any stream with configurable tags. */
 		stream: Stream.Stream<A, E, R>,
 		counter: Metric.Metric.Counter<number>,
 		tags: Record<string, string>,
@@ -43,27 +43,24 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 				Stream.ensuring(Metric.update(tagged, state.count)),
 			);
 		}));
+	static readonly middleware = HttpMiddleware.make((app) =>	/** HTTP metrics middleware - tracks active requests, duration, errors per tenant. */
+		Effect.gen(function* () {
+			const metrics = yield* MetricsService;
+			const req = yield* HttpServerRequest.HttpServerRequest;
+			const path = req.url.split('?')[0] ?? '/';
+			const tenantId = yield* Tenant.Context.current;
+			const active = metrics.http.active.pipe(Metric.tagged('tenant', tenantId));
+			yield* Metric.modify(active, 1);
+			return yield* app.pipe(
+				Metric.trackDuration(metrics.http.duration.pipe(Metric.tagged('method', req.method), Metric.tagged('path', path), Metric.tagged('tenant', tenantId))),
+				Metric.trackErrorWith(metrics.errors.pipe(Metric.tagged('tenant', tenantId)), (err) => typeof err === 'object' && err !== null && '_tag' in err ? String(err._tag) : 'UnknownError'),
+				Effect.tap((res) => Metric.update(metrics.http.requests.pipe(Metric.tagged('method', req.method), Metric.tagged('path', path), Metric.tagged('status', String(res.status)), Metric.tagged('tenant', tenantId)), 1)),
+				Effect.ensuring(Metric.modify(active, -1)),
+			);
+		}),
+	);
 }
-
-// --- [MIDDLEWARE] ------------------------------------------------------------
-
-const metricsMiddleware = HttpMiddleware.make((app) =>
-	Effect.gen(function* () {
-		const metrics = yield* MetricsService;
-		const req = yield* HttpServerRequest.HttpServerRequest;
-		const path = req.url.split('?')[0] ?? '/';
-		const appId = Option.getOrElse(Option.map((yield* Effect.serviceOption(RequestContext)), (ctx) => ctx.appId), () => 'unknown');
-		const active = metrics.http.active.pipe(Metric.tagged('app', appId));
-		yield* Metric.modify(active, 1);
-		return yield* app.pipe(
-			Metric.trackDuration(metrics.http.duration.pipe(Metric.tagged('method', req.method), Metric.tagged('path', path), Metric.tagged('app', appId))),
-			Metric.trackErrorWith(metrics.errors.pipe(Metric.tagged('app', appId)), (err) => typeof err === 'object' && err !== null && '_tag' in err ? String(err._tag) : 'UnknownError'),
-			Effect.tap((res) => Metric.update(metrics.http.requests.pipe(Metric.tagged('method', req.method), Metric.tagged('path', path), Metric.tagged('status', String(res.status)), Metric.tagged('app', appId)), 1)),
-			Effect.ensuring(Metric.modify(active, -1)),
-		);
-	}),
-);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { metricsMiddleware, MetricsService };
+export { MetricsService };

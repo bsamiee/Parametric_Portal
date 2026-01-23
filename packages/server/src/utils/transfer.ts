@@ -6,7 +6,7 @@ import { Codec, Metadata } from '@parametric-portal/types/files';
 import { Array as A, Chunk, Data, Effect, Either, Option, Ref, Schema as S, Stream } from 'effect';
 import type JSZip from 'jszip';
 import { PassThrough, Readable } from 'node:stream';
-import { Crypto } from './crypto.ts';
+import { Crypto } from '../security/crypto.ts';
 
 // --- [DRIVERS] ---------------------------------------------------------------
 
@@ -20,11 +20,9 @@ const _drivers = {
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type _Row = Either.Either<Asset, TransferError.Parse>;
+type _Asset = { readonly content: string; readonly hash?: string; readonly kind: string; readonly name?: string; readonly ordinal: number };
+type _Row = Either.Either<_Asset, TransferError.Parse>;
 type _Stream = Stream.Stream<_Row, TransferError.Fatal>;
-interface Asset { readonly content: string; readonly hash?: string; readonly kind: string; readonly name?: string; readonly ordinal: number }
-interface ImportOpts { readonly mode?: 'file' | 'rows'; readonly kind?: string; readonly format?: Codec.Ext }
-interface BinaryResult { readonly data: string; readonly name: string; readonly count: number }
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -48,7 +46,7 @@ class Import extends Data.TaggedError('Import')<{
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const limits = { batchSize: 500, compressionRatio: 100, entryBytes: 5 * 1024 * 1024, maxItems: 10_000, totalBytes: 50 * 1024 * 1024 } as const satisfies Codec.Limits;
-const parserError = (err: unknown): Fatal => {
+const _parserError = (err: unknown): Fatal => {
 	const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : String(err);
 	return new Fatal({ code: 'PARSER_ERROR', detail: msg });
 };
@@ -62,13 +60,13 @@ const _parseRecord = (line: string, ordinal: number, kind: string, parse: (str: 
 			const parsed = obj as Record<string, unknown>;
 			const assetKind = (parsed['kind'] as string) ?? kind;
 			const content = String(parsed['content'] ?? line);
-			return assetKind ? Either.right({ content, kind: assetKind, ordinal }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal }));
+			return assetKind ? Either.right<_Asset>({ content, kind: assetKind, ordinal }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal }));
 		}),
 	);
 const _delimited = (codec: Codec.Of<'delimited'>, input: Codec.Input, kind: string): _Stream =>
 	Stream.unwrap(_drivers.papa().pipe(Effect.map((Papa) => ((result) =>
 		result.errors.length > 0
-			? Stream.fail(parserError(result.errors[0]))
+			? Stream.fail(_parserError(result.errors[0]))
 			: Stream.fromIterable(result.data).pipe(
 				Stream.zipWithIndex,
 				Stream.map(([data, idx]) => ((ordinal, assetKind) =>
@@ -97,7 +95,7 @@ const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, kind: string): _Stre
 			parser.ontext = (text: string) => { if (current) current.content += text; };
 			parser.oncdata = (text: string) => { if (current) current.content += text; };
 			parser.onclosetag = (name: string) => { if (current && tags.has(name.toLowerCase())) { idx += 1; emit.single(current.kind ? Either.right({ ...current, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_KIND', ordinal: idx }))); current = null; } };
-			parser.onerror = (err: Error) => void emit.fail(parserError(err));
+			parser.onerror = (err: Error) => void emit.fail(_parserError(err));
 			parser.onend = () => void emit.end();
 			parser.write(codec.content(input)).close();
 		}),
@@ -105,9 +103,9 @@ const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, kind: string): _Stre
 const _xlsx = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string): _Stream =>
 	Stream.unwrap(_drivers.excel().pipe(Effect.map((ExcelJS) => {
 		const reader = new ExcelJS.stream.xlsx.WorkbookReader(Readable.from(codec.buf(input)), { hyperlinks: 'ignore', sharedStrings: 'cache', styles: 'ignore', worksheets: 'emit' });
-		return Stream.fromAsyncIterable(reader as AsyncIterable<AsyncIterable<{ values: unknown[] }>>, parserError).pipe(
+		return Stream.fromAsyncIterable(reader as AsyncIterable<AsyncIterable<{ values: unknown[] }>>, _parserError).pipe(
 			Stream.take(1),
-			Stream.flatMap((worksheet) => Stream.fromAsyncIterable(worksheet, parserError)),
+			Stream.flatMap((worksheet) => Stream.fromAsyncIterable(worksheet, _parserError)),
 			Stream.drop(1),
 			Stream.zipWithIndex,
 			Stream.map(([row, idx]) => {
@@ -141,7 +139,7 @@ const _zipWithManifest = (zip: JSZip, manifest: { entries: readonly Metadata[]; 
 				yield* Effect.filterOrFail(Effect.succeed(cur), (cumulative) => cumulative <= limits.totalBytes, () => new Fatal({ code: 'ARCHIVE_LIMIT' }));
 				yield* Effect.filterOrFail(Effect.succeed(cur), (cumulative) => !buf.byteLength || cumulative / buf.byteLength <= limits.compressionRatio, () => new Fatal({ code: 'COMPRESSION_RATIO' }));
 				const content = entry.codec.content(raw);
-				yield* entry.hash ? Crypto.Token.hash(content).pipe(Effect.orDie, Effect.filterOrFail((hash) => hash === entry.hash, () => new Parse({ code: 'HASH_MISMATCH', detail: name, ordinal }))) : Effect.void;
+				yield* entry.hash ? Crypto.token.hash(content).pipe(Effect.orDie, Effect.filterOrFail((hash) => hash === entry.hash, () => new Parse({ code: 'HASH_MISMATCH', detail: name, ordinal }))) : Effect.void;
 				const kind = yield* Effect.filterOrFail(Effect.succeed(entry.kind), (assetKind): assetKind is string => assetKind != null, () => new Parse({ code: 'MISSING_KIND', detail: name, ordinal }));
 				return Either.right({ content, kind, name, ordinal, ...(entry.hash && { hash: entry.hash }) });
 			}).pipe(Effect.catchTag('Parse', (err) => Effect.succeed(Either.left(err))))),
@@ -166,7 +164,11 @@ const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, kind: string):
 
 // --- [IMPORT] ----------------------------------------------------------------
 
-const import_ = (input: Codec.Input | readonly Codec.Input[], opts: ImportOpts = {}): _Stream => {
+const import_ = (input: Codec.Input | readonly Codec.Input[], opts: {
+	readonly mode?: 'file' | 'rows';
+	readonly kind?: string;
+	readonly format?: Codec.Ext;
+} = {}): _Stream => {
 	const inputs = Array.isArray(input) ? input : [input];
 	const kind = opts.kind ?? 'unknown';
 	return Stream.fromIterable(inputs).pipe(
@@ -191,20 +193,20 @@ const import_ = (input: Codec.Input | readonly Codec.Input[], opts: ImportOpts =
 
 // --- [SERIALIZERS] -----------------------------------------------------------
 
-type _Out<E, R> = Stream.Stream<Asset & { id: string; updatedAt: number }, E, R>;
-const serializeExport = (asset: Asset & { id: string; updatedAt: number }) => ({ content: asset.content, id: asset.id, kind: asset.kind, updatedAt: new Date(asset.updatedAt).toISOString() });
+type _Out<E, R> = Stream.Stream<_Asset & { id: string; updatedAt: number }, E, R>;
+const _serializeExport = (asset: _Asset & { id: string; updatedAt: number }) => ({ content: asset.content, id: asset.id, kind: asset.kind, updatedAt: new Date(asset.updatedAt).toISOString() });
 
 const _text = {
-	csv: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.papa().pipe(Effect.map((papa) => Stream.grouped(stream, limits.batchSize).pipe(Stream.zipWithIndex, Stream.map(([chunk, idx]) => `${papa.unparse(Chunk.toArray(chunk).map(serializeExport), { header: idx === 0, quotes: true })}\n`))))),
-	ndjson: <E, R>(stream: _Out<E, R>) => Stream.grouped(stream, limits.batchSize).pipe(Stream.map((chunk) => `${Chunk.toArray(chunk).map((asset) => JSON.stringify(serializeExport(asset))).join('\n')}\n`)),
+	csv: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.papa().pipe(Effect.map((papa) => Stream.grouped(stream, limits.batchSize).pipe(Stream.zipWithIndex, Stream.map(([chunk, idx]) => `${papa.unparse(Chunk.toArray(chunk).map(_serializeExport), { header: idx === 0, quotes: true })}\n`))))),
+	ndjson: <E, R>(stream: _Out<E, R>) => Stream.grouped(stream, limits.batchSize).pipe(Stream.map((chunk) => `${Chunk.toArray(chunk).map((asset) => JSON.stringify(_serializeExport(asset))).join('\n')}\n`)),
 	xml: <E, R>(stream: _Out<E, R>) => Stream.make('<?xml version="1.0" encoding="UTF-8"?>\n<assets>\n').pipe(
 		Stream.concat(Stream.map(stream, (asset) => `  <asset kind="${asset.kind}" id="${asset.id}"><![CDATA[${asset.content}]]></asset>\n`)),
 		Stream.concat(Stream.make('</assets>\n')),
 	),
-	yaml: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.yaml().pipe(Effect.map((yaml) => Stream.map(stream, (asset) => `---\n${yaml.stringify(serializeExport(asset))}`)))),
+	yaml: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.yaml().pipe(Effect.map((yaml) => Stream.map(stream, (asset) => `---\n${yaml.stringify(_serializeExport(asset))}`)))),
 } as const;
 const _binary = {
-	xlsx: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<BinaryResult, E, R> => Effect.gen(function* () {
+	xlsx: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
 		const excel = yield* _drivers.excel();
 		const chunks: Buffer[] = [];
 		const pt = new PassThrough();
@@ -212,17 +214,17 @@ const _binary = {
 		const wb = new excel.stream.xlsx.WorkbookWriter({ stream: pt, useSharedStrings: false, useStyles: false });
 		const sheet = wb.addWorksheet('Assets');
 		sheet.columns = [{ header: 'Kind', key: 'kind', width: 20 }, { header: 'Id', key: 'id', width: 40 }, { header: 'Content', key: 'content', width: 60 }, { header: 'UpdatedAt', key: 'updatedAt', width: 24 }];
-		const count = yield* Stream.runFold(stream, 0, (rowCount, asset) => { sheet.addRow(serializeExport(asset)).commit(); return rowCount + 1; });
+		const count = yield* Stream.runFold(stream, 0, (rowCount, asset) => { sheet.addRow(_serializeExport(asset)).commit(); return rowCount + 1; });
 		sheet.commit();
 		yield* Effect.promise(() => wb.commit());
 		return { count, data: Buffer.concat(chunks).toString('base64'), name: name ?? `export-${Date.now()}.xlsx` };
 	}),
-	zip: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<BinaryResult, E, R> => Effect.gen(function* () {
+	zip: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
 		const ZipClass = yield* _drivers.zip();
 		const zip = new ZipClass();
 		const entries: Metadata[] = [];
 		const count = yield* Stream.runFoldEffect(stream, 0, (entryCount, asset) =>
-			(asset.hash == null ? Crypto.Token.hash(asset.content).pipe(Effect.orDie) : Effect.succeed(asset.hash)).pipe(Effect.map((hash) => {
+			(asset.hash == null ? Crypto.token.hash(asset.content).pipe(Effect.orDie) : Effect.succeed(asset.hash)).pipe(Effect.map((hash) => {
 				const entryName = asset.name ?? `${String(entryCount).padStart(5, '0')}_${hash.slice(0, 8)}.txt`;
 				zip.file(entryName, asset.content, { compression: 'DEFLATE' });
 				entries.push(Metadata.from(asset.content, { hash, kind: asset.kind, name: entryName }));
@@ -235,26 +237,50 @@ const _binary = {
 	}),
 } as const;
 const exportText = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _text): Stream.Stream<Uint8Array, E, R> => Stream.map(_text[fmt](stream), new TextEncoder().encode);
-const exportBinary = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _binary, opts?: { readonly name?: string }): Effect.Effect<BinaryResult, E, R> => _binary[fmt](stream, opts?.name);
+const exportBinary = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _binary, opts?: { readonly name?: string }) => _binary[fmt](stream, opts?.name);
 
 // --- [PARTITION] -------------------------------------------------------------
 
-const partition = <T extends Asset>(rows: readonly Either.Either<T, Parse>[]) => {
+const partition = <T extends _Asset>(rows: readonly Either.Either<T, Parse>[]) => {
 	const [failures, rights] = A.separate(rows);
 	return { failures, items: rights, ordinalMap: A.map(rights, (row) => row.ordinal) };
 };
 
-// --- [NAMESPACE] -------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const TransferError = { Fatal, Import, Parse } as const;
+const Transfer = {
+	exportBinary,
+	exportText,
+	formats: {
+		binary: { xlsx: 'xlsx', zip: 'zip' } as const,
+		text: { csv: 'csv', ndjson: 'ndjson', xml: 'xml', yaml: 'yaml' } as const,
+	},
+	import: import_,
+	limits,
+	partition,
+} as const;
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const TransferError = {
+	Fatal,
+	Import,
+	Parse
+} as const;
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
+namespace Transfer {
+	export type BinaryFormat = keyof typeof Transfer.formats.binary;
+	export type BinaryResult = Effect.Effect.Success<ReturnType<typeof Transfer.exportBinary>>;
+	export type ImportOpts = NonNullable<Parameters<typeof Transfer.import>[1]>;
+	export type TextFormat = keyof typeof Transfer.formats.text;
+}
 namespace TransferError {
 	export type Any = Fatal | Import | Parse;
 	export type Fatal = InstanceType<typeof TransferError.Fatal>;
 	export type Import = InstanceType<typeof TransferError.Import>;
 	export type Parse = InstanceType<typeof TransferError.Parse>;
 }
-const Transfer = { exportBinary, exportText, import: import_, limits, partition } as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

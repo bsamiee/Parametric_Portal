@@ -3,75 +3,85 @@
   "version": "2.0.0",
   "type": "module",
   "exports": {
-    "./totp-replay": {
-      "types": "./src/totp-replay.ts",
-      "import": "./src/totp-replay.ts",
-      "default": "./src/totp-replay.ts"
-    },
     "./api": {
       "types": "./src/api.ts",
       "import": "./src/api.ts",
       "default": "./src/api.ts"
-    },
-    "./audit": {
-      "types": "./src/audit.ts",
-      "import": "./src/audit.ts",
-      "default": "./src/audit.ts"
     },
     "./context": {
       "types": "./src/context.ts",
       "import": "./src/context.ts",
       "default": "./src/context.ts"
     },
-    "./crypto": {
-      "types": "./src/crypto.ts",
-      "import": "./src/crypto.ts",
-      "default": "./src/crypto.ts"
+    "./tenant": {
+      "types": "./src/tenant.ts",
+      "import": "./src/tenant.ts",
+      "default": "./src/tenant.ts"
     },
-    "./auth": {
-      "types": "./src/auth.ts",
-      "import": "./src/auth.ts",
-      "default": "./src/auth.ts"
-    },
-    "./http-errors": {
-      "types": "./src/http-errors.ts",
-      "import": "./src/http-errors.ts",
-      "default": "./src/http-errors.ts"
-    },
-    "./metrics": {
-      "types": "./src/metrics.ts",
-      "import": "./src/metrics.ts",
-      "default": "./src/metrics.ts"
-    },
-    "./mfa": {
-      "types": "./src/mfa.ts",
-      "import": "./src/mfa.ts",
-      "default": "./src/mfa.ts"
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
     },
     "./middleware": {
       "types": "./src/middleware.ts",
       "import": "./src/middleware.ts",
       "default": "./src/middleware.ts"
     },
-    "./rate-limit": {
-      "types": "./src/rate-limit.ts",
-      "import": "./src/rate-limit.ts",
-      "default": "./src/rate-limit.ts"
+    "./infra/metrics": {
+      "types": "./src/infra/metrics.ts",
+      "import": "./src/infra/metrics.ts",
+      "default": "./src/infra/metrics.ts"
     },
-    "./telemetry": {
-      "types": "./src/telemetry.ts",
-      "import": "./src/telemetry.ts",
-      "default": "./src/telemetry.ts"
+    "./infra/rate-limit": {
+      "types": "./src/infra/rate-limit.ts",
+      "import": "./src/infra/rate-limit.ts",
+      "default": "./src/infra/rate-limit.ts"
     },
-    "./transfer": {
-      "types": "./src/transfer.ts",
-      "import": "./src/transfer.ts",
-      "default": "./src/transfer.ts"
+    "./infra/telemetry": {
+      "types": "./src/infra/telemetry.ts",
+      "import": "./src/infra/telemetry.ts",
+      "default": "./src/infra/telemetry.ts"
     },
-    "./circuit": {
-      "types": "./src/circuit.ts",
-      "import": "./src/circuit.ts",
-      "default": "./src/circuit.ts"
+    "./security/crypto": {
+      "types": "./src/security/crypto.ts",
+      "import": "./src/security/crypto.ts",
+      "default": "./src/security/crypto.ts"
+    },
+    "./security/totp-replay": {
+      "types": "./src/security/totp-replay.ts",
+      "import": "./src/security/totp-replay.ts",
+      "default": "./src/security/totp-replay.ts"
+    },
+    "./domain/audit": {
+      "types": "./src/domain/audit.ts",
+      "import": "./src/domain/audit.ts",
+      "default": "./src/domain/audit.ts"
+    },
+    "./domain/mfa": {
+      "types": "./src/domain/mfa.ts",
+      "import": "./src/domain/mfa.ts",
+      "default": "./src/domain/mfa.ts"
+    },
+    "./domain/session": {
+      "types": "./src/domain/session.ts",
+      "import": "./src/domain/session.ts",
+      "default": "./src/domain/session.ts"
+    },
+    "./utils/circuit": {
+      "types": "./src/utils/circuit.ts",
+      "import": "./src/utils/circuit.ts",
+      "default": "./src/utils/circuit.ts"
+    },
+    "./utils/diff": {
+      "types": "./src/utils/diff.ts",
+      "import": "./src/utils/diff.ts",
+      "default": "./src/utils/diff.ts"
+    },
+    "./utils/transfer": {
+      "types": "./src/utils/transfer.ts",
+      "import": "./src/utils/transfer.ts",
+      "default": "./src/utils/transfer.ts"
     }
   },
   "scripts": {

@@ -7,23 +7,23 @@ import type { Asset } from '@parametric-portal/database/models';
 import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/database/repos';
 import { SearchService } from '@parametric-portal/database/search';
 import { ParametricApi, type TransferQuery } from '@parametric-portal/server/api';
-import { Audit } from '@parametric-portal/server/audit';
-import { RequestContext } from '@parametric-portal/server/context';
-import { HttpError } from '@parametric-portal/server/http-errors';
-import { MetricsService } from '@parametric-portal/server/metrics';
+import { Tenant } from '@parametric-portal/server/tenant';
+import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { RateLimit } from '@parametric-portal/server/rate-limit';
-import { withAppSpan } from '@parametric-portal/server/telemetry';
-import { Transfer, TransferError } from '@parametric-portal/server/transfer';
+import { AuditService } from '@parametric-portal/server/domain/audit';
+import { MetricsService } from '@parametric-portal/server/infra/metrics';
+import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
+import { Telemetry } from '@parametric-portal/server/infra/telemetry';
+import { Transfer, TransferError } from '@parametric-portal/server/utils/transfer';
 import { Codec } from '@parametric-portal/types/files';
 import { Array as A, Chunk, DateTime, Effect, Metric, Option, Stream } from 'effect';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
-const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, params: typeof TransferQuery.Type) =>
+const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, audit: typeof AuditService.Service, params: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
-		const [metrics, session, appId] = yield* Effect.all([MetricsService, Middleware.Session, RequestContext.app]);
+		const [metrics, session, appId] = yield* Effect.all([MetricsService, Middleware.Session, Tenant.Context.current]);
 		const codec = Codec(params.format);
 		const baseStream = Stream.fromIterableEffect(repos.assets.byFilter(session.userId, appId, {
 			...(Option.isSome(params.after) && { after: params.after.value }),
@@ -40,9 +40,9 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 			...(Option.isSome(asset.name) && { name: asset.name.value }),
 		})));
 		const auditExport = (name: string, count?: number) =>
-			Audit.log(repos.audit, 'Asset', appId, 'export', { after: { count: count ?? null, format: codec.ext, name, userId: session.userId } });
+			audit.log('Asset', appId, 'export', { after: { count: count ?? null, format: codec.ext, name, userId: session.userId } });
 		return yield* codec.binary
-			? withAppSpan(`transfer.serialize.${codec.ext}`, Transfer.exportBinary(stream, codec.ext)).pipe(
+			? Telemetry.withSpan(`transfer.serialize.${codec.ext}`, Transfer.exportBinary(stream, codec.ext)).pipe(
 				Effect.tap((result) => Effect.all([
 					Effect.annotateCurrentSpan('transfer.format', codec.ext),
 					Effect.annotateCurrentSpan('transfer.rows', result.count),
@@ -73,10 +73,10 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 			})();
 	}),
 );
-const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, search: typeof SearchService.Service, params: typeof TransferQuery.Type) =>
+const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, search: typeof SearchService.Service, audit: typeof AuditService.Service, params: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
-		const [metrics, session, appId] = yield* Effect.all([MetricsService, Middleware.Session, RequestContext.app]);
+		const [metrics, session, appId] = yield* Effect.all([MetricsService, Middleware.Session, Tenant.Context.current]);
 		const codec = Codec(params.format);
 		const dryRun = Option.getOrElse(params.dryRun, () => false);
 		const body = yield* HttpServerRequest.HttpServerRequest.pipe(
@@ -87,7 +87,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 				(buf) => HttpError.validation('body', buf.byteLength === 0 ? 'Empty request body' : `Max import size: ${Transfer.limits.totalBytes} bytes`),
 			),
 		);
-		const parsed = yield* withAppSpan('transfer.parse', Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
+		const parsed = yield* Telemetry.withSpan('transfer.parse', Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
 			Effect.map(Chunk.toArray),
 			Effect.tap((rows) => Effect.annotateCurrentSpan('transfer.rows.raw', rows.length)),
 			Effect.catchTag('Fatal', (err) => Effect.fail(HttpError.validation('body', err.detail ?? err.code))),
@@ -105,9 +105,12 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 			A.isNonEmptyReadonlyArray,
 			() => HttpError.validation('body', failures.length > 0 ? `All ${failures.length} rows failed validation` : 'Empty file - no data to import'),
 		);
-		const processBatch = (acc: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
+		type BatchResult = { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] };
+		const processBatch = (acc: BatchResult, batchItems: typeof items) => {
 			const ordinals = A.map(batchItems, (row) => row.ordinal);
-			return repos.withTransaction(repos.assets.insertMany(A.map(batchItems, (item) => ({
+			// No transaction wrapper: each batch INSERT is atomic, and we accumulate failures individually
+			// Type assertion: put() returns union including RepoConfigError for null input, but grouped stream guarantees non-empty batches
+			const insert = repos.assets.insertMany(A.map(batchItems, (item) => ({
 				appId,
 				content: item.content,
 				deletedAt: Option.none(),
@@ -117,16 +120,20 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 				state: 'active',
 				updatedAt: undefined,
 				userId: Option.some(session.userId),
-			})))).pipe(
-				Effect.tapError((err) => Effect.logError('Batch insert failed', { error: String(err), ordinals })),
-				Effect.map((created) => ({ assets: A.appendAll(acc.assets, created), dbFailures: acc.dbFailures })),
-				Effect.catchAll((err) => Effect.succeed({ assets: acc.assets, dbFailures: A.append(acc.dbFailures, new TransferError.Import({ cause: err, code: 'BATCH_FAILED', rows: ordinals })) })),
+			}))) as Effect.Effect<readonly Asset[], unknown>;
+			return insert.pipe(
+				Effect.map((created): BatchResult => ({ assets: A.appendAll(acc.assets, created), dbFailures: acc.dbFailures })),
+				Effect.catchAll((err) =>
+					Effect.logError('Batch insert failed', { error: String(err), ordinals }).pipe(
+						Effect.as({ assets: acc.assets, dbFailures: A.append(acc.dbFailures, new TransferError.Import({ cause: err, code: 'BATCH_FAILED', rows: ordinals })) } as BatchResult),
+					),
+				),
 			);
 		};
-		const init = { assets: [] as readonly Asset[], dbFailures: [] as readonly TransferError.Import[] };
+		const init: BatchResult = { assets: [], dbFailures: [] };
 		const { assets, dbFailures } = dryRun
 			? init
-			: yield* withAppSpan('transfer.insert', Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), init, (acc, chunk) => processBatch(acc, Chunk.toArray(chunk))).pipe(
+			: yield* Telemetry.withSpan('transfer.insert', Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), init, (acc, chunk) => processBatch(acc, Chunk.toArray(chunk))).pipe(
 					Effect.tap(({ assets: inserted, dbFailures: failed }) => Effect.all([
 						Effect.annotateCurrentSpan('transfer.inserted', inserted.length),
 						Effect.annotateCurrentSpan('transfer.db_failures', failed.length),
@@ -139,7 +146,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 		const totalFailures = failures.length + A.reduce(dbFailures, 0, (count, err) => count + err.rows.length);
 		yield* Effect.all([
 			Metric.update(metrics.transfer.imports.pipe(Metric.tagged('format', codec.ext), Metric.tagged('app', appId), Metric.tagged('dryRun', String(dryRun))), 1),
-			Audit.log(repos.audit, 'Asset', appId, dryRun ? 'validate' : 'create', {
+			audit.log('Asset', appId, dryRun ? 'validate' : 'create', {
 				after: { dryRun, failedCount: totalFailures, format: codec.ext, importedCount: dryRun ? 0 : assets.length, userId: session.userId, validCount: items.length },
 			}),
 		], { discard: true });
@@ -154,9 +161,8 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 
 const TransferLive = HttpApiBuilder.group(ParametricApi, 'transfer', (handlers) =>
 	Effect.gen(function* () {
-		const repos = yield* DatabaseService;
-		const search = yield* SearchService;
-		return handlers.handleRaw('export', ({ urlParams }) => RateLimit.apply('api', handleExport(repos, urlParams))).handle('import', ({ urlParams }) => RateLimit.apply('mutation', handleImport(repos, search, urlParams)));
+		const [repos, search, audit] = yield* Effect.all([DatabaseService, SearchService, AuditService]);
+		return handlers.handleRaw('export', ({ urlParams }) => RateLimit.apply('api', handleExport(repos, audit, urlParams))).handle('import', ({ urlParams }) => RateLimit.apply('mutation', handleImport(repos, search, audit, urlParams)));
 	}),
 );
 

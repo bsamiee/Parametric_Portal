@@ -62,7 +62,7 @@ class Validation extends S.TaggedError<Validation>()('Validation',
 	HttpApiSchema.annotations({ description: 'Validation failed', status: 400 }),
 ) { override get message() { return `Validation: ${this.field} - ${this.details}`; } }
 
-// --- [OBJECT] ----------------------------------------------------------------
+// --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const HttpError = {
@@ -89,6 +89,9 @@ const HttpError = {
 	Validation,
 	validation: (field: string, details: string, cause?: unknown): Validation => new Validation({ cause, details, field }),
 } as const;
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
 namespace HttpError {
 	export type Any = Auth | Conflict | Forbidden | GatewayTimeout | Gone | Internal | NotFound | OAuth | RateLimit | ServiceUnavailable | Validation;
 	export type Auth = InstanceType<typeof HttpError.Auth>;

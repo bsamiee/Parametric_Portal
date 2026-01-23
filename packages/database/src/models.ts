@@ -2,7 +2,6 @@
  * Define @effect/sql Model classes for Auth, Assets, Audit bounded contexts.
  * UUIDv7 id columns provide creation timestamps via uuid_extract_timestamp().
  */
-/** biome-ignore-all lint/correctness/noUnusedVariables: <temporary> */
 /** biome-ignore-all assist/source/useSortedKeys: <Maintain registry organization> */
 import { Model } from '@effect/sql';
 import { Schema as S } from 'effect';
@@ -10,17 +9,6 @@ import { Schema as S } from 'effect';
 // --- [PRIMITIVES] ------------------------------------------------------------
 
 const BufferSchema: S.Schema<Buffer, Buffer> = S.instanceOf(Buffer);
-const PgTypeId = Symbol.for("parametric-portal/PgType");
-const pgType = (type: string) => S.annotations({ [PgTypeId]: type });
-
-// --- [EXTENSIONS] ------------------------------------------------------------
-
-const Citext = S.String.pipe(pgType("CITEXT"));
-const Inet = S.String.pipe(pgType("INET"));
-const TextArray = S.Array(S.String).pipe(pgType("TEXT[]"));
-const TsVector = S.Unknown.pipe(pgType("TSVECTOR"));
-const Vector1536 = S.Object.pipe(pgType("VECTOR(1536)"));
-const VirtualPrefix = S.String.pipe(pgType("TEXT GENERATED ALWAYS AS (left(hash, 16)) VIRTUAL"));
 
 // --- [AUTH: USER] ------------------------------------------------------------
 
@@ -143,15 +131,15 @@ class Asset extends Model.Class<Asset>('Asset')({ 						// User-created content.
 class AuditLog extends Model.Class<AuditLog>('AuditLog')({ 				// Append-only operation history. Belongs to an App. No updatedAt (immutable).
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
 	id: Model.Generated(S.UUID),
-	actorId: S.NullOr(S.UUID),
 	appId: S.UUID,
-	entityId: S.UUID,
-	entityType: S.String,
-	userAgent: S.NullOr(S.String),
-	actorEmail: S.NullOr(S.String),
+	userId: Model.FieldOption(S.UUID),									// FK to users - JOIN to get email when needed
+	requestId: Model.FieldOption(S.UUID),								// Correlation ID from request context
 	operation: S.String,
+	subject: S.String,
+	subjectId: S.UUID,
 	changes: Model.FieldOption(Model.JsonFromString(S.Unknown)),
-	ipAddress: S.NullOr(S.String),
+	ipAddress: Model.FieldOption(S.String),
+	userAgent: Model.FieldOption(S.String),
 }) {}
 
 // --- [EXPORT] ----------------------------------------------------------------

@@ -272,7 +272,7 @@
             "executor": "nx:run-commands",
             "inputs": ["infrastructure"],
             "options": {
-                "command": "yamllint infrastructure/ .github/workflows/ && hadolint apps/api/Dockerfile apps/parametric_icons/Dockerfile && actionlint && for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; kustomize build \"$dir\" | kubeconform -strict -ignore-missing-schemas -summary || exit 1; done && echo '[OK] All projects valid'",
+                "command": "yamllint infrastructure/ .github/workflows/ && hadolint apps/api/Dockerfile && actionlint && for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; kustomize build \"$dir\" | kubeconform -strict -ignore-missing-schemas -summary || exit 1; done && echo '[OK] All projects valid'",
                 "cwd": "{workspaceRoot}"
             }
         },

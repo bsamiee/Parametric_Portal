@@ -16,7 +16,6 @@ const _config = {
 	spanAttributes: { 'db.system': 'postgresql', 'service.name': 'database' },
 	ssl: 		{ enabled: false, rejectUnauthorized: true },
 	stats: 		{ limit: 100 },
-	tenant: 	{ default: '00000000-0000-7000-8000-000000000001', system: '00000000-0000-7000-8000-000000000000' },
 } as const;
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -80,12 +79,6 @@ const Client = {
 		}),
 	),
 	tenant: { 								/** RLS policy - SET LOCAL (3rd param = true) for transaction-scoped isolation with connection pooling. */
-		get: Effect.gen(function* () { 		/** Get current tenant from session. Returns default tenant if unset. */
-			const sql = yield* SqlClient.SqlClient;
-			const [row] = yield* sql<{ tenant: string }>`SELECT COALESCE(current_setting('app.current_tenant', true), ${_config.tenant.default}) AS tenant`;
-			return row?.tenant ?? _config.tenant.default;
-		}),
-		id: _config.tenant,					/** Well-known tenant IDs: default (anonymous requests), system (background jobs). */
 		set: _setTenant, 					/** Set tenant context for current transaction. RLS policies read this via current_setting(). */
 		with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () { /** Execute effect within tenant context. Wraps in transaction with SET LOCAL. */
 			const sql = yield* SqlClient.SqlClient;

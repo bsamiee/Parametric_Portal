@@ -197,10 +197,10 @@ class Metadata extends S.Class<Metadata>('Metadata')({
 const Codec = Object.assign(_codec, _query, {
 	detect: _detect,
 	dispatch: _dispatch,
+	size: _size,
 	entries: Object.fromEntries((Object.keys(_query) as _CapAll[]).map((cap) => [cap, _query[cap].map((key) => _cache[key])])) as unknown as { readonly [C in _CapAll]: readonly _Resolved<_Query[C]>[] },
 	Manifest: S.Struct({ entries: S.Array(Metadata), version: S.Literal(1) }),
 	Parseable: S.Literal(..._query.parseable),
-	size: _size,
 	Transfer: S.Literal(..._query.transfer),
 });
 

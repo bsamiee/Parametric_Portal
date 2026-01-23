@@ -43,7 +43,7 @@
  * FK POLICY (Coherent):
  * - Users are NEVER hard-deleted (soft-delete only via deleted_at)
  * - All user-owned entities use ON DELETE RESTRICT to prevent accidental cascade
- * - audit_logs: actor_id RESTRICT (users never hard-deleted), denormalized actor_email for compliance
+ * - audit_logs: user_id RESTRICT (users never hard-deleted); JOIN to users.email when needed
  * - Assets orphan gracefully (user_id SET NULL) for content preservation
  * APP-LAYER RESPONSIBILITIES:
  * - sessions.updated_at: Updated by app on each authenticated request
@@ -265,17 +265,23 @@ export default Effect.gen(function* () {
 			kind TEXT NOT NULL,
 			content TEXT NOT NULL,
 			state TEXT NOT NULL,
+			hash TEXT,
+			name TEXT,
 			deleted_at TIMESTAMPTZ,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			size INTEGER GENERATED ALWAYS AS (octet_length(content)) STORED,
-			CONSTRAINT assets_content_max_size CHECK (octet_length(content) <= 10485760)
+			CONSTRAINT assets_content_max_size CHECK (octet_length(content) <= 10485760),
+			CONSTRAINT assets_hash_format CHECK (hash IS NULL OR hash ~* '^[0-9a-f]{64}$')
 		)
 	`;
     yield* sql`COMMENT ON TABLE assets IS 'App content — use uuid_extract_timestamp(id) for creation time; user_id SET NULL on user delete preserves orphaned content'`;
+    yield* sql`COMMENT ON COLUMN assets.hash IS 'SHA-256 content hash (64 hex chars) for verification/deduplication — computed at app layer'`;
+    yield* sql`COMMENT ON COLUMN assets.name IS 'Original filename for ZIP manifest reconstruction and display'`;
     yield* sql`COMMENT ON COLUMN assets.size IS 'STORED for aggregate queries — octet_length for byte quota (UTF-8 aware)'`;
     yield* sql`CREATE INDEX idx_assets_app_kind ON assets(app_id, kind) INCLUDE (id, user_id) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_assets_app_user ON assets(app_id, user_id) INCLUDE (id, kind) WHERE deleted_at IS NULL AND user_id IS NOT NULL`;
     yield* sql`CREATE INDEX idx_assets_app_recent ON assets(app_id, id DESC) INCLUDE (kind, user_id) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_assets_hash ON assets(hash) WHERE hash IS NOT NULL AND deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_assets_app_id_fk ON assets(app_id)`;
     yield* sql`CREATE INDEX idx_assets_user_id_fk ON assets(user_id)`;
     yield* sql`CREATE TRIGGER assets_updated_at BEFORE UPDATE ON assets FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
@@ -286,27 +292,29 @@ export default Effect.gen(function* () {
 		CREATE TABLE audit_logs (
 			id UUID PRIMARY KEY DEFAULT uuidv7(),
 			app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+			user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+			request_id UUID,
 			operation TEXT NOT NULL,
-			entity_type TEXT NOT NULL,
-			entity_id UUID NOT NULL,
-			actor_id UUID REFERENCES users(id) ON DELETE RESTRICT,
-			actor_email TEXT,
+			subject TEXT NOT NULL,
+			subject_id UUID NOT NULL,
 			changes JSONB,
 			ip_address INET,
 			user_agent TEXT,
 			CONSTRAINT audit_logs_user_agent_length CHECK (user_agent IS NULL OR length(user_agent) <= 1024)
 		)
 	`;
-    yield* sql`COMMENT ON TABLE audit_logs IS 'Append-only audit trail — use uuid_extract_timestamp(id) for creation time; never UPDATE/DELETE in application code'`;
-    yield* sql`COMMENT ON COLUMN audit_logs.actor_id IS 'RESTRICT — users never hard-deleted; if somehow NULL, actor_email preserves attribution'`;
-    yield* sql`COMMENT ON COLUMN audit_logs.actor_email IS 'Denormalized for compliance — preserved even if actor_id becomes orphaned'`;
+    yield* sql`COMMENT ON TABLE audit_logs IS 'Append-only audit trail — use uuid_extract_timestamp(id) for creation time; JOIN to users for email; never UPDATE/DELETE in application code'`;
+    yield* sql`COMMENT ON COLUMN audit_logs.user_id IS 'FK to users — RESTRICT (users never hard-deleted); JOIN to users.email when needed'`;
+    yield* sql`COMMENT ON COLUMN audit_logs.request_id IS 'Correlation ID from request context — correlate multiple audit entries from same HTTP request'`;
     yield* sql`CREATE INDEX idx_audit_id_brin ON audit_logs USING BRIN (id)`;
-    yield* sql`CREATE INDEX idx_audit_app_entity ON audit_logs(app_id, entity_type, entity_id, id DESC) INCLUDE (actor_id, operation)`;
-    yield* sql`CREATE INDEX idx_audit_app_actor ON audit_logs(app_id, actor_id, id DESC) INCLUDE (entity_type, entity_id, operation) WHERE actor_id IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_audit_entity_id ON audit_logs(entity_id, id DESC)`;
+    yield* sql`CREATE INDEX idx_audit_app_subject ON audit_logs(app_id, subject, subject_id, id DESC) INCLUDE (user_id, operation)`;
+    yield* sql`CREATE INDEX idx_audit_app_user ON audit_logs(app_id, user_id, id DESC) INCLUDE (subject, subject_id, operation) WHERE user_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_audit_subject_id ON audit_logs(subject_id, id DESC)`;
+    yield* sql`CREATE INDEX idx_audit_request ON audit_logs(request_id) WHERE request_id IS NOT NULL`;
     yield* sql`CREATE INDEX idx_audit_changes ON audit_logs USING GIN (changes) WHERE changes IS NOT NULL`;
     yield* sql`CREATE INDEX idx_audit_ip ON audit_logs(ip_address) WHERE ip_address IS NOT NULL`;
     yield* sql`CREATE INDEX idx_audit_app_id_fk ON audit_logs(app_id)`;
+    yield* sql`CREATE INDEX idx_audit_user_id_fk ON audit_logs(user_id)`;
     yield* sql`CREATE TRIGGER audit_logs_immutable BEFORE UPDATE OR DELETE ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_modification()`;
     // ═══════════════════════════════════════════════════════════════════════════
     // MFA_SECRETS: TOTP secrets with backup codes
@@ -604,9 +612,9 @@ export default Effect.gen(function* () {
 				'asset',
 				NEW.id,
 				NEW.app_id,
-				NEW.kind,
+				COALESCE(NEW.name, NEW.kind),
 				NEW.content,
-				jsonb_build_object('kind', NEW.kind, 'size', NEW.size)
+				jsonb_build_object('kind', NEW.kind, 'size', NEW.size, 'name', NEW.name, 'hash', NEW.hash)
 			)
 			ON CONFLICT (entity_type, entity_id) DO UPDATE SET
 				scope_id = EXCLUDED.scope_id,
@@ -635,9 +643,9 @@ export default Effect.gen(function* () {
 				'auditLog',
 				NEW.id,
 				NEW.app_id,
-				coalesce(NEW.actor_email, NEW.entity_type::text || ':' || NEW.operation::text),
-				NEW.entity_type::text || ' ' || NEW.operation::text,
-				jsonb_strip_nulls(jsonb_build_object('entityType', NEW.entity_type, 'operation', NEW.operation, 'actorEmail', NEW.actor_email) || coalesce(NEW.changes, '{}'::jsonb))
+				NEW.subject::text || ':' || NEW.operation::text,
+				NEW.subject::text || ' ' || NEW.operation::text,
+				jsonb_strip_nulls(jsonb_build_object('subject', NEW.subject, 'operation', NEW.operation, 'userId', NEW.user_id) || coalesce(NEW.changes, '{}'::jsonb))
 			)
 			ON CONFLICT (entity_type, entity_id) DO UPDATE SET
 				scope_id = EXCLUDED.scope_id,
@@ -651,7 +659,7 @@ export default Effect.gen(function* () {
     yield* sql`CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION upsert_search_document_app()`;
     yield* sql`CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION upsert_search_document_user()`;
     yield* sql`CREATE TRIGGER users_search_delete AFTER UPDATE OF deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION delete_search_document_user()`;
-    yield* sql`CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, kind, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION upsert_search_document_asset()`;
+    yield* sql`CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, kind, name, hash, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION upsert_search_document_asset()`;
     yield* sql`CREATE TRIGGER assets_search_delete AFTER UPDATE OF deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION delete_search_document_asset()`;
     yield* sql`CREATE TRIGGER audit_logs_search_insert AFTER INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION insert_search_document_audit()`;
     yield* sql.unsafe(String.raw`
@@ -671,12 +679,12 @@ export default Effect.gen(function* () {
 				FROM users
 				WHERE deleted_at IS NULL;
 				INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-				SELECT 'asset', id, app_id, kind, content, jsonb_build_object('kind', kind, 'size', size)
+				SELECT 'asset', id, app_id, COALESCE(name, kind), content, jsonb_build_object('kind', kind, 'size', size, 'name', name, 'hash', hash)
 				FROM assets
 				WHERE deleted_at IS NULL;
 				INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-				SELECT 'auditLog', id, app_id, coalesce(actor_email, entity_type::text || ':' || operation::text), entity_type::text || ' ' || operation::text,
-					jsonb_strip_nulls(jsonb_build_object('entityType', entity_type, 'operation', operation, 'actorEmail', actor_email) || coalesce(changes, '{}'::jsonb))
+				SELECT 'auditLog', id, app_id, subject::text || ':' || operation::text, subject::text || ' ' || operation::text,
+					jsonb_strip_nulls(jsonb_build_object('subject', subject, 'operation', operation, 'userId', user_id) || coalesce(changes, '{}'::jsonb))
 				FROM audit_logs;
 				RETURN;
 			END IF;
@@ -696,13 +704,13 @@ export default Effect.gen(function* () {
 			WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
 			INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-			SELECT 'asset', id, app_id, kind, content, jsonb_build_object('kind', kind, 'size', size)
+			SELECT 'asset', id, app_id, COALESCE(name, kind), content, jsonb_build_object('kind', kind, 'size', size, 'name', name, 'hash', hash)
 			FROM assets
 			WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
 			INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-			SELECT 'auditLog', id, app_id, coalesce(actor_email, entity_type::text || ':' || operation::text), entity_type::text || ' ' || operation::text,
-				jsonb_strip_nulls(jsonb_build_object('entityType', entity_type, 'operation', operation, 'actorEmail', actor_email) || coalesce(changes, '{}'::jsonb))
+			SELECT 'auditLog', id, app_id, subject::text || ':' || operation::text, subject::text || ' ' || operation::text,
+				jsonb_strip_nulls(jsonb_build_object('subject', subject, 'operation', operation, 'userId', user_id) || coalesce(changes, '{}'::jsonb))
 			FROM audit_logs
 			WHERE app_id = p_scope_id;
 		END

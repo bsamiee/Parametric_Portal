@@ -2,27 +2,27 @@
  * OAuth implementation using Arctic library.
  * [PATTERN] Schema.Class for PKCE state, Match for error mapping, single circuit for GitHub.
  */
-import { Auth } from '@parametric-portal/server/auth';
-import { Circuit } from '@parametric-portal/server/circuit';
-import { Crypto, EncryptedKey, EncryptionKeyStore } from '@parametric-portal/server/crypto';
-import { HttpError } from '@parametric-portal/server/http-errors';
-import { MetricsService } from '@parametric-portal/server/metrics';
-import { OAuth } from '@parametric-portal/server/middleware';
+import { Context } from '@parametric-portal/server/context';
+
+const Auth = Context.Session.config;
+const OAuth = Context.OAuth;
+import { HttpError } from '@parametric-portal/server/errors';
+import { Crypto } from '@parametric-portal/server/security/crypto';
+import { Circuit } from '@parametric-portal/server/utils/circuit';
 import { Timestamp } from '@parametric-portal/types/types';
 import { Apple, ArcticFetchError, decodeIdToken, GitHub, Google, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens, UnexpectedErrorResponseBodyError, UnexpectedResponseError, generateCodeVerifier, generateState } from 'arctic';
-import { Config, type ConfigError, Duration, Effect, Layer, Match, Option as O, Redacted, Schema as S } from 'effect';
+import { Config, Duration, Effect, Layer, Match, Option as O, Redacted, Schema as S } from 'effect';
 
-// --- [PRIVATE_SCHEMAS] -------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
-const _OAuthProvider = { apple: 'apple', github: 'github', google: 'google', microsoft: 'microsoft' } as const;
-type _OAuthProviderType = typeof _OAuthProvider[keyof typeof _OAuthProvider];
-
+/** Provider-specific OAuth capabilities - keys define valid providers */
 const _oauth = {
 	apple:     { oidc: true,  pkce: true  },
 	github:    { oidc: false, pkce: false },
 	google:    { oidc: true,  pkce: true  },
 	microsoft: { oidc: true,  pkce: true  },
 } as const;
+type _Provider = keyof typeof _oauth;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -60,8 +60,8 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
 	verifier: S.optional(S.String),
 }) {
 	static readonly encrypt = Effect.fn('oauth.state.encrypt')(
-		(provider: _OAuthProviderType, state: string, verifier?: string) =>
-			Crypto.Key.encrypt(
+		(provider: _Provider, state: string, verifier?: string) =>
+			Crypto.encrypt(
 				JSON.stringify({
 					exp: Timestamp.add(Timestamp.nowSync(), Duration.toMillis(Auth.durations.pkce)),
 					provider,
@@ -69,14 +69,14 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
 					...(verifier === undefined ? {} : { verifier }),
 				}),
 			).pipe(
-				Effect.map((enc) => Buffer.from(enc.toBytes()).toString('base64url')),
+				Effect.map((enc) => Buffer.from(enc).toString('base64url')),
 				Effect.mapError((e) => HttpError.oauth(provider, 'State encryption failed', e)),
 			),
 	);
 	static readonly decrypt = Effect.fn('oauth.state.decrypt')(
-		(provider: _OAuthProviderType, encrypted: string) =>
-			EncryptedKey.decryptBytes(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
-				Effect.flatMap((json) =>
+		(provider: _Provider, encrypted: string) =>
+			Crypto.decrypt(new Uint8Array(Buffer.from(encrypted, 'base64url'))).pipe(
+				Effect.flatMap(({ value: json }) =>
 					Effect.try({ catch: (e) => HttpError.oauth(provider, 'Invalid state JSON', e), try: () => JSON.parse(json) as unknown }).pipe(
 						Effect.flatMap((parsed) => S.decodeUnknown(OAuthState)(parsed)),
 					),
@@ -96,7 +96,7 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const mapOAuthError = (provider: _OAuthProviderType) => {
+const mapOAuthError = (provider: _Provider) => {
 	const handlers: ReadonlyArray<readonly [(e: unknown) => boolean, (e: unknown) => HttpError.OAuth]> = [
 		[Circuit.isOpen, () => HttpError.oauth(provider, 'Service unavailable')],
 		[Circuit.isCancelled, () => HttpError.oauth(provider, 'Request cancelled')],
@@ -114,7 +114,7 @@ const extractResult = (tokens: OAuth2Tokens, user: { readonly id: string; readon
 	externalId: user.id,
 	refresh: O.fromNullable(tokens.hasRefreshToken() ? tokens.refreshToken() : undefined),
 }) as const;
-const oidcResult = (provider: _OAuthProviderType, tokens: OAuth2Tokens) =>
+const oidcResult = (provider: _Provider, tokens: OAuth2Tokens) =>
 	Effect.try({ catch: () => HttpError.oauth(provider, 'idToken() not available'), try: () => decodeIdToken(tokens.idToken()) }).pipe(
 		Effect.flatMap((claims) => S.decodeUnknown(OIDCClaims)(claims).pipe(Effect.mapError(() => HttpError.oauth(provider, 'Invalid token claims')))),
 		Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: d.sub })),
@@ -141,19 +141,20 @@ const githubResult = (tokens: OAuth2Tokens, circuit: Circuit.Instance) =>
 			Effect.flatMap((r) => S.decodeUnknown(GitHubUser)(r).pipe(Effect.mapError(() => HttpError.oauth('github', 'Invalid response')))),
 			Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: String(d.id) })),
 		);
-const validateState = (provider: _OAuthProviderType, state: string, stateCookie: string) =>
+const validateState = (provider: _Provider, state: string, stateCookie: string) =>
 	OAuthState.decrypt(provider, stateCookie).pipe(
 		Effect.filterOrFail(
-			(p) => Crypto.safeCompare(p.state, state),
+			(p) => Crypto.token.compare(p.state, state),
 			() => HttpError.oauth(provider, 'State mismatch'),
 		),
 	);
 
 // --- [LAYER] -----------------------------------------------------------------
 
-const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
+const _OAuthLayer = Layer.effect(
 	OAuth,
 	Effect.gen(function* () {
+		const cryptoService = yield* Crypto.Service;
 		const baseUrl = yield* Config.string('API_BASE_URL').pipe(Config.withDefault('http://localhost:4000'));
 		const loadCreds = (k: string) =>
 			Effect.all({
@@ -170,7 +171,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
 			}),
 			Config.string('OAUTH_MICROSOFT_TENANT_ID').pipe(Config.withDefault('common')),
 		]);
-		const redirect = (p: _OAuthProviderType) => `${baseUrl}/api/auth/oauth/${p}/callback`;
+		const redirect = (p: _Provider) => `${baseUrl}/api/auth/oauth/${p}/callback`;
 		const applePrivateKey = new TextEncoder().encode(Redacted.value(appleCreds.privateKey));
 		const clients = {
 			apple: new Apple(appleCreds.clientId, appleCreds.teamId, appleCreds.keyId, applePrivateKey, redirect('apple')),
@@ -185,8 +186,8 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
 			github: (t: OAuth2Tokens) => githubResult(t, githubCircuit),
 			google: (t: OAuth2Tokens) => oidcResult('google', t),
 			microsoft: (t: OAuth2Tokens) => oidcResult('microsoft', t),
-		} satisfies Record<_OAuthProviderType, (t: OAuth2Tokens) => Effect.Effect<ReturnType<typeof extractResult>, HttpError.OAuth>>;
-		const exchange = (provider: _OAuthProviderType, fn: () => Promise<OAuth2Tokens>): Effect.Effect<OAuth2Tokens, HttpError.OAuth> =>
+		} satisfies Record<_Provider, (t: OAuth2Tokens) => Effect.Effect<ReturnType<typeof extractResult>, HttpError.OAuth>>;
+		const exchange = (provider: _Provider, fn: () => Promise<OAuth2Tokens>): Effect.Effect<OAuth2Tokens, HttpError.OAuth> =>
 			provider === 'github'
 				? githubCircuit.execute(fn).pipe(
 						Effect.mapError(mapOAuthError(provider)),
@@ -200,7 +201,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
 		// Apple: OIDC with internal PKCE (no verifier params in Arctic API)
 		// GitHub: OAuth2 without PKCE
 		// Google/Microsoft: OIDC with explicit PKCE verifier
-		const createAuthUrl = (provider: _OAuthProviderType, state: string, verifier: string | undefined, scopes: string[]): URL =>
+		const createAuthUrl = (provider: _Provider, state: string, verifier: string | undefined, scopes: string[]): URL =>
 			Match.value(provider).pipe(
 				Match.when('github', () => clients.github.createAuthorizationURL(state, scopes)),
 				Match.when('apple', () => clients.apple.createAuthorizationURL(state, scopes)),
@@ -208,7 +209,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
 				Match.when('microsoft', () => clients.microsoft.createAuthorizationURL(state, verifier as string, scopes)),
 				Match.exhaustive,
 			);
-		const validateCode = (provider: _OAuthProviderType, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
+		const validateCode = (provider: _Provider, code: string, verifier: string | undefined): Promise<OAuth2Tokens> =>
 			Match.value(provider).pipe(
 				Match.when('github', () => clients.github.validateAuthorizationCode(code)),
 				Match.when('apple', () => clients.apple.validateAuthorizationCode(code)),
@@ -223,7 +224,7 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
 					yield* _oauth[provider].pkce && verifier === undefined ? Effect.fail(HttpError.oauth(provider, 'Missing PKCE verifier')) : Effect.void;
 					const rawTokens = yield* exchange(provider, () => validateCode(provider, code, verifier));
 					return yield* extractAuth[provider](rawTokens);
-				}).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.Default)),
+				}).pipe(Effect.provideService(Crypto.Service, cryptoService)),
 			createAuthorizationUrl: (provider) =>
 				Effect.gen(function* () {
 					const state = generateState();
@@ -232,10 +233,11 @@ const OAuthLive: Layer.Layer<OAuth, ConfigError.ConfigError> = Layer.effect(
 					const stateCookie = yield* OAuthState.encrypt(provider, state, verifier);
 					const url = createAuthUrl(provider, state, verifier, scopes);
 					return { stateCookie, url };
-				}).pipe(Effect.provide(EncryptionKeyStore.layer), Effect.provide(MetricsService.Default)),
+				}).pipe(Effect.provideService(Crypto.Service, cryptoService)),
 		});
 	}),
 );
+const OAuthLive = _OAuthLayer.pipe(Layer.provide(Crypto.Service.Default));
 
 // --- [EXPORT] ----------------------------------------------------------------
 

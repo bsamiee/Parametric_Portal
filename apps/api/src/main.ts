@@ -1,36 +1,32 @@
 import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
-import { SqlClient } from '@effect/sql';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SearchService } from '@parametric-portal/database/search';
 import { ParametricApi } from '@parametric-portal/server/api';
-import { RequestContext } from '@parametric-portal/server/context';
-import { EncryptionKeyStore } from '@parametric-portal/server/crypto';
-import { HttpError } from '@parametric-portal/server/http-errors';
-import { MetricsService } from '@parametric-portal/server/metrics';
-import { AuditService } from '@parametric-portal/server/audit';
+import { Tenant } from '@parametric-portal/server/tenant';
+import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { RateLimit } from '@parametric-portal/server/rate-limit';
-import { TelemetryLive } from '@parametric-portal/server/telemetry';
-import { TotpReplayGuard } from '@parametric-portal/server/totp-replay';
-import type { Hex64 } from '@parametric-portal/types/types';
-import { Config, Duration, Effect, Layer, Option, Schedule } from 'effect';
-import { OAuthLive } from './oauth.ts';
+import { AuditService } from '@parametric-portal/server/domain/audit';
+import { SessionService } from '@parametric-portal/server/domain/session';
+import { MetricsService } from '@parametric-portal/server/infra/metrics';
+import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
+import { Telemetry } from '@parametric-portal/server/infra/telemetry';
+import { Crypto } from '@parametric-portal/server/security/crypto';
+import { ReplayGuardService } from '@parametric-portal/server/security/totp-replay';
+import { Config, Effect, Layer, Option } from 'effect';
+import { OAuthLive } from './services/oauth.ts';
 import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
-import { IconsLive } from './routes/icons.ts';
 import { MfaLive } from './routes/mfa.ts';
 import { TelemetryRouteLive } from './routes/telemetry.ts';
 import { TransferLive } from './routes/transfer.ts';
-import { SearchLive } from './routes/search.ts';
 import { UsersLive } from './routes/users.ts';
-import { IconGenerationServiceLive } from './services/icons.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const API_CONFIG = { defaults: { corsOrigins: '*', port: 4000 }, search: { refreshMinutes: 5 } } as const;
+const API_CONFIG = { defaults: { corsOrigins: '*', port: 4000 } } as const;
 const serverConfig = Effect.runSync(
     Config.all({
         corsOrigins: Config.string('CORS_ORIGINS').pipe(
@@ -45,52 +41,35 @@ const serverConfig = Effect.runSync(
 
 const DatabaseLive = DatabaseService.Default;
 
-const makeSessionLookup = (db: typeof DatabaseService.Service, metrics: typeof MetricsService.Service) =>
-    (tokenHash: Hex64) =>
-        db.sessions.byHash(tokenHash).pipe(
-            Effect.tap(Option.match({ onNone: () => Effect.void, onSome: (s) => db.sessions.touch(s.id).pipe(Effect.catchAll((error) => Effect.logWarning('Session activity update failed', { error: String(error), sessionId: s.id }))) })),
-            Effect.flatMap(Option.match({
-                onNone: () => Effect.succeed(Option.none()),
-                onSome: (session) => db.mfaSecrets.byUser(session.userId).pipe(Effect.map((mfaOpt) => {
-                    const mfaEnabled = Option.isSome(mfaOpt) && Option.isSome(mfaOpt.value.enabledAt);
-                    return Option.some({
-                        mfaEnabled,
-                        mfaVerified: Option.isSome(session.verifiedAt),
-                        sessionId: session.id,
-                        userId: session.userId,
-                    });
-                })),
-            })),
-            Effect.catchAll((error) => Effect.logError('Session lookup failed', { error: String(error) }).pipe(Effect.as(Option.none()))),
-            Effect.provideService(MetricsService, metrics),
-        );
 const makeAppLookup = (db: typeof DatabaseService.Service) =>
-    (namespace: string) =>
+    (namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>> =>
         db.apps.byNamespace(namespace).pipe(
             Effect.map((appOpt) => Option.map(appOpt, (app) => ({ id: app.id, namespace: app.namespace }))),
             Effect.orElseSucceed(() => Option.none()),
         );
 const SessionAuthLive = Layer.unwrapEffect(
-    Effect.map(Effect.all([DatabaseService, MetricsService]), ([db, metrics]) =>
-        Middleware.Auth.makeLayer(makeSessionLookup(db, metrics)),
+    Effect.map(SessionService, (session) =>
+        Middleware.Auth.makeLayer((hash) => session.lookup(hash)),
     ),
 );
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
     Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
+        const db = yield* DatabaseService;
+        const audit = yield* AuditService;
         const checkDatabase = () =>
-            sql`SELECT 1`.pipe(
+            db.withTransaction(Effect.succeed(true)).pipe(
                 Effect.as(true),
+                Effect.timeout('5 seconds'),
                 Effect.catchAll(() => Effect.succeed(false)),
             );
         return handlers
             .handle('liveness', () => Effect.succeed({ status: 'ok' as const }))
             .handle('readiness', () =>
-                checkDatabase().pipe(
-                    Effect.flatMap((dbOk) =>
-                        dbOk
-                            ? Effect.succeed({ checks: { database: true }, status: 'ok' as const })
-                            : Effect.fail(HttpError.serviceUnavailable('Database check failed', 30000)),
+                Effect.all([checkDatabase(), audit.getHealth()]).pipe(
+                    Effect.flatMap(([dbOk, auditHealth]) =>
+                        dbOk && auditHealth.state !== 'alerted'
+                            ? Effect.succeed({ checks: { audit: auditHealth.state, database: true }, status: 'ok' as const })
+                            : Effect.fail(HttpError.serviceUnavailable(dbOk ? `Audit system ${auditHealth.state}` : 'Database check failed', 30000)),
                     ),
                 ),
             );
@@ -102,53 +81,34 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
  * - ServiceLayers: Domain services declare requirements via .Default (not standalone)
  * - AppLayers: Merges Infra + Services for complete dependency provision
  */
-const DefaultRequestContext = Layer.succeed(RequestContext, {
-    appId: RequestContext.Id.system,
-    ipAddress: Option.none(),
-    requestId: 'system',
-    sessionId: Option.none(),
-    userAgent: Option.none(),
-    userId: Option.none(),
-});
 const InfraLayers = Layer.mergeAll(
     Client.layer,
-    TelemetryLive,
-    EncryptionKeyStore.layer,
-    RateLimit.layer,
+    Telemetry.Default,
+    Crypto.Service.Default,
+    RateLimit.Default,
     MetricsService.Default,
-    TotpReplayGuard.Default,
-    AuditService.Default,
-    DefaultRequestContext,
+    ReplayGuardService.Default,
+    Tenant.Context.SystemLayer,
     NodeFileSystem.layer,
 );
-const ServiceLayers = Layer.mergeAll(DatabaseLive, OAuthLive, IconGenerationServiceLive, SearchService.Default).pipe(
+const ServiceLayers = Layer.mergeAll(DatabaseLive, SearchService.Default, OAuthLive, SessionService.Default, AuditService.Default).pipe(
     Layer.provide(InfraLayers),
 );
 const AppLayers = Layer.merge(InfraLayers, ServiceLayers);
 const SessionAuthWithDeps = SessionAuthLive.pipe(Layer.provide(AppLayers));
-const RouteLayers = Layer.mergeAll(AuditLive, AuthLive, HealthLive, IconsLive, MfaLive, SearchLive, TelemetryRouteLive, TransferLive, UsersLive).pipe(
+const RouteLayers = Layer.mergeAll(AuditLive, AuthLive, HealthLive, MfaLive, TelemetryRouteLive, TransferLive, UsersLive).pipe(
     Layer.provide(AppLayers),
 );
 const ApiLive = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayers));
 const ServerLiveInner = Layer.unwrapEffect(
     Effect.gen(function* () {
         const db = yield* DatabaseService;
-        const search = yield* SearchService;
-		yield* Effect.forkScoped(
-			search.refresh().pipe(
-				Effect.tapError((e) => Effect.logWarning('Search refresh failed', { error: String(e) })),
-				Effect.catchAll(() => Effect.void),
-				Effect.repeat(Schedule.spaced(Duration.minutes(API_CONFIG.search.refreshMinutes))),
-			),
-        );
         return HttpApiBuilder.serve((app) =>
             app.pipe(
                 Middleware.xForwardedHeaders,
                 Middleware.trace,
                 Middleware.security(),
-                Middleware.requestId,
                 Middleware.makeRequestContext(makeAppLookup(db)),
-                Middleware.makeTenantContext(Client.tenant.set),
                 Middleware.metrics,
                 RateLimit.headers,
                 HttpMiddleware.logger,

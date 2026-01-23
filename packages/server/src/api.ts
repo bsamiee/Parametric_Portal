@@ -3,60 +3,43 @@
  * Enables type-safe HttpApiClient derivation; domain modules use structural typing.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from '@effect/platform';
+import { ApiKey, AuditLog, User } from '@parametric-portal/database/models';
 import { Codec } from '@parametric-portal/types/files';
-import { IconRequest, IconResponse } from '@parametric-portal/types/icons';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
-import { HttpError } from './http-errors.ts';
+import { Context } from './context.ts';
+import { HttpError } from './errors.ts';
 import { Middleware } from './middleware.ts';
 
-// --- [PRIVATE_SCHEMAS] -------------------------------------------------------
+// --- [INTERNAL_SCHEMAS] ------------------------------------------------------
 
-const _Role = S.Literal('admin', 'guest', 'member', 'owner', 'viewer');
-const _OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-const _SearchEntity = S.Literal('app', 'asset', 'auditLog', 'user');
-
-const _authResponse = S.Struct({
+/** Auth response - returned by OAuth callback, refresh */
+const AuthResponse = S.Struct({
 	accessToken: S.String,
 	expiresAt: S.DateTimeUtc,
 	mfaPending: S.Boolean,
 });
 
-const _user = S.Struct({
-	appId: S.UUID,
-	email: S.String,
-	id: S.UUID,
-	role: _Role,
-	state: S.String,
-});
+// --- [MODEL_DERIVED_SCHEMAS] -------------------------------------------------
 
-/** Unified API key schema - optional fields for read vs create context */
-const _apiKey = S.Struct({
-	apiKey: S.optional(S.String), 						// Present on create request only
-	expiresAt: S.optional(S.NullOr(S.DateTimeUtc)),
-	id: S.optional(S.UUID),
-	name: S.NonEmptyTrimmedString,
-	prefix: S.optional(S.NullOr(S.String)),
-});
-
-const _auditLog = S.Struct({
-	actorEmail: S.NullOr(S.String),
-	actorId: S.NullOr(S.UUID),
-	appId: S.UUID,
-	changes: S.NullOr(S.Unknown),
-	entityId: S.UUID,
-	entityType: S.String,
-	id: S.UUID,
-	ipAddress: S.NullOr(S.String),
-	operation: S.String,
-	userAgent: S.NullOr(S.String),
-});
+/** OAuth identity providers - derived from Context.OAuthProvider */
+const OAuthProvider = S.Literal(...Object.values(Context.OAuthProvider) as [Context.OAuthProvider, ...Context.OAuthProvider[]]);
+/** User public projection - derived from User.json */
+const _UserPublic = User.json.pipe(S.pick('id', 'appId', 'email', 'role', 'state'));
+/** ApiKey public projection - derived from ApiKey.json */
+const _ApiKeyPublic = ApiKey.json.pipe(S.pick('id', 'name', 'prefix', 'expiresAt'));
+/** ApiKey create response - extends public with one-time apiKey reveal */
+const _ApiKeyCreateResponse = S.extend(_ApiKeyPublic, S.Struct({ apiKey: S.optional(S.String) }));
+/** ApiKey create payload - derived from ApiKey.insert with API-level validation */
+const _ApiKeyPayload = S.Struct({ expiresAt: S.optional(S.DateFromSelf), name: S.NonEmptyTrimmedString });
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const SuccessResponse = S.Struct({ success: S.Literal(true) });
+/** Auditable resource types - used for audit endpoint validation */
+const AuditSubject = S.Literal('ApiKey', 'App', 'Asset', 'MfaSecret', 'OauthAccount', 'RefreshToken', 'Session', 'User');
+const _SuccessResponse = S.Struct({ success: S.Literal(true) });
 /** Keyset paginated response factory - matches Page.KeysetOut<T> */
-const KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
+const _KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
 	cursor: S.NullOr(S.String),
 	hasNext: S.Boolean,
 	hasPrev: S.Boolean,
@@ -64,7 +47,7 @@ const KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
 	total: S.Int,
 });
 /** Unified transfer result - export: count/data/name/format; import: imported/failed. Mime derivable via Codec(format).mime */
-const TransferResult = S.Struct({
+const _TransferResult = S.Struct({
 	count: S.optional(S.Int),
 	data: S.optional(S.String),
 	failed: S.optional(S.Array(S.Struct({ error: S.String, ordinal: S.NullOr(S.Int) }))),
@@ -80,21 +63,8 @@ const TransferQuery = S.Struct({
 	format: S.optionalWith(HttpApiSchema.param('format', Codec.Transfer), { default: () => 'ndjson' as const }),
 	typeSlug: S.optionalWith(HttpApiSchema.param('type', S.NonEmptyTrimmedString), { as: 'Option' }),
 });
-/** Unified search result - keyset pagination + inline facets/items/suggestions */
-const SearchResultResponse = S.Struct({
-	...KeysetResponse(S.Struct({
-		displayText: S.String,
-		entityId: S.UUID,
-		entityType: _SearchEntity,
-		metadata: S.NullOr(S.Unknown),
-		rank: S.Number,
-		snippet: S.NullOr(S.String),
-	})).fields,
-	facets: S.NullOr(S.Record({ key: _SearchEntity, value: S.Int })),
-	suggestions: S.optional(S.Array(S.Struct({ frequency: S.Int, term: S.String }))),
-});
 /** Unified MFA response - enroll: qrDataUrl/secret/backupCodes; status: enabled/enrolled/remaining */
-const MfaResponse = S.Struct({
+const _MfaResponse = S.Struct({
 	backupCodes: S.optional(S.Array(S.String)),
 	enabled: S.optional(S.Boolean),
 	enrolled: S.optional(S.Boolean),
@@ -105,70 +75,51 @@ const MfaResponse = S.Struct({
 
 // --- [QUERY_SCHEMAS] ---------------------------------------------------------
 
-/** Comma-separated _SearchEntity array from URL param */
-const EntityTypesParam = S.transform(
-	S.String,
-	S.Array(_SearchEntity),
-	{
-		decode: (value) => value.split(',').map((segment) => segment.trim()).filter(S.is(_SearchEntity)),
-		encode: (value) => value.join(','),
-	},
-);
-/** Unified query schema - all optional fields, endpoint determines required subset */
+/** Unified query schema - audit pagination and filtering */
 const Query = S.Struct({
-	// Date filters (audit, search)
 	after: S.optional(HttpApiSchema.param('after', S.DateFromString)),
 	before: S.optional(HttpApiSchema.param('before', S.DateFromString)),
-	// Pagination (base)
 	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
-	// Search-specific
-	entityTypes: S.optionalWith(HttpApiSchema.param('entityTypes', EntityTypesParam), { default: () => [] as const }),
-	includeFacets: S.optionalWith(HttpApiSchema.param('includeFacets', S.BooleanFromString), { default: () => false }),
-	includeGlobal: S.optionalWith(HttpApiSchema.param('includeGlobal', S.BooleanFromString), { default: () => false }),
-	includeSnippets: S.optionalWith(HttpApiSchema.param('includeSnippets', S.BooleanFromString), { default: () => true }),
 	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
-	// Audit-specific
 	operation: S.optional(HttpApiSchema.param('operation', S.String)),
-	prefix: S.optional(HttpApiSchema.param('prefix', S.String.pipe(S.minLength(2), S.maxLength(256)))),
-	q: S.optional(HttpApiSchema.param('q', S.String.pipe(S.minLength(2), S.maxLength(256)))),
 });
 
 // --- [GROUPS] ----------------------------------------------------------------
 
-const AuthGroup = HttpApiGroup.make('auth')
+const _AuthGroup = HttpApiGroup.make('auth')
 	.prefix('/auth')
 	.add(
 		HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
-			.setPath(S.Struct({ provider: _OAuthProvider }))
+			.setPath(S.Struct({ provider: OAuthProvider }))
 			.addSuccess(S.Struct({ url: Url }))
 			.addError(HttpError.OAuth)
 			.addError(HttpError.RateLimit),
 	)
 	.add(
 		HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
-			.setPath(S.Struct({ provider: _OAuthProvider }))
+			.setPath(S.Struct({ provider: OAuthProvider }))
 			.setUrlParams(S.Struct({ code: S.String, state: S.String }))
-			.addSuccess(_authResponse)
+			.addSuccess(AuthResponse)
 			.addError(HttpError.OAuth)
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit),
 	)
 	.add(
 		HttpApiEndpoint.post('refresh', '/refresh')
-			.addSuccess(_authResponse)
+			.addSuccess(AuthResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.RateLimit),
 	)
 	.add(
 		HttpApiEndpoint.post('logout', '/logout')
 			.middleware(Middleware.Auth)
-			.addSuccess(SuccessResponse)
+			.addSuccess(_SuccessResponse)
 			.addError(HttpError.Internal),
 	)
 	.add(
 		HttpApiEndpoint.get('me', '/me')
 			.middleware(Middleware.Auth)
-			.addSuccess(_user)
+			.addSuccess(_UserPublic)
 			.addError(HttpError.NotFound)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal),
@@ -176,15 +127,15 @@ const AuthGroup = HttpApiGroup.make('auth')
 	.add(
 		HttpApiEndpoint.get('listApiKeys', '/apikeys')
 			.middleware(Middleware.Auth)
-			.addSuccess(S.Struct({ data: S.Array(_apiKey) }))
+			.addSuccess(S.Struct({ data: S.Array(_ApiKeyPublic) }))
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal),
 	)
 	.add(
 		HttpApiEndpoint.post('createApiKey', '/apikeys')
 			.middleware(Middleware.Auth)
-			.setPayload(_apiKey)
-			.addSuccess(_apiKey)
+			.setPayload(_ApiKeyPayload)
+			.addSuccess(_ApiKeyCreateResponse)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.addError(HttpError.Validation),
@@ -193,65 +144,47 @@ const AuthGroup = HttpApiGroup.make('auth')
 		HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
 			.middleware(Middleware.Auth)
 			.setPath(S.Struct({ id: S.UUID }))
-			.addSuccess(SuccessResponse)
+			.addSuccess(_SuccessResponse)
 			.addError(HttpError.NotFound)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal),
 	);
-const IconsGroup = HttpApiGroup.make('icons')
-	.prefix('/icons')
-	.add(
-		HttpApiEndpoint.get('list', '/')
-			.middleware(Middleware.Auth)
-			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(S.Struct({ id: S.UUID })))
-			.addError(HttpError.Forbidden)
-			.addError(HttpError.Internal),
-	)
-	.add(
-		HttpApiEndpoint.post('generate', '/')
-			.middleware(Middleware.Auth)
-			.setPayload(IconRequest)
-			.addSuccess(IconResponse)
-			.addError(HttpError.Forbidden)
-			.addError(HttpError.Internal),
-	);
-const HealthGroup = HttpApiGroup.make('health')
+const _HealthGroup = HttpApiGroup.make('health')
 	.prefix('/health')
 	.add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(S.Struct({ status: S.Literal('ok') })))
 	.add(
 		HttpApiEndpoint.get('readiness', '/readiness')
-			.addSuccess(S.Struct({ checks: S.Struct({ database: S.Boolean }), status: S.Literal('ok') }))
+			.addSuccess(S.Struct({ checks: S.Struct({ audit: S.optional(S.Literal('healthy', 'degraded', 'alerted')), database: S.Boolean }), status: S.Literal('ok') }))
 			.addError(HttpError.ServiceUnavailable),
 	);
-const TelemetryGroup = HttpApiGroup.make('telemetry')
+const _TelemetryGroup = HttpApiGroup.make('telemetry')
 	.prefix('/v1')
 	.add(HttpApiEndpoint.post('ingestTraces', '/traces').addSuccess(S.Void));
-const UsersGroup = HttpApiGroup.make('users')
+const _UsersGroup = HttpApiGroup.make('users')
 	.prefix('/users')
 	.add(
 		HttpApiEndpoint.patch('updateRole', '/:id/role')
 			.middleware(Middleware.Auth)
 			.setPath(S.Struct({ id: S.UUID }))
-			.setPayload(S.Struct({ role: _Role })) // Inline trivial request
-			.addSuccess(_user)
+			.setPayload(S.Struct({ role: Context.UserRole }))
+			.addSuccess(_UserPublic)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.NotFound)
 			.addError(HttpError.Internal),
 	);
-const MfaGroup = HttpApiGroup.make('mfa')
+const _MfaGroup = HttpApiGroup.make('mfa')
 	.prefix('/mfa')
 	.add(
 		HttpApiEndpoint.get('status', '/status')
 			.middleware(Middleware.Auth)
-			.addSuccess(MfaResponse)
+			.addSuccess(_MfaResponse)
 			.addError(HttpError.Internal),
 	)
 	.add(
 		HttpApiEndpoint.post('enroll', '/enroll')
 			.middleware(Middleware.Auth)
-			.addSuccess(MfaResponse)
+			.addSuccess(_MfaResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Conflict)
 			.addError(HttpError.Internal)
@@ -262,7 +195,7 @@ const MfaGroup = HttpApiGroup.make('mfa')
 		HttpApiEndpoint.post('verify', '/verify')
 			.middleware(Middleware.Auth)
 			.setPayload(S.Struct({ code: S.String.pipe(S.pattern(/^\d{6}$/)) })) // Inline: single-use
-			.addSuccess(SuccessResponse)
+			.addSuccess(_SuccessResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit),
@@ -270,7 +203,7 @@ const MfaGroup = HttpApiGroup.make('mfa')
 	.add(
 		HttpApiEndpoint.del('disable', '/')
 			.middleware(Middleware.Auth)
-			.addSuccess(SuccessResponse)
+			.addSuccess(_SuccessResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.NotFound)
@@ -285,26 +218,26 @@ const MfaGroup = HttpApiGroup.make('mfa')
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit),
 	);
-const AuditPaginatedResponse = KeysetResponse(_auditLog);
-const AuditGroup = HttpApiGroup.make('audit')
+const _AuditPaginatedResponse = _KeysetResponse(AuditLog.json);
+const _AuditGroup = HttpApiGroup.make('audit')
 	.prefix('/audit')
 	.add(
-		HttpApiEndpoint.get('getByEntity', '/entity/:entityType/:entityId')
+		HttpApiEndpoint.get('getByEntity', '/entity/:subject/:subjectId')
 			.middleware(Middleware.Auth)
-			.setPath(S.Struct({ entityId: S.UUID, entityType: S.String }))
+			.setPath(S.Struct({ subject: AuditSubject, subjectId: S.UUID }))
 			.setUrlParams(Query)
-			.addSuccess(AuditPaginatedResponse)
+			.addSuccess(_AuditPaginatedResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit),
 	)
 	.add(
-		HttpApiEndpoint.get('getByActor', '/actor/:actorId')
+		HttpApiEndpoint.get('getByUser', '/user/:userId')
 			.middleware(Middleware.Auth)
-			.setPath(S.Struct({ actorId: S.UUID }))
+			.setPath(S.Struct({ userId: S.UUID }))
 			.setUrlParams(Query)
-			.addSuccess(AuditPaginatedResponse)
+			.addSuccess(_AuditPaginatedResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
@@ -314,19 +247,19 @@ const AuditGroup = HttpApiGroup.make('audit')
 		HttpApiEndpoint.get('getMine', '/me')
 			.middleware(Middleware.Auth)
 			.setUrlParams(Query)
-			.addSuccess(AuditPaginatedResponse)
+			.addSuccess(_AuditPaginatedResponse)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit),
 	);
-const TransferGroup = HttpApiGroup.make('transfer')
+const _TransferGroup = HttpApiGroup.make('transfer')
 	.prefix('/transfer')
 	.add(
 		HttpApiEndpoint.get('export', '/export')
 			.middleware(Middleware.Auth)
 			.setUrlParams(TransferQuery)
-			.addSuccess(TransferResult)
+			.addSuccess(_TransferResult)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
@@ -339,32 +272,10 @@ const TransferGroup = HttpApiGroup.make('transfer')
 		HttpApiEndpoint.post('import', '/import')
 			.middleware(Middleware.Auth)
 			.setUrlParams(TransferQuery)
-			.addSuccess(TransferResult)
+			.addSuccess(_TransferResult)
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Validation)
-			.addError(HttpError.Internal)
-			.addError(HttpError.RateLimit),
-	);
-const SearchGroup = HttpApiGroup.make('search')
-	.prefix('/search')
-	.add(
-		HttpApiEndpoint.get('search', '/')
-			.middleware(Middleware.Auth)
-			.setUrlParams(Query)
-			.addSuccess(SearchResultResponse)
-			.addError(HttpError.Auth)
-			.addError(HttpError.Forbidden)
-			.addError(HttpError.Internal)
-			.addError(HttpError.RateLimit),
-	)
-	.add(
-		HttpApiEndpoint.get('suggest', '/suggest')
-			.middleware(Middleware.Auth)
-			.setUrlParams(Query)
-			.addSuccess(SearchResultResponse)
-			.addError(HttpError.Auth)
-			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit),
 	);
@@ -372,18 +283,16 @@ const SearchGroup = HttpApiGroup.make('search')
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const ParametricApi = HttpApi.make('ParametricApi')
-	.add(AuditGroup)
-	.add(AuthGroup)
-	.add(IconsGroup)
-	.add(HealthGroup)
-	.add(MfaGroup)
-	.add(SearchGroup)
-	.add(TelemetryGroup)
-	.add(TransferGroup)
-	.add(UsersGroup)
+	.add(_AuditGroup)
+	.add(_AuthGroup)
+	.add(_HealthGroup)
+	.add(_MfaGroup)
+	.add(_TelemetryGroup)
+	.add(_TransferGroup)
+	.add(_UsersGroup)
 	.prefix('/api')
 	.annotate(OpenApi.Title, 'Parametric Portal API');
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ParametricApi, Query, TransferQuery };
+export { AuthResponse, ParametricApi, Query, TransferQuery };

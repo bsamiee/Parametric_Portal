@@ -18,7 +18,7 @@ pre-commit:
         - "**/*.spec.ts"
         - "**/*.test.ts"
         - "**/overlay/*.tsx"
-        - "**/server/src/transfer.ts"
+        - "**/server/src/utils/transfer.ts"
       run: |
         violation=0
         for file in {staged_files}; do

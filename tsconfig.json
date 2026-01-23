@@ -3,7 +3,6 @@
     "files": [],
     "references": [
         { "path": "./apps/api" },
-        { "path": "./apps/parametric_icons" },
         { "path": "./apps/test-harness" },
         { "path": "./packages/ai" },
         { "path": "./packages/components" },
