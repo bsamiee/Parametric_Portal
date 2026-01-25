@@ -28,6 +28,7 @@ type Config<M extends Model.AnyNoContext> = {
 	conflict?: { keys: (keyof M['fields'] & string)[]; only?: (keyof M['fields'] & string)[] };
 	purge?: string;
 	fn?: Record<string, { args: (string | { field: string; cast: string })[]; params: S.Schema.AnyNoContext }>;
+	fnSet?: Record<string, { args: (string | { field: string; cast: string })[]; params: S.Schema.AnyNoContext }>;
 };
 type Pred =
 	| [string, unknown]
@@ -177,7 +178,9 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const exists = (pred: Pred | readonly Pred[]) =>
 			sql`SELECT EXISTS(SELECT 1 FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}) AS exists`.pipe(Effect.map(([r]) => (r as { exists: boolean }).exists));
 		const agg = <T extends AggSpec>(pred: Pred | readonly Pred[], spec: T): Effect.Effect<AggResult<T>, SqlError | ParseError> =>
-			sql`SELECT ${sql.csv(Object.entries(spec).map(([fn, col]) => fn === 'count' ? sql`COUNT(*)::int AS count` : sql`${sql.literal(fn.toUpperCase())}(${sql(col as string)})${fn === 'sum' || fn === 'avg' ? sql`::numeric` : sql``} AS ${sql(fn)}`))} FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([row]) => row as AggResult<T>));
+			sql`SELECT ${sql.csv(Object.entries(spec).map(([fn, col]) =>
+				fn === 'count' ? sql`COUNT(*)::int AS count` : sql`${sql.literal(fn.toUpperCase())}(${sql(col as string)})${fn === 'sum' || fn === 'avg' ? sql`::numeric` : sql``} AS ${sql(fn)}`))} FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([row]) =>
+					row as AggResult<T>));
 		const pageOffset = (pred: Pred | readonly Pred[], opts: { limit?: number; offset?: number; asc?: boolean } = {}) => {
 			const { limit = Page.bounds.default, offset: start = 0, asc = false } = opts;
 			return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
@@ -280,18 +283,30 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		/** Stream rows via server-side cursor with schema validation. Memory-efficient for large datasets. */
 		const stream = (pred: Pred | readonly Pred[], opts: { asc?: boolean } = {}): Stream.Stream<S.Schema.Type<M>, SqlError | ParseError> =>
 			Stream.mapEffect(sql`SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh} ${$order(opts.asc ?? false)}`.stream, S.decodeUnknown(model));
-		// --- Custom function method (fail with tagged error if not configured)
+		// --- Custom function methods (fail with tagged error if not configured)
+		const $fnArgs = (spec: { args: (string | { field: string; cast: string })[] }, params: Record<string, unknown>) =>
+			sql.csv(spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
+		/** Call scalar-returning function (SELECT fn(...) AS count → number) */
 		const fn = (name: string, params: Record<string, unknown>) =>
 			config.fn ? config.fn[name] ? ((spec: NonNullable<typeof config.fn>[string]) =>
-				SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${sql.csv(spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`))}) AS count`, Request: spec.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count))
+				SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${$fnArgs(spec, params)}) AS count`, Request: spec.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count))
 			)(config.fn[name]) : Effect.fail(new RepoUnknownFnError({ fn: name, table })) : Effect.fail(new RepoConfigError({ message: 'no functions configured', operation: 'fn', table }));
+		/** Call SETOF-returning function (SELECT * FROM fn(...) → T[]) */
+		const fnSet = (name: string, params: Record<string, unknown>) =>
+			config.fnSet
+				? config.fnSet[name]
+					? ((spec: NonNullable<typeof config.fnSet>[string]) =>
+						SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${$fnArgs(spec, params)})`, Request: spec.params, Result: model })(params)
+					)(config.fnSet[name])
+					: Effect.fail(new RepoUnknownFnError({ fn: name, table }))
+				: Effect.fail(new RepoConfigError({ message: 'no fnSet functions configured', operation: 'fnSet', table }));
 		// --- Transaction support ---------------------------------------------
 		/** Run effect within a transaction. Caller controls the transaction boundary. */
 		const withTransaction = sql.withTransaction;
 		return {
 			...base,
-			agg, by, count, drop, exists, find, fn, lift, merge, one, page, pageOffset, pg,
-			preds,purge, put, set, setIf, stream, upsert, withTransaction,
+			agg, by, count, drop, exists, find, fn, fnSet, lift, merge, one, page, pageOffset, pg,
+			preds, purge, put, set, setIf, stream, upsert, withTransaction,
 		};
 	});
 

@@ -5,8 +5,8 @@
 import { Otlp } from '@effect/opentelemetry';
 import { FetchHttpClient } from '@effect/platform';
 import { Config as Cfg, Duration, Effect, Layer, Option } from 'effect';
+import { Context } from '../context.ts';
 import { Circuit } from '../utils/circuit.ts';
-import { Tenant } from '../tenant.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -53,21 +53,21 @@ const _createResource = (cfg: Cfg.Config.Success<typeof _telemetryConfig>) => ({
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const annotateSpan: Effect.Effect<void, never, never> = Effect.gen(function* () {
-	const { tenantId, circuit } = yield* Effect.all({ circuit: Circuit.current, tenantId: Tenant.Context.current });
-	yield* Effect.annotateCurrentSpan('tenant.id', tenantId);
-	yield* Option.match(circuit, {
+	const ctx = yield* Context.Request.current;
+	yield* Effect.annotateCurrentSpan('tenant.id', ctx.tenantId);
+	yield* Option.match(ctx.circuit, {
 		onNone: () => Effect.void,
-		onSome: (ctx) => Effect.all([
-			Effect.annotateCurrentSpan('circuit.name', ctx.name),
-			Effect.annotateCurrentSpan('circuit.state', Circuit.State[ctx.state]),
+		onSome: (c) => Effect.all([
+			Effect.annotateCurrentSpan('circuit.name', c.name),
+			Effect.annotateCurrentSpan('circuit.state', Circuit.State[c.state]),
 		], { discard: true }),
 	});
 });
 const withSpan = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
 	Effect.gen(function* () {
-		const { tenantId, circuit } = yield* Effect.all({ circuit: Circuit.current, tenantId: Tenant.Context.current });
-		const tenantAttrs = { 'tenant.id': tenantId };
-		const circuitAttrs = Option.match(circuit, { onNone: () => ({}), onSome: (ctx) => ({ 'circuit.name': ctx.name, 'circuit.state': Circuit.State[ctx.state] }) });
+		const ctx = yield* Context.Request.current;
+		const tenantAttrs = { 'tenant.id': ctx.tenantId };
+		const circuitAttrs = Option.match(ctx.circuit, { onNone: () => ({}), onSome: (c) => ({ 'circuit.name': c.name, 'circuit.state': Circuit.State[c.state] }) });
 		return yield* Effect.withSpan(effect, name, { attributes: { ...tenantAttrs, ...circuitAttrs } });
 	});
 const Default = Layer.unwrapEffect(

@@ -99,6 +99,8 @@ type _ResolvedBase<E extends _CanonExt> = Simplify<_RawOf<E> & Readonly<{
 	is(input: _Input): boolean;
 	content(input: _Input): string;
 	buf(input: _Input): Buffer;
+	uint8(input: _Input): Uint8Array;
+	arrayBuffer(input: _Input): ArrayBuffer;
 	bytes(input: _Input): Stream.Stream<Uint8Array>;
 }>>;
 type _Resolved<E extends _Ext = _Ext> = E extends _CanonExt ? _ResolvedBase<E> : _ResolvedBase<_Canonical<E> & _CanonExt>;
@@ -123,8 +125,12 @@ const _cache = (() => {		// [DESIGN] Entry IS config. Codec('csv').sep works via
 		const buf = isBinary
 			? (input: _Input) => typeof input === 'string' ? Buffer.from(input, 'base64') : Buffer.from(new Uint8Array(input))
 			: (input: _Input) => typeof input === 'string' ? Buffer.from(input, 'utf8') : Buffer.from(new Uint8Array(input));
-		const bytes = (input: _Input) => Stream.make(typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input));
-		return { ...raw, ext, canonical: ext, binary: isBinary, _tag: raw.parser, is, content, buf, bytes } as _Resolved<E>;
+		const uint8 = isBinary
+			? (input: _Input) => typeof input === 'string' ? new Uint8Array(Buffer.from(input, 'base64')) : new Uint8Array(input)
+			: (input: _Input) => typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input);
+		const arrayBuffer = (input: _Input) => { const u8 = uint8(input); return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength); };
+		const bytes = (input: _Input) => Stream.make(uint8(input));
+		return { ...raw, ext, canonical: ext, binary: isBinary, _tag: raw.parser, is, content, buf, uint8, arrayBuffer, bytes } as _Resolved<E>;
 	};
 	const keys = (Object.keys(_Registry) as _Ext[]).filter((key): key is _CanonExt => !('aliasOf' in _Registry[key]));
 	const byExt = Object.fromEntries(keys.map((ext) => [ext, make(ext)])) as { [K in _CanonExt]: _Resolved<K> };
@@ -171,7 +177,7 @@ class Metadata extends S.Class<Metadata>('Metadata')({
 	content: S.optional(S.String),
 	hash: S.optional(S.String),
 	id: S.optional(S.UUID),
-	kind: S.optional(S.NonEmptyTrimmedString),
+	type: S.optional(S.NonEmptyTrimmedString),
 	mime: S.String,
 	name: S.NonEmptyTrimmedString,
 	size: S.NonNegativeInt,
@@ -186,8 +192,8 @@ class Metadata extends S.Class<Metadata>('Metadata')({
 	get binary() { return this.codec.binary; }
 	get category() { return this.codec.category; }
 	get mode(): 'archive' | 'code' | 'document' | 'image' | 'model' | 'svg' { return this.mime === 'image/svg+xml' ? 'svg' : this.category; }
-	static from(content: string, opts: { kind: string; name: string; mime?: string; hash?: string; id?: string }) {
-		return new Metadata({ content, hash: opts.hash, id: opts.id, kind: opts.kind, mime: opts.mime ?? 'text/plain', name: opts.name, size: _size(content) });
+	static from(content: string, opts: { type: string; name: string; mime?: string; hash?: string; id?: string }) {
+		return new Metadata({ content, hash: opts.hash, id: opts.id, type: opts.type, mime: opts.mime ?? 'text/plain', name: opts.name, size: _size(content) });
 	}
 }
 

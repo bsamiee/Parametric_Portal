@@ -62,9 +62,9 @@ const Client = {
 		return { healthy, latencyMs: Duration.toMillis(duration) };
 	}),
 	layer: _layer,
-	lock: {									/** Advisory locks for distributed coordination. Use xact variants with connection pooling. */
+	lock: {					/** Advisory locks for distributed coordination. Use xact variants with connection pooling. */
 		acquire: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* sql`SELECT pg_advisory_xact_lock(${key})`; }),
-		session: { 							/** Session-scoped locks (requires explicit release, use with caution in pooled connections) */
+		session: { 			/** Session-scoped locks (requires explicit release, use with caution in pooled connections) */
 			acquire: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* sql`SELECT pg_advisory_lock(${key})`; }),
 			release: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; const [r] = yield* sql<{ released: boolean }>`SELECT pg_advisory_unlock(${key}) AS released`; return r?.released ?? false; }),
 			try: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; const [r] = yield* sql<{ acquired: boolean }>`SELECT pg_try_advisory_lock(${key}) AS acquired`; return r?.acquired ?? false; }),
@@ -78,8 +78,8 @@ const Client = {
 			return yield* sql`SELECT * FROM pg_stat_statements LIMIT ${limit}`;
 		}),
 	),
-	tenant: { 								/** RLS policy - SET LOCAL (3rd param = true) for transaction-scoped isolation with connection pooling. */
-		set: _setTenant, 					/** Set tenant context for current transaction. RLS policies read this via current_setting(). */
+	tenant: { 				/** RLS policy - SET LOCAL (3rd param = true) for transaction-scoped isolation with connection pooling. */
+		set: _setTenant,	/** Set tenant context for current transaction. RLS policies read this via current_setting(). */
 		with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () { /** Execute effect within tenant context. Wraps in transaction with SET LOCAL. */
 			const sql = yield* SqlClient.SqlClient;
 			return yield* sql.withTransaction(_setTenant(appId).pipe(Effect.andThen(effect)));

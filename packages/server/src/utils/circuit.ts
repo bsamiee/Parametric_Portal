@@ -1,27 +1,31 @@
 /**
  * Wrap external calls with circuit breaker resilience.
  * Cockatiel-based; configurable breaker strategies with metrics integration.
+ * Circuit state tracked via RequestContext.circuit when available.
  */
 import {
 	BrokenCircuitError, CircuitState, ConsecutiveBreaker, CountBreaker, SamplingBreaker, TaskCancelledError, circuitBreaker,
 	handleAll, handleType, isBrokenCircuitError, isTaskCancelledError, type CircuitBreakerPolicy, type IBackoffFactory,
 	type IBreaker, type IDefaultPolicyContext, type IHalfOpenAfterBackoffContext, type Policy
 } from 'cockatiel';
-import { Duration, Effect, FiberRef, Match, Metric, Option } from 'effect';
+import { Duration, Effect, Match, Metric, Option } from 'effect';
+import { Context } from '../context.ts';
 import { MetricsService } from '../infra/metrics.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CIRCUIT_CONFIG = {
-	defaults: { consecutiveThreshold: 5, count: { size: 100, threshold: 0.2 }, halfOpenSeconds: 30, sampling: { durationSeconds: 30, threshold: 0.2 } },
-	metrics: { circuitTag: 'circuit' },
+	defaults: {
+		consecutiveThreshold: 5,
+		count: { size: 100, threshold: 0.2 },
+		halfOpenSeconds: 30,
+		sampling: { durationSeconds: 30, threshold: 0.2 } },
 } as const;
 const _registry = new Map<string, {
 	readonly execute: <A>(fn: (context: IDefaultPolicyContext) => PromiseLike<A> | A, signal?: AbortSignal) => Effect.Effect<A, BrokenCircuitError | TaskCancelledError | Error>;
 	readonly name: string;
 	readonly policy: CircuitBreakerPolicy;
 }>();
-const _contextRef = FiberRef.unsafeMake(Option.none<{ readonly name: string; readonly state: CircuitState }>());
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -56,14 +60,15 @@ const make = (name: string, config: {
 			Effect.gen(function* () {
 				const metrics = yield* Effect.serviceOption(MetricsService);
 				const before = policy.state;
-				const exit = yield* Effect.locally(Effect.tryPromise({ catch: (err: unknown) => err instanceof Error ? err : new Error(String(err)), try: (abortSignal) => policy.execute(fn, signal ?? abortSignal) }), _contextRef, Option.some({ name, state: before })).pipe(Effect.exit);
+				yield* Context.Request.update({ circuit: Option.some({ name, state: before }) });
+				const exit = yield* Effect.tryPromise({ catch: (err: unknown) => err instanceof Error ? err : new Error(String(err)), try: (abortSignal) => policy.execute(fn, signal ?? abortSignal) }).pipe(Effect.exit);
 				const after = policy.state;
 				const error = exit._tag === 'Failure' ? exit.cause : undefined;
 				const attemptedHalfOpen = before === CircuitState.Open && !(error instanceof BrokenCircuitError);
 				const transitions = [...(attemptedHalfOpen ? [{ previous: before, state: CircuitState.HalfOpen }, { previous: CircuitState.HalfOpen, state: after }] : []), ...(before !== after && !attemptedHalfOpen ? [{ previous: before, state: after }] : [])];
 				const notifyEffects = Option.isSome(onStateChange) ? transitions.map((transition) => onStateChange.value({ error, name, previous: transition.previous, state: transition.state })) : [];
-				const metricEffects = Option.isSome(metrics) ? transitions.map((transition) => Metric.update(metrics.value.circuit.stateChanges.pipe(Metric.tagged(_CIRCUIT_CONFIG.metrics.circuitTag, name)), CircuitState[transition.state])) : [];
-				yield* Effect.all([FiberRef.set(_contextRef, Option.some({ name, state: after })), ...notifyEffects, ...metricEffects], { discard: true });
+				const metricEffects = Option.isSome(metrics) ? transitions.map((transition) => Metric.update(Metric.taggedWithLabels(metrics.value.circuit.stateChanges, MetricsService.label({ circuit: name })), CircuitState[transition.state])) : [];
+				yield* Effect.all([Context.Request.update({ circuit: Option.some({ name, state: after }) }), ...notifyEffects, ...metricEffects], { discard: true });
 				return exit._tag === 'Success' ? exit.value : yield* Effect.failCause(exit.cause);
 			});
 		const instance = { execute, name, policy } as const;
@@ -71,7 +76,7 @@ const make = (name: string, config: {
 		return instance;
 	})();
 };
-const current = FiberRef.get(_contextRef);
+const current = Context.Request.current.pipe(Effect.map((ctx) => ctx.circuit));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

@@ -63,7 +63,7 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 						JOIN ${sql(Tuning.tables.documents)} d
 							ON d.entity_type = e.entity_type
 							AND d.entity_id = e.entity_id
-							AND d.content_hash = e.content_hash
+							AND d.hash = e.hash
 						WHERE true
 							${scopeFilter}
 							${entityFilter}
@@ -216,7 +216,7 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 				const scopeMatch = params.scopeId ? sql`scope_id = ${params.scopeId}::uuid` : sql`scope_id IS NULL`;
 				const scopeFilter = params.includeGlobal && params.scopeId ? sql`AND (${scopeMatch} OR scope_id IS NULL)` : sql`AND ${scopeMatch}`;
 				return sql`
-					SELECT entity_type, entity_id, scope_id, display_text, content_text, metadata, content_hash, updated_at
+					SELECT entity_type, entity_id, scope_id, display_text, content_text, metadata, hash, updated_at
 					FROM ${sql(Tuning.tables.embeddingSources)}
 					WHERE true ${scopeFilter} ${entityFilter}
 					ORDER BY updated_at DESC
@@ -224,21 +224,21 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 				`;
 			},
 			Request: S.Struct({ entityTypes: S.Array(S.Literal('app', 'asset', 'auditLog', 'user')), includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(Tuning.limits.embeddingBatch)), scopeId: S.NullOr(S.UUID) }),
-			Result: S.Struct({ contentHash: S.String, contentText: S.NullOr(S.String), displayText: S.String, entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
+			Result: S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), hash: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
 		});
 		const executeUpsertEmbedding = SqlSchema.single({ 	// PG 18.1: RETURNING WITH (OLD AS o, NEW AS n) returns both old and new row values, OLD.entity_type IS NULL means a fresh insert occurred
 			execute: (params) => sql`
-				INSERT INTO ${sql(Tuning.tables.embeddings)} (entity_type, entity_id, scope_id, embedding, content_hash)
-				VALUES (${params.entityType}, ${params.entityId}, ${params.scopeId}, (${params.embeddingJson})::vector, ${params.contentHash})
+				INSERT INTO ${sql(Tuning.tables.embeddings)} (entity_type, entity_id, scope_id, embedding, hash)
+				VALUES (${params.entityType}, ${params.entityId}, ${params.scopeId}, (${params.embeddingJson})::vector, ${params.hash})
 				ON CONFLICT (entity_type, entity_id) DO UPDATE SET
 					embedding = EXCLUDED.embedding,
 					scope_id = EXCLUDED.scope_id,
-					content_hash = EXCLUDED.content_hash
+					hash = EXCLUDED.hash
 				RETURNING WITH (OLD AS o, NEW AS n)
 					n.entity_type, n.entity_id,
 					(o.entity_type IS NULL)::boolean AS is_new
 			`,
-			Request: S.Struct({ contentHash: S.String, embeddingJson: S.String, entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), scopeId: S.NullOr(S.UUID) }),
+			Request: S.Struct({ embeddingJson: S.String, entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), hash: S.String, scopeId: S.NullOr(S.UUID) }),
 			Result: S.Struct({ entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), isNew: S.Boolean }),
 		});
 		return {
@@ -307,9 +307,9 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 					Effect.withSpan('search.suggest'),
 				),
 			),
-			upsertEmbedding: Effect.fn('SearchService.upsertEmbedding')((input: { readonly contentHash: string; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: EntityType; readonly scopeId: string | null }) =>
+			upsertEmbedding: Effect.fn('SearchService.upsertEmbedding')((input: { readonly hash: string; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: EntityType; readonly scopeId: string | null }) =>
 				S.decode(S.Array(S.Number).pipe(S.itemsCount(Tuning.embedding.dimensions)))(input.embedding).pipe(
-					Effect.andThen((embedding) => executeUpsertEmbedding({ contentHash: input.contentHash, embeddingJson: JSON.stringify(embedding), entityId: input.entityId, entityType: input.entityType, scopeId: input.scopeId })),
+					Effect.andThen((embedding) => executeUpsertEmbedding({ embeddingJson: JSON.stringify(embedding), entityId: input.entityId, entityType: input.entityType, hash: input.hash, scopeId: input.scopeId })),
 					Effect.mapError((cause) => new SearchError({ cause, operation: 'upsertEmbedding' })),
 					Effect.withSpan('search.upsertEmbedding'),
 				),
@@ -317,8 +317,8 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 		};
 	}),
 }) {
-	static readonly layer = this.Default;
-	static readonly Test = (overrides: Partial<SearchService> = {}) => 	/** Create a test layer with mock implementations for SearchService methods. Override only the methods you need in your test. */
+	/** Test layer factory with mock implementations. Override only the methods you need. */
+	static readonly Test = (overrides: Partial<SearchService> = {}) =>
 		Layer.succeed(SearchService, {
 			embeddingSources: overrides.embeddingSources ?? ((_) => Effect.succeed([])),
 			onRefresh: overrides.onRefresh ?? (() => Stream.empty),

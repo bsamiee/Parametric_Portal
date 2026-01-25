@@ -136,14 +136,18 @@ export default Effect.gen(function* () {
 			app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
 			email CITEXT NOT NULL,
 			role TEXT NOT NULL,
-			state TEXT NOT NULL,
+			status TEXT NOT NULL,
 			deleted_at TIMESTAMPTZ,
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			role_order INTEGER GENERATED ALWAYS AS (
+				CASE role WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'member' THEN 2 WHEN 'viewer' THEN 1 WHEN 'guest' THEN 0 ELSE -1 END
+			) VIRTUAL
 		)
 	`;
     yield* sql`COMMENT ON TABLE users IS 'User accounts — NEVER hard-delete; use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN users.deleted_at IS 'Soft-delete timestamp — NULL means active; set enables email re-registration'`;
     yield* sql`COMMENT ON COLUMN users.email IS 'Format validated at app layer; CITEXT enforces case-insensitive uniqueness among active users'`;
+    yield* sql`COMMENT ON COLUMN users.role_order IS 'VIRTUAL generated — permission hierarchy (owner=4, admin=3, member=2, viewer=1, guest=0)'`;
     yield* sql`CREATE UNIQUE INDEX idx_users_app_email_active ON users(app_id, email) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_email ON users(app_id, email) INCLUDE (id, role) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_id ON users(app_id) INCLUDE (id, email, role) WHERE deleted_at IS NULL`;
@@ -262,26 +266,29 @@ export default Effect.gen(function* () {
 			id UUID PRIMARY KEY DEFAULT uuidv7(),
 			app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
 			user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-			kind TEXT NOT NULL,
+			type TEXT NOT NULL,
 			content TEXT NOT NULL,
-			state TEXT NOT NULL,
+			status TEXT NOT NULL,
 			hash TEXT,
 			name TEXT,
+			storage_ref TEXT,
 			deleted_at TIMESTAMPTZ,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			size INTEGER GENERATED ALWAYS AS (octet_length(content)) STORED,
-			CONSTRAINT assets_content_max_size CHECK (octet_length(content) <= 10485760),
+			CONSTRAINT assets_content_max_size CHECK (octet_length(content) <= 1048576),
 			CONSTRAINT assets_hash_format CHECK (hash IS NULL OR hash ~* '^[0-9a-f]{64}$')
 		)
 	`;
     yield* sql`COMMENT ON TABLE assets IS 'App content — use uuid_extract_timestamp(id) for creation time; user_id SET NULL on user delete preserves orphaned content'`;
     yield* sql`COMMENT ON COLUMN assets.hash IS 'SHA-256 content hash (64 hex chars) for verification/deduplication — computed at app layer'`;
     yield* sql`COMMENT ON COLUMN assets.name IS 'Original filename for ZIP manifest reconstruction and display'`;
+    yield* sql`COMMENT ON COLUMN assets.storage_ref IS 'S3 object key when binary content stored externally — pattern: assets/{appId}/{hash}.{ext}'`;
     yield* sql`COMMENT ON COLUMN assets.size IS 'STORED for aggregate queries — octet_length for byte quota (UTF-8 aware)'`;
-    yield* sql`CREATE INDEX idx_assets_app_kind ON assets(app_id, kind) INCLUDE (id, user_id) WHERE deleted_at IS NULL`;
-    yield* sql`CREATE INDEX idx_assets_app_user ON assets(app_id, user_id) INCLUDE (id, kind) WHERE deleted_at IS NULL AND user_id IS NOT NULL`;
-    yield* sql`CREATE INDEX idx_assets_app_recent ON assets(app_id, id DESC) INCLUDE (kind, user_id) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_assets_app_type ON assets(app_id, type) INCLUDE (id, user_id) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_assets_app_user ON assets(app_id, user_id) INCLUDE (id, type) WHERE deleted_at IS NULL AND user_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_assets_app_recent ON assets(app_id, id DESC) INCLUDE (type, user_id) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_assets_hash ON assets(hash) WHERE hash IS NOT NULL AND deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_assets_storage_ref ON assets(storage_ref) WHERE storage_ref IS NOT NULL AND deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_assets_app_id_fk ON assets(app_id)`;
     yield* sql`CREATE INDEX idx_assets_user_id_fk ON assets(user_id)`;
     yield* sql`CREATE TRIGGER assets_updated_at BEFORE UPDATE ON assets FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
@@ -339,6 +346,98 @@ export default Effect.gen(function* () {
     yield* sql`COMMENT ON COLUMN mfa_secrets.deleted_at IS 'Soft-delete timestamp — NULL means active'`;
     yield* sql`CREATE INDEX idx_mfa_user ON mfa_secrets(user_id) INCLUDE (enabled_at) WHERE deleted_at IS NULL`;
     yield* sql`CREATE TRIGGER mfa_secrets_updated_at BEFORE UPDATE ON mfa_secrets FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // JOBS: Background job queue with tenant isolation and worker locking
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql`
+		CREATE OR REPLACE FUNCTION set_job_timestamps()
+		RETURNS TRIGGER AS $$
+		BEGIN
+			-- Auto-set started_at when transitioning to processing (first time only)
+			IF NEW.status = 'processing' AND (OLD.status IS NULL OR OLD.status != 'processing') AND NEW.started_at IS NULL THEN
+				NEW.started_at = NOW();
+			END IF;
+			-- Auto-set completed_at when transitioning to terminal state
+			IF NEW.status IN ('completed', 'dead') AND (OLD.status IS NULL OR OLD.status NOT IN ('completed', 'dead')) THEN
+				NEW.completed_at = NOW();
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql
+	`;
+    yield* sql`COMMENT ON FUNCTION set_job_timestamps() IS 'Trigger function to auto-set started_at/completed_at on job status transitions'`;
+    yield* sql`
+		CREATE TABLE jobs (
+			id UUID PRIMARY KEY DEFAULT uuidv7(),
+			app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+			user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+			request_id UUID,
+			type TEXT NOT NULL,
+			payload JSONB NOT NULL,
+			priority TEXT NOT NULL DEFAULT 'normal',
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			max_attempts INTEGER NOT NULL DEFAULT 5,
+			scheduled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			started_at TIMESTAMPTZ,
+			completed_at TIMESTAMPTZ,
+			last_error TEXT,
+			locked_by TEXT,
+			locked_until TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			-- VIRTUAL generated: queue wait time in milliseconds (null until started)
+			wait_ms INTEGER GENERATED ALWAYS AS (
+				CASE WHEN started_at IS NOT NULL
+				THEN EXTRACT(EPOCH FROM (started_at - scheduled_at))::integer * 1000
+				END
+			) VIRTUAL,
+			-- VIRTUAL generated: execution duration in milliseconds (null until completed)
+			duration_ms INTEGER GENERATED ALWAYS AS (
+				CASE WHEN completed_at IS NOT NULL AND started_at IS NOT NULL
+				THEN EXTRACT(EPOCH FROM (completed_at - started_at))::integer * 1000
+				END
+			) VIRTUAL,
+			CONSTRAINT jobs_priority_valid CHECK (priority IN ('low', 'normal', 'high', 'critical')),
+			CONSTRAINT jobs_status_valid CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'dead'))
+		)
+	`;
+    yield* sql`COMMENT ON TABLE jobs IS 'Background job queue — use uuid_extract_timestamp(id) for creation time; worker claims via SELECT FOR UPDATE SKIP LOCKED'`;
+    yield* sql`COMMENT ON COLUMN jobs.user_id IS 'FK to users — RESTRICT (users never hard-deleted); attribution for who enqueued the job'`;
+    yield* sql`COMMENT ON COLUMN jobs.request_id IS 'Correlation ID from request context — correlate job with originating HTTP request'`;
+    yield* sql`COMMENT ON COLUMN jobs.locked_by IS 'Worker ID holding the lock — NULL when available'`;
+    yield* sql`COMMENT ON COLUMN jobs.locked_until IS 'Lock expiration — stale locks can be reclaimed after this time'`;
+    yield* sql`COMMENT ON COLUMN jobs.wait_ms IS 'VIRTUAL — queue latency from scheduled_at to started_at in milliseconds'`;
+    yield* sql`COMMENT ON COLUMN jobs.duration_ms IS 'VIRTUAL — execution time from started_at to completed_at in milliseconds'`;
+    yield* sql`CREATE INDEX idx_jobs_claim ON jobs(priority DESC, scheduled_at ASC) WHERE status = 'pending' AND (locked_until IS NULL OR locked_until < now())`;
+    yield* sql`CREATE INDEX idx_jobs_app_status ON jobs(app_id, status) INCLUDE (type, scheduled_at)`;
+    yield* sql`CREATE INDEX idx_jobs_type_status ON jobs(type, status) INCLUDE (app_id, scheduled_at)`;
+    yield* sql`CREATE INDEX idx_jobs_cleanup ON jobs(status, completed_at) WHERE status IN ('completed', 'dead')`;
+    yield* sql`CREATE INDEX idx_jobs_app_id_fk ON jobs(app_id)`;
+    yield* sql`CREATE INDEX idx_jobs_user_id_fk ON jobs(user_id)`;
+    yield* sql`CREATE TRIGGER jobs_timestamps BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_job_timestamps()`;
+    yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    yield* sql`
+		CREATE OR REPLACE FUNCTION claim_jobs(p_worker_id TEXT, p_limit INT, p_lock_minutes INT DEFAULT 5)
+		RETURNS SETOF jobs
+		LANGUAGE sql
+		AS $$
+			UPDATE jobs SET
+				status = 'processing',
+				locked_by = p_worker_id,
+				locked_until = NOW() + (p_lock_minutes || ' minutes')::interval
+			WHERE id IN (
+				SELECT id FROM jobs
+				WHERE status = 'pending'
+					AND scheduled_at <= NOW()
+					AND (locked_until IS NULL OR locked_until < NOW())
+				ORDER BY priority DESC, scheduled_at ASC
+				FOR UPDATE SKIP LOCKED
+				LIMIT p_limit
+			)
+			RETURNING *
+		$$
+	`;
+    yield* sql`COMMENT ON FUNCTION claim_jobs IS 'Atomic job claim via SELECT FOR UPDATE SKIP LOCKED — trigger auto-sets started_at'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // PURGE FUNCTIONS: Hard-delete stale/expired records (cleanup jobs)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -432,6 +531,21 @@ export default Effect.gen(function* () {
 		$$
 	`;
     yield* sql`COMMENT ON FUNCTION purge_assets IS 'Hard-delete soft-deleted assets older than N days'`;
+    yield* sql`
+		CREATE OR REPLACE FUNCTION purge_jobs(p_older_than_days INT DEFAULT 7)
+		RETURNS INT
+		LANGUAGE sql
+		AS $$
+			WITH purged AS (
+				DELETE FROM jobs
+				WHERE status IN ('completed', 'dead')
+				  AND completed_at < NOW() - (p_older_than_days || ' days')::interval
+				RETURNING id
+			)
+			SELECT COUNT(*)::int FROM purged
+		$$
+	`;
+    yield* sql`COMMENT ON FUNCTION purge_jobs IS 'Hard-delete completed/dead jobs older than N days'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // IP-BASED FUNCTIONS: Abuse detection and session management
     // ═══════════════════════════════════════════════════════════════════════════
@@ -498,7 +612,7 @@ export default Effect.gen(function* () {
 			content_text TEXT,
 			metadata JSONB,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-			content_hash TEXT GENERATED ALWAYS AS (
+			hash TEXT GENERATED ALWAYS AS (
 				md5(coalesce(display_text, '') || ' ' || coalesce(content_text, '') || ' ' || coalesce(metadata::text, ''))
 			) STORED,
 			search_vector TSVECTOR GENERATED ALWAYS AS (
@@ -516,7 +630,7 @@ export default Effect.gen(function* () {
 			entity_id UUID NOT NULL,
 			scope_id UUID,
 			embedding VECTOR(1536) NOT NULL,
-			content_hash TEXT NOT NULL,
+			hash TEXT,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			CONSTRAINT search_embeddings_pk PRIMARY KEY (entity_type, entity_id),
 			CONSTRAINT search_embeddings_fk FOREIGN KEY (entity_type, entity_id)
@@ -539,13 +653,13 @@ export default Effect.gen(function* () {
 			d.display_text,
 			d.content_text,
 			d.metadata,
-			d.content_hash,
+			d.hash,
 			d.updated_at
 		FROM search_documents d
 		LEFT JOIN search_embeddings e
 			ON e.entity_type = d.entity_type
 			AND e.entity_id = d.entity_id
-			AND e.content_hash = d.content_hash
+			AND e.hash = d.hash
 		WHERE e.entity_id IS NULL
 	`;
     yield* sql`COMMENT ON VIEW search_embedding_sources IS 'Source for embedding refresh; yields documents missing current embeddings'`;
@@ -612,9 +726,9 @@ export default Effect.gen(function* () {
 				'asset',
 				NEW.id,
 				NEW.app_id,
-				COALESCE(NEW.name, NEW.kind),
+				COALESCE(NEW.name, NEW.type),
 				NEW.content,
-				jsonb_build_object('kind', NEW.kind, 'size', NEW.size, 'name', NEW.name, 'hash', NEW.hash)
+				jsonb_build_object('type', NEW.type, 'size', NEW.size, 'name', NEW.name, 'hash', NEW.hash)
 			)
 			ON CONFLICT (entity_type, entity_id) DO UPDATE SET
 				scope_id = EXCLUDED.scope_id,
@@ -659,7 +773,7 @@ export default Effect.gen(function* () {
     yield* sql`CREATE TRIGGER apps_search_upsert AFTER INSERT OR UPDATE OF name, namespace ON apps FOR EACH ROW EXECUTE FUNCTION upsert_search_document_app()`;
     yield* sql`CREATE TRIGGER users_search_upsert AFTER INSERT OR UPDATE OF email, role, deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION upsert_search_document_user()`;
     yield* sql`CREATE TRIGGER users_search_delete AFTER UPDATE OF deleted_at ON users FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION delete_search_document_user()`;
-    yield* sql`CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, kind, name, hash, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION upsert_search_document_asset()`;
+    yield* sql`CREATE TRIGGER assets_search_upsert AFTER INSERT OR UPDATE OF content, type, name, hash, deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NULL) EXECUTE FUNCTION upsert_search_document_asset()`;
     yield* sql`CREATE TRIGGER assets_search_delete AFTER UPDATE OF deleted_at ON assets FOR EACH ROW WHEN (NEW.deleted_at IS NOT NULL) EXECUTE FUNCTION delete_search_document_asset()`;
     yield* sql`CREATE TRIGGER audit_logs_search_insert AFTER INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION insert_search_document_audit()`;
     yield* sql.unsafe(String.raw`
@@ -679,7 +793,7 @@ export default Effect.gen(function* () {
 				FROM users
 				WHERE deleted_at IS NULL;
 				INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-				SELECT 'asset', id, app_id, COALESCE(name, kind), content, jsonb_build_object('kind', kind, 'size', size, 'name', name, 'hash', hash)
+				SELECT 'asset', id, app_id, COALESCE(name, type), content, jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash)
 				FROM assets
 				WHERE deleted_at IS NULL;
 				INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
@@ -704,7 +818,7 @@ export default Effect.gen(function* () {
 			WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
 			INSERT INTO search_documents (entity_type, entity_id, scope_id, display_text, content_text, metadata)
-			SELECT 'asset', id, app_id, COALESCE(name, kind), content, jsonb_build_object('kind', kind, 'size', size, 'name', name, 'hash', hash)
+			SELECT 'asset', id, app_id, COALESCE(name, type), content, jsonb_build_object('type', type, 'size', size, 'name', name, 'hash', hash)
 			FROM assets
 			WHERE deleted_at IS NULL AND app_id = p_scope_id;
 
@@ -773,6 +887,7 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE mfa_secrets ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE assets ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE jobs ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings ENABLE ROW LEVEL SECURITY`;
     // RLS Policies: users (scoped by app_id)
@@ -791,6 +906,8 @@ export default Effect.gen(function* () {
     yield* sql`CREATE POLICY assets_tenant_isolation ON assets USING (app_id = current_setting('app.current_tenant', true)::uuid) WITH CHECK (app_id = current_setting('app.current_tenant', true)::uuid)`;
     // RLS Policies: audit_logs (scoped by app_id)
     yield* sql`CREATE POLICY audit_logs_tenant_isolation ON audit_logs USING (app_id = current_setting('app.current_tenant', true)::uuid) WITH CHECK (app_id = current_setting('app.current_tenant', true)::uuid)`;
+    // RLS Policies: jobs (scoped by app_id)
+    yield* sql`CREATE POLICY jobs_tenant_isolation ON jobs USING (app_id = current_setting('app.current_tenant', true)::uuid) WITH CHECK (app_id = current_setting('app.current_tenant', true)::uuid)`;
     // RLS Policies: search_documents (scoped by scope_id = app_id, or global if NULL)
     yield* sql`CREATE POLICY search_documents_tenant_isolation ON search_documents USING (scope_id IS NULL OR scope_id = current_setting('app.current_tenant', true)::uuid)`;
     // RLS Policies: search_embeddings (scoped by scope_id = app_id, or global if NULL)
@@ -804,9 +921,11 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE mfa_secrets FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE assets FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE jobs FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings FORCE ROW LEVEL SECURITY`;
     yield* sql`COMMENT ON POLICY users_tenant_isolation ON users IS 'RLS: Isolate users by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY assets_tenant_isolation ON assets IS 'RLS: Isolate assets by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY audit_logs_tenant_isolation ON audit_logs IS 'RLS: Isolate audit_logs by app_id matching current_setting(app.current_tenant)'`;
+    yield* sql`COMMENT ON POLICY jobs_tenant_isolation ON jobs IS 'RLS: Isolate jobs by app_id matching current_setting(app.current_tenant)'`;
 });

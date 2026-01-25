@@ -13,11 +13,6 @@
       "import": "./src/context.ts",
       "default": "./src/context.ts"
     },
-    "./tenant": {
-      "types": "./src/tenant.ts",
-      "import": "./src/tenant.ts",
-      "default": "./src/tenant.ts"
-    },
     "./errors": {
       "types": "./src/errors.ts",
       "import": "./src/errors.ts",
@@ -43,6 +38,21 @@
       "import": "./src/infra/telemetry.ts",
       "default": "./src/infra/telemetry.ts"
     },
+    "./infra/storage": {
+      "types": "./src/infra/storage.ts",
+      "import": "./src/infra/storage.ts",
+      "default": "./src/infra/storage.ts"
+    },
+    "./infra/jobs": {
+      "types": "./src/infra/jobs.ts",
+      "import": "./src/infra/jobs.ts",
+      "default": "./src/infra/jobs.ts"
+    },
+    "./infra/metrics-polling": {
+      "types": "./src/infra/metrics-polling.ts",
+      "import": "./src/infra/metrics-polling.ts",
+      "default": "./src/infra/metrics-polling.ts"
+    },
     "./security/crypto": {
       "types": "./src/security/crypto.ts",
       "import": "./src/security/crypto.ts",
@@ -63,10 +73,25 @@
       "import": "./src/domain/mfa.ts",
       "default": "./src/domain/mfa.ts"
     },
+    "./domain/search": {
+      "types": "./src/domain/search.ts",
+      "import": "./src/domain/search.ts",
+      "default": "./src/domain/search.ts"
+    },
     "./domain/session": {
       "types": "./src/domain/session.ts",
       "import": "./src/domain/session.ts",
       "default": "./src/domain/session.ts"
+    },
+    "./domain/storage": {
+      "types": "./src/domain/storage.ts",
+      "import": "./src/domain/storage.ts",
+      "default": "./src/domain/storage.ts"
+    },
+    "./domain/oauth": {
+      "types": "./src/domain/oauth.ts",
+      "import": "./src/domain/oauth.ts",
+      "default": "./src/domain/oauth.ts"
     },
     "./utils/circuit": {
       "types": "./src/utils/circuit.ts",
@@ -82,6 +107,11 @@
       "types": "./src/utils/transfer.ts",
       "import": "./src/utils/transfer.ts",
       "default": "./src/utils/transfer.ts"
+    },
+    "./jobs/purge-assets": {
+      "types": "./src/jobs/purge-assets.ts",
+      "import": "./src/jobs/purge-assets.ts",
+      "default": "./src/jobs/purge-assets.ts"
     }
   },
   "scripts": {
@@ -92,12 +122,16 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/s3-request-presigner": "catalog:",
+    "@effect-aws/client-s3": "catalog:",
     "@effect/experimental": "catalog:",
     "@effect/opentelemetry": "catalog:",
     "@effect/platform": "catalog:",
     "@effect/sql": "catalog:",
     "@parametric-portal/database": "workspace:*",
     "@parametric-portal/types": "workspace:*",
+    "arctic": "catalog:",
     "cockatiel": "catalog:",
     "effect": "catalog:",
     "exceljs": "catalog:",
@@ -109,6 +143,7 @@
     "papaparse": "catalog:",
     "rfc6902": "catalog:",
     "sax": "catalog:",
+    "sharp": "catalog:",
     "ts-essentials": "catalog:",
     "yaml": "catalog:"
   },

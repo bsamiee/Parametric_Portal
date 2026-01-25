@@ -1,12 +1,12 @@
 /**
  * Apply rate limiting via @effect/experimental RateLimiter.
- * Table-driven presets; Redis primary, memory fallback; FiberRef propagates headers.
+ * Table-driven presets; Redis primary, memory fallback; reads from RequestContext.
  */
-import { type ConsumeResult, layer as rateLimiterLayer, layerStoreMemory, RateLimiter, type RateLimiterError } from '@effect/experimental/RateLimiter';
+import { layer as rateLimiterLayer, layerStoreMemory, RateLimiter, type RateLimiterError } from '@effect/experimental/RateLimiter';
 import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Config, Duration, Effect, FiberRef, Layer, Metric, Option, Redacted } from 'effect';
-import { Tenant } from '../tenant.ts';
+import { Config, Duration, Effect, Layer, Metric, Option, Redacted } from 'effect';
+import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { MetricsService } from './metrics.ts';
 
@@ -24,10 +24,6 @@ const presets = {
 	tokens: number;
 	window: Duration.Duration;
 }>;
-
-// --- [STATE] -----------------------------------------------------------------
-
-const _headerRef = FiberRef.unsafeMake(Option.none<ConsumeResult>());
 
 // --- [LAYER] -----------------------------------------------------------------
 
@@ -53,43 +49,40 @@ const Default = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
 const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, E, R>) => Effect.gen(function* () {
 	const metrics = yield* MetricsService;
 	const limiter = yield* RateLimiter;
-	const { ipAddress } = yield* Tenant.Context;
+	const ctx = yield* Context.Request.current;
 	const request = yield* HttpServerRequest.HttpServerRequest;
 	const config = presets[preset];
-	const key = `${preset}:${ipAddress ?? Option.getOrElse(request.remoteAddress, () => 'unknown')}`;
+	const key = `${preset}:${Option.getOrElse(ctx.ipAddress, () => Option.getOrElse(request.remoteAddress, () => 'unknown'))}`;
 	const result = yield* limiter.consume({ algorithm: config.algorithm, key, limit: config.limit, onExceeded: 'fail', tokens: config.tokens, window: config.window }).pipe(
-		Metric.trackDuration(metrics.rateLimit.checkDuration.pipe(Metric.tagged('preset', preset))),
+		Metric.trackDuration(Metric.taggedWithLabels(metrics.rateLimit.checkDuration, MetricsService.label({ preset }))),
 		Effect.catchAll((err: RateLimiterError) => err.reason === 'Exceeded' ? Effect.gen(function* () {
-			const headerResult = { delay: Duration.zero, limit: err.limit, remaining: err.remaining, resetAfter: err.retryAfter };
-			yield* FiberRef.set(_headerRef, Option.some(headerResult));
-			yield* Metric.update(metrics.rateLimit.rejections, preset);
-			return yield* Effect.fail(HttpError.rateLimit(Duration.toMillis(err.retryAfter), {
+			yield* Context.Request.update({ rateLimit: Option.some({ delay: Duration.zero, limit: err.limit, remaining: err.remaining, resetAfter: err.retryAfter }) });
+			yield* MetricsService.inc(metrics.rateLimit.rejections, MetricsService.label({ preset }), 1);
+			return yield* Effect.fail(HttpError.RateLimit.of(Duration.toMillis(err.retryAfter), {
 				limit: err.limit, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter),
 				...(presets[preset].recoveryAction ? { recoveryAction: presets[preset].recoveryAction } : {}),
 			}));
 		}) : Effect.gen(function* () {
 			yield* Effect.logWarning('Rate limit store unavailable (fail-open)', { error: String(err), preset });
-			yield* Metric.update(metrics.rateLimit.storeFailures.pipe(Metric.tagged('preset', preset)), 1);
+			yield* MetricsService.inc(metrics.rateLimit.storeFailures, MetricsService.label({ preset }), 1);
 			return { delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window };
 		})),
 	);
-	yield* FiberRef.set(_headerRef, Option.some(result));
+	yield* Context.Request.update({ rateLimit: Option.some(result) });
 	return yield* handler;
 }).pipe(Effect.withSpan(`rate-limit.${preset}`, { attributes: { 'rate-limit.preset': preset } }));
 const headers = HttpMiddleware.make((app) =>
-	Effect.locally(_headerRef, Option.none<ConsumeResult>())(
-		app.pipe(
-			Effect.flatMap((response) => FiberRef.get(_headerRef).pipe(
-				Effect.map((opt) => Option.match(opt, {
-					onNone: () => response,
-					onSome: (result) => HttpServerResponse.setHeaders(response, {
-						'X-RateLimit-Limit': String(result.limit),
-						'X-RateLimit-Remaining': String(Math.max(0, result.remaining)),
-						'X-RateLimit-Reset': String(Math.ceil(Duration.toMillis(result.resetAfter) / 1000)),
-					}),
-				})),
-			)),
-		),
+	app.pipe(
+		Effect.flatMap((response) => Context.Request.current.pipe(
+			Effect.map((ctx) => Option.match(ctx.rateLimit, {
+				onNone: () => response,
+				onSome: (result) => HttpServerResponse.setHeaders(response, {
+					'X-RateLimit-Limit': String(result.limit),
+					'X-RateLimit-Remaining': String(Math.max(0, result.remaining)),
+					'X-RateLimit-Reset': String(Math.ceil(Duration.toMillis(result.resetAfter) / 1000)),
+				}),
+			})),
+		)),
 	),
 );
 

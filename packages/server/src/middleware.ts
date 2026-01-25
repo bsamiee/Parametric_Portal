@@ -6,9 +6,8 @@
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
 import type { Hex64 } from '@parametric-portal/types/types';
 import * as ipaddr from 'ipaddr.js';
-import { Array as A, Effect, Layer, Option, pipe, Redacted } from 'effect';
+import { Array as A, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
 import { Context } from './context.ts';
-import { Tenant } from './tenant.ts';
 import { HttpError } from './errors.ts';
 import { MetricsService } from './infra/metrics.ts';
 import { Crypto } from './security/crypto.ts';
@@ -34,7 +33,7 @@ const _config = {
 	},
 } as const;
 const _trustedCidrs = A.filterMap(_config.proxy.cidrs, Option.liftThrowable(ipaddr.parseCIDR));
-const requireMfaVerified = Context.Session.pipe(Effect.filterOrFail((session) => !session.mfaEnabled || Option.isSome(session.verifiedAt), () => HttpError.forbidden('MFA verification required')), Effect.asVoid);
+const requireMfaVerified = Context.Request.session.pipe(Effect.filterOrFail((session) => !session.mfaEnabled || Option.isSome(session.verifiedAt), () => HttpError.Forbidden.of('MFA verification required')), Effect.asVoid);
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
@@ -67,61 +66,69 @@ const security = (hsts: typeof _config.security.hsts | false = _config.security.
 
 class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAuth', {
 	failure: HttpError.Auth,
-	provides: Context.Session,
 	security: { bearer: HttpApiSecurity.bearer },
 }) {
-	static readonly makeLayer = (lookup: (hash: Hex64) => Effect.Effect<Option.Option<{
-		readonly id: string;
-		readonly mfaEnabled: boolean;
-		readonly userId: string;
-		readonly verifiedAt: Option.Option<Date>;
-	}>>) =>
+	static readonly makeLayer = (lookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>>) =>
 		Layer.effect(this, Effect.map(MetricsService, (metrics) => SessionAuth.of({
 			bearer: (token: Redacted.Redacted<string>) => Crypto.token.hash(Redacted.value(token)).pipe(
-				Effect.mapError((err) => HttpError.auth('Token hashing failed', err)),
+				Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
+				Effect.mapError((err) => HttpError.Auth.of('Token hashing failed', err)),
 				Effect.flatMap(lookup),
-				Effect.andThen(Option.match({ onNone: () => Effect.fail(HttpError.auth('Invalid session')), onSome: Effect.succeed })),
-				Effect.provideService(MetricsService, metrics),
+				Effect.flatMap(Option.match({
+					onNone: () => Effect.zipRight(Metric.increment(metrics.auth.session.misses), Effect.fail(HttpError.Auth.of('Invalid session'))),
+					onSome: (session) => Context.Request.update({ session: Option.some(session) }).pipe(
+						Effect.tap(() => Metric.increment(metrics.auth.session.hits)),
+					),
+				})),
 			),
 		})));
 }
-const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: keyof typeof Context.UserRole.order) => Context.Session.pipe(
+const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: Context.UserRole) => Context.Request.session.pipe(
 	Effect.flatMap(({ userId }) => findById(userId)),
-	Effect.mapError((err) => HttpError.internal('User lookup failed', err)),
-	Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.forbidden('User not found')), onSome: Effect.succeed })),
-	Effect.filterOrFail((user) => (Context.UserRole.order[user.role as keyof typeof Context.UserRole.order] ?? 0) >= Context.UserRole.order[min], () => HttpError.forbidden('Insufficient permissions')),
+	Effect.mapError((err) => HttpError.Internal.of('User lookup failed', err)),
+	Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
+	Effect.filterOrFail((user) => Context.UserRole.hasAtLeast(user.role, min), () => HttpError.Forbidden.of('Insufficient permissions')),
 	Effect.asVoid,
 );
 
 // --- [CONTEXT_MIDDLEWARE] ----------------------------------------------------
 
-/** Build RequestContext from headers, session, and app lookup. Sets tenant via FiberRef. */
+/** Create app namespace lookup function from DatabaseService for request context injection. */
+const makeAppLookup =
+	(db: { readonly apps: { readonly byNamespace: (ns: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> } }) =>
+	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>> =>
+		db.apps.byNamespace(namespace).pipe(
+			Effect.map((appOpt) => Option.map(appOpt, (app) => ({ id: app.id, namespace: app.namespace }))),
+			Effect.orElseSucceed(() => Option.none()),
+		);
+/** Build RequestContext from headers and app lookup. Sets tenant via FiberRef. */
 const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>>) =>
 	HttpMiddleware.make((app) => Effect.gen(function* () {
 		const req = yield* HttpServerRequest.HttpServerRequest;
 		const requestId = Option.getOrElse(Headers.get(req.headers, 'x-request-id'), crypto.randomUUID);
-		const sessionOpt = yield* Effect.serviceOption(Context.Session);
 		const namespaceOpt = Headers.get(req.headers, 'x-app-id');
 		const found = yield* (Option.isNone(namespaceOpt)
 			? Effect.succeed(Option.none<{ readonly id: string; readonly namespace: string }>())
 			: findByNamespace(namespaceOpt.value).pipe(Effect.orElseSucceed(Option.none)));
-		const tenantId = Option.match(found, { onNone: () => Tenant.Context.Id.system, onSome: (item) => item.id });
-		return yield* Tenant.within(tenantId, app.pipe(
-			Effect.provideService(Tenant.Context, {
-				ipAddress: _extractClientIp(req.headers, req.remoteAddress),
-				requestId,
-				sessionId: Option.map(sessionOpt, (session) => session.id),
-				tenantId,
-				userAgent: Headers.get(req.headers, 'user-agent'),
-				userId: Option.map(sessionOpt, (session) => session.userId),
-			}),
+		const tenantId = Option.match(found, { onNone: () => Context.Request.Id.system, onSome: (item) => item.id });
+		const ctx: Context.Request.Data = {
+			circuit: Option.none(),
+			ipAddress: _extractClientIp(req.headers, req.remoteAddress),
+			rateLimit: Option.none(),
+			requestId,
+			session: Option.none(),
+			tenantId,
+			userAgent: Headers.get(req.headers, 'user-agent'),
+		};
+		return yield* Context.Request.within(tenantId, app.pipe(
+			Effect.provideService(Context.Request, ctx),
 			Effect.tap(() => Effect.all([
 				Effect.annotateCurrentSpan('tenant.id', tenantId),
 				Effect.annotateCurrentSpan('request.id', requestId),
 				Option.isSome(namespaceOpt) ? Effect.annotateCurrentSpan('app.namespace', namespaceOpt.value) : Effect.void,
 			], { discard: true })),
 			Effect.map((response) => HttpServerResponse.setHeader(response, 'x-request-id', requestId)),
-		));
+		), ctx);
 	}));
 const cors = (origins?: ReadonlyArray<string>) => {
 	const list = (origins ?? _config.cors.allowedOrigins).map((origin) => origin.trim()).filter(Boolean);
@@ -141,20 +148,19 @@ const Middleware = {
 	Auth: SessionAuth,
 	makeRequireRole,
 	requireMfaVerified,
-	Session: Context.Session,
 	// Context
 	cors,
+	makeAppLookup,
 	makeRequestContext,
-	OAuth: Context.OAuth,
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Middleware {
-	export type Session = Context.Session;
 	export type SessionLookup = Parameters<typeof SessionAuth.makeLayer>[0];
 	export type RoleLookup = Parameters<typeof makeRequireRole>[0];
 	export type RequestContextLookup = Parameters<typeof makeRequestContext>[0];
+	export type AppLookupDb = Parameters<typeof makeAppLookup>[0];
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

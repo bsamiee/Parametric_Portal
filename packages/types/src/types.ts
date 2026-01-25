@@ -2,7 +2,7 @@
  * Define branded primitives with Effect Schema validation.
  * Simple types export schema + type; companions add domain operations.
  */
-import { DateTime, Effect, Schema as S } from 'effect';
+import { DateTime, Effect, Either, Encoding, Schema as S } from 'effect';
 import { v7 as uuidv7 } from 'uuid';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -67,10 +67,7 @@ type DurationMs = typeof DurationMs.schema.Type;
 const Hex8 = (() => {
 	const schema = S.String.pipe(S.pattern(/^[0-9a-f]{8}$/), S.brand('Hex8'));
 	type T = typeof schema.Type;
-	const generateSync = (): T =>
-		[...crypto.getRandomValues(new Uint8Array(4))]
-			.map((byte) => byte.toString(16).padStart(2, '0'))
-			.join('') as T;
+	const generateSync = (): T => Encoding.encodeHex(crypto.getRandomValues(new Uint8Array(4))) as T;
 	const derive = (seed: string): T => {
 		const mod = 16 ** 8;
 		const hash = Array.from(seed).reduce<number>((acc, char) => (acc * 31 + (char.codePointAt(0) ?? 0)) % mod, 0);
@@ -89,8 +86,9 @@ const Hex64 = (() => {
 	const schema = S.String.pipe(S.pattern(/^[0-9a-f]{64}$/i), S.brand('Hex64'));
 	type T = typeof schema.Type;
 	return {
-		fromBase64: (base64: string): Uint8Array => Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0),
-		fromBytes: (bytes: Uint8Array): T => [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('') as T,
+		fromBase64: (base64: string): Uint8Array =>
+			Either.getOrThrowWith(Encoding.decodeBase64(base64), () => new Error('Invalid base64')),
+		fromBytes: (bytes: Uint8Array): T => Encoding.encodeHex(bytes) as T,
 		schema,
 	} as const;
 })();

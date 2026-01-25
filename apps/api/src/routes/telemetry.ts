@@ -5,6 +5,7 @@
 import { HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Circuit } from '@parametric-portal/server/utils/circuit';
+import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
 import { Telemetry } from '@parametric-portal/server/infra/telemetry';
 import { Config, Effect, Schema as S } from 'effect';
 
@@ -41,7 +42,7 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
 // --- [LAYERS] ----------------------------------------------------------------
 
 const TelemetryRouteLive = HttpApiBuilder.group(ParametricApi, 'telemetry', (handlers) =>
-    handlers.handle('ingestTraces', ({ request }) => handleIngestTraces(request)),
+    handlers.handle('ingestTraces', ({ request }) => RateLimit.apply('api', handleIngestTraces(request))),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

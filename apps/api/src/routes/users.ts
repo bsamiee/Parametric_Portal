@@ -9,6 +9,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/domain/audit';
+import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
 import { Effect, Option, pipe } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -20,15 +21,15 @@ const handleUpdateRole = Effect.fn('users.updateRole')(
             yield* requireRole('admin');
             const user = yield* pipe(
                 repos.users.one([{ field: 'id', value: targetUserId }]),
-                Effect.mapError((e) => HttpError.internal('User lookup failed', e)),
+                Effect.mapError((e) => HttpError.Internal.of('User lookup failed', e)),
                 Effect.flatMap((opt) => Option.match(opt, {
-                    onNone: () => Effect.fail(HttpError.notFound('user', targetUserId)),
+                    onNone: () => Effect.fail(HttpError.NotFound.of('user', targetUserId)),
                     onSome: Effect.succeed,
                 })),
             );
             const updatedUser = yield* pipe(
                 repos.users.update({ ...user, role: newRole, updatedAt: undefined }),
-                Effect.mapError((e) => HttpError.internal('Role update failed', e)),
+                Effect.mapError((e) => HttpError.Internal.of('Role update failed', e)),
             );
             yield* audit.log('User', targetUserId, 'update', {
                 after: { email: updatedUser.email, role: updatedUser.role },
@@ -44,7 +45,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
     Effect.gen(function* () {
         const [repos, audit] = yield* Effect.all([DatabaseService, AuditService]);
         const requireRole = Middleware.makeRequireRole((id) => repos.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((u) => ({ role: u.role })))));
-        return handlers.handle('updateRole', ({ path: { id }, payload: { role } }) => handleUpdateRole(repos, audit, requireRole, id, role));
+        return handlers.handle('updateRole', ({ path: { id }, payload: { role } }) => RateLimit.apply('mutation', handleUpdateRole(repos, audit, requireRole, id, role)));
     }),
 );
 
