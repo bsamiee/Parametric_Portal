@@ -20,9 +20,6 @@ type _RawMeta = Readonly<{ cat: string; sel: boolean; ins: boolean; upd: boolean
 type _RawEntry = Readonly<{ col: string; sql: string; ts: string; mark: string | false; gen: string | false; null: boolean; ref: string | false; wrap: readonly _RawMeta[] | false }>;
 
 // --- [METADATA_TABLES] -------------------------------------------------------
-// - fields: Which registry entries belong to this table | - fk: FK action overrides as [entry, action] tuples (RESTRICT is default, omit if not overriding)
-// - required: Entries where null:true should be NOT NULL in this table | - unique: Composite unique constraints as entry arrays
-// Note: Array defaults (e.g., TEXT[] NOT NULL → '{}') are inferred algorithmically in generate.ts
 
 const _Fk = {RESTRICT: 'RESTRICT', CASCADE: 'CASCADE', SETNULL:'SET NULL', SETDEFAULT:'SET DEFAULT', NOACTION:'NO ACTION',} as const;
 const _SqlCast = { INET: 'inet', JSONB: 'jsonb', UUID: 'uuid' } as const; /** SQL type → PostgreSQL cast string (types requiring explicit cast for comparisons) */

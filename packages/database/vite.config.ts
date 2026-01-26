@@ -19,7 +19,7 @@ export default defineConfig(
                 search: './src/search.ts',
             },
             external: [
-                '@effect/platform',
+                '@effect/experimental',
                 '@effect/platform-node',
                 '@effect/sql',
                 '@effect/sql-pg',

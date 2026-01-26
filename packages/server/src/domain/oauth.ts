@@ -5,10 +5,10 @@
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from '@effect/platform';
 import { Timestamp } from '@parametric-portal/types/types';
 import { Apple, decodeIdToken, generateCodeVerifier, generateState, GitHub, Google, MicrosoftEntraId, OAuth2RequestError, type OAuth2Tokens } from 'arctic';
-import { Config, Duration, Effect, Encoding, Match, Metric, Option as O, Redacted, Schema as S } from 'effect';
+import { Config, Duration, Effect, Either, Encoding, Match, Metric, Option as O, Redacted, Schema as S } from 'effect';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
-import { MetricsService } from '../infra/metrics.ts';
+import { MetricsService } from '../observe/metrics.ts';
 import { Crypto } from '../security/crypto.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -39,13 +39,15 @@ class OAuthState extends S.Class<OAuthState>('OAuthState')({
 	);
 	static readonly decrypt = Effect.fn('oauth.state.decrypt')(
 		(provider: Context.OAuthProvider, encrypted: string) =>
-			((decoded) => decoded._tag === 'Left'
-				? Effect.fail(HttpError.OAuth.of(provider, 'Invalid state encoding'))
-				: Crypto.decrypt(decoded.right).pipe(
-					Effect.flatMap((json) => Effect.try({ catch: (e) => HttpError.OAuth.of(provider, 'Invalid state JSON', e), try: () => JSON.parse(json) as unknown })),
-					Effect.flatMap((parsed) => S.decodeUnknown(OAuthState)(parsed)),
-				)
-			)(Encoding.decodeBase64Url(encrypted)).pipe(
+			Effect.suspend(() =>
+				Either.match(Encoding.decodeBase64Url(encrypted), {
+					onLeft: () => Effect.fail(HttpError.OAuth.of(provider, 'Invalid state encoding')),
+					onRight: (decoded) => Crypto.decrypt(decoded).pipe(
+						Effect.flatMap((json) => Effect.try({ catch: (e) => HttpError.OAuth.of(provider, 'Invalid state JSON', e), try: () => JSON.parse(json) as unknown })),
+						Effect.flatMap((parsed) => S.decodeUnknown(OAuthState)(parsed)),
+					),
+				}),
+			).pipe(
 				Effect.filterOrFail((p) => Timestamp.nowSync() <= p.exp, () => HttpError.OAuth.of(provider, 'State expired')),
 				Effect.filterOrFail((p) => p.provider === provider, () => HttpError.OAuth.of(provider, 'State provider mismatch')),
 				Effect.mapError((e) => (e instanceof HttpError.OAuth ? e : HttpError.OAuth.of(provider, 'Invalid state', e))),
@@ -99,13 +101,6 @@ const githubResult = (tokens: OAuth2Tokens): Effect.Effect<ReturnType<typeof ext
 		Effect.mapError(mapOAuthError('github')),
 		Effect.retry(Context.Request.config.oauth.retry),
 		Effect.timeoutFail({ duration: Context.Request.config.oauth.timeout, onTimeout: () => HttpError.OAuth.of('github', 'Request timeout') }),
-	);
-const validateState = (provider: Context.OAuthProvider, state: string, stateCookie: string) =>
-	OAuthState.decrypt(provider, stateCookie).pipe(
-		Effect.filterOrFail(
-			(p) => Crypto.token.compare(p.state, state),
-			() => HttpError.OAuth.of(provider, 'State mismatch'),
-		),
 	);
 
 // --- [SERVICE] ---------------------------------------------------------------
@@ -171,7 +166,12 @@ class OAuthService extends Effect.Service<OAuthService>()('server/OAuth', {
 		return {
 			authenticate: (provider: Context.OAuthProvider, code: string, state: string, stateCookie: string) =>
 				Effect.gen(function* () {
-					const { verifier } = yield* validateState(provider, state, stateCookie);
+					const { verifier } = yield* OAuthState.decrypt(provider, stateCookie).pipe(
+						Effect.filterOrFail(
+							(p) => Crypto.token.compare(p.state, state),
+							() => HttpError.OAuth.of(provider, 'State mismatch'),
+						),
+					);
 					yield* Context.Request.config.oauth.capabilities[provider].pkce && verifier === undefined
 						? Effect.fail(HttpError.OAuth.of(provider, 'Missing PKCE verifier'))
 						: Effect.void;

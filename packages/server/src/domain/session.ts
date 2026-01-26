@@ -7,7 +7,7 @@ import { type Hex64, Timestamp } from '@parametric-portal/types/types';
 import { Duration, Effect, Option } from 'effect';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
-import { MetricsService } from '../infra/metrics.ts';
+import { MetricsService } from '../observe/metrics.ts';
 import { Crypto } from '../security/crypto.ts';
 import { MfaService } from './mfa.ts';
 
@@ -57,14 +57,20 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 			Effect.gen(function* () {
 				const mfaPending = yield* mfa.isEnabled(userId).pipe(Effect.catchAll(() => Effect.succeed(false)));
 				const result = yield* create(userId, mfaPending);
-				yield* opts?.provider === undefined
-					? Effect.void
-					: MetricsService.inc(metrics.auth.logins, MetricsService.label({ isNewUser: String(opts.isNewUser ?? false), provider: opts.provider }), 1);
+				// Only emit login metrics when provider is specified (OAuth/password flows, not token refresh)
+				yield* Effect.when(
+					Effect.suspend(() => MetricsService.inc(metrics.auth.logins, MetricsService.label({
+						isNewUser: String(opts?.isNewUser ?? false),
+						provider: opts?.provider, // undefined is filtered by MetricsService.label
+					}), 1)),
+					() => opts?.provider !== undefined,
+				);
 				return result;
 			}).pipe(Effect.withSpan('session.createForLogin'));
 		 // Rotate tokens: validate refresh hash, check current MFA state, create new session, revoke old. Emits auth.refreshes metric.
 		const refresh = (hash: Hex64) =>
 			Effect.gen(function* () {
+				const ctx = yield* Context.Request.current;
 				const tokenOpt = yield* db.refreshTokens.byHashForUpdate(hash);
 				const token = yield* Option.match(tokenOpt, {
 					onNone: () => Effect.fail(HttpError.Auth.of('Invalid refresh token')),
@@ -80,7 +86,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				const mfaPending = yield* mfa.isEnabled(token.userId).pipe(Effect.catchAll(() => Effect.succeed(false)));
 				const result = yield* create(token.userId, mfaPending);
 				yield* db.refreshTokens.softDelete(token.id);
-				yield* MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: '' }), 1);
+				yield* MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: ctx.tenantId }), 1);
 				return { ...result, userId: token.userId };
 			}).pipe(
 				Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Auth.of('Token lookup failed', e)),
@@ -88,8 +94,11 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 			);
 		 // Revoke single session. Emits auth.logouts metric.
 		const revoke = (sessionId: string) =>
-			db.sessions.softDelete(sessionId).pipe(
-				Effect.tap(() => MetricsService.inc(metrics.auth.logouts, MetricsService.label({ tenant: '' }), 1)),
+			Effect.gen(function* () {
+				const ctx = yield* Context.Request.current;
+				yield* db.sessions.softDelete(sessionId);
+				yield* MetricsService.inc(metrics.auth.logouts, MetricsService.label({ tenant: ctx.tenantId }), 1);
+			}).pipe(
 				Effect.mapError((e) => HttpError.Internal.of('Session revocation failed', e)),
 				Effect.withSpan('session.revoke'),
 			);
@@ -123,19 +132,13 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 		 // Lookup session by token hash. For middleware authentication. Touches session activity, checks MFA state, fails silently on errors.
 		const lookup = (hash: Hex64) =>
 			db.sessions.byHash(hash).pipe(
-				Effect.tap(Option.match({
-					onNone: () => Effect.void,
+				Effect.flatMap(Option.match({
+					onNone: () => Effect.succeed(Option.none<Context.Request.Session>()),
 					onSome: (s) => db.sessions.touch(s.id).pipe(
 						Effect.catchAll((err) => Effect.logWarning('Session activity update failed', { error: String(err), sessionId: s.id })),
+						Effect.andThen(mfa.isEnabled(s.userId).pipe(Effect.catchAll(() => Effect.succeed(false)))),
+						Effect.map((mfaEnabled) => Option.some({ id: s.id, mfaEnabled, userId: s.userId, verifiedAt: s.verifiedAt })),
 					),
-				})),
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.succeed(Option.none()),
-					onSome: (s) =>
-						mfa.isEnabled(s.userId).pipe(
-							Effect.catchAll(() => Effect.succeed(false)),
-							Effect.map((mfaEnabled) => Option.some({ id: s.id, mfaEnabled, userId: s.userId, verifiedAt: s.verifiedAt })),
-						),
 				})),
 				Effect.catchAll((e) => Effect.logError('Session lookup failed', { error: String(e) }).pipe(Effect.as(Option.none()))),
 			);

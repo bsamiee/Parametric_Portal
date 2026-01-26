@@ -1,12 +1,16 @@
 /**
  * OTLP proxy for browser telemetry (CORS bypass).
  * Browser POSTs to /api/v1/traces, API forwards to collector.
+ *
+ * [AUDIT EXEMPTION]: Telemetry ingestion is intentionally not audited.
+ * This high-volume endpoint would generate excessive audit entries (one per trace batch).
+ * Telemetry data is already observable via the OTLP collector itself.
  */
 import { HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
-import { Circuit } from '@parametric-portal/server/utils/circuit';
-import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
-import { Telemetry } from '@parametric-portal/server/infra/telemetry';
+import { Circuit } from '@parametric-portal/server/security/circuit';
+import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Config, Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------

@@ -352,6 +352,18 @@ const _SearchGroup = HttpApiGroup.make('search')
 			.addError(HttpError.RateLimit)
 			.annotate(OpenApi.Description, 'Refresh search index (admin only)'),
 	);
+const _JobsGroup = HttpApiGroup.make('jobs')
+	.prefix('/jobs')
+	.add(
+		HttpApiEndpoint.get('subscribe', '/subscribe')
+			.middleware(Middleware.Auth)
+			.addSuccess(S.Void)
+			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.annotate(OpenApi.Description, 'Subscribe to job status updates via SSE'),
+	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -359,6 +371,7 @@ const ParametricApi = HttpApi.make('ParametricApi')
 	.add(_AuditGroup)
 	.add(_AuthGroup)
 	.add(_HealthGroup.annotate(OpenApi.Exclude, true))
+	.add(_JobsGroup)
 	.add(_SearchGroup)
 	.add(_TelemetryGroup.annotate(OpenApi.Exclude, true))
 	.add(_TransferGroup)

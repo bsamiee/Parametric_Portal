@@ -5,7 +5,7 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import { type Hex64, Uuidv7 } from '@parametric-portal/types/types';
-import { Cache, Config, Data, Duration, Effect, Encoding, Either, Option, Redacted } from 'effect';
+import { Cache, Config, Data, Duration, Effect, Encoding, Either, Redacted } from 'effect';
 import { Context } from '../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -30,16 +30,6 @@ class DecryptError extends Data.TaggedError('CryptoDecryptError')<{
 	readonly code: 'DECRYPT_FAILED' | 'INVALID_FORMAT' | 'KEY_DERIVATION_FAILED';
 	readonly tenantId: string;
 }> {}
-
-// --- [INTERNAL] --------------------------------------------------------------
-
-const _parse = (bytes: Uint8Array) => {
-	const v = bytes[0];
-	return bytes.length >= _config.minBytes && typeof v === 'number' && v >= _config.version.min && v <= _config.version.max
-		? Option.some({ cipher: bytes.slice(1 + _config.iv), iv: bytes.slice(1, 1 + _config.iv), v })
-		: Option.none();
-};
-const _toHex64 = (bytes: Uint8Array): Hex64 => Encoding.encodeHex(bytes) as Hex64;
 
 // --- [SERVICE] ---------------------------------------------------------------
 
@@ -101,8 +91,11 @@ const encrypt = (plaintext: string): Effect.Effect<Uint8Array, EncryptError, Ser
 const decrypt = (bytes: Uint8Array): Effect.Effect<string, DecryptError, Service> =>
 	Effect.gen(function* () {
 		const tenantId = yield* Context.Request.tenantId;
-		const parsed = yield* Effect.fromNullable(_parse(bytes).pipe(Option.getOrNull)).pipe(
-			Effect.mapError(() => new DecryptError({ code: 'INVALID_FORMAT', tenantId })),
+		const v = bytes[0];
+		const parsed = yield* (
+			bytes.length >= _config.minBytes && typeof v === 'number' && v >= _config.version.min && v <= _config.version.max
+				? Effect.succeed({ cipher: bytes.slice(1 + _config.iv), iv: bytes.slice(1, 1 + _config.iv), v })
+				: Effect.fail(new DecryptError({ code: 'INVALID_FORMAT', tenantId }))
 		);
 		const svc = yield* Service;
 		const key = yield* svc.deriveKey(tenantId).pipe(
@@ -119,7 +112,7 @@ const hash = (input: string): Effect.Effect<Hex64> =>
 		catch: (e) => e,
 		try: () => crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
 	}).pipe(
-		Effect.map((buf) => _toHex64(new Uint8Array(buf))),
+		Effect.map((buf) => Encoding.encodeHex(new Uint8Array(buf)) as Hex64),
 		Effect.orDie,
 		Effect.withSpan('crypto.hash'),
 	);

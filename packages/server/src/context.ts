@@ -11,7 +11,7 @@ import * as D from 'effect/Duration';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _Id = { default: '00000000-0000-7000-8000-000000000001', system: '00000000-0000-7000-8000-000000000000' } as const;
+const _Id = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
 const _isSecure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
 const _cookie = <N extends string, P extends string>(name: N, path: P, maxAge: Duration.DurationInput) =>
 	({ httpOnly: true, maxAge, name, path, sameSite: 'lax' as const, secure: _isSecure }) as const;

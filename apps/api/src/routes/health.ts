@@ -1,31 +1,35 @@
 /**
  * Health check endpoints: liveness probe and readiness probe with database/metrics checks.
+ * Traced for observability - health probe failures visible in distributed traces.
  */
 import { HttpApiBuilder } from '@effect/platform';
-import { DatabaseService } from '@parametric-portal/database/repos';
+import { Client } from '@parametric-portal/database/client';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
-import { MetricsPollingService } from '@parametric-portal/server/infra/metrics-polling';
+import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Effect } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 	Effect.gen(function* () {
-		const db = yield* DatabaseService;
-		const metricsPolling = yield* MetricsPollingService;
-		const checkDatabase = () =>
-			db.withTransaction(Effect.succeed(true)).pipe(
-				Effect.as(true),
-				Effect.timeout('5 seconds'),
-				Effect.catchAll(() => Effect.succeed(false)),
-			);
-			return handlers
-			.handle('liveness', () => Effect.succeed({ status: 'ok' as const }))
+		const polling = yield* PollingService;
+		return handlers
+			.handle('liveness', () =>
+				Effect.succeed({ status: 'ok' as const }).pipe(
+					Effect.withSpan('health.liveness'),
+				),
+			)
 			.handle('readiness', () =>
 				Effect.gen(function* () {
-					const [dbOk, healthAlerts] = yield* Effect.all([checkDatabase(), metricsPolling.getHealth()]);
+					// Use healthDeep for readiness: tests transaction capability, catches pool exhaustion
+					const [dbHealth, healthAlerts] = yield* Effect.all([Client.healthDeep(), polling.getHealth()]);
 					const criticalAlerts = healthAlerts.filter((a) => a.severity === 'critical');
+					yield* Effect.annotateCurrentSpan('health.database', dbHealth.healthy);
+					yield* Effect.annotateCurrentSpan('health.database.latencyMs', dbHealth.latencyMs);
+					yield* Effect.annotateCurrentSpan('health.alerts.count', healthAlerts.length);
+					yield* Effect.annotateCurrentSpan('health.alerts.critical', criticalAlerts.length);
+					const dbOk = dbHealth.healthy;
 					yield* Effect.filterOrFail(
 						Effect.succeed({ criticalAlerts, dbOk }),
 						({ dbOk, criticalAlerts }) => dbOk && criticalAlerts.length === 0,
@@ -36,7 +40,7 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 							),
 					);
 					return { checks: { database: true, metrics: healthAlerts.length === 0 ? 'ok' : 'warning' }, status: 'ok' as const };
-				}),
+				}).pipe(Effect.withSpan('health.readiness')),
 			);
 	}),
 );

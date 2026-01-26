@@ -1,43 +1,39 @@
 /**
  * Storage domain service with tenant context, audit logging, and metrics.
- * Wraps raw StorageService with automatic audit logging for mutating operations.
- * Polymorphic API mirrors StorageService: single/batch determined by input shape.
+ * Wraps raw StorageAdapter with automatic audit logging for mutating operations.
+ * Polymorphic API mirrors StorageAdapter: single/batch determined by input shape.
  */
 import { Effect, Option, type Stream } from 'effect';
 import { Context } from '../context.ts';
-import { AuditService } from './audit.ts';
-import { MetricsService } from '../infra/metrics.ts';
-import { StorageService } from '../infra/storage.ts';
+import { AuditService } from '../observe/audit.ts';
+import { MetricsService } from '../observe/metrics.ts';
+import { StorageAdapter } from '../infra/storage.ts';
 
 // --- [SERVICES] --------------------------------------------------------------
 
-class StorageDomainService extends Effect.Service<StorageDomainService>()('server/StorageDomain', {
+class StorageService extends Effect.Service<StorageService>()('server/Storage', {
 	effect: Effect.gen(function* () {
-		const storage = yield* StorageService;
+		const storage = yield* StorageAdapter;
 		const audit = yield* AuditService;
 		const metrics = yield* MetricsService;
 		const userIdFromContext = (ctx: Context.Request.Data) => Option.match(ctx.session, { onNone: () => undefined, onSome: (s) => s.userId });
-		const _putSingle = (input: StorageService.PutInput) =>
+		const _putSingle = (input: StorageAdapter.PutInput) =>
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const result = yield* storage.put(input);
-				yield* audit.log('storage', input.key, 'upload', {
-					after: { contentType: input.contentType, key: input.key, size: result.size, userId: userIdFromContext(ctx) },
-				});
+				yield* audit.log('Storage.upload', { details: { contentType: input.contentType, key: input.key, size: result.size, userId: userIdFromContext(ctx) }, subjectId: input.key });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-put' }), 1);
 				return result;
 			}).pipe(Effect.withSpan('storageDomain.put'));
 		/** Put object(s) with audit logging. Single input → single result; array input → array results. */
-		function put(input: StorageService.PutInput): Effect.Effect<StorageService.PutResult, unknown>;
-		function put(input: readonly StorageService.PutInput[]): Effect.Effect<readonly StorageService.PutResult[], unknown>;
+		function put(input: StorageAdapter.PutInput): Effect.Effect<StorageAdapter.PutResult, unknown>;
+		function put(input: readonly StorageAdapter.PutInput[]): Effect.Effect<readonly StorageAdapter.PutResult[], unknown>;
 		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
 		function put(input: any): any {
 			return Array.isArray(input) ? Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const results = yield* storage.put(input);
-				yield* audit.log('storage', `batch:${input.length}`, 'upload', {
-					after: { count: input.length, keys: input.map((i: StorageService.PutInput) => i.key), totalSize: results.reduce((acc, r) => acc + r.size, 0), userId: userIdFromContext(ctx) },
-				});
+				yield* audit.log('Storage.upload', { details: { count: input.length, keys: input.map((i: StorageAdapter.PutInput) => i.key), totalSize: results.reduce((acc, r) => acc + r.size, 0), userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-put' }), input.length);
 				return results;
 			}).pipe(Effect.withSpan('storageDomain.put.batch')) : _putSingle(input);
@@ -46,10 +42,7 @@ class StorageDomainService extends Effect.Service<StorageDomainService>()('serve
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* storage.remove(key);
-				yield* audit.log('storage', key, 'delete', {
-					after: { deleted: true, userId: userIdFromContext(ctx) },
-					before: { key },
-				});
+				yield* audit.log('Storage.delete', { details: { deleted: true, key, userId: userIdFromContext(ctx) }, subjectId: key });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-delete' }), 1);
 			}).pipe(Effect.withSpan('storageDomain.remove'));
 		/** Remove object(s) with audit logging. */
@@ -60,34 +53,27 @@ class StorageDomainService extends Effect.Service<StorageDomainService>()('serve
 			return Array.isArray(keys) ? Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* storage.remove(keys);
-				yield* audit.log('storage', `batch:${keys.length}`, 'delete', {
-					after: { count: keys.length, deleted: true, userId: userIdFromContext(ctx) },
-					before: { keys },
-				});
+				yield* audit.log('Storage.delete', { details: { count: keys.length, deleted: true, keys, userId: userIdFromContext(ctx) }, subjectId: `batch:${keys.length}` });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-delete' }), keys.length);
 			}).pipe(Effect.withSpan('storageDomain.remove.batch')) : _removeSingle(keys);
 		}
-		const _copySingle = (input: StorageService.CopyInput) =>
+		const _copySingle = (input: StorageAdapter.CopyInput) =>
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const result = yield* storage.copy(input);
-				yield* audit.log('storage', input.destKey, 'copy', {
-					after: { destKey: input.destKey, sourceKey: input.sourceKey, userId: userIdFromContext(ctx) },
-				});
+				yield* audit.log('Storage.copy', { details: { destKey: input.destKey, sourceKey: input.sourceKey, userId: userIdFromContext(ctx) }, subjectId: input.destKey });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-copy' }), 1);
 				return result;
 			}).pipe(Effect.withSpan('storageDomain.copy'));
 		/** Copy object(s) with audit logging. Single input → single result; array input → array results. */
-		function copy(input: StorageService.CopyInput): Effect.Effect<StorageService.CopyResult, unknown>;
-		function copy(input: readonly StorageService.CopyInput[]): Effect.Effect<readonly StorageService.CopyResult[], unknown>;
+		function copy(input: StorageAdapter.CopyInput): Effect.Effect<StorageAdapter.CopyResult, unknown>;
+		function copy(input: readonly StorageAdapter.CopyInput[]): Effect.Effect<readonly StorageAdapter.CopyResult[], unknown>;
 		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
 		function copy(input: any): any {
 			return Array.isArray(input) ? Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const results = yield* storage.copy(input);
-				yield* audit.log('storage', `batch:${input.length}`, 'copy', {
-					after: { copies: input.map((i: StorageService.CopyInput) => ({ dest: i.destKey, source: i.sourceKey })), count: input.length, userId: userIdFromContext(ctx) },
-				});
+				yield* audit.log('Storage.copy', { details: { copies: input.map((i: StorageAdapter.CopyInput) => ({ dest: i.destKey, source: i.sourceKey })), count: input.length, userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-copy' }), input.length);
 				return results;
 			}).pipe(Effect.withSpan('storageDomain.copy.batch')) : _copySingle(input);
@@ -96,9 +82,7 @@ class StorageDomainService extends Effect.Service<StorageDomainService>()('serve
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const result = yield* storage.putStream(input);
-				yield* audit.log('storage', input.key, 'stream-upload', {
-					after: { contentType: input.contentType, key: input.key, size: result.totalSize, userId: userIdFromContext(ctx) },
-				});
+				yield* audit.log('Storage.stream_upload', { details: { contentType: input.contentType, key: input.key, size: result.totalSize, userId: userIdFromContext(ctx) }, subjectId: input.key });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-stream-put' }), 1);
 				return result;
 			}).pipe(Effect.withSpan('storageDomain.putStream'));
@@ -106,9 +90,7 @@ class StorageDomainService extends Effect.Service<StorageDomainService>()('serve
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* storage.abortUpload(key, uploadId);
-				yield* audit.log('storage', key, 'abort-multipart', {
-					after: { key, uploadId, userId: userIdFromContext(ctx) },
-				});
+				yield* audit.log('Storage.abort_multipart', { details: { key, uploadId, userId: userIdFromContext(ctx) }, subjectId: key });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-abort-multipart' }), 1);
 			}).pipe(Effect.withSpan('storageDomain.abortUpload'));
 		/** Pass-through read operations (no audit needed). */
@@ -125,16 +107,16 @@ class StorageDomainService extends Effect.Service<StorageDomainService>()('serve
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
-namespace StorageDomainService {
-	export type PutInput = StorageService.PutInput;
-	export type PutResult = StorageService.PutResult;
-	export type CopyInput = StorageService.CopyInput;
-	export type CopyResult = StorageService.CopyResult;
-	export type SignInput = StorageService.SignInput;
-	export type GetResult = StorageService.GetResult;
-	export type Service = typeof StorageDomainService.Service;
+namespace StorageService {
+	export type PutInput = StorageAdapter.PutInput;
+	export type PutResult = StorageAdapter.PutResult;
+	export type CopyInput = StorageAdapter.CopyInput;
+	export type CopyResult = StorageAdapter.CopyResult;
+	export type SignInput = StorageAdapter.SignInput;
+	export type GetResult = StorageAdapter.GetResult;
+	export type Service = typeof StorageService.Service;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { StorageDomainService };
+export { StorageService };

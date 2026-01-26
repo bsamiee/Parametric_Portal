@@ -2,7 +2,7 @@
  * Guard against TOTP replay and brute-force attacks.
  * Redis primary (atomic SET NX EX), memory fallback; exponential lockout.
  */
-import { Clock, Config, Duration, Effect, HashMap, Option, Redacted, Ref, Schedule } from 'effect';
+import { Clock, Config, Duration, Effect, HashMap, Match, Option, Redacted, Ref, Schedule } from 'effect';
 import Redis from 'ioredis';
 import { HttpError } from '../errors.ts';
 
@@ -28,16 +28,22 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 			port: Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
 			url: Config.option(Config.redacted('REDIS_URL')),
 		}).pipe(Effect.map(({ host, password, port, url }) =>
-			Option.isSome(url) ? Option.some(new Redis(Redacted.value(url.value), { ..._config.redis, keyPrefix: _config.keyPrefix }))
-			: host !== 'localhost' || Option.isSome(password) ? Option.some(new Redis({ ..._config.redis, host, keyPrefix: _config.keyPrefix, password: Option.getOrUndefined(Option.map(password, Redacted.value)), port }))
-			: Option.none(),
+			Match.value({ hasUrl: Option.isSome(url), needsRedis: host !== 'localhost' || Option.isSome(password) }).pipe(
+				Match.when({ hasUrl: true }, () => Option.some(new Redis(Redacted.value(Option.getOrThrow(url)), { ..._config.redis, keyPrefix: _config.keyPrefix }))),
+				Match.when({ needsRedis: true }, () => Option.some(new Redis({ ..._config.redis, host, keyPrefix: _config.keyPrefix, password: Option.getOrUndefined(Option.map(password, Redacted.value)), port }))),
+				Match.orElse(() => Option.none()),
+			),
 		));
-		const memCheck = (key: string) => Clock.currentTimeMillis.pipe(Effect.flatMap((now) =>
-			Ref.modify(replayRef, (m) => {
-				const used = Option.exists(HashMap.get(m, key), (exp) => now <= exp);
-				return [{ alreadyUsed: used, backend: 'memory' as const }, used ? m : HashMap.set(m, key, now + _config.ttl.ms)];
-			}),
-		));
+		const memCheck = (key: string) =>
+			Effect.all([Clock.currentTimeMillis, Ref.get(replayRef)]).pipe(
+				Effect.flatMap(([now, m]) => {
+					const expiry = HashMap.get(m, key);
+					const used = Option.isSome(expiry) && now <= expiry.value;
+					return Ref.set(replayRef, used ? m : HashMap.set(m, key, now + _config.ttl.ms)).pipe(
+						Effect.as({ alreadyUsed: used, backend: 'memory' as const }),
+					);
+				}),
+			);
 		const redisCheck = (r: Redis, key: string) => Effect.tryPromise(() => r.set(key, '1', 'EX', _config.ttl.sec, 'NX')).pipe(
 			Effect.map((res): { readonly alreadyUsed: boolean; readonly backend: 'memory' | 'redis' } => ({ alreadyUsed: res === null, backend: 'redis' })),
 			Effect.catchAll(() => memCheck(key)),
@@ -69,13 +75,17 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 					}),
 				)),
 			),
-			recordFailure: (userId: string) => Clock.currentTimeMillis.pipe(Effect.flatMap((now) =>
-				Ref.update(lockoutRef, (m) => {
-					const count = Option.getOrElse(HashMap.get(m, userId), () => ({ count: 0, lockedUntil: 0 })).count + 1;
-					const lockedUntil = count >= _config.lockout.maxAttempts ? now + Math.min(_config.lockout.baseMs * (2 ** (count - _config.lockout.maxAttempts)), _config.lockout.maxMs) : 0;
-					return HashMap.set(m, userId, { count, lockedUntil });
-				}),
-			)),
+			recordFailure: (userId: string) =>
+				Effect.all([Clock.currentTimeMillis, Ref.get(lockoutRef)]).pipe(
+					Effect.flatMap(([now, m]) => {
+						const prev = Option.getOrElse(HashMap.get(m, userId), () => ({ count: 0, lockedUntil: 0 }));
+						const count = prev.count + 1;
+						const lockedUntil = count >= _config.lockout.maxAttempts
+							? now + Math.min(_config.lockout.baseMs * (2 ** (count - _config.lockout.maxAttempts)), _config.lockout.maxMs)
+							: 0;
+						return Ref.set(lockoutRef, HashMap.set(m, userId, { count, lockedUntil }));
+					}),
+				),
 			recordSuccess: (userId: string) => Ref.update(lockoutRef, HashMap.remove(userId)),
 		};
 	}),

@@ -7,7 +7,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
+import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Effect, Option, pipe } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------

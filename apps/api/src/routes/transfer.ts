@@ -5,16 +5,16 @@
 import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Asset } from '@parametric-portal/database/models';
 import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/database/repos';
-import { SearchService } from '@parametric-portal/database/search';
+import { SearchRepo } from '@parametric-portal/database/search';
 import { ParametricApi, type TransferQuery } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { AuditService } from '@parametric-portal/server/domain/audit';
-import { StorageDomainService } from '@parametric-portal/server/domain/storage';
-import { MetricsService } from '@parametric-portal/server/infra/metrics';
-import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
-import { Telemetry } from '@parametric-portal/server/infra/telemetry';
+import { StorageService } from '@parametric-portal/server/domain/storage';
+import { AuditService } from '@parametric-portal/server/observe/audit';
+import { MetricsService } from '@parametric-portal/server/observe/metrics';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
+import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Transfer, TransferError } from '@parametric-portal/server/utils/transfer';
 import { Codec } from '@parametric-portal/types/files';
@@ -22,7 +22,7 @@ import { Array as A, Chunk, DateTime, Effect, Metric, Option, Stream } from 'eff
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
-const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, audit: typeof AuditService.Service, storage: typeof StorageDomainService.Service, params: typeof TransferQuery.Type) =>
+const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, audit: typeof AuditService.Service, storage: typeof StorageService.Service, params: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const [metrics, ctx] = yield* Effect.all([MetricsService, Context.Request.current]);
@@ -58,7 +58,7 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 			Stream.map(([asset, idx]) => mapAsset(asset, idx)),
 		);
 		const auditExport = (name: string, count?: number) =>
-			audit.log('Asset', appId, 'export', { after: { count: count ?? null, format: codec.ext, name, userId: session.userId } });
+			audit.log('Asset.export', { details: { count: count ?? null, format: codec.ext, name, userId: session.userId }, subjectId: appId });
 		return yield* codec.binary
 			? Telemetry.withSpan(`transfer.serialize.${codec.ext}`, Transfer.exportBinary(binaryStream, codec.ext)).pipe(
 				Effect.tap((result) => Effect.all([
@@ -91,7 +91,7 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 			})();
 	}),
 );
-const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, search: typeof SearchService.Service, audit: typeof AuditService.Service, storage: typeof StorageDomainService.Service, params: typeof TransferQuery.Type) =>
+const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, search: typeof SearchRepo.Service, audit: typeof AuditService.Service, storage: typeof StorageService.Service, params: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const [metrics, ctx] = yield* Effect.all([MetricsService, Context.Request.current]);
@@ -175,8 +175,9 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 		const totalFailures = failures.length + A.reduce(dbFailures, 0, (count, err) => count + err.rows.length);
 		yield* Effect.all([
 			MetricsService.inc(metrics.transfer.imports, MetricsService.label({ app: appId, dryRun: String(dryRun), format: codec.ext })),
-			audit.log('Asset', appId, dryRun ? 'validate' : 'create', {
-				after: { dryRun, failedCount: totalFailures, format: codec.ext, importedCount: dryRun ? 0 : assets.length, userId: session.userId, validCount: items.length },
+			audit.log(dryRun ? 'Asset.validate' : 'Asset.import', {
+				details: { dryRun, failedCount: totalFailures, format: codec.ext, importedCount: dryRun ? 0 : assets.length, userId: session.userId, validCount: items.length },
+				subjectId: appId,
 			}),
 		], { discard: true });
 		return {
@@ -190,7 +191,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 
 const TransferLive = HttpApiBuilder.group(ParametricApi, 'transfer', (handlers) =>
 	Effect.gen(function* () {
-		const [repos, search, audit, storage] = yield* Effect.all([DatabaseService, SearchService, AuditService, StorageDomainService]);
+		const [repos, search, audit, storage] = yield* Effect.all([DatabaseService, SearchRepo, AuditService, StorageService]);
 		return handlers
 			.handleRaw('export', ({ urlParams }) => RateLimit.apply('api', handleExport(repos, audit, storage, urlParams)))
 			.handle('import', ({ urlParams }) => RateLimit.apply('mutation', handleImport(repos, search, audit, storage, urlParams)));

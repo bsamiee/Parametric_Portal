@@ -9,12 +9,7 @@ export default defineConfig(
     Effect.runSync(
         createConfig({
             entry: './src/main.ts',
-            external: [
-                '@parametric-portal/ai',
-                '@parametric-portal/database',
-                '@parametric-portal/server',
-                '@parametric-portal/types',
-            ],
+            external: ['@parametric-portal/database', '@parametric-portal/server', '@parametric-portal/types'],
             mode: 'server',
             name: 'ParametricApi',
             port: 4000,

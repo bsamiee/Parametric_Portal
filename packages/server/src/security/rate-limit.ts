@@ -7,19 +7,21 @@ import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLi
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { Config, Duration, Effect, Layer, Metric, Option, Redacted } from 'effect';
 import { Context } from '../context.ts';
+import { AuditService } from '../observe/audit.ts';
 import { HttpError } from '../errors.ts';
-import { MetricsService } from './metrics.ts';
+import { MetricsService } from '../observe/metrics.ts';
 
 // --- [TABLE] -----------------------------------------------------------------
 
 const presets = {
-	api: { algorithm: 'token-bucket', limit: 100, recoveryAction: undefined, tokens: 1, window: Duration.minutes(1) },
-	auth: { algorithm: 'fixed-window', limit: 5, recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
-	mfa: { algorithm: 'fixed-window', limit: 5, recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
-	mutation: { algorithm: 'token-bucket', limit: 100, recoveryAction: undefined, tokens: 5, window: Duration.minutes(1) },
+	api: { algorithm: 'token-bucket', limit: 100, onExceeded: 'fail', recoveryAction: undefined, tokens: 1, window: Duration.minutes(1) },
+	auth: { algorithm: 'fixed-window', limit: 5, onExceeded: 'fail', recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
+	mfa: { algorithm: 'fixed-window', limit: 5, onExceeded: 'fail', recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
+	mutation: { algorithm: 'token-bucket', limit: 100, onExceeded: 'delay', recoveryAction: undefined, tokens: 5, window: Duration.minutes(1) },
 } as const satisfies Record<string, {
 	algorithm: 'fixed-window' | 'token-bucket';
 	limit: number;
+	onExceeded: 'delay' | 'fail';
 	recoveryAction: 'email-verify' | 'support-ticket' | undefined;
 	tokens: number;
 	window: Duration.Duration;
@@ -47,17 +49,20 @@ const Default = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, E, R>) => Effect.gen(function* () {
-	const metrics = yield* MetricsService;
+	const [audit, metrics] = yield* Effect.all([AuditService, MetricsService]);
 	const limiter = yield* RateLimiter;
 	const ctx = yield* Context.Request.current;
 	const request = yield* HttpServerRequest.HttpServerRequest;
 	const config = presets[preset];
 	const key = `${preset}:${Option.getOrElse(ctx.ipAddress, () => Option.getOrElse(request.remoteAddress, () => 'unknown'))}`;
-	const result = yield* limiter.consume({ algorithm: config.algorithm, key, limit: config.limit, onExceeded: 'fail', tokens: config.tokens, window: config.window }).pipe(
+	const result = yield* limiter.consume({ algorithm: config.algorithm, key, limit: config.limit, onExceeded: config.onExceeded, tokens: config.tokens, window: config.window }).pipe(
 		Metric.trackDuration(Metric.taggedWithLabels(metrics.rateLimit.checkDuration, MetricsService.label({ preset }))),
 		Effect.catchAll((err: RateLimiterError) => err.reason === 'Exceeded' ? Effect.gen(function* () {
 			yield* Context.Request.update({ rateLimit: Option.some({ delay: Duration.zero, limit: err.limit, remaining: err.remaining, resetAfter: err.retryAfter }) });
-			yield* MetricsService.inc(metrics.rateLimit.rejections, MetricsService.label({ preset }), 1);
+			yield* Effect.all([
+				MetricsService.inc(metrics.rateLimit.rejections, MetricsService.label({ preset }), 1),
+				audit.log('rate_limited', { details: { limit: err.limit, preset, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter) } }),
+			], { discard: true });
 			return yield* Effect.fail(HttpError.RateLimit.of(Duration.toMillis(err.retryAfter), {
 				limit: err.limit, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter),
 				...(presets[preset].recoveryAction ? { recoveryAction: presets[preset].recoveryAction } : {}),

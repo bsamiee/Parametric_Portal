@@ -7,7 +7,7 @@ import { CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Chunk, Config, Duration, Effect, Layer, Metric, Option, Redacted, Stream } from 'effect';
 import { Context } from '../context.ts';
-import { MetricsService } from './metrics.ts';
+import { MetricsService } from '../observe/metrics.ts';
 
 // --- [INTERNAL] --------------------------------------------------------------
 
@@ -23,13 +23,6 @@ const _resolvePath = (key: string) =>
 	Context.Request.tenantId.pipe(
 		Effect.map((tenantId) => (tenantId === Context.Request.Id.system ? `system/${key}` : `tenants/${tenantId}/${key}`)),
 	);
-const _streamToBuffer = (stream: NodeJS.ReadableStream | ReadableStream | Blob): Effect.Effect<Uint8Array, unknown> =>
-	stream instanceof Blob
-		? Effect.tryPromise({ catch: (e) => e, try: () => stream.arrayBuffer() }).pipe(Effect.map((buf) => new Uint8Array(buf)))
-		: Stream.fromAsyncIterable(stream as AsyncIterable<Uint8Array>, (e) => e).pipe(
-				Stream.runCollect,
-				Effect.map((chunks) => new Uint8Array(Chunk.toReadonlyArray(chunks).flatMap((c) => Array.from(c)))),
-			);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -51,7 +44,7 @@ const _S3ClientLayer = Layer.unwrapEffect(
 
 // --- [SERVICE] ---------------------------------------------------------------
 
-class StorageService extends Effect.Service<StorageService>()('server/Storage', {
+class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAdapter', {
 	effect: Effect.gen(function* () {
 		const metrics = yield* MetricsService;
 		const s3 = yield* S3;  // Capture S3 instance to eliminate requirement from method signatures
@@ -89,7 +82,13 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 					Effect.tapError(() => MetricsService.inc(metrics.storage.errors, MetricsService.label({ op: 'get', tenant: tenantId }), 1)),
 				);
 				const typed = res as { Body?: NodeJS.ReadableStream; ContentType?: string; Metadata?: Record<string, string> };
-				const body = yield* (typed.Body ? _streamToBuffer(typed.Body).pipe(Effect.orDie) : Effect.succeed(new Uint8Array(0)));
+				const body = yield* (typed.Body
+					? Stream.fromAsyncIterable(typed.Body as AsyncIterable<Uint8Array>, (e) => e).pipe(
+							Stream.runCollect,
+							Effect.map((chunks) => new Uint8Array(Chunk.toReadonlyArray(chunks).flatMap((c) => Array.from(c)))),
+							Effect.orDie,
+						)
+					: Effect.succeed(new Uint8Array(0)));
 				yield* Effect.all([
 					MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'get', tenant: tenantId }), 1),
 					MetricsService.inc(metrics.storage.bytes, MetricsService.label({ direction: 'download', tenant: tenantId }), body.length),
@@ -186,8 +185,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 		const sign = (input:
 			| { readonly op: 'get'; readonly key: string; readonly expires?: Duration.Duration }
 			| { readonly op: 'put'; readonly key: string; readonly expires?: Duration.Duration }
-			| { readonly op: 'copy'; readonly sourceKey: string; readonly destKey: string; readonly expires?: Duration.Duration }
-		) => {				/** Generate pre-signed URL. Discriminated by op: 'get' | 'put' | 'copy'. */
+			| { readonly op: 'copy'; readonly sourceKey: string; readonly destKey: string; readonly expires?: Duration.Duration }) => {
 			const expires = Math.floor(Duration.toSeconds(input.expires ?? Duration.hours(1)));
 			const core = input.op === 'copy'
 				? Effect.all([_resolvePath(input.sourceKey), _resolvePath(input.destKey), S3ClientInstance.S3ClientInstance]).pipe(
@@ -251,16 +249,27 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 							: Effect.gen(function* () {	// Large file: multipart upload via S3 service
 								const createRes = yield* s3.createMultipartUpload({ Bucket: bucket, ContentType: input.contentType ?? 'application/octet-stream', Key: fullKey, Metadata: input.metadata });
 								const uploadId = createRes.UploadId ?? '';
+								yield* (uploadId === '' ? Effect.fail(new Error('createMultipartUpload returned empty uploadId')) : Effect.void);
 								yield* MetricsService.inc(metrics.storage.multipart.uploads, MetricsService.label({ tenant: tenantId }), 1);
 								const chunks = Array.from({ length: Math.ceil(initialBytes.length / partSize) }, (_, idx) => initialBytes.slice(idx * partSize, Math.min((idx + 1) * partSize, initialBytes.length)));
-								const parts = yield* Effect.forEach(chunks.map((chunk, idx) => ({ chunk, partNumber: idx + 1 })), ({ chunk, partNumber }) =>
-									s3.uploadPart({ Body: chunk, Bucket: bucket, Key: fullKey, PartNumber: partNumber, UploadId: uploadId }).pipe(
-										Effect.map((res) => ({ ETag: res.ETag ?? '', PartNumber: partNumber })),
-										Effect.tap(() => Effect.all([MetricsService.inc(metrics.storage.multipart.parts, MetricsService.label({ tenant: tenantId }), 1), MetricsService.inc(metrics.storage.multipart.bytes, MetricsService.label({ tenant: tenantId }), chunk.length)])),
-									), { concurrency: 3 });
-								yield* s3.completeMultipartUpload({ Bucket: bucket, Key: fullKey, MultipartUpload: { Parts: parts }, UploadId: uploadId });
-								yield* Effect.all([MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'multipart', tenant: tenantId }), 1), MetricsService.inc(metrics.storage.bytes, MetricsService.label({ direction: 'upload', tenant: tenantId }), initialBytes.length)]);
-								return { etag: parts.at(-1)?.ETag ?? '', key: input.key, totalSize: initialBytes.length };
+								const uploadPartsAndComplete = Effect.gen(function* () {
+									const parts = yield* Effect.forEach(chunks.map((chunk, idx) => ({ chunk, partNumber: idx + 1 })), ({ chunk, partNumber }) =>
+										s3.uploadPart({ Body: chunk, Bucket: bucket, Key: fullKey, PartNumber: partNumber, UploadId: uploadId }).pipe(
+											Effect.map((res) => ({ ETag: res.ETag ?? '', PartNumber: partNumber })),
+											Effect.tap(() => Effect.all([MetricsService.inc(metrics.storage.multipart.parts, MetricsService.label({ tenant: tenantId }), 1), MetricsService.inc(metrics.storage.multipart.bytes, MetricsService.label({ tenant: tenantId }), chunk.length)])),
+										), { concurrency: 3 });
+									yield* s3.completeMultipartUpload({ Bucket: bucket, Key: fullKey, MultipartUpload: { Parts: parts }, UploadId: uploadId });
+									yield* Effect.all([MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'multipart', tenant: tenantId }), 1), MetricsService.inc(metrics.storage.bytes, MetricsService.label({ direction: 'upload', tenant: tenantId }), initialBytes.length)]);
+									return { etag: parts.at(-1)?.ETag ?? '', key: input.key, totalSize: initialBytes.length };
+								});
+								return yield* uploadPartsAndComplete.pipe(
+									Effect.onExit((exit) => exit._tag === 'Failure'
+										? s3.abortMultipartUpload({ Bucket: bucket, Key: fullKey, UploadId: uploadId }).pipe(
+												Effect.tap(() => Effect.logWarning('Multipart upload aborted due to failure', { key: input.key, uploadId })),
+												Effect.catchAll(() => Effect.void),	// Don't fail cleanup if abort fails
+											)
+										: Effect.void),
+								);
 							}));
 					}).pipe(
 						Metric.trackDuration(Metric.taggedWithLabels(metrics.storage.stream.duration, MetricsService.label({ op: 'upload', tenant: tenantId }))),
@@ -309,7 +318,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 					})),
 				};
 			}).pipe(Effect.withSpan('storage.listUploads', { attributes: { 'storage.prefix': opts?.prefix ?? '' }, kind: 'client' }));
-		yield* Effect.logInfo('StorageService initialized', { bucket, region: config.region });
+		yield* Effect.logInfo('StorageAdapter initialized', { bucket, region: config.region });
 		return { abortUpload, copy, exists, get, getStream, list, listStream, listUploads, put, putStream, remove, sign };
 	}),
 }) {
@@ -318,7 +327,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
-namespace StorageService {
+namespace StorageAdapter {
 	export type PutInput = { key: string; body: Uint8Array | string; contentType?: string; metadata?: Record<string, string> };
 	export type PutResult = { key: string; etag: string; size: number };
 	export type GetResult = { body: Uint8Array; contentType: string; key: string; metadata: Record<string, string>; size: number };
@@ -328,9 +337,9 @@ namespace StorageService {
 		| { readonly op: 'get'; readonly key: string; readonly expires?: Duration.Duration }
 		| { readonly op: 'put'; readonly key: string; readonly expires?: Duration.Duration }
 		| { readonly op: 'copy'; readonly sourceKey: string; readonly destKey: string; readonly expires?: Duration.Duration };
-	export type Service = typeof StorageService.Service;
+	export type Service = typeof StorageAdapter.Service;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { StorageService };
+export { StorageAdapter };

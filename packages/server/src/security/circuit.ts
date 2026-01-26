@@ -10,7 +10,7 @@ import {
 } from 'cockatiel';
 import { Duration, Effect, Match, Metric, Option } from 'effect';
 import { Context } from '../context.ts';
-import { MetricsService } from '../infra/metrics.ts';
+import { MetricsService } from '../observe/metrics.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -56,6 +56,15 @@ const make = (name: string, config: {
 			...(config.initialState == null ? {} : { initialState: config.initialState }),
 		});
 		const onStateChange = Option.fromNullable(config.onStateChange);
+		const _deriveTransitions = (before: CircuitState, after: CircuitState, error: unknown): readonly { previous: CircuitState; state: CircuitState }[] =>
+			Match.value({ attemptedHalfOpen: before === CircuitState.Open && !(error instanceof BrokenCircuitError), changed: before !== after }).pipe(
+				Match.when({ attemptedHalfOpen: true }, () => [
+					{ previous: before, state: CircuitState.HalfOpen },
+					{ previous: CircuitState.HalfOpen, state: after },
+				]),
+				Match.when({ attemptedHalfOpen: false, changed: true }, () => [{ previous: before, state: after }]),
+				Match.orElse(() => []),
+			);
 		const execute = <A>(fn: (context: IDefaultPolicyContext) => PromiseLike<A> | A, signal?: AbortSignal): Effect.Effect<A, BrokenCircuitError | TaskCancelledError | Error> =>
 			Effect.gen(function* () {
 				const metrics = yield* Effect.serviceOption(MetricsService);
@@ -64,10 +73,9 @@ const make = (name: string, config: {
 				const exit = yield* Effect.tryPromise({ catch: (err: unknown) => err instanceof Error ? err : new Error(String(err)), try: (abortSignal) => policy.execute(fn, signal ?? abortSignal) }).pipe(Effect.exit);
 				const after = policy.state;
 				const error = exit._tag === 'Failure' ? exit.cause : undefined;
-				const attemptedHalfOpen = before === CircuitState.Open && !(error instanceof BrokenCircuitError);
-				const transitions = [...(attemptedHalfOpen ? [{ previous: before, state: CircuitState.HalfOpen }, { previous: CircuitState.HalfOpen, state: after }] : []), ...(before !== after && !attemptedHalfOpen ? [{ previous: before, state: after }] : [])];
-				const notifyEffects = Option.isSome(onStateChange) ? transitions.map((transition) => onStateChange.value({ error, name, previous: transition.previous, state: transition.state })) : [];
-				const metricEffects = Option.isSome(metrics) ? transitions.map((transition) => Metric.update(Metric.taggedWithLabels(metrics.value.circuit.stateChanges, MetricsService.label({ circuit: name })), CircuitState[transition.state])) : [];
+				const transitions = _deriveTransitions(before, after, error);
+				const notifyEffects = Option.isSome(onStateChange) ? transitions.map((t) => onStateChange.value({ error, name, previous: t.previous, state: t.state })) : [];
+				const metricEffects = Option.isSome(metrics) ? transitions.map((t) => Metric.update(Metric.taggedWithLabels(metrics.value.circuit.stateChanges, MetricsService.label({ circuit: name })), CircuitState[t.state])) : [];
 				yield* Effect.all([Context.Request.update({ circuit: Option.some({ name, state: after }) }), ...notifyEffects, ...metricEffects], { discard: true });
 				return exit._tag === 'Success' ? exit.value : yield* Effect.failCause(exit.cause);
 			});

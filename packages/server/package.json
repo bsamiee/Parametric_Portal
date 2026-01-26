@@ -23,20 +23,20 @@
       "import": "./src/middleware.ts",
       "default": "./src/middleware.ts"
     },
-    "./infra/metrics": {
-      "types": "./src/infra/metrics.ts",
-      "import": "./src/infra/metrics.ts",
-      "default": "./src/infra/metrics.ts"
+    "./observe/metrics": {
+      "types": "./src/observe/metrics.ts",
+      "import": "./src/observe/metrics.ts",
+      "default": "./src/observe/metrics.ts"
     },
-    "./infra/rate-limit": {
-      "types": "./src/infra/rate-limit.ts",
-      "import": "./src/infra/rate-limit.ts",
-      "default": "./src/infra/rate-limit.ts"
+    "./security/rate-limit": {
+      "types": "./src/security/rate-limit.ts",
+      "import": "./src/security/rate-limit.ts",
+      "default": "./src/security/rate-limit.ts"
     },
-    "./infra/telemetry": {
-      "types": "./src/infra/telemetry.ts",
-      "import": "./src/infra/telemetry.ts",
-      "default": "./src/infra/telemetry.ts"
+    "./observe/telemetry": {
+      "types": "./src/observe/telemetry.ts",
+      "import": "./src/observe/telemetry.ts",
+      "default": "./src/observe/telemetry.ts"
     },
     "./infra/storage": {
       "types": "./src/infra/storage.ts",
@@ -48,10 +48,10 @@
       "import": "./src/infra/jobs.ts",
       "default": "./src/infra/jobs.ts"
     },
-    "./infra/metrics-polling": {
-      "types": "./src/infra/metrics-polling.ts",
-      "import": "./src/infra/metrics-polling.ts",
-      "default": "./src/infra/metrics-polling.ts"
+    "./observe/polling": {
+      "types": "./src/observe/polling.ts",
+      "import": "./src/observe/polling.ts",
+      "default": "./src/observe/polling.ts"
     },
     "./security/crypto": {
       "types": "./src/security/crypto.ts",
@@ -63,10 +63,10 @@
       "import": "./src/security/totp-replay.ts",
       "default": "./src/security/totp-replay.ts"
     },
-    "./domain/audit": {
-      "types": "./src/domain/audit.ts",
-      "import": "./src/domain/audit.ts",
-      "default": "./src/domain/audit.ts"
+    "./observe/audit": {
+      "types": "./src/observe/audit.ts",
+      "import": "./src/observe/audit.ts",
+      "default": "./src/observe/audit.ts"
     },
     "./domain/mfa": {
       "types": "./src/domain/mfa.ts",
@@ -93,10 +93,10 @@
       "import": "./src/domain/oauth.ts",
       "default": "./src/domain/oauth.ts"
     },
-    "./utils/circuit": {
-      "types": "./src/utils/circuit.ts",
-      "import": "./src/utils/circuit.ts",
-      "default": "./src/utils/circuit.ts"
+    "./security/circuit": {
+      "types": "./src/security/circuit.ts",
+      "import": "./src/security/circuit.ts",
+      "default": "./src/security/circuit.ts"
     },
     "./utils/diff": {
       "types": "./src/utils/diff.ts",
@@ -108,10 +108,10 @@
       "import": "./src/utils/transfer.ts",
       "default": "./src/utils/transfer.ts"
     },
-    "./jobs/purge-assets": {
-      "types": "./src/jobs/purge-assets.ts",
-      "import": "./src/jobs/purge-assets.ts",
-      "default": "./src/jobs/purge-assets.ts"
+    "./infra/handlers/purge-assets": {
+      "types": "./src/infra/handlers/purge-assets.ts",
+      "import": "./src/infra/handlers/purge-assets.ts",
+      "default": "./src/infra/handlers/purge-assets.ts"
     }
   },
   "scripts": {
@@ -129,6 +129,7 @@
     "@effect/opentelemetry": "catalog:",
     "@effect/platform": "catalog:",
     "@effect/sql": "catalog:",
+    "@effect/sql-pg": "catalog:",
     "@parametric-portal/database": "workspace:*",
     "@parametric-portal/types": "workspace:*",
     "arctic": "catalog:",
@@ -143,8 +144,6 @@
     "papaparse": "catalog:",
     "rfc6902": "catalog:",
     "sax": "catalog:",
-    "sharp": "catalog:",
-    "ts-essentials": "catalog:",
     "yaml": "catalog:"
   },
   "devDependencies": {

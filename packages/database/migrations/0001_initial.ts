@@ -416,6 +416,29 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_jobs_user_id_fk ON jobs(user_id)`;
     yield* sql`CREATE TRIGGER jobs_timestamps BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_job_timestamps()`;
     yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    yield* sql.unsafe(String.raw`
+		CREATE OR REPLACE FUNCTION notify_job_status()
+		RETURNS TRIGGER
+		LANGUAGE plpgsql
+		SECURITY INVOKER
+		AS $$
+		BEGIN
+			IF OLD.status IS DISTINCT FROM NEW.status THEN
+				PERFORM pg_notify('job_status', json_build_object(
+					'jobId', NEW.id,
+					'appId', NEW.app_id,
+					'type', NEW.type,
+					'status', NEW.status,
+					'previousStatus', OLD.status,
+					'timestamp', extract(epoch from now())
+				)::text);
+			END IF;
+			RETURN NEW;
+		END
+		$$
+	`);
+    yield* sql`COMMENT ON FUNCTION notify_job_status() IS 'Trigger function to emit pg_notify on job status transitions for SSE streaming'`;
+    yield* sql`CREATE TRIGGER jobs_status_notify AFTER UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION notify_job_status()`;
     yield* sql`
 		CREATE OR REPLACE FUNCTION claim_jobs(p_worker_id TEXT, p_limit INT, p_lock_minutes INT DEFAULT 5)
 		RETURNS SETOF jobs

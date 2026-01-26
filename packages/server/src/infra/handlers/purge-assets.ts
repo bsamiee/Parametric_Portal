@@ -4,10 +4,10 @@
  */
 import type { DatabaseServiceShape } from '@parametric-portal/database/repos';
 import { Array as A, Duration, Effect, Option } from 'effect';
-import type { AuditService } from '../domain/audit.ts';
-import type { StorageDomainService } from '../domain/storage.ts';
-import type { JobService } from '../infra/jobs.ts';
-import { Context } from '../context.ts';
+import type { AuditService } from '../../observe/audit.ts';
+import type { StorageService } from '../../domain/storage.ts';
+import type { JobService } from '../jobs.ts';
+import { Context } from '../../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -21,9 +21,8 @@ const B = {
 
 const makePurgeAssetsHandler = (		// Create handler with services curried in. JobService provides Tenant context via withinSync at runtime.
 	db: DatabaseServiceShape,
-	storage: typeof StorageDomainService.Service,
-	audit: typeof AuditService.Service,
-) => (_payload: unknown) =>
+	storage: typeof StorageService.Service,
+	audit: typeof AuditService.Service,) => (_payload: unknown) =>
 		Effect.gen(function* () {
 			const staleAssets = yield* db.assets.findStaleForPurge(B.retention.days);
 			yield* Effect.when(
@@ -58,8 +57,9 @@ const makePurgeAssetsHandler = (		// Create handler with services curried in. Jo
 							Effect.logError('purge-assets: DB purge failed', { error: String(err) }).pipe(Effect.as(0)),
 						),
 					);
-					yield* audit.log('job', 'purge-assets', 'complete', {
-						after: { dbPurged, retentionDays: B.retention.days, s3Deleted, s3Failed },
+					yield* audit.log('Job.purge_assets', {
+						details: { dbPurged, retentionDays: B.retention.days, s3Deleted, s3Failed },
+						subjectId: 'purge-assets',
 					});
 					yield* Effect.logInfo('purge-assets: completed', {
 						dbPurged,
@@ -77,7 +77,7 @@ const makePurgeAssetsHandler = (		// Create handler with services curried in. Jo
 const registerPurgeAssetsJob = (											/** Register the purge-assets handler with JobService. Call during app initialization with services. */
 	jobService: typeof JobService.Service,
 	db: DatabaseServiceShape,
-	storage: typeof StorageDomainService.Service,
+	storage: typeof StorageService.Service,
 	audit: typeof AuditService.Service, ) =>
 	Effect.gen(function* () {
 		yield* jobService.registerHandler('purge-assets', makePurgeAssetsHandler(db, storage, audit));

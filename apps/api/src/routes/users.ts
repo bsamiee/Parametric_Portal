@@ -8,14 +8,14 @@ import { DatabaseService, type DatabaseServiceShape } from '@parametric-portal/d
 import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { AuditService } from '@parametric-portal/server/domain/audit';
-import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
+import { AuditService } from '@parametric-portal/server/observe/audit';
+import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Effect, Option, pipe } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const handleUpdateRole = Effect.fn('users.updateRole')(
-    (repos: DatabaseServiceShape, audit: typeof AuditService.Service, requireRole: ReturnType<typeof Middleware.makeRequireRole>, targetUserId: string, newRole: Context.UserRole) =>
+    (repos: DatabaseServiceShape, audit: typeof AuditService.Service, requireRole: Middleware.RequireRoleCheck, targetUserId: string, newRole: Context.UserRole) =>
         Effect.gen(function* () {
             yield* Middleware.requireMfaVerified;
             yield* requireRole('admin');
@@ -31,9 +31,10 @@ const handleUpdateRole = Effect.fn('users.updateRole')(
                 repos.users.update({ ...user, role: newRole, updatedAt: undefined }),
                 Effect.mapError((e) => HttpError.Internal.of('Role update failed', e)),
             );
-            yield* audit.log('User', targetUserId, 'update', {
+            yield* audit.log('User.update', {
                 after: { email: updatedUser.email, role: updatedUser.role },
                 before: { email: user.email, role: user.role },
+                subjectId: targetUserId,
             });
             return updatedUser;
         }),

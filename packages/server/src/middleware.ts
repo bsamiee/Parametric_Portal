@@ -8,8 +8,9 @@ import type { Hex64 } from '@parametric-portal/types/types';
 import * as ipaddr from 'ipaddr.js';
 import { Array as A, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
 import { Context } from './context.ts';
+import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
-import { MetricsService } from './infra/metrics.ts';
+import { MetricsService } from './observe/metrics.ts';
 import { Crypto } from './security/crypto.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -69,19 +70,20 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 	security: { bearer: HttpApiSecurity.bearer },
 }) {
 	static readonly makeLayer = (lookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>>) =>
-		Layer.effect(this, Effect.map(MetricsService, (metrics) => SessionAuth.of({
-			bearer: (token: Redacted.Redacted<string>) => Crypto.token.hash(Redacted.value(token)).pipe(
-				Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
-				Effect.mapError((err) => HttpError.Auth.of('Token hashing failed', err)),
-				Effect.flatMap(lookup),
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.zipRight(Metric.increment(metrics.auth.session.misses), Effect.fail(HttpError.Auth.of('Invalid session'))),
-					onSome: (session) => Context.Request.update({ session: Option.some(session) }).pipe(
-						Effect.tap(() => Metric.increment(metrics.auth.session.hits)),
-					),
-				})),
-			),
-		})));
+		Layer.effect(this, Effect.gen(function* () {
+			const metrics = yield* MetricsService;
+			const audit = yield* AuditService;
+			const onMiss = Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.zipRight(Effect.fail(HttpError.Auth.of('Invalid session'))));
+			const onHit = (session: Context.Request.Session) => Context.Request.update({ session: Option.some(session) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits)));
+			return SessionAuth.of({
+				bearer: (token: Redacted.Redacted<string>) => Crypto.token.hash(Redacted.value(token)).pipe(
+					Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
+					Effect.mapError((err) => HttpError.Auth.of('Token hashing failed', err)),
+					Effect.flatMap(lookup),
+					Effect.flatMap(Option.match({ onNone: () => onMiss, onSome: onHit })),
+				),
+			});
+		}));
 }
 const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: Context.UserRole) => Context.Request.session.pipe(
 	Effect.flatMap(({ userId }) => findById(userId)),
@@ -93,7 +95,6 @@ const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Opti
 
 // --- [CONTEXT_MIDDLEWARE] ----------------------------------------------------
 
-/** Create app namespace lookup function from DatabaseService for request context injection. */
 const makeAppLookup =
 	(db: { readonly apps: { readonly byNamespace: (ns: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> } }) =>
 	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>> =>
@@ -101,7 +102,6 @@ const makeAppLookup =
 			Effect.map((appOpt) => Option.map(appOpt, (app) => ({ id: app.id, namespace: app.namespace }))),
 			Effect.orElseSucceed(() => Option.none()),
 		);
-/** Build RequestContext from headers and app lookup. Sets tenant via FiberRef. */
 const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>>) =>
 	HttpMiddleware.make((app) => Effect.gen(function* () {
 		const req = yield* HttpServerRequest.HttpServerRequest;
@@ -159,6 +159,7 @@ const Middleware = {
 namespace Middleware {
 	export type SessionLookup = Parameters<typeof SessionAuth.makeLayer>[0];
 	export type RoleLookup = Parameters<typeof makeRequireRole>[0];
+	export type RequireRoleCheck = ReturnType<typeof makeRequireRole>;
 	export type RequestContextLookup = Parameters<typeof makeRequestContext>[0];
 	export type AppLookupDb = Parameters<typeof makeAppLookup>[0];
 }

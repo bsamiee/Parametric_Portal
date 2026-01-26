@@ -3,8 +3,8 @@
  * UUIDv7 ordering, casefold() comparisons, purge/revoke DB functions.
  *
  * ARCHITECTURE: DatabaseService provides repository access only.
- * SearchService is separate and independent at the same layer tier.
- * Consumers needing search should yield SearchService directly.
+ * SearchRepo is separate and independent at the same layer tier.
+ * Consumers needing search should yield SearchRepo directly.
  * This decoupling enables clean layer composition in main.ts.
  */
 import { SqlClient } from '@effect/sql';

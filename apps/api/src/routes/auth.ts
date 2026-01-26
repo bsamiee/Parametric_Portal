@@ -15,13 +15,13 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { AuditService } from '@parametric-portal/server/domain/audit';
 import { MfaService } from '@parametric-portal/server/domain/mfa';
 import { OAuthService } from '@parametric-portal/server/domain/oauth';
 import { SessionService } from '@parametric-portal/server/domain/session';
+import { AuditService } from '@parametric-portal/server/observe/audit';
+import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Crypto } from '@parametric-portal/server/security/crypto';
-import { MetricsService } from '@parametric-portal/server/infra/metrics';
-import { RateLimit } from '@parametric-portal/server/infra/rate-limit';
+import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import type { Uuidv7 } from '@parametric-portal/types/types';
 import { DateTime, Duration, Effect, Match, Option } from 'effect';
 
@@ -101,7 +101,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
 				}),
 			).pipe(Effect.mapError((e) => e instanceof HttpError.OAuth ? e : HttpError.Internal.of('User creation transaction failed', e)));
 			const { mfaPending, refreshToken, sessionExpiresAt, sessionToken } = yield* session.createForLogin(userId, { isNewUser, provider }).pipe(Effect.mapError(() => err('Session creation failed')));
-			yield* audit.log('User', userId, isNewUser ? 'create' : 'login', { after: { email, provider } });
+			yield* audit.log(isNewUser ? 'User.create' : 'User.login', { details: { email, provider }, subjectId: userId });
 			return yield* authResponse(sessionToken, sessionExpiresAt, refreshToken, mfaPending, true).pipe(Effect.mapError(() => err('Response build failed')));
 		}),
 );
@@ -115,7 +115,7 @@ const handleRefresh = Effect.fn('auth.refresh')((session: typeof SessionService.
 		const refreshIn = yield* requireOption(Option.fromNullable(request.cookies[Context.Request.config.cookie.refresh.name]), () => HttpError.Auth.of('Missing refresh token cookie'));
 		const hashIn = yield* Crypto.token.hash(refreshIn).pipe(Effect.mapError((e) => HttpError.Auth.of('Token hashing failed', e)));
 		const { mfaPending, refreshToken, sessionExpiresAt, sessionToken, userId } = yield* session.refresh(hashIn);
-		yield* audit.log('RefreshToken', userId, 'refresh');
+		yield* audit.log('RefreshToken.refresh', { subjectId: userId });
 		return yield* authResponse(sessionToken, sessionExpiresAt, refreshToken, mfaPending).pipe(Effect.mapError((e) => HttpError.Auth.of('Response build failed', e)));
 	}),
 );
@@ -126,7 +126,7 @@ const handleLogout = Effect.fn('auth.logout')((session: typeof SessionService.Se
 		const sess = yield* Context.Request.session;
 		yield* session.revoke(sess.id);
 		yield* session.revokeAll(sess.userId);
-		yield* audit.log('Session', sess.id, 'logout');
+		yield* audit.log('Session.logout', { subjectId: sess.userId });
 		return yield* logoutResponse().pipe(Effect.mapError((e) => HttpError.Internal.of('Response build failed', e)));
 	}),
 );
@@ -138,7 +138,7 @@ const handleMe = (repos: DatabaseServiceShape, audit: typeof AuditService.Servic
 			Effect.mapError((e) => HttpError.Internal.of('User lookup failed', e)),
 			Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.NotFound.of('user', userId)), onSome: Effect.succeed })),
 		);
-		yield* audit.log('User', userId, 'read');
+		yield* audit.log('User.read', { subjectId: userId });
 		return user;
 	}).pipe(Effect.withSpan('auth.me', { kind: 'server' }));
 
@@ -148,7 +148,7 @@ const handleMfaStatus = (mfa: typeof MfaService.Service, audit: typeof AuditServ
 	Effect.gen(function* () {
 		const { userId } = yield* Context.Request.session;
 		const status = yield* mfa.getStatus(userId);
-		yield* audit.log('MfaSecret', userId, 'status');
+		yield* audit.log('MfaSecret.status', { subjectId: userId });
 		return status;
 	}).pipe(Effect.withSpan('auth.mfa.status', { kind: 'server' }));
 const handleMfaEnroll = (mfa: typeof MfaService.Service, repos: DatabaseServiceShape, audit: typeof AuditService.Service) =>
@@ -157,14 +157,14 @@ const handleMfaEnroll = (mfa: typeof MfaService.Service, repos: DatabaseServiceS
 		const userOpt = yield* repos.users.one([{ field: 'id', value: sess.userId }]).pipe(Effect.mapError((e) => HttpError.Internal.of('User lookup failed', e)));
 		const user = yield* Option.match(userOpt, { onNone: () => Effect.fail(HttpError.NotFound.of('user', sess.userId)), onSome: Effect.succeed });
 		const result = yield* mfa.enroll(user.id, user.email);
-		yield* audit.log('MfaSecret', sess.userId, 'enroll');
+		yield* audit.log('MfaSecret.enroll', { subjectId: sess.userId });
 		return result;
 	}));
 const handleMfaVerify = (session: typeof SessionService.Service, audit: typeof AuditService.Service, code: string) =>
 	RateLimit.apply('mfa', Effect.gen(function* () {
 		const sess = yield* Context.Request.session;
 		const result = yield* session.verifyMfa(sess.id, sess.userId, code);
-		yield* audit.log('MfaSecret', sess.userId, 'verify');
+		yield* audit.log('MfaSecret.verify', { subjectId: sess.userId });
 		return result;
 	}));
 const handleMfaDisable = (mfa: typeof MfaService.Service, audit: typeof AuditService.Service) =>
@@ -172,14 +172,14 @@ const handleMfaDisable = (mfa: typeof MfaService.Service, audit: typeof AuditSer
 		yield* Middleware.requireMfaVerified;
 		const { userId } = yield* Context.Request.session;
 		yield* mfa.disable(userId);
-		yield* audit.log('MfaSecret', userId, 'disable');
+		yield* audit.log('MfaSecret.disable', { subjectId: userId });
 		return { success: true as const };
 	}).pipe(Effect.withSpan('auth.mfa.disable', { kind: 'server' }));
 const handleMfaRecover = (session: typeof SessionService.Service, audit: typeof AuditService.Service, code: string) =>
 	RateLimit.apply('mfa', Effect.gen(function* () {
 		const sess = yield* Context.Request.session;
 		const { remainingCodes } = yield* session.recoverMfa(sess.id, sess.userId, code.toUpperCase());
-		yield* audit.log('MfaSecret', sess.userId, 'recover');
+		yield* audit.log('MfaSecret.recover', { subjectId: sess.userId });
 		return { remainingCodes, success: true as const };
 	}));
 
@@ -190,7 +190,7 @@ const handleListApiKeys = (repos: DatabaseServiceShape, audit: typeof AuditServi
 		yield* Middleware.requireMfaVerified;
 		const { userId } = yield* Context.Request.session;
 		const keys = yield* repos.apiKeys.byUser(userId).pipe(Effect.mapError((e) => HttpError.Internal.of('API key list failed', e)));
-		yield* audit.log('ApiKey', userId, 'list', { after: { count: keys.length } });
+		yield* audit.log('ApiKey.list', { details: { count: keys.length }, subjectId: userId });
 		return { data: keys };
 	}).pipe(Effect.withSpan('auth.apiKeys.list', { kind: 'server' }));
 const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
@@ -210,7 +210,7 @@ const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
 			}).pipe(Effect.mapError((e) => HttpError.Internal.of('API key insert failed', e)));
 			yield* Effect.all([
 				MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'create' })),
-				audit.log('ApiKey', key.id, 'create', { after: { name: key.name } }),
+				audit.log('ApiKey.create', { details: { name: key.name }, subjectId: key.id }),
 			], { discard: true });
 			return { ...key, apiKey: pair.token };
 		}),
@@ -225,7 +225,7 @@ const handleDeleteApiKey = Effect.fn('auth.apiKeys.delete')((repos: DatabaseServ
 		const key = yield* requireOption(Option.filter(keyOpt, (k) => k.userId === userId), () => HttpError.NotFound.of('apikey', id));
 		yield* repos.apiKeys.softDelete(id).pipe(Effect.mapError((e) => HttpError.Internal.of('API key revocation failed', e)));
 		yield* Effect.all([
-			audit.log('ApiKey', id, 'revoke', { after: { name: key.name } }),
+			audit.log('ApiKey.revoke', { details: { keyId: id, name: key.name }, subjectId: userId }),
 			MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'delete' })),
 		], { discard: true });
 		return { success: true } as const;

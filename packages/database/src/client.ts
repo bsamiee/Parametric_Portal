@@ -51,9 +51,19 @@ const _setTenant = (appId: string) => Effect.gen(function* () {
 });
 const Client = {
 	config: _config,
-	health: Effect.fn('db.checkHealth')(function* () {
+	health: Effect.fn('db.checkHealth')(function* () {			// Quick health check: tests connection availability. Use for liveness probes. Does not test transaction capability.
 		const sql = yield* SqlClient.SqlClient;
 		const [duration, healthy] = yield* sql`SELECT 1`.pipe(
+			Effect.as(true),
+			Effect.timeout(_config.durations.health),
+			Effect.catchAll(() => Effect.succeed(false)),
+			Effect.timed,
+		);
+		return { healthy, latencyMs: Duration.toMillis(duration) };
+	}),
+	healthDeep: Effect.fn('db.checkHealthDeep')(function* () {	// Deep health check: tests transaction capability. Use for readiness probes. Catches connection pool exhaustion.
+		const sql = yield* SqlClient.SqlClient;
+		const [duration, healthy] = yield* sql.withTransaction(sql`SELECT 1`).pipe(
 			Effect.as(true),
 			Effect.timeout(_config.durations.health),
 			Effect.catchAll(() => Effect.succeed(false)),

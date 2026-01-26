@@ -42,15 +42,21 @@ class SearchError extends Data.TaggedError('SearchError')<{ readonly cause: unkn
 
 // --- [SERVICES] --------------------------------------------------------------
 
-class SearchService extends Effect.Service<SearchService>()('database/SearchService', {
+class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 	effect: Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const pg = yield* PgClient.PgClient;
+		/** Build scope and entity type filter fragments. Alias defaults to 'd' for documents table; null for no alias. */
+		const buildFilters = (params: { readonly entityTypes: readonly EntityType[]; readonly includeGlobal: boolean; readonly scopeId: string | null }, alias: string | null = 'd') => {
+			const col = (name: string) => alias === null ? sql`${sql(name)}` : sql`${sql(alias)}.${sql(name)}`;
+			const entityFilter = params.entityTypes.length ? sql`AND ${col('entity_type')} IN ${sql.in(params.entityTypes)}` : sql``;
+			const scopeMatch = params.scopeId ? sql`${col('scope_id')} = ${params.scopeId}::uuid` : sql`${col('scope_id')} IS NULL`;
+			const scopeFilter = params.includeGlobal && params.scopeId ? sql`AND (${scopeMatch} OR ${col('scope_id')} IS NULL)` : sql`AND ${scopeMatch}`;
+			return { entityFilter, scopeFilter, scopeMatch };
+		};
 		const buildRankedCtes = (params: { readonly embeddingJson?: string | undefined; readonly entityTypes: readonly EntityType[]; readonly includeGlobal: boolean; readonly scopeId: string | null; readonly term: string }) => {
 			const hasEmbedding = params.embeddingJson !== undefined;
-			const entityFilter = params.entityTypes.length ? sql`AND d.entity_type IN ${sql.in(params.entityTypes)}` : sql``;
-			const scopeMatch = params.scopeId ? sql`d.scope_id = ${params.scopeId}::uuid` : sql`d.scope_id IS NULL`;
-			const scopeFilter = params.includeGlobal && params.scopeId ? sql`AND (${scopeMatch} OR d.scope_id IS NULL)` : sql`AND ${scopeMatch}`;
+			const { entityFilter, scopeFilter } = buildFilters(params);
 		const term = sql`casefold(unaccent(${params.term}))`; 	// PG 18.1: casefold() for Unicode case folding (e.g., ß → ss), unaccent() for diacritics
 			const query = sql`websearch_to_tsquery(${Tuning.regconfig}::regconfig, unaccent(${params.term}))`;
 			const semanticParts = { 							// Dispatch table for semantic CTE (hasEmbedding ? with : without)
@@ -212,9 +218,7 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 		});
 		const executeEmbeddingSources = SqlSchema.findAll({
 			execute: (params) => {
-				const entityFilter = params.entityTypes.length ? sql`AND entity_type IN ${sql.in(params.entityTypes)}` : sql``;
-				const scopeMatch = params.scopeId ? sql`scope_id = ${params.scopeId}::uuid` : sql`scope_id IS NULL`;
-				const scopeFilter = params.includeGlobal && params.scopeId ? sql`AND (${scopeMatch} OR scope_id IS NULL)` : sql`AND ${scopeMatch}`;
+				const { entityFilter, scopeFilter } = buildFilters(params, null);
 				return sql`
 					SELECT entity_type, entity_id, scope_id, display_text, content_text, metadata, hash, updated_at
 					FROM ${sql(Tuning.tables.embeddingSources)}
@@ -242,7 +246,7 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 			Result: S.Struct({ entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), isNew: S.Boolean }),
 		});
 		return {
-			embeddingSources: Effect.fn('SearchService.embeddingSources')((options: { readonly entityTypes?: readonly EntityType[]; readonly includeGlobal?: boolean; readonly limit?: number; readonly scopeId?: string | null }) =>
+			embeddingSources: Effect.fn('SearchRepo.embeddingSources')((options: { readonly entityTypes?: readonly EntityType[]; readonly includeGlobal?: boolean; readonly limit?: number; readonly scopeId?: string | null }) =>
 				executeEmbeddingSources({
 					entityTypes: options.entityTypes ?? [],
 					includeGlobal: options.includeGlobal ?? false,
@@ -267,14 +271,14 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 						),
 					Request: S.Struct({ includeGlobal: S.Boolean, scopeId: S.NullOr(S.UUID) }),
 				});
-				return Effect.fn('SearchService.refresh')((scopeId: string | null = null, includeGlobal = false) =>
+				return Effect.fn('SearchRepo.refresh')((scopeId: string | null = null, includeGlobal = false) =>
 					executeRefresh({ includeGlobal, scopeId }).pipe(
 						Effect.mapError((cause) => new SearchError({ cause, operation: 'refresh' })),
 						Effect.withSpan('search.refresh'),
 					),
 				);
 			})(),
-			search: Effect.fn('SearchService.search')((options: { readonly embedding?: readonly number[]; readonly entityTypes?: readonly EntityType[]; readonly includeFacets?: boolean; readonly includeGlobal?: boolean; readonly includeSnippets?: boolean; readonly scopeId: string | null; readonly term: string }, pagination: { cursor?: string; limit?: number } = {}) =>
+			search: Effect.fn('SearchRepo.search')((options: { readonly embedding?: readonly number[]; readonly entityTypes?: readonly EntityType[]; readonly includeFacets?: boolean; readonly includeGlobal?: boolean; readonly includeSnippets?: boolean; readonly scopeId: string | null; readonly term: string }, pagination: { cursor?: string; limit?: number } = {}) =>
 				Effect.gen(function* () {
 					const cursorValue = Option.filter(yield* Page.decode(pagination.cursor, S.Number), (c) => S.is(S.UUID)(c.id));
 					const limit = Math.min(Math.max(pagination.limit ?? Tuning.limits.defaultLimit, 1), Tuning.limits.maxLimit);
@@ -296,7 +300,7 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 					return { ...Page.keyset(items, totalCount, limit, (item) => ({ id: item.entityId, v: item.rank }), S.Number, Option.isSome(cursorValue)), facets };
 				}).pipe(Effect.withSpan('search.query', { attributes: { term: options.term } })),
 			),
-			suggest: Effect.fn('SearchService.suggest')((options: { readonly includeGlobal?: boolean; readonly limit?: number; readonly prefix: string; readonly scopeId: string | null }) =>
+			suggest: Effect.fn('SearchRepo.suggest')((options: { readonly includeGlobal?: boolean; readonly limit?: number; readonly prefix: string; readonly scopeId: string | null }) =>
 				executeSuggestions({
 					includeGlobal: options.includeGlobal ?? false,
 					limit: Math.min(Math.max(options.limit ?? Tuning.limits.suggestLimitDefault, 1), Tuning.limits.suggestLimitMax),
@@ -307,7 +311,7 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 					Effect.withSpan('search.suggest'),
 				),
 			),
-			upsertEmbedding: Effect.fn('SearchService.upsertEmbedding')((input: { readonly hash: string; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: EntityType; readonly scopeId: string | null }) =>
+			upsertEmbedding: Effect.fn('SearchRepo.upsertEmbedding')((input: { readonly hash: string; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: EntityType; readonly scopeId: string | null }) =>
 				S.decode(S.Array(S.Number).pipe(S.itemsCount(Tuning.embedding.dimensions)))(input.embedding).pipe(
 					Effect.andThen((embedding) => executeUpsertEmbedding({ embeddingJson: JSON.stringify(embedding), entityId: input.entityId, entityType: input.entityType, hash: input.hash, scopeId: input.scopeId })),
 					Effect.mapError((cause) => new SearchError({ cause, operation: 'upsertEmbedding' })),
@@ -318,17 +322,17 @@ class SearchService extends Effect.Service<SearchService>()('database/SearchServ
 	}),
 }) {
 	/** Test layer factory with mock implementations. Override only the methods you need. */
-	static readonly Test = (overrides: Partial<SearchService> = {}) =>
-		Layer.succeed(SearchService, {
+	static readonly Test = (overrides: Partial<SearchRepo> = {}) =>
+		Layer.succeed(SearchRepo, {
 			embeddingSources: overrides.embeddingSources ?? ((_) => Effect.succeed([])),
 			onRefresh: overrides.onRefresh ?? (() => Stream.empty),
 			refresh: overrides.refresh ?? ((_scopeId, _includeGlobal) => Effect.void),
-			search: overrides.search ?? ((_options, _pagination) => Effect.succeed({ cursor: undefined, facets: null, hasMore: false, items: [], total: 0 })),
+			search: overrides.search ?? ((_options, _pagination) => Effect.succeed({ cursor: null, facets: null, hasNext: false, hasPrev: false, items: [], total: 0 })),
 			suggest: overrides.suggest ?? ((_options) => Effect.succeed([])),
 			upsertEmbedding: overrides.upsertEmbedding ?? ((_input) => Effect.succeed({ entityId: '00000000-0000-0000-0000-000000000000', entityType: 'app' as const, isNew: true })),
-		} as SearchService);
+		} as SearchRepo);
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { SearchError, SearchService };
+export { SearchError, SearchRepo };
