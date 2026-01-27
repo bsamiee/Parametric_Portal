@@ -3,7 +3,8 @@
  * Uses cockatiel for circuit breaker (proven state machine), Effect for everything else.
  * Metrics are optional - module works without MetricsService in context.
  */
-import { Data, Duration, Effect, Schedule } from 'effect';
+import { Data, Duration, Effect, Metric, Option, Schedule } from 'effect';
+import { MetricsService } from '../observe/metrics.ts';
 import { Circuit } from '../security/circuit.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -29,6 +30,12 @@ const _schedules = {
 	),
 } as const;
 
+const _metrics = {
+	fallbacks: Metric.counter('resilience_fallbacks_total'),
+	retries: Metric.counter('resilience_retries_total'),
+	timeouts: Metric.counter('resilience_timeouts_total'),
+} as const;
+
 // --- [ERRORS] ----------------------------------------------------------------
 
 class TimeoutError extends Data.TaggedError('TimeoutError')<{
@@ -46,32 +53,61 @@ class CircuitOpenError extends Data.TaggedError('CircuitOpenError')<{
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-/** Apply timeout to an effect with typed error */
+/** Apply timeout to an effect with typed error and optional metrics */
 const withTimeout = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 	duration: Duration.Duration,
 	operation = 'operation',
 ): Effect.Effect<A, E | TimeoutError, R> =>
-	effect.pipe(
-		Effect.timeoutFail({
-			duration,
-			onTimeout: () => new TimeoutError({ durationMs: Duration.toMillis(duration), operation }),
-		}),
-	);
+	Effect.gen(function* () {
+		const metricsOpt = yield* Effect.serviceOption(MetricsService);
+		const result = yield* effect.pipe(
+			Effect.timeoutFail({
+				duration,
+				onTimeout: () => new TimeoutError({ durationMs: Duration.toMillis(duration), operation }),
+			}),
+			Effect.tapError((err) =>
+				err instanceof TimeoutError && Option.isSome(metricsOpt)
+					? MetricsService.inc(_metrics.timeouts, MetricsService.label({ operation }))
+					: Effect.void,
+			),
+		);
+		return result;
+	});
 
-/** Apply retry schedule to an effect */
+/** Apply retry schedule to an effect with optional metrics on each retry */
 const withRetry = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 	schedule: Schedule.Schedule<unknown, E, never> = _schedules.default,
+	operation = 'operation',
 ): Effect.Effect<A, E, R> =>
-	Effect.retry(effect, schedule);
+	Effect.gen(function* () {
+		const metricsOpt = yield* Effect.serviceOption(MetricsService);
+		// Use tapInput to emit metric on each retry (receives the error that triggered retry)
+		const scheduleWithMetrics = Option.isSome(metricsOpt)
+			? Schedule.tapInput(schedule, () =>
+				MetricsService.inc(_metrics.retries, MetricsService.label({ operation })),
+			)
+			: schedule;
+		return yield* Effect.retry(effect, scheduleWithMetrics);
+	});
 
-/** Apply fallback when effect fails */
+/** Apply fallback when effect fails with optional metrics */
 const withFallback = <A, E, R, A2, R2>(
 	effect: Effect.Effect<A, E, R>,
 	fallback: Effect.Effect<A2, never, R2>,
+	operation = 'operation',
 ): Effect.Effect<A | A2, never, R | R2> =>
-	Effect.catchAll(effect, () => fallback);
+	Effect.catchAll(effect, (err) =>
+		Effect.gen(function* () {
+			const metricsOpt = yield* Effect.serviceOption(MetricsService);
+			const reason = typeof err === 'object' && err !== null && '_tag' in err ? String(err._tag) : 'unknown';
+			yield* Option.isSome(metricsOpt)
+				? MetricsService.inc(_metrics.fallbacks, MetricsService.label({ operation, reason }))
+				: Effect.void;
+			return yield* fallback;
+		}),
+	);
 
 /** Execute through a circuit breaker by name - wraps effect in cockatiel circuit breaker */
 const withCircuit = <A, E, R>(
@@ -103,18 +139,29 @@ const withResilience = <A, E, R>(
 		readonly timeout?: Duration.Duration;
 	},
 ): Effect.Effect<A, E | TimeoutError | CircuitOpenError | Error, R> => {
+	const operation = config?.operation ?? 'operation';
+
 	// Order matters: timeout → retry → circuit → execute
 	// Timeout wraps the retried operation so each attempt has same timeout
 	// Circuit wraps everything so open circuit short-circuits early
 
 	// Start with the base effect
 	const withTimeoutApplied = config?.timeout !== undefined
-		? withTimeout(effect, config.timeout, config.operation)
+		? withTimeout(effect, config.timeout, operation)
 		: effect;
 
-	// Apply retry (wraps timeout - retries on timeout or other errors)
-	const withRetryApplied = config?.retry !== undefined
-		? Effect.retry(withTimeoutApplied, config.retry)
+	// Apply retry with metrics (wraps timeout - retries on timeout or other errors)
+	const retrySchedule = config?.retry;
+	const withRetryApplied = retrySchedule !== undefined
+		? Effect.gen(function* () {
+			const metricsOpt = yield* Effect.serviceOption(MetricsService);
+			const scheduleWithMetrics = Option.isSome(metricsOpt)
+				? Schedule.tapInput(retrySchedule, () =>
+					MetricsService.inc(_metrics.retries, MetricsService.label({ operation })),
+				)
+				: retrySchedule;
+			return yield* Effect.retry(withTimeoutApplied, scheduleWithMetrics);
+		})
 		: withTimeoutApplied;
 
 	// Apply circuit breaker (outermost - tracks failures across retries)
@@ -122,9 +169,9 @@ const withResilience = <A, E, R>(
 		? withCircuit(withRetryApplied, config.circuit, config.circuitConfig)
 		: withRetryApplied;
 
-	// Apply fallback at the very end if provided
+	// Apply fallback with metrics at the very end if provided
 	const withFallbackApplied = config?.fallback !== undefined
-		? withFallback(withCircuitApplied, config.fallback)
+		? withFallback(withCircuitApplied, config.fallback, operation)
 		: withCircuitApplied;
 
 	return withFallbackApplied as Effect.Effect<A, E | TimeoutError | CircuitOpenError | Error, R>;
