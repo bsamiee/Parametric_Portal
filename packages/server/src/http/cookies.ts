@@ -62,7 +62,7 @@ const readOptional = <A, I extends Readonly<Record<string, string | undefined>>,
 	schema: S.Schema<A, I, R>,
 ): Effect.Effect<Option.Option<A>, never, HttpServerRequest.HttpServerRequest | R> =>
 	HttpServerRequest.schemaCookies(schema).pipe(
-		Effect.map(Option.some),
+		Effect.map((v) => Option.some(v)),
 		Effect.catchTag('ParseError', () => Effect.succeed(Option.none())),
 	);
 

@@ -81,16 +81,18 @@ const withRetry = <A, E, R>(
 	schedule: Schedule.Schedule<unknown, E, never> = _schedules.default,
 	operation = 'operation',
 ): Effect.Effect<A, E, R> =>
-	Effect.gen(function* () {
-		const metricsOpt = yield* Effect.serviceOption(MetricsService);
-		// Use tapInput to emit metric on each retry (receives the error that triggered retry)
-		const scheduleWithMetrics = Option.isSome(metricsOpt)
-			? Schedule.tapInput(schedule, () =>
-				MetricsService.inc(_metrics.retries, MetricsService.label({ operation })),
-			)
-			: schedule;
-		return yield* Effect.retry(effect, scheduleWithMetrics);
-	});
+	effect.pipe(
+		Effect.tapError(() =>
+			Effect.flatMap(
+				Effect.serviceOption(MetricsService),
+				Option.match({
+					onNone: () => Effect.void,
+					onSome: () => MetricsService.inc(_metrics.retries, MetricsService.label({ operation })),
+				}),
+			),
+		),
+		Effect.retry(schedule),
+	);
 
 /** Apply fallback when effect fails with optional metrics */
 const withFallback = <A, E, R, A2, R2>(
@@ -114,18 +116,19 @@ const withCircuit = <A, E, R>(
 	effect: Effect.Effect<A, E, R>,
 	circuitName: string,
 	config?: Circuit.Config,
-): Effect.Effect<A, E | CircuitOpenError | Error, R> =>
-	Effect.gen(function* () {
-		const circuit = Circuit.make(circuitName, config);
-		// Execute through circuit breaker - converts BrokenCircuitError to CircuitOpenError
-		const result = yield* circuit.execute(
-			() => Effect.runPromise(effect as Effect.Effect<A, E, never>),
-		).pipe(
+): Effect.Effect<A, E | CircuitOpenError, R> => {
+	const circuit = Circuit.make(circuitName, config);
+	// Circuit.execute expects a function returning PromiseLike, and returns Effect
+	// We run our effect via runPromise, then handle circuit errors
+	return Effect.flatMap(
+		Effect.context<R>(),
+		(ctx) => circuit.execute(() => Effect.runPromise(Effect.provide(effect, ctx))).pipe(
 			Effect.catchIf(Circuit.isOpen, () => Effect.fail(new CircuitOpenError({ circuit: circuitName }))),
 			Effect.catchIf(Circuit.isCancelled, (err) => Effect.die(err)),
-		);
-		return result;
-	});
+			Effect.mapError((err) => err as E | CircuitOpenError),
+		),
+	);
+};
 
 /** Unified resilience wrapper - applies timeout, retry, circuit breaker, and fallback in optimal order */
 const withResilience = <A, E, R>(
@@ -146,33 +149,36 @@ const withResilience = <A, E, R>(
 	// Circuit wraps everything so open circuit short-circuits early
 
 	// Start with the base effect
-	const withTimeoutApplied = config?.timeout !== undefined
-		? withTimeout(effect, config.timeout, operation)
-		: effect;
+	const withTimeoutApplied = config?.timeout === undefined
+		? effect
+		: withTimeout(effect, config.timeout, operation);
 
 	// Apply retry with metrics (wraps timeout - retries on timeout or other errors)
 	const retrySchedule = config?.retry;
-	const withRetryApplied = retrySchedule !== undefined
-		? Effect.gen(function* () {
-			const metricsOpt = yield* Effect.serviceOption(MetricsService);
-			const scheduleWithMetrics = Option.isSome(metricsOpt)
-				? Schedule.tapInput(retrySchedule, () =>
-					MetricsService.inc(_metrics.retries, MetricsService.label({ operation })),
-				)
-				: retrySchedule;
-			return yield* Effect.retry(withTimeoutApplied, scheduleWithMetrics);
-		})
-		: withTimeoutApplied;
+	const withRetryApplied = retrySchedule === undefined
+		? withTimeoutApplied
+		: withTimeoutApplied.pipe(
+			Effect.tapError(() =>
+				Effect.flatMap(
+					Effect.serviceOption(MetricsService),
+					Option.match({
+						onNone: () => Effect.void,
+						onSome: () => MetricsService.inc(_metrics.retries, MetricsService.label({ operation })),
+					}),
+				),
+			),
+			Effect.retry(retrySchedule),
+		);
 
 	// Apply circuit breaker (outermost - tracks failures across retries)
-	const withCircuitApplied = config?.circuit !== undefined
-		? withCircuit(withRetryApplied, config.circuit, config.circuitConfig)
-		: withRetryApplied;
+	const withCircuitApplied = config?.circuit === undefined
+		? withRetryApplied
+		: withCircuit(withRetryApplied, config.circuit, config.circuitConfig);
 
 	// Apply fallback with metrics at the very end if provided
-	const withFallbackApplied = config?.fallback !== undefined
-		? withFallback(withCircuitApplied, config.fallback, operation)
-		: withCircuitApplied;
+	const withFallbackApplied = config?.fallback === undefined
+		? withCircuitApplied
+		: withFallback(withCircuitApplied, config.fallback, operation);
 
 	return withFallbackApplied as Effect.Effect<A, E | TimeoutError | CircuitOpenError | Error, R>;
 };
