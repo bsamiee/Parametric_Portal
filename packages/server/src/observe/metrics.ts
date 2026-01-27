@@ -54,13 +54,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		},
 		circuit: { stateChanges: Metric.frequency('circuit_state_changes_total') },
 		errors: Metric.frequency('errors_total'),
-		fiber: {
-			active: Metric.fiberActive,
-			failures: Metric.fiberFailures,
-			lifetimes: Metric.fiberLifetimes,
-			started: Metric.fiberStarted,
-			successes: Metric.fiberSuccesses,
-		},
+		fiber: { active: Metric.fiberActive, failures: Metric.fiberFailures, lifetimes: Metric.fiberLifetimes, started: Metric.fiberStarted, successes: Metric.fiberSuccesses },
 		http: {
 			active: Metric.gauge('http_requests_active'),
 			duration: Metric.timerWithBoundaries('http_request_duration_seconds', _boundaries.http),
@@ -93,7 +87,9 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			storeFailures: Metric.counter('rate_limit_store_failures_total'),
 		},
 		resilience: {
+			bulkheadRejections: Metric.counter('resilience_bulkhead_rejections_total'),
 			fallbacks: Metric.counter('resilience_fallbacks_total'),
+			hedges: Metric.counter('resilience_hedges_total'),
 			retries: Metric.counter('resilience_retries_total'),
 			timeouts: Metric.counter('resilience_timeouts_total'),
 		},
@@ -115,15 +111,25 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			stream: { duration: Metric.timerWithBoundaries('storage_stream_duration_seconds', _boundaries.storage) },
 		},
 		stream: {
+			active: Metric.gauge('stream_active'),
 			bytes: Metric.counter('stream_bytes_total'),
 			duration: Metric.timerWithBoundaries('stream_duration_seconds', [0.1, 1, 10, 60, 300]),
 			elements: Metric.counter('stream_elements_total'),
+			errors: Metric.counter('stream_errors_total'),
 		},
 		transfer: {
 			duration: Metric.timerWithBoundaries('transfer_duration_seconds', _boundaries.transfer),
 			exports: Metric.counter('transfer_exports_total'),
 			imports: Metric.counter('transfer_imports_total'),
 			rows: Metric.counter('transfer_rows_total'),
+		},
+		workers: {
+			active: Metric.gauge('workers_active'),
+			completions: Metric.counter('workers_completions_total'),
+			crashes: Metric.counter('workers_crashes_total'),
+			duration: Metric.timerWithBoundaries('workers_duration_seconds', _boundaries.transfer),
+			queueDepth: Metric.gauge('workers_queue_depth'),
+			timeouts: Metric.counter('workers_timeouts_total'),
 		},
 	}),
 }) {
@@ -149,6 +155,13 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		value === 1
 			? Metric.increment(Metric.taggedWithLabels(counter, labels))
 			: Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value);
+	// --- [GAUGE] -------------------------------------------------------------
+	static readonly gauge = (								// Update gauge with labels using official Metric.update API.
+		gauge: Metric.Metric.Gauge<number>,
+		labels: HashSet.HashSet<MetricLabel.MetricLabel>,
+		delta: number,
+	): Effect.Effect<void> =>
+		Metric.update(Metric.taggedWithLabels(gauge, labels), delta);
 	// --- [TRACKING] ----------------------------------------------------------
 	static readonly trackEffect = <A, E, R>(			// Unified effect tracker - composes duration + error + defect tracking via official Metric APIs.
 		effect: Effect.Effect<A, E, R>,
