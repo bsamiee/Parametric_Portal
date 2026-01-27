@@ -3,7 +3,7 @@
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
-import { Array as A, Chunk, Data, Effect, Either, Option, Ref, Schema as S, Stream } from 'effect';
+import { Array as A, Chunk, Effect, Either, Option, Ref, Schema as S, Stream } from 'effect';
 import type JSZip from 'jszip';
 import { PassThrough, Readable } from 'node:stream';
 import { Crypto } from '../security/crypto.ts';
@@ -26,22 +26,22 @@ type _Stream = Stream.Stream<_Row, TransferError.Fatal>;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
-class Parse extends Data.TaggedError('Parse')<{
-	readonly code: 'DECOMPRESS' | 'HASH_MISMATCH' | 'INVALID_PATH' | 'INVALID_RECORD' | 'MISSING_TYPE' | 'SCHEMA_MISMATCH' | 'TOO_LARGE';
-	readonly ordinal?: number;
-	readonly detail?: string;
-}> { override get message() { return this.detail ? `Parse[${this.code}]@${this.ordinal}: ${this.detail}` : `Parse[${this.code}]@${this.ordinal}`; }}
+class Parse extends S.TaggedError<Parse>()('Parse', {
+	code: S.Literal('DECOMPRESS', 'HASH_MISMATCH', 'INVALID_PATH', 'INVALID_RECORD', 'MISSING_TYPE', 'SCHEMA_MISMATCH', 'TOO_LARGE'),
+	detail: S.optional(S.String),
+	ordinal: S.optional(S.Number),
+}) { override get message() { return this.detail ? `Parse[${this.code}]@${this.ordinal}: ${this.detail}` : `Parse[${this.code}]@${this.ordinal}`; }}
 
-class Fatal extends Data.TaggedError('Fatal')<{
-	readonly code: 'ARCHIVE_LIMIT' | 'COMPRESSION_RATIO' | 'INVALID_FORMAT' | 'INVALID_MANIFEST' | 'PARSER_ERROR' | 'ROW_LIMIT' | 'UNSUPPORTED';
-	readonly detail?: string;
-}> { override get message() { return this.detail ? `Fatal[${this.code}]: ${this.detail}` : `Fatal[${this.code}]`; }}
+class Fatal extends S.TaggedError<Fatal>()('Fatal', {
+	code: S.Literal('ARCHIVE_LIMIT', 'COMPRESSION_RATIO', 'INVALID_FORMAT', 'INVALID_MANIFEST', 'PARSER_ERROR', 'ROW_LIMIT', 'UNSUPPORTED'),
+	detail: S.optional(S.String),
+}) { override get message() { return this.detail ? `Fatal[${this.code}]: ${this.detail}` : `Fatal[${this.code}]`; }}
 
-class Import extends Data.TaggedError('Import')<{
-	readonly code: 'BATCH_FAILED';
-	readonly rows: readonly number[];
-	readonly cause?: unknown;
-}> { override get message() { return `Import[${this.code}] rows: ${this.rows.join(', ')}`; }}
+class Import extends S.TaggedError<Import>()('Import', {
+	cause: S.optional(S.Unknown),
+	code: S.Literal('BATCH_FAILED'),
+	rows: S.Array(S.Number),
+}) { override get message() { return `Import[${this.code}] rows: ${this.rows.join(', ')}`; }}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 

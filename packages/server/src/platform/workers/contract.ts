@@ -1,16 +1,10 @@
 /**
  * RPC contract schemas for worker communication.
- * Defines type-safe request/response patterns for transfer parsing workers.
+ * Reuses TransferError.Parse from transfer.ts; adds worker-specific errors.
  */
 import { Rpc, RpcGroup } from '@effect/rpc';
 import { Schema as S } from 'effect';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type ParseProgress = typeof ParseProgress.Type;
-type ParseResult = typeof ParseResult.Type;
-type ParseFormat = S.Schema.Type<typeof ParseFormat>;
-type TransferWorkerError = S.Schema.Type<typeof TransferWorkerErrorSchema>;
+import { TransferError } from '../../utils/transfer.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -39,12 +33,6 @@ const ParseFormat = S.Literal('xlsx', 'csv', 'zip', 'json', 'yaml', 'xml', 'ndjs
 
 // --- [ERRORS] ----------------------------------------------------------------
 
-class ParseError extends S.TaggedError<ParseError>()('ParseError', {
-	code: S.Literal('DECOMPRESS', 'HASH_MISMATCH', 'INVALID_PATH', 'INVALID_RECORD', 'MISSING_TYPE', 'SCHEMA_MISMATCH', 'TOO_LARGE'),
-	detail: S.optional(S.String),
-	ordinal: S.optional(S.Number),
-}) {}
-
 class TimeoutError extends S.TaggedError<TimeoutError>()('TimeoutError', {
 	elapsedMs: S.Number,
 	hardLimitMs: S.Number,
@@ -56,7 +44,7 @@ class WorkerCrashError extends S.TaggedError<WorkerCrashError>()('WorkerCrashErr
 	workerId: S.String,
 }) {}
 
-const TransferWorkerErrorSchema = S.Union(ParseError, TimeoutError, WorkerCrashError);
+const TransferWorkerErrorSchema = S.Union(TransferError.Parse, TimeoutError, WorkerCrashError);
 
 // --- [RPC] -------------------------------------------------------------------
 
@@ -72,7 +60,6 @@ const TransferRpc = RpcGroup.make(ParseTransfer);
 // --- [EXPORT] ----------------------------------------------------------------
 
 export {
-	ParseError,
 	ParseFormat,
 	ParseProgress,
 	ParseResult,
@@ -82,4 +69,12 @@ export {
 	TransferWorkerErrorSchema,
 	WorkerCrashError,
 };
-export type { TransferWorkerError };
+
+// --- [TYPES] -----------------------------------------------------------------
+
+type ParseProgressType = typeof ParseProgress.Type;
+type ParseResultType = typeof ParseResult.Type;
+type ParseFormatType = S.Schema.Type<typeof ParseFormat>;
+type TransferWorkerError = S.Schema.Type<typeof TransferWorkerErrorSchema>;
+
+export type { ParseFormatType, ParseProgressType, ParseResultType, TransferWorkerError };
