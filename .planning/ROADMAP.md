@@ -63,10 +63,13 @@ Plans:
   2. API health endpoint responds under 100ms during heavy transfer parsing operations
   3. Session/token cache entries have compile-time type validation via KeyValueStore.forSchema
   4. Single KeyValueStore interface allows swapping between memory and Redis backends via Layer
-**Plans**: TBD
+**Plans**: 4 plans in 4 waves
 
 Plans:
-- TBD (populated during planning phase)
+- [ ] 03-01-PLAN.md — RPC contract schemas + CacheService forSchema extension (Wave 1)
+- [ ] 03-02-PLAN.md — Worker script with RPC server for transfer parsing (Wave 2)
+- [ ] 03-03-PLAN.md — WorkerPoolService main thread service (Wave 3)
+- [ ] 03-04-PLAN.md — Integration and health endpoint verification (Wave 4)
 
 ## Progress
 
@@ -77,7 +80,7 @@ Phases execute in numeric order: 1 → 2 → 3
 |-------|----------------|--------|-----------|
 | 1. Platform API Adoption | 0/3 | Planned (3 plans, 2 waves) | - |
 | 2. Layer Architecture Consolidation | 0/TBD | Not started | - |
-| 3. Advanced Platform Features | 0/TBD | Not started | - |
+| 3. Advanced Platform Features | 0/4 | Planned (4 plans, 4 waves) | - |
 
 ---
-*Last updated: 2026-01-27 after Phase 1 planning complete*
+*Last updated: 2026-01-27 after Phase 3 planning complete*
