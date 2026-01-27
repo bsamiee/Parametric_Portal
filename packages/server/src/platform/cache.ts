@@ -3,25 +3,10 @@
  * Auto-scopes keys by tenant + user from FiberRef context.
  * Integrates rate limiting and cross-instance invalidation via Redis pub/sub.
  */
-import {
-	layer as rateLimiterLayer,
-	layerStoreMemory,
-	RateLimiter,
-	type RateLimiterError,
-} from '@effect/experimental/RateLimiter';
+import {layer as rateLimiterLayer, layerStoreMemory, RateLimiter, type RateLimiterError,} from '@effect/experimental/RateLimiter';
 import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpServerRequest } from '@effect/platform';
-import {
-	Cache as EffectCache,
-	Config,
-	Data,
-	Duration,
-	Effect,
-	Layer,
-	Match,
-	Option,
-	Redacted,
-} from 'effect';
+import { Cache as EffectCache, Config, Data, Duration, Effect, Layer, Match, Option, pipe, Redacted, Schema as S } from 'effect';
 import Redis from 'ioredis';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
@@ -30,77 +15,31 @@ import { Resilience } from '../utils/resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _config = {
-	defaults: {
-		capacity: 1000,
-		inMemoryTTL: Duration.seconds(10),
-		ttl: Duration.minutes(5),
-	},
-	pubsub: { channel: 'cache:invalidate' },
-	redis: {
-		connectTimeout: 5000,
-		enableReadyCheck: true,
-		host: 'localhost',
-		lazyConnect: false,
-		maxRetriesPerRequest: 3,
-		port: 6379,
-		prefix: 'cache:',
-	},
-} as const;
-
-const _rateLimitPresets = {
-	api: {
-		algorithm: 'token-bucket' as const,
-		limit: 100,
-		onExceeded: 'fail' as const,
-		tokens: 1,
-		window: Duration.minutes(1),
-	},
-	auth: {
-		algorithm: 'fixed-window' as const,
-		limit: 5,
-		onExceeded: 'fail' as const,
-		recoveryAction: 'email-verify' as const,
-		tokens: 1,
-		window: Duration.minutes(15),
-	},
-	mfa: {
-		algorithm: 'fixed-window' as const,
-		limit: 5,
-		onExceeded: 'fail' as const,
-		recoveryAction: 'email-verify' as const,
-		tokens: 1,
-		window: Duration.minutes(15),
-	},
-	mutation: {
-		algorithm: 'token-bucket' as const,
-		limit: 100,
-		onExceeded: 'delay' as const,
-		tokens: 5,
-		window: Duration.minutes(1),
-	},
-} as const;
-
+const _Cache = (() => {
+	const ttl = Duration.minutes(5);
+	const redis = { connectTimeout: 5000, enableReadyCheck: true, host: 'localhost', lazyConnect: false, maxRetriesPerRequest: 3, port: 6379, prefix: 'cache:' } as const;
+	return {
+		defaults: 	  { capacity: 1000, inMemoryTTL: Duration.seconds(10), ttl, ttlSeconds: Math.floor(Duration.toMillis(ttl) / 1000) },
+		pubsub: 	  { channel: 'cache:invalidate' },
+		rateLimit: {
+			api: 	  { algorithm: 'token-bucket', limit: 100, 	onExceeded: 'fail',  recoveryAction: undefined, 			  tokens: 1, window: Duration.minutes(1)  },
+			auth: 	  { algorithm: 'fixed-window', limit: 5, 	onExceeded: 'fail',  recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
+			mfa: 	  { algorithm: 'fixed-window', limit: 5, 	onExceeded: 'fail',  recoveryAction: 'email-verify' as const, tokens: 1, window: Duration.minutes(15) },
+			mutation: { algorithm: 'token-bucket', limit: 100, 	onExceeded: 'delay', recoveryAction: undefined, 			  tokens: 5, window: Duration.minutes(1)  },
+		} satisfies Record<string, { algorithm: 'fixed-window' | 'token-bucket'; limit: number; onExceeded: 'delay' | 'fail'; recoveryAction: 'email-verify' | 'support-ticket' | undefined; tokens: number; window: Duration.Duration }>,
+		redis,
+	} as const;
+})();
+const _domains = new Map<string, S.Schema<unknown, unknown, never>>();
 const _redisConfig = Config.all({
-	connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(
-		Config.withDefault(_config.redis.connectTimeout),
-	),
-	enableReadyCheck: Config.boolean('REDIS_READY_CHECK').pipe(
-		Config.withDefault(_config.redis.enableReadyCheck),
-	),
-	host: Config.string('REDIS_HOST').pipe(Config.withDefault(_config.redis.host)),
-	lazyConnect: Config.boolean('REDIS_LAZY_CONNECT').pipe(
-		Config.withDefault(_config.redis.lazyConnect),
-	),
-	maxRetriesPerRequest: Config.integer('REDIS_MAX_RETRIES').pipe(
-		Config.withDefault(_config.redis.maxRetriesPerRequest),
-	),
-	password: Config.redacted('REDIS_PASSWORD').pipe(
-		Config.option,
-		Config.map((opt) => opt.pipe(Option.map(Redacted.value), Option.getOrUndefined)),
-	),
-	port: Config.integer('REDIS_PORT').pipe(Config.withDefault(_config.redis.port)),
-	prefix: Config.string('CACHE_PREFIX').pipe(Config.withDefault(_config.redis.prefix)),
+	connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(_Cache.redis.connectTimeout)),
+	enableReadyCheck: Config.boolean('REDIS_READY_CHECK').pipe(Config.withDefault(_Cache.redis.enableReadyCheck)),
+	host: Config.string('REDIS_HOST').pipe(Config.withDefault(_Cache.redis.host)),
+	lazyConnect: Config.boolean('REDIS_LAZY_CONNECT').pipe(Config.withDefault(_Cache.redis.lazyConnect)),
+	maxRetriesPerRequest: Config.integer('REDIS_MAX_RETRIES').pipe(Config.withDefault(_Cache.redis.maxRetriesPerRequest)),
+	password: Config.redacted('REDIS_PASSWORD').pipe(Config.option, Config.map((opt) => Option.match(opt, { onNone: () => undefined, onSome: (r) => Redacted.value(r) }))),
+	port: Config.integer('REDIS_PORT').pipe(Config.withDefault(_Cache.redis.port)),
+	prefix: Config.string('CACHE_PREFIX').pipe(Config.withDefault(_Cache.redis.prefix)),
 });
 
 // --- [ERRORS] ----------------------------------------------------------------
@@ -108,439 +47,188 @@ const _redisConfig = Config.all({
 class CacheError extends Data.TaggedError('CacheError')<{
 	readonly cause: unknown;
 	readonly operation: string;
-}> {
-	override get message() {
-		return `CacheError: ${this.operation} - ${String(this.cause)}`;
-	}
-}
+}> {override get message() {return `CacheError: ${this.operation} - ${String(this.cause)}`;}}
 
 // --- [SERVICES] --------------------------------------------------------------
-
-type CacheKey = { readonly domain: string; readonly key: string; readonly tenantId: string };
-type CacheState = {
-	readonly _caches: Map<string, EffectCache.Cache<CacheKey, unknown, Resilience.Error<unknown>>>;
-	readonly _prefix: string;
-	readonly _pub: Redis;
-	readonly _sub: Redis;
-};
 
 class CacheService extends Effect.Service<CacheService>()('server/CacheService', {
 	scoped: Effect.gen(function* () {
 		const cfg = yield* _redisConfig;
-		const redisOpts = {
-			connectTimeout: cfg.connectTimeout,
-			enableReadyCheck: cfg.enableReadyCheck,
-			host: cfg.host,
-			lazyConnect: cfg.lazyConnect,
-			maxRetriesPerRequest: cfg.maxRetriesPerRequest,
-			password: cfg.password,
-			port: cfg.port,
-		};
-
-		// Pub client for commands + publishing
-		const pub = new Redis(redisOpts);
-		yield* Effect.addFinalizer(() =>
-			Effect.sync(() => {
-				pub.disconnect();
-			}),
-		);
-
-		// Sub client for subscriptions (must be separate)
-		const sub = new Redis(redisOpts);
-		yield* Effect.addFinalizer(() =>
-			Effect.sync(() => {
-				sub.unsubscribe();
-				sub.disconnect();
-			}),
-		);
-
-		// Subscribe to invalidation channel
+		const pub = new Redis({ connectTimeout: cfg.connectTimeout, enableReadyCheck: cfg.enableReadyCheck, host: cfg.host, lazyConnect: cfg.lazyConnect, maxRetriesPerRequest: cfg.maxRetriesPerRequest, password: cfg.password, port: cfg.port });
+		yield* Effect.addFinalizer(() => Effect.sync(() => pub.disconnect()));
+		const sub = pub.duplicate();
+		yield* Effect.addFinalizer(() => Effect.sync(() => { sub.unsubscribe(); sub.disconnect(); }));
 		yield* Effect.tryPromise({
 			catch: (e) => new CacheError({ cause: e, operation: 'subscribe' }),
-			try: () => sub.subscribe(_config.pubsub.channel),
-		}).pipe(
-			Effect.catchAll((err) =>
-				Effect.logWarning('Redis pub/sub unavailable, continuing with memory-only', {
-					error: String(err),
-				}),
-			),
-		);
-
-		const caches = new Map<
-			string,
-			EffectCache.Cache<CacheKey, unknown, Resilience.Error<unknown>>
-		>();
-
-		// Handle invalidation messages - dispatched via external callback
-		sub.on('message', (channel, message) =>
-			Match.value(channel).pipe(
-				Match.when(_config.pubsub.channel, () => {
-					const parsed = JSON.parse(message) as {
-						domain: string;
-						key: string;
-						tenantId: string;
-					};
-					const cache = caches.get(parsed.domain);
-					return cache
-						? Effect.runFork(
-								cache.invalidate({
-									domain: parsed.domain,
-									key: parsed.key,
-									tenantId: parsed.tenantId,
-								}),
-							)
-						: undefined;
-				}),
-				Match.orElse(() => undefined),
-			),
-		);
-
+			try: () => sub.subscribe(_Cache.pubsub.channel),
+		}).pipe(Effect.catchAll((err) => Effect.logWarning('Redis pub/sub unavailable', { error: String(err) })));
+		const caches = new Map<string, EffectCache.Cache<{ readonly domain: string; readonly key: string; readonly tenantId: string }, unknown, Resilience.Error<unknown>>>();
+		sub.on('message', (channel, message) => pipe(
+			Option.liftPredicate(channel, (ch) => ch === _Cache.pubsub.channel),
+			Option.map(() => JSON.parse(message) as { readonly domain: string; readonly key: string; readonly tenantId: string }),
+			Option.flatMap((p) => pipe(Option.fromNullable(caches.get(p.domain)), Option.map((c) => ({ c, p })))),
+			Option.match({ onNone: () => {}, onSome: ({ c, p }) => Effect.runFork(c.invalidate(p)) }),
+		));
 		yield* Effect.logInfo('CacheService initialized', { host: cfg.host, port: cfg.port });
-
-		return {
-			_caches: caches,
-			_prefix: cfg.prefix,
-			_pub: pub,
-			_sub: sub,
-		} satisfies CacheState;
+		return { _caches: caches, _prefix: cfg.prefix, _pub: pub, _sub: sub };
 	}),
 }) {
 	// --- [GET] ---------------------------------------------------------------
-	static readonly get = <V, E, R>(
-		domain: string,
-		lookup: (key: string) => Effect.Effect<V, E, R>,
-	) => {
-		return (
-			key: string,
-		): Effect.Effect<Option.Option<V>, Resilience.Error<E>, R | CacheService> =>
-			Effect.gen(function* () {
-				const state = yield* CacheService;
-				const tenantId = yield* Context.Request.tenantId;
-				const sessionOpt = yield* Context.Request.current.pipe(
-					Effect.map((ctx) => ctx.session),
-				);
-				const userId = Option.map(sessionOpt, (s) => s.userId).pipe(
-					Option.getOrElse(() => ''),
-				);
-				const scopedKey = userId
-					? `${state._prefix}${tenantId}:${userId}:${domain}:${key}`
-					: `${state._prefix}${tenantId}:${domain}:${key}`;
-				const ck: CacheKey = { domain, key: scopedKey, tenantId };
-
-				// Get or create L1 cache for this domain
-				const existingCache = state._caches.get(domain) as
-					| EffectCache.Cache<CacheKey, V, Resilience.Error<E>>
-					| undefined;
-				const cache =
-					existingCache ??
-					(yield* EffectCache.make<CacheKey, V, Resilience.Error<E>, R>({
-						capacity: _config.defaults.capacity,
-						lookup: (cacheKey) =>
-							Resilience.wrap(lookup(cacheKey.key.split(':').pop() ?? cacheKey.key), {
-								operation: `${domain}:lookup`,
-								retry: 'fast',
-								timeout: Duration.seconds(5),
-							}),
-						timeToLive: _config.defaults.ttl,
-					}));
-
-				// Register cache if new
-				yield* existingCache
-					? Effect.void
-					: Effect.sync(() =>
-							state._caches.set(
-								domain,
-								cache as EffectCache.Cache<CacheKey, unknown, Resilience.Error<unknown>>,
-							),
-						);
-
-				const emitHitMetric = (layer?: string) =>
-					Effect.flatMap(Effect.serviceOption(MetricsService), (opt) =>
-						Option.match(opt, {
-							onNone: () => Effect.void,
-							onSome: (m) =>
-								MetricsService.inc(
-									m.cache.hits,
-									MetricsService.label({ domain, layer, tenant: tenantId }),
-								),
-						}),
+	static readonly get = <V, E, R>(domain: string, lookup: (key: string) => Effect.Effect<V, E, R>) =>
+		(key: string): Effect.Effect<Option.Option<V>, Resilience.Error<E>, R | CacheService> =>
+			Effect.flatMap(
+				Effect.all({ ctx: Context.Request.current, metricsOpt: Effect.serviceOption(MetricsService), state: CacheService }),
+				({ ctx, metricsOpt, state }) => {
+					type CK = { readonly domain: string; readonly key: string; readonly tenantId: string };
+					const userSuffix = Option.match(ctx.session, { onNone: () => '', onSome: (s) => `:${s.userId}` });
+					const scopedKey = `${state._prefix}${ctx.tenantId}${userSuffix}:${domain}:${key}`;
+					const ck: CK = { domain, key: scopedKey, tenantId: ctx.tenantId };
+					const labels = MetricsService.label({ domain, tenant: ctx.tenantId });
+					const labelsL2 = MetricsService.label({ domain, layer: 'l2', tenant: ctx.tenantId });
+					const incHit = Option.match(metricsOpt, { onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.hits, labels) });
+					const incHitL2 = Option.match(metricsOpt, { onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.hits, labelsL2) });
+					const incMiss = Option.match(metricsOpt, { onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.misses, labels) });
+					const existing = state._caches.get(domain) as EffectCache.Cache<CK, V, Resilience.Error<E>> | undefined;
+					const makeLookup = (cacheKey: CK) => Resilience.run(`cache:${domain}`, lookup(cacheKey.key.split(':').pop() ?? cacheKey.key), { retry: 'fast', timeout: Duration.seconds(5) });
+					const makeCache = EffectCache.make<CK, V, Resilience.Error<E>, R>({ capacity: _Cache.defaults.capacity, lookup: makeLookup, timeToLive: _Cache.defaults.ttl });
+					const cacheEffect = existing === undefined ? Effect.tap(makeCache, (c) => Effect.sync(() => state._caches.set(domain, c as EffectCache.Cache<CK, unknown, Resilience.Error<unknown>>))) : Effect.succeed(existing);
+					const tryL1 = (cache: EffectCache.Cache<CK, V, Resilience.Error<E>>) => cache.getOption(ck).pipe(
+						Effect.orElseSucceed(() => Option.none<V>()),
+						Effect.flatMap(Option.match({ onNone: () => Effect.fail('L1Miss' as const), onSome: (v) => Effect.as(incHit, v) })),
 					);
-
-				const emitMissMetric = () =>
-					Effect.flatMap(Effect.serviceOption(MetricsService), (opt) =>
-						Option.match(opt, {
-							onNone: () => Effect.void,
-							onSome: (m) =>
-								MetricsService.inc(
-									m.cache.misses,
-									MetricsService.label({ domain, tenant: tenantId }),
-								),
-						}),
+					const tryL2 = (cache: EffectCache.Cache<CK, V, Resilience.Error<E>>) => Effect.flatMap(
+						Effect.tryPromise({ catch: () => 'L2Miss' as const, try: () => state._pub.get(scopedKey) }),
+						(raw) => pipe(Option.fromNullable(raw), Option.match({
+							onNone: () => Effect.fail('L2Miss' as const),
+							onSome: (r) => { const v = JSON.parse(r) as V; return Effect.as(Effect.tap(cache.set(ck, v), () => incHitL2), v); },
+						})),
 					);
-
-				const writeBehindL2 = (value: V) =>
-					Effect.tryPromise({
-						catch: (e) => new CacheError({ cause: e, operation: 'redis-set' }),
-						try: () =>
-							state._pub.setex(
-								scopedKey,
-								Math.floor(Duration.toMillis(_config.defaults.ttl) / 1000),
-								JSON.stringify(value),
-							),
-					}).pipe(
-						Effect.catchAll((err) =>
-							Effect.logWarning('Redis write-behind failed', { error: String(err) }),
-						),
-						Effect.fork,
-					);
-
-				// Try L1 first
-				const l1Result = yield* cache.getOption(ck);
-
-				// L1 hit: emit metric and return
-				return yield* Option.match(l1Result, {
-					onNone: () =>
-						// L1 miss - try L2
-						Effect.tryPromise({
-							catch: () => Option.none<V>(),
-							try: () =>
-								state._pub.get(scopedKey).then((raw) =>
-									raw ? Option.some(JSON.parse(raw) as V) : Option.none<V>(),
-								),
-						}).pipe(
-							Effect.catchAll(() => Effect.succeed(Option.none<V>())),
-							Effect.flatMap((l2Result) =>
-								Option.match(l2Result, {
-									onNone: () =>
-										// Full miss - run lookup via L1 cache
-										emitMissMetric().pipe(
-											Effect.andThen(
-												cache.get(ck).pipe(
-													Effect.map(Option.some),
-													Effect.catchAll(() => Effect.succeed(Option.none<V>())),
-												),
-											),
-											Effect.tap((result) =>
-												Option.match(result, {
-													onNone: () => Effect.void,
-													onSome: writeBehindL2,
-												}),
-											),
-										),
-									onSome: (value) =>
-										// L2 hit - populate L1 and emit metric
-										Effect.all([cache.set(ck, value), emitHitMetric('l2')], {
-											discard: true,
-										}).pipe(Effect.as(l2Result)),
-								}),
-							),
-						),
-					onSome: () => emitHitMetric().pipe(Effect.as(l1Result)),
-				});
-			});
-	};
-
+					const writeBehind = (v: V) => Effect.runFork(Effect.catchAll(
+						Effect.tryPromise({ catch: (e) => new CacheError({ cause: e, operation: 'redis-set' }), try: () => state._pub.setex(scopedKey, _Cache.defaults.ttlSeconds, JSON.stringify(v)) }),
+						(err) => Effect.logWarning('Redis write-behind failed', { error: String(err) }),
+					));
+					const doLookup = (cache: EffectCache.Cache<CK, V, Resilience.Error<E>>) => Effect.tap(Effect.tap(cache.get(ck), () => incMiss), (v) => Effect.sync(() => writeBehind(v)));
+					return Effect.flatMap(cacheEffect, (cache) => Effect.option(Effect.firstSuccessOf([tryL1(cache), tryL2(cache), doLookup(cache)])));
+				},
+			);
 	// --- [INVALIDATE] --------------------------------------------------------
 	static readonly invalidate = (domain: string, key: string) =>
 		Effect.gen(function* () {
+			type CK = { readonly domain: string; readonly key: string; readonly tenantId: string };
 			const state = yield* CacheService;
-			const tenantId = yield* Context.Request.tenantId;
-			const sessionOpt = yield* Context.Request.current.pipe(Effect.map((ctx) => ctx.session));
-			const userId = Option.map(sessionOpt, (s) => s.userId).pipe(Option.getOrElse(() => ''));
-			const scopedKey = userId
-				? `${state._prefix}${tenantId}:${userId}:${domain}:${key}`
-				: `${state._prefix}${tenantId}:${domain}:${key}`;
-			const ck: CacheKey = { domain, key: scopedKey, tenantId };
-
-			// Invalidate L1 if cache exists
-			const cache = state._caches.get(domain);
-			yield* cache ? cache.invalidate(ck) : Effect.void;
-
-			// Invalidate L2
-			yield* Effect.tryPromise({
-				catch: (e) => new CacheError({ cause: e, operation: 'redis-del' }),
-				try: () => state._pub.del(scopedKey),
-			}).pipe(Effect.catchAll(() => Effect.void));
-
-			// Broadcast invalidation to other instances
-			yield* Effect.tryPromise({
-				catch: (e) => new CacheError({ cause: e, operation: 'redis-publish' }),
-				try: () =>
-					state._pub.publish(
-						_config.pubsub.channel,
-						JSON.stringify({ domain, key: scopedKey, tenantId }),
-					),
-			}).pipe(
-				Effect.catchAll((err) =>
-					Effect.logWarning('Redis publish failed', { error: String(err) }),
-				),
-			);
-
-			// Emit eviction metric
-			yield* Effect.flatMap(Effect.serviceOption(MetricsService), (opt) =>
-				Option.match(opt, {
-					onNone: () => Effect.void,
-					onSome: (m) =>
-						MetricsService.inc(
-							m.cache.evictions,
-							MetricsService.label({ domain, tenant: tenantId }),
-						),
-				}),
-			);
+			const metricsOpt = yield* Effect.serviceOption(MetricsService);
+			const ctx = yield* Context.Request.current;
+			const userSuffix = Option.match(ctx.session, { onNone: () => '', onSome: (s) => `:${s.userId}` });
+			const scopedKey = `${state._prefix}${ctx.tenantId}${userSuffix}:${domain}:${key}`;
+			const ck: CK = { domain, key: scopedKey, tenantId: ctx.tenantId };
+			yield* Effect.transposeMapOption(Option.fromNullable(state._caches.get(domain)), (c) => c.invalidate(ck));
+			yield* Effect.tryPromise({ catch: (e) => new CacheError({ cause: e, operation: 'redis-del' }), try: () => state._pub.del(scopedKey) }).pipe(Effect.catchAll((err) => Effect.logWarning('Redis del failed', { error: String(err) })));
+			yield* Effect.tryPromise({ catch: (e) => new CacheError({ cause: e, operation: 'redis-publish' }), try: () => state._pub.publish(_Cache.pubsub.channel, JSON.stringify(ck)) }).pipe(Effect.catchAll((err) => Effect.logWarning('Redis publish failed', { error: String(err) })));
+			yield* Effect.transposeMapOption(metricsOpt, (m) => MetricsService.inc(m.cache.evictions, MetricsService.label({ domain, tenant: ctx.tenantId })));
 		});
-
 	// --- [HEALTH] ------------------------------------------------------------
 	static readonly health = () =>
 		Effect.gen(function* () {
 			const state = yield* CacheService;
-			const l2 = yield* Effect.tryPromise({
-				catch: () => false,
-				try: () => state._pub.ping().then((pong) => pong === 'PONG'),
-			}).pipe(Effect.catchAll(() => Effect.succeed(false)));
-			return { l1: true, l2 };
+			const l2 = yield* Effect.tryPromise({ catch: () => false as const, try: () => state._pub.ping().then((pong) => pong === 'PONG') }).pipe(Effect.orElseSucceed(() => false as const));
+			return { l1: true as const, l2 };
 		});
-
+	// --- [SCHEMA_REGISTER] ---------------------------------------------------
+	static readonly register = <A, I>(domain: string, schema: S.Schema<A, I>) =>
+		Effect.sync(() => { _domains.set(domain, schema as S.Schema<unknown, unknown, never>); });
+	// --- [SCHEMA_GET] --------------------------------------------------------
+	static readonly getSchema = <A, I = A>(domain: string) => (key: string): Effect.Effect<Option.Option<A>, never, CacheService> =>
+		pipe(
+			Option.fromNullable(_domains.get(domain) as S.Schema<A, I> | undefined),
+			Option.match({
+				onNone: () => Effect.succeed(Option.none<A>()),
+				onSome: (schema) => Effect.flatMap(
+					Effect.all({ ctx: Context.Request.current, state: CacheService }),
+					({ ctx, state }) => {
+						const userSuffix = Option.match(ctx.session, { onNone: () => '', onSome: (s) => `:${s.userId}` });
+						const scopedKey = `${state._prefix}${ctx.tenantId}${userSuffix}:${domain}:${key}`;
+						return pipe(
+							Effect.tryPromise({ catch: () => 'L2Miss' as const, try: () => state._pub.get(scopedKey) }),
+							Effect.orElseSucceed(() => null),
+							Effect.flatMap((raw) => Option.match(Option.fromNullable(raw), {
+								onNone: () => Effect.succeed(Option.none<A>()),
+								onSome: (r) => S.decodeUnknown(S.parseJson(schema))(r).pipe(Effect.map(Option.some), Effect.catchTag('ParseError', () => Effect.succeed(Option.none<A>()))),
+							})),
+						);
+					},
+				),
+			}),
+		);
+	// --- [SCHEMA_SET] --------------------------------------------------------
+	static readonly setSchema = <A, I = A>(domain: string, ttlOverride?: Duration.Duration) => (key: string, value: A): Effect.Effect<void, CacheError, CacheService> =>
+		pipe(
+			Option.fromNullable(_domains.get(domain) as S.Schema<A, I> | undefined),
+			Option.match({
+				onNone: () => Effect.void,
+				onSome: (schema) => Effect.flatMap(
+					Effect.all({ ctx: Context.Request.current, state: CacheService }),
+					({ ctx, state }) => {
+						const userSuffix = Option.match(ctx.session, { onNone: () => '', onSome: (s) => `:${s.userId}` });
+						const scopedKey = `${state._prefix}${ctx.tenantId}${userSuffix}:${domain}:${key}`;
+						const ttlSeconds = ttlOverride ? Math.floor(Duration.toMillis(ttlOverride) / 1000) : _Cache.defaults.ttlSeconds;
+						return pipe(
+							S.encode(schema)(value),
+							Effect.orDie,
+							Effect.flatMap((encoded) => Effect.tryPromise({ catch: (e) => new CacheError({ cause: e, operation: 'redis-set-schema' }), try: () => state._pub.setex(scopedKey, ttlSeconds, JSON.stringify(encoded)) })),
+							Effect.asVoid,
+						);
+					},
+				),
+			}),
+		);
 	// --- [RATE_LIMIT] --------------------------------------------------------
-	static readonly rateLimit = (preset: keyof typeof _rateLimitPresets) =>
+	static readonly rateLimit = (preset: keyof typeof _Cache.rateLimit) =>
 		Effect.gen(function* () {
 			const limiter = yield* RateLimiter;
+			const metricsOpt = yield* Effect.serviceOption(MetricsService);
 			const ctx = yield* Context.Request.current;
 			const request = yield* HttpServerRequest.HttpServerRequest;
-			const config = _rateLimitPresets[preset];
-			const ip = Option.getOrElse(ctx.ipAddress, () =>
-				Option.getOrElse(request.remoteAddress, () => 'unknown'),
+			const config = _Cache.rateLimit[preset];
+			const ip = Option.getOrElse(ctx.ipAddress, () => Option.getOrElse(request.remoteAddress, () => 'unknown'));
+			const result = yield* limiter.consume({ algorithm: config.algorithm, key: `${preset}:${ip}`, limit: config.limit, onExceeded: config.onExceeded, tokens: config.tokens, window: config.window }).pipe(
+				Effect.catchAll((err: RateLimiterError) => Match.value(err).pipe(
+					Match.when({ reason: 'Exceeded' }, (e) => Effect.zipRight(
+						Context.Request.update({ rateLimit: Option.some({ delay: Duration.zero, limit: e.limit, remaining: e.remaining, resetAfter: e.retryAfter }) }),
+						Effect.fail(HttpError.RateLimit.of(Duration.toMillis(e.retryAfter), { limit: e.limit, remaining: e.remaining, resetAfterMs: Duration.toMillis(e.retryAfter), ...pipe(config.recoveryAction, Option.fromNullable, Option.match({ onNone: () => ({}), onSome: (ra) => ({ recoveryAction: ra }) })) })),
+					)),
+					Match.orElse(() => Effect.zipRight(
+						Effect.all([Effect.logWarning('Rate limit store unavailable (fail-open)', { error: String(err), preset }), Effect.transposeMapOption(metricsOpt, (m) => MetricsService.inc(m.rateLimit.storeFailures, MetricsService.label({ preset })))], { discard: true }),
+						Effect.succeed({ delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window }),
+					)),
+				)),
 			);
-			const key = `${preset}:${ip}`;
-
-			const result = yield* limiter
-				.consume({
-					algorithm: config.algorithm,
-					key,
-					limit: config.limit,
-					onExceeded: config.onExceeded,
-					tokens: config.tokens,
-					window: config.window,
-				})
-				.pipe(
-					Effect.catchAll((err: RateLimiterError) =>
-						err.reason === 'Exceeded'
-							? Effect.gen(function* () {
-									yield* Context.Request.update({
-										rateLimit: Option.some({
-											delay: Duration.zero,
-											limit: err.limit,
-											remaining: err.remaining,
-											resetAfter: err.retryAfter,
-										}),
-									});
-									const recovery =
-										'recoveryAction' in config ? config.recoveryAction : undefined;
-									return yield* Effect.fail(
-										HttpError.RateLimit.of(Duration.toMillis(err.retryAfter), {
-											limit: err.limit,
-											remaining: err.remaining,
-											resetAfterMs: Duration.toMillis(err.retryAfter),
-											...(recovery ? { recoveryAction: recovery } : {}),
-										}),
-									);
-								})
-							: Effect.gen(function* () {
-									// Fail-open on store errors
-									yield* Effect.logWarning('Rate limit store unavailable (fail-open)', {
-										error: String(err),
-										preset,
-									});
-									yield* Effect.flatMap(Effect.serviceOption(MetricsService), (opt) =>
-										Option.match(opt, {
-											onNone: () => Effect.void,
-											onSome: (m) =>
-												MetricsService.inc(
-													m.rateLimit.storeFailures,
-													MetricsService.label({ preset }),
-												),
-										}),
-									);
-									return {
-										delay: Duration.zero,
-										limit: config.limit,
-										remaining: config.limit,
-										resetAfter: config.window,
-									};
-								}),
-					),
-				);
-
-			yield* Context.Request.update({ rateLimit: Option.some(result) });
-
-			// Emit metric for successful check
-			yield* Effect.flatMap(Effect.serviceOption(MetricsService), (opt) =>
-				Option.match(opt, {
-					onNone: () => Effect.void,
-					onSome: (m) =>
-						MetricsService.inc(
-							m.rateLimit.rejections,
-							MetricsService.label({ outcome: 'allowed', preset }),
-						),
-				}),
-			);
-
+			yield* Context.Request.update({ rateLimit: pipe(result, Option.some) });
 			return result;
 		}).pipe(Effect.withSpan(`cache.rateLimit.${preset}`));
-
 	// --- [REDIS] -------------------------------------------------------------
-	static readonly redis = Effect.map(CacheService, (s) => s._pub);
-
+	static readonly redis = CacheService.pipe(Effect.map((s) => s._pub));
 	// --- [LAYER] -------------------------------------------------------------
 	static readonly Layer = CacheService.Default.pipe(
-		Layer.provideMerge(
-			rateLimiterLayer.pipe(
-				Layer.provideMerge(
-					Layer.unwrapEffect(
-						Config.string('RATE_LIMIT_STORE').pipe(
-							Config.withDefault('memory'),
-							Effect.map((store) =>
-								store === 'redis'
-									? layerStoreRedis({
-											connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(
-												Config.withDefault(5000),
-											),
-											enableReadyCheck: Config.boolean('REDIS_READY_CHECK').pipe(
-												Config.withDefault(true),
-											),
-											host: Config.string('REDIS_HOST').pipe(
-												Config.withDefault('localhost'),
-											),
-											lazyConnect: Config.boolean('REDIS_LAZY_CONNECT').pipe(
-												Config.withDefault(false),
-											),
-											maxRetriesPerRequest: Config.integer('REDIS_MAX_RETRIES').pipe(
-												Config.withDefault(3),
-											),
-											password: Config.redacted('REDIS_PASSWORD').pipe(
-												Config.option,
-												Config.map((opt) =>
-													opt.pipe(Option.map(Redacted.value), Option.getOrUndefined),
-												),
-											),
-											port: Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
-											prefix: Config.string('RATE_LIMIT_PREFIX').pipe(
-												Config.withDefault('rl:'),
-											),
-											retryStrategy: Config.integer('REDIS_RETRY_DELAY').pipe(
-												Config.withDefault(100),
-												Config.map(
-													(delay) => (tries: number) =>
-														tries > 3 ? null : Math.min(tries * delay, 2000),
-												),
-											),
-										})
-									: layerStoreMemory,
-							),
-						),
-					),
-				),
+		Layer.provideMerge(rateLimiterLayer),
+		Layer.provideMerge(Layer.unwrapEffect(
+			Config.string('RATE_LIMIT_STORE').pipe(
+				Config.withDefault('memory'),
+				Effect.flatMap((store) => Match.value(store).pipe(
+					Match.when('redis', () => _redisConfig.pipe(Effect.map((cfg) => layerStoreRedis({
+						connectTimeout: Config.succeed(cfg.connectTimeout),
+						enableReadyCheck: Config.succeed(cfg.enableReadyCheck),
+						host: Config.succeed(cfg.host),
+						lazyConnect: Config.succeed(cfg.lazyConnect),
+						maxRetriesPerRequest: Config.succeed(cfg.maxRetriesPerRequest),
+						password: Config.succeed(cfg.password),
+						port: Config.succeed(cfg.port),
+						prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')),
+						retryStrategy: Config.integer('REDIS_RETRY_DELAY').pipe(Config.withDefault(100), Config.map((delay) => (tries: number) => Match.value(tries > 3).pipe(Match.when(true, () => null), Match.orElse(() => Math.min(tries * delay, 2000))))),
+					})))),
+					Match.orElse(() => Effect.succeed(layerStoreMemory)),
+				)),
 			),
-		),
+		)),
 	);
 }
 
@@ -548,7 +236,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 
 namespace CacheService {
 	export type Error = CacheError;
-	export type RateLimitPreset = keyof typeof _rateLimitPresets;
+	export type RateLimitPreset = keyof typeof _Cache.rateLimit;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
