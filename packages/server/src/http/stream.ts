@@ -49,6 +49,22 @@ type ProgressConfig = {
 	readonly logInterval?: number;
 };
 
+type DownloadConfig = {
+	readonly filename: string;
+	readonly contentType?: string;
+	readonly size?: number;
+	readonly buffer?: Partial<BufferConfig>;
+};
+
+type ExportFormat = 'json' | 'csv' | 'ndjson';
+
+type ExportConfig<A> = {
+	readonly filename: string;
+	readonly format: ExportFormat;
+	readonly serialize?: (a: A) => string;
+	readonly buffer?: Partial<BufferConfig>;
+};
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _bufferDefaults = {
@@ -252,10 +268,106 @@ const withCircuit = <A, E, R>(
 		),
 	);
 
+/**
+ * Build file download response with proper headers.
+ * Sets Content-Disposition for browser download, Content-Type, and optional Content-Length.
+ */
+const download = <E>(
+	stream: Stream.Stream<Uint8Array, E, never>,
+	config: DownloadConfig,
+): HttpServerResponse.HttpServerResponse => {
+	const bufferConfig = _resolveBufferConfig(_bufferDefaults.download, config.buffer);
+	const bufferedStream = _applyBufferStrategy(stream, bufferConfig);
+
+	const contentType = config.contentType ?? 'application/octet-stream';
+	const escapedFilename = config.filename.replace(/"/g, '\\"');
+
+	const headers = Headers.fromInput({
+		'Content-Disposition': `attachment; filename="${escapedFilename}"`,
+		'Content-Type': contentType,
+		...(config.size !== undefined ? { 'Content-Length': String(config.size) } : {}),
+	});
+
+	return HttpServerResponse.stream(bufferedStream, {
+		contentType,
+		headers,
+	});
+};
+
+/**
+ * Transform stream to JSON array format (wrapped in brackets, comma-separated).
+ */
+const jsonArray = <A, E, R>(
+	stream: Stream.Stream<A, E, R>,
+	serialize: (a: A) => string = (a) => JSON.stringify(a),
+): Stream.Stream<Uint8Array, E, R> =>
+	Stream.concat(
+		Stream.succeed(_encodeToBytes('[')),
+		Stream.concat(
+			stream.pipe(
+				Stream.zipWithIndex,
+				Stream.map(([a, idx]) => _encodeToBytes(idx === 0 ? serialize(a) : `,${serialize(a)}`)),
+			),
+			Stream.succeed(_encodeToBytes(']')),
+		),
+	);
+
+/**
+ * Transform stream to NDJSON format (newline-delimited JSON).
+ */
+const ndjson = <A, E, R>(
+	stream: Stream.Stream<A, E, R>,
+	serialize: (a: A) => string = (a) => JSON.stringify(a),
+): Stream.Stream<Uint8Array, E, R> =>
+	Stream.map(stream, (a) => _encodeToBytes(`${serialize(a)}\n`));
+
+/**
+ * Build data export response in specified format.
+ * Supports JSON array, NDJSON, and CSV formats.
+ */
+const export_ = <A, E>(
+	stream: Stream.Stream<A, E, never>,
+	config: ExportConfig<A>,
+): HttpServerResponse.HttpServerResponse => {
+	const serialize = config.serialize ?? ((a: A) => JSON.stringify(a));
+	const bufferConfig = _resolveBufferConfig(_bufferDefaults.export, config.buffer);
+
+	const formatResult = Match.value(config.format).pipe(
+		Match.when('json', () => ({
+			contentType: 'application/json',
+			stream: _applyBufferStrategy(jsonArray(stream, serialize), bufferConfig),
+		})),
+		Match.when('ndjson', () => ({
+			contentType: 'application/x-ndjson',
+			stream: _applyBufferStrategy(ndjson(stream, serialize), bufferConfig),
+		})),
+		Match.when('csv', () => ({
+			contentType: 'text/csv',
+			stream: _applyBufferStrategy(ndjson(stream, serialize), bufferConfig), // CSV uses same newline pattern
+		})),
+		Match.exhaustive,
+	);
+
+	const escapedFilename = config.filename.replace(/"/g, '\\"');
+	const headers = Headers.fromInput({
+		'Content-Disposition': `attachment; filename="${escapedFilename}"`,
+		'Content-Type': formatResult.contentType,
+	});
+
+	return HttpServerResponse.stream(formatResult.stream, {
+		contentType: formatResult.contentType,
+		headers,
+	});
+};
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Streaming = {
+	download,
+	export_,
+	jsonArray,
+	ndjson,
 	response,
 	sse,
 	sseTracked,
@@ -290,6 +402,19 @@ namespace Streaming {
 	export type ProgressConfig = {
 		readonly name: string;
 		readonly logInterval?: number;
+	};
+	export type DownloadConfig = {
+		readonly filename: string;
+		readonly contentType?: string;
+		readonly size?: number;
+		readonly buffer?: Partial<BufferConfig>;
+	};
+	export type ExportFormat = 'json' | 'csv' | 'ndjson';
+	export type ExportConfig<A> = {
+		readonly filename: string;
+		readonly format: ExportFormat;
+		readonly serialize?: (a: A) => string;
+		readonly buffer?: Partial<BufferConfig>;
 	};
 	export type CircuitOpenError = Resilience.CircuitOpenError;
 }
