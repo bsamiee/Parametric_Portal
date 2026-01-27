@@ -32,10 +32,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   7. StreamingService always tracks metrics automatically via MetricsService
   8. rate-limit.ts and totp-replay.ts refactored to use CacheService (shared Redis client)
   9. All code follows polymorphic unity pattern — no loose const/function spam, max 1 helper per file
-**Plans**: TBD (to be created during planning)
+**Plans**: 3 plans in 2 waves
 
 Plans:
-- TBD (populated during planning phase)
+- [ ] 01-01-PLAN.md — Create CacheService with L1/L2 architecture (Wave 1)
+- [ ] 01-02-PLAN.md — Create StreamingService with unified streaming API (Wave 1)
+- [ ] 01-03-PLAN.md — Migrate consumers and delete absorbed files (Wave 2)
 
 ### Phase 2: Layer Architecture Consolidation
 **Goal**: Restructure 7 layers into 4 clean boundaries with clear dependency direction and no circular references
@@ -73,9 +75,9 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Platform API Adoption | 0/TBD | Context gathered, ready for planning | - |
+| 1. Platform API Adoption | 0/3 | Planned (3 plans, 2 waves) | - |
 | 2. Layer Architecture Consolidation | 0/TBD | Not started | - |
 | 3. Advanced Platform Features | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-01-27 after Phase 1 context revision*
+*Last updated: 2026-01-27 after Phase 1 planning complete*
