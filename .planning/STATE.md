@@ -12,7 +12,7 @@ See: .planning/PROJECT.md (updated 2026-01-26)
 Phase: 1 of 3 (Platform API Adoption)
 Plan: 4 of TBD in current phase
 Status: In progress
-Last activity: 2026-01-27 — Completed 01-04-PLAN.md (Streaming module)
+Last activity: 2026-01-27 — Completed 01-03-PLAN.md (Cache module)
 
 Progress: [████░░░░░░] 40%
 
@@ -32,7 +32,7 @@ Progress: [████░░░░░░] 40%
 | 3. Advanced Platform Features | 0/TBD | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 01-04 (6 min), 01-03 (N/A), 01-02 (2 min), 01-01 (5 min)
+- Last 5 plans: 01-03 (7 min), 01-04 (6 min), 01-02 (2 min), 01-01 (5 min)
 - Trend: Stable
 
 *Updated after each plan completion*
@@ -56,6 +56,9 @@ Recent decisions affecting current work:
 - 01-04: Response builders return HttpServerResponse directly (not Effect) - streams must have R=never
 - 01-04: Buffer defaults per stream type - SSE sliding, downloads/exports suspend
 - 01-04: Circuit breaker at stream start, not per-element
+- 01-03: Effect.Cache for deduplication - built-in coalescing, no hand-rolled implementation
+- 01-03: Resilience order: retry -> timeout -> fallback (retry on original error type E)
+- 01-03: invalidateAll clears entire cache (per-tenant filtering requires Redis in Phase 3)
 
 ### Pending Todos
 
@@ -78,5 +81,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Completed 01-04-PLAN.md
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
