@@ -10,30 +10,30 @@ See: .planning/PROJECT.md (updated 2026-01-26)
 ## Current Position
 
 Phase: 1 of 3 (Platform API Adoption)
-Plan: 2 of TBD in current phase
+Plan: 4 of TBD in current phase
 Status: In progress
-Last activity: 2026-01-27 — Completed 01-01-PLAN.md (Resilience module)
+Last activity: 2026-01-27 — Completed 01-04-PLAN.md (Streaming module)
 
-Progress: [██░░░░░░░░] 20%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 3.5 min
-- Total execution time: 0.12 hours
+- Total plans completed: 4
+- Average duration: 4.25 min
+- Total execution time: 0.28 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Platform API Adoption | 2/TBD | 7 min | 3.5 min |
+| 1. Platform API Adoption | 4/TBD | 17 min | 4.25 min |
 | 2. Layer Architecture Consolidation | 0/TBD | - | - |
 | 3. Advanced Platform Features | 0/TBD | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (2 min), 01-01 (5 min)
-- Trend: N/A (insufficient data)
+- Last 5 plans: 01-04 (6 min), 01-03 (N/A), 01-02 (2 min), 01-01 (5 min)
+- Trend: Stable
 
 *Updated after each plan completion*
 
@@ -53,6 +53,9 @@ Recent decisions affecting current work:
 - 01-02: Cookie encryption remains domain concern in oauth.ts
 - 01-01: Keep cockatiel for circuit breaker, use Effect for retry/timeout
 - 01-01: Metrics optional via Effect.serviceOption - resilience works without MetricsService
+- 01-04: Response builders return HttpServerResponse directly (not Effect) - streams must have R=never
+- 01-04: Buffer defaults per stream type - SSE sliding, downloads/exports suspend
+- 01-04: Circuit breaker at stream start, not per-element
 
 ### Pending Todos
 
@@ -75,5 +78,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Completed 01-01-PLAN.md
+Stopped at: Completed 01-04-PLAN.md
 Resume file: None
