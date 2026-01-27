@@ -10,30 +10,30 @@ See: .planning/PROJECT.md (updated 2026-01-26)
 ## Current Position
 
 Phase: 1 of 3 (Platform API Adoption)
-Plan: 1 of TBD in current phase
+Plan: 2 of TBD in current phase
 Status: In progress
-Last activity: 2026-01-27 — Completed 01-02-PLAN.md (Cookies module)
+Last activity: 2026-01-27 — Completed 01-01-PLAN.md (Resilience module)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 2 min
-- Total execution time: 0.03 hours
+- Total plans completed: 2
+- Average duration: 3.5 min
+- Total execution time: 0.12 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Platform API Adoption | 1/TBD | 2 min | 2 min |
+| 1. Platform API Adoption | 2/TBD | 7 min | 3.5 min |
 | 2. Layer Architecture Consolidation | 0/TBD | - | - |
 | 3. Advanced Platform Features | 0/TBD | - | - |
 
 **Recent Trend:**
-- Last 5 plans: 01-02 (2 min)
-- Trend: N/A (single data point)
+- Last 5 plans: 01-02 (2 min), 01-01 (5 min)
+- Trend: N/A (insufficient data)
 
 *Updated after each plan completion*
 
@@ -51,6 +51,8 @@ Recent decisions affecting current work:
 - 01-02: Schema validation at read boundary - ParseError propagates to caller
 - 01-02: Missing optional cookies return Option.none, not errors
 - 01-02: Cookie encryption remains domain concern in oauth.ts
+- 01-01: Keep cockatiel for circuit breaker, use Effect for retry/timeout
+- 01-01: Metrics optional via Effect.serviceOption - resilience works without MetricsService
 
 ### Pending Todos
 
@@ -73,5 +75,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Completed 01-02-PLAN.md
+Stopped at: Completed 01-01-PLAN.md
 Resume file: None
