@@ -239,7 +239,14 @@ const _HealthGroup = HttpApiGroup.make('health')
 	.add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(S.Struct({ status: S.Literal('ok') })))
 	.add(
 		HttpApiEndpoint.get('readiness', '/readiness')
-			.addSuccess(S.Struct({ checks: S.Struct({ audit: S.optional(S.Literal('healthy', 'degraded', 'alerted')), database: S.Boolean }), status: S.Literal('ok') }))
+			.addSuccess(S.Struct({
+				checks: S.Struct({
+					audit: S.optional(S.Literal('healthy', 'degraded', 'alerted')),
+					database: S.Boolean,
+					workers: S.optional(S.Struct({ available: S.Boolean, poolSize: S.Int })),
+				}),
+				status: S.Literal('ok'),
+			}))
 			.addError(HttpError.ServiceUnavailable),
 	);
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
