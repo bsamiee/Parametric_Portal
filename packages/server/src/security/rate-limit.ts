@@ -5,7 +5,7 @@
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimiter, type RateLimiterError } from '@effect/experimental/RateLimiter';
 import { layerStoreConfig as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Config, Duration, Effect, Layer, Metric, Option, Redacted } from 'effect';
+import { Config, Duration, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
 import { Context } from '../context.ts';
 import { AuditService } from '../observe/audit.ts';
 import { HttpError } from '../errors.ts';
@@ -29,7 +29,7 @@ const presets = {
 
 // --- [LAYER] -----------------------------------------------------------------
 
-const Default = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
+const Default = rateLimiterLayer.pipe(Layer.provideMerge(Layer.unwrapEffect(
 	Config.string('RATE_LIMIT_STORE').pipe(Config.withDefault('memory'), Effect.map((store) => store === 'redis'
 		? layerStoreRedis({
 			connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(5000)),
@@ -37,7 +37,7 @@ const Default = rateLimiterLayer.pipe(Layer.provide(Layer.unwrapEffect(
 			host: Config.string('REDIS_HOST').pipe(Config.withDefault('localhost')),
 			lazyConnect: Config.boolean('REDIS_LAZY_CONNECT').pipe(Config.withDefault(false)),
 			maxRetriesPerRequest: Config.integer('REDIS_MAX_RETRIES').pipe(Config.withDefault(3)),
-			password: Config.redacted('REDIS_PASSWORD').pipe(Config.option, Config.map(Option.map(Redacted.value)), Config.map(Option.getOrUndefined)),
+			password: Config.redacted('REDIS_PASSWORD').pipe(Config.option, Config.map((opt) => opt.pipe(Option.map((v) => Redacted.value(v)), Option.getOrUndefined))),
 			port: Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
 			prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')),
 			retryStrategy: Config.integer('REDIS_RETRY_DELAY').pipe(Config.withDefault(100), Config.map((delay) => (tries: number) => tries > 3 ? null : Math.min(tries * delay, 2000))),
@@ -73,7 +73,7 @@ const apply = <A, E, R>(preset: keyof typeof presets, handler: Effect.Effect<A, 
 			return { delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window };
 		})),
 	);
-	yield* Context.Request.update({ rateLimit: Option.some(result) });
+	yield* Context.Request.update({ rateLimit: pipe(result, Option.some) });
 	return yield* handler;
 }).pipe(Effect.withSpan(`rate-limit.${preset}`, { attributes: { 'rate-limit.preset': preset } }));
 const headers = HttpMiddleware.make((app) =>

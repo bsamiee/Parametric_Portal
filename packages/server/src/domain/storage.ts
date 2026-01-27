@@ -3,7 +3,7 @@
  * Wraps raw StorageAdapter with automatic audit logging for mutating operations.
  * Polymorphic API mirrors StorageAdapter: single/batch determined by input shape.
  */
-import { Effect, Option, type Stream } from 'effect';
+import { Array as A, Effect, Option, pipe, type Stream } from 'effect';
 import { Context } from '../context.ts';
 import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -25,7 +25,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-put' }), 1);
 				return result;
 			}).pipe(Effect.withSpan('storageDomain.put'));
-		/** Put object(s) with audit logging. Single input → single result; array input → array results. */
+		// Put object(s) with audit logging. Single input → single result; array input → array results.
 		function put(input: StorageAdapter.PutInput): Effect.Effect<StorageAdapter.PutResult, unknown>;
 		function put(input: readonly StorageAdapter.PutInput[]): Effect.Effect<readonly StorageAdapter.PutResult[], unknown>;
 		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
@@ -33,7 +33,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 			return Array.isArray(input) ? Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const results = yield* storage.put(input);
-				yield* audit.log('Storage.upload', { details: { count: input.length, keys: input.map((i: StorageAdapter.PutInput) => i.key), totalSize: results.reduce((acc, r) => acc + r.size, 0), userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
+				yield* audit.log('Storage.upload', { details: { count: input.length, keys: pipe(input as readonly StorageAdapter.PutInput[], A.map((i) => i.key)), totalSize: A.reduce(results, 0, (acc, r) => acc + r.size), userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-put' }), input.length);
 				return results;
 			}).pipe(Effect.withSpan('storageDomain.put.batch')) : _putSingle(input);
@@ -45,7 +45,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 				yield* audit.log('Storage.delete', { details: { deleted: true, key, userId: userIdFromContext(ctx) }, subjectId: key });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-delete' }), 1);
 			}).pipe(Effect.withSpan('storageDomain.remove'));
-		/** Remove object(s) with audit logging. */
+		// Remove object(s) with audit logging.
 		function remove(key: string): Effect.Effect<void, unknown>;
 		function remove(keys: readonly string[]): Effect.Effect<void, unknown>;
 		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
@@ -65,7 +65,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-copy' }), 1);
 				return result;
 			}).pipe(Effect.withSpan('storageDomain.copy'));
-		/** Copy object(s) with audit logging. Single input → single result; array input → array results. */
+		// Copy object(s) with audit logging. Single input → single result; array input → array results.
 		function copy(input: StorageAdapter.CopyInput): Effect.Effect<StorageAdapter.CopyResult, unknown>;
 		function copy(input: readonly StorageAdapter.CopyInput[]): Effect.Effect<readonly StorageAdapter.CopyResult[], unknown>;
 		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
@@ -73,7 +73,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 			return Array.isArray(input) ? Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const results = yield* storage.copy(input);
-				yield* audit.log('Storage.copy', { details: { copies: input.map((i: StorageAdapter.CopyInput) => ({ dest: i.destKey, source: i.sourceKey })), count: input.length, userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
+				yield* audit.log('Storage.copy', { details: { copies: pipe(input as readonly StorageAdapter.CopyInput[], A.map((i) => ({ dest: i.destKey, source: i.sourceKey }))), count: input.length, userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-copy' }), input.length);
 				return results;
 			}).pipe(Effect.withSpan('storageDomain.copy.batch')) : _copySingle(input);
@@ -93,7 +93,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 				yield* audit.log('Storage.abort_multipart', { details: { key, uploadId, userId: userIdFromContext(ctx) }, subjectId: key });
 				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-abort-multipart' }), 1);
 			}).pipe(Effect.withSpan('storageDomain.abortUpload'));
-		/** Pass-through read operations (no audit needed). */
+		// Pass-through read operations (no audit needed).
 		const get = storage.get;
 		const getStream = storage.getStream;
 		const list = storage.list;
@@ -108,13 +108,17 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace StorageService {
-	export type PutInput = StorageAdapter.PutInput;
-	export type PutResult = StorageAdapter.PutResult;
 	export type CopyInput = StorageAdapter.CopyInput;
 	export type CopyResult = StorageAdapter.CopyResult;
-	export type SignInput = StorageAdapter.SignInput;
 	export type GetResult = StorageAdapter.GetResult;
+	export type GetStreamResult = StorageAdapter.GetStreamResult;
+	export type ListItem = StorageAdapter.ListItem;
+	export type PutInput = StorageAdapter.PutInput;
+	export type PutResult = StorageAdapter.PutResult;
 	export type Service = typeof StorageService.Service;
+	export type SignInput = StorageAdapter.SignInput;
+	export type SignInputCopy = StorageAdapter.SignInputCopy;
+	export type SignInputGetPut = StorageAdapter.SignInputGetPut;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

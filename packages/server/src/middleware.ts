@@ -60,8 +60,8 @@ const trace = HttpMiddleware.make((app) => Effect.gen(function* () {
 	yield* Effect.annotateCurrentSpan('http.status_code', response.status);
 	return Option.match(yield* Effect.optionFromOptional(Effect.currentSpan), { onNone: () => response, onSome: (span) => HttpServerResponse.setHeaders(response, HttpTraceContext.toHeaders(span)) });
 }));
-const security = (hsts: typeof _config.security.hsts | false = _config.security.hsts) => HttpMiddleware.make((app) => Effect.map(app, (res) =>
-	[..._config.security.base, ...(hsts ? [['strict-transport-security', `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`] as const] : [])].reduce((acc, [key, value]) => HttpServerResponse.setHeader(acc, key, value), res)));
+const security = (hsts: typeof _config.security.hsts | false = _config.security.hsts) => HttpMiddleware.make((app) => app.pipe(Effect.map((res) =>
+	[..._config.security.base, ...(hsts ? [['strict-transport-security', `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`] as const] : [])].reduce((acc, [key, value]) => HttpServerResponse.setHeader(acc, key, value), res))));
 
 // --- [AUTH_MIDDLEWARE] -------------------------------------------------------
 
@@ -74,13 +74,13 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 			const metrics = yield* MetricsService;
 			const audit = yield* AuditService;
 			const onMiss = Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.zipRight(Effect.fail(HttpError.Auth.of('Invalid session'))));
-			const onHit = (session: Context.Request.Session) => Context.Request.update({ session: Option.some(session) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits)));
+			const onHit = (s: Context.Request.Session) => Context.Request.update({ session: pipe(s, Option.some) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits)));
 			return SessionAuth.of({
 				bearer: (token: Redacted.Redacted<string>) => Crypto.token.hash(Redacted.value(token)).pipe(
 					Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
 					Effect.mapError((err) => HttpError.Auth.of('Token hashing failed', err)),
-					Effect.flatMap(lookup),
-					Effect.flatMap(Option.match({ onNone: () => onMiss, onSome: onHit })),
+					Effect.flatMap((hash) => lookup(hash)),
+					Effect.flatMap((opt) => opt.pipe(Option.match({ onNone: () => onMiss, onSome: onHit }))),
 				),
 			});
 		}));
@@ -88,7 +88,7 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: Context.UserRole) => Context.Request.session.pipe(
 	Effect.flatMap(({ userId }) => findById(userId)),
 	Effect.mapError((err) => HttpError.Internal.of('User lookup failed', err)),
-	Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
+	Effect.flatMap((opt) => opt.pipe(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed }))),
 	Effect.filterOrFail((user) => Context.UserRole.hasAtLeast(user.role, min), () => HttpError.Forbidden.of('Insufficient permissions')),
 	Effect.asVoid,
 );
@@ -99,7 +99,7 @@ const makeAppLookup =
 	(db: { readonly apps: { readonly byNamespace: (ns: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> } }) =>
 	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>> =>
 		db.apps.byNamespace(namespace).pipe(
-			Effect.map((appOpt) => Option.map(appOpt, (app) => ({ id: app.id, namespace: app.namespace }))),
+			Effect.map((appOpt) => appOpt.pipe(Option.map((app) => ({ id: app.id, namespace: app.namespace })))),
 			Effect.orElseSucceed(() => Option.none()),
 		);
 const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>>) =>

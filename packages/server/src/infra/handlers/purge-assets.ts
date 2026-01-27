@@ -1,9 +1,9 @@
 /**
- * Background job to purge stale S3 assets and hard-delete DB records.
+ * Background job: purge stale S3 assets and hard-delete DB records.
  * Runs periodically to clean up soft-deleted assets older than retention period.
  */
 import type { DatabaseServiceShape } from '@parametric-portal/database/repos';
-import { Array as A, Duration, Effect, Option } from 'effect';
+import { Array as A, Duration, Effect, pipe } from 'effect';
 import type { AuditService } from '../../observe/audit.ts';
 import type { StorageService } from '../../domain/storage.ts';
 import type { JobService } from '../jobs.ts';
@@ -11,85 +11,74 @@ import { Context } from '../../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = {
+const _PurgeConfig = {
 	retention: { days: 30 },
 	s3: { batchSize: 100, concurrency: 2 },
 	schedule: { interval: Duration.hours(6) },
 } as const;
 
-// --- [FUNCTIONS] -------------------------------------------------------------
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const makePurgeAssetsHandler = (		// Create handler with services curried in. JobService provides Tenant context via withinSync at runtime.
-	db: DatabaseServiceShape,
-	storage: typeof StorageService.Service,
-	audit: typeof AuditService.Service,) => (_payload: unknown) =>
-		Effect.gen(function* () {
-			const staleAssets = yield* db.assets.findStaleForPurge(B.retention.days);
-			yield* Effect.when(
-				Effect.logInfo('purge-assets: no stale assets found'),
-				() => staleAssets.length === 0,
-			);
-			yield* Effect.unless(
-				Effect.gen(function* () {
-					const keysToDelete = A.filterMap(staleAssets, (a) => Option.flatMap(a.storageRef, (k) => typeof k === 'string' ? Option.some(k) : Option.none()));
-					yield* Effect.logInfo('purge-assets: processing stale assets', {
-						assetCount: staleAssets.length,
-						s3KeyCount: keysToDelete.length,
-					});
-					const s3Batches = A.chunksOf(keysToDelete, B.s3.batchSize);
-					const s3Results = yield* Effect.forEach(
-						s3Batches,
-						(batch) =>
-							storage.remove(batch).pipe(
-								Effect.map(() => ({ deleted: batch.length, failed: 0 })),
-								Effect.catchAll((err) =>
-									Effect.logWarning('purge-assets: S3 batch delete failed', { error: String(err), keys: batch.length }).pipe(
-										Effect.as({ deleted: 0, failed: batch.length }),
-									),
-								),
-							),
-						{ concurrency: B.s3.concurrency },
-					);
-					const s3Deleted = A.reduce(s3Results, 0, (acc, r) => acc + r.deleted);
-					const s3Failed = A.reduce(s3Results, 0, (acc, r) => acc + r.failed);
-					const dbPurged = yield* (db.assets.purge(B.retention.days) as Effect.Effect<number, unknown>).pipe(
-						Effect.catchAll((err) =>
-							Effect.logError('purge-assets: DB purge failed', { error: String(err) }).pipe(Effect.as(0)),
-						),
-					);
-					yield* audit.log('Job.purge_assets', {
-						details: { dbPurged, retentionDays: B.retention.days, s3Deleted, s3Failed },
-						subjectId: 'purge-assets',
-					});
-					yield* Effect.logInfo('purge-assets: completed', {
-						dbPurged,
-						retentionDays: B.retention.days,
-						s3Deleted,
-						s3Failed,
-					});
-				}),
-				() => staleAssets.length === 0,
-			);
-		}).pipe(Effect.withSpan('jobs.purge-assets'));
-
-// --- [REGISTRATION] ----------------------------------------------------------
-
-const registerPurgeAssetsJob = (											/** Register the purge-assets handler with JobService. Call during app initialization with services. */
-	jobService: typeof JobService.Service,
-	db: DatabaseServiceShape,
-	storage: typeof StorageService.Service,
-	audit: typeof AuditService.Service, ) =>
-	Effect.gen(function* () {
-		yield* jobService.registerHandler('purge-assets', makePurgeAssetsHandler(db, storage, audit));
-		yield* Effect.logInfo('purge-assets: handler registered');
-	});
-const enqueuePurgeAssetsJob = (jobService: typeof JobService.Service) =>	/** Enqueue the purge-assets job to run periodically. */
-	Context.Request.withinSync(
-		Context.Request.Id.system,
-		jobService.enqueue('purge-assets', null, { delay: B.schedule.interval }),
-		Context.Request.system(),
+const _deleteBatch = (storage: typeof StorageService.Service, batch: ReadonlyArray<string>) =>
+	storage.remove(batch).pipe(
+		Effect.as({ deleted: batch.length, failed: 0 }),
+		Effect.catchAll((err) =>
+			Effect.logWarning('S3 batch delete failed', { error: String(err), keys: batch.length }).pipe(
+				Effect.as({ deleted: 0, failed: batch.length }),
+			),
+		),
 	);
+
+// --- [ENTRY_POINT] -----------------------------------------------------------
+
+const PurgeAssets = {
+	enqueue: (jobService: typeof JobService.Service) =>
+		Context.Request.withinSync(
+			Context.Request.Id.system,
+			jobService.enqueue('purge-assets', null, { delay: _PurgeConfig.schedule.interval }),
+			Context.Request.system(),
+		),
+	handler: (db: DatabaseServiceShape, storage: typeof StorageService.Service, audit: typeof AuditService.Service) =>
+		Effect.fn('jobs.purge-assets')((_payload: unknown) =>
+			db.assets.findStaleForPurge(_PurgeConfig.retention.days).pipe(
+				Effect.flatMap(A.match({
+					onEmpty: () => Effect.logInfo('No stale assets found'),
+					onNonEmpty: (staleAssets) => Effect.gen(function* () {
+						const keysToDelete = pipe(staleAssets, A.filterMap((a) => a.storageRef), A.filter((k): k is string => k !== null));
+						yield* Effect.logInfo('Processing stale assets', { assetCount: staleAssets.length, s3KeyCount: keysToDelete.length });
+						const s3Batches = A.chunksOf(keysToDelete, _PurgeConfig.s3.batchSize);
+						const s3Results = yield* Effect.forEach(s3Batches, (batch) => _deleteBatch(storage, batch), { concurrency: _PurgeConfig.s3.concurrency });
+						const s3Deleted = A.reduce(s3Results, 0, (acc, r) => acc + r.deleted);
+						const s3Failed = A.reduce(s3Results, 0, (acc, r) => acc + r.failed);
+						const dbPurged = yield* (db.assets.purge(_PurgeConfig.retention.days) as Effect.Effect<number, unknown>).pipe(
+							Effect.catchAll((err) => Effect.logError('DB purge failed', { error: String(err) }).pipe(Effect.as(0))),
+						);
+						const details = { dbPurged, retentionDays: _PurgeConfig.retention.days, s3Deleted, s3Failed };
+						yield* Effect.all([
+							audit.log('Job.purge_assets', { details, subjectId: 'purge-assets' }),
+							Effect.logInfo('Completed', details),
+						], { discard: true });
+					}),
+				})),
+			),
+		),
+	register: (jobService: typeof JobService.Service, db: DatabaseServiceShape, storage: typeof StorageService.Service, audit: typeof AuditService.Service) =>
+		Effect.gen(function* () {
+			yield* jobService.registerHandler('purge-assets', PurgeAssets.handler(db, storage, audit));
+			yield* Effect.logInfo('Handler registered');
+		}),
+} as const;
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
+namespace PurgeAssets {
+    export type Services = {
+        readonly db: DatabaseServiceShape;
+        readonly storage: typeof StorageService.Service;
+        readonly audit: typeof AuditService.Service;
+    };
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { enqueuePurgeAssetsJob, makePurgeAssetsHandler, registerPurgeAssetsJob };
+export { PurgeAssets };

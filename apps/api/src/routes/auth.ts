@@ -23,21 +23,10 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import type { Uuidv7 } from '@parametric-portal/types/types';
-import { DateTime, Duration, Effect, Match, Option } from 'effect';
+import { DateTime, Effect, Match, Option } from 'effect';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const setCookie = (key: keyof typeof Context.Request.config.cookie, value: string, clear = false) => {
-	const cfg = Context.Request.config.cookie[key];
-	return (res: HttpServerResponse.HttpServerResponse) =>
-		HttpServerResponse.setCookie(res, cfg.name, value, {
-			httpOnly: cfg.httpOnly,
-			maxAge: clear ? Duration.zero : cfg.maxAge,
-			path: cfg.path,
-			sameSite: cfg.sameSite,
-			secure: cfg.secure,
-		});
-};
 const requireOption = <A, E>(opt: Option.Option<A>, onNone: () => E): Effect.Effect<A, E> =>
 	Option.match(opt, { onNone: () => Effect.fail(onNone()), onSome: Effect.succeed });
 const verifyCsrf = (req: HttpServerRequest.HttpServerRequest) =>
@@ -47,10 +36,10 @@ const verifyCsrf = (req: HttpServerRequest.HttpServerRequest) =>
 	).pipe(Effect.asVoid);
 const authResponse = (token: Uuidv7, expiresAt: Date, refresh: Uuidv7, mfaPending: boolean, clearOAuth = false) =>
 	HttpServerResponse.json({ accessToken: token, expiresAt: DateTime.unsafeFromDate(expiresAt), mfaPending }).pipe(
-		Effect.flatMap((res) => clearOAuth ? setCookie('oauth', '', true)(res) : Effect.succeed(res)),
-		Effect.flatMap(setCookie('refresh', refresh)),
+		Effect.map((res) => clearOAuth ? Context.Request.cookie.clear('oauth')(res) : res),
+		Effect.flatMap(Context.Request.cookie.set('refresh', refresh)),
 	);
-const logoutResponse = () => HttpServerResponse.json({ success: true }).pipe(Effect.flatMap(setCookie('refresh', '', true)));
+const logoutResponse = () => HttpServerResponse.json({ success: true }).pipe(Effect.map(Context.Request.cookie.clear('refresh')));
 const oauthErr = (provider: Context.OAuthProvider) => (reason: string) => HttpError.OAuth.of(provider, reason);
 
 // --- [OAUTH_HANDLERS] --------------------------------------------------------
@@ -58,7 +47,7 @@ const oauthErr = (provider: Context.OAuthProvider) => (reason: string) => HttpEr
 const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: typeof OAuthService.Service, provider: Context.OAuthProvider) =>
 	oauth.createAuthorizationUrl(provider).pipe(
 		Effect.flatMap(({ stateCookie, url }) =>
-			HttpServerResponse.json({ url: url.toString() }).pipe(Effect.flatMap(setCookie('oauth', stateCookie))),
+			HttpServerResponse.json({ url: url.toString() }).pipe(Effect.flatMap(Context.Request.cookie.set('oauth', stateCookie))),
 		),
 		Effect.mapError((e) => Match.value(e).pipe(
 			Match.when((x: unknown): x is HttpError.OAuth => x instanceof HttpError.OAuth, (x) => x),
@@ -71,7 +60,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
 		Effect.gen(function* () {
 			const err = oauthErr(provider);
 			const [request, appId] = yield* Effect.all([HttpServerRequest.HttpServerRequest, Context.Request.tenantId]);
-			const stateCookie = yield* requireOption(Option.fromNullable(request.cookies[Context.Request.config.cookie.oauth.name]), () => err('Missing OAuth state cookie'));
+			const stateCookie = yield* Context.Request.cookie.get('oauth', request, () => err('Missing OAuth state cookie'));
 			const result = yield* oauth.authenticate(provider, code, state, stateCookie);
 			const email = yield* requireOption(result.email, () => err('Email not provided by provider'));
 			const { isNewUser, userId } = yield* repos.withTransaction(
@@ -112,7 +101,7 @@ const handleRefresh = Effect.fn('auth.refresh')((session: typeof SessionService.
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
-		const refreshIn = yield* requireOption(Option.fromNullable(request.cookies[Context.Request.config.cookie.refresh.name]), () => HttpError.Auth.of('Missing refresh token cookie'));
+		const refreshIn = yield* Context.Request.cookie.get('refresh', request, () => HttpError.Auth.of('Missing refresh token cookie'));
 		const hashIn = yield* Crypto.token.hash(refreshIn).pipe(Effect.mapError((e) => HttpError.Auth.of('Token hashing failed', e)));
 		const { mfaPending, refreshToken, sessionExpiresAt, sessionToken, userId } = yield* session.refresh(hashIn);
 		yield* audit.log('RefreshToken.refresh', { subjectId: userId });
@@ -222,7 +211,7 @@ const handleDeleteApiKey = Effect.fn('auth.apiKeys.delete')((repos: DatabaseServ
 		yield* Middleware.requireMfaVerified;
 		const [{ userId }, metrics] = yield* Effect.all([Context.Request.session, MetricsService]);
 		const keyOpt = yield* repos.apiKeys.one([{ field: 'id', value: id }]).pipe(Effect.mapError((e) => HttpError.Internal.of('API key lookup failed', e)));
-		const key = yield* requireOption(Option.filter(keyOpt, (k) => k.userId === userId), () => HttpError.NotFound.of('apikey', id));
+		const key = yield* requireOption(keyOpt.pipe(Option.filter((k) => k.userId === userId)), () => HttpError.NotFound.of('apikey', id));
 		yield* repos.apiKeys.softDelete(id).pipe(Effect.mapError((e) => HttpError.Internal.of('API key revocation failed', e)));
 		yield* Effect.all([
 			audit.log('ApiKey.revoke', { details: { keyId: id, name: key.name }, subjectId: userId }),

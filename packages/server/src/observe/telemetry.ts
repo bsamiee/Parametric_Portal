@@ -97,7 +97,7 @@ const withSpan = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect
 		return yield* Effect.withSpan(effect, name, { attributes: { ...tenantAttrs, ...circuitAttrs } });
 	});
 const Default = Layer.unwrapEffect(	// Unified OTLP layer: traces + metrics + logs with structured logger and log level filtering.
-	Effect.map(_telemetryConfig, (cfg) => {
+	_telemetryConfig.pipe(Effect.map((cfg) => {
 		const exp = config.exporters[cfg.environment];
 		return Layer.merge(
 			Otlp.layer({
@@ -127,7 +127,7 @@ const Default = Layer.unwrapEffect(	// Unified OTLP layer: traces + metrics + lo
 				Logger.minimumLogLevel(LogLevel.fromLiteral(cfg.logLevel)),
 			),
 		);
-	}),
+	})),
 ).pipe(
 	Layer.provide(OtlpSerialization.layerJson),
 	Layer.provide(FetchHttpClient.layer),

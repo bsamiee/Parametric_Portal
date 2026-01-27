@@ -1,25 +1,21 @@
 /**
  * Background job processing with database-backed queue.
  * SELECT FOR UPDATE SKIP LOCKED for atomic claim; Circuit breaker resilience; graceful shutdown.
- *
  * Effect APIs: Semaphore (concurrency), Schedule.exponential+jittered (backoff), Schedule.spaced (polling).
- *
  * [ARCHITECTURE] Hybrid Service Design:
  * JobService intentionally combines job orchestration (enqueue, process, retry) with real-time event
  * streaming (onStatusChange via pg.listen). This differs from SearchRepo/SearchService pattern
  * where pg.listen lives in database layer and domain layer filters the interface.
- *
  * Rationale:
  * - JobService is a complete orchestration system, not just a repository wrapper
  * - Job status events are tightly coupled to processing lifecycle (same service owns both)
  * - No domain wrapper needed - JobService IS the domain logic for background jobs
  * - PgClient access justified: events are internal to job processing, not external data
- *
  * Consumers: routes/jobs.ts exposes onStatusChange() via SSE for real-time job dashboards.
  */
 import { PgClient } from '@effect/sql-pg';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Duration, Effect, HashMap, Metric, Option, Random, Ref, Schedule, Schema as S, Stream } from 'effect';
+import { Duration, Effect, HashMap, Metric, Option, pipe, Random, Ref, Schedule, Schema as S, Stream } from 'effect';
 import { AuditService } from '../observe/audit.ts';
 import { Circuit } from '../security/circuit.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -43,7 +39,7 @@ const B = {
 	breaker: { halfOpen: Duration.seconds(30), threshold: 5 },
 	lock: { minutes: 5 },
 	poll: { busy: Duration.seconds(1), idle: Duration.seconds(10) }, // Adaptive: fast when busy, slow when idle
-	retry: { base: Duration.seconds(1), cap: Duration.minutes(10), factor: 2, jitter: 0.4 },
+	retry: { base: Duration.seconds(1), cap: Duration.minutes(10), factor: 2 },
 	shutdown: { interval: Duration.millis(100), maxWait: 50 },
 	timeout: Duration.minutes(5),
 } as const;
@@ -88,16 +84,15 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 		const retry = (job: DbJob, error: unknown) =>
 			Effect.gen(function* () {
 				const attempt = job.attempts + 1;
-				const baseMs = Duration.toMillis(B.retry.base);
-				const capMs = Duration.toMillis(B.retry.cap);
-				const exponentialMs = baseMs * (B.retry.factor ** attempt);
-				const jitter = yield* Random.nextRange(1 - B.retry.jitter / 2, 1 + B.retry.jitter / 2);
-				const cappedDelayMs = Math.round(Math.min(exponentialMs, capMs) * jitter);
-				yield* run(db.jobs.retry(job.id, { attempts: attempt, lastError: String(error), scheduledAt: new Date(Date.now() + cappedDelayMs) }));
+				const exponential = Duration.times(B.retry.base, B.retry.factor ** attempt);
+				const capped = Duration.min(exponential, B.retry.cap);
+				const jitterFactor = yield* Random.nextRange(0.8, 1.2); // Matches Schedule.jittered defaults
+				const delayMs = Math.round(Duration.toMillis(capped) * jitterFactor);
+				yield* run(db.jobs.retry(job.id, { attempts: attempt, lastError: String(error), scheduledAt: new Date(Date.now() + delayMs) }));
 				yield* Effect.all([
 					MetricsService.inc(metrics.jobs.failures, MetricsService.label({ type: job.type }), 1),
 					MetricsService.inc(metrics.jobs.retries, MetricsService.label({ type: job.type }), 1),
-					audit.log('Job.retry', { details: { attempt, delayMs: cappedDelayMs, error: String(error), type: job.type }, subjectId: job.id }),
+					audit.log('Job.retry', { details: { attempt, delayMs, error: String(error), type: job.type }, subjectId: job.id }),
 				], { discard: true });
 			}).pipe(Effect.withSpan('jobs.retry', { attributes: { 'job.attempts': job.attempts, 'job.id': job.id, 'job.maxAttempts': job.maxAttempts, 'job.type': job.type } }));
 		const outcome = (job: DbJob, error: unknown) => job.attempts + 1 >= job.maxAttempts ? deadLetter(job, String(error)) : retry(job, error);
@@ -107,7 +102,7 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 				const map = yield* Ref.get(handlers);
 				const handler = HashMap.get(map, job.type);
 				const requestId = Option.getOrElse(job.requestId as Option.Option<string>, () => crypto.randomUUID());
-				const sessionFromJob = Option.map(job.userId as Option.Option<string>, (userId) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId, verifiedAt: Option.none<Date>() }));
+				const sessionFromJob = (job.userId as Option.Option<string>).pipe(Option.map((userId) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId, verifiedAt: Option.none<Date>() })));
 				const ctx: Partial<Context.Request.Data> = { ipAddress: Option.none(), requestId, session: sessionFromJob, userAgent: Option.none() };
 				yield* Context.Request.withinSync(job.appId, Effect.gen(function* () {
 					const labels = MetricsService.label({ tenant: job.appId, type: job.type });
@@ -173,10 +168,10 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 				const priority = opts?.priority ?? 'normal';
 				const maxAttempts = opts?.maxAttempts ?? 5;
 				const ctx = yield* Context.Request.current;
-				const userId = Option.match(ctx.session, { onNone: () => Option.none<string>(), onSome: (s) => Option.some(s.userId) });
+				const userId = ctx.session.pipe(Option.map((s) => s.userId));
 				const inserted = yield* run(db.jobs.put(items.map((payload) => ({
 					appId: ctx.tenantId, attempts: 0, lastError: Option.none(), lockedBy: Option.none(), lockedUntil: Option.none(),
-					maxAttempts, payload, priority, requestId: Option.some(ctx.requestId),
+					maxAttempts, payload, priority, requestId: pipe(ctx.requestId, Option.some),
 					scheduledAt: opts?.delay ? new Date(Date.now() + Duration.toMillis(opts.delay)) : new Date(), status: 'pending', type, updatedAt: undefined, userId,
 				}))));
 				const ids = (inserted as readonly { id: string }[]).map((j) => j.id);

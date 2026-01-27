@@ -1,15 +1,20 @@
 /**
  * Session lifecycle: creation, rotation, revocation, MFA-verified state.
  * Delegates TOTP/backup verification to MfaService; owns session.verifiedAt transitions.
+ * Includes MFA status cache (5min TTL) to reduce per-request DB lookups.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { type Hex64, Timestamp } from '@parametric-portal/types/types';
-import { Duration, Effect, Option } from 'effect';
+import { Cache, Duration, Effect, Option } from 'effect';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Crypto } from '../security/crypto.ts';
 import { MfaService } from './mfa.ts';
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _mfaCacheConfig = { capacity: 5000, ttl: Duration.minutes(5) } as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -18,11 +23,12 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 		const db = yield* DatabaseService;
 		const mfa = yield* MfaService;
 		const metrics = yield* MetricsService;
-		/**
-		 * Create session + refresh token pair. Caller provides mfaPending (avoids duplicate MFA check).
-		 * Does NOT emit metrics - caller is responsible for login metrics with proper tags.
-		 */
-		const create = (userId: string, mfaPending: boolean) =>
+		const mfaEnabledCache = yield* Cache.make({
+			capacity: _mfaCacheConfig.capacity,
+			lookup: (userId: string) => mfa.isEnabled(userId).pipe(Effect.catchAll(() => Effect.succeed(false))),
+			timeToLive: _mfaCacheConfig.ttl,
+		});
+		const create = (userId: string, mfaPending: boolean) => // Does NOT emit metrics - caller is responsible for login metrics with proper tags.
 			Effect.gen(function* () {
 				const [ctx, session, refresh] = yield* Effect.all([
 					Context.Request.current,
@@ -52,23 +58,20 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				], { discard: true }));
 				return { mfaPending, refreshToken: refresh.token, sessionExpiresAt, sessionToken: session.token };
 			}).pipe(Effect.withSpan('session.create'));
-		/** Create session for login flow. Checks MFA internally, emits auth.logins metric with tags. */
-		const createForLogin = (userId: string, opts?: { isNewUser?: boolean; provider?: string }) =>
+		const createForLogin = (userId: string, opts?: { isNewUser?: boolean; provider?: string }) =>	// Create session for login flow. Checks MFA internally, emits auth.logins metric with tags.
 			Effect.gen(function* () {
 				const mfaPending = yield* mfa.isEnabled(userId).pipe(Effect.catchAll(() => Effect.succeed(false)));
 				const result = yield* create(userId, mfaPending);
-				// Only emit login metrics when provider is specified (OAuth/password flows, not token refresh)
-				yield* Effect.when(
+				yield* Effect.when(					// Only emit login metrics when provider is specified (OAuth/password flows, not token refresh)
 					Effect.suspend(() => MetricsService.inc(metrics.auth.logins, MetricsService.label({
 						isNewUser: String(opts?.isNewUser ?? false),
-						provider: opts?.provider, // undefined is filtered by MetricsService.label
+						provider: opts?.provider, 	// undefined is filtered by MetricsService.label
 					}), 1)),
 					() => opts?.provider !== undefined,
 				);
 				return result;
 			}).pipe(Effect.withSpan('session.createForLogin'));
-		 // Rotate tokens: validate refresh hash, check current MFA state, create new session, revoke old. Emits auth.refreshes metric.
-		const refresh = (hash: Hex64) =>
+		const refresh = (hash: Hex64) =>			// Rotate tokens: validate refresh hash, check current MFA state, create new session, revoke old. Emits auth.refreshes metric.
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const tokenOpt = yield* db.refreshTokens.byHashForUpdate(hash);
@@ -92,8 +95,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Auth.of('Token lookup failed', e)),
 				Effect.withSpan('session.refresh'),
 			);
-		 // Revoke single session. Emits auth.logouts metric.
-		const revoke = (sessionId: string) =>
+		const revoke = (sessionId: string) =>	// Revoke single session. Emits auth.logouts metric.
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* db.sessions.softDelete(sessionId);
@@ -102,8 +104,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				Effect.mapError((e) => HttpError.Internal.of('Session revocation failed', e)),
 				Effect.withSpan('session.revoke'),
 			);
-		 // Revoke all sessions and refresh tokens for user. No metrics (bulk operation).
-		const revokeAll = (userId: string) =>
+		const revokeAll = (userId: string) =>	// Revoke all sessions and refresh tokens for user. No metrics (bulk operation).
 			Effect.all([
 				db.sessions.softDeleteByUser(userId),
 				db.refreshTokens.softDeleteByUser(userId),
@@ -111,17 +112,18 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				Effect.mapError((e) => HttpError.Internal.of('Bulk session revocation failed', e)),
 				Effect.withSpan('session.revokeAll'),
 			);
-		 // Verify TOTP code and mark session as verified. Delegates verification to MfaService (which handles mfa.verifications metric).
+		// Verify TOTP code and mark session as verified. Delegates verification to MfaService (which handles mfa.verifications metric).
+		// Invalidates MFA cache since verify() might enable MFA on first successful verification.
 		const verifyMfa = (sessionId: string, userId: string, code: string) =>
 			mfa.verify(userId, code).pipe(
+				Effect.tap(() => mfaEnabledCache.invalidate(userId)),
 				Effect.tap(() => db.sessions.verify(sessionId).pipe(
 					Effect.mapError((e) => HttpError.Internal.of('Session verification update failed', e)),
 				)),
 				Effect.map(() => ({ success: true as const, verifiedAt: new Date() })),
 				Effect.withSpan('session.verifyMfa'),
 			);
-		 // Use backup code and mark session as verified. Delegates verification to MfaService (which handles mfa.recoveryUsed metric).
-		const recoverMfa = (sessionId: string, userId: string, code: string) =>
+		const recoverMfa = (sessionId: string, userId: string, code: string) =>	// Use backup code and mark session as verified. Delegates verification to MfaService (which handles mfa.recoveryUsed metric).
 			mfa.useRecoveryCode(userId, code).pipe(
 				Effect.tap(() => db.sessions.verify(sessionId).pipe(
 					Effect.mapError((e) => HttpError.Internal.of('Session verification update failed', e)),
@@ -129,20 +131,20 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				Effect.map((result) => ({ ...result, verifiedAt: new Date() })),
 				Effect.withSpan('session.recoverMfa'),
 			);
-		 // Lookup session by token hash. For middleware authentication. Touches session activity, checks MFA state, fails silently on errors.
-		const lookup = (hash: Hex64) =>
+		const lookup = (hash: Hex64) =>	// Lookup session by token hash. For middleware authentication. Touches session activity, checks MFA state (cached), fails silently on errors.
 			db.sessions.byHash(hash).pipe(
 				Effect.flatMap(Option.match({
 					onNone: () => Effect.succeed(Option.none<Context.Request.Session>()),
 					onSome: (s) => db.sessions.touch(s.id).pipe(
 						Effect.catchAll((err) => Effect.logWarning('Session activity update failed', { error: String(err), sessionId: s.id })),
-						Effect.andThen(mfa.isEnabled(s.userId).pipe(Effect.catchAll(() => Effect.succeed(false)))),
+						Effect.andThen(mfaEnabledCache.get(s.userId)),
 						Effect.map((mfaEnabled) => Option.some({ id: s.id, mfaEnabled, userId: s.userId, verifiedAt: s.verifiedAt })),
 					),
 				})),
 				Effect.catchAll((e) => Effect.logError('Session lookup failed', { error: String(e) }).pipe(Effect.as(Option.none()))),
 			);
-		return { create, createForLogin, lookup, recoverMfa, refresh, revoke, revokeAll, verifyMfa };
+		const invalidateMfaCache = (userId: string) => mfaEnabledCache.invalidate(userId);	// Invalidate MFA cache when status changes (called from MfaService on enable/disable)
+		return { create, createForLogin, invalidateMfaCache, lookup, recoverMfa, refresh, revoke, revokeAll, verifyMfa };
 	}),
 }) {}
 

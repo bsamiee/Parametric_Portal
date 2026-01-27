@@ -1,20 +1,24 @@
 /**
  * Unified request context: tenant isolation, session state, rate limiting, circuit breaker.
  * Single FiberRef + Effect.Tag replaces scattered context mechanisms.
+ *
+ * Cookie handling: minimal typed wrapper over @effect/platform HttpServerResponse.
+ * - 3 operations: get (read), set (write), clear (delete)
+ * - Type-safe keys via CookieKey union
+ * - Encryption handled at domain layer (oauth.ts), not here
  */
+import { type HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import type { Cookie, CookiesError } from '@effect/platform/Cookies';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
 import type { CircuitState } from 'cockatiel';
-import type { Duration } from 'effect';
-import { Effect, FiberRef, Layer, Option, Schedule, Schema as S } from 'effect';
+import { Effect, FiberRef, type Duration, Layer, Option, Schedule, Schema as S } from 'effect';
 import * as D from 'effect/Duration';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _Id = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
 const _isSecure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
-const _cookie = <N extends string, P extends string>(name: N, path: P, maxAge: Duration.DurationInput) =>
-	({ httpOnly: true, maxAge, name, path, sameSite: 'lax' as const, secure: _isSecure }) as const;
 const _default: Context.Request.Data = {
 	circuit: Option.none(),
 	ipAddress: Option.none(),
@@ -25,6 +29,10 @@ const _default: Context.Request.Data = {
 	userAgent: Option.none(),
 };
 const _ref = FiberRef.unsafeMake<Context.Request.Data>(_default);
+const _cookie = {
+	oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: D.minutes(10), path: '/api/auth/oauth', sameSite: 'lax', secure: _isSecure } },
+	refresh: { name: 'refreshToken', options: { httpOnly: true, maxAge: D.days(30), path: '/api/auth', sameSite: 'lax', secure: _isSecure } },
+} as const satisfies Record<string, { readonly name: string; readonly options: Cookie['options'] }>;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -46,16 +54,14 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 	static override readonly session = FiberRef.get(_ref).pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.die('No session - route must be protected by SessionAuth middleware'), onSome: Effect.succeed })));
 	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(_ref, (ctx) => ({ ...ctx, ...partial }));
 	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-		FiberRef.get(_ref).pipe(Effect.flatMap((ctx) => Effect.locally(effect, _ref, { ...ctx, ...partial })));
+		Effect.locallyWith(effect, _ref, (ctx) => ({ ...ctx, ...partial }));
 	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> =>
-		FiberRef.get(_ref).pipe(Effect.flatMap((current) => Effect.locally(effect, _ref, { ...current, ...ctx, tenantId: tenantId === _Id.system ? _Id.system : tenantId })));
+		Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId: tenantId === _Id.system ? _Id.system : tenantId }));
 	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>
 		Effect.gen(function* () {
 			const id = tenantId === _Id.system ? _Id.system : tenantId;
 			const sql = yield* SqlClient.SqlClient;
-			const current = yield* FiberRef.get(_ref);
-			const merged = { ...current, ...ctx, tenantId: id };
-			return yield* sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${id}, true)`.pipe(Effect.andThen(Effect.locally(effect, _ref, merged))));
+			return yield* sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${id}, true)`.pipe(Effect.andThen(Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId: id })))));
 		});
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({
 		circuit: Option.none(),
@@ -67,11 +73,15 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		userAgent: Option.none(),
 	});
 	static readonly SystemLayer = Layer.succeed(Request, Request.system());
+	// Cookie: 3 operations (get/set/clear) over @effect/platform. Encryption is domain concern (oauth.ts).
+	static readonly cookie = {
+		clear: (key: keyof typeof _cookie) => (res: HttpServerResponse.HttpServerResponse) => HttpServerResponse.expireCookie(res, _cookie[key].name, _cookie[key].options),
+		get: <E>(key: keyof typeof _cookie, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> =>
+			Effect.fromNullable(req.cookies[_cookie[key].name]).pipe(Effect.mapError(onNone)),
+		set: (key: keyof typeof _cookie, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> =>
+			HttpServerResponse.setCookie(res, _cookie[key].name, value, _cookie[key].options),
+	} as const;
 	static readonly config = {
-		cookie: {
-			oauth: _cookie('oauthState', '/api/auth/oauth', D.minutes(10)),
-			refresh: _cookie('refreshToken', '/api/auth', D.days(30)),
-		},
 		csrf: { expectedValue: 'XMLHttpRequest', header: 'x-requested-with' },
 		durations: { pkce: D.minutes(10), refresh: D.days(30), session: D.days(7) },
 		endpoints: { githubApi: 'https://api.github.com/user' },
@@ -99,6 +109,7 @@ const Context = { OAuthProvider, Request, UserRole } as const;
 namespace Context {
 	export type OAuthProvider = S.Schema.Type<typeof OAuthProvider>;
 	export type UserRole = S.Schema.Type<typeof UserRole.schema>;
+	export type CookieKey = keyof typeof _cookie;
 	export namespace Request {
 		export type Id = (typeof Request.Id)[keyof typeof Request.Id];
 		export interface Session {

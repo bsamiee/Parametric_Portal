@@ -7,7 +7,7 @@
  * - HTTP concerns: Pagination, query params, auth responses (not entity models)
  * - Inline schemas: Single-use response shapes defined at endpoint
  */
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from '@effect/platform';
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
 import { ApiKey, AuditLog, User } from '@parametric-portal/database/models';
 import { Codec } from '@parametric-portal/types/files';
 import { Url } from '@parametric-portal/types/types';
@@ -364,6 +364,78 @@ const _JobsGroup = HttpApiGroup.make('jobs')
 			.addError(HttpError.RateLimit)
 			.annotate(OpenApi.Description, 'Subscribe to job status updates via SSE'),
 	);
+const _StorageSignOp = S.Literal('get', 'put');
+const _StorageSignRequest = S.Struct({
+	contentType: S.optional(S.String).annotations({ description: 'Content-Type for PUT operations (default: application/octet-stream)' }),
+	expiresInSeconds: S.optionalWith(S.Int.pipe(S.between(60, 3600)), { default: () => 3600 }).annotations({ description: 'URL expiration in seconds (60-3600, default: 3600)' }),
+	key: S.NonEmptyTrimmedString.annotations({ description: 'Storage key (path within tenant namespace)' }),
+	op: _StorageSignOp.annotations({ description: 'Operation type: get (download) or put (upload)' }),
+});
+const _StorageSignResponse = S.Struct({
+	expiresAt: S.DateTimeUtc.annotations({ description: 'URL expiration timestamp' }),
+	key: S.String.annotations({ description: 'Storage key' }),
+	op: _StorageSignOp.annotations({ description: 'Operation type' }),
+	url: Url.annotations({ description: 'Presigned URL for direct S3 access' }),
+});
+const _StorageUploadRequest = S.Struct({
+	contentType: S.optional(S.String).annotations({ description: 'Optional content-type override' }),
+	file: Multipart.SingleFileSchema.annotations({ description: 'File to upload' }),
+	key: S.optional(S.String).annotations({ description: 'Optional storage key (defaults to filename)' }),
+});
+const _StorageUploadResponse = S.Struct({
+	etag: S.String.annotations({ description: 'ETag of uploaded object' }),
+	key: S.String.annotations({ description: 'Storage key where file was stored' }),
+	size: S.Int.annotations({ description: 'File size in bytes' }),
+});
+const _StorageGroup = HttpApiGroup.make('storage')
+	.prefix('/storage')
+	.add(
+		HttpApiEndpoint.post('sign', '/sign')
+			.middleware(Middleware.Auth)
+			.setPayload(_StorageSignRequest)
+			.addSuccess(_StorageSignResponse)
+			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Generate presigned URL')
+			.annotate(OpenApi.Description, 'Generates a presigned URL for direct S3 upload or download. URLs are tenant-scoped and time-limited.'),
+	)
+	.add(
+		HttpApiEndpoint.get('exists', '/exists/:key')
+			.middleware(Middleware.Auth)
+			.setPath(S.Struct({ key: S.String }))
+			.addSuccess(S.Struct({ exists: S.Boolean, key: S.String }))
+			.addError(HttpError.Auth)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.annotate(OpenApi.Summary, 'Check if object exists'),
+	)
+	.add(
+		HttpApiEndpoint.del('remove', '/:key')
+			.middleware(Middleware.Auth)
+			.setPath(S.Struct({ key: S.String }))
+			.addSuccess(S.Struct({ key: S.String, success: S.Literal(true) }))
+			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.annotate(OpenApi.Summary, 'Delete object'),
+	)
+	.add(
+		HttpApiEndpoint.post('upload', '/upload')
+			.middleware(Middleware.Auth)
+			.setPayload(_StorageUploadRequest)
+			.addSuccess(_StorageUploadResponse)
+			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Upload file directly')
+			.annotate(OpenApi.Description, 'Server-side file upload with multipart form data. Files are stored in tenant namespace with automatic content-type detection.'),
+	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -373,6 +445,7 @@ const ParametricApi = HttpApi.make('ParametricApi')
 	.add(_HealthGroup.annotate(OpenApi.Exclude, true))
 	.add(_JobsGroup)
 	.add(_SearchGroup)
+	.add(_StorageGroup)
 	.add(_TelemetryGroup.annotate(OpenApi.Exclude, true))
 	.add(_TransferGroup)
 	.add(_UsersGroup)

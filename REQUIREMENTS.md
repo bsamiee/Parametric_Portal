@@ -20,7 +20,6 @@ alwaysApply: true
 - NEVER declare types separately from schemas
 
 [REQUIRED]:
-- Replace `any` with branded types via Schema
 - Replace `try/catch` with Effect error channel
 - Replace `for/while` with `.map`, `.filter`, or Effect.forEach
 - Replace `let`/`var` with `const`
@@ -30,9 +29,10 @@ alwaysApply: true
 - Decode at boundaries; treat external data as `unknown`
 
 [CONDITIONAL]:
-- PREFER `Match.type`/`Match.value` for exhaustive variant handling
+- PREFER `Match.value().pipe(Match.when/tag..., Match.exhaustive)` for variants
 - ALLOW dispatch tables for simple key→value maps
-- ALLOW ternary for binary conditions
+- ALLOW ternary for pure value selection only (never for effects)
+- NEVER use `if` statements—use `Option.match`, `Effect.filterOrFail`, or `Match`
 
 ---
 ## [2][CONTEXT]
@@ -40,6 +40,7 @@ alwaysApply: true
 ### [2.1][TOOLING]
 
 [STACK]: TypeScript 6.0-dev, React 19 canary, Vite 7, Tailwind v4, LightningCSS, Nx 22 Crystal.
+[EFFECT]: `@effect/sql` Model for entities, `@effect/platform` HttpApi for contracts.
 [BUILD]: Nx distributed caching + affected commands. Single `vite.factory.ts` extended per package.
 [CLI]: Always run Nx via `pnpm exec nx <command>`. Never use bare `nx`.
 [QUALITY]: Biome for lint + format. Vitest for tests. SonarCloud for static analysis.
@@ -69,52 +70,53 @@ Data crossing system boundaries follows 3-level model:
 [IMPORTANT] Single source of truth for types and validation.
 
 ```typescript
-import { Schema as S } from 'effect'
+// Branded primitives: IIFE companion with schema + operations
+const Timestamp = (() => {
+  const schema = S.Number.pipe(S.positive(), S.brand('Timestamp'));
+  type T = typeof schema.Type;
+  return {
+    add: (ts: T, ms: number): T => (ts + ms) as T,
+    now: Effect.sync(() => Date.now() as T),
+    schema,
+  } as const;
+})();
+type Timestamp = typeof Timestamp.schema.Type;
 
-// Schema defines structure + validation + brand
-const UserIdSchema = S.String.pipe(
-  S.pattern(/^usr_[a-z0-9]{24}$/),
-  S.brand('UserId'),
-)
-
-// Type derived—never declared separately
-type UserId = typeof UserIdSchema.Type
-
-// Decode at boundary
-const decodeUserId = S.decodeUnknown(UserIdSchema)
+// Entity models: Model.Class with field modifiers
+class User extends Model.Class<User>('User')({
+  id: Model.Generated(S.UUID),           // DB-generated, excluded from insert
+  hash: Model.Sensitive(S.String),       // Excluded from all json variants
+  deletedAt: Model.FieldOption(S.DateFromSelf),
+  updatedAt: Model.DateTimeUpdateFromDate,
+}) {}
+// Auto-derives: User.select, User.insert, User.update, User.json
 ```
 
 ---
 ### [3.2][TYPED_ERRORS]
 
-[IMPORTANT] Errors are tagged values with exhaustive handling.
+[IMPORTANT] Errors are tagged values. Domain uses `Data.TaggedError`; HTTP uses `S.TaggedError`.
 
 ```typescript
-import { Data, Match } from 'effect'
-
-// Domain errors via Data.TaggedError
-class NotFound extends Data.TaggedError('NotFound')<{
-  readonly resource: string
-  readonly id?: string
-}> {
-  get message() {
-    return this.id
-      ? `${this.resource}/${this.id} not found`
-      : `${this.resource} not found`
-  }
-}
-
-class Unauthorized extends Data.TaggedError('Unauthorized')<{
-  readonly reason: string
+// Domain errors: Data.TaggedError (client-side, business logic)
+class Browser extends Data.TaggedError('Browser')<{
+  readonly code: 'CLIPBOARD_READ' | 'STORAGE_FAILED';
+  readonly details?: string;
 }> {}
 
-// Exhaustive handling via Match
-const handleError = (error: NotFound | Unauthorized) =>
-  Match.value(error).pipe(
-    Match.tag('NotFound', (e) => ({ status: 404, body: e.message })),
-    Match.tag('Unauthorized', (e) => ({ status: 401, body: e.reason })),
-    Match.exhaustive,
-  )
+// HTTP errors: S.TaggedError with HttpApiSchema annotations + static factory
+class Auth extends S.TaggedError<Auth>()('Auth',
+  { cause: S.optional(S.Unknown), details: S.String },
+  HttpApiSchema.annotations({ status: 401 }),
+) {
+  static readonly of = (details: string, cause?: unknown) => new Auth({ cause, details });
+}
+
+// Namespace + const merge for grouped exports
+const HttpError = { Auth, NotFound, Forbidden } as const;
+namespace HttpError {
+  export type Any = Auth | NotFound | Forbidden;
+}
 ```
 
 ---
@@ -197,15 +199,15 @@ const fetchUserData = (id: UserId) =>
     prefs: PreferenceRepo.findByUser(id),
   })
 
-// Effect.gen for sequential operations with control flow
+// Effect.gen for sequential operations—use Option.match, never if
 const processUser = (id: UserId) =>
   Effect.gen(function* () {
-    const user = yield* UserRepo.findById(id)
-    if (!user) {
-      return yield* Effect.fail(new NotFound({ resource: 'User', id }))
-    }
-    const normalized = normalize(user.name) // Pure function call
-    return yield* UserRepo.update(id, { name: normalized })
+    const userOpt = yield* UserRepo.findById(id)
+    const user = yield* Option.match(userOpt, {
+      onNone: () => Effect.fail(new NotFound({ resource: 'User', id })),
+      onSome: Effect.succeed,
+    })
+    return yield* UserRepo.update(id, { name: normalize(user.name) })
   })
 
 // pipe for linear transformations
@@ -243,31 +245,23 @@ type MimeType = (typeof mimeTypes)[MimeCategory][number]
 ---
 ### [3.7][LAYERS]
 
-[IMPORTANT] Compose layers once at composition root.
+[IMPORTANT] Compose layers once at composition root. Use `ManagedRuntime` for lifecycle.
 
 ```typescript
-import { Layer } from 'effect'
+// Tiered composition: Platform → Infra → Domain
+const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.layer);
+const InfraLayer = Layer.mergeAll(DatabaseService.Default, MetricsService.Default)
+  .pipe(Layer.provideMerge(PlatformLayer));
+const AppLayer = Layer.mergeAll(SessionService.Default, MfaService.Default)
+  .pipe(Layer.provideMerge(InfraLayer));
 
-// Infrastructure layers (no dependencies)
-const ConfigLive = Layer.succeed(Config, loadConfig())
+// Layer.unwrapEffect for layers needing runtime service access
+const AuthLayer = Layer.unwrapEffect(
+  SessionService.pipe(Effect.map((s) => Middleware.Auth.makeLayer(s.lookup)))
+).pipe(Layer.provide(AppLayer));
 
-// Service layers (depend on infra)
-const UserRepoLive = Layer.effect(UserRepo, Effect.gen(function* () {
-  const db = yield* Database
-  return createUserRepo(db)
-}))
-
-// Composition root: single point of Layer wiring
-const AppLive = Layer.mergeAll(
-  UserRepoLive,
-  PermissionRepoLive,
-).pipe(
-  Layer.provide(DatabaseLive),
-  Layer.provide(ConfigLive),
-)
-
-// Run program with all dependencies
-Effect.runPromise(program.pipe(Effect.provide(AppLive)))
+// ManagedRuntime for clean lifecycle + testability
+const AppRuntime = ManagedRuntime.make(AppLayer);
 ```
 
 ---

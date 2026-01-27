@@ -18,7 +18,7 @@ import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Transfer, TransferError } from '@parametric-portal/server/utils/transfer';
 import { Codec } from '@parametric-portal/types/files';
-import { Array as A, Chunk, DateTime, Effect, Metric, Option, Stream } from 'effect';
+import { Array as A, Chunk, DateTime, Effect, Metric, Option, pipe, Stream } from 'effect';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -108,7 +108,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 			),
 		);
 		const parsed = yield* Telemetry.withSpan('transfer.parse', Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
-			Effect.map(Chunk.toArray),
+			Effect.map((c) => Chunk.toArray(c)),
 			Effect.tap((rows) => Effect.annotateCurrentSpan('transfer.rows.raw', rows.length)),
 			Effect.catchTag('Fatal', (err) => Effect.fail(HttpError.Validation.of('body', err.detail ?? err.code))),
 		));
@@ -136,18 +136,18 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 					yield* storage.put({ body: rawBuf, contentType: codec.mime, key: s3Key, metadata: { type: item.type } });
 					const metadata = JSON.stringify({ hash, mime: codec.mime, originalName, size: rawBuf.byteLength, storageRef: s3Key });
 					return {
-						appId, content: metadata, deletedAt: Option.none(), hash: Option.some(hash),
-						name: Option.some(originalName), status: 'active' as const, storageRef: Option.some(s3Key),
-						type: item.type, updatedAt: undefined, userId: Option.some(session.userId),
+						appId, content: metadata, deletedAt: Option.none(), hash: pipe(hash, Option.some),
+						name: pipe(originalName, Option.some), status: 'active' as const, storageRef: pipe(s3Key, Option.some),
+						type: item.type, updatedAt: undefined, userId: pipe(session.userId, Option.some),
 					};
 				})
 				: Effect.succeed({
 					appId, content: item.content, deletedAt: Option.none(), hash: Option.fromNullable(item.hash),
 					name: Option.fromNullable(item.name), status: 'active' as const, storageRef: Option.none<string>(),
-					type: item.type, updatedAt: undefined, userId: Option.some(session.userId),
+					type: item.type, updatedAt: undefined, userId: pipe(session.userId, Option.some),
 				});
 		const processBatch = (acc: BatchResult, batchItems: typeof items) => {
-			const ordinals = A.map(batchItems, (row) => row.ordinal);
+			const ordinals = batchItems.map((row) => row.ordinal);
 			const prepareAll = Effect.forEach(batchItems, prepareItem, { concurrency: 10 });	// Prepare all items (binary → S3 + metadata, text → direct content)
 			return prepareAll.pipe(
 				Effect.flatMap((prepared) => repos.assets.insertMany(prepared) as Effect.Effect<readonly Asset[], unknown>),
@@ -181,7 +181,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 			}),
 		], { discard: true });
 		return {
-			failed: A.appendAll(A.map(failures, (err) => ({ error: err.detail ?? err.code, ordinal: err.ordinal ?? null })), A.flatMap(dbFailures, (err) => A.map(err.rows, (ordinal) => ({ error: 'Database insert failed' as const, ordinal })))),
+			failed: A.appendAll(failures.map((err) => ({ error: err.detail ?? err.code, ordinal: err.ordinal ?? null })), dbFailures.flatMap((err) => err.rows.map((ordinal) => ({ error: 'Database insert failed' as const, ordinal })))),
 			imported: dryRun ? items.length : assets.length,
 		};
 	}),

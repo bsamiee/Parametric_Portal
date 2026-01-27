@@ -9,11 +9,21 @@ import { Config, Duration, Effect, Either, Encoding, Match, Metric, Option as O,
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Circuit } from '../security/circuit.ts';
 import { Crypto } from '../security/crypto.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const GitHubUserSchema = S.Struct({ email: S.NullishOr(S.String), id: S.Number });
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _githubCircuit = Circuit.make('oauth.github', {
+	breaker: { _tag: 'consecutive', threshold: 3 },
+	halfOpenAfter: Duration.seconds(30),
+	onStateChange: ({ name, previous, state }) =>
+		Effect.logWarning('GitHub OAuth circuit state change', { name, previous: Circuit.State[previous], state: Circuit.State[state] }),
+});
 
 // --- [CLASSES] ---------------------------------------------------------------
 
@@ -86,7 +96,7 @@ const oidcResult = (provider: Context.OAuthProvider, tokens: OAuth2Tokens) =>
 		),
 		Effect.map((d) => extractResult(tokens, { email: d.email ?? null, id: d.sub })),
 	);
-const githubResult = (tokens: OAuth2Tokens): Effect.Effect<ReturnType<typeof extractResult>, HttpError.OAuth> =>
+const _githubApiCall = (tokens: OAuth2Tokens) =>
 	Effect.gen(function* () {
 		const client = yield* HttpClient.HttpClient;
 		const request = HttpClientRequest.get(Context.Request.config.endpoints.githubApi).pipe(
@@ -98,10 +108,19 @@ const githubResult = (tokens: OAuth2Tokens): Effect.Effect<ReturnType<typeof ext
 		return extractResult(tokens, { email: data.email ?? null, id: String(data.id) });
 	}).pipe(
 		Effect.provide(FetchHttpClient.layer),
-		Effect.mapError(mapOAuthError('github')),
 		Effect.retry(Context.Request.config.oauth.retry),
-		Effect.timeoutFail({ duration: Context.Request.config.oauth.timeout, onTimeout: () => HttpError.OAuth.of('github', 'Request timeout') }),
+		Effect.timeoutFail({ duration: Context.Request.config.oauth.timeout, onTimeout: () => new Error('Request timeout') }),
 	);
+const githubResult = (tokens: OAuth2Tokens): Effect.Effect<ReturnType<typeof extractResult>, HttpError.OAuth> =>
+	_githubCircuit
+		.execute(() => Effect.runPromise(_githubApiCall(tokens).pipe(Effect.interruptible)))
+		.pipe(
+			Effect.mapError((e) =>
+				Circuit.isOpen(e)
+					? HttpError.OAuth.of('github', 'Service temporarily unavailable (circuit open)')
+					: mapOAuthError('github')(e),
+			),
+		);
 
 // --- [SERVICE] ---------------------------------------------------------------
 
@@ -167,9 +186,11 @@ class OAuthService extends Effect.Service<OAuthService>()('server/OAuth', {
 			authenticate: (provider: Context.OAuthProvider, code: string, state: string, stateCookie: string) =>
 				Effect.gen(function* () {
 					const { verifier } = yield* OAuthState.decrypt(provider, stateCookie).pipe(
-						Effect.filterOrFail(
-							(p) => Crypto.token.compare(p.state, state),
-							() => HttpError.OAuth.of(provider, 'State mismatch'),
+						Effect.flatMap((p) =>
+							Crypto.token.compare(p.state, state).pipe(
+								Effect.filterOrFail((match) => match, () => HttpError.OAuth.of(provider, 'State mismatch')),
+								Effect.as(p),
+							),
 						),
 					);
 					yield* Context.Request.config.oauth.capabilities[provider].pkce && verifier === undefined

@@ -116,11 +116,12 @@ const hash = (input: string): Effect.Effect<Hex64> =>
 		Effect.orDie,
 		Effect.withSpan('crypto.hash'),
 	);
-const timingSafeCompare = (a: string, b: string): boolean => {
-	const bufA = new TextEncoder().encode(a);
-	const bufB = new TextEncoder().encode(b);
-	return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
-};
+const timingSafeCompare = (a: string, b: string): Effect.Effect<boolean> =>
+	Effect.sync(() => {
+		const bufA = new TextEncoder().encode(a);
+		const bufB = new TextEncoder().encode(b);
+		return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+	});
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

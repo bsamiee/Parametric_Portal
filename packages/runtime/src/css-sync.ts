@@ -62,7 +62,7 @@ const useCssSync = <T extends object>(
 ): void => {
     const { classNames, prefix = B.defaults.prefix, root = B.defaults.root, selector } = config;
     const validatedPrefix = useMemo(() => validatePrefix(prefix), [prefix]);
-    const rootStable = useCallback(root, []);
+    const rootStable = useCallback(root, [root]);
     useEffect(() => {
         const rootEl = rootStable();
         const sync = (state: T): void => {

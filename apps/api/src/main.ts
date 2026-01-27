@@ -30,6 +30,7 @@ import { AuthLive } from './routes/auth.ts';
 import { HealthLive } from './routes/health.ts';
 import { JobsLive } from './routes/jobs.ts';
 import { SearchLive } from './routes/search.ts';
+import { StorageLive } from './routes/storage.ts';
 import { TelemetryRouteLive } from './routes/telemetry.ts';
 import { TransferLive } from './routes/transfer.ts';
 import { UsersLive } from './routes/users.ts';
@@ -45,28 +46,32 @@ const serverConfig = Effect.runSync(
 		port: Config.number('PORT').pipe(Config.withDefault(4000)),
 	}),
 );
-const PlatformLayer = Layer.mergeAll(	// External resources (DB, S3, FileSystem, Telemetry) - no dependencies
+const PlatformLayer = Layer.mergeAll(				// External resources (DB, S3, FileSystem, Telemetry) - no dependencies
 	Client.layer,
 	StorageAdapter.S3ClientLayer,
 	NodeFileSystem.layer,
 	Telemetry.Default,
 );
-const DataLayer = Layer.mergeAll(		// Database repos, search, pure utilities - depends on Platform
+const BaseInfraLayer = Layer.mergeAll(				// Database repos, search, pure utilities - depends on Platform
 	DatabaseService.Default,
 	SearchRepo.Default,
 	MetricsService.Default,
 	Crypto.Service.Default,
-	ReplayGuardService.Default,
-	RateLimit.Default,
 	Context.Request.SystemLayer,
 ).pipe(Layer.provideMerge(PlatformLayer));
-const CoreLayer = Layer.mergeAll(		// Infrastructure + Auth services - depends on Data (which includes Platform)
+const RateLimitLayer = RateLimit.Default.pipe(		// Provides RateLimiter + RateLimiterStore
+	Layer.provideMerge(BaseInfraLayer),
+);
+const DataLayer = ReplayGuardService.Default.pipe(	// Requires RateLimiterStore from RateLimitLayer
+	Layer.provideMerge(RateLimitLayer),
+);
+const CoreLayer = Layer.mergeAll(					// Infrastructure + Auth services - depends on Data (which includes Platform)
 	StorageAdapter.Default,
 	AuditService.Default,
 	MfaService.Default,
 	OAuthService.Default,
 ).pipe(Layer.provideMerge(DataLayer));
-const DomainLayer = Layer.mergeAll(		// Business logic services - depends on Core (which includes Data + Platform)
+const DomainLayer = Layer.mergeAll(					// Business logic services - depends on Core (which includes Data + Platform)
 	SessionService.Default,
 	StorageService.Default,
 	SearchService.Default,
@@ -85,10 +90,10 @@ const _AppRuntime = ManagedRuntime.make(AppLayer);	// MANAGED RUNTIME - All appl
 // --- [HTTP_LAYER] ------------------------------------------------------------
 
 const SessionAuthLayer = Layer.unwrapEffect(		// Session authentication middleware - Needs SessionService to validate tokens
-	Effect.map(SessionService, (session) => Middleware.Auth.makeLayer((hash) => session.lookup(hash))),
+	SessionService.pipe(Effect.map((session) => Middleware.Auth.makeLayer((hash) => session.lookup(hash)))),
 ).pipe(Layer.provide(AppLayer));
 const RouteLayer = Layer.mergeAll(					// Route handlers - All routes get access to all application services
-	AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, TelemetryRouteLive, TransferLive, UsersLive,
+	AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive,
 ).pipe(Layer.provide(AppLayer));
 const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer));
 

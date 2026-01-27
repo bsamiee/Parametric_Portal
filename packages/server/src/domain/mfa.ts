@@ -4,7 +4,7 @@
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { randomBytes } from 'node:crypto';
-import { Clock, Effect, Encoding, Option, pipe } from 'effect';
+import { Clock, Effect, Encoding, Option, Stream } from 'effect';
 import { customAlphabet } from 'nanoid';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import { Context } from '../context.ts';
@@ -27,25 +27,19 @@ const _config = {
 const _dbErr = (msg: string) => <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, HttpError.Internal, R> =>
 	eff.pipe(Effect.mapError((e) => HttpError.Internal.of(msg, e)));
 const _findValidBackupCodeIndex = (codes: readonly string[], code: string) =>
-	Effect.iterate(
-		{ found: Option.none<number>(), index: 0 },
-		{
-			body: (state) => {
-				const saltedHash = codes[state.index] ?? '';
-				const idx = saltedHash.indexOf('$');
-				return pipe(
-					Option.liftPredicate(() => idx > 0 && idx < saltedHash.length - 1)(idx),
-					Option.match({
-						onNone: () => Effect.succeed(false),
-						onSome: () => Crypto.token.hash(`${saltedHash.slice(0, idx)}${code.toUpperCase()}`).pipe(
-							Effect.map((actualHash) => Crypto.token.compare(actualHash, saltedHash.slice(idx + 1))),
-						),
-					}),
-				).pipe(Effect.map((valid) => ({ found: valid ? Option.some(state.index) : Option.none(), index: state.index + 1 })));
-			},
-			while: (state) => state.index < codes.length && Option.isNone(state.found),
-		},
-	).pipe(Effect.map((state) => Option.getOrElse(state.found, () => -1)));
+	Stream.fromIterable(codes).pipe(
+		Stream.zipWithIndex,
+		Stream.mapEffect(([saltedHash, index]) => {
+			const idx = saltedHash.indexOf('$');
+			return idx > 0 && idx < saltedHash.length - 1
+				? Crypto.token.hash(`${saltedHash.slice(0, idx)}${code.toUpperCase()}`).pipe(
+						Effect.flatMap((actualHash) => Crypto.token.compare(actualHash, saltedHash.slice(idx + 1))),
+						Effect.map((valid) => ({ index, valid })),
+					)
+				: Effect.succeed({ index, valid: false });
+		}),
+		Stream.runFold(-1, (found, r) => r.valid && found === -1 ? r.index : found),
+	);
 
 // --- [SERVICES] --------------------------------------------------------------
 

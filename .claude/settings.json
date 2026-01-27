@@ -1,53 +1,60 @@
 {
-    "model": "claude-opus-4-5-20251101",
-    "hooks": {
-        "SessionStart": [{
-            "matcher": "startup|resume",
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-env.sh"
-                },
-                {
-                    "type": "command",
-                    "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/load-skill-index.py"
-                }
-            ]
-        }],
-        "PostToolUse": [{
-            "matcher": "*",
-            "hooks": [{
-                "type": "command",
-                "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/webhook-emit.py",
-                "timeout": 5
-            }]
-        }]
-    },
-    "permissions": {
-        "allow": [
-            "Read",
-            "Write",
-            "Edit",
-            "Glob",
-            "Grep",
-            "Task",
-            "TodoWrite",
-            "NotebookEdit",
-            "WebSearch",
-            "WebFetch",
-            "Skill",
-            "SlashCommand",
-            "Bash",
-            "Bash(pnpm:*)",
-            "Bash(nx:*)",
-            "Bash(git:*)",
-            "Bash(gh:*)",
-            "Bash(node:*)",
-            "Bash(uv:*)",
-            "mcp__playwright-test__*",
-            "mcp__playwright__browser_*"
-        ],
-        "ask": [],
-        "deny": []
-    }
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Task",
+      "TodoWrite",
+      "NotebookEdit",
+      "WebSearch",
+      "WebFetch",
+      "Skill",
+      "SlashCommand",
+      "Bash",
+      "Bash(pnpm:*)",
+      "Bash(nx:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(node:*)",
+      "Bash(uv:*)",
+      "mcp__playwright-test__*",
+      "mcp__playwright__browser_*"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "model": "claude-opus-4-5-20251101",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/setup-env.sh"
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/load-skill-index.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/webhook-emit.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {}
 }
