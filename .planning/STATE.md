@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-26)
 ## Current Position
 
 Phase: 1 of 3 (Platform API Adoption)
-Plan: 0 of TBD (restarting with revised scope)
-Status: Context gathered, ready for planning
-Last activity: 2026-01-27 — Revised Phase 1 context with new decisions
+Plan: 2 of 4 (completed)
+Status: In progress
+Last activity: 2026-01-27 - Completed 01-02-PLAN.md (StreamingService)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [##########..........] 50% (2/4 plans)
 
 ## Phase 1 Revision Notes
 
@@ -40,24 +40,25 @@ See: `.planning/phases/01-platform-api-adoption/01-CONTEXT.md` for full decision
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Phase 1: 4-layer architecture (Platform -> Infra -> Domain -> HTTP) — Reduces cognitive load
+- Phase 1: 4-layer architecture (Platform -> Infra -> Domain -> HTTP) - Reduces cognitive load
 - Phase 1: L1/L2 cache architecture with lazy write-behind to Redis
 - Phase 1: Context-aware auto-scope (tenant + user when session exists)
 - Phase 1: Rate limiting absorbed into CacheService
 - Phase 1: Resilience stays as utilities, used internally by services
-- Phase 3: SerializedWorkerPool for parsing — Off-thread CPU work, non-blocking API
-- Phase 3: Effect Cluster for jobs — Replace hand-rolled queue with official APIs
+- Phase 1 Plan 02: No consumer-configurable buffer options - intelligent defaults baked in
+- Phase 1 Plan 02: Buffer BEFORE encoding for SSE - drop stale domain objects efficiently
+- Phase 3: SerializedWorkerPool for parsing - Off-thread CPU work, non-blocking API
+- Phase 3: Effect Cluster for jobs - Replace hand-rolled queue with official APIs
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
 **Phase 1 readiness:**
 - Need deep research on @effect/experimental Redis API for L2 cache
 - Need to understand Effect pub/sub for cross-instance invalidation
-- Worker API research for StreamingService preparation
 
 **Phase 2 readiness:**
 - Must map full dependency graph before merging layers to avoid circular references
@@ -69,5 +70,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Revised Phase 1 context, cleared stale docs
+Stopped at: Completed 01-02-PLAN.md (StreamingService)
 Resume file: None
