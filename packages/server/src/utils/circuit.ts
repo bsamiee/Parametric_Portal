@@ -6,9 +6,8 @@
  * Events wired to metrics: break, reset, halfOpen, success, failure
  */
 import {
-	type BrokenCircuitError, CircuitState, ConsecutiveBreaker, CountBreaker, type FailureReason, type IBackoffFactory, type IBreaker,
-	type IDisposable, type IHalfOpenAfterBackoffContext, type IsolatedCircuitError, type Policy, SamplingBreaker,
-	type TaskCancelledError, circuitBreaker, handleAll, isBrokenCircuitError, isIsolatedCircuitError, isTaskCancelledError,
+	type BrokenCircuitError, CircuitState, ConsecutiveBreaker, CountBreaker, type FailureReason, type IBackoffFactory, type IBreaker, type IDisposable, type IHalfOpenAfterBackoffContext, type IsolatedCircuitError,
+	type Policy, SamplingBreaker, type TaskCancelledError, circuitBreaker, handleAll, isBrokenCircuitError, isIsolatedCircuitError, isTaskCancelledError,
 } from 'cockatiel';
 import { Data, Duration, Effect, Match, Metric, Option } from 'effect';
 import { Context } from '../context.ts';
