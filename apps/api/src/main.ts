@@ -21,9 +21,11 @@ import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { ReplayGuardService } from '@parametric-portal/server/security/totp-replay';
+import { WorkerPoolService } from '@parametric-portal/server/platform/workers/pool';
 import { Config, Effect, Layer, ManagedRuntime } from 'effect';
 import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
@@ -58,12 +60,13 @@ const BaseInfraLayer = Layer.mergeAll(				// Database repos, search, pure utilit
 	MetricsService.Default,
 	Crypto.Service.Default,
 	Context.Request.SystemLayer,
+	WorkerPoolService.Layer,
 ).pipe(Layer.provideMerge(PlatformLayer));
-const RateLimitLayer = RateLimit.Default.pipe(		// Provides RateLimiter + RateLimiterStore
+const CacheLayer = CacheService.Layer.pipe(			// Provides CacheService + RateLimiter
 	Layer.provideMerge(BaseInfraLayer),
 );
-const DataLayer = ReplayGuardService.Default.pipe(	// Requires RateLimiterStore from RateLimitLayer
-	Layer.provideMerge(RateLimitLayer),
+const DataLayer = ReplayGuardService.Default.pipe(	// Requires CacheService (provides Redis for replay guard)
+	Layer.provideMerge(CacheLayer),
 );
 const CoreLayer = Layer.mergeAll(					// Infrastructure + Auth services - depends on Data (which includes Platform)
 	StorageAdapter.Default,
