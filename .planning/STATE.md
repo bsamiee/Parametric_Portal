@@ -5,37 +5,33 @@
 See: .planning/PROJECT.md (updated 2026-01-26)
 
 **Core value:** Polymorphic patterns that maximize @effect/platform APIs
-**Current focus:** Phase 1: Platform API Adoption
+**Current focus:** Phase 1: Platform API Adoption (revised)
 
 ## Current Position
 
 Phase: 1 of 3 (Platform API Adoption)
-Plan: 4 of TBD in current phase
-Status: In progress
-Last activity: 2026-01-27 — Completed 01-03-PLAN.md (Cache module)
+Plan: 0 of TBD (restarting with revised scope)
+Status: Context gathered, ready for planning
+Last activity: 2026-01-27 — Revised Phase 1 context with new decisions
 
-Progress: [████░░░░░░] 40%
+Progress: [░░░░░░░░░░] 0%
 
-## Performance Metrics
+## Phase 1 Revision Notes
 
-**Velocity:**
-- Total plans completed: 4
-- Average duration: 4.25 min
-- Total execution time: 0.28 hours
+Original Phase 1 created wrapper utilities (cache.ts, stream.ts, resilience.ts, circuit.ts).
+After execution and review, the approach was deemed insufficient:
+- Created loose const/function exports instead of proper Effect.Service classes
+- Did not follow MetricsService polymorphic pattern
+- Required consumer configuration instead of intelligent internal defaults
+- Did not achieve the unified service vision
 
-**By Phase:**
+**New direction:**
+- CacheService: Proper Effect.Service with L1/L2 architecture, auto-scope from context
+- StreamingService: Unified service for SSE/download/export with intelligent defaults
+- Full migration of rate-limit.ts, totp-replay.ts consumers
+- Code quality: Dense services, polymorphic unity, no loose const spam
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 1. Platform API Adoption | 4/TBD | 17 min | 4.25 min |
-| 2. Layer Architecture Consolidation | 0/TBD | - | - |
-| 3. Advanced Platform Features | 0/TBD | - | - |
-
-**Recent Trend:**
-- Last 5 plans: 01-03 (7 min), 01-04 (6 min), 01-02 (2 min), 01-01 (5 min)
-- Trend: Stable
-
-*Updated after each plan completion*
+See: `.planning/phases/01-platform-api-adoption/01-CONTEXT.md` for full decisions.
 
 ## Accumulated Context
 
@@ -45,20 +41,12 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - Phase 1: 4-layer architecture (Platform -> Infra -> Domain -> HTTP) — Reduces cognitive load
-- Phase 1: Memory-first cache with Redis fallback — Local fast path, distributed only when needed
+- Phase 1: L1/L2 cache architecture with lazy write-behind to Redis
+- Phase 1: Context-aware auto-scope (tenant + user when session exists)
+- Phase 1: Rate limiting absorbed into CacheService
+- Phase 1: Resilience stays as utilities, used internally by services
 - Phase 3: SerializedWorkerPool for parsing — Off-thread CPU work, non-blocking API
 - Phase 3: Effect Cluster for jobs — Replace hand-rolled queue with official APIs
-- 01-02: Schema validation at read boundary - ParseError propagates to caller
-- 01-02: Missing optional cookies return Option.none, not errors
-- 01-02: Cookie encryption remains domain concern in oauth.ts
-- 01-01: Keep cockatiel for circuit breaker, use Effect for retry/timeout
-- 01-01: Metrics optional via Effect.serviceOption - resilience works without MetricsService
-- 01-04: Response builders return HttpServerResponse directly (not Effect) - streams must have R=never
-- 01-04: Buffer defaults per stream type - SSE sliding, downloads/exports suspend
-- 01-04: Circuit breaker at stream start, not per-element
-- 01-03: Effect.Cache for deduplication - built-in coalescing, no hand-rolled implementation
-- 01-03: Resilience order: retry -> timeout -> fallback (retry on original error type E)
-- 01-03: invalidateAll clears entire cache (per-tenant filtering requires Redis in Phase 3)
 
 ### Pending Todos
 
@@ -67,8 +55,9 @@ None yet.
 ### Blockers/Concerns
 
 **Phase 1 readiness:**
-- Cookie refactor requires comprehensive OAuth flow testing
-- Cache integration needs session lookup performance benchmarking
+- Need deep research on @effect/experimental Redis API for L2 cache
+- Need to understand Effect pub/sub for cross-instance invalidation
+- Worker API research for StreamingService preparation
 
 **Phase 2 readiness:**
 - Must map full dependency graph before merging layers to avoid circular references
@@ -76,10 +65,9 @@ None yet.
 
 **Phase 3 readiness:**
 - Worker pool integration complexity unknown (needs spike for schema definitions and worker script setup)
-- KeyValueStore Redis adapter requires custom implementation (not provided by @effect/platform)
 
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Completed 01-03-PLAN.md
+Stopped at: Revised Phase 1 context, cleared stale docs
 Resume file: None

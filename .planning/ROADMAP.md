@@ -12,29 +12,30 @@ Consolidate the existing 7-layer architecture into a clean 4-layer structure whi
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Platform API Adoption** - Replace manual patterns with official Effect APIs
+- [ ] **Phase 1: Platform API Adoption** - Create CacheService and StreamingService following MetricsService pattern
 - [ ] **Phase 2: Layer Architecture Consolidation** - Restructure 7 layers into 4 clean boundaries
 - [ ] **Phase 3: Advanced Platform Features** - Add worker pools and unified caching
 
 ## Phase Details
 
-### Phase 1: Platform API Adoption
-**Goal**: Eliminate hand-rolled patterns by adopting official Effect platform primitives for cookies, SSE, caching, resilience, and streaming backpressure
+### Phase 1: Platform API Adoption (REVISED 2026-01-27)
+**Goal**: Create proper Effect.Service implementations for CacheService and StreamingService following the polymorphic pattern established in MetricsService. Full migration of consumers.
 **Depends on**: Nothing (first phase)
-**Requirements**: HTTP-02, HTTP-03, STREAM-02, CACHE-01, RESILIENCE-01 (expanded)
+**Requirements**: CACHE-01, STREAM-01, RESILIENCE-01 (integrated)
 **Success Criteria** (what must be TRUE):
-  1. All SSE endpoints use @effect/experimental Sse encoder without manual TextEncoder
-  2. Cookie operations use @effect/platform Cookies module with schema validation at boundary
-  3. Session and app lookups use Effect.Cache for request deduplication
-  4. All streaming endpoints have explicit buffer configuration preventing unbounded memory growth
-  5. Resilience patterns (retry, timeout, circuit, fallback) available as composable Effect primitives
-**Plans**: 4 plans in 2 waves
+  1. CacheService is Effect.Service class with L1 (memory) / L2 (Redis) architecture
+  2. CacheService auto-scopes by tenant/user from FiberRef context — consumers never pass namespace
+  3. CacheService provides single `get()` with internal resilience, metrics, lookup, sliding expiration
+  4. CacheService absorbs rate limiting — no separate RateLimit.apply needed
+  5. StreamingService is Effect.Service class with `sse()`, `download()`, `export()` entry points
+  6. StreamingService has intelligent backpressure defaults per type (no consumer config)
+  7. StreamingService always tracks metrics automatically via MetricsService
+  8. rate-limit.ts and totp-replay.ts refactored to use CacheService (shared Redis client)
+  9. All code follows polymorphic unity pattern — no loose const/function spam, max 1 helper per file
+**Plans**: TBD (to be created during planning)
 
 Plans:
-- [ ] 01-01-PLAN.md — Resilience module (retry, timeout, circuit, fallback)
-- [ ] 01-02-PLAN.md — Cookies module (schema validation at boundary)
-- [ ] 01-03-PLAN.md — Cache module (tenant isolation, request deduplication)
-- [ ] 01-04-PLAN.md — Streaming module (SSE encoding, backpressure control)
+- TBD (populated during planning phase)
 
 ### Phase 2: Layer Architecture Consolidation
 **Goal**: Restructure 7 layers into 4 clean boundaries with clear dependency direction and no circular references
@@ -72,9 +73,9 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Platform API Adoption | 0/4 | Ready for execution | - |
+| 1. Platform API Adoption | 0/TBD | Context gathered, ready for planning | - |
 | 2. Layer Architecture Consolidation | 0/TBD | Not started | - |
 | 3. Advanced Platform Features | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-01-26 after Phase 1 planning*
+*Last updated: 2026-01-27 after Phase 1 context revision*
