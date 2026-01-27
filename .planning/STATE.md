@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-01-26)
 
 **Core value:** Polymorphic patterns that maximize @effect/platform APIs
-**Current focus:** Phase 1: Platform API Adoption (revised)
+**Current focus:** Phase 3: Advanced Platform Features
 
 ## Current Position
 
-Phase: 1 of 3 (Platform API Adoption)
+Phase: 3 of 3 (Advanced Platform Features)
 Plan: 1 of 4 (completed)
 Status: In progress
-Last activity: 2026-01-27 - Completed 01-01-PLAN.md (CacheService)
+Last activity: 2026-01-27 - Completed 03-01-PLAN.md (RPC Contracts + Schema Cache)
 
-Progress: [#####...............] 25% (1/4 plans)
+Progress: [####################] 100% Phase 1, [#####...............] 25% Phase 3
 
 ## Phase 1 Revision Notes
 
@@ -49,6 +49,9 @@ Recent decisions affecting current work:
 - Phase 1 Plan 01: err.reason === 'Exceeded' for RateLimiterError type narrowing
 - Phase 3: SerializedWorkerPool for parsing - Off-thread CPU work, non-blocking API
 - Phase 3: Effect Cluster for jobs - Replace hand-rolled queue with official APIs
+- Phase 3 Plan 01: S.TaggedError for RPC errors (not Data.TaggedError) - Required for serialization
+- Phase 3 Plan 01: Duration as milliseconds in worker errors - Duration.Duration not JSON-serializable
+- Phase 3 Plan 01: Schema stores bypass L1 Effect.Cache - Direct Redis for simplicity
 
 ### Pending Todos
 
@@ -64,10 +67,11 @@ None.
 - FiberRef propagation testing critical for tenant isolation
 
 **Phase 3 readiness:**
-- Worker pool integration complexity unknown (needs spike for schema definitions and worker script setup)
+- RPC contracts complete, ready for worker pool implementation
+- CacheService schema methods available for typed storage
 
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Completed 01-01-PLAN.md (CacheService)
+Stopped at: Completed 03-01-PLAN.md (RPC Contracts + Schema Cache)
 Resume file: None
