@@ -9,7 +9,9 @@
  */
 import { Headers, HttpServerResponse } from '@effect/platform';
 import { Sse } from '@effect/experimental';
-import { Match, Stream } from 'effect';
+import { Effect, Match, Metric, Option, Stream } from 'effect';
+import { MetricsService } from '../observe/metrics.ts';
+import { Resilience } from './resilience.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -38,6 +40,15 @@ type ResponseConfig = {
 	readonly buffer?: Partial<BufferConfig>;
 };
 
+type SseTrackedConfig<A, E> = SseConfig<A, E> & {
+	readonly name: string;
+};
+
+type ProgressConfig = {
+	readonly name: string;
+	readonly logInterval?: number;
+};
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _bufferDefaults = {
@@ -48,6 +59,13 @@ const _bufferDefaults = {
 } as const satisfies Record<string, BufferConfig>;
 
 const _textEncoder = new TextEncoder();
+
+const _metrics = {
+	bufferOverflows: Metric.counter('stream_buffer_overflows_total'),
+	bytes: Metric.counter('stream_bytes_total'),
+	duration: Metric.timerWithBoundaries('stream_duration_seconds', [0.1, 1, 10, 60, 300]),
+	elements: Metric.counter('stream_elements_total'),
+} as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -149,13 +167,101 @@ const withBuffer = <A, E, R>(
 	return _applyBufferStrategy(stream, config);
 };
 
+/**
+ * Build SSE response with metrics tracking.
+ * Tracks element count per stream. Metrics are optional - works without MetricsService.
+ */
+const sseTracked = <A, E>(
+	events: Stream.Stream<A, E, never>,
+	config: SseTrackedConfig<A, E>,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, never, never> =>
+	Effect.gen(function* () {
+		const metricsOpt = yield* Effect.serviceOption(MetricsService);
+		const labels = MetricsService.label({ stream: config.name });
+
+		const trackedEvents = Option.match(metricsOpt, {
+			onNone: () => events,
+			onSome: () => Stream.tap(events, () => MetricsService.inc(_metrics.elements, labels)),
+		});
+
+		const bufferConfig = _resolveBufferConfig(_bufferDefaults.sse, config.buffer);
+
+		const sseStream = trackedEvents.pipe(
+			Stream.map((a) => _encodeToBytes(_formatSseEvent(config.serialize(a)))),
+			Stream.catchAll((e) =>
+				config.onError
+					? Stream.succeed(_encodeToBytes(_formatSseEvent(config.onError(e))))
+					: Stream.fail(e),
+			),
+			(s) => _applyBufferStrategy(s, bufferConfig),
+		);
+
+		return HttpServerResponse.stream(sseStream, {
+			contentType: 'text/event-stream',
+			headers: Headers.fromInput({
+				'Cache-Control': 'no-cache',
+				'Connection': 'keep-alive',
+			}),
+		});
+	});
+
+/**
+ * Add progress tracking to a stream with periodic logging.
+ * Uses sampling to reduce overhead on high-volume streams.
+ */
+const withProgress = <A, E, R>(
+	stream: Stream.Stream<A, E, R>,
+	config: ProgressConfig,
+): Stream.Stream<A, E, R> => {
+	const interval = config.logInterval ?? 1000;
+	const labels = MetricsService.label({ stream: config.name });
+
+	return stream.pipe(
+		Stream.zipWithIndex,
+		Stream.tap(([, idx]) =>
+			idx > 0 && idx % interval === 0
+				? Effect.flatMap(
+					Effect.serviceOption(MetricsService),
+					Option.match({
+						onNone: () => Effect.logInfo('Stream progress', { items: idx, stream: config.name }),
+						onSome: () => Effect.all([
+							MetricsService.inc(_metrics.elements, labels, idx),
+							Effect.logInfo('Stream progress', { items: idx, stream: config.name }),
+						]),
+					}),
+				)
+				: Effect.void,
+		),
+		Stream.map(([item]) => item),
+	);
+};
+
+/**
+ * Wrap a stream with circuit breaker protection.
+ * Checks circuit state at stream start - if open, fails immediately.
+ * For per-element circuit protection, use Resilience.withCircuit on individual effects.
+ */
+const withCircuit = <A, E, R>(
+	stream: Stream.Stream<A, E, R>,
+	circuitName: string,
+): Stream.Stream<A, E | Resilience.CircuitOpenError, R> =>
+	Stream.unwrap(
+		Resilience.withCircuit(
+			Effect.succeed(stream),
+			circuitName,
+		),
+	);
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Streaming = {
 	response,
 	sse,
+	sseTracked,
 	withBuffer,
+	withCircuit,
+	withProgress,
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
@@ -173,11 +279,19 @@ namespace Streaming {
 		readonly buffer?: Partial<BufferConfig>;
 		readonly onError?: (e: E) => SseEventData;
 	};
+	export type SseTrackedConfig<A, E> = SseConfig<A, E> & {
+		readonly name: string;
+	};
 	export type ResponseConfig = {
 		readonly contentType: string;
 		readonly headers?: Headers.Input;
 		readonly buffer?: Partial<BufferConfig>;
 	};
+	export type ProgressConfig = {
+		readonly name: string;
+		readonly logInterval?: number;
+	};
+	export type CircuitOpenError = Resilience.CircuitOpenError;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
