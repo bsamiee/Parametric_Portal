@@ -30,6 +30,9 @@ export default defineConfig(
                 'observe/metrics': './src/observe/metrics.ts',
                 'observe/polling': './src/observe/polling.ts',
                 'observe/telemetry': './src/observe/telemetry.ts',
+                // Platform modules
+                'platform/workers/contract': './src/platform/workers/contract.ts',
+                'platform/workers/transfer': './src/platform/workers/transfer.ts',
                 // Security modules
                 'security/crypto': './src/security/crypto.ts',
                 'security/totp-replay': './src/security/totp-replay.ts',
