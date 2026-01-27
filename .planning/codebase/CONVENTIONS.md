@@ -192,6 +192,69 @@
 - Use `Effect.matchEffect` for effect-returning handlers
 - Avoid if/else when exhaustive matching available
 
+## Polymorphic Unity
+
+**Core Principle:** Single intelligent functions with discriminated behavior, not explosion of variants.
+
+**Metrics Ownership:**
+- ALL metrics defined in `MetricsService` only — never local `_metrics` objects in module files
+- Modules emit via `MetricsService.inc(service.counter, labels)` accessing the service
+- Add new metric namespaces to MetricsService when needed (e.g., `cache: { hits, misses }`)
+
+**Anti-Pattern — Const Spam:**
+```typescript
+// BAD: Separate functions for each variant
+const _emitHitMetric = (name: string) => ...
+const _emitMissMetric = (name: string) => ...
+
+// GOOD: Single polymorphic function
+const _emitMetric = (type: 'hit' | 'miss', name: string) => ...
+```
+
+**Anti-Pattern — Accessor Explosion:**
+```typescript
+// BAD: Separate functions for optional/required
+const read = (schema) => ...
+const readOptional = (schema) => ...
+
+// GOOD: Single intelligent function
+const read = <S>(schema: S, opts?: { optional?: boolean }) => ...
+// Or use existing context.ts pattern: onNone callback
+```
+
+**Anti-Pattern — "with" Wrapper Explosion:**
+```typescript
+// BAD: Explosion of optional wrappers
+sse, sseTracked, withBuffer, withCircuit, withProgress
+
+// GOOD: Single function with intelligent defaults
+sse(stream, { name: '...' })  // metrics, buffer, circuit automatic
+```
+
+**Anti-Pattern — Loose Type Spam:**
+```typescript
+// BAD: Standalone interface definitions
+interface CacheConfig<K, V, E, R> { ... }
+interface CacheInstance<K, V, E, R> { ... }
+interface CacheStats { ... }
+
+// GOOD: Types derived from functions in namespace
+namespace Cache {
+  export type Config<K, V, E, R> = Parameters<typeof make<K, V, E, R>>[0]
+  export type Instance<K, V, E, R> = ReturnType<typeof make<K, V, E, R>>
+}
+```
+
+**Automatic Defaults:**
+- Metrics emission is automatic when MetricsService in context (use `Effect.serviceOption`)
+- Buffer configuration has smart defaults per stream type
+- Circuit breaker integration automatic for external calls
+- Tenant isolation automatic via FiberRef context
+- User configures behavior, not ceremony
+
+**Reference Implementation:** `observe/metrics.ts`, `context.ts`, `security/circuit.ts`
+
 ---
 
 *Convention analysis: 2026-01-26*
+*Polymorphic unity added: 2026-01-27*
