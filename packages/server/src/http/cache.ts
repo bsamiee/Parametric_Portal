@@ -1,36 +1,17 @@
-/** Tenant-isolated cache with request deduplication and automatic metrics via MetricsService. */
-import { Cache as EffectCache, Duration, Effect, Match, Metric, Option } from 'effect';
+/**
+ * Tenant-isolated cache with request deduplication and automatic metrics.
+ * Wraps Effect.Cache with resilience via Resilience.wrap.
+ *
+ * Usage: Cache.make({ name, lookup, capacity?, ttl?, timeout?, retry?, circuit?, fallback? })
+ */
+import { Array as A, Cache as EffectCache, Duration, Effect, Either, Exit, Match, Metric, Option } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Resilience } from '../utils/resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _defaults = { capacity: 1000, ttl: Duration.minutes(5) } as const;
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _emitMetric = (type: 'hit' | 'miss' | 'eviction', name: string, tenant: string) =>
-	Effect.serviceOption(MetricsService).pipe(
-		Effect.flatMap(Option.match({
-			onNone: () => Effect.void,
-			onSome: (m) => MetricsService.inc(
-				Match.value(type).pipe(
-					Match.when('hit', () => m.cache.hits),
-					Match.when('miss', () => m.cache.misses),
-					Match.orElse(() => m.cache.evictions),
-				),
-				MetricsService.label({ name, tenant }),
-			),
-		})),
-	);
-const _trackDuration = <A, E, R>(effect: Effect.Effect<A, E, R>, name: string, tenant: string): Effect.Effect<A, E, R> =>
-	Effect.flatMap(
-		Effect.serviceOption(MetricsService),
-		Option.match({
-			onNone: () => effect,
-			onSome: (m) => effect.pipe(Metric.trackDuration(Metric.taggedWithLabels(m.cache.lookupDuration, MetricsService.label({ name, tenant })))),
-		}),
-	);
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -38,38 +19,85 @@ const make = <K, V, E, R>(config: {
 	readonly name: string;
 	readonly lookup: (key: K) => Effect.Effect<V, E, R>;
 	readonly capacity?: number;
-	readonly ttl?: Duration.Duration;}) =>
+	readonly circuit?: Resilience.Config<V, E, R>['circuit'];
+	readonly fallback?: (key: K, error: Resilience.Error<E>) => Effect.Effect<V, never, R>;
+	readonly retry?: Resilience.RetryMode;
+	readonly timeout?: Duration.Duration;
+	readonly ttl?: Duration.Duration | ((exit: Exit.Exit<V, E>) => Duration.Duration);
+}) =>
 	Effect.gen(function* () {
+		type CK = { readonly tenantId: string; readonly key: K };
 		const capacity = config.capacity ?? _defaults.capacity;
-		const ttl = config.ttl ?? _defaults.ttl;
-		type CompositeKey = { readonly tenantId: string; readonly key: K };
-		const internal = yield* EffectCache.make<CompositeKey, V, E, R>({
-			capacity,
-			lookup: (ck) => Effect.gen(function* () {
-				yield* _emitMetric('miss', config.name, ck.tenantId);
-				return yield* _trackDuration(config.lookup(ck.key), config.name, ck.tenantId);
-			}),
-			timeToLive: ttl,
-		});
-		const _compositeKey = (key: K) => Context.Request.tenantId.pipe(Effect.map((tenantId): CompositeKey => ({ key, tenantId })));
-		const get = (key: K): Effect.Effect<V, E, R> =>
-			Effect.gen(function* () {
-				const ck = yield* _compositeKey(key);
-				const cached = yield* internal.contains(ck);
-				yield* cached ? _emitMetric('hit', config.name, ck.tenantId) : Effect.void;
-				return yield* internal.get(ck);
+		// Lookup wraps user's function with resilience + metrics
+		const lookup = (ck: CK): Effect.Effect<V, Resilience.Error<E>, R> => {
+			const labels = MetricsService.label({ name: config.name, tenant: ck.tenantId });
+			const resilient = Resilience.wrap(config.lookup(ck.key), {
+				circuit: config.circuit,
+				operation: `${config.name}:lookup`,
+				retry: config.retry,
+				timeout: config.timeout,
 			});
-		const refresh = (key: K): Effect.Effect<void, E, R> => Effect.flatMap(_compositeKey(key), (ck) => internal.refresh(ck));
-		const invalidate = (key: K): Effect.Effect<void, never, R> => Effect.flatMap(_compositeKey(key), (ck) => internal.invalidate(ck));
-		const invalidateAll: Effect.Effect<void, never, R> =
-			Effect.gen(function* () {
-				const tenantId = yield* Context.Request.tenantId;
+			// Metrics: miss counter + duration (lookup only called on cache miss)
+			const withMetrics = Effect.flatMap(Effect.serviceOption(MetricsService), (opt) =>
+				Option.match(opt, {
+					onNone: () => resilient,
+					onSome: (m) =>
+						resilient.pipe(
+							Effect.tap(() => MetricsService.inc(m.cache.misses, labels)),
+							Metric.trackDuration(Metric.taggedWithLabels(m.cache.lookupDuration, labels)),
+						),
+				}),
+			);
+			const fb = config.fallback;							// Fallback on error
+			return fb === undefined ? withMetrics : withMetrics.pipe(Effect.catchAll((err) => fb(ck.key, err)));
+		};
+		const internal = yield* Match.value(config.ttl).pipe(	// Create internal Effect.Cache with tenant-scoped composite key
+			Match.when(Match.undefined, () => EffectCache.make<CK, V, Resilience.Error<E>, R>({ capacity, lookup, timeToLive: _defaults.ttl }),),
+			Match.when(Duration.isDuration, (ttl) => EffectCache.make<CK, V, Resilience.Error<E>, R>({ capacity, lookup, timeToLive: ttl }),),
+			Match.orElse((ttlFn) =>
+				EffectCache.makeWith<CK, V, Resilience.Error<E>, R>({
+					capacity,
+					lookup,
+					timeToLive: (exit) => ttlFn(Exit.mapError(exit, (e) => e as E)),
+				}),
+			),
+		);
+		// Composite key builder: tenantId + user key
+		const ck = (key: K) => Effect.andThen(Context.Request.tenantId, (tenantId): CK => ({ key, tenantId }));
+		return {
+			cacheStats: internal.cacheStats,
+			contains: (key: K) => Effect.flatMap(ck(key), (c) => internal.contains(c)),
+			entryStats: (key: K) => Effect.flatMap(ck(key), (c) => internal.entryStats(c)),
+			// Effect.Cache.getEither returns Left on cache HIT, Right on cache MISS (lookup invoked). We increment hit counter only on Left (actual cache hit)
+			get: (key: K): Effect.Effect<V, Resilience.Error<E>, R> =>
+				Effect.gen(function* () {
+					const c = yield* ck(key);
+					const either = yield* internal.getEither(c);
+					const metricsOpt = yield* Effect.serviceOption(MetricsService);
+					// Emit hit metric only on actual cache hit (Either.isLeft)
+					if (Option.isSome(metricsOpt) && Either.isLeft(either)) {
+						yield* MetricsService.inc(metricsOpt.value.cache.hits, MetricsService.label({ name: config.name, tenant: c.tenantId }));
+					}
+					return Either.merge(either);
+				}),
+			getEither: (key: K) => Effect.flatMap(ck(key), (c) => internal.getEither(c)),
+			getOption: (key: K) => Effect.flatMap(ck(key), (c) => internal.getOption(c)),
+			invalidate: (key: K) => Effect.flatMap(ck(key), (c) => internal.invalidate(c)),
+			invalidateAll: Effect.gen(function* () {
 				yield* internal.invalidateAll;
-				yield* _emitMetric('eviction', config.name, tenantId);
-			});
-		const contains = (key: K): Effect.Effect<boolean, never, R> => Effect.flatMap(_compositeKey(key), (ck) => internal.contains(ck));
-		const stats = internal.cacheStats.pipe(Effect.map((s) => ({ hits: s.hits, misses: s.misses, size: s.size })));
-		return { contains, get, invalidate, invalidateAll, refresh, stats };
+				const metricsOpt = yield* Effect.serviceOption(MetricsService);
+				if (Option.isSome(metricsOpt)) {
+					const tenantId = yield* Context.Request.tenantId;
+					yield* MetricsService.inc(metricsOpt.value.cache.evictions, MetricsService.label({ name: config.name, tenant: tenantId }));
+				}
+			}),
+			invalidateWhen: (key: K, predicate: (value: V) => boolean) =>
+				Effect.flatMap(ck(key), (c) => internal.invalidateWhen(c, predicate)),
+			keys: internal.keys.pipe(Effect.map(A.map((c) => c.key))),
+			refresh: (key: K) => Effect.flatMap(ck(key), (c) => internal.refresh(c)),
+			set: (key: K, value: V) => Effect.flatMap(ck(key), (c) => internal.set(c, value)),
+			size: internal.size,
+		};
 	});
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -82,7 +110,6 @@ const Cache = { defaults: _defaults, make } as const;
 namespace Cache {
 	export type Config<K, V, E, R> = Parameters<typeof make<K, V, E, R>>[0];
 	export type Instance<K, V, E, R> = Effect.Effect.Success<ReturnType<typeof make<K, V, E, R>>>;
-	export type Stats = { readonly hits: number; readonly misses: number; readonly size: number };
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

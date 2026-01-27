@@ -93,10 +93,10 @@
       "import": "./src/domain/oauth.ts",
       "default": "./src/domain/oauth.ts"
     },
-    "./security/circuit": {
-      "types": "./src/security/circuit.ts",
-      "import": "./src/security/circuit.ts",
-      "default": "./src/security/circuit.ts"
+    "./utils/circuit": {
+      "types": "./src/utils/circuit.ts",
+      "import": "./src/utils/circuit.ts",
+      "default": "./src/utils/circuit.ts"
     },
     "./utils/diff": {
       "types": "./src/utils/diff.ts",

@@ -7,11 +7,10 @@
  * - Type-safe keys via CookieKey union
  * - Encryption handled at domain layer (oauth.ts), not here
  */
-import { type HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Cookie, CookiesError } from '@effect/platform/Cookies';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
-import type { CircuitState } from 'cockatiel';
 import { Effect, FiberRef, type Duration, Layer, Option, Schedule, Schema as S } from 'effect';
 import * as D from 'effect/Duration';
 
@@ -73,13 +72,11 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		userAgent: Option.none(),
 	});
 	static readonly SystemLayer = Layer.succeed(Request, Request.system());
-	// Cookie: 3 operations (get/set/clear) over @effect/platform. Encryption is domain concern (oauth.ts).
-	static readonly cookie = {
+	static readonly cookie = {	// Cookie: 4 operations over @effect/platform. Schema validation at boundary via `read`. Encryption is domain concern (oauth.ts).
 		clear: (key: keyof typeof _cookie) => (res: HttpServerResponse.HttpServerResponse) => HttpServerResponse.expireCookie(res, _cookie[key].name, _cookie[key].options),
-		get: <E>(key: keyof typeof _cookie, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> =>
-			Effect.fromNullable(req.cookies[_cookie[key].name]).pipe(Effect.mapError(onNone)),
-		set: (key: keyof typeof _cookie, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> =>
-			HttpServerResponse.setCookie(res, _cookie[key].name, value, _cookie[key].options),
+		get: <E>(key: keyof typeof _cookie, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> => Effect.fromNullable(req.cookies[_cookie[key].name]).pipe(Effect.mapError(onNone)),
+		read: <A, I extends Readonly<Record<string, string | undefined>>, R>(schema: S.Schema<A, I, R>) => HttpServerRequest.schemaCookies(schema),
+		set: (key: keyof typeof _cookie, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, _cookie[key].name, value, _cookie[key].options),
 	} as const;
 	static readonly config = {
 		csrf: { expectedValue: 'XMLHttpRequest', header: 'x-requested-with' },
@@ -126,7 +123,7 @@ namespace Context {
 		}
 		export interface Circuit {
 			readonly name: string;
-			readonly state: CircuitState;
+			readonly state: string;
 		}
 		export interface Data {
 			readonly circuit: Option.Option<Circuit>;

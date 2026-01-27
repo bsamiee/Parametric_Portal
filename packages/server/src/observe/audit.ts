@@ -113,58 +113,34 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 		type ReplayResult = { readonly failed: number; readonly replayed: number; readonly skipped: boolean };
 		const _noOp = (skipped: boolean): ReplayResult => ({ failed: 0, replayed: 0, skipped });
 		const _processLine = (line: string) =>
-			Effect.try({ catch: () => null, try: () => JSON.parse(line) as Record<string, unknown> }).pipe(
-				Effect.matchEffect({
-					onFailure: () => Effect.succeed(Tuple.make(false, line)),
-					onSuccess: (parsed) =>
-						parsed === null
-							? Effect.succeed(Tuple.make(false, line))
-							: pipe(
-								(() => { const { _error: _, _timestamp: __, ...entry } = parsed; return entry; })(),
-								(entry) => db.audit.log(entry as Parameters<typeof db.audit.log>[0]).pipe(
-									Effect.as(Tuple.make(true, '')),
-									Effect.catchAll(() => Effect.succeed(Tuple.make(false, line))),
-								),
-							),
-				}),
-			);
-		const replayDeadLetters: Effect.Effect<ReplayResult> = pipe(
-			fs,
-			Option.filter(() => _config.deadLetter.enabled),
-			Option.match({
-				onNone: () => Effect.succeed(_noOp(true)),
-				onSome: (fileSystem) => {
-					const { path } = _config.deadLetter;
-					const tempPath = `${path}.processing`;
-					return fileSystem.rename(path, tempPath).pipe(
-						Effect.as(true),
-						Effect.catchAll(() => Effect.succeed(false)),
-						Effect.flatMap((renamed) =>
-							renamed
-								? fileSystem.readFileString(tempPath).pipe(
-									Effect.catchAll(() => Effect.succeed('')),
-									Effect.map((content) => content.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)),
-									Effect.flatMap((lines) => Effect.forEach(lines, _processLine, { concurrency: _config.deadLetter.replay.concurrency })),
-									Effect.map(A.partition((r) => r[0])),
-									Effect.tap(([failures]) =>
-										failures.length > 0
-											? fileSystem.writeFileString(path, `${failures.map(([, l]) => l).join('\n')}\n`, { flag: 'a' }).pipe(
-												Effect.catchAll((e) => Effect.logError('Replay failure write failed', { error: String(e) })),
-											)
-											: Effect.void,
-									),
-									Effect.tap(() => fileSystem.remove(tempPath).pipe(Effect.ignore)),
-									Effect.flatMap(([failures, successes]) =>
-										Effect.logInfo('Dead-letter replay completed', { failed: failures.length, replayed: successes.length }).pipe(
-											Effect.as({ failed: failures.length, replayed: successes.length, skipped: false }),
-										),
-									),
-								) : Effect.succeed(_noOp(false)),
-						),
-					);
-				},
-			}),
-		).pipe(Effect.withSpan('audit.replayDeadLetters'));
+			Effect.gen(function* () {
+				const parsed = yield* Effect.try(() => JSON.parse(line) as Record<string, unknown> | null).pipe(Effect.orElseSucceed(() => null));
+				if (parsed === null) return Tuple.make(false, line);
+				const { _error: _, _timestamp: __, ...entry } = parsed;
+				const success = yield* db.audit.log(entry as Parameters<typeof db.audit.log>[0]).pipe(Effect.as(true), Effect.catchAll(() => Effect.succeed(false)));
+				return Tuple.make(success, success ? '' : line);
+			});
+		const replayDeadLetters: Effect.Effect<ReplayResult> = Effect.gen(function* () {
+			if (Option.isNone(fs) || !_config.deadLetter.enabled) return _noOp(true);
+			const fileSystem = fs.value;
+			const { path } = _config.deadLetter;
+			const tempPath = `${path}.processing`;
+			const renamed = yield* fileSystem.rename(path, tempPath).pipe(Effect.as(true), Effect.catchAll(() => Effect.succeed(false)));
+			if (!renamed) return _noOp(false);
+			const content = yield* fileSystem.readFileString(tempPath).pipe(Effect.catchAll(() => Effect.succeed('')));
+			const lines = content.split('\n').map((l) => l.trim()).filter(Boolean);
+			const results = yield* Effect.forEach(lines, _processLine, { concurrency: _config.deadLetter.replay.concurrency });
+			const [failures, successes] = A.partition(results, (r) => r[0]);
+			if (failures.length > 0) {
+				const failedLines = failures.map(([, l]) => l).join('\n');
+				yield* fileSystem.writeFileString(path, `${failedLines}\n`, { flag: 'a' }).pipe(
+					Effect.catchAll((e) => Effect.logError('Replay failure write failed', { error: String(e) })),
+				);
+			}
+			yield* fileSystem.remove(tempPath).pipe(Effect.ignore);
+			yield* Effect.logInfo('Dead-letter replay completed', { failed: failures.length, replayed: successes.length });
+			return { failed: failures.length, replayed: successes.length, skipped: false };
+		}).pipe(Effect.withSpan('audit.replayDeadLetters'));
 		// Background replay fiber: runs periodically with jitter to prevent thundering herd
 		yield* replayDeadLetters.pipe(
 			Effect.repeat(Schedule.spaced(_config.deadLetter.replay.interval).pipe(Schedule.jittered)),

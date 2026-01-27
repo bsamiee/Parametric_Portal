@@ -30,11 +30,11 @@ export default defineConfig(
                 'observe/metrics': './src/observe/metrics.ts',
                 'observe/polling': './src/observe/polling.ts',
                 'observe/telemetry': './src/observe/telemetry.ts',
-                'security/circuit': './src/security/circuit.ts',
                 // Security modules
                 'security/crypto': './src/security/crypto.ts',
                 'security/totp-replay': './src/security/totp-replay.ts',
                 // Utility modules
+                'utils/circuit': './src/utils/circuit.ts',
                 'utils/diff': './src/utils/diff.ts',
                 'utils/transfer': './src/utils/transfer.ts',
             },

@@ -80,7 +80,7 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 					Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
 					Effect.mapError((err) => HttpError.Auth.of('Token hashing failed', err)),
 					Effect.flatMap((hash) => lookup(hash)),
-					Effect.flatMap((opt) => opt.pipe(Option.match({ onNone: () => onMiss, onSome: onHit }))),
+					Effect.flatMap((opt) => Option.isSome(opt) ? onHit(opt.value) : onMiss),
 				),
 			});
 		}));

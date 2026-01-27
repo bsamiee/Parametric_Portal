@@ -7,7 +7,6 @@ import { Otlp, OtlpSerialization } from '@effect/opentelemetry';
 import { FetchHttpClient } from '@effect/platform';
 import { Config as Cfg, Duration, Effect, Layer, Logger, LogLevel, Option } from 'effect';
 import { Context } from '../context.ts';
-import { Circuit } from '../security/circuit.ts';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -68,10 +67,6 @@ const _telemetryConfig = Cfg.all({
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _circuitStateToString = (state: number): string => {	// Safely serialize Circuit.State to string, handling invalid values.
-	const name = Circuit.State[state];
-	return typeof name === 'string' ? name : `unknown(${state})`;
-};
 const annotateSpan: Effect.Effect<void, never, never> = Effect.gen(function* () {
 	const ctx = yield* Context.Request.current;
 	yield* Effect.annotateCurrentSpan('tenant.id', ctx.tenantId);
@@ -79,7 +74,7 @@ const annotateSpan: Effect.Effect<void, never, never> = Effect.gen(function* () 
 		onNone: () => Effect.void,
 		onSome: (c) => Effect.all([
 			Effect.annotateCurrentSpan('circuit.name', c.name),
-			Effect.annotateCurrentSpan('circuit.state', _circuitStateToString(c.state)),
+			Effect.annotateCurrentSpan('circuit.state', c.state),
 		], { discard: true }),
 	});
 });
@@ -91,7 +86,7 @@ const withSpan = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect
 			onNone: () => ({}),
 			onSome: (c) => ({
 				'circuit.name': c.name,
-				'circuit.state': _circuitStateToString(c.state),
+				'circuit.state': c.state,
 			}),
 		});
 		return yield* Effect.withSpan(effect, name, { attributes: { ...tenantAttrs, ...circuitAttrs } });

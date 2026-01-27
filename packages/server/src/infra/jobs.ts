@@ -17,7 +17,7 @@ import { PgClient } from '@effect/sql-pg';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Duration, Effect, HashMap, Metric, Option, pipe, Random, Ref, Schedule, Schema as S, Stream } from 'effect';
 import { AuditService } from '../observe/audit.ts';
-import { Circuit } from '../security/circuit.ts';
+import { Circuit } from '../utils/circuit.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Context } from '../context.ts';
 
@@ -60,10 +60,8 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 		const circuit = Circuit.make('jobs-db', {
 			breaker: { _tag: 'consecutive', threshold: B.breaker.threshold },
 			halfOpenAfter: B.breaker.halfOpen,
-			onStateChange: ({ name, previous, state }) =>
-				Effect.logWarning('Circuit state change', { from: Circuit.State[previous], name, to: Circuit.State[state] }),
 		});
-		const run = <A>(eff: Effect.Effect<A, unknown>) => circuit.execute(() => Effect.runPromise(eff));
+		const run = <A>(eff: Effect.Effect<A, unknown>) => circuit.execute(eff);
 		const complete = (job: DbJob) =>
 			run(db.jobs.complete(job.id)).pipe(
 				Effect.tap(() => Effect.all([

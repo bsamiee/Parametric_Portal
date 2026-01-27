@@ -9,7 +9,7 @@ import { Config, Duration, Effect, Either, Encoding, Match, Metric, Option as O,
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { MetricsService } from '../observe/metrics.ts';
-import { Circuit } from '../security/circuit.ts';
+import { Circuit } from '../utils/circuit.ts';
 import { Crypto } from '../security/crypto.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -21,8 +21,6 @@ const GitHubUserSchema = S.Struct({ email: S.NullishOr(S.String), id: S.Number }
 const _githubCircuit = Circuit.make('oauth.github', {
 	breaker: { _tag: 'consecutive', threshold: 3 },
 	halfOpenAfter: Duration.seconds(30),
-	onStateChange: ({ name, previous, state }) =>
-		Effect.logWarning('GitHub OAuth circuit state change', { name, previous: Circuit.State[previous], state: Circuit.State[state] }),
 });
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -113,10 +111,10 @@ const _githubApiCall = (tokens: OAuth2Tokens) =>
 	);
 const githubResult = (tokens: OAuth2Tokens): Effect.Effect<ReturnType<typeof extractResult>, HttpError.OAuth> =>
 	_githubCircuit
-		.execute(() => Effect.runPromise(_githubApiCall(tokens).pipe(Effect.interruptible)))
+		.execute(_githubApiCall(tokens))
 		.pipe(
 			Effect.mapError((e) =>
-				Circuit.isOpen(e)
+				Circuit.is(e, 'BrokenCircuit')
 					? HttpError.OAuth.of('github', 'Service temporarily unavailable (circuit open)')
 					: mapOAuthError('github')(e),
 			),

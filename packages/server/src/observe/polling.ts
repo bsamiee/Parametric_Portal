@@ -74,16 +74,15 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 		const launchSchedule = Schedule.spaced(_config.intervals.queueDepth).pipe(Schedule.jittered);
 		yield* MetricPolling.launch(polling, launchSchedule);
 		yield* Effect.logInfo('PollingService started');
-		const snapshot = () =>
-			Metric.snapshot.pipe(Effect.map((snap) =>
-				[...snap].flatMap((entry) =>
-					_stateToEntries(
-						entry.metricState,
-						entry.metricKey.name,
-						Object.fromEntries([...entry.metricKey.tags].map((tag) => [tag.key, tag.value])),
-					),
+		const snapshot = Metric.snapshot.pipe(Effect.map((snap) =>
+			[...snap].flatMap((entry) =>
+				_stateToEntries(
+					entry.metricState,
+					entry.metricKey.name,
+					Object.fromEntries([...entry.metricKey.tags].map((tag) => [tag.key, tag.value])),
 				),
-			));
+			),
+		));
 		const getHealth = () => Ref.get(alerts);
 		return { getHealth, snapshot };
 	}),

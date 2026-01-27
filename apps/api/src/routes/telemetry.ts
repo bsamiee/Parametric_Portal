@@ -8,7 +8,7 @@
  */
 import { HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
-import { Circuit } from '@parametric-portal/server/security/circuit';
+import { Circuit } from '@parametric-portal/server/utils/circuit';
 import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Config, Effect, Schema as S } from 'effect';
@@ -32,9 +32,12 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
         const endpoint = yield* CollectorEndpoint;
         const json = yield* request.json;
         const payload = yield* S.decodeUnknown(OtlpPayload)(json);
-        yield* TelemetryCircuit.execute(async ({ signal }) =>
-            fetch(`${endpoint}/v1/traces`, { body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' }, method: 'POST', signal })
-                .then((r) => r.ok ? undefined : Promise.reject(new Error(`OTLP collector HTTP ${r.status}`))),
+        yield* TelemetryCircuit.execute(
+            Effect.tryPromise({
+                catch: (e) => e instanceof Error ? e : new Error(String(e)),
+                try: (signal) => fetch(`${endpoint}/v1/traces`, { body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' }, method: 'POST', signal })
+                    .then((r) => r.ok ? undefined : Promise.reject(new Error(`OTLP collector HTTP ${r.status}`))),
+            }),
         );
         return HttpServerResponse.empty({ status: 202 });
     }).pipe(
