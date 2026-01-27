@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-01-26)
 ## Current Position
 
 Phase: 3 of 3 (Advanced Platform Features)
-Plan: 1 of 4 (completed)
+Plan: 2 of 4 (completed)
 Status: In progress
-Last activity: 2026-01-27 - Completed 03-01-PLAN.md (RPC Contracts + Schema Cache)
+Last activity: 2026-01-27 - Completed 03-02-PLAN.md (Worker Script)
 
-Progress: [####################] 100% Phase 1, [#####...............] 25% Phase 3
+Progress: [####################] 100% Phase 1, [##########..........] 50% Phase 3
 
 ## Phase 1 Revision Notes
 
@@ -52,6 +52,9 @@ Recent decisions affecting current work:
 - Phase 3 Plan 01: S.TaggedError for RPC errors (not Data.TaggedError) - Required for serialization
 - Phase 3 Plan 01: Duration as milliseconds in worker errors - Duration.Duration not JSON-serializable
 - Phase 3 Plan 01: Schema stores bypass L1 Effect.Cache - Direct Redis for simplicity
+- Phase 3 Plan 02: Effect.async for callback-based parsers (SAX, ExcelJS)
+- Phase 3 Plan 02: AccumState accumulator pattern for functional progress tracking
+- Phase 3 Plan 02: Progress throttled by 100 rows OR 10KB
 
 ### Pending Todos
 
@@ -67,11 +70,12 @@ None.
 - FiberRef propagation testing critical for tenant isolation
 
 **Phase 3 readiness:**
-- RPC contracts complete, ready for worker pool implementation
-- CacheService schema methods available for typed storage
+- RPC contracts complete (Plan 01)
+- Worker script complete (Plan 02)
+- Ready for worker pool client implementation (Plan 03/04)
 
 ## Session Continuity
 
 Last session: 2026-01-27
-Stopped at: Completed 03-01-PLAN.md (RPC Contracts + Schema Cache)
+Stopped at: Completed 03-02-PLAN.md (Worker Script)
 Resume file: None
