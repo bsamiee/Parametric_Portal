@@ -19,18 +19,22 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Platform API Adoption
-**Goal**: Eliminate hand-rolled patterns by adopting official Effect platform primitives for cookies, SSE, caching, and streaming backpressure
+**Goal**: Eliminate hand-rolled patterns by adopting official Effect platform primitives for cookies, SSE, caching, resilience, and streaming backpressure
 **Depends on**: Nothing (first phase)
-**Requirements**: HTTP-02, HTTP-03, STREAM-02, CACHE-01
+**Requirements**: HTTP-02, HTTP-03, STREAM-02, CACHE-01, RESILIENCE-01 (expanded)
 **Success Criteria** (what must be TRUE):
   1. All SSE endpoints use @effect/experimental Sse encoder without manual TextEncoder
   2. Cookie operations use @effect/platform Cookies module with schema validation at boundary
   3. Session and app lookups use Effect.Cache for request deduplication
   4. All streaming endpoints have explicit buffer configuration preventing unbounded memory growth
-**Plans**: TBD
+  5. Resilience patterns (retry, timeout, circuit, fallback) available as composable Effect primitives
+**Plans**: 4 plans in 2 waves
 
 Plans:
-- TBD (populated during planning phase)
+- [ ] 01-01-PLAN.md — Resilience module (retry, timeout, circuit, fallback)
+- [ ] 01-02-PLAN.md — Cookies module (schema validation at boundary)
+- [ ] 01-03-PLAN.md — Cache module (tenant isolation, request deduplication)
+- [ ] 01-04-PLAN.md — Streaming module (SSE encoding, backpressure control)
 
 ### Phase 2: Layer Architecture Consolidation
 **Goal**: Restructure 7 layers into 4 clean boundaries with clear dependency direction and no circular references
@@ -68,9 +72,9 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Platform API Adoption | 0/TBD | Not started | - |
+| 1. Platform API Adoption | 0/4 | Ready for execution | - |
 | 2. Layer Architecture Consolidation | 0/TBD | Not started | - |
 | 3. Advanced Platform Features | 0/TBD | Not started | - |
 
 ---
-*Last updated: 2026-01-26 after roadmap creation*
+*Last updated: 2026-01-26 after Phase 1 planning*
