@@ -3,9 +3,10 @@
  * Uses Effect.Cache for request coalescing (multiple concurrent lookups coalesce into single backend call).
  * Automatic tenant key prefixing from FiberRef ensures isolation without consumer ceremony.
  */
-import { Cache, Duration, Effect, Metric, Option } from 'effect';
+import { Cache, Duration, Effect, Metric, Option, type Schedule } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Resilience } from './resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -25,6 +26,12 @@ const _metrics = {
 
 type CompositeKey<K> = { readonly tenantId: string; readonly key: K };
 
+interface CacheResilienceConfig<V, E, R> {
+	readonly retry?: Schedule.Schedule<unknown, E, never>;
+	readonly timeout?: Duration.Duration;
+	readonly fallback?: Effect.Effect<V, never, R>;
+}
+
 interface CacheConfig<K, V, E, R> {
 	readonly name: string;
 	readonly capacity: number;
@@ -32,6 +39,7 @@ interface CacheConfig<K, V, E, R> {
 	readonly ttl: Duration.Duration;
 	readonly onHit?: (key: K) => Effect.Effect<void, never, R>;
 	readonly onMiss?: (key: K) => Effect.Effect<void, never, R>;
+	readonly resilience?: CacheResilienceConfig<V, E, R>;
 }
 
 interface CacheInstance<K, V, E, R> {
@@ -79,11 +87,32 @@ const _emitMissMetric = (name: string, tenant: string) =>
 
 // --- [SERVICES] --------------------------------------------------------------
 
-const make = <K, V, E, R>(config: CacheConfig<K, V, E, R>): Effect.Effect<CacheInstance<K, V, E, R>, never, R> =>
+const make = <K, V, E, R>(config: CacheConfig<K, V, E, R>): Effect.Effect<CacheInstance<K, V, E | Resilience.TimeoutError, R>, never, R> =>
 	Effect.gen(function* () {
+		// Build resilient lookup by wrapping user's lookup with optional retry/timeout/fallback
+		// Order: retry wraps original (retries on E), timeout wraps that (adds TimeoutError), fallback wraps all
+		const wrapWithResilience = (effect: Effect.Effect<V, E, R>): Effect.Effect<V, E | Resilience.TimeoutError, R> => {
+			// Apply retry first (on original error type E)
+			const withRetryApplied = config.resilience?.retry
+				? Resilience.withRetry(effect, config.resilience.retry, config.name)
+				: effect;
+
+			// Apply timeout second (adds TimeoutError to error channel)
+			const withTimeoutApplied = config.resilience?.timeout
+				? Resilience.withTimeout(withRetryApplied, config.resilience.timeout, config.name)
+				: withRetryApplied;
+
+			// Apply fallback last (can recover from E | TimeoutError)
+			const withFallbackApplied = config.resilience?.fallback
+				? Resilience.withFallback(withTimeoutApplied, config.resilience.fallback, config.name)
+				: withTimeoutApplied;
+
+			return withFallbackApplied;
+		};
+
 		// Internal cache uses composite keys (tenantId + user key)
 		// Type params: <Key, Value, Error, Environment>
-		const internalCache = yield* Cache.make<CompositeKey<K>, V, E, R>({
+		const internalCache = yield* Cache.make<CompositeKey<K>, V, E | Resilience.TimeoutError, R>({
 			capacity: config.capacity,
 			lookup: (compositeKey) =>
 				Effect.gen(function* () {
@@ -92,10 +121,13 @@ const make = <K, V, E, R>(config: CacheConfig<K, V, E, R>): Effect.Effect<CacheI
 						? config.onMiss(compositeKey.key)
 						: _emitMissMetric(config.name, compositeKey.tenantId);
 
+					// Apply resilience patterns to the lookup
+					const resilientLookup = wrapWithResilience(config.lookup(compositeKey.key));
+
 					// Execute lookup with duration tracking
 					const metricsOpt = yield* Effect.serviceOption(MetricsService);
 					return yield* Option.isSome(metricsOpt)
-						? config.lookup(compositeKey.key).pipe(
+						? resilientLookup.pipe(
 								Metric.trackDuration(
 									Metric.taggedWithLabels(
 										_metrics.lookupDuration,
@@ -103,12 +135,12 @@ const make = <K, V, E, R>(config: CacheConfig<K, V, E, R>): Effect.Effect<CacheI
 									),
 								),
 							)
-						: config.lookup(compositeKey.key);
+						: resilientLookup;
 				}),
 			timeToLive: config.ttl,
 		});
 
-		const get = (key: K): Effect.Effect<V, E, R> =>
+		const get = (key: K): Effect.Effect<V, E | Resilience.TimeoutError, R> =>
 			Effect.gen(function* () {
 				const tenantId = yield* Context.Request.tenantId;
 				const compositeKey = _makeCompositeKey(tenantId, key);
@@ -124,7 +156,7 @@ const make = <K, V, E, R>(config: CacheConfig<K, V, E, R>): Effect.Effect<CacheI
 				return yield* internalCache.get(compositeKey);
 			});
 
-		const refresh = (key: K): Effect.Effect<void, E, R> =>
+		const refresh = (key: K): Effect.Effect<void, E | Resilience.TimeoutError, R> =>
 			Effect.gen(function* () {
 				const tenantId = yield* Context.Request.tenantId;
 				const compositeKey = _makeCompositeKey(tenantId, key);
@@ -188,6 +220,7 @@ const TenantCache = {
 namespace TenantCache {
 	export type Config<K, V, E, R> = CacheConfig<K, V, E, R>;
 	export type Instance<K, V, E, R> = CacheInstance<K, V, E, R>;
+	export type ResilienceConfig<V, E, R> = CacheResilienceConfig<V, E, R>;
 	export type Stats = CacheStats;
 }
 
