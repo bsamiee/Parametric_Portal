@@ -1,129 +1,82 @@
 # Phase 1: Platform API Adoption - Context
 
-**Gathered:** 2026-01-26
+**Gathered:** 2026-01-27
 **Status:** Ready for planning
 
 <domain>
 ## Phase Boundary
 
-Build the unified HTTP foundation for packages/server/ by replacing all hand-rolled patterns with official Effect APIs. This phase creates four polymorphic modules (cookies, stream, cache, resilience) that form the base layer for hundreds of multi-tenant apps with cluster deployment capability.
+Create proper Effect.Service implementations for CacheService and StreamingService following the polymorphic pattern established in MetricsService. Full refactor of existing cache and streaming wrappers into dense, intelligent services. Migrate all consumers (rate-limit.ts, totp-replay.ts) to use CacheService. Prepare StreamingService API for Phase 3 worker pool integration.
 
-**Expanded scope:** This phase now includes resilience/circuit breaker rebuild to ensure streaming and cache have proper retry/fallback/circuit patterns integrated.
+**Not in scope:** Layer reorganization (Phase 2), actual worker pool implementation (Phase 3).
 
 </domain>
 
 <decisions>
 ## Implementation Decisions
 
-### Cookie Migration
-- ALL cookies go through @effect/platform Cookies with schema validation at boundary
-- Encryption as separate Crypto step - Cookies handles typed I/O, Crypto service layers encryption on top
-- Migration approach: all at once (breaking change, single PR, clean cutover)
-- Cookie schemas live in `packages/server/src/http/cookies.ts`
-- Follow metrics.ts polymorphic pattern: dense FP+Effect code, unified API export, no type wrapping
+### CacheService API surface
+- **No consumer-facing namespaces** — namespace derived automatically from FiberRef context (tenantId, userId when session exists)
+- **Context-aware auto-scope** — if session exists, scope to user; otherwise scope to tenant; consumers never pass tenant/user
+- **Caller specifies TTL** with internal sliding expiration — TTL is explicit on get/set, sliding renewal handled internally
+- **Single `get()` function** — internally integrates resilience, metrics, lookup callback; returns Option.none on failure
+- **Registration at service init** — lookup functions registered in layer: `{ sessions: findSession, tokens: findToken }`
 
-### Unified Streaming Engine
-- Single `packages/server/src/http/stream.ts` module
-- Covers ALL streaming primitives: HttpServerResponse.stream, Sse, Transferable, Stream.*, Channel
-- Unified polymorphic API - NOT separate functions per operation type
-- Serves clients, internal streaming, infrastructure, jobs - all use cases
-- Built-in retry with backoff, circuit breaker integration, graceful termination on exhausted retries
-- NO partial results on failure - data integrity priority, clean up resources
-- Built-in metrics/observability - every stream auto-emits to observation stack
-- Delegate multipart uploads to @effect-aws/client-s3 - streaming engine coordinates, S3 client handles chunking
-- Backpressure: Claude decides per stream type using Effect patterns, intelligent defaults, no consumer ceremony
-- Heavy parsing (xlsx/zip/csv): Refactor to streaming in Phase 1, worker pools in Phase 3 - establish foundation now
+### StreamingService composition
+- **Unified StreamingService** — single service with `sse()`, `download()`, `export()` entry points
+- **Intelligent backpressure defaults** — SSE: sliding (drop stale); downloads: suspend (wait); exports: suspend — internal, not configurable
+- **Resilience integrated** — circuit/retry/fallback logic internalized via utilities from circuit.ts/resilience.ts; consumers don't configure per-call
+- **Always track metrics** — all streams auto-emit bytes/elements/duration with tenant labels via MetricsService
+- **Automatic cleanup** — Effect.ensuring handles cleanup internally; no consumer callback
+- **Universal chunking** — understand and integrate all streaming/transfer/chunk APIs (Effect Stream, Web Streams, Node streams) for unified ingestion + egress; optimal batching internally
 
-### Unified Cache
-- Single polymorphic cache module for external/internal, client/backend, workers/jobs
-- Comprehensive research needed on ALL Effect cache APIs: Effect.Cache, KeyValueStore, and others
-- Memory-first with Redis fallback - intelligent behavior optimizing performance/cost
-- Built-in retry/graceful fallback/cleanup/circuit integration (same patterns as streaming)
-- Automatic tenantId prefix from FiberRef context - zero-effort tenant isolation
-- Built-in metrics: hits/misses/latency auto-emit
-- Smart lookup defaults: cached by default, easy override for direct access (e.g., session.lookup() cached, session.lookup.direct() uncached)
+### Backend abstraction (L1/L2 cache)
+- **Proper L1/L2 architecture** — L1 (memory) is fast path; L2 (Redis) is durable fallback; consumers always use single `get()` API
+- **Lazy write-behind** — writes go to L1; background fiber asynchronously pushes to L2 using official @effect/experimental Redis API
+- **Graceful degradation** — warn if Redis unavailable in production but continue with memory-only
+- **Redis pub/sub for invalidation** — use official Effect Redis API (or ioredis); broadcast invalidation via pub/sub; all instances clear L1 when key invalidated
+- **Metrics + health** — cache stats auto-emit via MetricsService; `CacheService.health()` available for explicit L1/L2 status checks
 
-### Resilience Module (NEW - Expanded Scope)
-- Single `packages/server/src/http/resilience.ts` for circuit, retry, timeout, fallback
-- Full rebuild - deep research on ALL Effect + cockatiel APIs
-- Honest comparison: pure Effect vs cockatiel-based implementation
-- Must properly use 12-15+ imports from effect/cockatiel - no hand-rolling
-- Unified polymorphic API - integrates into streaming, cache, backpressure
-- Built-in metrics
+### Service integration
+- **Rate limiting absorbed** — CacheService provides rate limiting internally; no separate `RateLimit.apply` — it's automatic based on service configuration similar to circuit.ts pattern
+- **ReplayGuard keeps specialized STM** — but shares Redis client from CacheService; no duplicate connections or configs
+- **CacheService exposes Redis client** — `CacheService.redis` available for specialized services (ReplayGuard) that need direct access
+- **SessionService stays separate** — owns auth flow logic; not absorbed into CacheService
+- **Resilience stays as utilities** — circuit.ts and resilience.ts remain utilities in /utils; CacheService and StreamingService use them internally
 
-### Backpressure Configuration
-- Part of streaming engine's intelligent behavior
-- Buffer configuration per stream type - Claude decides sensible defaults
-- Overflow behavior intelligent per use case
-- Built-in metrics: buffer utilization, overflow events
-- Circuit breaker integration for cascade failure prevention
+### Code quality standards
+- **Polymorphic unity** — one polymorphic function per concern (like MetricsService.label); no function/const spam
+- **Dense Effect.Service classes** — all logic internalized via static methods; no loose const exports
+- **Advanced TS inference** — no loose type exports; use inferred types, inline types, branded schemas
+- **Maximum 1 helper** — ideally zero; if absolutely needed, one internal helper maximum per file
+- **Internalized intelligence** — logic is private and automatic; minimal API surface for consumers
 
-### File Organization
-- New modules in `packages/server/src/http/` directory:
-  - `http/cookies.ts`
-  - `http/stream.ts`
-  - `http/cache.ts`
-  - `http/resilience.ts`
-- Existing files remain at `src/` root (context.ts, middleware.ts, errors.ts, api.ts) - refactored in place
-- All modules export Layers (e.g., Cookies.Default, Stream.Default) for composition in main.ts
-
-### Effect API Deep-Dive
-- Minimum research scope: effect (core) + @effect/platform + @effect/experimental
-- Add @effect/opentelemetry for metrics integration
-- CRUCIAL: Don't overlook core effect package for code bodies
-- Use Effect capabilities A to Z: Array, Match, Channel, BigInt, BigDecimal, Chunk, Config, Context, Data, Encoding, Fiber*, Hash*, time-related, etc.
-- Lean toward 100% Effect patterns for traceable pipelines and Railway-Oriented Programming
-- First map EVERYTHING in each module, then determine relevance - don't overlook useful APIs
-
-### Integration Patterns
-- Modules integrate internally (resilience → stream → backpressure → etc.)
-- Export clean unified APIs - consumers don't compose manually, no boilerplate
-- Internal intelligence, external simplicity
-- Full/aggressive clean break from original patterns - new server/ folder dictates new API
-- Route refactoring comes AFTER Phase 2 (layer consolidation) - server/ rebuilt first, then main.ts, then routes
-
-### Claude's Discretion
-- Backpressure defaults per stream type
-- Cache location (http/ vs infra/) based on layer architecture
-- Effect vs cockatiel decision for resilience after research
-- Test organization (co-located vs centralized)
-- Schema.TaggedRequest preparation for Phase 3 workers
+### Roadmap preparation
+- **Phase 1 enables Phase 2** — CacheService + StreamingService become building blocks for layer consolidation
+- **Full migration in Phase 1** — refactor rate-limit.ts and totp-replay.ts to use CacheService; clean break
+- **Prepare for Phase 3 workers** — StreamingService API designed to support offloading to workers; understand @effect/platform worker APIs, Effect.Workflow, SerializedWorkerPool before designing
 
 </decisions>
 
 <specifics>
 ## Specific Ideas
 
-- "We want unified polymorphic approach - ONE file following metrics.ts pattern, dense FP+Effect code, unified API export"
-- "State what you're doing, and it's done - no ceremony or dev overhead"
-- "Automatic tenantId, automatic metrics, automatic retry/circuit - intelligent behavior everywhere"
-- "Cookie → Crypto integration without extra layers - keep it simple"
-- "NO partial results - data integrity over availability"
-- "100% Effect patterns might be better for traceable Railway-Oriented Programming"
-- "12-15+ imports from effect/cockatiel - must properly use official capabilities"
-- "First understand all fundamental operations (stream, export, import, upload, copy, etc.), then build focused API"
+- Follow MetricsService polymorphic pattern exactly: single service class, static methods, internal logic, polymorphic label function
+- Circuit.ts is the model for utility structure: const+namespace merge, typed config, registry pattern
+- Look at how rate-limit.ts currently uses @effect/experimental RateLimiterStore — CacheService should provide equivalent capability without separate store concept
+- "No handrolling" — use official Effect APIs: @effect/experimental for Redis, Effect.Cache for deduplication, Stream for backpressure
+- Tenant isolation already flows via FiberRef (Context.Request.tenantId) — services read it internally
 
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-- Effect Cluster migration - Phase 3+ (after foundation stable)
-- Machine abstraction for jobs - experimental API, evaluate later
-- Redis KeyValueStore adapter implementation - needs custom work, evaluate in Phase 3
-- Route handler refactoring - after Phase 2 layer consolidation
-- @effect/workflow integration - evaluate after cluster foundation
+None — discussion stayed within phase scope
 
 </deferred>
-
-## Roadmap Updates Required
-
-Phase 1 scope expanded to include:
-- RESILIENCE-01: Unified resilience module (circuit, retry, timeout, fallback)
-- Broader streaming scope (full engine, not just SSE cleanup)
-- Circuit breaker integration throughout
 
 ---
 
 *Phase: 01-platform-api-adoption*
-*Context gathered: 2026-01-26*
+*Context gathered: 2026-01-27*
