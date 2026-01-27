@@ -34,7 +34,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		name: string,
 		events: Stream.Stream<A, E, never>,
 		serialize: (a: A) => { readonly data: string; readonly event?: string; readonly id?: string },
-	): Effect.Effect<HttpServerResponse.HttpServerResponse, never, never> =>
+	): Effect.Effect<HttpServerResponse.HttpServerResponse, never, StreamingService> =>
 		Effect.gen(function* () {
 			const encoder = new TextEncoder();
 			const metricsOpt = yield* Effect.serviceOption(MetricsService);
@@ -76,7 +76,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		const headers = Headers.fromInput({
 			'Content-Disposition': `attachment; filename="${config.filename.replaceAll('"', String.raw`\"`)}"`,
 			'Content-Type': config.contentType,
-			...(config.size !== undefined ? { 'Content-Length': String(config.size) } : {}),
+			...(config.size === undefined ? {} : { 'Content-Length': String(config.size) }),
 		});
 		return HttpServerResponse.stream(buffered, { contentType: config.contentType, headers });
 	};
@@ -90,7 +90,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		stream: Stream.Stream<A, E, never>,
 		format: 'json' | 'csv' | 'ndjson',
 		serialize: (a: A) => string = (a) => JSON.stringify(a),
-	): Effect.Effect<HttpServerResponse.HttpServerResponse, never, never> =>
+	): Effect.Effect<HttpServerResponse.HttpServerResponse, never, StreamingService> =>
 		Effect.gen(function* () {
 			const encoder = new TextEncoder();
 			const metricsOpt = yield* Effect.serviceOption(MetricsService);
