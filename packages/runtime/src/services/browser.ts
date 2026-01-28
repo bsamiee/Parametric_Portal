@@ -4,7 +4,7 @@
 import { Clipboard } from '@effect/platform-browser';
 import { AppError } from '@parametric-portal/types/app-error';
 import { Svg } from '@parametric-portal/types/svg';
-import { Context, Effect, Layer, Option, Stream } from 'effect';
+import { Context, Effect, Layer, Option, pipe, Stream } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
@@ -21,7 +21,7 @@ type ExportInput = {
 };
 type BrowserService = {
     readonly download: (data: Blob | string, filename: string, mimeType?: string) => Effect.Effect<void>;
-    readonly export: (input: ExportInput) => Effect.Effect<void, AppError<'Browser'>>;
+    readonly export: (input: ExportInput) => Effect.Effect<void, AppError.Browser>;
 };
 
 // --- [CLASSES] ---------------------------------------------------------------
@@ -30,14 +30,6 @@ class Browser extends Context.Tag('Browser')<Browser, BrowserService>() {}
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const downloadBlob = (blob: Blob, filename: string): void => {
-    const url = URL.createObjectURL(blob);
-    const a = globalThis.document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-};
 const sanitizeFilename = (text: string): string =>
     text
         .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
@@ -47,98 +39,107 @@ const sanitizeFilename = (text: string): string =>
         .replaceAll(/[^a-z0-9 -]/g, '')
         .replaceAll(/[ -]+/g, '_')
         .slice(0, 64) || 'export';
-const buildFilename = (base: string, ext: string, variantIndex?: number, variantCount?: number): string =>
-    variantCount && variantCount > 1 && variantIndex !== undefined
-        ? `${sanitizeFilename(base)}_variant_${variantIndex + 1}.${ext}`
-        : `${sanitizeFilename(base)}.${ext}`;
+const triggerDownload = (blob: Blob, filename: string): void => {
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(globalThis.document.createElement('a'), { download: filename, href: url });
+    a.click();
+    URL.revokeObjectURL(url);
+};
+const requireSvg = (svg: string | undefined): Effect.Effect<string, AppError.Browser> =>
+    pipe(
+        Option.fromNullable(svg),
+        Option.flatMap(Svg.sanitize),
+        Effect.mapError(() => AppError.browser('NO_SVG')),
+    );
+const variantFilename = (base: string, ext: string, index: number | undefined, count: number | undefined): string =>
+    count && count > 1 && index !== undefined ? `${base}_variant_${index + 1}.${ext}` : `${base}.${ext}`;
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
-const pngEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>> =>
-    Effect.gen(function* () {
-        const svg = yield* Option.fromNullable(input.svg).pipe(
-            Option.flatMap(Svg.sanitize),
-            Effect.mapError(() => AppError.from('Browser', 'NO_SVG')),
-        );
-        const canvas = globalThis.document.createElement('canvas');
-        const size = input.pngSize ?? 512;
-        canvas.width = size;
-        canvas.height = size;
+const pngEffect = (input: ExportInput): Effect.Effect<void, AppError.Browser> => {
+    const size = input.pngSize ?? 512;
+    const base = sanitizeFilename(input.filename ?? '');
+    return Effect.gen(function* () {
+        const svg = yield* requireSvg(input.svg);
+        const canvas = Object.assign(globalThis.document.createElement('canvas'), { height: size, width: size });
         const ctx = yield* Option.fromNullable(canvas.getContext('2d')).pipe(
-            Effect.mapError(() => AppError.from('Browser', 'CANVAS_CONTEXT')),
+            Effect.mapError(() => AppError.browser('CANVAS_CONTEXT')),
         );
-        yield* Effect.async<void, AppError<'Browser'>>((resume) => {
+        yield* Effect.async<void, AppError.Browser>((resume) => {
             const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
             const img = new Image();
             img.onload = () => {
                 ctx.drawImage(img, 0, 0, size, size);
-                const a = globalThis.document.createElement('a');
-                a.href = canvas.toDataURL('image/png');
-                a.download = buildFilename(input.filename ?? '', 'png', input.variantIndex, input.variantCount);
+                const a = Object.assign(globalThis.document.createElement('a'), {
+                    download: variantFilename(base, 'png', input.variantIndex, input.variantCount),
+                    href: canvas.toDataURL('image/png'),
+                });
                 a.click();
                 URL.revokeObjectURL(url);
                 resume(Effect.void);
             };
             img.onerror = () => {
                 URL.revokeObjectURL(url);
-                resume(Effect.fail(AppError.from('Browser', 'EXPORT_FAILED')));
+                resume(Effect.fail(AppError.browser('EXPORT_FAILED')));
             };
             img.src = url;
         });
-    }).pipe(Effect.withSpan('export.png', { attributes: { format: 'png', size: input.pngSize ?? 512 } }));
-const svgEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>> =>
-    Option.fromNullable(input.svg).pipe(
-        Option.flatMap(Svg.sanitize),
-        Effect.mapError(() => AppError.from('Browser', 'NO_SVG')),
+    }).pipe(Effect.withSpan('export.png', { attributes: { format: 'png', size } }));
+};
+const svgEffect = (input: ExportInput): Effect.Effect<void, AppError.Browser> => {
+    const base = sanitizeFilename(input.filename ?? '');
+    return requireSvg(input.svg).pipe(
         Effect.tap((svg) =>
             Effect.sync(() =>
-                downloadBlob(
+                triggerDownload(
                     new Blob([svg], { type: 'image/svg+xml' }),
-                    buildFilename(input.filename ?? '', 'svg', input.variantIndex, input.variantCount),
+                    variantFilename(base, 'svg', input.variantIndex, input.variantCount),
                 ),
             ),
         ),
         Effect.asVoid,
         Effect.withSpan('export.svg', { attributes: { format: 'svg' } }),
     );
-const zipEffect = (input: ExportInput): Effect.Effect<void, AppError<'Browser'>> =>
-    Effect.gen(function* () {
+};
+const zipEffect = (input: ExportInput): Effect.Effect<void, AppError.Browser> => {
+    const base = sanitizeFilename(input.filename ?? '');
+    const exportError = (e: unknown) => AppError.browser('EXPORT_FAILED', undefined, e);
+    return Effect.gen(function* () {
         const variants = yield* Option.fromNullable(input.variants).pipe(
             Option.filter((v) => v.length > 0),
-            Effect.mapError(() => AppError.from('Browser', 'NO_VARIANTS')),
+            Effect.mapError(() => AppError.browser('NO_VARIANTS')),
         );
-        const { default: JSZip } = yield* Effect.tryPromise({
-            catch: () => AppError.from('Browser', 'EXPORT_FAILED'),
-            try: () => import('jszip'),
-        });
-        const base = sanitizeFilename(input.filename ?? '');
+        const { default: JSZip } = yield* Effect.tryPromise({ catch: exportError, try: () => import('jszip') });
         const zip = new JSZip();
         const total = variants.length;
         yield* Stream.fromIterable(variants).pipe(
             Stream.zipWithIndex,
-            Stream.mapEffect(([svg, index]: readonly [string, number]) =>
+            Stream.tap(([content, index]) =>
                 Effect.sync(() => {
-                    const sanitized = Option.getOrNull(Svg.sanitize(svg));
-                    sanitized && zip.file(`${base}_variant_${index + 1}.svg`, sanitized);
+                    Option.map(Svg.sanitize(content), (sanitized) =>
+                        zip.file(`${base}_variant_${index + 1}.svg`, sanitized),
+                    );
                     input.onProgress?.((index + 1) / total);
                 }),
             ),
             Stream.runDrain,
         );
-        const blob = yield* Effect.tryPromise({
-            catch: () => AppError.from('Browser', 'EXPORT_FAILED'),
-            try: () => zip.generateAsync({ type: 'blob' }),
-        });
-        downloadBlob(blob, `${base}.zip`);
+        triggerDownload(
+            yield* Effect.tryPromise({ catch: exportError, try: () => zip.generateAsync({ type: 'blob' }) }),
+            `${base}.zip`,
+        );
     }).pipe(
         Effect.withSpan('export.zip', { attributes: { format: 'zip', variantCount: input.variants?.length ?? 0 } }),
     );
+};
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const BrowserLive = Layer.succeed(Browser, {
     download: (data, filename, mimeType = 'application/octet-stream') =>
-        Effect.sync(() => downloadBlob(data instanceof Blob ? data : new Blob([data], { type: mimeType }), filename)),
+        Effect.sync(() =>
+            triggerDownload(data instanceof Blob ? data : new Blob([data], { type: mimeType }), filename),
+        ),
     export: (input) => ({ png: pngEffect, svg: svgEffect, zip: zipEffect })[input.format](input),
 });
 const BrowserServicesLive = Layer.mergeAll(Clipboard.layer, BrowserLive);

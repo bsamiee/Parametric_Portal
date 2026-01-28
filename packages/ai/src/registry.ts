@@ -14,12 +14,10 @@ import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
 import { OpenAiClient, OpenAiLanguageModel } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
-import type { AiProvider } from '@parametric-portal/types/schema';
 import { Config, type Effect, Layer, Redacted, Schema as S } from 'effect';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type AiProviderType = AiProvider;
 type AiModelConfig = {
     readonly apiKey?: string;
     readonly maxTokens?: number;
@@ -29,9 +27,14 @@ type AiModelConfig = {
     readonly topP?: number;
 };
 
+// --- [PRIVATE_SCHEMAS] -------------------------------------------------------
+
+const _AiProvider = S.Literal('anthropic', 'gemini', 'openai');
+type _AiProvider = typeof _AiProvider.Type;
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     defaults: {
         anthropic: { maxTokens: 6000, model: 'claude-sonnet-4-20250514', temperature: 1 },
         gemini: { maxTokens: 4096, model: 'gemini-2.0-flash', temperature: 1 },
@@ -42,7 +45,7 @@ const B = Object.freeze({
         gemini: 'GEMINI_API_KEY',
         openai: 'OPENAI_API_KEY',
     },
-} as const);
+} as const;
 
 // --- [DISPATCH_TABLES] -------------------------------------------------------
 
@@ -134,11 +137,11 @@ const createToolHandlers = <Tools extends Record<string, Tool.Any>>(
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const createModelLayer = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer =>
+const createModelLayer = (provider: _AiProvider, config?: AiModelConfig): AiModelLayer =>
     modelCreators[provider](config);
-const getModel = (provider: AiProviderType, config?: AiModelConfig): AiModelLayer => createModelLayer(provider, config);
+const getModel = (provider: _AiProvider, config?: AiModelConfig): AiModelLayer => createModelLayer(provider, config);
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { B as AI_TUNING, buildPrompt, composeToolkit, createModelLayer, createTool, createToolHandlers, getModel };
-export type { AiModelConfig, AiModelLayer, AiProviderType };
+export type { AiModelConfig, AiModelLayer };

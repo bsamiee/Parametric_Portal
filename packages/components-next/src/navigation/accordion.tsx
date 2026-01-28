@@ -1,10 +1,6 @@
 /**
- * Accordion: Composable disclosure components with standalone trigger.
- * Single import namespace pattern - Accordion.Item, Accordion.Trigger, Accordion.Content.
- * Wraps RAC Disclosure/DisclosureGroup with theme inheritance and DnD reordering.
- *
- * RAC props pass through directly - we only add: theme (color/size/variant), onReorder, lazy.
- * AccordionTrigger is standalone - uses own CSS variable namespace, not Button.
+ * Composable disclosure with standalone trigger and DnD reordering.
+ * Compound component: Accordion.Item, Accordion.Trigger, Accordion.Content.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -59,8 +55,8 @@ type AccordionTriggerProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		content: cn('flex-1 truncate text-left'),
 		indicator: cn(
 			'size-(--accordion-trigger-indicator-size) shrink-0',
@@ -99,8 +95,8 @@ const B = Object.freeze({
 			'focus-visible:outline-none focus-visible:ring-(--focus-ring-width) focus-visible:ring-(--focus-ring-color) focus-visible:ring-offset-(--focus-ring-offset)',
 			'disabled:pointer-events-none disabled:opacity-(--accordion-trigger-disabled-opacity)',
 		),
-	}),
-});
+	},
+} as const;
 const AccordionContext = createContext<AccordionContextValue | null>(null);
 
 // --- [SUB-COMPONENTS] --------------------------------------------------------
@@ -126,7 +122,7 @@ const AccordionTrigger: FC<AccordionTriggerProps> = ({
 			<RACButton
 				{...(tooltipProps as object)}
 				{...(gestureProps as object)}
-				className={composeTailwindRenderProps(className, B.slot.trigger)}
+				className={composeTailwindRenderProps(className, _B.slot.trigger)}
 				data-async-state={slot.attr}
 				data-color={color ?? ctx?.color}
 				data-expanded={isExpanded || undefined}
@@ -137,10 +133,10 @@ const AccordionTrigger: FC<AccordionTriggerProps> = ({
 				ref={mergedRef}
 				slot="trigger"
 			>
-				{slot.render(prefix, B.slot.prefix)}
-				<span className={B.slot.content}>{slot.resolve(children)}</span>
+				{slot.render(prefix, _B.slot.prefix)}
+				<span className={_B.slot.content}>{slot.resolve(children)}</span>
 				{!hideIndicator && (
-					<span className={B.slot.indicator} data-expanded={isExpanded || undefined}>
+					<span className={_B.slot.indicator} data-expanded={isExpanded || undefined}>
 						{Slot.content(Slot.resolve(indicator, asyncState)) ?? <ChevronDown />}
 					</span>
 				)}
@@ -158,11 +154,11 @@ const AccordionContent: FC<AccordionContentProps> = ({ children, className, lazy
 	return (
 		<RACDisclosurePanel
 			{...rest}
-			className={composeTailwindRenderProps(className, B.slot.panel)}
+			className={composeTailwindRenderProps(className, _B.slot.panel)}
 			data-expanded={isExpanded || undefined}
 			data-slot="accordion-panel"
 		>
-			<div className={B.slot.panelInner}>{hasExpanded ? children : null}</div>
+			<div className={_B.slot.panelInner}>{hasExpanded ? children : null}</div>
 		</RACDisclosurePanel>
 	);
 };
@@ -178,8 +174,8 @@ const AccordionItem: FC<AccordionItemProps> = ({ children, className, id, isDisa
 	const { dropProps, isDropTarget } = useDrop({
 		getDropOperation: (types) => types.has(mimeType) ? 'move' : 'cancel',
 		isDisabled: !onReorder,
-		onDrop: (e) => {
-			const item = e.items.find((i) => i.kind === 'text' && i.types.has(mimeType)) as TextDropItem | undefined;
+		onDrop: (event) => {
+			const item = event.items.find((dropItem) => dropItem.kind === 'text' && dropItem.types.has(mimeType)) as TextDropItem | undefined;
 			item?.getText(mimeType).then((fromId) => fromId !== id && onReorder?.(fromId, id));
 		},
 		ref: dropRef,
@@ -187,7 +183,7 @@ const AccordionItem: FC<AccordionItemProps> = ({ children, className, id, isDisa
 	return (
 		<RACDisclosure
 			{...({ ...rest, ...(onReorder ? { ...dragProps, ...dropProps } : {}) } as unknown as RACDisclosureProps)}
-			className={composeTailwindRenderProps(className, B.slot.item)}
+			className={composeTailwindRenderProps(className, _B.slot.item)}
 			data-color={ctx?.color}
 			data-dragging={isDragging || undefined}
 			data-drop-target={isDropTarget || undefined}
@@ -214,7 +210,7 @@ const AccordionRoot: FC<AccordionProps> = ({
 	return (
 		<RACDisclosureGroup
 			{...({ ...rest } as unknown as RACDisclosureGroupProps)}
-			className={composeTailwindRenderProps(className, B.slot.root)}
+			className={composeTailwindRenderProps(className, _B.slot.root)}
 			data-color={color}
 			data-size={size}
 			data-slot="accordion"

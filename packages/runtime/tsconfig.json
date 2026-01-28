@@ -1,5 +1,10 @@
 {
     "compilerOptions": {
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
+        "noEmit": true,
         "outDir": "dist",
         "rootDir": ".",
         "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/runtime.tsbuildinfo",

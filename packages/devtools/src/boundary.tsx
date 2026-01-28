@@ -57,8 +57,8 @@ const EffectErrorBoundary = ({ children, fallback, loggerLayer, onError }: Effec
     <ErrorBoundary
         fallback={fallback ?? <div>{T.fallbackText}</div>}
         onError={(error, info) => {
-            dispatchLog('logError', T.messages.boundaryCaught, { error, info }, loggerLayer);
-            onError(error, { info, phase: T.phases.boundary });
+            dispatchLog('logError', T.messages.boundaryCaught, { error: toError(error), info }, loggerLayer);
+            onError(toError(error), { info, phase: T.phases.boundary });
         }}
     >
         {children}

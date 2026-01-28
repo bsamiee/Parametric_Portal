@@ -1,299 +1,158 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # ///
-"""Nx workspace CLI — polymorphic interface with zero-arg defaults."""
+"""Nx workspace CLI — query monorepo metadata via unified interface.
 
-# --- [IMPORTS] ----------------------------------------------------------------
+Commands:
+    workspace                     List all projects
+    path                          Get workspace root path
+    generators                    List available generators
+    project <name>                View project configuration
+    run <target>                  Run target across projects
+    schema <generator>            View generator schema
+    affected [base]               List affected projects (default: main)
+    graph [output]                Generate dependency graph (default: .nx/graph.json)
+    tokens [path]                 Count tokens in file/directory (default: .)
+    docs [topic]                  View Nx command documentation
+"""
+from __future__ import annotations
+
 import json
 import os
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, Final
 
-
-# --- [TYPES] ------------------------------------------------------------------
-type Args = dict[str, Any]
-type CmdBuilder = Callable[[Args], tuple[str, ...] | str]
-type OutputFormatter = Callable[[str, Args], dict[str, Any]]
-type Handler = tuple[CmdBuilder, OutputFormatter]
-
-
 # --- [CONSTANTS] --------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
-class _B:
-    pnpm: str = "pnpm"
-    exec: str = "exec"
-    nx: str = "nx"
-    tsx: str = "tsx"
-    show: str = "show"
-    run_many: str = "run-many"
-    base_prefix: str = "--base="
-    file_prefix: str = "--file="
-    base: str = "main"
-    output: str = ".nx/graph.json"
-    target: str = "build"
-    token_script: str = "tools/scripts/count-tokens.ts"
-    cwd_env: str = "CLAUDE_PROJECT_DIR"
-    failed_suffix: str = " failed"
-    daemon_env: str = "NX_DAEMON"
+BASE_BRANCH: Final = "main"
+GRAPH_OUTPUT: Final = ".nx/graph.json"
+TOKEN_SCRIPT: Final = "tools/scripts/count-tokens.ts"
+
+# --- [DISPATCH] ---------------------------------------------------------------
+CMDS: Final[dict[str, tuple[Callable[..., dict], int]]] = {}
 
 
-B: Final[_B] = _B()
-
-SCRIPT_PATH: Final[str] = "uv run .claude/skills/nx-tools/scripts/nx.py"
-
-COMMANDS: Final[dict[str, dict[str, str]]] = {
-    "workspace": {
-        "desc": "List all projects in workspace",
-        "opts": "",
-        "req": "",
-    },
-    "path": {
-        "desc": "Get workspace root path",
-        "opts": "",
-        "req": "",
-    },
-    "generators": {
-        "desc": "List available generators",
-        "opts": "",
-        "req": "",
-    },
-    "project": {
-        "desc": "View project configuration",
-        "opts": "--name PROJECT",
-        "req": "--name",
-    },
-    "run": {
-        "desc": "Run target across projects",
-        "opts": "--target TARGET",
-        "req": "--target",
-    },
-    "schema": {
-        "desc": "View generator schema",
-        "opts": "--generator NAME",
-        "req": "--generator",
-    },
-    "affected": {
-        "desc": "List affected projects",
-        "opts": "[--base main]",
-        "req": "",
-    },
-    "graph": {
-        "desc": "Generate dependency graph",
-        "opts": "[--output .nx/graph.json]",
-        "req": "",
-    },
-    "tokens": {
-        "desc": "Count tokens in file/directory",
-        "opts": "[--path PATH]",
-        "req": "",
-    },
-    "docs": {
-        "desc": "View Nx command documentation",
-        "opts": "[--topic COMMAND]",
-        "req": "",
-    },
-}
-
-REQUIRED: Final[dict[str, tuple[str, ...]]] = {
-    "project": ("name",),
-    "run": ("target",),
-    "schema": ("generator",),
-}
+def cmd(argc: int) -> Callable[[Callable[..., dict]], Callable[..., dict]]:
+    """Register command with required argument count."""
+    def register(fn: Callable[..., dict]) -> Callable[..., dict]:
+        CMDS[fn.__name__] = (fn, argc)
+        return fn
+    return register
 
 
-# --- [PURE_FUNCTIONS] ---------------------------------------------------------
-def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
-    """Generate usage error with correct syntax."""
-    return {
-        "status": "error",
-        "message": "\n".join(
-            [
-                f"[ERROR] {message}",
-                "",
-                "[USAGE]",
-                *(
-                    [
-                        f"  {SCRIPT_PATH} {cmd}{' ' + COMMANDS[cmd]['opts'] if COMMANDS[cmd]['opts'] else ''}",
-                        *(
-                            [f"  Required: {COMMANDS[cmd]['req']}"]
-                            if COMMANDS[cmd]["req"]
-                            else []
-                        ),
-                    ]
-                    if cmd and cmd in COMMANDS
-                    else [
-                        f"  {SCRIPT_PATH} <command> [options]",
-                        "",
-                        "[ZERO_ARG_COMMANDS]",
-                        *[
-                            f"  {n:<12} {i['desc']}"
-                            for n, i in COMMANDS.items()
-                            if not i["req"]
-                        ],
-                        "",
-                        "[REQUIRED_ARG_COMMANDS]",
-                        *[
-                            f"  {n:<12} {i['desc']} ({i['req']})"
-                            for n, i in COMMANDS.items()
-                            if i["req"]
-                        ],
-                        "",
-                        "[EXAMPLES]",
-                        f"  {SCRIPT_PATH} workspace",
-                        f"  {SCRIPT_PATH} project --name parametric-portal",
-                        f"  {SCRIPT_PATH} run --target build",
-                    ]
-                ),
-            ]
-        ),
-    }
+# --- [SUBPROCESS] -------------------------------------------------------------
+def _run(*args: str) -> tuple[bool, str]:
+    """Run pnpm exec nx command, return (success, output)."""
+    env = {**os.environ, "NX_DAEMON": "false"}
+    r = subprocess.run(("pnpm", "exec", "nx", *args), capture_output=True, text=True, env=env)
+    return r.returncode == 0, (r.stdout or r.stderr).strip()
 
 
-def _validate_args(cmd: str, args: Args) -> list[str]:
-    """Return list of missing required arguments for command."""
-    return [
-        f"--{k.replace('_', '-')}" for k in REQUIRED.get(cmd, ()) if not args.get(k)
-    ]
+def _run_tsx(*args: str) -> tuple[bool, str]:
+    """Run pnpm exec tsx command, return (success, output)."""
+    r = subprocess.run(("pnpm", "exec", "tsx", *args), capture_output=True, text=True)
+    return r.returncode == 0, (r.stdout or r.stderr).strip()
 
 
-# --- [DISPATCH_TABLES] --------------------------------------------------------
-handlers: dict[str, Handler] = {
-    "workspace": (
-        lambda _: (B.pnpm, B.exec, B.nx, B.show, "projects", "--json"),
-        lambda o, _: {"projects": json.loads(o)},
-    ),
-    "project": (
-        lambda a: (B.pnpm, B.exec, B.nx, B.show, "project", a.get("name") or "", "--json"),
-        lambda o, a: {"name": a.get("name", ""), "project": json.loads(o)},
-    ),
-    "affected": (
-        lambda a: (
-            B.pnpm,
-            B.exec,
-            B.nx,
-            B.show,
-            "projects",
-            "--affected",
-            f"{B.base_prefix}{a.get('base') or B.base}",
-            "--json",
-        ),
-        lambda o, a: {
-            "base": a.get("base") or B.base,
-            "affected": json.loads(o),
-        },
-    ),
-    "run": (
-        lambda a: (B.pnpm, B.exec, B.nx, B.run_many, "-t", a.get("target") or B.target),
-        lambda o, a: {
-            "target": a.get("target") or B.target,
-            "output": o.strip(),
-        },
-    ),
-    "tokens": (
-        lambda a: (B.pnpm, B.exec, B.tsx, B.token_script, a.get("path") or "."),
-        lambda o, a: {
-            "path": a.get("path") or ".",
-            "output": o.strip(),
-        },
-    ),
-    "path": (
-        lambda _: os.environ.get(B.cwd_env, os.getcwd()),
-        lambda o, _: {"path": o},
-    ),
-    "generators": (
-        lambda _: (B.pnpm, B.exec, B.nx, "list"),
-        lambda o, _: {"generators": o.strip()},
-    ),
-    "schema": (
-        lambda a: (B.pnpm, B.exec, B.nx, "g", a.get("generator") or "", "--help"),
-        lambda o, a: {
-            "generator": a.get("generator", ""),
-            "schema": o.strip(),
-        },
-    ),
-    "graph": (
-        lambda a: (
-            B.pnpm,
-            B.exec,
-            B.nx,
-            "graph",
-            f"{B.file_prefix}{a.get('output') or B.output}",
-        ),
-        lambda o, a: {"file": a.get("output") or B.output},
-    ),
-    "docs": (
-        lambda a: (
-            (B.pnpm, B.exec, B.nx, a.get("topic", ""), "--help")
-            if a.get("topic")
-            else (B.pnpm, B.exec, B.nx, "--help")
-        ),
-        lambda o, a: {
-            "topic": a.get("topic") or "general",
-            "docs": o.strip(),
-        },
-    ),
-}
+# --- [COMMANDS] ---------------------------------------------------------------
+@cmd(0)
+def workspace() -> dict:
+    """List all projects in workspace."""
+    ok, out = _run("show", "projects", "--json")
+    return {"status": "success", "projects": json.loads(out)} if ok else {"status": "error", "message": out}
+
+
+@cmd(0)
+def path() -> dict:
+    """Get workspace root path."""
+    p = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
+    return {"status": "success", "path": p}
+
+
+@cmd(0)
+def generators() -> dict:
+    """List available generators."""
+    ok, out = _run("list")
+    return {"status": "success", "generators": out} if ok else {"status": "error", "message": out}
+
+
+@cmd(1)
+def project(name: str) -> dict:
+    """View project configuration."""
+    ok, out = _run("show", "project", name, "--json")
+    return {"status": "success", "name": name, "project": json.loads(out)} if ok else {"status": "error", "message": out}
+
+
+@cmd(1)
+def run(target: str) -> dict:
+    """Run target across projects."""
+    ok, out = _run("run-many", "-t", target)
+    return {"status": "success", "target": target, "output": out} if ok else {"status": "error", "message": out}
+
+
+@cmd(1)
+def schema(generator: str) -> dict:
+    """View generator schema."""
+    ok, out = _run("g", generator, "--help")
+    return {"status": "success", "generator": generator, "schema": out} if ok else {"status": "error", "message": out}
+
+
+@cmd(0)
+def affected(base: str = "") -> dict:
+    """List affected projects."""
+    b = base or BASE_BRANCH
+    ok, out = _run("show", "projects", "--affected", f"--base={b}", "--json")
+    return {"status": "success", "base": b, "affected": json.loads(out)} if ok else {"status": "error", "message": out}
+
+
+@cmd(0)
+def graph(output: str = "") -> dict:
+    """Generate dependency graph."""
+    o = output or GRAPH_OUTPUT
+    ok, out = _run("graph", f"--file={o}")
+    return {"status": "success", "file": o} if ok else {"status": "error", "message": out}
+
+
+@cmd(0)
+def tokens(path_: str = "") -> dict:
+    """Count tokens in file/directory."""
+    p = path_ or "."
+    ok, out = _run_tsx(TOKEN_SCRIPT, p)
+    return {"status": "success", "path": p, "output": out} if ok else {"status": "error", "message": out}
+
+
+@cmd(0)
+def docs(topic: str = "") -> dict:
+    """View Nx command documentation."""
+    args = (topic, "--help") if topic else ("--help",)
+    ok, out = _run(*args)
+    return {"status": "success", "topic": topic or "general", "docs": out} if ok else {"status": "error", "message": out}
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    """CLI entry point — zero-arg defaults with optional args."""
-    if not (args := sys.argv[1:]) or args[0] in ("-h", "--help"):
-        print(json.dumps(_usage_error("No command specified"), indent=2))
-        return 1
-
-    if (cmd := args[0]) not in COMMANDS:
-        print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2))
-        return 1
-
-    # Parse optional flags (--key value or --key=value)
-    opts: Args = {}
-    i = 1
-    while i < len(args):
-        arg = args[i]
-        if arg.startswith("--"):
-            if "=" in arg:
-                key, val = arg[2:].split("=", 1)
-                opts[key.replace("-", "_")] = val
-            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
-                opts[arg[2:].replace("-", "_")] = args[i + 1]
-                i += 1
-            else:
-                opts[arg[2:].replace("-", "_")] = True
-        i += 1
-
-    if missing := _validate_args(cmd, opts):
-        print(
-            json.dumps(
-                _usage_error(f"Missing required: {', '.join(missing)}", cmd), indent=2
-            )
-        )
-        return 1
-
-    builder, formatter = handlers[cmd]
-    cmd_tuple = builder(opts)
-    env = {**os.environ, B.daemon_env: "false"}
-
-    match cmd_tuple:
-        case str():
-            output = cmd_tuple
-        case tuple() if (
-            r := subprocess.run(cmd_tuple, capture_output=True, text=True, env=env)
-        ).returncode == 0:
-            output = r.stdout or r.stderr
+    """Dispatch command and print JSON output."""
+    match sys.argv[1:]:
+        case [cmd_name, *cmd_args] if (entry := CMDS.get(cmd_name)):
+            fn, argc = entry
+            if len(cmd_args) < argc:
+                print(f"Usage: nx.py {cmd_name} {' '.join(f'<arg{i+1}>' for i in range(argc))}")
+                return 1
+            try:
+                result = fn(*cmd_args[:argc + 1])  # required + up to 1 optional
+                print(json.dumps(result, indent=2))
+                return 0 if result["status"] == "success" else 1
+            except json.JSONDecodeError as e:
+                print(json.dumps({"status": "error", "message": f"Invalid JSON: {e}"}))
+                return 1
+        case [cmd_name, *_]:
+            print(f"[ERROR] Unknown command '{cmd_name}'\n")
+            print(__doc__)
+            return 1
         case _:
-            output = None
-
-    result = (
-        {"status": "success", **formatter(output, opts)}
-        if output
-        else {"status": "error", "message": f"{cmd}{B.failed_suffix}"}
-    )
-    print(json.dumps(result, indent=2))
-    return 0 if output else 1
+            print(__doc__)
+            return 1
 
 
 if __name__ == "__main__":

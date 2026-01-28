@@ -1,83 +1,47 @@
 /**
- * Audit group handlers for audit log retrieval operations.
- * Paginated audit log endpoints with date/operation filters.
- * Supports: admin-only entity/actor queries, self-lookup for any authenticated user.
+ * Audit log retrieval: admin entity/user queries, self-lookup for authenticated users.
  */
 import { HttpApiBuilder } from '@effect/platform';
-import { type AuditFilter, DatabaseService, type DatabaseServiceShape } from '@parametric-portal/database/repos';
-import { type AuditFilterQuery, ParametricApi } from '@parametric-portal/server/api';
-import { getAppId } from '@parametric-portal/server/context';
-import { HttpError } from '@parametric-portal/server/http-errors';
-import { Middleware, requireRole } from '@parametric-portal/server/middleware';
-import { RateLimit } from '@parametric-portal/server/rate-limit';
-import type { AuditEntityType, AuditLog, UserId } from '@parametric-portal/types/schema';
+import { DatabaseService } from '@parametric-portal/database/repos';
+import { ParametricApi } from '@parametric-portal/server/api';
+import { Context } from '@parametric-portal/server/context';
+import { HttpError } from '@parametric-portal/server/errors';
+import { Middleware } from '@parametric-portal/server/middleware';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Effect, Option, pipe } from 'effect';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type FilterParams = typeof AuditFilterQuery.Type;
-type PaginatedResult = { readonly data: readonly AuditLog[]; readonly limit: number; readonly offset: number; readonly total: number };
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const toFilter = (params: FilterParams): AuditFilter => ({
-    after: Option.getOrUndefined(params.after),
-    before: Option.getOrUndefined(params.before),
-    operation: Option.getOrUndefined(params.operation),
-});
-
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
-
-const handleGetByEntity = Effect.fn('audit.getByEntity')(
-    (repos: DatabaseServiceShape, entityType: AuditEntityType, entityId: string, params: FilterParams) =>
-        Effect.gen(function* () {
-            yield* requireRole('admin');
-            const appId = yield* getAppId;
-            const filter = toFilter(params);
-            const { data, total } = yield* pipe(
-                repos.audit.findByEntity(appId, entityType, entityId, params.limit, params.offset, filter),
-                HttpError.chain(HttpError.Internal, { message: 'Audit log lookup failed' }),
-            );
-            return { data, limit: params.limit, offset: params.offset, total } satisfies PaginatedResult;
-        }),
-);
-const handleGetByActor = Effect.fn('audit.getByActor')(
-    (repos: DatabaseServiceShape, actorId: UserId, params: FilterParams) =>
-        Effect.gen(function* () {
-            yield* requireRole('admin');
-            const appId = yield* getAppId;
-            const filter = toFilter(params);
-            const { data, total } = yield* pipe(
-                repos.audit.findByActor(appId, actorId, params.limit, params.offset, filter),
-                HttpError.chain(HttpError.Internal, { message: 'Audit log lookup failed' }),
-            );
-            return { data, limit: params.limit, offset: params.offset, total } satisfies PaginatedResult;
-        }),
-);
-const handleGetMine = Effect.fn('audit.getMine')(
-    (repos: DatabaseServiceShape, params: FilterParams) =>
-        Effect.gen(function* () {
-            const { userId } = yield* Middleware.Session;
-            const appId = yield* getAppId;
-            const filter = toFilter(params);
-            const { data, total } = yield* pipe(
-                repos.audit.findByActor(appId, userId, params.limit, params.offset, filter),
-                HttpError.chain(HttpError.Internal, { message: 'Audit log lookup failed' }),
-            );
-            return { data, limit: params.limit, offset: params.offset, total } satisfies PaginatedResult;
-        }),
-);
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
-    Effect.gen(function* () {
-        const repos = yield* DatabaseService;
-        return handlers
-            .handle('getByEntity', ({ path: { entityType, entityId }, urlParams }) => RateLimit.middleware.api(handleGetByEntity(repos, entityType, entityId, urlParams)))
-            .handle('getByActor', ({ path: { actorId }, urlParams }) => RateLimit.middleware.api(handleGetByActor(repos, actorId, urlParams)))
-            .handle('getMine', ({ urlParams }) => RateLimit.middleware.api(handleGetMine(repos, urlParams)));
-    }),
+	Effect.gen(function* () {
+		const repos = yield* DatabaseService;
+		const requireRole = Middleware.makeRequireRole((id) => repos.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((u) => ({ role: u.role })))));
+		const adminLookup = <A>(find: Effect.Effect<A, unknown>) => pipe(
+			Middleware.requireMfaVerified,
+			Effect.zipRight(requireRole('admin')),
+			Effect.zipRight(find),
+			Effect.mapError((e) => HttpError.Internal.of('Audit lookup failed', e)),
+		);
+		return handlers
+			.handle('getByEntity', ({ path: { subject, subjectId }, urlParams: params }) =>
+				CacheService.rateLimit('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.bySubject(tenantId, subject, subjectId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByEntity', { kind: 'server' }))))
+			.handle('getByUser', ({ path: { userId }, urlParams: params }) =>
+				CacheService.rateLimit('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.byUser(tenantId, userId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByUser', { kind: 'server' }))))
+			.handle('getMine', ({ urlParams: params }) =>
+				CacheService.rateLimit('api', pipe(
+					Middleware.requireMfaVerified,
+					Effect.zipRight(Context.Request.current),
+					Effect.flatMap((ctx) =>
+						Option.match(ctx.session, {
+							onNone: () => Effect.fail(HttpError.Auth.of('Session required') as HttpError.Auth | HttpError.Internal),
+							onSome: (session) => repos.audit.byUser(ctx.tenantId, session.userId, params.limit, params.cursor, params).pipe(
+								Effect.mapError((e) => HttpError.Internal.of('Audit lookup failed', e) as HttpError.Auth | HttpError.Internal),
+							),
+						}),
+					),
+					Effect.withSpan('audit.getMine', { kind: 'server' }),
+				)));
+	}),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

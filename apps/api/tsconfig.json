@@ -9,6 +9,7 @@
         "paths": {
             "@parametric-portal/ai/*": ["../../packages/ai/src/*"],
             "@parametric-portal/database/*": ["../../packages/database/src/*"],
+            "@parametric-portal/database/search/*": ["../../packages/database/src/search/*"],
             "@parametric-portal/server/*": ["../../packages/server/src/*"],
             "@parametric-portal/types/*": ["../../packages/types/src/*"]
         },

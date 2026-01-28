@@ -1,7 +1,6 @@
 /**
- * Floating utilities with @floating-ui/react integration.
- * Tooltip hook with delay group coordination, tree wrapper, and integration utilities.
- * Behavior defaults in B constant; props override for escape hatch.
+ * Tooltip hook with @floating-ui/react integration and delay group coordination.
+ * CSS variable driven defaults in B constant; props override for escape hatch.
  */
 import {
     arrow, autoUpdate, flip, hide, offset, type Placement, safePolygon, shift, type Strategy, FloatingArrow, FloatingNode, FloatingPortal,
@@ -46,12 +45,12 @@ type TooltipResult<P extends object = object> = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    behavior: Object.freeze({
+const _B = {
+    behavior: {
         placement: 'top' as Placement,
         strategy: 'absolute' as Strategy,
-    }),
-    cssVars: Object.freeze({
+    },
+    cssVars: {
         arrowPadding: '--tooltip-arrow-padding',
         arrowPath: '--tooltip-arrow-path',
         arrowTipRadius: '--tooltip-arrow-tip-radius',
@@ -59,14 +58,14 @@ const B = Object.freeze({
         offset: '--tooltip-offset',
         shiftPadding: '--tooltip-shift-padding',
         transitionDuration: '--tooltip-transition-duration',
-    }),
-    defaults: Object.freeze({
+    },
+    defaults: {
         arrowPadding: 4,
         offset: 8,
         shiftPadding: 10,
         transitionDuration: 200,
-    }),
-    slot: Object.freeze({
+    },
+    slot: {
         arrow: cn(
             'fill-(--tooltip-arrow-color)',
             '[width:var(--tooltip-arrow-width)]',
@@ -85,64 +84,64 @@ const B = Object.freeze({
             'duration-(--tooltip-transition-duration)',
             'ease-(--tooltip-transition-easing)',
         ),
-    }),
-});
+    },
+} as const;
 
 // --- [HOOK] ------------------------------------------------------------------
 
-const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, baseRef?: Ref<HTMLElement>, baseProps?: P, ): TooltipResult<P> => {
+const useTooltip = <P extends object = object>( config: TooltipConfig | undefined, baseRef?: Ref<HTMLElement>, baseProps?: P, ): TooltipResult<P> => {
     const id = useId();
-    const has = cfg?.content != null;
+    const has = config?.content != null;
     const nodeId = useFloatingNodeId();
     const [internalOpen, setInternalOpen] = useState(false);
     const arrowRef = useRef<SVGSVGElement>(null);
     const resolvedConfig = useMemo(() => ({
-        arrowPadding: cfg?.arrowPadding ?? (readCssPx(B.cssVars.arrowPadding) || B.defaults.arrowPadding),
-        offset: cfg?.offset ?? (readCssPx(B.cssVars.offset) || B.defaults.offset),
-        shiftPadding: cfg?.shiftPadding ?? (readCssPx(B.cssVars.shiftPadding) || B.defaults.shiftPadding),
-        transitionDuration: cfg?.transitionDuration ?? (readCssMs(B.cssVars.transitionDuration) || B.defaults.transitionDuration),
-    }), [cfg?.offset, cfg?.arrowPadding, cfg?.shiftPadding, cfg?.transitionDuration]);
-    const placement = cfg?.placement ?? B.behavior.placement;
-    const strategy = cfg?.strategy ?? B.behavior.strategy;
-    const isOpen = cfg?.open ?? internalOpen;
+        arrowPadding: config?.arrowPadding ?? (readCssPx(_B.cssVars.arrowPadding) || _B.defaults.arrowPadding),
+        offset: config?.offset ?? (readCssPx(_B.cssVars.offset) || _B.defaults.offset),
+        shiftPadding: config?.shiftPadding ?? (readCssPx(_B.cssVars.shiftPadding) || _B.defaults.shiftPadding),
+        transitionDuration: config?.transitionDuration ?? (readCssMs(_B.cssVars.transitionDuration) || _B.defaults.transitionDuration),
+    }), [config?.offset, config?.arrowPadding, config?.shiftPadding, config?.transitionDuration]);
+    const placement = config?.placement ?? _B.behavior.placement;
+    const strategy = config?.strategy ?? _B.behavior.strategy;
+    const isOpen = config?.open ?? internalOpen;
     const readBoundary = (): Element | 'clippingAncestors' => {
-        const v = globalThis.document?.documentElement
-            ? getComputedStyle(globalThis.document.documentElement).getPropertyValue(B.cssVars.boundary).trim()
+        const cssValue = globalThis.document?.documentElement
+            ? getComputedStyle(globalThis.document.documentElement).getPropertyValue(_B.cssVars.boundary).trim()
             : '';
-        return v === 'viewport' ? globalThis.document?.body ?? 'clippingAncestors' : 'clippingAncestors';
+        return cssValue === 'viewport' ? globalThis.document?.body ?? 'clippingAncestors' : 'clippingAncestors';
     };
-    const resolvedBoundary = cfg?.boundary ?? readBoundary();
+    const resolvedBoundary = config?.boundary ?? readBoundary();
     const shiftPad = { padding: resolvedConfig.shiftPadding };
     const middleware = has && [
         offset(resolvedConfig.offset),
         flip({
             ...shiftPad,
             boundary: resolvedBoundary,
-            ...(cfg?.fallbackPlacements && { fallbackPlacements: [...cfg.fallbackPlacements] }),
+            ...(config?.fallbackPlacements && { fallbackPlacements: [...config.fallbackPlacements] }),
         }),
         shift({ ...shiftPad, boundary: resolvedBoundary, crossAxis: true }),
         arrow({ element: arrowRef as RefObject<SVGSVGElement>, padding: resolvedConfig.arrowPadding }),
         hide({ strategy: 'referenceHidden' }),
     ];
     const { context, floatingStyles, refs } = useFloating({
-        ...(cfg?.anchor && { elements: { reference: cfg.anchor.current } }),
+        ...(config?.anchor && { elements: { reference: config.anchor.current } }),
         middleware: middleware || [],
         ...(nodeId && { nodeId }),
         onOpenChange: (open: boolean) => {
             setInternalOpen(open);
-            cfg?.onOpenChange?.(open);
+            config?.onOpenChange?.(open);
         },
         open: isOpen,
         placement,
         strategy,
-        whileElementsMounted: (r, f, u) => autoUpdate(r, f, u, { ancestorResize: true, ancestorScroll: true, elementResize: true }),
+        whileElementsMounted: (reference, floating, update) => autoUpdate(reference, floating, update, { ancestorResize: true, ancestorScroll: true, elementResize: true }),
     });
     const { delay: groupDelay, isInstantPhase, currentId } = useDelayGroup(context, { id });
-    const { click = false, dismissOnEscape = true, dismissOnOutsidePress = true } = cfg?.interactions ?? {};
-    const hasExternalAnchor = cfg?.anchor !== undefined;
-    const isControlled = cfg?.open !== undefined;
+    const { click = false, dismissOnEscape = true, dismissOnOutsidePress = true } = config?.interactions ?? {};
+    const hasExternalAnchor = config?.anchor !== undefined;
+    const isControlled = config?.open !== undefined;
     const { getFloatingProps, getReferenceProps } = useInteractions([
-        useHover(context, { delay: cfg?.delay ?? groupDelay, enabled: has && !isControlled, handleClose: safePolygon({ blockPointerEvents: true }) }),
+        useHover(context, { delay: config?.delay ?? groupDelay, enabled: has && !isControlled, handleClose: safePolygon({ blockPointerEvents: true }) }),
         useFocus(context, { enabled: has && !isControlled }),
         useClick(context, { enabled: click && !isControlled }),
         useDismiss(context, { escapeKey: dismissOnEscape, outsidePress: dismissOnOutsidePress }),
@@ -152,17 +151,17 @@ const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, 
     const instantDur = has ? { close: currentId === context.floatingId ? resolvedConfig.transitionDuration : 0, open: 0 } : 0;
     const { isMounted, status } = useTransitionStatus(context, { duration: isInstantPhase ? instantDur : dur });
     const arrowProps = useMemo(() => {
-        const cssPath = readCssVar(B.cssVars.arrowPath);
-        const cssTipRadiusRaw = readCssVar(B.cssVars.arrowTipRadius);
+        const cssPath = readCssVar(_B.cssVars.arrowPath);
+        const cssTipRadiusRaw = readCssVar(_B.cssVars.arrowTipRadius);
         const cssTipRadius = cssTipRadiusRaw ? Number.parseFloat(cssTipRadiusRaw) : Number.NaN;
         const cssProps = defined({
             d: cssPath || undefined,
             tipRadius: cssTipRadiusRaw && Number.isFinite(cssTipRadius) ? cssTipRadius : undefined,
         });
         const cssOnlyProps = Object.keys(cssProps).length > 0 ? cssProps : undefined;
-        return cfg?.arrow
+        return config?.arrow
             ? (() => {
-                  const { height, staticOffset, tipRadius, width, ...rest } = cfg.arrow;
+                  const { height, staticOffset, tipRadius, width, ...rest } = config.arrow;
                   return {
                       ...cssProps,
                       ...defined(rest),
@@ -173,7 +172,7 @@ const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, 
                   };
               })()
             : cssOnlyProps;
-    }, [cfg?.arrow]);
+    }, [config?.arrow]);
     const mergedRef = useMergeRefs([baseRef, has && !hasExternalAnchor ? refs.setReference : undefined]);
     const mergedProps = {
         ...(baseProps ?? ({} as P)),
@@ -187,21 +186,21 @@ const useTooltip = <P extends object = object>( cfg: TooltipConfig | undefined, 
         ref: refs.domReference as RefObject<HTMLElement | null>,
         render: (has && isMounted && (() => (
             <FloatingNode id={nodeId}>
-                <FloatingPortal root={cfg.portalRoot ?? null}>
+                <FloatingPortal root={config.portalRoot ?? null}>
                     <div
                         {...getFloatingProps()}
-                        className={B.slot.content}
+                        className={_B.slot.content}
                         data-slot='tooltip'
                         data-status={status}
-                        data-style={cfg.style}
+                        data-style={config.style}
                         id={id}
                         ref={refs.setFloating}
                         style={floatingStyles}
                     >
-                        {cfg.content}
+                        {config.content}
                         <FloatingArrow
                             {...arrowProps}
-                            className={B.slot.arrow}
+                            className={_B.slot.arrow}
                             context={context}
                             ref={arrowRef}
                         />

@@ -1,10 +1,6 @@
 /**
- * Link: Navigation component with text and button-styled modes.
- * Text mode (default): Underlined text link with color variants.
- * Button mode (variant prop): Button-styled link using Button CSS vars.
- * Auto-detects external links and adds security attributes.
- * Supports: download links, action links (onPress without href renders as span).
- * REQUIRED: color prop. size required when variant is set.
+ * Navigation with text and button-styled modes. Auto-detects external links.
+ * Requires color prop. Size required when variant is set.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -46,8 +42,8 @@ type LinkIconProps = Omit<RACLinkProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		button: cn(
 			'inline-flex items-center justify-center cursor-pointer',
 			'h-(--button-height) w-(--button-width) px-(--button-px) gap-(--button-gap)',
@@ -85,8 +81,8 @@ const B = Object.freeze({
 			'[&[aria-current]]:text-(--link-current-fg) [&[aria-current]]:font-(--link-current-font-weight)',
 		),
 		textContent: 'truncate',
-	}),
-});
+	},
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -118,9 +114,9 @@ const LinkCore: FC<LinkProps> = (props) => {
 		'data-slot': isButtonMode ? 'link-button' : 'link',
 		'data-variant': variant,
 	};
-	const baseClass = isButtonMode ? B.slot.button : B.slot.text;
-	const iconClass = isButtonMode ? B.slot.buttonIcon : B.slot.icon;
-	const textClass = isButtonMode ? B.slot.buttonText : B.slot.textContent;
+	const baseClass = isButtonMode ? _B.slot.button : _B.slot.text;
+	const iconClass = isButtonMode ? _B.slot.buttonIcon : _B.slot.icon;
+	const textClass = isButtonMode ? _B.slot.buttonText : _B.slot.textContent;
 	const composedClassName = composeTailwindRenderProps(className, baseClass);
 	return (
 		<>
@@ -156,7 +152,7 @@ const LinkIcon: FC<LinkIconProps> = (props) => {
 			<RACLink
 				{...({ ...rest, ...tooltipProps } as unknown as RACLinkProps)}
 				aria-label={ariaLabel}
-				className={composeTailwindRenderProps(className, B.slot.iconOnly)}
+				className={composeTailwindRenderProps(className, _B.slot.iconOnly)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}

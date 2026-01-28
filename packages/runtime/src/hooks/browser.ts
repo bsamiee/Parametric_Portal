@@ -13,35 +13,35 @@ import { Browser, type ExportInput } from '../services/browser';
 
 type ClipboardState<V> = {
     readonly copy: (value: V) => void;
-    readonly error: AppError<'Browser'> | null;
+    readonly error: AppError.Browser | null;
     readonly isPending: boolean;
     readonly paste: () => void;
     readonly reset: () => void;
-    readonly state: AsyncState<V, AppError<'Browser'>>;
+    readonly state: AsyncState.Of<V, AppError.Browser>;
     readonly value: V | null;
 };
 type DownloadState = {
     readonly download: (data: Blob | string, filename: string, mimeType?: string) => void;
-    readonly error: AppError<'Browser'> | null;
+    readonly error: AppError.Browser | null;
     readonly isPending: boolean;
     readonly reset: () => void;
-    readonly state: AsyncState<void, AppError<'Browser'>>;
+    readonly state: AsyncState.Of<void, AppError.Browser>;
 };
 type ExportState = {
-    readonly error: AppError<'Browser'> | null;
+    readonly error: AppError.Browser | null;
     readonly exportAs: (input: ExportInput) => void;
     readonly isPending: boolean;
     readonly progress: number;
     readonly reset: () => void;
-    readonly state: AsyncState<void, AppError<'Browser'>>;
+    readonly state: AsyncState.Of<void, AppError.Browser>;
 };
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const clipboardWriteError = (e: Clipboard.ClipboardError): AppError<'Browser'> =>
-    AppError.from('Browser', 'CLIPBOARD_WRITE', AppError.withApi(e.message, 'navigator.clipboard'));
-const clipboardReadError = (e: Clipboard.ClipboardError): AppError<'Browser'> =>
-    AppError.from('Browser', 'CLIPBOARD_READ', AppError.withApi(e.message, 'navigator.clipboard'));
+const clipboardWriteError = (e: Clipboard.ClipboardError): AppError.Browser =>
+    AppError.browser('CLIPBOARD_WRITE', undefined, e);
+const clipboardReadError = (e: Clipboard.ClipboardError): AppError.Browser =>
+    AppError.browser('CLIPBOARD_READ', undefined, e);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -50,41 +50,41 @@ const useClipboard = <V>(
     deserializer: (text: string) => V = (text) => text as V,
 ): ClipboardState<V> => {
     const runtime = Runtime.use<Clipboard.Clipboard, never>();
-    const [state, setState] = useState<AsyncState<V, AppError<'Browser'>>>(AsyncState.Idle());
+    const [state, setState] = useState<AsyncState.Of<V, AppError.Browser>>(AsyncState.idle());
     const copy = useCallback(
         (v: V) => {
-            setState(AsyncState.Loading());
+            setState(AsyncState.loading());
             runtime.runFork(
                 Effect.gen(function* () {
                     const svc = yield* Clipboard.Clipboard;
                     yield* svc.writeString(serializer(v));
                     return v;
                 }).pipe(
-                    Effect.tap((data) => Effect.sync(() => setState(AsyncState.Success(data)))),
-                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(clipboardWriteError(e))))),
+                    Effect.tap((data) => Effect.sync(() => setState(AsyncState.success(data)))),
+                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.failure(clipboardWriteError(e))))),
                 ),
             );
         },
         [runtime, serializer],
     );
     const paste = useCallback(() => {
-        setState(AsyncState.Loading());
+        setState(AsyncState.loading());
         runtime.runFork(
             Effect.gen(function* () {
                 const svc = yield* Clipboard.Clipboard;
                 const text = yield* svc.readString;
                 return deserializer(text);
             }).pipe(
-                Effect.tap((data) => Effect.sync(() => setState(AsyncState.Success(data)))),
-                Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(clipboardReadError(e))))),
+                Effect.tap((data) => Effect.sync(() => setState(AsyncState.success(data)))),
+                Effect.tapError((e) => Effect.sync(() => setState(AsyncState.failure(clipboardReadError(e))))),
             ),
         );
     }, [runtime, deserializer]);
-    const reset = useCallback(() => setState(AsyncState.Idle()), []);
+    const reset = useCallback(() => setState(AsyncState.idle()), []);
     return {
         copy,
         error: Option.getOrNull(AsyncState.getError(state)),
-        isPending: AsyncState.isPending(state),
+        isPending: AsyncState.$is('Loading')(state),
         paste,
         reset,
         state,
@@ -93,40 +93,42 @@ const useClipboard = <V>(
 };
 const useDownload = (): DownloadState => {
     const runtime = Runtime.use<Browser, never>();
-    const [state, setState] = useState<AsyncState<void, AppError<'Browser'>>>(AsyncState.Idle());
+    const [state, setState] = useState<AsyncState.Of<void, AppError.Browser>>(AsyncState.idle());
     const download = useCallback(
         (data: Blob | string, filename: string, mimeType?: string) => {
-            setState(AsyncState.Loading());
+            setState(AsyncState.loading());
             runtime.runFork(
                 Effect.gen(function* () {
                     const svc = yield* Browser;
                     yield* svc.download(data, filename, mimeType);
                 }).pipe(
-                    Effect.tap(() => Effect.sync(() => setState(AsyncState.Success(undefined)))),
-                    Effect.tapError(() =>
-                        Effect.sync(() => setState(AsyncState.Failure(AppError.from('Browser', 'DOWNLOAD_FAILED')))),
+                    Effect.tap(() => Effect.sync(() => setState(AsyncState.success(undefined)))),
+                    Effect.tapError((e) =>
+                        Effect.sync(() =>
+                            setState(AsyncState.failure(AppError.browser('DOWNLOAD_FAILED', undefined, e))),
+                        ),
                     ),
                 ),
             );
         },
         [runtime],
     );
-    const reset = useCallback(() => setState(AsyncState.Idle()), []);
+    const reset = useCallback(() => setState(AsyncState.idle()), []);
     return {
         download,
         error: Option.getOrNull(AsyncState.getError(state)),
-        isPending: AsyncState.isPending(state),
+        isPending: AsyncState.$is('Loading')(state),
         reset,
         state,
     };
 };
 const useExport = (): ExportState => {
     const runtime = Runtime.use<Browser, never>();
-    const [state, setState] = useState<AsyncState<void, AppError<'Browser'>>>(AsyncState.Idle());
+    const [state, setState] = useState<AsyncState.Of<void, AppError.Browser>>(AsyncState.idle());
     const [progress, setProgress] = useState(0);
     const exportAs = useCallback(
         (input: ExportInput) => {
-            setState(AsyncState.Loading());
+            setState(AsyncState.loading());
             setProgress(0);
             runtime.runFork(
                 Effect.gen(function* () {
@@ -134,21 +136,21 @@ const useExport = (): ExportState => {
                     yield* svc.export({ ...input, onProgress: (p) => setProgress(p * 100) });
                     setProgress(100);
                 }).pipe(
-                    Effect.tap(() => Effect.sync(() => setState(AsyncState.Success(undefined)))),
-                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.Failure(e)))),
+                    Effect.tap(() => Effect.sync(() => setState(AsyncState.success(undefined)))),
+                    Effect.tapError((e) => Effect.sync(() => setState(AsyncState.failure(e)))),
                 ),
             );
         },
         [runtime],
     );
     const reset = useCallback(() => {
-        setState(AsyncState.Idle());
+        setState(AsyncState.idle());
         setProgress(0);
     }, []);
     return {
         error: Option.getOrNull(AsyncState.getError(state)),
         exportAs,
-        isPending: AsyncState.isPending(state),
+        isPending: AsyncState.$is('Loading')(state),
         progress,
         reset,
         state,

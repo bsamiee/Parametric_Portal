@@ -3,70 +3,135 @@
   "version": "2.0.0",
   "type": "module",
   "exports": {
-    "./totp-replay": {
-      "types": "./src/totp-replay.ts",
-      "import": "./src/totp-replay.ts",
-      "default": "./src/totp-replay.ts"
-    },
     "./api": {
       "types": "./src/api.ts",
       "import": "./src/api.ts",
       "default": "./src/api.ts"
-    },
-    "./audit": {
-      "types": "./src/audit.ts",
-      "import": "./src/audit.ts",
-      "default": "./src/audit.ts"
     },
     "./context": {
       "types": "./src/context.ts",
       "import": "./src/context.ts",
       "default": "./src/context.ts"
     },
-    "./crypto": {
-      "types": "./src/crypto.ts",
-      "import": "./src/crypto.ts",
-      "default": "./src/crypto.ts"
-    },
-    "./auth": {
-      "types": "./src/auth.ts",
-      "import": "./src/auth.ts",
-      "default": "./src/auth.ts"
-    },
-    "./http-errors": {
-      "types": "./src/http-errors.ts",
-      "import": "./src/http-errors.ts",
-      "default": "./src/http-errors.ts"
-    },
-    "./metrics": {
-      "types": "./src/metrics.ts",
-      "import": "./src/metrics.ts",
-      "default": "./src/metrics.ts"
-    },
-    "./mfa": {
-      "types": "./src/mfa.ts",
-      "import": "./src/mfa.ts",
-      "default": "./src/mfa.ts"
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts",
+      "default": "./src/errors.ts"
     },
     "./middleware": {
       "types": "./src/middleware.ts",
       "import": "./src/middleware.ts",
       "default": "./src/middleware.ts"
     },
-    "./rate-limit": {
-      "types": "./src/rate-limit.ts",
-      "import": "./src/rate-limit.ts",
-      "default": "./src/rate-limit.ts"
+    "./observe/metrics": {
+      "types": "./src/observe/metrics.ts",
+      "import": "./src/observe/metrics.ts",
+      "default": "./src/observe/metrics.ts"
     },
-    "./telemetry": {
-      "types": "./src/telemetry.ts",
-      "import": "./src/telemetry.ts",
-      "default": "./src/telemetry.ts"
+    "./platform/cache": {
+      "types": "./src/platform/cache.ts",
+      "import": "./src/platform/cache.ts",
+      "default": "./src/platform/cache.ts"
     },
-    "./transfer": {
-      "types": "./src/transfer.ts",
-      "import": "./src/transfer.ts",
-      "default": "./src/transfer.ts"
+    "./observe/telemetry": {
+      "types": "./src/observe/telemetry.ts",
+      "import": "./src/observe/telemetry.ts",
+      "default": "./src/observe/telemetry.ts"
+    },
+    "./infra/storage": {
+      "types": "./src/infra/storage.ts",
+      "import": "./src/infra/storage.ts",
+      "default": "./src/infra/storage.ts"
+    },
+    "./infra/jobs": {
+      "types": "./src/infra/jobs.ts",
+      "import": "./src/infra/jobs.ts",
+      "default": "./src/infra/jobs.ts"
+    },
+    "./observe/polling": {
+      "types": "./src/observe/polling.ts",
+      "import": "./src/observe/polling.ts",
+      "default": "./src/observe/polling.ts"
+    },
+    "./security/crypto": {
+      "types": "./src/security/crypto.ts",
+      "import": "./src/security/crypto.ts",
+      "default": "./src/security/crypto.ts"
+    },
+    "./security/totp-replay": {
+      "types": "./src/security/totp-replay.ts",
+      "import": "./src/security/totp-replay.ts",
+      "default": "./src/security/totp-replay.ts"
+    },
+    "./observe/audit": {
+      "types": "./src/observe/audit.ts",
+      "import": "./src/observe/audit.ts",
+      "default": "./src/observe/audit.ts"
+    },
+    "./domain/mfa": {
+      "types": "./src/domain/mfa.ts",
+      "import": "./src/domain/mfa.ts",
+      "default": "./src/domain/mfa.ts"
+    },
+    "./domain/search": {
+      "types": "./src/domain/search.ts",
+      "import": "./src/domain/search.ts",
+      "default": "./src/domain/search.ts"
+    },
+    "./domain/session": {
+      "types": "./src/domain/session.ts",
+      "import": "./src/domain/session.ts",
+      "default": "./src/domain/session.ts"
+    },
+    "./domain/storage": {
+      "types": "./src/domain/storage.ts",
+      "import": "./src/domain/storage.ts",
+      "default": "./src/domain/storage.ts"
+    },
+    "./domain/oauth": {
+      "types": "./src/domain/oauth.ts",
+      "import": "./src/domain/oauth.ts",
+      "default": "./src/domain/oauth.ts"
+    },
+    "./utils/circuit": {
+      "types": "./src/utils/circuit.ts",
+      "import": "./src/utils/circuit.ts",
+      "default": "./src/utils/circuit.ts"
+    },
+    "./utils/diff": {
+      "types": "./src/utils/diff.ts",
+      "import": "./src/utils/diff.ts",
+      "default": "./src/utils/diff.ts"
+    },
+    "./utils/transfer": {
+      "types": "./src/utils/transfer.ts",
+      "import": "./src/utils/transfer.ts",
+      "default": "./src/utils/transfer.ts"
+    },
+    "./utils/resilience": {
+      "types": "./src/utils/resilience.ts",
+      "import": "./src/utils/resilience.ts",
+      "default": "./src/utils/resilience.ts"
+    },
+    "./infra/handlers/purge-assets": {
+      "types": "./src/infra/handlers/purge-assets.ts",
+      "import": "./src/infra/handlers/purge-assets.ts",
+      "default": "./src/infra/handlers/purge-assets.ts"
+    },
+    "./platform/streaming": {
+      "types": "./src/platform/streaming.ts",
+      "import": "./src/platform/streaming.ts",
+      "default": "./src/platform/streaming.ts"
+    },
+    "./platform/websocket": {
+      "types": "./src/platform/websocket.ts",
+      "import": "./src/platform/websocket.ts",
+      "default": "./src/platform/websocket.ts"
+    },
+    "./infra/webhooks": {
+      "types": "./src/infra/webhooks.ts",
+      "import": "./src/infra/webhooks.ts",
+      "default": "./src/infra/webhooks.ts"
     }
   },
   "scripts": {
@@ -77,21 +142,42 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/s3-request-presigner": "catalog:",
+    "@effect-aws/client-s3": "catalog:",
+    "@effect/cli": "catalog:",
+    "@effect/cluster": "catalog:",
     "@effect/experimental": "catalog:",
     "@effect/opentelemetry": "catalog:",
     "@effect/platform": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
+    "@effect/printer": "catalog:",
+    "@effect/printer-ansi": "catalog:",
+    "@effect/rpc": "catalog:",
     "@effect/sql": "catalog:",
+    "@effect/sql-pg": "catalog:",
+    "@effect/workflow": "catalog:",
+    "@parametric-portal/database": "workspace:*",
     "@parametric-portal/types": "workspace:*",
+    "arctic": "catalog:",
+    "cockatiel": "catalog:",
     "effect": "catalog:",
     "exceljs": "catalog:",
+    "ipaddr.js": "catalog:",
     "ioredis": "catalog:",
     "jszip": "catalog:",
     "nanoid": "catalog:",
     "otplib": "catalog:",
-    "papaparse": "catalog:"
+    "papaparse": "catalog:",
+    "rfc6902": "catalog:",
+    "sax": "catalog:",
+    "yaml": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "@types/papaparse": "catalog:",
+    "@types/sax": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

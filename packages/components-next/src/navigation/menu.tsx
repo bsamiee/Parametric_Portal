@@ -1,8 +1,6 @@
 /**
- * Menu: Context/dropdown menu with sections, shortcuts, submenus, and destructive actions.
- * CSS variable inheritance - color/size set on Menu, children inherit.
- * REQUIRED: color, size props on Menu. Optional trigger prop for self-contained usage.
- * Supports: SubmenuTrigger for nested menus, href links on items, section-level selection.
+ * Context/dropdown menu with sections, shortcuts, submenus, and destructive actions.
+ * Requires color and size props. Supports SubmenuTrigger for nested menus.
  */
 import { FloatingNode, useFloatingNodeId, useMergeRefs } from '@floating-ui/react';
 import { useClipboard } from '@parametric-portal/runtime/hooks/browser';
@@ -66,22 +64,22 @@ type MenuSectionProps<T extends object = object> = Omit<RACMenuSectionProps<T>, 
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	cssVars: Object.freeze({
+const _B = {
+	cssVars: {
 		badgeMax: '--menu-item-badge-max',
 		offset: '--menu-popover-offset',
 		submenuDelay: '--menu-submenu-delay',
 		submenuOffset: '--menu-submenu-offset',
 		submenuSkeletonCount: '--menu-submenu-skeleton-count',
-	}),
-	defaults: Object.freeze({
+	},
+	defaults: {
 		skeletonCount: 3,
-	}),
-	presets: Object.freeze({
+	},
+	presets: {
 		copy: { icon: { default: Copy }, shortcut: '⌘C' },
 		delete: { icon: { default: Trash2 }, shortcut: '⌘⌫' },
 		paste: { icon: { default: Clipboard }, shortcut: '⌘V' },
-	} as const),
+	} as const,
 	slot: {
 		item: cn(
 			'flex items-center gap-(--menu-item-gap) cursor-pointer outline-none',
@@ -145,18 +143,18 @@ const B = Object.freeze({
 			'p-(--menu-padding)',
 		),
 	} as const,
-});
+} as const;
 const MenuContext = createContext<MenuContextValue | null>(null);
 
 // --- [COMPONENTS] ------------------------------------------------------------
 
 const SubmenuSkeleton: FC<{ readonly count?: number }> = ({ count }) => {
-	const resolvedCount = count ?? Math.max(1, Math.round(readCssPx(B.cssVars.submenuSkeletonCount)) || B.defaults.skeletonCount);
+	const resolvedCount = count ?? Math.max(1, Math.round(readCssPx(_B.cssVars.submenuSkeletonCount)) || _B.defaults.skeletonCount);
 	return (
-		<div className={B.slot.submenuSkeletonContainer} data-slot='submenu-skeleton'>
-			{Array.from({ length: resolvedCount }, (_, i) => (
+		<div className={_B.slot.submenuSkeletonContainer} data-slot='submenu-skeleton'>
+			{Array.from({ length: resolvedCount }, (_element, index) => (
 				// biome-ignore lint/suspicious/noArrayIndexKey: skeleton items are static, never reorder
-				<div className={B.slot.submenuSkeleton} key={i} />
+				<div className={_B.slot.submenuSkeleton} key={index} />
 			))}
 		</div>
 	);
@@ -167,13 +165,13 @@ const SubmenuSkeleton: FC<{ readonly count?: number }> = ({ count }) => {
 const MenuRoot = <T extends object>({
 	children, className, color, offset, onOpenChange, size, trigger, triggerBehavior, variant, ...racProps }: MenuProps<T>): ReactNode => {
 	const nodeId = useFloatingNodeId();
-	const resolvedOffset = offset ?? readCssPx(B.cssVars.offset);
+	const resolvedOffset = offset ?? readCssPx(_B.cssVars.offset);
 	const contextValue = useMemo(() => ({ color, size, variant }), [color, size, variant]);
 	const menu = (
 		<MenuContext.Provider value={contextValue}>
 			<RACMenu
 				{...(racProps as RACMenuProps<T>)}
-				className={composeTailwindRenderProps(className, B.slot.menu)}
+				className={composeTailwindRenderProps(className, _B.slot.menu)}
 				data-color={color}
 				data-size={size}
 				data-slot='menu'
@@ -190,7 +188,7 @@ const MenuRoot = <T extends object>({
 				{trigger}
 				<FloatingNode id={nodeId}>
 					<Popover
-						className={B.slot.popover}
+						className={_B.slot.popover}
 						data-color={color}
 						data-size={size}
 						data-slot='menu-popover'
@@ -214,9 +212,9 @@ const MenuItem: FC<MenuItemProps> = ({
 	const clipboard = useClipboard();
 	const slot = Slot.bind(asyncState);
 	const preset = Match.value({ copy, delete: deletePreset, paste }).pipe(
-		Match.when(({ copy: c }) => Boolean(c), () => B.presets.copy),
-		Match.when(({ paste: p }) => Boolean(p), () => B.presets.paste),
-		Match.when(({ delete: d }) => Boolean(d), () => B.presets.delete),
+		Match.when(({ copy: c }) => Boolean(c), () => _B.presets.copy),
+		Match.when(({ paste: p }) => Boolean(p), () => _B.presets.paste),
+		Match.when(({ delete: d }) => Boolean(d), () => _B.presets.delete),
 		Match.orElse(() => null),
 	);
 	const icon: SlotDef | undefined = iconProp ?? preset?.icon;
@@ -226,12 +224,12 @@ const MenuItem: FC<MenuItemProps> = ({
 	const itemRef = useRef<HTMLDivElement>(null);
 	const submenuNodeId = useFloatingNodeId();
 	const hasSubmenu = submenu !== undefined;
-	const submenuIsLoading = AsyncState.isPending(submenuAsyncState);
+	const submenuIsLoading = submenuAsyncState != null && AsyncState.$is('Loading')(submenuAsyncState);
 	const resolvedSubmenuConfig = useMemo(
-		() => hasSubmenu ? ({ delay: submenuDelay ?? readCssMs(B.cssVars.submenuDelay), offset: submenuOffset ?? readCssPx(B.cssVars.submenuOffset) }) : null,
+		() => hasSubmenu ? ({ delay: submenuDelay ?? readCssMs(_B.cssVars.submenuDelay), offset: submenuOffset ?? readCssPx(_B.cssVars.submenuOffset) }) : null,
 		[hasSubmenu, submenuDelay, submenuOffset],
 	);
-	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
+	const badgeLabel = Badge.useLabel(badge, _B.cssVars.badgeMax);
 	const { props: gestureProps } = useGesture({
 		isDisabled: isDisabled || slot.pending,
 		prefix: 'menu-item',
@@ -252,7 +250,7 @@ const MenuItem: FC<MenuItemProps> = ({
 	const itemContent = (
 		<RACMenuItem
 			{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACMenuItemProps)}
-			className={composeTailwindRenderProps(className, B.slot.item)}
+			className={composeTailwindRenderProps(className, _B.slot.item)}
 			data-async-state={slot.attr}
 			data-destructive={destructive || undefined}
 			data-slot='menu-item'
@@ -263,15 +261,15 @@ const MenuItem: FC<MenuItemProps> = ({
 		>
 			{(renderProps) => (
 				<>
-					{slot.render(icon, B.slot.itemIcon)}
+					{slot.render(icon, _B.slot.itemIcon)}
 					<span className='flex-1'>
 						{isRenderFn
 							? (children as (state: MenuItemRenderProps) => ReactNode)(renderProps)
 							: slot.resolve(children)}
 					</span>
-					{hasSubmenu && slot.render(submenuIndicator ?? { default: ChevronRight }, B.slot.submenuIndicator)}
-					{badgeLabel !== null && !hasSubmenu && <span className={B.slot.itemBadge}>{badgeLabel}</span>}
-					{shortcut && !hasSubmenu && createElement('kbd', { className: B.slot.shortcut }, shortcut)}
+					{hasSubmenu && slot.render(submenuIndicator ?? { default: ChevronRight }, _B.slot.submenuIndicator)}
+					{badgeLabel !== null && !hasSubmenu && <span className={_B.slot.itemBadge}>{badgeLabel}</span>}
+					{shortcut && !hasSubmenu && createElement('kbd', { className: _B.slot.shortcut }, shortcut)}
 				</>
 			)}
 		</RACMenuItem>
@@ -284,15 +282,15 @@ const MenuItem: FC<MenuItemProps> = ({
 		</>
 	);
 	return hasSubmenu ? (
-		<RACSubmenuTrigger delay={resolvedSubmenuConfig?.delay ?? readCssMs(B.cssVars.submenuDelay)}>
+		<RACSubmenuTrigger delay={resolvedSubmenuConfig?.delay ?? readCssMs(_B.cssVars.submenuDelay)}>
 			{itemContent}
 			<FloatingNode id={submenuNodeId}>
 				<Popover
-					className={B.slot.submenuPopover}
+					className={_B.slot.submenuPopover}
 					data-color={menuCtx?.color}
 					data-theme='menu'
 					data-slot='submenu-popover'
-					offset={resolvedSubmenuConfig?.offset ?? readCssPx(B.cssVars.submenuOffset)}
+					offset={resolvedSubmenuConfig?.offset ?? readCssPx(_B.cssVars.submenuOffset)}
 					{...defined({ 'data-size': resolvedSubmenuSize, 'data-variant': menuCtx?.variant })}
 				>
 					{submenuIsLoading ? <SubmenuSkeleton {...defined({ count: submenuSkeletonCount })} /> : submenu}
@@ -310,15 +308,15 @@ const MenuItem: FC<MenuItemProps> = ({
 const MenuSection = <T extends object = object>({ children, className, title, ...racProps }: MenuSectionProps<T>): ReactNode => (
 	<RACMenuSection
 		{...(racProps as RACMenuSectionProps<T>)}
-		className={cn(B.slot.section, className)}
+		className={cn(_B.slot.section, className)}
 		data-slot='menu-section'
 	>
-		{title && <Header className={B.slot.sectionHeader}>{title}</Header>}
+		{title && <Header className={_B.slot.sectionHeader}>{title}</Header>}
 		{children as ReactNode}
 	</RACMenuSection>
 );
 const MenuSeparator: FC<{ readonly className?: string }> = ({ className }) => (
-	<Separator className={cn(B.slot.separator, className)} data-slot='menu-separator' />
+	<Separator className={cn(_B.slot.separator, className)} data-slot='menu-separator' />
 );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

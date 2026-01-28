@@ -2,92 +2,76 @@
 # /// script
 # dependencies = ["httpx"]
 # ///
-"""SonarCloud API — polymorphic HTTP client, zero-arg defaults."""
+"""SonarCloud API CLI — code quality metrics via REST API.
 
-# --- [IMPORTS] ----------------------------------------------------------------
+Commands:
+    quality-gate [branch]           Quality gate status (or: quality-gate pr <num>)
+    issues [severities] [types]     Search issues (e.g., BLOCKER,CRITICAL BUG)
+    measures [metrics]              Project metrics (e.g., coverage,bugs)
+    analyses [page_size]            Analysis history (default: 10)
+    projects [page_size]            List organization projects (default: 100)
+    hotspots [status]               Security hotspots (e.g., TO_REVIEW)
+"""
+from __future__ import annotations
+
 import json
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any, Final
 
 import httpx
 
-
-# --- [TYPES] ------------------------------------------------------------------
-type ToolConfig = dict[str, Any]
-type ToolFn = Callable[..., dict[str, Any]]
-
-
 # --- [CONSTANTS] --------------------------------------------------------------
-@dataclass(frozen=True, slots=True)
-class _B:
-    base_url: str = "https://sonarcloud.io/api"
-    key_env: str = "SONAR_TOKEN"
-    timeout: int = 30
-    page_size: int = 100
-    max_results: int = 500
-    organization: str = "bsamiee"
-    project: str = "bsamiee_Parametric_Portal"
-    default_page_size_analyses: int = 10
-    max_page_size_analyses: int = 100
-    error_truncate_len: int = 500
-    default_metrics: str = "ncloc,coverage,bugs,vulnerabilities,code_smells,duplicated_lines_density,security_hotspots,reliability_rating,security_rating,sqale_rating"
-    default_statuses: str = "OPEN,CONFIRMED,REOPENED"
+BASE_URL: Final = "https://sonarcloud.io/api"
+KEY_ENV: Final = "SONAR_TOKEN"
+TIMEOUT: Final = 30
+ORG: Final = "bsamiee"
+PROJECT: Final = "bsamiee_Parametric_Portal"
+DEFAULT_METRICS: Final = "ncloc,coverage,bugs,vulnerabilities,code_smells,duplicated_lines_density,security_hotspots,reliability_rating,security_rating,sqale_rating"
+DEFAULT_STATUSES: Final = "OPEN,CONFIRMED,REOPENED"
+
+# --- [DISPATCH] ---------------------------------------------------------------
+CMDS: Final[dict[str, tuple[Callable[..., dict], int]]] = {}
 
 
-B: Final[_B] = _B()
-
-SCRIPT_PATH: Final[str] = "uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py"
-
-COMMANDS: Final[dict[str, dict[str, str]]] = {
-    "quality-gate": {
-        "desc": "Quality gate pass/fail status",
-        "opts": "[--branch NAME] [--pull-request NUM]",
-    },
-    "issues": {
-        "desc": "Search code issues (bugs, smells, vulnerabilities)",
-        "opts": "[--severities BLOCKER,CRITICAL,MAJOR,MINOR,INFO] [--types BUG,VULNERABILITY,CODE_SMELL] [--statuses OPEN,CONFIRMED,REOPENED]",
-    },
-    "measures": {
-        "desc": "Project metrics (coverage, bugs, etc.)",
-        "opts": "[--metrics coverage,bugs,vulnerabilities]",
-    },
-    "analyses": {
-        "desc": "Analysis history",
-        "opts": "[--page NUM] [--page-size NUM]",
-    },
-    "projects": {
-        "desc": "List organization projects",
-        "opts": "[--page NUM] [--page-size NUM]",
-    },
-    "hotspots": {
-        "desc": "Security hotspots",
-        "opts": "[--status TO_REVIEW|ACKNOWLEDGED|FIXED|SAFE]",
-    },
-}
-
-_COERCE: Final[dict[str, type]] = {"page": int, "page_size": int}
+def cmd(argc: int) -> Callable[[Callable[..., dict]], Callable[..., dict]]:
+    """Register command with required argument count."""
+    def register(fn: Callable[..., dict]) -> Callable[..., dict]:
+        CMDS[fn.__name__.replace("_", "-")] = (fn, argc)
+        return fn
+    return register
 
 
-# --- [PURE_FUNCTIONS] ---------------------------------------------------------
-def _parse_conditions(conditions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Transforms quality gate conditions to structured format."""
+# --- [HTTP] -------------------------------------------------------------------
+def _get(path: str, params: dict[str, Any]) -> tuple[bool, dict]:
+    """GET request with auth, return (success, data)."""
+    token = os.environ.get(KEY_ENV, "")
+    if not token:
+        return False, {"error": f"Missing {KEY_ENV} environment variable"}
+    headers = {"Authorization": f"Bearer {token}"}
+    with httpx.Client(timeout=TIMEOUT) as c:
+        r = c.get(f"{BASE_URL}{path}", headers=headers, params=params)
+        r.raise_for_status()
+        return True, r.json()
+
+
+# --- [HELPERS] ----------------------------------------------------------------
+def _parse_conditions(conditions: list[dict]) -> list[dict]:
+    """Transform quality gate conditions."""
     return [
         {
             "metric": c.get("metricKey", ""),
             "status": c.get("status", ""),
             "actual": c.get("actualValue", ""),
             "threshold": c.get("errorThreshold", c.get("warningThreshold", "")),
-            "comparator": c.get("comparator", ""),
         }
         for c in conditions
     ]
 
 
-def _summarize_issues(issues: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    """Groups issues by severity and type."""
+def _summarize_issues(issues: list[dict]) -> dict[str, dict[str, int]]:
+    """Group issues by severity and type."""
     by_severity: dict[str, int] = {}
     by_type: dict[str, int] = {}
     for issue in issues:
@@ -98,319 +82,182 @@ def _summarize_issues(issues: list[dict[str, Any]]) -> dict[str, dict[str, int]]
     return {"by_severity": by_severity, "by_type": by_type}
 
 
-def _build_params(base: dict[str, Any], conditionals: dict[str, Any]) -> dict[str, Any]:
-    """Merges base params with non-empty conditionals."""
-    return base | {k: v for k, v in conditionals.items() if v}
-
-
-def _pagination(
-    page: int | None, page_size: int | None, default_size: int, max_size: int
-) -> dict[str, int]:
-    """Builds pagination params from defaults, applies limits."""
+# --- [COMMANDS] ---------------------------------------------------------------
+@cmd(0)
+def quality_gate(arg1: str = "", arg2: str = "") -> dict:
+    """Quality gate status. Args: [branch] or pr <num>."""
+    params: dict[str, Any] = {"projectKey": PROJECT, "organization": ORG}
+    if arg1 == "pr" and arg2:
+        params["pullRequest"] = arg2
+    elif arg1:
+        params["branch"] = arg1
+    ok, data = _get("/qualitygates/project_status", params)
+    if not ok:
+        return {"status": "error", "message": data.get("error", str(data))}
+    ps = data["projectStatus"]
     return {
-        "ps": min(page_size or default_size, max_size),
-        "p": page or 1,
+        "status": "success",
+        "project": PROJECT,
+        "gate_status": ps["status"],
+        "passed": ps["status"] == "OK",
+        "conditions": _parse_conditions(ps.get("conditions", [])),
     }
 
 
-def _usage_error(message: str, cmd: str | None = None) -> dict[str, Any]:
-    """Generates usage error for correct syntax."""
-    lines = [f"[ERROR] {message}", "", "[USAGE]"]
-
-    if cmd and cmd in COMMANDS:
-        lines.append(f"  {SCRIPT_PATH} {cmd} {COMMANDS[cmd]['opts']}")
-    else:
-        lines.append(f"  {SCRIPT_PATH} <command> [options]")
-        lines.append("")
-        lines.append("[COMMANDS]")
-        for name, info in COMMANDS.items():
-            lines.append(f"  {name:<14} {info['desc']}")
-        lines.append("")
-        lines.append("[EXAMPLES]")
-        lines.append(f"  {SCRIPT_PATH} issues")
-        lines.append(f"  {SCRIPT_PATH} issues --severities BLOCKER,CRITICAL")
-        lines.append(f"  {SCRIPT_PATH} hotspots")
-        lines.append(f"  {SCRIPT_PATH} quality-gate")
-
-    return {"status": "error", "message": "\n".join(lines)}
-
-
-# --- [REGISTRY] ---------------------------------------------------------------
-_tools: dict[str, tuple[ToolFn, ToolConfig]] = {}
-
-
-def tool(**cfg: Any) -> Callable[[ToolFn], ToolFn]:
-    """Registers tool—HTTP config: method, path, transform."""
-
-    def register(fn: ToolFn) -> ToolFn:
-        _tools[fn.__name__.replace("_", "-")] = (fn, {"method": "GET", **cfg})
-        return fn
-
-    return register
-
-
-# --- [TOOLS] ------------------------------------------------------------------
-@tool(
-    path="/qualitygates/project_status",
-    transform=lambda r, a: {
-        "project": a.get("project", B.project),
-        "status": r["projectStatus"]["status"],
-        "passed": r["projectStatus"]["status"] == "OK",
-        "conditions": _parse_conditions(r["projectStatus"].get("conditions", [])),
-        "ignored_conditions": r["projectStatus"].get("ignoredConditions", False),
-    },
-)
-def quality_gate(
-    project: str = "", organization: str = "", branch: str = "", pull_request: str = ""
-) -> dict:
-    """Retrieves quality gate status for project."""
-    base = {
-        "projectKey": project or B.project,
-        "organization": organization or B.organization,
+@cmd(0)
+def issues(severities: str = "", types: str = "") -> dict:
+    """Search issues. Args: [severities] [types] (comma-separated)."""
+    params: dict[str, Any] = {
+        "componentKeys": PROJECT,
+        "organization": ORG,
+        "statuses": DEFAULT_STATUSES,
+        "ps": 100,
     }
-    conditionals = {
-        "branch": branch,
-        "pullRequest": pull_request,
+    if severities:
+        params["severities"] = severities
+    if types:
+        params["types"] = types
+    ok, data = _get("/issues/search", params)
+    if not ok:
+        return {"status": "error", "message": data.get("error", str(data))}
+    issues_list = [
+        {
+            "key": i["key"],
+            "rule": i["rule"],
+            "severity": i["severity"],
+            "type": i["type"],
+            "message": i["message"],
+            "component": i["component"].split(":")[-1],
+            "line": i.get("line"),
+        }
+        for i in data["issues"]
+    ]
+    return {
+        "status": "success",
+        "project": PROJECT,
+        "total": data["paging"]["total"],
+        "issues": issues_list,
+        "summary": _summarize_issues(data["issues"]),
     }
-    return _build_params(base, conditionals)
 
 
-@tool(
-    path="/issues/search",
-    transform=lambda r, a: {
-        "project": a.get("project", B.project),
-        "total": r["paging"]["total"],
-        "page": r["paging"]["pageIndex"],
-        "issues": [
-            {
-                "key": i["key"],
-                "rule": i["rule"],
-                "severity": i["severity"],
-                "type": i["type"],
-                "status": i["status"],
-                "message": i["message"],
-                "component": i["component"].split(":")[-1],
-                "line": i.get("line"),
-                "effort": i.get("effort", ""),
-            }
-            for i in r["issues"]
-        ],
-        "summary": _summarize_issues(r["issues"]),
-    },
-)
-def issues(
-    project: str = "",
-    organization: str = "",
-    severities: str = "",
-    types: str = "",
-    statuses: str = "",
-    page: int = 1,
-    page_size: int = 100,
-) -> dict:
-    """Searches issues by severity, type, status."""
-    base = {
-        "componentKeys": project or B.project,
-        "organization": organization or B.organization,
-        **_pagination(page, page_size, B.page_size, B.max_results),
+@cmd(0)
+def measures(metrics: str = "") -> dict:
+    """Project metrics. Args: [metrics] (comma-separated, default: all)."""
+    params = {
+        "component": PROJECT,
+        "organization": ORG,
+        "metricKeys": metrics or DEFAULT_METRICS,
     }
-    conditionals = {
-        "severities": severities,
-        "types": types,
-        "statuses": statuses or B.default_statuses,
-    }
-    return _build_params(base, conditionals)
-
-
-@tool(
-    path="/measures/component",
-    transform=lambda r, a: {
-        "project": r["component"]["key"],
-        "name": r["component"]["name"],
+    ok, data = _get("/measures/component", params)
+    if not ok:
+        return {"status": "error", "message": data.get("error", str(data))}
+    return {
+        "status": "success",
+        "project": data["component"]["key"],
+        "name": data["component"]["name"],
         "metrics": {
             m["metric"]: m.get("value", m.get("period", {}).get("value", "N/A"))
-            for m in r["component"]["measures"]
+            for m in data["component"]["measures"]
         },
-    },
-)
-def measures(project: str = "", organization: str = "", metrics: str = "") -> dict:
-    """Retrieves project metrics (coverage, ncloc, bugs)."""
-    return {
-        "component": project or B.project,
-        "organization": organization or B.organization,
-        "metricKeys": metrics or B.default_metrics,
     }
 
 
-@tool(
-    path="/project_analyses/search",
-    transform=lambda r, a: {
-        "project": a.get("project", B.project),
-        "total": r["paging"]["total"],
+@cmd(0)
+def analyses(page_size: str = "") -> dict:
+    """Analysis history. Args: [page_size] (default: 10)."""
+    ps = int(page_size) if page_size else 10
+    params = {"project": PROJECT, "organization": ORG, "ps": min(ps, 100)}
+    ok, data = _get("/project_analyses/search", params)
+    if not ok:
+        return {"status": "error", "message": data.get("error", str(data))}
+    return {
+        "status": "success",
+        "project": PROJECT,
+        "total": data["paging"]["total"],
         "analyses": [
             {
-                "key": an["key"],
-                "date": an["date"],
-                "events": [
-                    {"category": e["category"], "name": e.get("name", "")}
-                    for e in an.get("events", [])
-                ],
+                "key": a["key"],
+                "date": a["date"],
+                "events": [{"category": e["category"], "name": e.get("name", "")} for e in a.get("events", [])],
             }
-            for an in r["analyses"]
+            for a in data["analyses"]
         ],
-    },
-)
-def analyses(
-    project: str = "", organization: str = "", page: int = 1, page_size: int = 10
-) -> dict:
-    """Retrieves analysis history for project."""
-    return {
-        "project": project or B.project,
-        "organization": organization or B.organization,
-        **_pagination(
-            page, page_size, B.default_page_size_analyses, B.max_page_size_analyses
-        ),
     }
 
 
-@tool(
-    path="/projects/search",
-    transform=lambda r, a: {
-        "organization": a.get("organization", B.organization),
-        "total": r["paging"]["total"],
-        "projects": [
-            {"key": p["key"], "name": p["name"], "qualifier": p.get("qualifier", "")}
-            for p in r["components"]
-        ],
-    },
-)
-def projects(organization: str = "", page: int = 1, page_size: int = 100) -> dict:
-    """Lists projects within organization."""
+@cmd(0)
+def projects(page_size: str = "") -> dict:
+    """List organization projects. Args: [page_size] (default: 100)."""
+    ps = int(page_size) if page_size else 100
+    params = {"organization": ORG, "ps": min(ps, 500)}
+    ok, data = _get("/projects/search", params)
+    if not ok:
+        return {"status": "error", "message": data.get("error", str(data))}
     return {
-        "organization": organization or B.organization,
-        **_pagination(page, page_size, B.page_size, B.max_results),
+        "status": "success",
+        "organization": ORG,
+        "total": data["paging"]["total"],
+        "projects": [{"key": p["key"], "name": p["name"]} for p in data["components"]],
     }
 
 
-@tool(
-    path="/hotspots/search",
-    transform=lambda r, a: {
-        "project": a.get("project", B.project),
-        "total": r["paging"]["total"],
+@cmd(0)
+def hotspots(status: str = "") -> dict:
+    """Security hotspots. Args: [status] (TO_REVIEW|ACKNOWLEDGED|FIXED|SAFE)."""
+    params: dict[str, Any] = {"projectKey": PROJECT, "organization": ORG, "ps": 100}
+    if status:
+        params["status"] = status
+    ok, data = _get("/hotspots/search", params)
+    if not ok:
+        return {"status": "error", "message": data.get("error", str(data))}
+    return {
+        "status": "success",
+        "project": PROJECT,
+        "total": data["paging"]["total"],
         "hotspots": [
             {
                 "key": h["key"],
                 "message": h["message"],
                 "status": h["status"],
-                "vulnerability_probability": h["vulnerabilityProbability"],
+                "probability": h["vulnerabilityProbability"],
                 "component": h["component"].split(":")[-1],
                 "line": h.get("line"),
             }
-            for h in r["hotspots"]
+            for h in data["hotspots"]
         ],
-    },
-)
-def hotspots(
-    project: str = "",
-    organization: str = "",
-    status: str = "",
-    page: int = 1,
-    page_size: int = 100,
-) -> dict:
-    """Searches security hotspots in project."""
-    base = {
-        "projectKey": project or B.project,
-        "organization": organization or B.organization,
-        **_pagination(page, page_size, B.page_size, B.max_results),
     }
-    conditionals = {"status": status}
-    return _build_params(base, conditionals)
-
-
-# --- [DISPATCH] ---------------------------------------------------------------
-def _http_error_response(e: httpx.HTTPStatusError) -> dict[str, Any]:
-    """Formats HTTP status error response."""
-    return {
-        "status": "error",
-        "message": str(e),
-        "code": e.response.status_code,
-        "details": e.response.text[: B.error_truncate_len] if e.response.text else "",
-    }
-
-
-def _request_error_response(e: httpx.RequestError) -> dict[str, Any]:
-    """Formats request error response."""
-    return {"status": "error", "message": str(e)}
-
-
-def _handle_error(e: Exception) -> dict[str, Any]:
-    """Dispatches error via type-specific handler."""
-    match e:
-        case httpx.HTTPStatusError():
-            return _http_error_response(e)
-        case httpx.RequestError():
-            return _request_error_response(e)
-        case _:
-            return {"status": "error", "message": str(e)}
-
-
-def dispatch(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Executes registered tool via HTTP dispatch."""
-    if cmd not in _tools:
-        return _usage_error(f"Unknown command: {cmd}")
-
-    fn, cfg = _tools[cmd]
-    sig = fn.__code__.co_varnames[: fn.__code__.co_argcount]
-    params = fn(**{k: args.get(k, "") for k in sig})
-
-    token = os.environ.get(B.key_env, "")
-    if not token:
-        return _usage_error(f"Missing {B.key_env} environment variable")
-
-    headers = {"Authorization": f"Bearer {token}"}
-
-    try:
-        with httpx.Client(timeout=B.timeout) as c:
-            r = c.request(
-                cfg["method"],
-                f"{B.base_url}{cfg['path']}",
-                headers=headers,
-                params=params,
-            )
-            r.raise_for_status()
-            return {"status": "success", **cfg["transform"](r.json(), args)}
-    except Exception as e:
-        return _handle_error(e)
 
 
 # --- [ENTRY_POINT] ------------------------------------------------------------
 def main() -> int:
-    """CLI entry point — zero-arg defaults, optional filters."""
-    if not (args := sys.argv[1:]) or args[0] in ("-h", "--help"):
-        return print(json.dumps(_usage_error("No command specified"), indent=2)) or 1
-    if (cmd := args[0]) not in COMMANDS:
-        return print(json.dumps(_usage_error(f"Unknown command: {cmd}"), indent=2)) or 1
-
-    # Parse optional flags (--key value or --key=value)
-    opts: dict[str, Any] = {}
-    i = 1
-    while i < len(args):
-        arg = args[i]
-        if arg.startswith("--"):
-            if "=" in arg:
-                key, val = arg[2:].split("=", 1)
-                opts[key.replace("-", "_")] = val
-            elif i + 1 < len(args) and not args[i + 1].startswith("--"):
-                key = arg[2:].replace("-", "_")
-                val = args[i + 1]
-                opts[key] = _COERCE.get(key, str)(val)
-                i += 1
-            else:
-                opts[arg[2:].replace("-", "_")] = True
-        i += 1
-
-    result = dispatch(cmd, opts)
-    print(json.dumps(result, indent=2))
-    return 0 if result["status"] == "success" else 1
+    """Dispatch command and print JSON output."""
+    match sys.argv[1:]:
+        case [cmd_name, *cmd_args] if (entry := CMDS.get(cmd_name)):
+            fn, argc = entry
+            if len(cmd_args) < argc:
+                print(f"Usage: sonarcloud.py {cmd_name} {' '.join(f'<arg{i+1}>' for i in range(argc))}")
+                return 1
+            try:
+                result = fn(*cmd_args[:argc + 2])  # required + up to 2 optional
+                print(json.dumps(result, indent=2))
+                return 0 if result["status"] == "success" else 1
+            except httpx.HTTPStatusError as e:
+                print(json.dumps({"status": "error", "code": e.response.status_code, "message": e.response.text[:200]}))
+                return 1
+            except httpx.RequestError as e:
+                print(json.dumps({"status": "error", "message": str(e)}))
+                return 1
+            except ValueError as e:
+                print(json.dumps({"status": "error", "message": f"Invalid argument: {e}"}))
+                return 1
+        case [cmd_name, *_]:
+            print(f"[ERROR] Unknown command '{cmd_name}'\n")
+            print(__doc__)
+            return 1
+        case _:
+            print(__doc__)
+            return 1
 
 
 if __name__ == "__main__":

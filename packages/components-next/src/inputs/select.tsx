@@ -1,8 +1,6 @@
 /**
- * Select: Dropdown selection with ListBox, Popover positioning, and async state support.
- * Supports single/multi-select, sections, badges, tooltips, and custom validation.
- * Pure presentation - async state from external useEffectMutate hook.
- * REQUIRED: color, size, suffix (chevron icon) props - no defaults, no hardcoded mappings.
+ * Dropdown selection with ListBox, Popover positioning, and async state.
+ * Requires color, size, suffix props. Supports single/multi-select, sections.
  */
 import { FloatingNode, useFloatingNodeId, useMergeRefs } from '@floating-ui/react';
 import { readCssPx } from '@parametric-portal/runtime/runtime';
@@ -58,11 +56,11 @@ type SelectSectionProps<T extends object = object> = Omit<ListBoxSectionProps<T>
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	cssVars: Object.freeze({
+const _B = {
+	cssVars: {
 		badgeMax: '--select-item-badge-max',
 		offset: '--select-popover-offset',
-	}),
+	},
 	slot: {
 		description: cn('text-(--select-description-size) text-(--select-description-color)'),
 		error: cn('text-(--select-error-size) text-(--select-error-color)'),
@@ -159,7 +157,7 @@ const B = Object.freeze({
 		value: cn('truncate text-left flex-1'),
 		valuePlaceholder: cn('text-(--select-placeholder-color)'),
 	} as const,
-});
+} as const;
 const SelectContext = createContext<SelectContextValue | null>(null);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -169,7 +167,7 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 	label, layout, offset, onSelectionChange, orientation, placeholder, ref, renderEmptyState, searchable, selectedKeys, selectionBehavior, selectionMode = 'single',
 	shouldFocusOnHover, shouldFocusWrap, size, suffix, tooltip, variant, ...racProps }: SelectProps<T>): ReactNode => {
 	const nodeId = useFloatingNodeId();
-	const resolvedOffset = offset ?? readCssPx(B.cssVars.offset);
+	const resolvedOffset = offset ?? readCssPx(_B.cssVars.offset);
 	const triggerRef = useRef<HTMLButtonElement | HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState<number | undefined>();
 	const asyncSlot = Slot.bind(asyncState);
@@ -188,7 +186,7 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 	const popoverContent = (
 		<FloatingNode id={nodeId}>
 			<Popover
-				className={B.slot.popover}
+				className={_B.slot.popover}
 				data-color={color}
 				data-selection-mode={selectionMode}
 				data-size={size}
@@ -199,7 +197,7 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 				style={{ minWidth: triggerWidth }}
 			>
 				<ListBox
-					className={B.slot.listbox}
+					className={_B.slot.listbox}
 					data-slot='select-listbox'
 					onSelectionChange={handleSelectionChange}
 					selectionMode={selectionMode}
@@ -215,7 +213,7 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 			{searchable ? (
 				<RACComboBox
 					{...({ ...racProps, ...tooltipProps } as unknown as object)}
-					className={cn(B.slot.root, className)}
+					className={cn(_B.slot.root, className)}
 					data-async-state={asyncSlot.attr}
 					data-color={color}
 					data-orientation={orientation}
@@ -228,20 +226,20 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 					isDisabled={isDisabled || asyncSlot.pending}
 					ref={mergedRef}
 				>
-					{label && <Label className={B.slot.label} data-slot='select-label'>{label}</Label>}
-					<div className={B.slot.inputWrapper} data-invalid={isInvalid || undefined} ref={triggerRef as Ref<HTMLDivElement>}>
-						<Input className={B.slot.input} {...defined({ placeholder })} />
-						{Slot.content(suffix, B.slot.inputIcon)}
+					{label && <Label className={_B.slot.label} data-slot='select-label'>{label}</Label>}
+					<div className={_B.slot.inputWrapper} data-invalid={isInvalid || undefined} ref={triggerRef as Ref<HTMLDivElement>}>
+						<Input className={_B.slot.input} {...defined({ placeholder })} />
+						{Slot.content(suffix, _B.slot.inputIcon)}
 					</div>
 					{popoverContent}
-					{description && <Text className={B.slot.description} data-slot='select-description' slot='description'>{description}</Text>}
-					<FieldError className={B.slot.error} data-slot='select-error'>{errorMessage}</FieldError>
+					{description && <Text className={_B.slot.description} data-slot='select-description' slot='description'>{description}</Text>}
+					<FieldError className={_B.slot.error} data-slot='select-error'>{errorMessage}</FieldError>
 				</RACComboBox>
 			) : (
 				<RACSelect
 					{...(racProps as RACSelectProps<T>)}
 					{...tooltipProps}
-					className={composeTailwindRenderProps(className, B.slot.root)}
+					className={composeTailwindRenderProps(className, _B.slot.root)}
 					data-async-state={asyncSlot.attr}
 					data-color={color}
 					data-orientation={orientation}
@@ -253,18 +251,18 @@ const SelectRoot = <T extends SelectOption = SelectOption>({
 					isDisabled={isDisabled || asyncSlot.pending}
 					ref={mergedRef}
 				>
-					{label && <Label className={B.slot.label} data-slot='select-label'>{label}</Label>}
-					<RACButton className={B.slot.trigger} data-invalid={isInvalid || undefined} ref={triggerRef as Ref<HTMLButtonElement>}>
-						<SelectValue className={B.slot.value}>
+					{label && <Label className={_B.slot.label} data-slot='select-label'>{label}</Label>}
+					<RACButton className={_B.slot.trigger} data-invalid={isInvalid || undefined} ref={triggerRef as Ref<HTMLButtonElement>}>
+						<SelectValue className={_B.slot.value}>
 							{({ selectedText }) => (
-								<span className={selectedText ? undefined : B.slot.valuePlaceholder}> {selectedText || placeholder} </span>
+								<span className={selectedText ? undefined : _B.slot.valuePlaceholder}> {selectedText || placeholder} </span>
 							)}
 						</SelectValue>
-						{Slot.content(suffix, B.slot.triggerIcon)}
+						{Slot.content(suffix, _B.slot.triggerIcon)}
 					</RACButton>
 					{popoverContent}
-					{description && <Text className={B.slot.description} data-slot='select-description' slot='description'>{description}</Text>}
-					<FieldError className={B.slot.error} data-slot='select-error'>{errorMessage}</FieldError>
+					{description && <Text className={_B.slot.description} data-slot='select-description' slot='description'>{description}</Text>}
+					<FieldError className={_B.slot.error} data-slot='select-error'>{errorMessage}</FieldError>
 				</RACSelect>
 			)}
 			{renderTooltip?.()}
@@ -277,7 +275,7 @@ const SelectItem: FC<SelectItemProps> = ({
 	const ctx = useContext(SelectContext);
 	const isMultiple = ctx?.selectionMode === 'multiple';
 	const { props: tooltipProps, render: renderTooltip } = useTooltip(tooltip);
-	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
+	const badgeLabel = Badge.useLabel(badge, _B.cssVars.badgeMax);
 	const mergedRef = useMergeRefs([ref, tooltipProps.ref as Ref<HTMLDivElement>]);
 	const isRenderFn = typeof children === 'function';
 	return (
@@ -285,7 +283,7 @@ const SelectItem: FC<SelectItemProps> = ({
 			<ListBoxItem
 				{...(racProps as ListBoxItemProps)}
 				{...tooltipProps}
-				className={composeTailwindRenderProps(className, cn(B.slot.item, isMultiple && 'group'))}
+				className={composeTailwindRenderProps(className, cn(_B.slot.item, isMultiple && 'group'))}
 				data-destructive={destructive || undefined}
 				data-slot='select-item'
 				ref={mergedRef}
@@ -293,18 +291,18 @@ const SelectItem: FC<SelectItemProps> = ({
 				{(renderProps) => (
 					<>
 						{isMultiple && (
-							<span className={B.slot.itemCheckbox} data-slot='select-item-checkbox'>
-								{renderProps.isSelected && <Check className={B.slot.itemCheckboxIcon} />}
+							<span className={_B.slot.itemCheckbox} data-slot='select-item-checkbox'>
+								{renderProps.isSelected && <Check className={_B.slot.itemCheckboxIcon} />}
 							</span>
 						)}
-						{Slot.render(icon, undefined, B.slot.itemIcon)}
+						{Slot.render(icon, undefined, _B.slot.itemIcon)}
 						<span className='flex-1 flex flex-col'>
 							{isRenderFn
 								? (children as (state: ListBoxItemRenderProps) => ReactNode)(renderProps)
 							: children}
-							{description && <span className={B.slot.itemDescription}>{description}</span>}
+							{description && <span className={_B.slot.itemDescription}>{description}</span>}
 						</span>
-						{badgeLabel !== null && <span className={B.slot.itemBadge}>{badgeLabel}</span>}
+						{badgeLabel !== null && <span className={_B.slot.itemBadge}>{badgeLabel}</span>}
 					</>
 				)}
 			</ListBoxItem>
@@ -315,15 +313,15 @@ const SelectItem: FC<SelectItemProps> = ({
 const SelectSection = <T extends object = object>({ children, className, title, ...racProps }: SelectSectionProps<T>): ReactNode => (
 	<ListBoxSection
 		{...(racProps as ListBoxSectionProps<T>)}
-		className={cn(B.slot.section, className)}
+		className={cn(_B.slot.section, className)}
 		data-slot='select-section'
 	>
-		{title && <Header className={B.slot.sectionHeader}>{title}</Header>}
+		{title && <Header className={_B.slot.sectionHeader}>{title}</Header>}
 		{children as ReactNode}
 	</ListBoxSection>
 );
 const SelectSeparator: FC<{ readonly className?: string }> = ({ className }) => (
-	<Separator className={cn(B.slot.separator, className)} data-slot='select-separator' />
+	<Separator className={cn(_B.slot.separator, className)} data-slot='select-separator' />
 );
 
 // --- [COMPOUND] --------------------------------------------------------------

@@ -1,8 +1,6 @@
 /**
- * FileUpload: Unified DnD (drop + clipboard) + FileTrigger.
- * Pure presentation - async state from external useFileUpload hook.
- * REQUIRED: accept prop for MIME type filtering.
- * Uses RAC DropZone + useClipboard directly.
+ * Unified DnD (drop + clipboard) and FileTrigger for file selection.
+ * Requires accept prop for MIME type filtering. Uses RAC DropZone + useClipboard.
  */
 import { AsyncState } from '@parametric-portal/types/async';
 import type { FC, ReactNode, Ref } from 'react';
@@ -37,8 +35,8 @@ type FileUploadProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		base: cn(
 			'relative flex flex-col items-center justify-center',
 			'w-(--file-upload-width) min-h-(--file-upload-height)',
@@ -51,8 +49,8 @@ const B = Object.freeze({
 			'disabled:opacity-(--file-upload-disabled-opacity) disabled:pointer-events-none',
 			'data-[focus-visible]:ring-(--focus-ring-width) data-[focus-visible]:ring-(--focus-ring-color) data-[focus-visible]:z-(--focus-ring-z)',
 		),
-	}),
-});
+	},
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -70,32 +68,32 @@ const walkDirectory = async (dir: DirectoryDropItem, basePath = ''): Promise<Rea
 	return results.flat();
 };
 const extractFiles = async (items: readonly DropItem[]): Promise<readonly File[]> => {
-	const files = await Promise.all(items.filter((i): i is FileDropItem => i.kind === 'file').map((i) => i.getFile()));
-	const directories = items.filter((i): i is DirectoryDropItem => i.kind === 'directory');
-	const directoryFiles = await Promise.all(directories.map((d) => walkDirectory(d)));
+	const files = await Promise.all(items.filter((item): item is FileDropItem => item.kind === 'file').map((item) => item.getFile()));
+	const directories = items.filter((item): item is DirectoryDropItem => item.kind === 'directory');
+	const directoryFiles = await Promise.all(directories.map((dir) => walkDirectory(dir)));
 	return [...files, ...directoryFiles.flat()];
 };
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 const acceptTypes = (...types: readonly string[]) =>
-	(dragTypes: DragTypes, allowed: DropOperation[]): DropOperation => types.some((t) => dragTypes.has(t)) ? (allowed[0] ?? 'cancel') : 'cancel';
+	(dragTypes: DragTypes, allowed: DropOperation[]): DropOperation => types.some((type) => dragTypes.has(type)) ? (allowed[0] ?? 'cancel') : 'cancel';
 const FileUpload: FC<FileUploadProps> = ({
 	accept, acceptDirectory, asyncState, children, className, defaultCamera, isDisabled,
 	multiple = false, onDropActivate, onDropEnter, onDropExit, onFilesChange, progress = 0, ref, toast, trigger, }) => {
 	Toast.useTrigger(asyncState, toast);
 	const onDropHandler = useCallback(
-		(e: { items: readonly DropItem[] }) => void extractFiles(e.items).then((f) => f.length > 0 && onFilesChange(f)),
+		(event: { items: readonly DropItem[] }) => void extractFiles(event.items).then((files) => files.length > 0 && onFilesChange(files)),
 		[onFilesChange],
 	);
 	const onPaste = useCallback(
 		(items: DropItem[]) => {
-			const validItems = items.filter((i): i is FileDropItem => i.kind === 'file' && accept.includes(i.type));
-			return void Promise.all(validItems.map((i) => i.getFile())).then((f) => f.length > 0 && onFilesChange(f));
+			const validItems = items.filter((item): item is FileDropItem => item.kind === 'file' && accept.includes(item.type));
+			return void Promise.all(validItems.map((item) => item.getFile())).then((files) => files.length > 0 && onFilesChange(files));
 		},
 		[accept, onFilesChange],
 	);
 	const onSelect = useCallback(
-		(fl: FileList | null) => fl && fl.length > 0 && onFilesChange(Array.from(fl)),
+		(fileList: FileList | null) => fileList && fileList.length > 0 && onFilesChange(Array.from(fileList)),
 		[onFilesChange],
 	);
 	const getDropOperation = useMemo(() => acceptTypes(...accept), [accept]);
@@ -109,7 +107,7 @@ const FileUpload: FC<FileUploadProps> = ({
 			{({ isDropTarget, isFocusVisible }) => (
 				<div
 					{...clipboardProps}
-					className={cn(B.slot.base, className)}
+					className={cn(_B.slot.base, className)}
 					data-async-state={AsyncState.toAttr(asyncState)}
 					data-drop-target={isDropTarget || undefined}
 					data-focus-visible={isFocusVisible || undefined}

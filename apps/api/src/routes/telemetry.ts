@@ -1,18 +1,25 @@
 /**
  * OTLP proxy for browser telemetry (CORS bypass).
  * Browser POSTs to /api/v1/traces, API forwards to collector.
+ *
+ * [AUDIT EXEMPTION]: Telemetry ingestion is intentionally not audited.
+ * This high-volume endpoint would generate excessive audit entries (one per trace batch).
+ * Telemetry data is already observable via the OTLP collector itself.
  */
 import { HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
-import { TELEMETRY_TUNING } from '@parametric-portal/server/telemetry';
+import { Circuit } from '@parametric-portal/server/utils/circuit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Config, Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const CollectorEndpoint = Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(
-    Config.withDefault(TELEMETRY_TUNING.defaults.endpointHttp),
+    Config.withDefault(Telemetry.config.defaults.endpoint),
     Config.map((url) => url.replace(':4317', ':4318')),
 );
+const TelemetryCircuit = Circuit.make('telemetry.otlp');
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -25,11 +32,11 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
         const endpoint = yield* CollectorEndpoint;
         const json = yield* request.json;
         const payload = yield* S.decodeUnknown(OtlpPayload)(json);
-        yield* Effect.tryPromise(() =>
-            fetch(`${endpoint}/v1/traces`, {
-                body: JSON.stringify(payload),
-                headers: { 'Content-Type': 'application/json' },
-                method: 'POST',
+        yield* TelemetryCircuit.execute(
+            Effect.tryPromise({
+                catch: (e) => e instanceof Error ? e : new Error(String(e)),
+                try: (signal) => fetch(`${endpoint}/v1/traces`, { body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' }, method: 'POST', signal })
+                    .then((r) => r.ok ? undefined : Promise.reject(new Error(`OTLP collector HTTP ${r.status}`))),
             }),
         );
         return HttpServerResponse.empty({ status: 202 });
@@ -42,7 +49,7 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
 // --- [LAYERS] ----------------------------------------------------------------
 
 const TelemetryRouteLive = HttpApiBuilder.group(ParametricApi, 'telemetry', (handlers) =>
-    handlers.handle('ingestTraces', ({ request }) => handleIngestTraces(request)),
+    handlers.handle('ingestTraces', ({ request }) => CacheService.rateLimit('api', handleIngestTraces(request))),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

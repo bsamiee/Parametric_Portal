@@ -1,9 +1,6 @@
 /**
- * Radio: RadioGroup + Radio for mutually exclusive selection.
- * Pure presentation - CSS variable driven styling.
- * Features: Label/Description/FieldError, SelectionIndicator animation, render props, validation, longPress.
- * Presets: card (bordered container via prop), segmented (button-like via RadioGroup context).
- * REQUIRED: color, size, icon props - no defaults.
+ * RadioGroup and Radio for mutually exclusive selection.
+ * Requires color, size, icon props. Presets: card, segmented.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -46,7 +43,7 @@ type RadioProps = Omit<RACRadioProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const _B = {
 	slot: {
 		description: cn('text-(--radio-group-description-size) text-(--radio-group-description-color)'),
 		fieldError: cn('text-(--radio-group-error-size) text-(--radio-group-error-color)'),
@@ -99,7 +96,7 @@ const B = Object.freeze({
 			'disabled:pointer-events-none disabled:opacity-(--radio-disabled-opacity)',
 		),
 	} as const,
-});
+} as const;
 const RadioGroupContext = createContext<RadioGroupContextValue | null>(null);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -110,7 +107,7 @@ const RadioGroupRoot: FC<RadioGroupProps> = ({
 	return (
 		<RACRadioGroup
 			{...(racProps as RACRadioGroupProps)}
-			className={composeTailwindRenderProps(className, B.slot.groupWrapper)}
+			className={composeTailwindRenderProps(className, _B.slot.groupWrapper)}
 			data-color={color}
 			data-segmented={segmented || undefined}
 			data-size={size}
@@ -119,10 +116,10 @@ const RadioGroupRoot: FC<RadioGroupProps> = ({
 			{...defined({ orientation })}
 		>
 			<RadioGroupContext.Provider value={contextValue}>
-				{label && <Label className={B.slot.groupLabel} data-slot='radio-group-label'>{label}</Label>}
-				{description && <Text className={B.slot.description} data-slot='radio-group-description' slot='description'>{description}</Text>}
-				<div className={segmented ? B.slot.groupSegmented : B.slot.groupBase} data-orientation={orientation}>{children}</div>
-				<FieldError className={B.slot.fieldError} data-slot='radio-group-error'>{errorMessage}</FieldError>
+				{label && <Label className={_B.slot.groupLabel} data-slot='radio-group-label'>{label}</Label>}
+				{description && <Text className={_B.slot.description} data-slot='radio-group-description' slot='description'>{description}</Text>}
+				<div className={segmented ? _B.slot.groupSegmented : _B.slot.groupBase} data-orientation={orientation}>{children}</div>
+				<FieldError className={_B.slot.fieldError} data-slot='radio-group-error'>{errorMessage}</FieldError>
 			</RadioGroupContext.Provider>
 		</RACRadioGroup>
 	);
@@ -142,7 +139,7 @@ const Radio: FC<RadioProps> = ({
 	});
 	const mergedRef = useMergeRefs([ref, radioRef, tooltipProps.ref as Ref<HTMLLabelElement>]);
 	const isSegmented = groupCtx?.segmented ?? false;
-	const baseSlot = (isSegmented && B.slot.radioSegmented) || (card && B.slot.radioCard) || B.slot.radioBase;
+	const baseSlot = (isSegmented && _B.slot.radioSegmented) || (card && _B.slot.radioCard) || _B.slot.radioBase;
 	const showCircle = !isSegmented;
 	const isRenderFn = typeof children === 'function';
 	return (
@@ -162,14 +159,14 @@ const Radio: FC<RadioProps> = ({
 				{(renderProps) => (
 					<>
 						{showCircle && (
-							<span className={B.slot.radioCircle} data-slot='radio-circle'>
-								<span className={B.slot.radioIndicator} data-slot='radio-indicator' />
-								{Slot.content(renderProps.isSelected ? icon : null, B.slot.radioIcon)}
+							<span className={_B.slot.radioCircle} data-slot='radio-circle'>
+								<span className={_B.slot.radioIndicator} data-slot='radio-indicator' />
+								{Slot.content(renderProps.isSelected ? icon : null, _B.slot.radioIcon)}
 							</span>
 						)}
 						{isRenderFn
 							? (children as (state: RadioRenderProps) => ReactNode)(renderProps)
-							: children && <span className={B.slot.radioLabel}>{slot.resolve(children)}</span>}
+							: children && <span className={_B.slot.radioLabel}>{slot.resolve(children)}</span>}
 					</>
 				)}
 			</RACRadio>

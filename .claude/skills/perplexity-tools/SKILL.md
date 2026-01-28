@@ -4,8 +4,8 @@ type: complex
 depth: base
 user-invocable: false
 description: >-
-  Executes Perplexity AI queries via unified Python CLI. Use when conducting
-  web research, asking questions with citations, deep research tasks, reasoning
+  Executes Perplexity AI queries via Python CLI. Use when conducting web
+  research, asking questions with citations, deep research tasks, reasoning
   problems, or searching for up-to-date information.
 ---
 
@@ -14,28 +14,59 @@ description: >-
 
 <br>
 
-Execute Perplexity AI queries via unified Python CLI.
+Execute Perplexity AI queries via Python CLI. API key auto-injected via 1Password.
 
-[IMPORTANT] Commands require `--query`. API key auto-injected via 1Password.
+---
+## [1][COMMANDS]
+
+| [CMD]     | [ARGS]                         | [MODEL]               |
+| --------- | ------------------------------ | --------------------- |
+| ask       | `<query>`                      | sonar                 |
+| research  | `<query> [strip]`              | sonar-deep-research   |
+| reason    | `<query> [strip]`              | sonar-reasoning-pro   |
+| search    | `<query> [max] [country]`      | sonar                 |
+
+---
+## [2][USAGE]
 
 ```bash
-# Quick question—citations (sonar)
-uv run .claude/skills/perplexity-tools/scripts/perplexity.py ask --query "What is Effect-TS?"
+# Quick question with citations
+uv run .claude/skills/perplexity-tools/scripts/perplexity.py ask "What is Effect-TS?"
 
-# Deep research (sonar-deep-research)
-uv run .claude/skills/perplexity-tools/scripts/perplexity.py research --query "React 19 new features"
-uv run .claude/skills/perplexity-tools/scripts/perplexity.py research --query "Vite 7 migration" --strip-thinking
+# Deep research (10min timeout)
+uv run .claude/skills/perplexity-tools/scripts/perplexity.py research "React 19 new features"
 
-# Reasoning task (sonar-reasoning-pro)
-uv run .claude/skills/perplexity-tools/scripts/perplexity.py reason --query "Compare Vite vs Webpack"
-uv run .claude/skills/perplexity-tools/scripts/perplexity.py reason --query "Effect vs RxJS" --strip-thinking
+# Deep research, strip thinking tags
+uv run .claude/skills/perplexity-tools/scripts/perplexity.py research "Vite 7 migration" strip
 
-# Web search (sonar)
-uv run .claude/skills/perplexity-tools/scripts/perplexity.py search --query "Nx 22 Crystal" --max-results 5
+# Reasoning task
+uv run .claude/skills/perplexity-tools/scripts/perplexity.py reason "Compare Effect vs RxJS"
+
+# Web search with max results
+uv run .claude/skills/perplexity-tools/scripts/perplexity.py search "Nx Crystal" 5
 ```
 
 ---
-## [1][OUTPUT]
+## [3][ARGUMENTS]
+
+**ask**: `<query>`
+- `query` — Question to ask (required)
+
+**research**: `<query> [strip]`
+- `query` — Research topic (required)
+- `strip` — Pass `strip` to remove `<think>` tags from response
+
+**reason**: `<query> [strip]`
+- `query` — Reasoning problem (required)
+- `strip` — Pass `strip` to remove `<think>` tags from response
+
+**search**: `<query> [max] [country]`
+- `query` — Search query (required)
+- `max` — Max results (default: `10`)
+- `country` — Country code to focus results
+
+---
+## [4][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 

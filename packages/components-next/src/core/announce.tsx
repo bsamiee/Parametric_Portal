@@ -1,8 +1,6 @@
 /**
- * Screen reader announcements and accessibility utilities.
- * Uses @react-aria/live-announcer singleton for stable live regions.
- * Safari-safe: announcer handles 100ms timing quirk internally.
- * VisuallyHidden: Content hidden visually but accessible to screen readers.
+ * Screen reader announcements via @react-aria/live-announcer singleton.
+ * AsyncAnnouncer auto-announces state transitions. VisuallyHidden hides content visually.
  */
 import { announce } from '@react-aria/live-announcer';
 import { AsyncState } from '@parametric-portal/types/async';
@@ -23,21 +21,20 @@ type AsyncAnnounceConfig = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    defaults: Object.freeze({
+const _B = {
+    defaults: {
         assertiveness: 'polite' as Assertiveness,
         failure: 'Operation failed',
         loading: 'Loading',
         success: 'Operation completed',
-    }),
-});
+    },
+} as const;
 
 // --- [HOOKS] -----------------------------------------------------------------
 
 const useAsyncAnnounce = (
     asyncState: AsyncState<unknown, unknown> | undefined,
-    config: AsyncAnnounceConfig = {},
-): void => {
+    config: AsyncAnnounceConfig = {}, ): void => {
     const prevTagRef = useRef<string | undefined>(undefined);
     useEffect(() => {
         const prevTag = prevTagRef.current;
@@ -46,13 +43,13 @@ const useAsyncAnnounce = (
             Option.fromNullable(asyncState),
             Option.filter((state) => prevTag !== state._tag),
             Option.map((state) => AsyncState.$match(state, {
-                Failure: () => config.failure ?? B.defaults.failure,
+                Failure: () => config.failure ?? _B.defaults.failure,
                 Idle: () => null,
-                Loading: () => config.loading ?? B.defaults.loading,
-                Success: () => config.success ?? B.defaults.success,
+                Loading: () => config.loading ?? _B.defaults.loading,
+                Success: () => config.success ?? _B.defaults.success,
             })),
             Option.flatMap(Option.fromNullable),
-            Option.map((message) => announce(message, config.assertiveness ?? B.defaults.assertiveness)),
+            Option.map((message) => announce(message, config.assertiveness ?? _B.defaults.assertiveness)),
         );
     }, [asyncState, config.assertiveness, config.failure, config.loading, config.success]);
 };

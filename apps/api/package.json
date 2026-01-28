@@ -14,17 +14,13 @@
         "typecheck": "tsc --project tsconfig.json --noEmit"
     },
     "dependencies": {
-        "@effect/ai": "catalog:",
+        "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
-        "@effect/sql": "catalog:",
-        "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",
         "@parametric-portal/types": "workspace:*",
-        "arctic": "catalog:",
-        "effect": "catalog:",
-        "isomorphic-dompurify": "catalog:"
+        "effect": "catalog:"
     },
     "devDependencies": {
         "@types/node": "catalog:",

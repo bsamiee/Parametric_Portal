@@ -1,6 +1,5 @@
 /**
- * Dialog: Accessible modal dialog with focus trap, backdrop blur, and enter/exit animations.
- * Uses React Aria Components Dialog with ModalOverlay for focus management.
+ * Modal dialog with focus trap, backdrop blur, and enter/exit animations.
  * useDialog hook provides deferred action pattern for confirmation workflows.
  */
 import { AsyncState } from '@parametric-portal/types/async';
@@ -76,11 +75,11 @@ type DialogSpecificProps = {
 	readonly trigger?: ReactNode;
 };
 type DialogBehaviorInput = {
-	readonly backdropBlur?: boolean | undefined;
-	readonly buttons?: readonly DialogButton[] | undefined;
-	readonly isDismissable?: boolean | undefined;
-	readonly isKeyboardDismissDisabled?: boolean | undefined;
-	readonly role?: DialogRole | undefined;
+	readonly backdropBlur: boolean | undefined;
+	readonly buttons: readonly DialogButton[] | undefined;
+	readonly isDismissable: boolean | undefined;
+	readonly isKeyboardDismissDisabled: boolean | undefined;
+	readonly role: DialogRole | undefined;
 };
 type DialogBaseProps = {
 	readonly onClose?: () => void;
@@ -89,8 +88,8 @@ type DialogBaseProps = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		body: cn('flex-1 overflow-auto p-(--dialog-padding)', 'text-(--dialog-font-size) text-(--dialog-fg)'),
 		button: cn(
 			'px-(--dialog-button-padding-x) py-(--dialog-button-padding-y)',
@@ -123,8 +122,8 @@ const B = Object.freeze({
 		),
 		overlayBlur: 'backdrop-blur-sm',
 		title: cn('text-(--dialog-header-font-size) font-(--dialog-header-font-weight) text-(--dialog-fg)'),
-	}),
-});
+	},
+} as const;
 const DialogContext = createContext<DialogContextValue | null>(null);
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -147,8 +146,14 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 	const [internalOpen, setInternalOpen] = useState(false);
 	const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
 	const isOpen = cfg?.open ?? internalOpen;
-	const isPending = AsyncState.isPending(cfg?.asyncState);
-	const behavior = resolveDialogBehavior(cfg);
+	const isPending = cfg?.asyncState != null && AsyncState.$is('Loading')(cfg.asyncState);
+	const behavior = resolveDialogBehavior(cfg == null ? undefined : {
+		backdropBlur: cfg.backdropBlur,
+		buttons: cfg.buttons,
+		isDismissable: cfg.isDismissable,
+		isKeyboardDismissDisabled: cfg.isKeyboardDismissDisabled,
+		role: cfg.role,
+	});
 	const { close, confirm, handleOpenChange, open } = useMemo(() => ({
 		close: () => { setPendingAction(null); setInternalOpen(false); cfg?.onOpenChange?.(false); },
 		confirm: () => {
@@ -167,7 +172,7 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 	const hasContent = cfg?.title || cfg?.description || cfg?.content || cfg?.buttons;
 	const render = has && isOpen && hasContent ? () => (
 		<RACModalOverlay
-			className={cn(B.slot.overlay, behavior.backdropBlur && B.slot.overlayBlur, cfg.overlayClassName)}
+			className={cn(_B.slot.overlay, behavior.backdropBlur && _B.slot.overlayBlur, cfg.overlayClassName)}
 			data-slot='dialog-overlay'
 			data-theme='dialog'
 			isDismissable={behavior.isDismissable}
@@ -175,9 +180,9 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 			isOpen={isOpen}
 			onOpenChange={handleOpenChange}
 		>
-			<RACModal className={B.slot.modal} data-slot='dialog-modal'>
+			<RACModal className={_B.slot.modal} data-slot='dialog-modal'>
 				<RACDialog
-					className={composeTailwindRenderProps(cfg.className, B.slot.content) as string}
+					className={composeTailwindRenderProps(cfg.className, _B.slot.content) as string}
 					data-slot='dialog'
 					role={behavior.role}
 				>
@@ -185,18 +190,18 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 						{(cfg.title || cfg.description) && (<DialogHeader description={cfg.description} title={cfg.title} />)}
 						{cfg.content && (typeof cfg.content === 'function' ? cfg.content(renderContext) : cfg.content)}
 						{cfg.buttons && cfg.buttons.length > 0 && (
-							<div className={B.slot.footer} data-slot='dialog-footer'>
-								{cfg.buttons.map((btn) => (
+							<div className={_B.slot.footer} data-slot='dialog-footer'>
+								{cfg.buttons.map((button) => (
 									<button
 										// biome-ignore lint/a11y/noAutofocus: dialog buttons may require autofocus for UX
-										autoFocus={btn.autoFocus}
-										className={cn(B.slot.button, btn.action === 'confirm' ? B.slot.buttonConfirm : B.slot.buttonCancel, btn.className)}
+										autoFocus={button.autoFocus}
+										className={cn(_B.slot.button, button.action === 'confirm' ? _B.slot.buttonConfirm : _B.slot.buttonCancel, button.className)}
 										disabled={isPending}
-										key={`${btn.action}-${String(btn.label)}`}
-										onClick={btn.action === 'confirm' ? confirm : close}
+										key={`${button.action}-${String(button.label)}`}
+										onClick={button.action === 'confirm' ? confirm : close}
 										type='button'
 									>
-										{btn.label}
+										{button.label}
 									</button>
 								))}
 							</div>
@@ -213,17 +218,17 @@ const useDialog = <P extends object = object>(cfg: DialogConfig | undefined, bas
 // --- [SUB-COMPONENTS] --------------------------------------------------------
 
 const DialogHeader: FC<DialogHeaderProps> = ({ children, className, description, title }) => (
-	<div className={cn(B.slot.header, className)} data-slot='dialog-header'>
-		{title && (<Heading className={B.slot.title} data-slot='dialog-title' slot='title'>{title}</Heading>)}
-		{description && (<p className={B.slot.description} data-slot='dialog-description'>{description}</p>)}
+	<div className={cn(_B.slot.header, className)} data-slot='dialog-header'>
+		{title && (<Heading className={_B.slot.title} data-slot='dialog-title' slot='title'>{title}</Heading>)}
+		{description && (<p className={_B.slot.description} data-slot='dialog-description'>{description}</p>)}
 		{children}
 	</div>
 );
 const DialogBody: FC<DialogSlotProps> = ({ children, className }) => (
-	<div className={cn(B.slot.body, className)} data-slot='dialog-body'>{children}</div>
+	<div className={cn(_B.slot.body, className)} data-slot='dialog-body'>{children}</div>
 );
 const DialogFooter: FC<DialogSlotProps> = ({ children, className }) => (
-	<div className={cn(B.slot.footer, className)} data-slot='dialog-footer'>{children}</div>
+	<div className={cn(_B.slot.footer, className)} data-slot='dialog-footer'>{children}</div>
 );
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -231,13 +236,13 @@ const DialogFooter: FC<DialogSlotProps> = ({ children, className }) => (
 const DialogRoot: FC<DialogProps> = ({
 	backdropBlur, closeOnInteractOutside, defaultOpen, isDismissable, isKeyboardDismissDisabled, isOpen, overlayClassName, overlayStyle, onClose,
 	onOpenChange, children, className, trigger, role: roleProp, ...dialogProps }) => {
-	const behavior = resolveDialogBehavior({ backdropBlur, isDismissable, isKeyboardDismissDisabled, role: roleProp });
+	const behavior = resolveDialogBehavior({ backdropBlur, buttons: undefined, isDismissable, isKeyboardDismissDisabled, role: roleProp });
 	const resolvedCloseOnInteractOutside = closeOnInteractOutside ?? behavior.isDismissable;
 	const contextValue: DialogContextValue = useMemo(() => ({ role: behavior.role }), [behavior.role]);
 	const handleOpenChange = (open: boolean): void => { onOpenChange?.(open); !open && onClose?.(); };
 	const dialogContent = (
 		<RACModalOverlay
-			className={cn(B.slot.overlay, behavior.backdropBlur && B.slot.overlayBlur, overlayClassName)}
+			className={cn(_B.slot.overlay, behavior.backdropBlur && _B.slot.overlayBlur, overlayClassName)}
 			data-slot='dialog-overlay'
 			data-theme='dialog'
 			isDismissable={resolvedCloseOnInteractOutside}
@@ -245,10 +250,10 @@ const DialogRoot: FC<DialogProps> = ({
 			onOpenChange={handleOpenChange}
 			{...defined({ defaultOpen, isOpen, style: overlayStyle })}
 		>
-			<RACModal className={B.slot.modal} data-slot='dialog-modal'>
+			<RACModal className={_B.slot.modal} data-slot='dialog-modal'>
 				<RACDialog
 					{...(dialogProps as unknown as RACDialogProps)}
-					className={composeTailwindRenderProps(className, B.slot.content) as string}
+					className={composeTailwindRenderProps(className, _B.slot.content) as string}
 					data-slot='dialog'
 					role={behavior.role}
 				>

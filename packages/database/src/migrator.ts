@@ -1,13 +1,19 @@
-/** PgMigrator layer: file-system loader for ../migrations directory. */
-import '@effect/platform';
+/**
+ * Load migrations from ../migrations directory via PgMigrator.
+ * NodeContext filesystem access; depends on Client.layer.
+ */
 import { fileURLToPath } from 'node:url';
+import { NodeContext } from '@effect/platform-node';
 import { PgMigrator } from '@effect/sql-pg';
 import { Layer } from 'effect';
-import { PgLive } from './client.ts';
+import { Client } from './client.ts';
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const MigratorLive = PgMigrator.layer({ loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))) }).pipe(Layer.provide(PgLive));
+const MigratorLive = PgMigrator.layer({ loader: PgMigrator.fromFileSystem(fileURLToPath(new URL(/* @vite-ignore */ '../migrations', import.meta.url))) }).pipe(
+	Layer.provide(Client.layer),
+	Layer.provide(NodeContext.layer),
+);
 
 // --- [EXPORT] ----------------------------------------------------------------
 

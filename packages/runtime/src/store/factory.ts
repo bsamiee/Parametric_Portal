@@ -1,9 +1,9 @@
 /**
  * Zustand store factory with canonical middleware chain composition.
  */
-import type { XOR } from '@parametric-portal/types/props';
 import { PositiveInt } from '@parametric-portal/types/types';
 import { Either, Match, Schema as S } from 'effect';
+import type { XOR } from 'ts-essentials';
 import { type TemporalState, temporal } from 'zundo';
 import { create, type StateCreator, type UseBoundStore, type StoreApi as ZustandStoreApi } from 'zustand';
 import { devtools, persist, subscribeWithSelector } from 'zustand/middleware';
@@ -82,7 +82,7 @@ const validateStoreName = (name: string): boolean => Either.isRight(S.decodeUnkn
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     defaults: {
         devtools: { enabled: true },
         immer: { enabled: true },
@@ -98,10 +98,10 @@ const B = Object.freeze({
                 /^reset/,
             ] as const satisfies ReadonlyArray<RegExp>,
         },
-        temporal: { enabled: true, limit: PositiveInt.decodeSync(100) },
+        temporal: { enabled: true, limit: S.decodeSync(PositiveInt)(100) },
     },
     order: ['immer', 'computed', 'persist', 'temporal', 'subscribeWithSelector', 'devtools'] as const,
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 

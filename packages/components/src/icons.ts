@@ -61,7 +61,7 @@ const createIconComponent = (input: IconInput) => {
                 size: computed.iconSize,
                 stroke: propStrokeWidth ?? input.strokeWidth ?? utilities.strokeWidth(resolvedScale.scale),
             };
-        }, [propScale, propStrokeWidth, input.scale, input.strokeWidth]);
+        }, [propScale, propStrokeWidth]);
         const tooltipOffsetPx = computeOffsetPx(scale, B.algo.tooltipOffMul);
         const tooltipState = useTooltipState(wrapperRef, {
             ...(tooltip !== undefined && { content: tooltip }),

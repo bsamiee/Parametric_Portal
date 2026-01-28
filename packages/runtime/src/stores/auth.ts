@@ -1,51 +1,54 @@
 /**
  * Cross-app authentication state with HttpOnly cookie token persistence.
+ * Uses DateTime.Utc consistently for all temporal values.
  */
-import type { AiProvider, ApiKeyId, Role, UserId } from '@parametric-portal/types/schema';
+import type { DateTime } from 'effect';
 import { createStore } from '../store/factory';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type ApiKeyResponseType = {
-    readonly createdAt: Date;
-    readonly id: ApiKeyId;
-    readonly name: string;
-    readonly provider: AiProvider;
-};
-type UserResponseType = {
-    readonly createdAt: Date;
+type AuthUser = {
+    readonly id: string;
+    readonly appId: string;
     readonly email: string;
-    readonly id: UserId;
-    readonly role: Role;
+    readonly role: string;
+    readonly state: string;
+};
+type AuthApiKey = {
+    readonly id: string;
+    readonly name: string;
+    readonly prefix: string;
+    readonly expiresAt: Date | null;
+    readonly lastUsedAt: Date | null;
 };
 type AuthState = {
     readonly accessToken: string | null;
-    readonly apiKeys: ReadonlyArray<ApiKeyResponseType>;
-    readonly expiresAt: Date | null;
+    readonly apiKeys: ReadonlyArray<AuthApiKey>;
+    readonly expiresAt: DateTime.Utc | null;
     readonly isAccountOverlayOpen: boolean;
     readonly isAuthOverlayOpen: boolean;
     readonly isLoading: boolean;
-    readonly user: UserResponseType | null;
+    readonly user: AuthUser | null;
 };
 type AuthActions = {
-    readonly addApiKey: (key: ApiKeyResponseType) => void;
+    readonly addApiKey: (key: AuthApiKey) => void;
     readonly clearAuth: () => void;
     readonly closeAccountOverlay: () => void;
     readonly closeAuthOverlay: () => void;
     readonly openAccountOverlay: () => void;
     readonly openAuthOverlay: () => void;
     readonly removeApiKey: (id: string) => void;
-    readonly setApiKeys: (keys: ReadonlyArray<ApiKeyResponseType>) => void;
-    readonly setAuth: (token: string, expiresAt: Date, user: UserResponseType) => void;
+    readonly setApiKeys: (keys: ReadonlyArray<AuthApiKey>) => void;
+    readonly setAuth: (token: string, expiresAt: DateTime.Utc, user: AuthUser) => void;
     readonly setLoading: (flag: boolean) => void;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const AuthStoreTuning = {
     initial: {
         accessToken: null,
-        apiKeys: [] as ReadonlyArray<ApiKeyResponseType>,
+        apiKeys: [] as ReadonlyArray<AuthApiKey>,
         expiresAt: null,
         isAccountOverlayOpen: false,
         isAuthOverlayOpen: false,
@@ -53,15 +56,15 @@ const B = Object.freeze({
         user: null,
     } satisfies AuthState,
     name: 'parametric-portal:auth',
-} as const);
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const useAuthStore = createStore<AuthState & AuthActions>(
     (set, get) => ({
-        ...B.initial,
+        ...AuthStoreTuning.initial,
         addApiKey: (key) => set({ apiKeys: [...get().apiKeys, key] }),
-        clearAuth: () => set(B.initial),
+        clearAuth: () => set(AuthStoreTuning.initial),
         closeAccountOverlay: () => set({ isAccountOverlayOpen: false }),
         closeAuthOverlay: () => set({ isAuthOverlayOpen: false }),
         openAccountOverlay: () => set({ isAccountOverlayOpen: true }),
@@ -73,7 +76,7 @@ const useAuthStore = createStore<AuthState & AuthActions>(
     }),
     {
         immer: false,
-        name: B.name,
+        name: AuthStoreTuning.name,
         persist: false,
         temporal: false,
     },
@@ -81,5 +84,5 @@ const useAuthStore = createStore<AuthState & AuthActions>(
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as AUTH_STORE_TUNING, useAuthStore };
-export type { AuthActions, AuthState };
+export { AuthStoreTuning as AUTH_STORE_TUNING, useAuthStore };
+export type { AuthActions, AuthApiKey, AuthState, AuthUser };

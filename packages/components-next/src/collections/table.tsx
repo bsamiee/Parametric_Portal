@@ -1,10 +1,6 @@
 /**
- * Table: Data table with sorting, selection, column resizing, and row actions.
- * Compound component pattern - Table.Header, Table.Body, Table.Row, Table.Cell, Table.Column.
- * Wraps RAC Table components with theme-driven CSS variable styling.
- *
- * RAC props pass through directly - we only add: theme (color/size/variant), tooltip, gesture.
- * Supports keyboard navigation, selection modes (single/multiple/none), sortable columns, resizable columns.
+ * Data table with sorting, selection, and column resizing.
+ * Compound component: Table.Header, Table.Body, Table.Row, Table.Cell, Table.Column.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -84,8 +80,8 @@ const TableContext = createContext<TableContextValue | null>(null);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		body: cn('bg-(--table-body-bg)'),
 		cell: cn(
 			'px-(--table-cell-px) py-(--table-cell-py)',
@@ -160,8 +156,8 @@ const B = Object.freeze({
 			'group-data-[sorted]/table-column:opacity-100',
 			'group-data-[sort-direction=descending]/table-column:rotate-180',
 		),
-	}),
-});
+	},
+} as const;
 
 // --- [SUB-COMPONENTS] --------------------------------------------------------
 
@@ -170,7 +166,7 @@ const TableHeader = <T extends object>({ children, className, ...racProps }: Tab
 	return (
 		<RACTableHeader
 			{...(racProps as RACTableHeaderProps<T>)}
-			className={composeTailwindRenderProps(className, B.slot.header)}
+			className={composeTailwindRenderProps(className, _B.slot.header)}
 			data-color={ctx?.color}
 			data-size={ctx?.size}
 			data-slot="table-header"
@@ -185,13 +181,13 @@ const TableBody = <T extends object>({ children, className, emptyState, ...racPr
 	return (
 		<RACTableBody
 			{...(racProps as RACTableBodyProps<T>)}
-			className={composeTailwindRenderProps(className, B.slot.body)}
+			className={composeTailwindRenderProps(className, _B.slot.body)}
 			data-color={ctx?.color}
 			data-size={ctx?.size}
 			data-slot="table-body"
 			data-variant={ctx?.variant}
 			{...(emptyState !== undefined && {
-				renderEmptyState: () => <div className={B.slot.emptyState}>{emptyState}</div>,
+				renderEmptyState: () => <div className={_B.slot.emptyState}>{emptyState}</div>,
 			})}
 		>
 			{children}
@@ -219,7 +215,7 @@ const TableRow = <T extends object = object>({ asyncState, children, className, 
 				{...(racProps as RACRowProps<T>)}
 				{...(tooltipPropsWithoutRef as object)}
 				{...(gesturePropsWithoutRef as object)}
-				className={composeTailwindRenderProps(className, B.slot.row)}
+				className={composeTailwindRenderProps(className, _B.slot.row)}
 				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-size={ctx?.size}
@@ -240,7 +236,7 @@ const TableRow = <T extends object = object>({ asyncState, children, className, 
 const TableRowCheckbox = ({ children, className, ...racProps }: TableRowCheckboxProps): ReactNode => (
 	<RACCheckbox
 		{...racProps}
-		className={composeTailwindRenderProps(className, B.slot.checkbox)}
+		className={composeTailwindRenderProps(className, _B.slot.checkbox)}
 		slot="selection"
 	>
 		{children}
@@ -257,7 +253,7 @@ const TableColumn = ({
 		<RACColumn
 			{...(racProps as RACColumnProps)}
 			{...defined({ allowsSorting, defaultWidth, isRowHeader, maxWidth, minWidth, width })}
-			className={composeTailwindRenderProps(className, B.slot.column)}
+			className={composeTailwindRenderProps(className, _B.slot.column)}
 			id={id}
 		>
 			{(renderProps: RACColumnRenderProps) => {
@@ -267,7 +263,7 @@ const TableColumn = ({
 					<>
 						<div
 							{...(tooltipProps as object)}
-							className={B.slot.columnContent}
+							className={_B.slot.columnContent}
 							data-allows-sorting={isSortable || undefined}
 							data-color={ctx?.color}
 							data-size={ctx?.size}
@@ -282,7 +278,7 @@ const TableColumn = ({
 								<span
 									aria-hidden="true"
 									className={cn(
-										B.slot.sortIndicator,
+										_B.slot.sortIndicator,
 										isSorted && 'opacity-100',
 										sortDirection === 'descending' && 'rotate-180',
 									)}
@@ -309,7 +305,7 @@ const TableCell = ({ asyncState, children, className, ref, tooltip, ...racProps 
 		<RACCell
 			{...(racProps as RACCellProps)}
 			{...(tooltipProps as object)}
-			className={composeTailwindRenderProps(className, B.slot.cell)}
+			className={composeTailwindRenderProps(className, _B.slot.cell)}
 			data-async-state={slot.attr}
 			data-color={ctx?.color}
 			data-size={ctx?.size}
@@ -325,7 +321,7 @@ const TableCell = ({ asyncState, children, className, ref, tooltip, ...racProps 
 const ResizableTableContainer = ({ children, className, ...racProps }: ResizableTableContainerProps): ReactNode => (
 	<RACResizableTableContainer
 		{...(racProps as RACResizableTableContainerProps)}
-		className={cn(B.slot.resizableContainer, className)}
+		className={cn(_B.slot.resizableContainer, className)}
 		data-slot="table-resizable-container"
 	>
 		{children}
@@ -337,7 +333,7 @@ const ColumnResizer = ({ children, className, ref, ...racProps }: ColumnResizerP
 	return (
 		<RACColumnResizer
 			{...(racProps as RACColumnResizerProps)}
-			className={composeTailwindRenderProps(className, B.slot.columnResizer)}
+			className={composeTailwindRenderProps(className, _B.slot.columnResizer)}
 			data-slot="table-column-resizer"
 			ref={mergedRef}
 		>
@@ -354,7 +350,7 @@ const TableRoot = ({ children, className, color, size, variant, ...racProps }: T
 		<TableContext.Provider value={contextValue}>
 			<RACTable
 				{...(racProps as RACTableProps)}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-color={color}
 				data-size={size}
 				data-slot="table"

@@ -1,8 +1,6 @@
 /**
- * DatePicker: Unified date/datetime/range selection with calendar popover.
- * CSS variable inheritance - color/size/variant set on root, children inherit.
- * REQUIRED: size prop. Optional: color, variant, mode, granularity.
- * Mode: 'single' (default) or 'range'. Granularity: 'day' | 'hour' | 'minute' | 'second'.
+ * Date/datetime/range selection with calendar popover.
+ * Requires size prop. Mode: single (default) or range. Granularity: day/hour/minute/second.
  */
 import { FloatingNode, useMergeRefs, useFloatingNodeId } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -88,12 +86,12 @@ const getLocaleHourCycle = (): HourCycle => pipe(
 	Option.map(({ hourCycle }): HourCycle => hourCycle === 'h23' || hourCycle === 'h24' ? 24 : 12),
 	Option.getOrElse((): HourCycle => 12),
 );
-const B = Object.freeze({
-	cssVars: Object.freeze({ offset: '--date-picker-popover-offset' }),
-	defaults: Object.freeze({ firstDayOfWeek: 'auto' as const, granularity: 'day' as DatePickerGranularity, hourCycle: 'auto' as const, mode: 'single' as DatePickerMode, offset: 8, rangeSeparator: '-' }),
-	granularity: Object.freeze({ time: ['hour', 'minute', 'second'] as const }),
-	icon: Object.freeze({ next: ChevronRight, prev: ChevronLeft }),
-	slot: Object.freeze({
+const _B = {
+	cssVars: { offset: '--date-picker-popover-offset' },
+	defaults: { firstDayOfWeek: 'auto' as const, granularity: 'day' as DatePickerGranularity, hourCycle: 'auto' as const, mode: 'single' as DatePickerMode, offset: 8, rangeSeparator: '-' },
+	granularity: { time: ['hour', 'minute', 'second'] as const },
+	icon: { next: ChevronRight, prev: ChevronLeft },
+	slot: {
 		calendar: cn('w-(--date-picker-calendar-width)', 'p-(--date-picker-calendar-padding)', 'bg-(--date-picker-calendar-bg)', 'rounded-(--date-picker-calendar-radius)'),
 		cell: cn(
 			'flex items-center justify-center', 'size-(--date-picker-cell-size)', 'text-(--date-picker-cell-font-size)', 'rounded-(--date-picker-cell-radius)', 'cursor-pointer',
@@ -158,15 +156,15 @@ const B = Object.freeze({
 			'focus-visible:outline-none focus-visible:ring-(--focus-ring-width) focus-visible:ring-(--focus-ring-color)',
 		),
 		triggerIcon: cn('size-(--date-picker-trigger-icon-size) shrink-0'),
-	}),
-});
+	},
+} as const;
 const Ctx = createContext<ContextValue | null>(null);
 
 // --- [INTERNAL_COMPONENTS] ---------------------------------------------------
 
 const Segment: FC<{ readonly segment: RACDateSegmentProps['segment'] }> = ({ segment }) => (
 	<RACDateSegment
-		className={B.slot.segment}
+		className={_B.slot.segment}
 		data-editable={segment.isEditable || undefined}
 		data-placeholder={segment.isPlaceholder || undefined}
 		data-slot='date-picker-segment'
@@ -178,7 +176,7 @@ const Field: FC<{ readonly slot?: 'end' | 'start' }> = ({ slot }) => {
 	const ctx = useContext(Ctx);
 	return (
 		<RACDateInput
-			className={B.slot.field}
+			className={_B.slot.field}
 			data-color={ctx?.color}
 			data-granularity={ctx?.granularity}
 			data-size={ctx?.size}
@@ -208,7 +206,7 @@ const Trigger: FC<TriggerProps> = ({ asyncState, gesture, icon, tooltip }) => {
 		<>
 			<RACButton
 				{...({ ...tooltipProps, ...gestureProps, style: gestureProps.style } as unknown as RACButtonProps)}
-				className={B.slot.trigger}
+				className={_B.slot.trigger}
 				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-size={ctx?.size}
@@ -218,7 +216,7 @@ const Trigger: FC<TriggerProps> = ({ asyncState, gesture, icon, tooltip }) => {
 				isPending={slot.pending}
 				ref={mergedRef}
 			>
-				{slot.render(icon, B.slot.triggerIcon)}
+				{slot.render(icon, _B.slot.triggerIcon)}
 			</RACButton>
 			<AsyncAnnouncer asyncState={asyncState} />
 			{renderTooltip?.()}
@@ -228,13 +226,13 @@ const Trigger: FC<TriggerProps> = ({ asyncState, gesture, icon, tooltip }) => {
 const CalendarHeader: FC = () => {
 	const ctx = useContext(Ctx);
 	return (
-		<header className={B.slot.header} data-slot='date-picker-header'>
-			<RACButton className={B.slot.headerButton} data-slot='date-picker-prev-button' slot='previous' {...defined({ 'aria-label': ctx?.prevButtonLabel })}>
-				{Slot.render(B.icon.prev, undefined, B.slot.headerIcon)}
+		<header className={_B.slot.header} data-slot='date-picker-header'>
+			<RACButton className={_B.slot.headerButton} data-slot='date-picker-prev-button' slot='previous' {...defined({ 'aria-label': ctx?.prevButtonLabel })}>
+				{Slot.render(_B.icon.prev, undefined, _B.slot.headerIcon)}
 			</RACButton>
-			<RACHeading className={B.slot.headerTitle} data-slot='date-picker-heading' />
-			<RACButton className={B.slot.headerButton} data-slot='date-picker-next-button' slot='next' {...defined({ 'aria-label': ctx?.nextButtonLabel })}>
-				{Slot.render(B.icon.next, undefined, B.slot.headerIcon)}
+			<RACHeading className={_B.slot.headerTitle} data-slot='date-picker-heading' />
+			<RACButton className={_B.slot.headerButton} data-slot='date-picker-next-button' slot='next' {...defined({ 'aria-label': ctx?.nextButtonLabel })}>
+				{Slot.render(_B.icon.next, undefined, _B.slot.headerIcon)}
 			</RACButton>
 		</header>
 	);
@@ -251,15 +249,15 @@ const Cell: FC<{ readonly date: RACCalendarCellProps['date'] }> = ({ date }) => 
 	const { props: { ref: tooltipRef, ...tooltipProps }, render: renderTooltip } = useTooltip(tooltipConfig);
 	return (
 		<>
-			<RACCalendarCell {...tooltipProps} ref={tooltipRef as Ref<HTMLTableCellElement>} className={B.slot.cell} data-slot='date-picker-cell' date={date} />
+			<RACCalendarCell {...tooltipProps} ref={tooltipRef as Ref<HTMLTableCellElement>} className={_B.slot.cell} data-slot='date-picker-cell' date={date} />
 			{renderTooltip?.()}
 		</>
 	);
 };
 const CalendarGrid: FC = () => (
-	<RACCalendarGrid className={B.slot.grid} data-slot='date-picker-grid'>
+	<RACCalendarGrid className={_B.slot.grid} data-slot='date-picker-grid'>
 		<RACCalendarGridHeader>
-			{(day) => <RACCalendarHeaderCell className={B.slot.headerCell} data-slot='date-picker-header-cell'>{day}</RACCalendarHeaderCell>}
+			{(day) => <RACCalendarHeaderCell className={_B.slot.headerCell} data-slot='date-picker-header-cell'>{day}</RACCalendarHeaderCell>}
 		</RACCalendarGridHeader>
 		<RACCalendarGridBody>
 			{(date: RACCalendarCellProps['date']) => <Cell date={date} />}
@@ -270,12 +268,12 @@ const Calendar: FC<{ readonly isRange: boolean }> = ({ isRange }) => {
 	const ctx = useContext(Ctx);
 	const dataProps = { 'data-color': ctx?.color, 'data-size': ctx?.size, 'data-variant': ctx?.variant };
 	return isRange ? (
-		<RACRangeCalendar {...dataProps} className={B.slot.rangeCalendar} data-slot='date-picker-range-calendar' {...defined({ 'aria-label': ctx?.calendarLabel, firstDayOfWeek: ctx?.firstDayOfWeek })}>
+		<RACRangeCalendar {...dataProps} className={_B.slot.rangeCalendar} data-slot='date-picker-range-calendar' {...defined({ 'aria-label': ctx?.calendarLabel, firstDayOfWeek: ctx?.firstDayOfWeek })}>
 			<CalendarHeader />
 			<CalendarGrid />
 		</RACRangeCalendar>
 	) : (
-		<RACCalendar {...dataProps} className={B.slot.calendar} data-slot='date-picker-calendar' {...defined({ 'aria-label': ctx?.calendarLabel, firstDayOfWeek: ctx?.firstDayOfWeek })}>
+		<RACCalendar {...dataProps} className={_B.slot.calendar} data-slot='date-picker-calendar' {...defined({ 'aria-label': ctx?.calendarLabel, firstDayOfWeek: ctx?.firstDayOfWeek })}>
 			<CalendarHeader />
 			<CalendarGrid />
 		</RACCalendar>
@@ -290,13 +288,13 @@ const TimeField: FC<{ readonly config: { readonly description?: ReactNode; reado
 	const rangeValue = rangeState?.timeRange ?? null;
 	const autoValue = rangeState ? (part === 'end' ? rangeValue?.end : rangeValue?.start) ?? null : singleState?.timeValue ?? null;
 	const handleChange = (next: TimeValue | null): void => { rangeState ? rangeState.setTime(part, next) : next !== null && singleState?.setTimeValue(next);};
-	const timeGranularity = B.granularity.time.includes(ctx?.granularity as (typeof B.granularity.time)[number])
+	const timeGranularity = _B.granularity.time.includes(ctx?.granularity as (typeof _B.granularity.time)[number])
 		? (ctx?.granularity as 'hour' | 'minute' | 'second')
 		: undefined;
 	const hourCycle = ctx?.hourCycle;
 	return hasTime ? (
 		<RACTimeField
-			className={B.slot.time}
+			className={_B.slot.time}
 			data-color={ctx?.color}
 			data-size={ctx?.size}
 			data-slot='date-picker-time'
@@ -306,22 +304,22 @@ const TimeField: FC<{ readonly config: { readonly description?: ReactNode; reado
 			{...(hourCycle !== undefined && { hourCycle })}
 			{...defined({ granularity: timeGranularity, slot })}
 		>
-			{config.label && <RACLabel className={B.slot.timeLabel} data-slot='date-picker-time-label'>{config.label}</RACLabel>}
-			<RACDateInput className={B.slot.timeInput} data-color={ctx?.color} data-size={ctx?.size} data-slot='date-picker-time-input' data-variant={ctx?.variant}>
+			{config.label && <RACLabel className={_B.slot.timeLabel} data-slot='date-picker-time-label'>{config.label}</RACLabel>}
+			<RACDateInput className={_B.slot.timeInput} data-color={ctx?.color} data-size={ctx?.size} data-slot='date-picker-time-input' data-variant={ctx?.variant}>
 				{(seg) => <Segment segment={seg} />}
 			</RACDateInput>
-			{config.description && <Text className={B.slot.description} data-slot='date-picker-time-description' slot='description'>{config.description}</Text>}
+			{config.description && <Text className={_B.slot.description} data-slot='date-picker-time-description' slot='description'>{config.description}</Text>}
 		</RACTimeField>
 	) : null;
 };
-const PopoverContent: FC<{ readonly children: ReactNode; readonly offset?: number | undefined }> = ({ children, offset }) => {
+const PopoverContent: FC<{ readonly children: ReactNode; readonly offset: number | undefined }> = ({ children, offset }) => {
 	const nodeId = useFloatingNodeId();
 	const ctx = useContext(Ctx);
-	const resolvedOffset = offset ?? (readCssPx(B.cssVars.offset) || B.defaults.offset);
+	const resolvedOffset = offset ?? (readCssPx(_B.cssVars.offset) || _B.defaults.offset);
 	return (
 		<FloatingNode id={nodeId}>
 			<Popover
-				className={B.slot.popover}
+				className={_B.slot.popover}
 				data-color={ctx?.color}
 				data-size={ctx?.size}
 				data-slot='date-picker-popover'
@@ -343,14 +341,14 @@ const DatePicker = <T extends DateValue>(props: DatePickerProps<T>): ReactNode =
 		label, mode: modeProp, nextButtonLabel, popoverOffset, prevButtonLabel, rangeSeparator, ref, size, time, tooltip, triggerAsyncState,
 		triggerGesture, triggerIcon, triggerTooltip, variant, ...racProps } = props;
 	const { render: renderTooltip } = useTooltip(tooltip);
-	const mode = modeProp ?? B.defaults.mode;
-	const granularity = granularityProp ?? B.defaults.granularity;
+	const mode = modeProp ?? _B.defaults.mode;
+	const granularity = granularityProp ?? _B.defaults.granularity;
 	const firstDayOfWeek = firstDayProp === 'auto' || firstDayProp === undefined ? getLocaleFirstDayOfWeek() : firstDayProp;
 	const hourCycle = hourCycleProp === 'auto' || hourCycleProp === undefined ? getLocaleHourCycle() : hourCycleProp;
 	const isRange = mode === 'range';
-	const separator = rangeSeparator === false ? null : rangeSeparator ?? B.defaults.rangeSeparator;
+	const separator = rangeSeparator === false ? null : rangeSeparator ?? _B.defaults.rangeSeparator;
 	const isDefaultSeparator = rangeSeparator === undefined;
-	const showTime = time === true || (typeof time === 'object') || B.granularity.time.includes(granularity as (typeof B.granularity.time)[number]);
+	const showTime = time === true || (typeof time === 'object') || _B.granularity.time.includes(granularity as (typeof _B.granularity.time)[number]);
 	const timeConfig = typeof time === 'object' ? time : {};
 	const ctxValue = useMemo<ContextValue>(() => ({ calendarLabel, cellTooltip, color, firstDayOfWeek, granularity, hourCycle, isDisabled, isReadOnly, nextButtonLabel, prevButtonLabel, size, variant }), [calendarLabel, cellTooltip, color, firstDayOfWeek, granularity, hourCycle, isDisabled, isReadOnly, nextButtonLabel, prevButtonLabel, size, variant]);
 	const dataProps = {
@@ -364,11 +362,11 @@ const DatePicker = <T extends DateValue>(props: DatePickerProps<T>): ReactNode =
 	};
 	const content = children ?? (
 		<>
-			<Group className={B.slot.group} data-slot='date-picker-group'>
+			<Group className={_B.slot.group} data-slot='date-picker-group'>
 				{isRange ? (
 					<>
 						<Field slot='start' />
-						{separator && <span aria-hidden={isDefaultSeparator || undefined} className={B.slot.rangeSeparator} data-slot='date-picker-range-separator'>{separator}</span>}
+						{separator && <span aria-hidden={isDefaultSeparator || undefined} className={_B.slot.rangeSeparator} data-slot='date-picker-range-separator'>{separator}</span>}
 						<Field slot='end' />
 					</>
 				) : (
@@ -376,8 +374,8 @@ const DatePicker = <T extends DateValue>(props: DatePickerProps<T>): ReactNode =
 				)}
 				<Trigger {...{ asyncState: triggerAsyncState, gesture: triggerGesture, icon: triggerIcon, tooltip: triggerTooltip } as TriggerProps} />
 			</Group>
-			{description && <Text className={B.slot.description} data-slot='date-picker-description' slot='description'>{description}</Text>}
-			<FieldError className={B.slot.error} data-slot='date-picker-error'>{errorMessage}</FieldError>
+			{description && <Text className={_B.slot.description} data-slot='date-picker-description' slot='description'>{description}</Text>}
+			<FieldError className={_B.slot.error} data-slot='date-picker-error'>{errorMessage}</FieldError>
 			<PopoverContent offset={popoverOffset}>
 				<Calendar isRange={isRange} />
 				{showTime && (isRange ? (
@@ -398,26 +396,26 @@ const DatePicker = <T extends DateValue>(props: DatePickerProps<T>): ReactNode =
 					<RACDateRangePicker
 						{...(racProps as Omit<RACDateRangePickerProps<T>, 'children' | 'granularity'>)}
 						{...dataProps}
-						className={cn(B.slot.root, className)}
+						className={cn(_B.slot.root, className)}
 						granularity={granularity}
 						isDisabled={isDisabled}
 						isReadOnly={isReadOnly}
 						ref={ref}
 					>
-						{label && <RACLabel className={B.slot.label} data-slot='date-picker-label'>{label}</RACLabel>}
+						{label && <RACLabel className={_B.slot.label} data-slot='date-picker-label'>{label}</RACLabel>}
 						{content}
 					</RACDateRangePicker>
 				) : (
 					<RACDatePicker
 						{...(racProps as Omit<RACDatePickerProps<T>, 'children' | 'granularity'>)}
 						{...dataProps}
-						className={cn(B.slot.root, className)}
+						className={cn(_B.slot.root, className)}
 						granularity={granularity}
 						isDisabled={isDisabled}
 						isReadOnly={isReadOnly}
 						ref={ref}
 					>
-						{label && <RACLabel className={B.slot.label} data-slot='date-picker-label'>{label}</RACLabel>}
+						{label && <RACLabel className={_B.slot.label} data-slot='date-picker-label'>{label}</RACLabel>}
 						{content}
 					</RACDatePicker>
 				)}

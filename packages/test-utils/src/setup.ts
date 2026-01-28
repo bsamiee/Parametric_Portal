@@ -1,5 +1,6 @@
 /**
- * Test setup: shared lifecycle hooks for node and browser environments.
+ * Initialize shared test lifecycle hooks for node and browser environments.
+ * Fast-check config, fake timers, storage clearing, Effect equality testers.
  */
 import './effect-test';
 import { addEqualityTesters } from '@effect/vitest';

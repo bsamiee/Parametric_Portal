@@ -1,5 +1,6 @@
 /**
- * Test constants: deterministic values for reproducible tests.
+ * Provide deterministic test constants for reproducible assertions.
+ * Frozen time, fast-check config, storage version, error codes.
  */
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------

@@ -22,14 +22,14 @@ type CookieOptions = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     cookie: {
         expires: 365,
         path: '/',
         sameSite: 'Lax' as const,
         secure: true,
     },
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 

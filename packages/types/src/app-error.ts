@@ -1,68 +1,60 @@
 /**
- * Unify domain errors via Data.TaggedError for Effect.gen yield.
- * Enables catchTag discrimination, structured formatting, domain-scoped codes.
+ * Define client-side domain errors via Data.TaggedError.
+ * Individual tags per domain enable Effect.catchTag discrimination.
  */
 import { Data } from 'effect';
 
-// --- [TYPES] -----------------------------------------------------------------
+// --- [ERRORS] ----------------------------------------------------------------
 
-type ErrorDomain = keyof typeof B;
-type ErrorCode<D extends ErrorDomain> = keyof typeof B[D];
+class Browser extends Data.TaggedError('Browser')<{
+	readonly cause?: unknown;
+	readonly code: 'CANVAS_CONTEXT' | 'CLIPBOARD_READ' | 'CLIPBOARD_UNAVAILABLE' | 'CLIPBOARD_WRITE' | 'DOWNLOAD_FAILED' | 'EXPORT_FAILED' | 'NO_SVG' | 'NO_VARIANTS' | 'STORAGE_FAILED' | 'STORAGE_READ' | 'STORAGE_WRITE';
+	readonly details?: string;
+}> {override get message() { return this.details ? `Browser[${this.code}]: ${this.details}` : `Browser[${this.code}]`; }}
 
-// --- [CONSTANTS] -------------------------------------------------------------
+class Database extends Data.TaggedError('Database')<{
+	readonly cause?: unknown;
+	readonly code: 'NOT_FOUND';
+	readonly details?: string;
+}> {override get message() { return this.details ? `Database[${this.code}]: ${this.details}` : `Database[${this.code}]`; }}
 
-const B = Object.freeze({
-	Browser: {
-		CANVAS_CONTEXT: { code: 'CANVAS_CONTEXT' as const, message: 'Failed to get canvas 2D context' },
-		CLIPBOARD_READ: { code: 'CLIPBOARD_READ' as const, message: 'Failed to read from clipboard' },
-		CLIPBOARD_UNAVAILABLE: { code: 'CLIPBOARD_UNAVAILABLE' as const, message: 'Clipboard API not available' },
-		CLIPBOARD_WRITE: { code: 'CLIPBOARD_WRITE' as const, message: 'Failed to write to clipboard' },
-		DOWNLOAD_FAILED: { code: 'DOWNLOAD_FAILED' as const, message: 'Download failed' },
-		EXPORT_FAILED: { code: 'EXPORT_FAILED' as const, message: 'Export failed' },
-		NO_SVG: { code: 'NO_SVG' as const, message: 'No SVG content to export' },
-		NO_VARIANTS: { code: 'NO_VARIANTS' as const, message: 'No variants to export' },
-		STORAGE_FAILED: { code: 'STORAGE_FAILED' as const, message: 'Storage operation failed' },
-		STORAGE_READ: { code: 'STORAGE_READ' as const, message: 'Failed to read from storage' },
-		STORAGE_WRITE: { code: 'STORAGE_WRITE' as const, message: 'Failed to write to storage' },
-	},
-	Database: {
-		NOT_FOUND: { code: 'NOT_FOUND' as const, message: 'Record not found' },
-	},
-	File: {
-		FILE_EMPTY: { code: 'FILE_EMPTY' as const, message: 'File is empty' },
-		FILE_TOO_LARGE: { code: 'FILE_TOO_LARGE' as const, message: 'File exceeds size limit' },
-		INVALID_CONTENT: { code: 'INVALID_CONTENT' as const, message: 'Invalid file content' },
-		INVALID_TYPE: { code: 'INVALID_TYPE' as const, message: 'Unsupported file type' },
-		READ_FAILED: { code: 'READ_FAILED' as const, message: 'Failed to read file' },
-	},
-	Messaging: {
-		SEND_FAILED: { code: 'SEND_FAILED' as const, message: 'Failed to send message' },
-		TIMEOUT: { code: 'TIMEOUT' as const, message: 'Operation timed out' },
-		VALIDATION_FAILED: { code: 'VALIDATION_FAILED' as const, message: 'Schema validation failed' },
-	},
-} as const);
+class File extends Data.TaggedError('File')<{
+	readonly cause?: unknown;
+	readonly code: 'FILE_EMPTY' | 'FILE_TOO_LARGE' | 'INVALID_CONTENT' | 'INVALID_TYPE' | 'READ_FAILED';
+	readonly details?: string;
+}> {override get message() { return this.details ? `File[${this.code}]: ${this.details}` : `File[${this.code}]`; }}
 
-// --- [CLASSES] ---------------------------------------------------------------
+class Messaging extends Data.TaggedError('Messaging')<{
+	readonly cause?: unknown;
+	readonly code: 'SEND_FAILED' | 'TIMEOUT' | 'VALIDATION_FAILED';
+	readonly details?: string;
+}> {override get message() { return this.details ? `Messaging[${this.code}]: ${this.details}` : `Messaging[${this.code}]`; }}
 
-class AppError<D extends ErrorDomain = ErrorDomain> extends Data.TaggedError('AppError')<{
-	readonly code: ErrorCode<D>;
-	readonly domain: D;
-	readonly message: string;
-}> {
-	/** Format error for logging/display with domain:code prefix. */
-	get formatted(): string { return `[${this.domain}:${String(this.code)}] ${this.message}`; }
-	/** Construct from domain-scoped error code with optional message override. */
-	static from<D extends ErrorDomain>(domain: D, key: ErrorCode<D>, message?: string): AppError<D> {
-		const entry = B[domain][key] as { readonly code: string; readonly message: string };
-		return new AppError({ code: entry.code as ErrorCode<D>, domain, message: message ?? entry.message });
-	}
-	/** Append API context to message for failed external calls. */
-	static withApi(msg: string, api: string): string { return `${msg} (${api})`; }
-	/** Append MIME type to message using brackets for machine-readable context. */
-	static withMimeType(msg: string, type: string): string { return `${msg} [${type}]`; }
+// --- [FACTORIES] -------------------------------------------------------------
+
+const browser = (code: Browser['code'], details?: string, cause?: unknown) => new Browser({ code, ...(cause !== undefined && { cause }), ...(details !== undefined && { details }) });
+const database = (code: Database['code'], details?: string, cause?: unknown) => new Database({ code, ...(cause !== undefined && { cause }), ...(details !== undefined && { details }) });
+const file = (code: File['code'], details?: string, cause?: unknown) => new File({ code, ...(cause !== undefined && { cause }), ...(details !== undefined && { details }) });
+const messaging = (code: Messaging['code'], details?: string, cause?: unknown) => new Messaging({ code, ...(cause !== undefined && { cause }), ...(details !== undefined && { details }) });
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
+const AppError = {
+	browser,
+	database,
+	file,
+	messaging
+} as const;
+
+namespace AppError {
+	export type Any = Browser | Database | File | Messaging;
+	export type Browser = InstanceType<typeof Browser>;
+	export type Database = InstanceType<typeof Database>;
+	export type File = InstanceType<typeof File>;
+	export type Messaging = InstanceType<typeof Messaging>;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { ErrorCode, ErrorDomain };
 export { AppError };

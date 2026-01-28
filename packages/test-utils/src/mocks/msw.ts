@@ -1,5 +1,6 @@
 /**
- * MSW server: request interception for API testing with typed handlers.
+ * Configure MSW server for request interception in API tests.
+ * Typed HTTP method handlers, error simulation, network failure mocks.
  */
 import { delay, HttpResponse, http, type RequestHandler } from 'msw';
 import { type SetupServer, setupServer } from 'msw/node';

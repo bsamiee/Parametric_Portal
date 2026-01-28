@@ -16,7 +16,7 @@ description: >-
 
 Execute SonarCloud queries through unified Python CLI.
 
-[IMPORTANT] Commands accept zero arguments. Defaults: `project=bsamiee_Parametric_Portal`, `organization=bsamiee`. 1Password auto-injects API token.
+[IMPORTANT] Commands default to `project=bsamiee_Parametric_Portal`, `organization=bsamiee`. 1Password auto-injects API token.
 
 ---
 ## [0][SCANNER]
@@ -36,36 +36,75 @@ pnpm sonar
 **Configuration:** `sonar-project.properties` at repo root.
 
 ---
-## [1][API_QUERIES]
+## [1][COMMANDS]
+
+| [CMD]        | [ARGS]                    | [PURPOSE]                          |
+| ------------ | ------------------------- | ---------------------------------- |
+| quality-gate | `[branch]` or `pr <num>`  | Quality gate pass/fail status      |
+| issues       | `[severities] [types]`    | Search code issues                 |
+| measures     | `[metrics]`               | Project metrics                    |
+| analyses     | `[page_size]`             | Analysis history                   |
+| projects     | `[page_size]`             | List organization projects         |
+| hotspots     | `[status]`                | Security hotspots                  |
+
+---
+## [2][USAGE]
 
 ```bash
 # Zero-arg invocation (most common)
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py hotspots
 uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py quality-gate
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues
 uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py measures
 uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py analyses
 uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py projects
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py hotspots
 
-# Filtered queries
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues --severities BLOCKER,CRITICAL
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues --types BUG,VULNERABILITY
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py hotspots --status TO_REVIEW
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py quality-gate --branch main
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py quality-gate --pull-request 42
-uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py measures --metrics coverage,bugs,vulnerabilities
+# With optional args
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py quality-gate main
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py quality-gate pr 42
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues BLOCKER,CRITICAL
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py issues BLOCKER,CRITICAL BUG,VULNERABILITY
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py measures coverage,bugs
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py analyses 20
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py projects 50
+uv run .claude/skills/sonarcloud-tools/scripts/sonarcloud.py hotspots TO_REVIEW
 ```
 
 ---
-## [2][OUTPUT]
+## [3][ARGUMENTS]
+
+**quality-gate**: `[branch]` or `pr <num>`
+- No args — current default branch
+- `main` — specific branch
+- `pr 42` — specific pull request
+
+**issues**: `[severities] [types]`
+- `severities` — Comma-separated: BLOCKER,CRITICAL,MAJOR,MINOR,INFO
+- `types` — Comma-separated: BUG,VULNERABILITY,CODE_SMELL
+
+**measures**: `[metrics]`
+- `metrics` — Comma-separated (default: all standard metrics)
+- Common: coverage,bugs,vulnerabilities,code_smells,ncloc
+
+**analyses**: `[page_size]`
+- `page_size` — Number of results (default: 10, max: 100)
+
+**projects**: `[page_size]`
+- `page_size` — Number of results (default: 100, max: 500)
+
+**hotspots**: `[status]`
+- `status` — Filter: TO_REVIEW, ACKNOWLEDGED, FIXED, SAFE
+
+---
+## [4][OUTPUT]
 
 Commands return: `{"status": "success|error", ...}`.
 
 | [INDEX] | [CMD]          | [RESPONSE]                                      |
 | :-----: | -------------- | ----------------------------------------------- |
-|   [1]   | `issues`       | `{project, total, issues[], summary}`           |
-|   [2]   | `hotspots`     | `{project, total, hotspots[]}`                  |
-|   [3]   | `quality-gate` | `{project, status, passed: bool, conditions[]}` |
-|   [4]   | `measures`     | `{project, name, metrics}`                      |
-|   [5]   | `analyses`     | `{project, total, analyses[]}`                  |
-|   [6]   | `projects`     | `{organization, total, projects[]}`             |
+|   [1]   | `quality-gate` | `{project, gate_status, passed: bool, conditions[]}` |
+|   [2]   | `issues`       | `{project, total, issues[], summary}`           |
+|   [3]   | `measures`     | `{project, name, metrics}`                      |
+|   [4]   | `analyses`     | `{project, total, analyses[]}`                  |
+|   [5]   | `projects`     | `{organization, total, projects[]}`             |
+|   [6]   | `hotspots`     | `{project, total, hotspots[]}`                  |

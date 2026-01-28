@@ -1,9 +1,6 @@
 /**
- * Field: Unified input component with type="text|search|number" discrimination.
- * Pure presentation - CSS variable driven styling.
- * Supports: text (prefix/suffix, multiline), search (searchIcon, clearIcon), number (stepper icons).
- * REQUIRED: color, size, type props - no defaults.
- * Mode detection follows Button's pattern via type prop discrimination.
+ * Unified input with type discrimination: text, search, number.
+ * Requires color, size, type props. Supports multiline, clear, stepper icons.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -56,8 +53,8 @@ type NumberFieldProps = Omit<RACNumberFieldProps, 'children'> & BaseFieldProps &
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		// Search field slots
 		clearButton: cn(
 			'flex items-center justify-center cursor-pointer',
@@ -143,8 +140,8 @@ const B = Object.freeze({
 			'group-invalid:border-(--field-invalid-border)',
 			'group-disabled:opacity-(--field-disabled-opacity) group-disabled:pointer-events-none',
 		),
-	}),
-});
+	},
+} as const;
 
 // --- [TEXT_FIELD_CONTENT] ----------------------------------------------------
 
@@ -166,7 +163,7 @@ const TextFieldContent: FC<TextFieldProps> = ({
 		<>
 			<RACTextField
 				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACTextFieldProps)}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-multiline={multiline || undefined}
@@ -177,22 +174,22 @@ const TextFieldContent: FC<TextFieldProps> = ({
 				isDisabled={isDisabled || slot.pending}
 				ref={mergedRef}
 			>
-				{label && <Label className={B.slot.label} data-slot='field-label'>{label}</Label>}
+				{label && <Label className={_B.slot.label} data-slot='field-label'>{label}</Label>}
 				{multiline ? (
-					<div className={B.slot.textareaWrapper} data-slot='field-textarea-wrapper'>
-						{Slot.render(prefix, asyncState, B.slot.prefixIcon)}
-						<TextArea className={B.slot.textarea} data-slot='field-textarea' {...defined({ placeholder, rows })} />
-						{Slot.render(suffix, asyncState, B.slot.suffixIcon)}
+					<div className={_B.slot.textareaWrapper} data-slot='field-textarea-wrapper'>
+						{Slot.render(prefix, asyncState, _B.slot.prefixIcon)}
+						<TextArea className={_B.slot.textarea} data-slot='field-textarea' {...defined({ placeholder, rows })} />
+						{Slot.render(suffix, asyncState, _B.slot.suffixIcon)}
 					</div>
 				) : (
-					<div className={B.slot.inputWrapper} data-slot='field-input-wrapper'>
-						{Slot.render(prefix, asyncState, B.slot.prefixIcon)}
-						<Input className={B.slot.input} data-slot='field-input' {...defined({ placeholder })} />
-						{Slot.render(suffix, asyncState, B.slot.suffixIcon)}
+					<div className={_B.slot.inputWrapper} data-slot='field-input-wrapper'>
+						{Slot.render(prefix, asyncState, _B.slot.prefixIcon)}
+						<Input className={_B.slot.input} data-slot='field-input' {...defined({ placeholder })} />
+						{Slot.render(suffix, asyncState, _B.slot.suffixIcon)}
 					</div>
 				)}
-				{description && <Text className={B.slot.description} data-slot='field-description' slot='description'>{description}</Text>}
-				<FieldError className={B.slot.error} data-slot='field-error'>{errorMessage}</FieldError>
+				{description && <Text className={_B.slot.description} data-slot='field-description' slot='description'>{description}</Text>}
+				<FieldError className={_B.slot.error} data-slot='field-error'>{errorMessage}</FieldError>
 			</RACTextField>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
@@ -219,7 +216,7 @@ const SearchFieldContent: FC<SearchFieldProps> = ({
 		<>
 			<RACSearchField
 				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACSearchFieldProps)}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
@@ -229,16 +226,16 @@ const SearchFieldContent: FC<SearchFieldProps> = ({
 				isDisabled={isDisabled || slot.pending}
 				ref={mergedRef}
 			>
-				{label && <Label className={B.slot.label} data-slot='field-label'>{label}</Label>}
-				<div className={B.slot.inputWrapper} data-slot='field-input-wrapper'>
-					{slot.render(searchIcon, B.slot.searchIcon)}
-					<Input className={B.slot.searchInput} data-slot='field-input' {...defined({ placeholder })} />
-					<RACButton className={B.slot.clearButton} data-slot='field-clear'>
-						{slot.render(clearIcon, B.slot.clearIcon)}
+				{label && <Label className={_B.slot.label} data-slot='field-label'>{label}</Label>}
+				<div className={_B.slot.inputWrapper} data-slot='field-input-wrapper'>
+					{slot.render(searchIcon, _B.slot.searchIcon)}
+					<Input className={_B.slot.searchInput} data-slot='field-input' {...defined({ placeholder })} />
+					<RACButton className={_B.slot.clearButton} data-slot='field-clear'>
+						{slot.render(clearIcon, _B.slot.clearIcon)}
 					</RACButton>
 				</div>
-				{description && <Text className={B.slot.description} data-slot='field-description' slot='description'>{description}</Text>}
-				<FieldError className={B.slot.error} data-slot='field-error'>{errorMessage}</FieldError>
+				{description && <Text className={_B.slot.description} data-slot='field-description' slot='description'>{description}</Text>}
+				<FieldError className={_B.slot.error} data-slot='field-error'>{errorMessage}</FieldError>
 			</RACSearchField>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
@@ -266,7 +263,7 @@ const NumberFieldContent: FC<NumberFieldProps> = ({
 			<RACNumberField
 				{...({ ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACNumberFieldProps)}
 				{...(formatOptions && { formatOptions })}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-async-state={slot.attr}
 				data-color={color}
 				data-size={size}
@@ -276,18 +273,18 @@ const NumberFieldContent: FC<NumberFieldProps> = ({
 				isDisabled={isDisabled || slot.pending}
 				ref={mergedRef}
 			>
-				{label && <Label className={B.slot.label} data-slot='field-label'>{label}</Label>}
-				<Group className={B.slot.numberGroup} data-slot='field-group'>
-					<RACButton className={B.slot.stepper} data-slot='field-decrement' slot='decrement'>
-						{slot.render(decrementIcon, B.slot.stepperIcon)}
+				{label && <Label className={_B.slot.label} data-slot='field-label'>{label}</Label>}
+				<Group className={_B.slot.numberGroup} data-slot='field-group'>
+					<RACButton className={_B.slot.stepper} data-slot='field-decrement' slot='decrement'>
+						{slot.render(decrementIcon, _B.slot.stepperIcon)}
 					</RACButton>
-					<Input className={B.slot.numberInput} data-slot='field-input' />
-					<RACButton className={B.slot.stepper} data-slot='field-increment' slot='increment'>
-						{slot.render(incrementIcon, B.slot.stepperIcon)}
+					<Input className={_B.slot.numberInput} data-slot='field-input' />
+					<RACButton className={_B.slot.stepper} data-slot='field-increment' slot='increment'>
+						{slot.render(incrementIcon, _B.slot.stepperIcon)}
 					</RACButton>
 				</Group>
-				{description && <Text className={B.slot.description} data-slot='field-description' slot='description'>{description}</Text>}
-				<FieldError className={B.slot.error} data-slot='field-error'>{errorMessage}</FieldError>
+				{description && <Text className={_B.slot.description} data-slot='field-description' slot='description'>{description}</Text>}
+				<FieldError className={_B.slot.error} data-slot='field-error'>{errorMessage}</FieldError>
 			</RACNumberField>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
@@ -299,12 +296,9 @@ const NumberFieldContent: FC<NumberFieldProps> = ({
 
 const Field: FC<FieldProps> = (props) => {
 	switch (props.type) {
-		case 'text':
-			return <TextFieldContent {...props} />;
-		case 'search':
-			return <SearchFieldContent {...props} />;
-		case 'number':
-			return <NumberFieldContent {...props} />;
+		case 'text': return <TextFieldContent {...props} />;
+		case 'search': return <SearchFieldContent {...props} />;
+		case 'number': return <NumberFieldContent {...props} />;
 	}
 };
 

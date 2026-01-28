@@ -16,7 +16,7 @@ type ColorSlotRef =
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const TW = Object.freeze({
+const TW = {
 	alignContent: ['normal', 'center', 'start', 'end', 'between', 'around', 'evenly', 'baseline', 'stretch'] as const,
 	alignItems: ['start', 'end', 'end-safe', 'center', 'center-safe', 'baseline', 'baseline-last', 'stretch'] as const,
 	alignSelf: ['auto', 'start', 'end', 'end-safe', 'center', 'center-safe', 'stretch', 'baseline', 'baseline-last'] as const,
@@ -134,9 +134,9 @@ const TW = Object.freeze({
 	willChange: ['auto', 'scroll', 'contents', 'transform'] as const,
 	wordBreak: ['normal', 'all', 'keep'] as const,
 	zIndex: ['auto', 0, 10, 20, 30, 40, 50] as const,
-} as const);
+} as const;
 
-const RAC = Object.freeze({
+const RAC = {
 	boolean: [
 		'hovered', 'pressed', 'focused', 'focus-visible', 'focus-within', 'selected', 'indeterminate',
 		'disabled', 'readonly', 'required', 'invalid', 'placeholder',
@@ -146,7 +146,7 @@ const RAC = Object.freeze({
 		'outside-month', 'outside-visible-range', 'selection-start', 'selection-end',
 		'allows-removing', 'allows-sorting', 'resizing', 'has-submenu', 'has-child-items',
 	] as const,
-	nonBoolean: Object.freeze({
+	nonBoolean: {
 		layout: ['grid', 'stack'] as const,
 		orientation: ['horizontal', 'vertical'] as const,
 		placement: ['top', 'top left', 'top right', 'top start', 'top end', 'bottom', 'bottom left', 'bottom right', 'bottom start', 'bottom end', 'left', 'left top', 'left bottom', 'right', 'right top', 'right bottom', 'start', 'start top', 'start bottom', 'end', 'end top', 'end bottom'] as const,
@@ -154,8 +154,8 @@ const RAC = Object.freeze({
 		segmentType: ['literal', 'year', 'month', 'day', 'hour', 'minute', 'second', 'dayPeriod', 'era', 'timeZoneName'] as const,
 		selectionMode: ['none', 'single', 'multiple'] as const,
 		sortDirection: ['ascending', 'descending'] as const,
-	}),
-} as const);
+	},
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

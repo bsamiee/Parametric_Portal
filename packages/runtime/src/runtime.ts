@@ -15,15 +15,15 @@ type ProviderProps<R, E> = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-    cssVars: Object.freeze({
-        floatingDelay: Object.freeze({
+const B = {
+    cssVars: {
+        floatingDelay: {
             close: '--tooltip-group-close-delay',
             open: '--tooltip-group-open-delay',
             timeout: '--tooltip-group-timeout',
-        }),
-    }),
-} as const);
+        },
+    },
+} as const;
 // biome-ignore lint/suspicious/noExplicitAny: Generic context requires any for React Context variance
 const ctx = createContext<ManagedRuntime.ManagedRuntime<any, any> | null>(null);
 
@@ -89,11 +89,11 @@ const make = <R, E>(layer: Layer.Layer<R, E, never>): ManagedRuntime.ManagedRunt
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const Runtime = Object.freeze({
+const Runtime = {
     make,
     Provider,
     use: useRuntimeHook,
-});
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

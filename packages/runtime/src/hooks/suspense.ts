@@ -85,7 +85,7 @@ const useEffectResource = <A, E, R>(effect: Effect.Effect<A, E, R>, options?: Ca
             },
         );
     };
-    return Object.freeze({
+    return {
         preload: startIfIdle,
         read: (): A => {
             startIfIdle();
@@ -95,7 +95,7 @@ const useEffectResource = <A, E, R>(effect: Effect.Effect<A, E, R>, options?: Ca
             return c.value as A;
         },
         status: () => getCache().status,
-    });
+    } as const;
 };
 
 // --- [EXPORT] ----------------------------------------------------------------

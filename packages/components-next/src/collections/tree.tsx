@@ -1,11 +1,6 @@
 /**
- * Tree: Hierarchical navigation component with expand/collapse functionality.
- * Compound component pattern - Tree.Item, Tree.ItemContent, Tree.Group.
- * Wraps RAC Tree/TreeItem with theme-driven CSS variable styling.
- *
- * RAC props pass through directly - we only add: theme (color/size/variant), tooltip, gesture, lazy.
- * Supports keyboard navigation, selection modes (single/multiple), DnD via RAC hooks.
- * TreeItem accepts title/prefix for simplified usage - auto-renders content when title provided.
+ * Hierarchical navigation with expand/collapse and lazy loading.
+ * Compound component: Tree.Item, Tree.ItemContent, Tree.Group.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -74,8 +69,8 @@ type TreeGroupProps<T extends object = object> = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		actions: cn(
 			'ml-auto flex items-center gap-(--tree-item-content-actions-gap)',
 			'opacity-0 transition-opacity duration-(--tree-animation-duration)',
@@ -115,8 +110,8 @@ const B = Object.freeze({
 			'gap-(--tree-gap)',
 			'text-(--tree-font-size)',
 		),
-	}),
-});
+	},
+} as const;
 const TreeContext = createContext<TreeContextValue | null>(null);
 const TreeItemStateContext = createContext<TreeItemStateContextValue | null>(null);
 
@@ -148,7 +143,7 @@ const TreeItemContent: FC<TreeItemContentProps> = ({
 			<div
 				{...(tooltipProps as object)}
 				{...(gestureProps as object)}
-				className={cn(B.slot.content, className)}
+				className={cn(_B.slot.content, className)}
 				data-async-state={slot.attr}
 				data-color={color ?? ctx?.color}
 				data-disabled={isDisabled || undefined}
@@ -164,18 +159,18 @@ const TreeItemContent: FC<TreeItemContentProps> = ({
 				{!hideIndicator && hasChildren && (
 					<span
 						aria-hidden="true"
-						className={B.slot.indicator}
+						className={_B.slot.indicator}
 						data-expanded={isExpanded || undefined}
 					>
 						{Slot.content(Slot.resolve(indicator, asyncState)) ?? <ChevronRight />}
 					</span>
 				)}
 				{!hideIndicator && !hasChildren && (
-					<span aria-hidden="true" className={B.slot.indicator} style={{ visibility: 'hidden' }} />
+					<span aria-hidden="true" className={_B.slot.indicator} style={{ visibility: 'hidden' }} />
 				)}
-				{slot.render(prefix, B.slot.prefix)}
-				<span className={B.slot.label}>{slot.resolve(children)}</span>
-				{actions && <span className={B.slot.actions}>{slot.resolve(actions)}</span>}
+				{slot.render(prefix, _B.slot.prefix)}
+				<span className={_B.slot.label}>{slot.resolve(children)}</span>
+				{actions && <span className={_B.slot.actions}>{slot.resolve(actions)}</span>}
 			</div>
 			{renderTooltip?.()}
 			<AsyncAnnouncer asyncState={asyncState} />
@@ -205,7 +200,7 @@ const TreeItem = <T extends object = object>({
 	return (
 		<RACTreeItem<T>
 			{...(rest as object)}
-			className={composeTailwindRenderProps(className, B.slot.item)}
+			className={composeTailwindRenderProps(className, _B.slot.item)}
 			data-color={ctx?.color}
 			data-size={ctx?.size}
 			data-slot="tree-item"
@@ -236,7 +231,7 @@ const TreeGroup = <T extends object = object>({ children, className, items, lazy
 		? children as ReactNode
 		: <Collection items={items}>{children as (item: T) => ReactNode}</Collection>;
 	return (
-		<div className={cn(B.slot.group, className)} data-slot="tree-group">
+		<div className={cn(_B.slot.group, className)} data-slot="tree-group">
 			{hasExpanded ? content : null}
 		</div>
 	);
@@ -250,7 +245,7 @@ const TreeRoot = <T extends object>({ children, className, color, size, variant,
 		<TreeContext.Provider value={contextValue}>
 			<RACTree<T>
 				{...(rest as RACTreeProps<T>)}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-color={color}
 				data-size={size}
 				data-slot="tree"

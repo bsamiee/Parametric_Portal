@@ -8,11 +8,6 @@
       "import": "./src/async.ts",
       "default": "./src/async.ts"
     },
-    "./props": {
-      "types": "./src/props.ts",
-      "import": "./src/props.ts",
-      "default": "./src/props.ts"
-    },
     "./app-error": {
       "types": "./src/app-error.ts",
       "import": "./src/app-error.ts",
@@ -42,11 +37,6 @@
       "types": "./src/ui.ts",
       "import": "./src/ui.ts",
       "default": "./src/ui.ts"
-    },
-    "./schema": {
-      "types": "./src/schema.ts",
-      "import": "./src/schema.ts",
-      "default": "./src/schema.ts"
     }
   },
   "scripts": {
@@ -59,10 +49,13 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "dependencies": {
-    "drizzle-orm": "catalog:",
+    "@gltf-transform/core": "catalog:",
+    "@xmldom/xmldom": "catalog:",
     "effect": "catalog:",
     "happy-dom": "catalog:",
-    "isomorphic-dompurify": "catalog:"
+    "isomorphic-dompurify": "catalog:",
+    "sax": "catalog:",
+    "uuid": "catalog:"
   },
   "devDependencies": {
     "@fast-check/vitest": "catalog:",

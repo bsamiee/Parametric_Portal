@@ -712,7 +712,7 @@ const ProgressDemo: FC = () => (
             <span className='text-xs font-medium text-(--color-text-600)'>Indeterminate (via asyncState)</span>
             <Progress
                 aria-label='Uploading'
-                asyncState={AsyncState.Loading()}
+                asyncState={AsyncState.loading()}
                 color='primary'
                 data-testid='progress-indeterminate'
                 label='Uploading files...'
@@ -776,7 +776,7 @@ const ProgressDemo: FC = () => (
             <span className='text-xs font-medium text-(--color-text-600)'>Circular Indeterminate</span>
             <Progress
                 aria-label='Loading'
-                asyncState={AsyncState.Loading()}
+                asyncState={AsyncState.loading()}
                 color='primary'
                 data-testid='progress-circular-indeterminate'
                 label='Loading...'

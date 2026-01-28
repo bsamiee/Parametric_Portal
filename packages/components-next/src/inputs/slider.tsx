@@ -1,10 +1,6 @@
 /**
- * Slider: Range/value selection component with visual track, thumb, and optional output display.
- * Pure presentation - CSS variable driven styling via frozen B constant.
- * Supports single value (number) OR range (number[]) via value/defaultValue props.
- * Track fill rendered via --slider-fill-percent and --slider-fill-start CSS variables.
- * Thumb tooltip uses DragStateSync pattern (same as ColorPicker).
- * REQUIRED: color, size props - no defaults, no hardcoded mappings.
+ * Range/value selection with visual track, thumb, and optional output display.
+ * Requires color and size props. Supports single value or range via value props.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { CSSProperties, FC, ReactNode, Ref } from 'react';
@@ -45,8 +41,8 @@ type SliderOutputProps = Omit<RACSliderOutputProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		fill: cn(
 			'absolute rounded-(--slider-fill-radius)',
 			'bg-(--slider-fill-bg)',
@@ -84,8 +80,8 @@ const B = Object.freeze({
 			'data-[orientation=vertical]:w-(--slider-track-width) data-[orientation=vertical]:h-full',
 			'disabled:cursor-not-allowed',
 		),
-	}),
-});
+	},
+} as const;
 
 // --- [SUB_COMPONENTS] --------------------------------------------------------
 
@@ -123,7 +119,7 @@ const SliderRoot: FC<SliderProps> = ({
 		<>
 			<RACSlider
 				{...({ ...racProps, ...tooltipProps } as unknown as RACSliderProps)}
-				className={composeTailwindRenderProps(className, B.slot.root)}
+				className={composeTailwindRenderProps(className, _B.slot.root)}
 				data-color={color}
 				data-orientation={orientation}
 				data-size={size}
@@ -134,7 +130,7 @@ const SliderRoot: FC<SliderProps> = ({
 			>
 				{() => (
 					<>
-						{label && <Label className={B.slot.label} data-slot='slider-label'>{label}</Label>}
+						{label && <Label className={_B.slot.label} data-slot='slider-label'>{label}</Label>}
 						{showOutput && <SliderOutput />}
 						{children ?? defaultContent}
 					</>
@@ -147,7 +143,7 @@ const SliderRoot: FC<SliderProps> = ({
 const SliderTrack: FC<SliderTrackProps> = ({ children, className, ref, ...racProps }) => (
 	<RACSliderTrack
 		{...(racProps as RACSliderTrackProps)}
-		className={composeTailwindRenderProps(className, B.slot.track)}
+		className={composeTailwindRenderProps(className, _B.slot.track)}
 		data-slot='slider-track'
 		ref={ref}
 	>
@@ -166,7 +162,7 @@ const SliderTrack: FC<SliderTrackProps> = ({ children, className, ref, ...racPro
 			return (
 				<>
 					<div
-						className={B.slot.fill}
+						className={_B.slot.fill}
 						data-orientation={orientation}
 						data-slot='slider-fill'
 						style={fillStyle}
@@ -190,7 +186,7 @@ const SliderThumb: FC<SliderThumbProps> = ({ children, className, ref, tooltip, 
 		<>
 			<RACSliderThumb
 				{...(racProps as RACSliderThumbProps)}
-				className={composeTailwindRenderProps(className, B.slot.thumb)}
+				className={composeTailwindRenderProps(className, _B.slot.thumb)}
 				data-slot='slider-thumb'
 				ref={mergedRef}
 			>
@@ -212,7 +208,7 @@ const SliderThumb: FC<SliderThumbProps> = ({ children, className, ref, tooltip, 
 const SliderOutput: FC<SliderOutputProps> = ({ children, className, ref, ...racProps }) => (
 	<RACSliderOutput
 		{...(racProps as RACSliderOutputProps)}
-		className={composeTailwindRenderProps(className, B.slot.output)}
+		className={composeTailwindRenderProps(className, _B.slot.output)}
 		data-slot='slider-output'
 		ref={ref}
 	>
@@ -220,7 +216,7 @@ const SliderOutput: FC<SliderOutputProps> = ({ children, className, ref, ...racP
 			const isRenderFn = typeof children === 'function';
 			return isRenderFn
 				? children({ values: renderProps.state.values })
-				: children ?? renderProps.state.values.map((_, i) => renderProps.state.getThumbValueLabel(i)).join(' – ');
+				: children ?? renderProps.state.values.map((_value, index) => renderProps.state.getThumbValueLabel(index)).join(' – ');
 		}}
 	</RACSliderOutput>
 );

@@ -1,8 +1,6 @@
 /**
- * Core utilities for component development.
- * CSS class merging, RAC render-props composition, slot resolution and rendering.
- * SlotInput accepts raw values (LucideIcon, ReactElement) OR SlotDef for async-aware slots.
- * SlotDef keys map 1:1 to AsyncState._tag values (Idle, Loading, Success, Failure).
+ * Core utilities: CSS class merging, RAC render-props composition, slot resolution.
+ * SlotInput accepts LucideIcon, ReactElement, or SlotDef for async-aware rendering.
  */
 
 import { AsyncState } from '@parametric-portal/types/async';
@@ -29,25 +27,25 @@ type BadgeValue = { readonly current: number; readonly max?: number };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const _B = {
 	badgeCap: '+',
 	badgeRadix: 10,
 	badgeZero: 0,
-});
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const cn = (...inputs: readonly ClassValue[]): string => twMerge(clsx(inputs));
-const composeTailwindRenderProps = <T,>(cls: RenderPropsClassName<T>, tw: ClassNameValue): ((v: T) => string) | string => composeRenderProps(cls, (prev) => twMerge(tw, prev));
+const composeTailwindRenderProps = <T,>(className: RenderPropsClassName<T>, tailwind: ClassNameValue): ((value: T) => string) | string => composeRenderProps(className, (prev) => twMerge(tailwind, prev));
 const isExternalHref = (href: string | undefined): boolean => href?.startsWith('http') ? !(globalThis.location && href.startsWith(globalThis.location.origin)) : false;
 /** Filter object to entries where value is not undefined. Optional mapper transforms values. */
 function defined<T extends Record<string, unknown>>(obj: T): { [K in keyof T as T[K] extends undefined ? never : K]: Exclude<T[K], undefined> };
 function defined<T extends Record<string, unknown>, R>(obj: T, map: (v: Exclude<T[keyof T], undefined>) => R): { [K in keyof T as T[K] extends undefined ? never : K]: R };
-function defined<T extends Record<string, unknown>, R>(obj: T, map?: (v: Exclude<T[keyof T], undefined>) => R) {
+function defined<T extends Record<string, unknown>, R>(obj: T, map?: (value: Exclude<T[keyof T], undefined>) => R) {
 	return Object.fromEntries(
 		Object.entries(obj)
-			.filter(([, v]) => v !== undefined)
-			.map(([k, v]) => [k, map ? map(v as Exclude<T[keyof T], undefined>) : v]),
+			.filter(([, value]) => value !== undefined)
+			.map(([key, value]) => [key, map ? map(value as Exclude<T[keyof T], undefined>) : value]),
 	) as never;
 }
 const badgeLabel = (value: BadgeValue | undefined, cssVar: string): string | null =>
@@ -56,35 +54,35 @@ const badgeLabel = (value: BadgeValue | undefined, cssVar: string): string | nul
 		: (() => {
 			const root = globalThis.document?.documentElement;
 			const raw = root ? getComputedStyle(root).getPropertyValue(cssVar).trim() : '';
-			const parsed = Number.parseInt(raw, B.badgeRadix);
-			const cssMax = Number.isNaN(parsed) ? B.badgeZero : parsed;
-			const max = value.max ?? (cssMax > B.badgeZero ? cssMax : undefined);
-			return max !== undefined && value.current > max ? `${max}${B.badgeCap}` : String(value.current);
+			const parsed = Number.parseInt(raw, _B.badgeRadix);
+			const cssMax = Number.isNaN(parsed) ? _B.badgeZero : parsed;
+			const max = value.max ?? (cssMax > _B.badgeZero ? cssMax : undefined);
+			return max !== undefined && value.current > max ? `${max}${_B.badgeCap}` : String(value.current);
 		})();
 
 // --- [SLOT] ------------------------------------------------------------------
 
-const isLucide = (v: unknown): v is LucideIcon =>
-	v != null &&
-	((typeof v === 'function' &&
-		typeof (v as { displayName?: unknown }).displayName === 'string' &&
-		typeof (v as { render?: unknown }).render === 'function') ||
-	(typeof v === 'object' &&
-		(v as { $$typeof?: symbol }).$$typeof === Symbol['for']('react.forward_ref') &&
-		typeof (v as { render?: unknown }).render === 'function'));
-const isSlotDef = <T extends Renderable>(v: unknown): v is SlotDef<T> =>
-	v != null &&
-	typeof v === 'object' &&
-	!isValidElement(v) &&
-	!isLucide(v) &&
-	('default' in v || 'idle' in v || 'loading' in v || 'success' in v || 'failure' in v);
+const isLucide = (value: unknown): value is LucideIcon =>
+	value != null &&
+	((typeof value === 'function' &&
+		typeof (value as { displayName?: unknown }).displayName === 'string' &&
+		typeof (value as { render?: unknown }).render === 'function') ||
+	(typeof value === 'object' &&
+		(value as { $$typeof?: symbol }).$$typeof === Symbol['for']('react.forward_ref') &&
+		typeof (value as { render?: unknown }).render === 'function'));
+const isSlotDef = <T extends Renderable>(value: unknown): value is SlotDef<T> =>
+	value != null &&
+	typeof value === 'object' &&
+	!isValidElement(value) &&
+	!isLucide(value) &&
+	('default' in value || 'idle' in value || 'loading' in value || 'success' in value || 'failure' in value);
 const normalize = <T extends Renderable>(input: SlotInput<T> | undefined): SlotDef<T> | undefined =>
-    pipe(Option.fromNullable(input), Option.map((v) => isSlotDef<T>(v) ? v : { default: v } as SlotDef<T>), Option.getOrUndefined);
+    pipe(Option.fromNullable(input), Option.map((val) => isSlotDef<T>(val) ? val : { default: val } as SlotDef<T>), Option.getOrUndefined);
 const content = (slotContent: Renderable | null | undefined, className?: string): ReactNode =>
 	Match.value(slotContent).pipe(
 		Match.when(Predicate.isNullable, () => null),
 		Match.when(isLucide, (Icon) => createElement(Icon, { className })),
-		Match.when(isValidElement<{ className?: string }>, (el) => cloneElement(el, { className: cn(el.props.className, className) })),
+		Match.when(isValidElement<{ className?: string }>, (element) => cloneElement(element, { className: cn(element.props.className, className) })),
 		Match.orElse((node) => node),
 	);
 const resolve = <T extends Renderable>(
@@ -103,7 +101,7 @@ const bind = (state: AsyncState<unknown, unknown> | undefined) =>
 	Object.freeze({
 		attr: AsyncState.toAttr(state),
 		content,
-		pending: AsyncState.isPending(state),
+		pending: state != null && AsyncState.$is('Loading')(state),
 		render: (input: SlotInput | undefined, className?: string) => render(input, state, className),
 		resolve: <T extends Renderable>(input: SlotInput<T> | undefined) => resolve(input, state),
 	});

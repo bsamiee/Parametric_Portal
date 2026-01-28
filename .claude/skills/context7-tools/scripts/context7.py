@@ -108,6 +108,10 @@ def main() -> int:
                     except httpx.RequestError as e:
                         print(f"[ERROR] {e}")
                         return 1
+        case [cmd_name, *_]:
+            print(f"[ERROR] Unknown command '{cmd_name}'\n")
+            print(__doc__)
+            return 1
         case _:
             print(__doc__)
             return 1

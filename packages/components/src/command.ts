@@ -317,7 +317,7 @@ const createCommandFactory = <T extends CommandType>(commandType: T, input: Comm
             return () => {
                 shouldListen && document.removeEventListener('keydown', handler);
             };
-        }, [globalShortcut, handleOpenChange, commandType]);
+        }, [globalShortcut, handleOpenChange]);
         const navigation = usePageNavigation(vimBindings);
         const [simpleSearch, setSimpleSearch] = useState('');
         const [search, setSearch] = config.useNav

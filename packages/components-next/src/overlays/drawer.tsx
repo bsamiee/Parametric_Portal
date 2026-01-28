@@ -1,9 +1,6 @@
 /**
- * Drawer: Gesture-driven slide-in panel with all 4 directions.
- * Wraps Vaul with theme-driven CSS variable styling.
- * Vaul props pass through directly - we add: theme (color/size/variant), trigger, nested, onClose.
- * REQUIRED: color, size props on Drawer - no defaults.
- * Features: context inheritance, FloatingNode for nested floats, Vaul.NestedRoot via nested prop.
+ * Gesture-driven slide-in panel with all 4 directions. Wraps Vaul.
+ * Requires color and size props. Supports nested drawers via nested prop.
  */
 import { FloatingNode, useFloatingNodeId } from '@floating-ui/react';
 import { readCssVar } from '@parametric-portal/runtime/runtime';
@@ -36,12 +33,12 @@ const DrawerContext = createContext<DrawerContextValue | null>(null);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	cssVars: Object.freeze({
+const _B = {
+	cssVars: {
 		fadeFromIndex: '--drawer-fade-from-index',
 		snapPoints: ['--drawer-snap-point-1', '--drawer-snap-point-2', '--drawer-snap-point-3', '--drawer-snap-point-4', '--drawer-snap-point-5'] as const,
-	}),
-	slot: Object.freeze({
+	},
+	slot: {
 		body: cn(
 			'flex-1 overflow-auto',
 			'p-(--drawer-padding)',
@@ -94,14 +91,14 @@ const B = Object.freeze({
 			'bg-(--drawer-overlay-bg)',
 		),
 		title: cn( 'text-(--drawer-header-font-size) font-(--drawer-header-font-weight)', ),
-	}),
-});
-const contentDirectionClass: Readonly<Record<NonNullable<DialogProps['direction']>, string>> = Object.freeze({
-	bottom: B.slot.contentBottom,
-	left: B.slot.contentLeft,
-	right: B.slot.contentRight,
-	top: B.slot.contentTop,
-});
+	},
+} as const;
+const contentDirectionClass: Readonly<Record<NonNullable<DialogProps['direction']>, string>> = {
+	bottom: _B.slot.contentBottom,
+	left: _B.slot.contentLeft,
+	right: _B.slot.contentRight,
+	top: _B.slot.contentTop,
+} as const;
 
 // --- [SUB_COMPONENTS] --------------------------------------------------------
 
@@ -109,22 +106,22 @@ const DrawerTrigger: FC<DrawerTriggerProps> = ({ asChild = true, children, class
 	<Drawer.Trigger asChild={asChild} className={className}>{children}</Drawer.Trigger>
 );
 const DrawerHandle: FC<{ readonly className?: string }> = ({ className }) => (
-	<Drawer.Handle className={cn(B.slot.handle, className)} data-slot="drawer-handle" />
+	<Drawer.Handle className={cn(_B.slot.handle, className)} data-slot="drawer-handle" />
 );
 const DrawerHeader: FC<DrawerHeaderProps> = ({ children, className, ref }) => (
-	<div className={cn(B.slot.header, className)} data-slot="drawer-header" ref={ref}>{children}</div>
+	<div className={cn(_B.slot.header, className)} data-slot="drawer-header" ref={ref}>{children}</div>
 );
 const DrawerTitle: FC<DrawerSlotProps> = ({ children, className }) => (
-	<Drawer.Title className={cn(B.slot.title, className)} data-slot="drawer-title">{children}</Drawer.Title>
+	<Drawer.Title className={cn(_B.slot.title, className)} data-slot="drawer-title">{children}</Drawer.Title>
 );
 const DrawerDescription: FC<DrawerSlotProps> = ({ children, className }) => (
-	<Drawer.Description className={cn(B.slot.description, className)} data-slot="drawer-description">{children}</Drawer.Description>
+	<Drawer.Description className={cn(_B.slot.description, className)} data-slot="drawer-description">{children}</Drawer.Description>
 );
 const DrawerBody: FC<DrawerSlotProps> = ({ children, className }) => (
-	<div className={cn(B.slot.body, className)} data-slot="drawer-body">{children}</div>
+	<div className={cn(_B.slot.body, className)} data-slot="drawer-body">{children}</div>
 );
 const DrawerFooter: FC<DrawerSlotProps> = ({ children, className }) => (
-	<div className={cn(B.slot.footer, className)} data-slot="drawer-footer">{children}</div>
+	<div className={cn(_B.slot.footer, className)} data-slot="drawer-footer">{children}</div>
 );
 const DrawerClose: FC<DrawerSlotProps> = ({ children, className }) => (
 	<Drawer.Close className={className}>{children}</Drawer.Close>
@@ -137,19 +134,19 @@ const DrawerRoot: FC<DrawerProps> = ({
 	const nodeId = useFloatingNodeId();
 	const contextValue = useMemo(() => ({ color, size, variant }), [color, size, variant]);
 	const snapConfig = useMemo(() => {
-		const points = B.cssVars.snapPoints.map(readCssVar).filter(Boolean).map((v) => (v.endsWith('px') ? v : Number.parseFloat(v)));
-		const fade = Number.parseInt(readCssVar(B.cssVars.fadeFromIndex), 10);
+		const points = _B.cssVars.snapPoints.map(readCssVar).filter(Boolean).map((value) => (value.endsWith('px') ? value : Number.parseFloat(value)));
+		const fade = Number.parseInt(readCssVar(_B.cssVars.fadeFromIndex), 10);
 		return points.length > 0 ? { snapPoints: points, ...(!Number.isNaN(fade) && { fadeFromIndex: fade }) } : {};
 	}, []);
 	const handleOpenChange = (open: boolean): void => { onOpenChange?.(open); !open && onClose?.(); };
 	const Component = nested ? Drawer.NestedRoot : Drawer.Root;
-	const contentClassName = composeTailwindRenderProps(className, cn(B.slot.content, contentDirectionClass[direction])) as string;
+	const contentClassName = composeTailwindRenderProps(className, cn(_B.slot.content, contentDirectionClass[direction])) as string;
 	return (
 		<DrawerContext.Provider value={contextValue}>
 			<Component direction={direction} onOpenChange={handleOpenChange} {...snapConfig} {...(vaulProps as DialogProps)}>
 				{trigger && <Drawer.Trigger asChild>{trigger}</Drawer.Trigger>}
 				<Drawer.Portal>
-					<Drawer.Overlay className={B.slot.overlay} data-slot="drawer-overlay" />
+					<Drawer.Overlay className={_B.slot.overlay} data-slot="drawer-overlay" />
 					<FloatingNode id={nodeId}>
 						<Drawer.Content
 							className={contentClassName}

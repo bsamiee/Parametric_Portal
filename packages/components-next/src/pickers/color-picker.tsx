@@ -1,14 +1,6 @@
 /**
- * ColorPicker: Monolithic color selection with configurable features.
- * Pure presentation - CSS variable driven styling via frozen B constant.
- * REQUIRED: size prop - no defaults.
- *
- * Features (all optional, compose as needed):
- * - mode: 'area' (2D gradient) or 'wheel' (circular hue)
- * - sliders: array of ColorChannel for 1D adjustments
- * - field: hex/channel text input with label/description
- * - swatches: preset color selection
- * - tooltip: standard hover tooltip on root container
+ * Color selection with area/wheel modes, sliders, field, and swatches.
+ * Requires size prop. All features optional and composable.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -51,14 +43,14 @@ type ColorPickerProps = Omit<RACColorPickerProps, 'children' | 'defaultValue' | 
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	defaults: Object.freeze({
+const _B = {
+	defaults: {
 		innerRadius: 40,
 		outerRadius: 80,
 		xChannel: 'saturation' as ColorChannel,
 		yChannel: 'brightness' as ColorChannel,
-	}),
-	slot: Object.freeze({
+	},
+	slot: {
 		alphaPattern: cn(
 			'absolute inset-0 -z-10',
 			'rounded-inherit',
@@ -151,8 +143,8 @@ const B = Object.freeze({
 			'disabled:opacity-(--color-picker-disabled-opacity) disabled:pointer-events-none',
 		),
 		wheelTrack: cn('absolute inset-0','rounded-full',),
-	}),
-} as const);
+	},
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -188,7 +180,7 @@ const ColorThumb: FC<{
 	const mergedRef = useMergeRefs([ref, thumbRef, tooltipProps.ref as Ref<HTMLDivElement>]);
 	return (
 		<>
-			<RACColorThumb className={cn(B.slot.thumb, className)} data-slot='color-picker-thumb' ref={mergedRef}>
+			<RACColorThumb className={cn(_B.slot.thumb, className)} data-slot='color-picker-thumb' ref={mergedRef}>
 				{({ color, isDragging }) => (<DragStateSync colorValue={formatColor(color, format)} isDragging={isDragging} onSync={setDragState}> {children} </DragStateSync>)}
 			</RACColorThumb>
 			{renderTooltip?.()}
@@ -205,10 +197,10 @@ const ColorPicker: FC<ColorPickerProps> = ({
 	swatchLayout = 'grid', swatches, thumbTooltip = false, thumbTooltipFormat = 'hex', tooltip, value, variant, wheelLabel, xChannel, yChannel, ...racProps }) => {
 	const normalizedDefault = normalizeColor(defaultValue);
 	const normalizedValue = normalizeColor(value);
-	const resolvedXChannel = xChannel ?? B.defaults.xChannel;
-	const resolvedYChannel = yChannel ?? B.defaults.yChannel;
-	const resolvedInnerRadius = innerRadius ?? B.defaults.innerRadius;
-	const resolvedOuterRadius = outerRadius ?? B.defaults.outerRadius;
+	const resolvedXChannel = xChannel ?? _B.defaults.xChannel;
+	const resolvedYChannel = yChannel ?? _B.defaults.yChannel;
+	const resolvedInnerRadius = innerRadius ?? _B.defaults.innerRadius;
+	const resolvedOuterRadius = outerRadius ?? _B.defaults.outerRadius;
 	const eyeDropperSupported = eyeDropper && globalThis.window !== undefined && 'EyeDropper' in globalThis;
 	const openEyeDropper = () => {
 		eyeDropperSupported && new ((globalThis as unknown as { EyeDropper: new () => { open: () => Promise<{ sRGBHex: string }> } }).EyeDropper)().open()
@@ -250,7 +242,7 @@ const ColorPicker: FC<ColorPickerProps> = ({
 			{({ color: currentColor }) => (
 				<div
 					{...tooltipProps}
-					className={cn(B.slot.root, className)}
+					className={cn(_B.slot.root, className)}
 					data-mode={mode}
 					data-size={size}
 					data-slot='color-picker'
@@ -260,7 +252,7 @@ const ColorPicker: FC<ColorPickerProps> = ({
 					{mode === 'area' && (
 						<RACColorArea
 							aria-label={areaLabel ?? `Color ${resolvedXChannel} and ${resolvedYChannel}`}
-							className={B.slot.area}
+							className={_B.slot.area}
 							data-slot='color-picker-area'
 							xChannel={resolvedXChannel}
 							yChannel={resolvedYChannel}
@@ -272,13 +264,13 @@ const ColorPicker: FC<ColorPickerProps> = ({
 					{mode === 'wheel' && (
 						<RACColorWheel
 							aria-label={wheelLabel ?? 'Hue wheel'}
-							className={B.slot.wheel}
+							className={_B.slot.wheel}
 							data-slot='color-picker-wheel'
 							innerRadius={resolvedInnerRadius}
 							outerRadius={resolvedOuterRadius}
 							{...defined({ isDisabled, onChangeEnd })}
 						>
-							<RACColorWheelTrack className={B.slot.wheelTrack} data-slot='color-picker-wheel-track' />
+							<RACColorWheelTrack className={_B.slot.wheelTrack} data-slot='color-picker-wheel-track' />
 							<ColorThumb format={thumbTooltipFormat} tooltip={thumbTooltip} />
 						</RACColorWheel>
 					)}
@@ -286,75 +278,75 @@ const ColorPicker: FC<ColorPickerProps> = ({
 						<RACColorSlider
 							aria-label={sliderLabels?.[channel] ?? `${channel} channel`}
 							channel={channel}
-							className={B.slot.slider}
+							className={_B.slot.slider}
 							data-channel={channel}
 							data-slot='color-picker-slider'
 							key={channel}
 							orientation={sliderOrientation}
 							{...defined({ colorSpace, isDisabled, onChangeEnd })}
 						>
-							<RACSliderTrack className={B.slot.sliderTrack} data-slot='color-picker-slider-track'>
-								{channel === 'alpha' && <div className={B.slot.alphaPattern} data-slot='color-picker-alpha-pattern' />}
+							<RACSliderTrack className={_B.slot.sliderTrack} data-slot='color-picker-slider-track'>
+								{channel === 'alpha' && <div className={_B.slot.alphaPattern} data-slot='color-picker-alpha-pattern' />}
 								<ColorThumb format={thumbTooltipFormat} tooltip={thumbTooltip} />
 							</RACSliderTrack>
-							{sliderShowOutput && (<RACSliderOutput className={B.slot.sliderOutput} data-slot='color-picker-slider-output' />)}
+							{sliderShowOutput && (<RACSliderOutput className={_B.slot.sliderOutput} data-slot='color-picker-slider-output' />)}
 						</RACColorSlider>
 					))}
 					{field && (
 						<RACColorField
-							className={B.slot.field}
+							className={_B.slot.field}
 							data-slot='color-picker-field'
 							{...defined({ channel: field.channel, colorSpace, isDisabled, isInvalid: field.isInvalid, isReadOnly: field.isReadOnly, isRequired: field.isRequired })}
 						>
-							{field.label && (<Label className={B.slot.fieldLabel} data-slot='color-picker-field-label'> {field.label} </Label>)}
-							<Input className={B.slot.fieldInput} data-slot='color-picker-field-input' />
-							{field.description && (<Text className={B.slot.fieldDescription} data-slot='color-picker-field-description' slot='description'> {field.description} </Text>)}
-							<FieldError className={B.slot.fieldError} data-slot='color-picker-field-error'> {field.errorMessage} </FieldError>
+							{field.label && (<Label className={_B.slot.fieldLabel} data-slot='color-picker-field-label'> {field.label} </Label>)}
+							<Input className={_B.slot.fieldInput} data-slot='color-picker-field-input' />
+							{field.description && (<Text className={_B.slot.fieldDescription} data-slot='color-picker-field-description' slot='description'> {field.description} </Text>)}
+							<FieldError className={_B.slot.fieldError} data-slot='color-picker-field-error'> {field.errorMessage} </FieldError>
 						</RACColorField>
 					)}
 					{eyeDropperSupported && (
 						<RACButton
 							{...({ ...eyeDropperTooltipProps, ...eyeDropperGestureProps } as unknown as RACButtonProps)}
 							aria-label={eyeDropperLabel ?? 'Pick color from screen'}
-							className={B.slot.eyeDropperButton}
+							className={_B.slot.eyeDropperButton}
 							data-async-state={eyeDropperSlot.attr}
 							data-slot='color-picker-eyedropper'
 							isDisabled={isDisabled || eyeDropperSlot.pending}
 							onPress={openEyeDropper}
 							ref={eyeDropperMergedRef}
 						>
-							{eyeDropperIcon && <span className={B.slot.eyeDropperIcon}>{eyeDropperIcon}</span>}
+							{eyeDropperIcon && <span className={_B.slot.eyeDropperIcon}>{eyeDropperIcon}</span>}
 						</RACButton>
 					)}
 					{swatch && (copyToClipboard ? (
 						<RACButton
 							{...({ ...copyTooltipProps, ...copyGestureProps } as unknown as RACButtonProps)}
 							aria-label='Copy color to clipboard'
-							className={B.slot.swatchWrapper}
+							className={_B.slot.swatchWrapper}
 							data-async-state={copySlot.attr}
 							data-slot='color-picker-swatch-wrapper'
 							isDisabled={isDisabled || copySlot.pending}
 							onPress={() => copyToClipboard(currentColor)}
 							ref={swatchMergedRef}
 						>
-							<div className={B.slot.alphaPattern} data-slot='color-picker-alpha-pattern' />
-							<RACColorSwatch className={B.slot.swatch} data-slot='color-picker-swatch' />
+							<div className={_B.slot.alphaPattern} data-slot='color-picker-alpha-pattern' />
+							<RACColorSwatch className={_B.slot.swatch} data-slot='color-picker-swatch' />
 						</RACButton>
 					) : (
-						<div className={B.slot.swatchWrapper} data-slot='color-picker-swatch-wrapper'>
-							<div className={B.slot.alphaPattern} data-slot='color-picker-alpha-pattern' />
-							<RACColorSwatch className={B.slot.swatch} data-slot='color-picker-swatch' />
+						<div className={_B.slot.swatchWrapper} data-slot='color-picker-swatch-wrapper'>
+							<div className={_B.slot.alphaPattern} data-slot='color-picker-alpha-pattern' />
+							<RACColorSwatch className={_B.slot.swatch} data-slot='color-picker-swatch' />
 						</div>
 					))}
 					{swatches && swatches.length > 0 && (
 						<RACColorSwatchPicker
-							className={B.slot.swatchPicker}
+							className={_B.slot.swatchPicker}
 							data-slot='color-picker-swatch-picker'
 							layout={swatchLayout}
 						>
 							{swatches.map((swatchColor) => (
 								<RACColorSwatchPickerItem
-									className={B.slot.swatchPickerItem}
+									className={_B.slot.swatchPickerItem}
 									color={swatchColor}
 									data-slot='color-picker-swatch-item'
 									key={swatchColor}

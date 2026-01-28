@@ -1,11 +1,6 @@
 /**
- * Button: Pure presentation component with theme-driven styling via CSS variable slots.
- * Supports standard press and toggle modes via props discrimination.
- * Async state comes from external hooks (useEffectMutate) - no internal Effect execution.
- * REQUIRED: color and size props - no defaults, no hardcoded mappings.
- *
- * RAC props pass through directly - we only add: theme, asyncState, tooltip, prefix/suffix, gesture.
- * Toggle mode auto-detected from isSelected/defaultSelected/onChange props.
+ * Multi-mode button with async state, tooltip, gesture, and menu trigger support.
+ * Requires color and size props. Toggle mode via isSelected/onChange.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -53,8 +48,8 @@ type ButtonGroupProps = Omit<RACToggleButtonGroupProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		base: cn(
 			'inline-flex items-center justify-center cursor-pointer',
 			'h-(--button-height) w-(--button-width) px-(--button-px) gap-(--button-gap)',
@@ -73,15 +68,15 @@ const B = Object.freeze({
 		group: cn('inline-flex gap-(--button-group-gap)', 'data-[orientation=vertical]:flex-col'),
 		icon: cn('size-(--button-icon-size) shrink-0', '[animation:var(--button-icon-animation,none)]'),
 		text: 'truncate',
-	}),
-});
+	},
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const ButtonGroup: FC<ButtonGroupProps> = ({ children, className, color, size, variant, ...rest }) => (
 	<RACToggleButtonGroup
 		{...(rest as RACToggleButtonGroupProps)}
-		className={composeTailwindRenderProps(className, B.slot.group)}
+		className={composeTailwindRenderProps(className, _B.slot.group)}
 		data-color={color}
 		data-size={size}
 		data-slot="button-group"
@@ -122,13 +117,13 @@ const ButtonCore: FC<ButtonProps> = (props) => {
 	};
 	const content = (
 		<>
-			{slot.render(prefix, B.slot.icon)}
-			<span className={B.slot.text}>{slot.resolve(children)}</span>
-			{slot.render(suffix, B.slot.icon)}
+			{slot.render(prefix, _B.slot.icon)}
+			<span className={_B.slot.text}>{slot.resolve(children)}</span>
+			{slot.render(suffix, _B.slot.icon)}
 		</>
 	);
 	const { onChange: _gestureOnChange, ...gesturePropsWithoutOnChange } = gestureProps;
-	const composedClassName = composeTailwindRenderProps(className, B.slot.base);
+	const composedClassName = composeTailwindRenderProps(className, _B.slot.base);
 	const toggleButtonProps = {
 		...rest,
 		...tooltipProps,

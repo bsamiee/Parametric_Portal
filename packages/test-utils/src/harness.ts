@@ -1,5 +1,6 @@
 /**
- * Test harness: setup/capture utilities for test isolation.
+ * Provide test harness utilities for setup, capture, and isolation.
+ * Console spies, environment stubs, storage helpers, timer control.
  */
 import './effect-test';
 import { Effect, Exit } from 'effect';

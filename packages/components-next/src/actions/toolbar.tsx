@@ -1,8 +1,6 @@
 /**
- * Toolbar: Action grouping component with keyboard navigation.
- * Wraps RAC Toolbar with CSS variable slots for theme-driven styling.
- * Supports horizontal/vertical orientation, groups, separators, and items with tooltips.
- * REQUIRED: color, size props on Toolbar - no defaults.
+ * Action group with keyboard navigation and selection support.
+ * Requires color and size props. Supports horizontal/vertical orientation.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import { createContext, useContext, useMemo, useRef, type CSSProperties, type FC, type ReactNode, type Ref } from 'react';
@@ -60,8 +58,8 @@ type ToolbarProps = Omit<RACToolbarProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		group: cn(
 			'inline-flex items-center gap-(--toolbar-group-gap)',
 			'data-[orientation=vertical]:flex-col',
@@ -97,8 +95,8 @@ const B = Object.freeze({
 			'data-[orientation=horizontal]:w-(--toolbar-separator-thickness) data-[orientation=horizontal]:h-(--toolbar-separator-length) data-[orientation=horizontal]:mx-(--toolbar-separator-margin)',
 			'data-[orientation=vertical]:h-(--toolbar-separator-thickness) data-[orientation=vertical]:w-(--toolbar-separator-length) data-[orientation=vertical]:my-(--toolbar-separator-margin)',
 		),
-	}),
-});
+	},
+} as const;
 const ToolbarContext = createContext<ToolbarContextValue | null>(null);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -111,7 +109,7 @@ const ToolbarRoot: FC<ToolbarProps> = ({ children, className, color, orientation
 	return (
 		<RACToolbar
 			{...(racProps as RACToolbarProps)}
-			className={composeTailwindRenderProps(className, B.slot.root)}
+			className={composeTailwindRenderProps(className, _B.slot.root)}
 			data-color={color}
 			data-size={size}
 			data-slot='toolbar'
@@ -130,7 +128,7 @@ const ToolbarGroup: FC<ToolbarGroupProps> = ({ 'aria-label': ariaLabel, children
 	return (
 		<RACGroup
 			{...(ariaLabel && { 'aria-label': ariaLabel })}
-			className={cn(B.slot.group, className)}
+			className={cn(_B.slot.group, className)}
 			data-orientation={ctx?.orientation}
 			data-slot='toolbar-group'
 			ref={ref}
@@ -144,7 +142,7 @@ const ToolbarSeparator: FC<ToolbarSeparatorProps> = ({ className, ref }) => {
 	const orientation = ctx?.orientation ?? 'horizontal';
 	return (
 		<RACSeparator
-			className={cn(B.slot.separator, className)}
+			className={cn(_B.slot.separator, className)}
 			data-orientation={orientation}
 			data-slot='toolbar-separator'
 			orientation={orientation}
@@ -159,7 +157,7 @@ const ToolbarToggleGroup: FC<ToolbarToggleGroupProps> = ({ 'aria-label': ariaLab
 		<RACToggleButtonGroup
 			{...(rest as unknown as RACToggleButtonGroupProps)}
 			aria-label={ariaLabel}
-			className={cn(B.slot.group, className)}
+			className={cn(_B.slot.group, className)}
 			data-color={ctx?.color}
 			data-orientation={orientation}
 			data-size={ctx?.size}
@@ -188,7 +186,7 @@ const ToolbarItem: FC<ToolbarItemProps> = (props) => {
 	} as Parameters<typeof useGesture>[0]);
 	const mergedRef = useMergeRefs([ref, elementRef, tooltipProps.ref as Ref<HTMLButtonElement>]);
 	const mergedStyle = { ...gestureProps.style, ...styleProp } as CSSProperties;
-	const composedClassName = composeTailwindRenderProps(className, B.slot.item);
+	const composedClassName = composeTailwindRenderProps(className, _B.slot.item);
 	const dataProps = {
 		'data-color': ctx?.color,
 		'data-orientation': ctx?.orientation,
@@ -197,13 +195,13 @@ const ToolbarItem: FC<ToolbarItemProps> = (props) => {
 	};
 	const content = (
 		<>
-			{selectionIndicator && <RACSelectionIndicator className={B.slot.selectionIndicator} />}
-			{Slot.render(prefix, undefined, B.slot.itemIcon)}
+			{selectionIndicator && <RACSelectionIndicator className={_B.slot.selectionIndicator} />}
+			{Slot.render(prefix, undefined, _B.slot.itemIcon)}
 			{children && <span className='truncate'>{Slot.resolve(children, undefined)}</span>}
-			{Slot.render(suffix, undefined, B.slot.itemIcon)}
+			{Slot.render(suffix, undefined, _B.slot.itemIcon)}
 		</>
 	);
-	const { onChange: _g, ...gesturePropsForToggle } = gestureProps;	// RACToggleButton.onChange conflicts with gesture's onChange - must omit for toggle mode
+	const { onChange: _gestureOnChange, ...gesturePropsForToggle } = gestureProps;	// RACToggleButton.onChange conflicts with gesture's onChange - must omit for toggle mode
 	const toggleButtonProps = {
 		...rest,
 		...tooltipProps,

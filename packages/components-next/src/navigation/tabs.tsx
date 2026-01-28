@@ -1,9 +1,6 @@
 /**
- * Tabs: Navigation with TabList + Tab + TabPanel.
- * CSS variable inheritance - color/size/variant set on container, children inherit.
- * Supports href links on tabs for router integration, shouldForceMount on panels.
- * DnD reordering via onReorder prop - requires id on each Tab.
- * REQUIRED: color, size props on Tabs - no defaults.
+ * Tab navigation with TabList, Tab, and TabPanel. Supports DnD reordering.
+ * Requires color and size props. Supports href links for router integration.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import { createContext, useContext, useMemo, useRef, type FC, type ReactNode, type Ref } from 'react';
@@ -48,9 +45,9 @@ type TabProps = Omit<RACTabProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	cssVars: Object.freeze({ badgeMax: '--tabs-tab-badge-max' }),
-	slot: Object.freeze({
+const _B = {
+	cssVars: { badgeMax: '--tabs-tab-badge-max' },
+	slot: {
 		list: cn(
 			'flex gap-(--tabs-list-gap)',
 			'bg-(--tabs-list-bg) p-(--tabs-list-padding) rounded-(--tabs-list-radius)',
@@ -85,8 +82,8 @@ const B = Object.freeze({
 			'rounded-(--tabs-tab-badge-radius)',
 		),
 		tabIcon: cn('size-(--tabs-tab-icon-size) shrink-0'),
-	}),
-});
+	},
+} as const;
 const TabsContext = createContext<TabsContextValue | null>(null);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -96,7 +93,7 @@ const TabsRoot: FC<TabsProps> = ({ children, className, color, onReorder, ref, s
 	return (
 		<RACTabs
 			{...(racProps as RACTabsProps)}
-			className={composeTailwindRenderProps(className, B.slot.root)}
+			className={composeTailwindRenderProps(className, _B.slot.root)}
 			data-color={color}
 			data-size={size}
 			data-slot='tabs'
@@ -112,7 +109,7 @@ const TabsRoot: FC<TabsProps> = ({ children, className, color, onReorder, ref, s
 const TabList = <T extends object = object>({ className, ...racProps }: TabListProps<T>): ReactNode => (
 	<RACTabList
 		{...(racProps as RACTabListProps<T>)}
-		className={composeTailwindRenderProps(className, B.slot.list)}
+		className={composeTailwindRenderProps(className, _B.slot.list)}
 		data-slot='tabs-list'
 	/>
 );
@@ -128,8 +125,8 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 	const { dropProps, isDropTarget } = useDrop({
 		getDropOperation: (types) => types.has(mimeType) ? 'move' : 'cancel',
 		isDisabled: !onReorder,
-		onDrop: (e) => {
-			const item = e.items.find((i) => i.kind === 'text' && i.types.has(mimeType)) as TextDropItem | undefined;
+		onDrop: (event) => {
+			const item = event.items.find((dropItem) => dropItem.kind === 'text' && dropItem.types.has(mimeType)) as TextDropItem | undefined;
 			const targetId = String(id);
 			item?.getText(mimeType).then((fromId) => fromId !== targetId && onReorder?.(fromId, targetId));
 		},
@@ -146,12 +143,12 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 	});
 	const mergedRef = useMergeRefs([ref, tabRef, tooltipProps.ref as Ref<HTMLDivElement>].filter(Boolean) as Array<Ref<HTMLDivElement>>);
 	const isRenderFn = typeof children === 'function';
-	const badgeLabel = Badge.useLabel(badge, B.cssVars.badgeMax);
+	const badgeLabel = Badge.useLabel(badge, _B.cssVars.badgeMax);
 	return (
 		<>
 			<RACTab
 				{...({ ...(onReorder ? { ...dragProps, ...dropProps } : {}), ...racProps, ...tooltipProps, ...gestureProps } as unknown as RACTabProps)}
-				className={composeTailwindRenderProps(className, B.slot.tab)}
+				className={composeTailwindRenderProps(className, _B.slot.tab)}
 				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-dragging={isDragging || undefined}
@@ -164,11 +161,11 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 			>
 				{(renderProps) => (
 					<>
-						{slot.render(icon, B.slot.tabIcon)}
+						{slot.render(icon, _B.slot.tabIcon)}
 						{isRenderFn
 							? (children as (state: TabRenderProps) => ReactNode)(renderProps)
 							: slot.resolve(children)}
-						{badgeLabel !== null && <span className={B.slot.tabBadge}>{badgeLabel}</span>}
+						{badgeLabel !== null && <span className={_B.slot.tabBadge}>{badgeLabel}</span>}
 					</>
 				)}
 			</RACTab>
@@ -180,7 +177,7 @@ const Tab: FC<TabProps> = ({ asyncState, badge, children, className, gesture, ic
 const TabPanel: FC<TabPanelProps> = ({ className, ref, ...racProps }) => (
 	<RACTabPanel
 		{...(racProps as RACTabPanelProps)}
-		className={composeTailwindRenderProps(className, B.slot.panel)}
+		className={composeTailwindRenderProps(className, _B.slot.panel)}
 		data-slot='tabs-panel'
 		ref={ref}
 	/>

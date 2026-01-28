@@ -1,7 +1,6 @@
 /**
- * Unified gesture system wrapping @use-gesture/react + react-aria useLongPress.
- * ADT discriminant enables exhaustive matching; full FullGestureState exposed via accessors.
- * Library config types passed through unchanged - no wrapping, no duplication.
+ * Unified gesture system wrapping @use-gesture/react and react-aria useLongPress.
+ * ADT discriminant enables exhaustive matching; FullGestureState exposed via accessors.
  */
 import { useGesture as useGestureLib, type CoordinatesConfig, type DragConfig, type FullGestureState, type HoverConfig, type MoveConfig, type PinchConfig, } from '@use-gesture/react';
 import { Data, Match, Option, pipe } from 'effect';
@@ -76,8 +75,8 @@ type GestureProps = SimplifyDeep<{
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	cssVars: Object.freeze({
+const _B = {
+	cssVars: {
 		interactionHaptic: '--interaction-haptic-duration',
 		interactionLongPressThreshold: '--interaction-long-press-threshold',
 		longPressCancelDistance: '--gesture-longpress-cancel-distance',
@@ -86,84 +85,83 @@ const B = Object.freeze({
 		swipeDistance: '--gesture-swipe-distance',
 		swipeDuration: '--gesture-swipe-duration',
 		swipeVelocity: '--gesture-swipe-velocity',
-	}),
-	cssVarsFor: Object.freeze({
-		drag: (p: string): Partial<CssVarConfig> => ({ deltaX: `--${p}-drag-delta-x`, deltaY: `--${p}-drag-delta-y`, momentum: `--${p}-drag-momentum`, velocityX: `--${p}-drag-velocity-x`, velocityY: `--${p}-drag-velocity-y`, x: `--${p}-drag-x`, y: `--${p}-drag-y` }),
-		longPress: (p: string): Partial<CssVarConfig> => ({ progress: `--${p}-longpress-progress` }),
-		move: (p: string): Partial<CssVarConfig> => ({ x: `--${p}-move-x`, y: `--${p}-move-y` }),
-		pinch: (p: string): Partial<CssVarConfig> => ({ angle: `--${p}-pinch-angle`, scale: `--${p}-pinch-scale` }),
-		scroll: (p: string): Partial<CssVarConfig> => ({ x: `--${p}-scroll-x`, y: `--${p}-scroll-y` }),
-		wheel: (p: string): Partial<CssVarConfig> => ({ x: `--${p}-wheel-x`, y: `--${p}-wheel-y` }),
-	}),
-	defaults: Object.freeze({ decayPower: 0.95, decayRestDelta: 0.5, rubberbandFactor: 0.2, snapThreshold: 50, snapVelocity: 0.5 }),
-});
+	},
+	cssVarsFor: {
+		drag: (prefix: string): Partial<CssVarConfig> => ({ deltaX: `--${prefix}-drag-delta-x`, deltaY: `--${prefix}-drag-delta-y`, momentum: `--${prefix}-drag-momentum`, velocityX: `--${prefix}-drag-velocity-x`, velocityY: `--${prefix}-drag-velocity-y`, x: `--${prefix}-drag-x`, y: `--${prefix}-drag-y` }),
+		longPress: (prefix: string): Partial<CssVarConfig> => ({ progress: `--${prefix}-longpress-progress` }),
+		move: (prefix: string): Partial<CssVarConfig> => ({ x: `--${prefix}-move-x`, y: `--${prefix}-move-y` }),
+		pinch: (prefix: string): Partial<CssVarConfig> => ({ angle: `--${prefix}-pinch-angle`, scale: `--${prefix}-pinch-scale` }),
+		scroll: (prefix: string): Partial<CssVarConfig> => ({ x: `--${prefix}-scroll-x`, y: `--${prefix}-scroll-y` }),
+		wheel: (prefix: string): Partial<CssVarConfig> => ({ x: `--${prefix}-wheel-x`, y: `--${prefix}-wheel-y` }),
+	},
+	defaults: { decayPower: 0.95, decayRestDelta: 0.5, rubberbandFactor: 0.2, snapThreshold: 50, snapVelocity: 0.5 },
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const { $is, $match, Drag, Hover, LongPress, Move, Pinch, Scroll, Wheel } = Data.taggedEnum<GestureEventDef>();
 
 const generateCssVars = (prefix: string, config: GestureProps): CssVarConfig => ({
-	...(config.drag && B.cssVarsFor.drag(prefix)),
-	...(config.longPress && B.cssVarsFor.longPress(prefix)),
-	...(config.move && B.cssVarsFor.move(prefix)),
-	...(config.pinch && B.cssVarsFor.pinch(prefix)),
-	...(config.scroll && B.cssVarsFor.scroll(prefix)),
-	...(config.wheel && B.cssVarsFor.wheel(prefix)),
+	...(config.drag && _B.cssVarsFor.drag(prefix)),
+	...(config.longPress && _B.cssVarsFor.longPress(prefix)),
+	...(config.move && _B.cssVarsFor.move(prefix)),
+	...(config.pinch && _B.cssVarsFor.pinch(prefix)),
+	...(config.scroll && _B.cssVarsFor.scroll(prefix)),
+	...(config.wheel && _B.cssVarsFor.wheel(prefix)),
 });
 // Side-effectful CSS sync - uses plain guards since Option.gen is for pure transformations
-const syncCssVars = (ref: RefObject<HTMLElement | null>, evt: GestureEventDef, cfg: CssVarConfig | undefined): void => {
+const syncCssVars = (ref: RefObject<HTMLElement | null>, evt: GestureEventDef, varConfig: CssVarConfig | undefined): void => {
 	const el = ref.current;
-	const c = cfg;
-	(el && c) && (() => {
-		const set = (k: string | undefined, v: string): void => { k && el.style.setProperty(k, v); };
+	(el && varConfig) && (() => {
+		const set = (key: string | undefined, val: string): void => { key && el.style.setProperty(key, val); };
 		$match(evt, {
 			Drag: ({ state: { offset, velocity, delta } }) => {
-				set(c.x, `${offset[0]}px`); set(c.y, `${offset[1]}px`);
-				set(c.velocityX, String(velocity[0])); set(c.velocityY, String(velocity[1]));
-				set(c.deltaX, `${delta[0]}px`); set(c.deltaY, `${delta[1]}px`);
-				set(c.momentum, String(Math.hypot(velocity[0], velocity[1])));
+				set(varConfig.x, `${offset[0]}px`); set(varConfig.y, `${offset[1]}px`);
+				set(varConfig.velocityX, String(velocity[0])); set(varConfig.velocityY, String(velocity[1]));
+				set(varConfig.deltaX, `${delta[0]}px`); set(varConfig.deltaY, `${delta[1]}px`);
+				set(varConfig.momentum, String(Math.hypot(velocity[0], velocity[1])));
 			},
 			Hover: () => {},
 			LongPress: () => {},
-			Move: ({ state }) => { set(c.x, `${state.offset[0]}px`); set(c.y, `${state.offset[1]}px`); },
-			Pinch: ({ state }) => { set(c.scale, String(state.offset[0])); set(c.angle, `${state.offset[1]}deg`); },
-			Scroll: ({ state }) => { set(c.x, `${state.offset[0]}px`); set(c.y, `${state.offset[1]}px`); },
-			Wheel: ({ state }) => { set(c.x, `${state.offset[0]}px`); set(c.y, `${state.offset[1]}px`); },
+			Move: ({ state }) => { set(varConfig.x, `${state.offset[0]}px`); set(varConfig.y, `${state.offset[1]}px`); },
+			Pinch: ({ state }) => { set(varConfig.scale, String(state.offset[0])); set(varConfig.angle, `${state.offset[1]}deg`); },
+			Scroll: ({ state }) => { set(varConfig.x, `${state.offset[0]}px`); set(varConfig.y, `${state.offset[1]}px`); },
+			Wheel: ({ state }) => { set(varConfig.x, `${state.offset[0]}px`); set(varConfig.y, `${state.offset[1]}px`); },
 		});
 	})();
 };
 const V2 = Object.freeze({
-	clamp: (v: V2, bounds: V2Bounds): V2 => V2.map(v, (x, i) => clamp(x, bounds.min[i], bounds.max[i])),
-	from: (v: [number, number]): V2 => [v[0], v[1]] as const,
-	magnitude: (v: V2): number => Math.hypot(v[0], v[1]),
-	map: (v: V2, f: (x: number, i: 0 | 1) => number): V2 => [f(v[0], 0), f(v[1], 1)] as const,
-	rubberband: (v: V2, bounds: V2Bounds, factor: number): V2 => {
-		const rb = (x: number, min: number, max: number): number =>
-			Match.value(x).pipe(
+	clamp: (vec: V2, bounds: V2Bounds): V2 => V2.map(vec, (coord, idx) => clamp(coord, bounds.min[idx], bounds.max[idx])),
+	from: (vec: [number, number]): V2 => [vec[0], vec[1]] as const,
+	magnitude: (vec: V2): number => Math.hypot(vec[0], vec[1]),
+	map: (vec: V2, mapper: (coord: number, idx: 0 | 1) => number): V2 => [mapper(vec[0], 0), mapper(vec[1], 1)] as const,
+	rubberband: (vec: V2, bounds: V2Bounds, factor: number): V2 => {
+		const rb = (coord: number, min: number, max: number): number =>
+			Match.value(coord).pipe(
 				Match.when((n) => n < min, (n) => min + (n - min) * factor),
 				Match.when((n) => n > max, (n) => max + (n - max) * factor),
 				Match.orElse((n) => n),
 			);
-		return V2.map(v, (x, i) => rb(x, bounds.min[i], bounds.max[i]));
+		return V2.map(vec, (coord, idx) => rb(coord, bounds.min[idx], bounds.max[idx]));
 	},
-	snap: (v: V2, snap: SnapConfig, threshold: number): V2 => {
-		const nearest = (x: number, points: readonly number[], th: number): number => {
-			const best = points.reduce((b, p) => Math.abs(p - x) < Math.abs(b - x) ? p : b, points[0] ?? 0);
-			return Math.abs(best - x) < th ? best : x;
+	snap: (vec: V2, snap: SnapConfig, threshold: number): V2 => {
+		const nearest = (coord: number, points: readonly number[], th: number): number => {
+			const best = points.reduce((prev, pt) => Math.abs(pt - coord) < Math.abs(prev - coord) ? pt : prev, points[0] ?? 0);
+			return Math.abs(best - coord) < th ? best : coord;
 		};
 		return 'unified' in snap && snap.unified
-			? V2.map(v, (x) => nearest(x, snap.unified.points, snap.unified.threshold ?? threshold))
-			: [nearest(v[0], snap.x.points, snap.x.threshold ?? threshold), nearest(v[1], snap.y.points, snap.y.threshold ?? threshold)] as const;
+			? V2.map(vec, (coord) => nearest(coord, snap.unified.points, snap.unified.threshold ?? threshold))
+			: [nearest(vec[0], snap.x.points, snap.x.threshold ?? threshold), nearest(vec[1], snap.y.points, snap.y.threshold ?? threshold)] as const;
 	},
 });
-const applyMovementBounds = (v: V2, movement: V2Bounds & { rubberband?: { factor: number } } | undefined): V2 =>
+const applyMovementBounds = (vec: V2, movement: V2Bounds & { rubberband?: { factor: number } } | undefined): V2 =>
 	pipe(
 		Option.fromNullable(movement),
-		Option.map((mv) => mv.rubberband ? V2.rubberband(v, mv, mv.rubberband.factor ?? B.defaults.rubberbandFactor) : V2.clamp(v, mv)),
-		Option.getOrElse(() => v),
+		Option.map((mv) => mv.rubberband ? V2.rubberband(vec, mv, mv.rubberband.factor ?? _B.defaults.rubberbandFactor) : V2.clamp(vec, mv)),
+		Option.getOrElse(() => vec),
 	);
-const swipeFrom = (v: [number, number]): SwipeDir | null => ({ '-1,0': 'left', '0,-1': 'up', '0,1': 'down', '1,0': 'right' } as Record<string, SwipeDir>)[`${v[0]},${v[1]}`] ?? null;
-const touchAction = (cfg: GestureConfig): string => !cfg.drag && !cfg.pinch && !cfg.scroll ? 'auto' : ({ x: 'pan-y', y: 'pan-x' } as Record<string, string>)[cfg.drag?.axis ?? ''] ?? 'none';
+const swipeFrom = (vec: [number, number]): SwipeDir | null => ({ '-1,0': 'left', '0,-1': 'up', '0,1': 'down', '1,0': 'right' } as Record<string, SwipeDir>)[`${vec[0]},${vec[1]}`] ?? null;
+const touchAction = (gestureConfig: GestureConfig): string => !gestureConfig.drag && !gestureConfig.pinch && !gestureConfig.scroll ? 'auto' : ({ x: 'pan-y', y: 'pan-x' } as Record<string, string>)[gestureConfig.drag?.axis ?? ''] ?? 'none';
 const vibrate = (ms: number): void => { 'vibrate' in (navigator ?? {}) && navigator.vibrate(ms); };
 const phaseOf = <K extends GestureKind>(g: FullGestureState<K>): Phase => (g.first && 'start') || (g.last && 'end') || 'move';
 const hasState = (e: GestureEventDef): e is HasState => e._tag !== 'LongPress';
@@ -172,23 +170,23 @@ const resolveMs = (primary: string, fallback: string): number => readCssVar(prim
 const isDrag = $is('Drag'), isHover = $is('Hover'), isLongPress = $is('LongPress'), isMove = $is('Move'), isPinch = $is('Pinch'), isScroll = $is('Scroll'), isWheel = $is('Wheel');
 const isCoordinates = (e: GestureEventDef | undefined): boolean => e != null && ['Drag', 'Hover', 'Move', 'Scroll', 'Wheel'].includes(e._tag);
 // Accessors
-const stateField = <T>(e: GestureEventDef, get: (s: FullGestureState<GestureKind>) => T): Option.Option<T> => pipe(Option.some(e), Option.filter(hasState), Option.map((ev) => get(ev.state as FullGestureState<GestureKind>)));
-const v2Field = (key: keyof FullGestureState<GestureKind>) => (e: GestureEventDef): Option.Option<V2> => stateField(e, (s) => V2.from(s[key] as [number, number]));
+const stateField = <T>(evt: GestureEventDef, get: (gestureState: FullGestureState<GestureKind>) => T): Option.Option<T> => pipe(Option.some(evt), Option.filter(hasState), Option.map((ev) => get(ev.state as FullGestureState<GestureKind>)));
+const v2Field = (key: keyof FullGestureState<GestureKind>) => (evt: GestureEventDef): Option.Option<V2> => stateField(evt, (gestureState) => V2.from(gestureState[key] as [number, number]));
 const getOffset = v2Field('offset'), getMovement = v2Field('movement'), getDelta = v2Field('delta'), getVelocity = v2Field('velocity');
 const getDirection = v2Field('direction'), getDistance = v2Field('distance'), getInitial = v2Field('initial'), getOverflow = v2Field('overflow');
-const getXY = (e: GestureEventDef): Option.Option<V2> => pipe(Option.some(e), Option.filter(hasState), Option.filter((ev) => 'xy' in ev.state), Option.map((ev) => V2.from((ev.state as { xy: [number, number] }).xy)));
-const getOrigin = (e: GestureEventDef): Option.Option<V2> => pipe(Option.some(e), Option.filter(isPinch), Option.map((p) => V2.from(p.state.origin)));
-const getDA = (e: GestureEventDef): Option.Option<V2> => pipe(Option.some(e), Option.filter(isPinch), Option.map((p) => V2.from(p.state.da)));
-const getTurns = (e: GestureEventDef): Option.Option<number> => pipe(Option.some(e), Option.filter(isPinch), Option.map((p) => p.state.turns));
-const getTap = (e: GestureEventDef): Option.Option<boolean> => pipe(Option.some(e), Option.filter(isDrag), Option.map((d) => d.state.tap));
-const getSwipe = (e: GestureEventDef): Option.Option<SwipeDir | null> => pipe(Option.some(e), Option.filter(isDrag), Option.map((d) => d.swipe));
-const getElapsedTime = (e: GestureEventDef): Option.Option<number> => stateField(e, (s) => s.elapsedTime);
-const getAxis = (e: GestureEventDef): Option.Option<string | undefined> => stateField(e, (s) => s.axis);
-const isActive = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? e.progress > 0 && e.progress < 1 : hasState(e) && e.state.active;
-const isFirst = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? e.progress === 0 : hasState(e) && e.state.first;
-const isLast = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? e.progress >= 1 : hasState(e) && e.state.last;
-const isCanceled = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? false : hasState(e) && 'canceled' in e.state && Boolean(e.state.canceled);
-const isIntentional = (e: GestureEventDef): boolean => e._tag === 'LongPress' ? true : hasState(e) && e.state.intentional;
+const getXY = (evt: GestureEventDef): Option.Option<V2> => pipe(Option.some(evt), Option.filter(hasState), Option.filter((ev) => 'xy' in ev.state), Option.map((ev) => V2.from((ev.state as { xy: [number, number] }).xy)));
+const getOrigin = (evt: GestureEventDef): Option.Option<V2> => pipe(Option.some(evt), Option.filter(isPinch), Option.map((pinchEvt) => V2.from(pinchEvt.state.origin)));
+const getDA = (evt: GestureEventDef): Option.Option<V2> => pipe(Option.some(evt), Option.filter(isPinch), Option.map((pinchEvt) => V2.from(pinchEvt.state.da)));
+const getTurns = (evt: GestureEventDef): Option.Option<number> => pipe(Option.some(evt), Option.filter(isPinch), Option.map((pinchEvt) => pinchEvt.state.turns));
+const getTap = (evt: GestureEventDef): Option.Option<boolean> => pipe(Option.some(evt), Option.filter(isDrag), Option.map((dragEvt) => dragEvt.state.tap));
+const getSwipe = (evt: GestureEventDef): Option.Option<SwipeDir | null> => pipe(Option.some(evt), Option.filter(isDrag), Option.map((dragEvt) => dragEvt.swipe));
+const getElapsedTime = (evt: GestureEventDef): Option.Option<number> => stateField(evt, (gestureState) => gestureState.elapsedTime);
+const getAxis = (evt: GestureEventDef): Option.Option<string | undefined> => stateField(evt, (gestureState) => gestureState.axis);
+const isActive = (evt: GestureEventDef): boolean => evt._tag === 'LongPress' ? evt.progress > 0 && evt.progress < 1 : hasState(evt) && evt.state.active;
+const isFirst = (evt: GestureEventDef): boolean => evt._tag === 'LongPress' ? evt.progress === 0 : hasState(evt) && evt.state.first;
+const isLast = (evt: GestureEventDef): boolean => evt._tag === 'LongPress' ? evt.progress >= 1 : hasState(evt) && evt.state.last;
+const isCanceled = (evt: GestureEventDef): boolean => evt._tag === 'LongPress' ? false : hasState(evt) && 'canceled' in evt.state && Boolean(evt.state.canceled);
+const isIntentional = (evt: GestureEventDef): boolean => evt._tag === 'LongPress' ? true : hasState(evt) && evt.state.intentional;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -203,7 +201,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 	const cssVars = useMemo(() => prefix ? { ...generateCssVars(prefix, config), ...cssVarsExplicit } : cssVarsExplicit, [config, cssVarsExplicit, prefix]);
 	const [state, setState] = useState<Partial<Record<Lowercase<GestureEventTag>, GestureEventDef>>>({});
 	const enabled = !isDisabled;
-	const swipeCfg = useMemo(() => ({ distance: readCssPx(B.cssVars.swipeDistance), duration: readCssMs(B.cssVars.swipeDuration), velocity: readCssPx(B.cssVars.swipeVelocity) / 1000 }), []);
+	const swipeCfg = useMemo(() => ({ distance: readCssPx(_B.cssVars.swipeDistance), duration: readCssMs(_B.cssVars.swipeDuration), velocity: readCssPx(_B.cssVars.swipeVelocity) / 1000 }), []);
 	const inertiaRef = useRef<{ active: boolean; position: V2; velocity: V2 }>({ active: false, position: [0, 0], velocity: [0, 0] });
 	const physicsRafRef = useRef<number | null>(null);
 	const typedCallbacks = useMemo(() => ({ drag: onDragCb, hover: onHoverCb, longpress: onLongPress, move: onMoveCb, pinch: onPinchCb, scroll: onScrollCb, wheel: onWheelCb }) as const, [onDragCb, onHoverCb, onLongPress, onMoveCb, onPinchCb, onScrollCb, onWheelCb]);
@@ -211,7 +209,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 	const startInertia = useCallback((startPos: V2, startVel: V2): void => {
 		const decay = physics?.decay;
 		decay && (() => {
-			const { power = B.defaults.decayPower, restDelta = B.defaults.decayRestDelta } = decay;
+			const { power = _B.defaults.decayPower, restDelta = _B.defaults.decayRestDelta } = decay;
 			inertiaRef.current = { active: true, position: startPos, velocity: startVel };
 			const tick = (): void => {
 				const ir = inertiaRef.current;
@@ -220,7 +218,7 @@ const useGesture = (config: GestureConfig): GestureResult => {
 					const newPos: V2 = [ir.position[0] + newVel[0], ir.position[1] + newVel[1]];
 					const done = V2.magnitude(newVel) < restDelta;
 					inertiaRef.current = { active: !done, position: newPos, velocity: newVel };
-					const finalPos = snap && V2.magnitude(newVel) < B.defaults.snapVelocity ? V2.snap(newPos, snap, B.defaults.snapThreshold) : newPos;
+				const finalPos = snap && V2.magnitude(newVel) < _B.defaults.snapVelocity ? V2.snap(newPos, snap, _B.defaults.snapThreshold) : newPos;
 					cssVars?.x && ref.current?.style.setProperty(cssVars.x, `${finalPos[0]}px`);
 					cssVars?.y && ref.current?.style.setProperty(cssVars.y, `${finalPos[1]}px`);
 					physicsRafRef.current = done ? null : requestAnimationFrame(tick);
@@ -229,20 +227,20 @@ const useGesture = (config: GestureConfig): GestureResult => {
 			physicsRafRef.current = requestAnimationFrame(tick);
 		})();
 	}, [cssVars?.x, cssVars?.y, physics?.decay, ref, snap]);
-	const handler = useCallback(<K extends GestureKind>(kind: Lowercase<GestureEventTag>, factory: (g: FullGestureState<K>) => GestureEventDef) => (g: FullGestureState<K>): void => {
+	const handler = useCallback(<K extends GestureKind>(kind: Lowercase<GestureEventTag>, factory: (gestureState: FullGestureState<K>) => GestureEventDef) => (gestureState: FullGestureState<K>): void => {
 		const offset = pipe(
-			V2.from(g.offset),
-			(v) => applyMovementBounds(v, bounds?.movement),
-			(v) => snap && g.last && !physics ? V2.snap(v, snap, B.defaults.snapThreshold) : v,
+			V2.from(gestureState.offset),
+			(vec) => applyMovementBounds(vec, bounds?.movement),
+			(vec) => snap && gestureState.last && !physics ? V2.snap(vec, snap, _B.defaults.snapThreshold) : vec,
 		);
-		const evt = factory({ ...g, offset } as FullGestureState<K>);
-		setState((s) => ({ ...s, [kind]: evt }));
-		ref.current?.setAttribute(`data-${kind}-state`, g.active ? 'active' : 'idle');
+		const evt = factory({ ...gestureState, offset } as FullGestureState<K>);
+		setState((prev) => ({ ...prev, [kind]: evt }));
+		ref.current?.setAttribute(`data-${kind}-state`, gestureState.active ? 'active' : 'idle');
 		syncCssVars(ref, evt, cssVars);
-		typedCallbacks[kind]?.(evt as never, phaseOf(g));
-		onGesture?.(evt, phaseOf(g));
-		$is('Drag')(evt) && g.last && evt.swipe && onSwipe?.(evt.swipe);
-		kind === 'drag' && g.last && physics && startInertia(offset, V2.from(g.velocity));
+		typedCallbacks[kind]?.(evt as never, phaseOf(gestureState));
+		onGesture?.(evt, phaseOf(gestureState));
+		$is('Drag')(evt) && gestureState.last && evt.swipe && onSwipe?.(evt.swipe);
+		kind === 'drag' && gestureState.last && physics && startInertia(offset, V2.from(gestureState.velocity));
 	}, [bounds, cssVars, onGesture, onSwipe, physics, ref, snap, startInertia, typedCallbacks]);
 	const handlers = useMemo(() => ({
 		...(drag && { onDrag: handler<'drag'>('drag', (g) => Drag({ state: g, swipe: swipeFrom(g.swipe) })) }),
@@ -260,24 +258,24 @@ const useGesture = (config: GestureConfig): GestureResult => {
 	}), [drag, enabled, eventOptions, hover, mobile, move, pinch, scroll, swipeCfg, transform, wheel]);
 	const bind = useGestureLib(handlers, gestureConfig as Parameters<typeof useGestureLib>[1]);
 	const lpConfig = useMemo(() => ({
-		cancelDist: readCssPx(B.cssVars.longPressCancelDistance),
-		hapticMs: longPress?.haptic ? resolveMs(B.cssVars.longPressHaptic, B.cssVars.interactionHaptic) : 0,
-		threshold: longPress?.threshold ?? resolveMs(B.cssVars.longPressThreshold, B.cssVars.interactionLongPressThreshold),
+		cancelDist: readCssPx(_B.cssVars.longPressCancelDistance),
+		hapticMs: longPress?.haptic ? resolveMs(_B.cssVars.longPressHaptic, _B.cssVars.interactionHaptic) : 0,
+		threshold: longPress?.threshold ?? resolveMs(_B.cssVars.longPressThreshold, _B.cssVars.interactionLongPressThreshold),
 	}), [longPress?.threshold, longPress?.haptic]);
 	const rafRef = useRef<number | null>(null);
 	const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const startPos = useRef<{ x: number; y: number } | null>(null);
 	const pointerTypeRef = useRef<PointerType>('mouse');
 	// RAF required for progress animation in React hooks (Effect.repeatWhile incompatible with React render cycle)
-	const lpStart = useCallback((e: Parameters<NonNullable<RACLongPressProps['onLongPressStart']>>[0]) => {
+	const lpStart = useCallback((event: Parameters<NonNullable<RACLongPressProps['onLongPressStart']>>[0]) => {
 		const t0 = Date.now();
-		pointerTypeRef.current = e.pointerType as PointerType;
-		startPos.current = 'clientX' in e ? { x: (e as unknown as PointerEvent).clientX, y: (e as unknown as PointerEvent).clientY } : null;
+		pointerTypeRef.current = event.pointerType as PointerType;
+		startPos.current = 'clientX' in event ? { x: (event as unknown as PointerEvent).clientX, y: (event as unknown as PointerEvent).clientY } : null;
 		const tick = (): void => {
-			const p = Math.min((Date.now() - t0) / lpConfig.threshold, 1);
-			cssVars?.progress && ref.current?.style.setProperty(cssVars.progress, String(p));
-			ref.current?.setAttribute('data-longpress-progress', String(p));
-			rafRef.current = p < 1 ? requestAnimationFrame(tick) : null;
+			const progress = Math.min((Date.now() - t0) / lpConfig.threshold, 1);
+			cssVars?.progress && ref.current?.style.setProperty(cssVars.progress, String(progress));
+			ref.current?.setAttribute('data-longpress-progress', String(progress));
+			rafRef.current = progress < 1 ? requestAnimationFrame(tick) : null;
 		};
 		rafRef.current = requestAnimationFrame(tick);
 		const evt = LongPress({ pointerType: pointerTypeRef.current, progress: 0 });
@@ -308,9 +306,9 @@ const useGesture = (config: GestureConfig): GestureResult => {
 	}, [longPress?.repeatInterval, lpConfig, onGesture, onLongPress]);
 	useEffect(() => longPress?.cancelOnMove
 		? (() => {
-			const onMove = (e: PointerEvent): void => {
+			const onMove = (pointerEvent: PointerEvent): void => {
 				const pos = startPos.current;
-				const exceeds = pos && Math.hypot(e.clientX - pos.x, e.clientY - pos.y) > lpConfig.cancelDist;
+				const exceeds = pos && Math.hypot(pointerEvent.clientX - pos.x, pointerEvent.clientY - pos.y) > lpConfig.cancelDist;
 				exceeds && rafRef.current !== null && cancelAnimationFrame(rafRef.current);
 				exceeds && cssVars?.progress && ref.current?.style.removeProperty(cssVars.progress);
 			};

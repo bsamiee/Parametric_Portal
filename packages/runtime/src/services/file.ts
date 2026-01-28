@@ -1,112 +1,109 @@
 /**
- * File I/O and validation service with SVG sanitization support.
+ * File I/O utilities. Stateless functions - no service ceremony needed.
  */
 import { AppError } from '@parametric-portal/types/app-error';
-import {
-    type FileMetadata,
-    type FileUploadConfig,
-    type MimeType,
-    type ValidatedFile,
-    validateFile,
-} from '@parametric-portal/types/files';
+import { Metadata } from '@parametric-portal/types/files';
 import { Svg } from '@parametric-portal/types/svg';
-import { Context, Effect, Layer, Option, pipe } from 'effect';
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type FileOpsService = {
-    readonly fromDataTransfer: (dataTransfer: DataTransfer | null) => Option.Option<ReadonlyArray<File>>;
-    readonly fromFileList: (files: FileList | null) => Option.Option<ReadonlyArray<File>>;
-    readonly processUpload: <T extends MimeType>(
-        files: ReadonlyArray<File>,
-        config: FileUploadConfig<T>,
-    ) => Effect.Effect<ReadonlyArray<ValidatedFile<T>>, AppError<'File'>>;
-    readonly toArrayBuffer: (file: File) => Effect.Effect<ArrayBuffer, AppError<'File'>>;
-    readonly toDataUrl: (file: File) => Effect.Effect<string, AppError<'File'>>;
-    readonly toText: (file: File) => Effect.Effect<string, AppError<'File'>>;
-};
-
-// --- [CLASSES] ---------------------------------------------------------------
-
-class FileOps extends Context.Tag('FileOps')<FileOps, FileOpsService>() {}
+import { Effect, Option, pipe, Schema as S } from 'effect';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const validateContent = (mimeType: MimeType, content: string): Effect.Effect<string, AppError<'File'>> =>
-    mimeType === 'image/svg+xml'
-        ? Svg.sanitize(content).pipe(
-              Effect.mapError(() => AppError.from('File', 'INVALID_CONTENT', 'Invalid SVG markup')),
-          )
-        : Effect.succeed(content);
-
-// --- [SERVICES] --------------------------------------------------------------
-
-const fileOpsImpl: FileOpsService = {
-    fromDataTransfer: (dataTransfer) =>
-        Option.fromNullable(dataTransfer).pipe(
-            Option.map((dt) => Array.from(dt.files)),
-            Option.filter((arr) => arr.length > 0),
-        ),
-    fromFileList: (files) =>
-        Option.fromNullable(files).pipe(
-            Option.map(Array.from<File>),
-            Option.filter((arr) => arr.length > 0),
-        ),
-    processUpload: <T extends MimeType>(files: ReadonlyArray<File>, config: FileUploadConfig<T>) =>
-        Effect.all(
-            files.map((file) =>
-                pipe(
-                    validateFile(file, config.maxSizeBytes),
-                    Effect.filterOrFail(
-                        (m): m is FileMetadata & { readonly mimeType: T } =>
-                            config.allowedTypes == null || config.allowedTypes.includes(m.mimeType as T),
-                        () =>
-                            AppError.from(
-                                'File',
-                                'INVALID_TYPE',
-                                `Allowed: ${config.allowedTypes?.join(', ') ?? 'any'}`,
-                            ),
-                    ),
-                    Effect.flatMap((metadata) =>
-                        Effect.all(
-                            {
-                                content: pipe(
-                                    fileOpsImpl.toText(file),
-                                    Effect.flatMap((text) => validateContent(metadata.mimeType, text)),
-                                ),
-                                dataUrl: fileOpsImpl.toDataUrl(file),
-                            },
-                            { concurrency: 'unbounded' },
-                        ).pipe(Effect.map(({ content, dataUrl }) => ({ content, dataUrl, metadata }))),
-                    ),
-                ),
-            ),
-            { concurrency: 'unbounded' },
-        ),
-    toArrayBuffer: (file) =>
-        Effect.tryPromise({
-            catch: () => AppError.from('File', 'READ_FAILED'),
-            try: () => file.arrayBuffer(),
-        }),
-    toDataUrl: (file) =>
-        Effect.async<string, AppError<'File'>>((resume) => {
+const fromFiles = (source: DataTransfer | FileList | null): Option.Option<ReadonlyArray<File>> =>
+    pipe(
+        Option.fromNullable(source),
+        Option.map((src) => Array.from('files' in src ? src.files : src)),
+        Option.filter((files) => files.length > 0),
+    );
+const readFile = {
+    arrayBuffer: (file: File): Effect.Effect<ArrayBuffer, AppError.File> =>
+        Effect.tryPromise({ catch: () => AppError.file('READ_FAILED'), try: () => file.arrayBuffer() }),
+    dataUrl: (file: File): Effect.Effect<string, AppError.File> =>
+        Effect.async<string, AppError.File>((resume) => {
             const reader = new FileReader();
             reader.onload = () => resume(Effect.succeed(reader.result as string));
-            reader.onerror = () => resume(Effect.fail(AppError.from('File', 'READ_FAILED')));
+            reader.onerror = () => resume(Effect.fail(AppError.file('READ_FAILED')));
             reader.readAsDataURL(file);
         }),
-    toText: (file) =>
-        Effect.tryPromise({
-            catch: () => AppError.from('File', 'READ_FAILED'),
-            try: () => file.text(),
-        }),
+    text: (file: File): Effect.Effect<string, AppError.File> =>
+        Effect.tryPromise({ catch: () => AppError.file('READ_FAILED'), try: () => file.text() }),
+} as const;
+const validateFile = (file: File, maxSize = 512 * 1024): Effect.Effect<Metadata, AppError.File> =>
+    Effect.succeed(file).pipe(
+        Effect.filterOrFail(
+            (f) => f.size > 0,
+            () => AppError.file('FILE_EMPTY'),
+        ),
+        Effect.filterOrFail(
+            (f) => f.size <= maxSize,
+            () => AppError.file('FILE_TOO_LARGE'),
+        ),
+        Effect.andThen((f) =>
+            S.decodeUnknown(Metadata)({ mime: f.type || 'application/octet-stream', name: f.name, size: f.size }).pipe(
+                Effect.mapError((error) => AppError.file('INVALID_TYPE', undefined, error)),
+            ),
+        ),
+    );
+const validateContent = (mime: string, content: string): Effect.Effect<string, AppError.File> =>
+    mime === 'image/svg+xml'
+        ? Option.match(Svg.sanitize(content), {
+              onNone: () => Effect.fail(AppError.file('INVALID_CONTENT')),
+              onSome: Effect.succeed,
+          })
+        : Effect.succeed(content);
+type ProcessedFile<T extends string> = {
+    readonly content: string;
+    readonly dataUrl: string;
+    readonly metadata: Metadata & { mime: T };
 };
-
-// --- [LAYERS] ----------------------------------------------------------------
-
-const FileOpsLive = Layer.succeed(FileOps, fileOpsImpl);
+const processOne = <T extends string>(
+    file: File,
+    allowedTypes?: ReadonlyArray<T>,
+    maxSizeBytes?: number,
+): Effect.Effect<ProcessedFile<T>, AppError.File> =>
+    validateFile(file, maxSizeBytes).pipe(
+        Effect.filterOrFail(
+            (meta): meta is Metadata & { mime: T } => allowedTypes == null || allowedTypes.includes(meta.mime as T),
+            () => AppError.file('INVALID_TYPE'),
+        ),
+        Effect.flatMap((metadata) =>
+            Effect.map(
+                Effect.all(
+                    {
+                        content: readFile
+                            .text(file)
+                            .pipe(Effect.flatMap((text) => validateContent(metadata.mime, text))),
+                        dataUrl: readFile.dataUrl(file),
+                    },
+                    { concurrency: 2 },
+                ),
+                (result) => ({ ...result, metadata }),
+            ),
+        ),
+    );
+function process<T extends string>(
+    input: File,
+    allowedTypes?: ReadonlyArray<T>,
+    maxSizeBytes?: number,
+): Effect.Effect<ProcessedFile<T>, AppError.File>;
+function process<T extends string>(
+    input: ReadonlyArray<File>,
+    allowedTypes?: ReadonlyArray<T>,
+    maxSizeBytes?: number,
+): Effect.Effect<ReadonlyArray<ProcessedFile<T>>, AppError.File>;
+function process<T extends string>(
+    input: File | ReadonlyArray<File>,
+    allowedTypes?: ReadonlyArray<T>,
+    maxSizeBytes?: number,
+): Effect.Effect<ProcessedFile<T> | ReadonlyArray<ProcessedFile<T>>, AppError.File> {
+    if (Array.isArray(input)) {
+        return Effect.forEach(input as ReadonlyArray<File>, (file) => processOne(file, allowedTypes, maxSizeBytes), {
+            concurrency: 'unbounded',
+        });
+    }
+    return processOne(input as File, allowedTypes, maxSizeBytes);
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export type { FileOpsService };
-export { FileOps, FileOpsLive, validateContent };
+export { fromFiles, process, readFile, validateContent, validateFile };
+export type { ProcessedFile };

@@ -1,13 +1,6 @@
 /**
- * Breadcrumbs: Navigation path display with automatic separators.
- * CSS variable inheritance - color/size set on container, children inherit.
- * REQUIRED: color, size props on Breadcrumbs root.
- *
- * Item modes (like Button's toggle mode):
- * - Link mode (default): Item with href renders navigable link
- * - Ellipsis mode: Item with ellipsis=true renders collapsed indicator for overflow
- *
- * Supports: onAction for navigation callbacks, gesture integration, tooltips.
+ * Navigation path display with automatic separators and ellipsis overflow.
+ * Requires color and size props. Supports link and ellipsis item modes.
  */
 import { useMergeRefs } from '@floating-ui/react';
 import type { AsyncState } from '@parametric-portal/types/async';
@@ -59,8 +52,8 @@ type BreadcrumbsCurrentProps = Omit<RACBreadcrumbProps, 'children'> & {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	slot: Object.freeze({
+const _B = {
+	slot: {
 		current: cn(
 			'inline-flex items-center gap-(--breadcrumbs-item-gap)',
 			'text-(--breadcrumbs-current-font-size) font-(--breadcrumbs-current-font-weight)',
@@ -96,8 +89,8 @@ const B = Object.freeze({
 			'text-(--breadcrumbs-separator-color)',
 			'mx-(--breadcrumbs-separator-mx)',
 		),
-	}),
-});
+	},
+} as const;
 const BreadcrumbsContext = createContext<BreadcrumbsContextValue | null>(null);
 
 // --- [SUB-COMPONENTS] --------------------------------------------------------
@@ -127,7 +120,7 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 			<RACBreadcrumb
 				{...(racProps as RACBreadcrumbProps)}
 				{...(tooltipProps as object)}
-				className={cn(B.slot.item, className)}
+				className={cn(_B.slot.item, className)}
 				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-ellipsis='true'
@@ -137,12 +130,12 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 				ref={mergedRef}
 				{...defined({ id })}
 			>
-				<span className={B.slot.ellipsis} data-slot='breadcrumbs-ellipsis'>
-					{slot.render(ellipsisIcon ?? { default: MoreHorizontal }, B.slot.ellipsisIcon)}
+				<span className={_B.slot.ellipsis} data-slot='breadcrumbs-ellipsis'>
+					{slot.render(ellipsisIcon ?? { default: MoreHorizontal }, _B.slot.ellipsisIcon)}
 				</span>
 				{children as ReactNode}
-				<span aria-hidden='true' className={B.slot.separator} data-slot='breadcrumbs-separator'>
-					{slot.render(separator ?? { default: ChevronRight }, B.slot.separator)}
+				<span aria-hidden='true' className={_B.slot.separator} data-slot='breadcrumbs-separator'>
+					{slot.render(separator ?? { default: ChevronRight }, _B.slot.separator)}
 				</span>
 			</RACBreadcrumb>
 			{renderTooltip?.()}
@@ -152,7 +145,7 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 		<>
 			<RACBreadcrumb
 				{...(racProps as RACBreadcrumbProps)}
-				className={cn(B.slot.item, className)}
+				className={cn(_B.slot.item, className)}
 				data-async-state={slot.attr}
 				data-color={ctx?.color}
 				data-size={ctx?.size}
@@ -163,17 +156,17 @@ const BreadcrumbsItem: FC<BreadcrumbsItemProps> = ({
 			>
 				<RACLink
 					{...({ ...tooltipProps, ...gestureProps } as unknown as RACLinkProps)}
-					className={B.slot.link}
+					className={_B.slot.link}
 					data-disabled={isDisabled || slot.pending || undefined}
 					data-slot='breadcrumbs-link'
 					ref={mergedLinkRef}
 					{...defined({ href, isDisabled: isDisabled || slot.pending, rel, target })}
 				>
-					{slot.render(prefix, B.slot.icon)}
+					{slot.render(prefix, _B.slot.icon)}
 					<span>{slot.resolve(children)}</span>
 				</RACLink>
-				<span aria-hidden='true' className={B.slot.separator} data-slot='breadcrumbs-separator'>
-					{slot.render(separator ?? { default: ChevronRight }, B.slot.separator)}
+				<span aria-hidden='true' className={_B.slot.separator} data-slot='breadcrumbs-separator'>
+					{slot.render(separator ?? { default: ChevronRight }, _B.slot.separator)}
 				</span>
 			</RACBreadcrumb>
 			{renderTooltip?.()}
@@ -192,7 +185,7 @@ const BreadcrumbsCurrent: FC<BreadcrumbsCurrentProps> = ({
 			<RACBreadcrumb
 				{...(racProps as RACBreadcrumbProps)}
 				{...(tooltipProps as object)}
-				className={cn(B.slot.item, className)}
+				className={cn(_B.slot.item, className)}
 				data-color={ctx?.color}
 				data-current='true'
 				data-size={ctx?.size}
@@ -200,8 +193,8 @@ const BreadcrumbsCurrent: FC<BreadcrumbsCurrentProps> = ({
 				data-variant={ctx?.variant}
 				ref={mergedRef}
 			>
-				<span aria-current='page' className={B.slot.current}>
-					{slot.render(prefix, B.slot.icon)}
+				<span aria-current='page' className={_B.slot.current}>
+					{slot.render(prefix, _B.slot.icon)}
 					<span>{slot.resolve(children)}</span>
 				</span>
 			</RACBreadcrumb>
@@ -218,7 +211,7 @@ const BreadcrumbsRoot = <T extends object = object>({
 		<BreadcrumbsContext.Provider value={contextValue}>
 			<RACBreadcrumbs
 				{...(racProps as RACBreadcrumbsProps<T>)}
-				className={cn(B.slot.root, className)}
+				className={cn(_B.slot.root, className)}
 				data-color={color}
 				data-size={size}
 				data-slot='breadcrumbs'

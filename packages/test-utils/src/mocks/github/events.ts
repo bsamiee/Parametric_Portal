@@ -1,6 +1,6 @@
 /**
- * GitHub webhook event factories: type-safe payload generators for workflow testing.
- * Field names use snake_case to match GitHub API schema (required for payload compatibility).
+ * Generate type-safe GitHub webhook event payloads for workflow testing.
+ * Snake_case field names match GitHub API schema for payload compatibility.
  */
 
 // biome-ignore-all lint/style/useNamingConvention: GitHub API uses snake_case field names

@@ -1,6 +1,7 @@
 {
     "compilerOptions": {
         "outDir": "dist",
+        "preserveSymlinks": true,
         "rootDir": ".",
         "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/database.tsbuildinfo",
         "types": ["node", "vitest/globals"]

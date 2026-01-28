@@ -1,10 +1,8 @@
 /**
- * FilePreview: Mode-dispatched file preview with auto MIME detection.
- * Pure presentation - content pre-sanitized by useFileUpload hook.
- * Accepts either individual props OR a `file` object from useFileUpload.
+ * Mode-dispatched file preview with auto MIME detection.
+ * Accepts individual props or file object from useFileUpload hook.
  */
-import { type FileMetadata, MimeType } from '@parametric-portal/types/files';
-import { Match } from 'effect';
+import type { Metadata } from '@parametric-portal/types/files';
 import type { LucideIcon } from 'lucide-react';
 import { Archive, Code, File, FileText, Image } from 'lucide-react';
 import type { FC, ReactNode, Ref } from 'react';
@@ -12,24 +10,22 @@ import { cn, Slot } from '../core/utils';
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type PreviewMode = keyof typeof MimeType.config | 'svg' | 'unknown';
-type ValidatedFileInput = { readonly content: string; readonly dataUrl: string; readonly metadata: FileMetadata; };
 type FilePreviewProps = {
 	readonly className?: string;
 	readonly content?: string;
 	readonly dataUrl?: string;
-	readonly file?: ValidatedFileInput;
+	readonly file?: { readonly content: string; readonly dataUrl: string; readonly metadata: Metadata };
 	readonly icon?: LucideIcon | ReactNode;
-	readonly metadata?: FileMetadata;
-	readonly mode?: PreviewMode;
+	readonly metadata?: Metadata;
+	readonly mode?: Metadata['mode'] | 'unknown';
 	readonly ref?: Ref<HTMLDivElement>;
 	readonly showMetadata?: boolean;
 };
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
-	modeIcons: Object.freeze({
+const _B = {
+	modeIcons: {
 		archive: Archive,
 		code: Code,
 		document: FileText,
@@ -37,8 +33,8 @@ const B = Object.freeze({
 		model: File,
 		svg: Image,
 		unknown: File,
-	} as const satisfies Record<PreviewMode, LucideIcon>),
-	slot: Object.freeze({
+	} as const satisfies Record<Metadata['mode'] | 'unknown', LucideIcon>,
+	slot: {
 		base: cn(
 			'relative flex flex-col items-center justify-center overflow-hidden',
 			'w-(--file-preview-width) h-(--file-preview-height)',
@@ -54,33 +50,22 @@ const B = Object.freeze({
 			'text-(--file-preview-meta-font-size)',
 		),
 		svg: cn('w-full h-full [&>svg]:w-full [&>svg]:h-full'),
-	}),
-});
-
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-const detectMode = (mimeType: string): PreviewMode =>
-	Match.value(mimeType).pipe(
-		Match.when('image/svg+xml', () => 'svg' as const),
-		Match.orElse(() => (MimeType.toCategory[mimeType as MimeType] as PreviewMode | undefined) ?? 'unknown'),
-	);
+	},
+} as const;
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 const FilePreview: FC<FilePreviewProps> = ({ className, content, dataUrl, file, icon, metadata, mode: modeOverride, ref, showMetadata }) => {
-	const m = file?.metadata ?? metadata;
-	const mode = m ? (modeOverride ?? detectMode(m.mimeType)) : 'unknown';
-	const iconEl = Slot.content(icon ?? B.modeIcons[mode], B.slot.icon);
-	const imageEl = mode === 'image' && (file?.dataUrl ?? dataUrl) && <img alt={m?.name} className={B.slot.image} src={file?.dataUrl ?? dataUrl} />;
-	const svgContent = file?.content ?? content;
-	const svgEl = mode === 'svg' && svgContent && <div className={B.slot.svg} dangerouslySetInnerHTML={{ __html: svgContent }} />;
-	const metaEl = m && (showMetadata ?? file != null) && <div className={B.slot.meta}>{m.name}</div>;
-	return m ? (
-		<div className={cn(B.slot.base, className)} data-mime-type={m.mimeType} data-mode={mode} data-slot='file-preview' ref={ref}>
-			{imageEl || svgEl || iconEl}
-			{metaEl}
+	const meta = file?.metadata ?? metadata;
+	if (!meta) return null;
+	const mode = modeOverride ?? meta.mode, src = file?.dataUrl ?? dataUrl, svg = file?.content ?? content;
+	const visual = (mode === 'image' && src && <img alt={meta.name} className={_B.slot.image} src={src} />) || (mode === 'svg' && svg && <div className={_B.slot.svg} dangerouslySetInnerHTML={{ __html: svg }} />) || Slot.content(icon ?? _B.modeIcons[mode], _B.slot.icon);
+	return (
+		<div className={cn(_B.slot.base, className)} data-mime={meta.mime} data-mode={mode} data-slot='file-preview' ref={ref}>
+			{visual}
+			{(showMetadata ?? file != null) && <div className={_B.slot.meta}>{meta.name}</div>}
 		</div>
-	) : null;
+	);
 };
 
 // --- [EXPORT] ----------------------------------------------------------------

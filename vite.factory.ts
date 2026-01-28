@@ -452,7 +452,6 @@ const config: {
                     /^@opentelemetry/,
                     /^@grpc/,
                     /^prom-client/,
-                    /^drizzle-orm/,
                     ...(c.external ?? []),
                 ],
                 output: { exports: 'named' as const },

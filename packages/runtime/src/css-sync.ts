@@ -2,6 +2,7 @@
  * Sync Zustand store state to DOM CSS variables via subscription.
  */
 import { HtmlId } from '@parametric-portal/types/types';
+import { Schema as S } from 'effect';
 import { useCallback, useEffect, useMemo } from 'react';
 import type { StoreApi } from 'zustand';
 
@@ -17,18 +18,18 @@ type CssSyncConfig<T> = {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const B = {
     defaults: {
         prefix: 'app',
         root: () => document.documentElement,
     },
-} as const);
+} as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const validatePrefix = (prefix: string): string => {
-    HtmlId.is(prefix) || console.warn(`[css-sync] Invalid prefix "${prefix}", using default`);
-    return HtmlId.is(prefix) ? prefix : B.defaults.prefix;
+    S.is(HtmlId)(prefix) || console.warn(`[css-sync] Invalid prefix "${prefix}", using default`);
+    return S.is(HtmlId)(prefix) ? prefix : B.defaults.prefix;
 };
 const syncVariables = <T>(
     root: HTMLElement,
@@ -61,7 +62,7 @@ const useCssSync = <T extends object>(
 ): void => {
     const { classNames, prefix = B.defaults.prefix, root = B.defaults.root, selector } = config;
     const validatedPrefix = useMemo(() => validatePrefix(prefix), [prefix]);
-    const rootStable = useCallback(root, []);
+    const rootStable = useCallback(root, [root]);
     useEffect(() => {
         const rootEl = rootStable();
         const sync = (state: T): void => {
