@@ -65,9 +65,10 @@ const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.f
 	userAgent:        { col: 'user_agent',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
 	name:             { col: 'name',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	storageRef:       { col: 'storage_ref',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	namespace:        { col: 'namespace',        sql: 'TEXT',        ts: 'S.String',          mark: 'casefold',  gen: false,    null: false, ref: false,      wrap: false                                                  },
-	email:            { col: 'email',            sql: 'CITEXT',      ts: 'S.String',          mark: 'casefold',  gen: false,    null: false, ref: false,      wrap: false                                                  },
+	namespace:        { col: 'namespace',        sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	email:            { col: 'email',            sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	role:             { col: 'role',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	roleOrder:        { col: 'role_order',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
 	status:           { col: 'status',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	type:             { col: 'type',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	content:          { col: 'content',          sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -101,7 +102,7 @@ const _Tables = {
 	apps: {
 		fields: 	[_Registry.id, _Registry.name, _Registry.namespace, _Registry.settings, _Registry.updatedAt]},
 	users: {
-		fields: 	[_Registry.id, _Registry.appId, _Registry.email, _Registry.role, _Registry.status, _Registry.deletedAt, _Registry.updatedAt]},
+		fields: 	[_Registry.id, _Registry.appId, _Registry.email, _Registry.role, _Registry.roleOrder, _Registry.status, _Registry.deletedAt, _Registry.updatedAt]},
 	sessions: {
 		fields: 	[_Registry.id, _Registry.userId, _Registry.hash, _Registry.expiresAt, _Registry.deletedAt, _Registry.verifiedAt, _Registry.ipAddress, _Registry.userAgent, _Registry.updatedAt, _Registry.prefix],
 		required: 	[_Registry.userId, _Registry.expiresAt]},
@@ -267,7 +268,7 @@ const _resolve = (fieldOrCol: string): _Resolved | undefined => {											/** 
 const _predMeta = (fieldOrCol: string): { cast: string | undefined; wrap: 'casefold' | undefined } => {		/** Derive predicate metadata from field registry (cast + wrap for SQL predicates) */
 	const entry = _resolve(fieldOrCol);
 	return entry
-		? { cast: _SqlCast[entry.sql as keyof typeof _SqlCast], wrap: entry.mark === 'casefold' ? 'casefold' : undefined }
+		? { cast: _SqlCast[entry.sql as keyof typeof _SqlCast], wrap: entry.sql === 'CITEXT' ? 'casefold' : undefined }
 		: { cast: undefined, wrap: undefined };
 };
 const _isSqlType = (fieldOrCol: string, sqlType: _Sql): boolean => _resolve(fieldOrCol)?.sql === sqlType;	/** Check if field has specific SQL type */
