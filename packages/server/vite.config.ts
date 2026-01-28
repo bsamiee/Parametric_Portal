@@ -24,6 +24,7 @@ export default defineConfig(
                 // Infrastructure modules
                 'infra/jobs': './src/infra/jobs.ts',
                 'infra/storage': './src/infra/storage.ts',
+                'infra/webhooks': './src/infra/webhooks.ts',
                 middleware: './src/middleware.ts',
                 // Observability modules
                 'observe/audit': './src/observe/audit.ts',
@@ -31,14 +32,16 @@ export default defineConfig(
                 'observe/polling': './src/observe/polling.ts',
                 'observe/telemetry': './src/observe/telemetry.ts',
                 // Platform modules
-                'platform/workers/contract': './src/platform/workers/contract.ts',
-                'platform/workers/transfer': './src/platform/workers/transfer.ts',
+                'platform/cache': './src/platform/cache.ts',
+                'platform/streaming': './src/platform/streaming.ts',
+                'platform/websocket': './src/platform/websocket.ts',
                 // Security modules
                 'security/crypto': './src/security/crypto.ts',
                 'security/totp-replay': './src/security/totp-replay.ts',
                 // Utility modules
                 'utils/circuit': './src/utils/circuit.ts',
                 'utils/diff': './src/utils/diff.ts',
+                'utils/resilience': './src/utils/resilience.ts',
                 'utils/transfer': './src/utils/transfer.ts',
             },
             external: [

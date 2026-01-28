@@ -20,9 +20,9 @@ class CircuitError extends Data.TaggedError('CircuitError')<{
 	readonly cause: BrokenCircuitError | Error | IsolatedCircuitError | TaskCancelledError;
 	readonly reason: 'BrokenCircuit' | 'Cancelled' | 'ExecutionFailed' | 'Isolated';
 }> {
-	static readonly fromBroken = (circuit: string, cause: BrokenCircuitError) => new CircuitError({ cause, circuit, reason: 'BrokenCircuit' });
+	static readonly fromBroken = 	(circuit: string, cause: BrokenCircuitError) => new CircuitError({ cause, circuit, reason: 'BrokenCircuit' });
 	static readonly fromCancelled = (circuit: string, cause: TaskCancelledError) => new CircuitError({ cause, circuit, reason: 'Cancelled' });
-	static readonly fromIsolated = (circuit: string, cause: IsolatedCircuitError) => new CircuitError({ cause, circuit, reason: 'Isolated' });
+	static readonly fromIsolated = 	(circuit: string, cause: IsolatedCircuitError) => new CircuitError({ cause, circuit, reason: 'Isolated' });
 	static readonly fromExecution = (circuit: string, cause: Error) => new CircuitError({ cause, circuit, reason: 'ExecutionFailed' });
 	override get message() { return `Circuit[${this.circuit}]: ${this.reason} - ${this.cause.message}`; }
 }
@@ -51,10 +51,7 @@ const make = (name: string, config: {
 	readonly metrics?: boolean;
 	readonly onStateChange?: (change: { readonly name: string; readonly previous: string; readonly state: string }) => Effect.Effect<void, never, never>;
 	readonly persist?: boolean;
-	readonly policy?: Policy; } = {}): Circuit.Instance => {
-	const persist = config.persist ?? true;
-	const cached = persist ? _registry.get(name) : undefined;
-	if (cached) return cached;
+	readonly policy?: Policy; } = {}): Circuit.Instance => Option.fromNullable((config.persist ?? true) ? _registry.get(name) : undefined).pipe(Option.getOrElse(() => {
 	const breaker = Match.value(config.breaker).pipe(
 		Match.when(undefined, () => new ConsecutiveBreaker(_CIRCUIT_CONFIG.defaults.consecutiveThreshold)),
 		Match.tag('consecutive', (cfg) => new ConsecutiveBreaker(cfg.threshold ?? _CIRCUIT_CONFIG.defaults.consecutiveThreshold)),
@@ -115,7 +112,7 @@ const make = (name: string, config: {
 			return result;
 		});
 	const instance: Circuit.Instance = {
-		dispose: () => { disposables.forEach((d) => { d.dispose(); }); persist && _registry.delete(name); },
+		dispose: () => { disposables.forEach((d) => { d.dispose(); }); (config.persist ?? true) && _registry.delete(name); },
 		execute,
 		isolate: () => policy.isolate(),
 		get lastFailure() { return policy.lastFailure; },
@@ -123,9 +120,9 @@ const make = (name: string, config: {
 		get state() { return policy.state; },
 		toJSON: () => policy.toJSON(),
 	};
-	persist && _registry.set(name, instance);
+	(config.persist ?? true) && _registry.set(name, instance);
 	return instance;
-};
+}));
 const current = Context.Request.current.pipe(Effect.map((ctx) => ctx.circuit));
 function is(err: unknown): err is CircuitError;
 function is<R extends CircuitError['reason']>(err: unknown, reason: R): err is CircuitError & { readonly reason: R };

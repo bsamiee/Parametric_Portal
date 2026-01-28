@@ -3,7 +3,7 @@
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
-import { Array as A, Chunk, Effect, Either, Option, Ref, Schema as S, Stream } from 'effect';
+import { Array as A, Chunk, Effect, Either, Option, Schema as S, Stream } from 'effect';
 import type JSZip from 'jszip';
 import { PassThrough, Readable } from 'node:stream';
 import { Crypto } from '../security/crypto.ts';
@@ -69,9 +69,10 @@ const _delimited = (codec: Codec.Of<'delimited'>, input: Codec.Input, assetType:
 			? Stream.fail(_parserError(result.errors[0]))
 			: Stream.fromIterable(result.data).pipe(
 				Stream.zipWithIndex,
-				Stream.map(([data, idx]) => ((ordinal, parsedType) =>
-					parsedType ? Either.right({ content: data['content'] ?? '', ordinal, type: parsedType }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal }))
-				)(idx + 1, data['type'] ?? assetType)),
+				Stream.map(([data, idx]) => {
+					const ordinal = idx + 1, parsedType = data['type'] ?? assetType;
+					return parsedType ? Either.right({ content: data['content'] ?? '', ordinal, type: parsedType }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal }));
+				}),
 			)
 	)(Papa.parse<Record<string, string>>(codec.content(input), { delimiter: codec.sep, header: true, skipEmptyLines: 'greedy', transformHeader: (header) => header.trim().toLowerCase().replaceAll('_', '') })))));
 const _streamed = (codec: Codec.Of<'stream'>, input: Codec.Input, assetType: string): _Stream =>
@@ -79,10 +80,12 @@ const _streamed = (codec: Codec.Of<'stream'>, input: Codec.Input, assetType: str
 		(codec.sep === '\n'
 			? codec.bytes(input).pipe(Stream.decodeText(), Stream.splitLines)
 			: Stream.fromIterable(codec.content(input).split(codec.sep))
-		).pipe(Stream.zipWithIndex, Stream.filterMap(([line, idx]) => ((trimmed, ordinal) =>
-			trimmed ? Codec.size(trimmed) > limits.entryBytes ? Option.some(Either.left(new Parse({ code: 'TOO_LARGE', ordinal })))
-			: Option.some(_parseRecord(trimmed, ordinal, assetType, mod.parse)) : Option.none()
-		)(line.trim(), idx + 1))),
+		).pipe(Stream.zipWithIndex, Stream.filterMap(([line, idx]) => Option.liftPredicate(line.trim(), (t): t is string => t !== '').pipe(
+			Option.map((trimmed) => {
+				const ordinal = idx + 1;
+				return Codec.size(trimmed) > limits.entryBytes ? Either.left(new Parse({ code: 'TOO_LARGE', ordinal })) : _parseRecord(trimmed, ordinal, assetType, mod.parse);
+			}),
+		))),
 	)));
 const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, assetType: string): _Stream =>
 	Stream.unwrap(_drivers.sax().pipe(Effect.map((sax) =>
@@ -91,10 +94,12 @@ const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, assetType: string): 
 			const tags = new Set<string>(codec.nodes);
 			let current: { content: string; type: string } | null = null;
 			let idx = 0;
-			parser.onopentag = (tag) => { if (tags.has(tag.name.toLowerCase())) { const attr = tag.attributes['type']; current = { content: '', type: (typeof attr === 'string' ? attr : attr?.value) ?? assetType }; } };
-			parser.ontext = (text: string) => { if (current) current.content += text; };
-			parser.oncdata = (text: string) => { if (current) current.content += text; };
-			parser.onclosetag = (name: string) => { if (current && tags.has(name.toLowerCase())) { idx += 1; emit.single(current.type ? Either.right({ ...current, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal: idx }))); current = null; } };
+			parser.onopentag = (tag) => Option.liftPredicate(tag, (t) => tags.has(t.name.toLowerCase())).pipe(Option.map((t) => { const attr = t.attributes['type']; current = { content: '', type: (typeof attr === 'string' ? attr : attr?.value) ?? assetType }; return current; }));
+			// biome-ignore lint/style/noParameterAssign: SAX streaming parser requires mutable accumulator
+			parser.ontext = (text: string) => Option.fromNullable(current).pipe(Option.map((c) => { c.content += text; return c; }));
+			// biome-ignore lint/style/noParameterAssign: SAX streaming parser requires mutable accumulator
+			parser.oncdata = (text: string) => Option.fromNullable(current).pipe(Option.map((c) => { c.content += text; return c; }));
+			parser.onclosetag = (name: string) => Option.fromNullable(current).pipe(Option.filter(() => tags.has(name.toLowerCase())), Option.map((c) => { idx += 1; emit.single(c.type ? Either.right({ ...c, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal: idx }))); current = null; return c; }));
 			parser.onerror = (err: Error) => void emit.fail(_parserError(err));
 			parser.onend = () => void emit.end();
 			parser.write(codec.content(input)).close();
@@ -126,25 +131,25 @@ const _zipNoManifest = (zip: JSZip, assetType: string): _Stream =>
 		),
 	);
 const _zipWithManifest = (zip: JSZip, manifest: { entries: readonly Metadata[]; version: 1 }, buf: Buffer): _Stream =>
-	Stream.unwrap(Ref.make(0).pipe(Effect.map((sizeRef) =>
-		Stream.fromIterable(manifest.entries).pipe(
-			Stream.filter((entry) => entry.name !== 'manifest.json'),
-			Stream.zipWithIndex,
-			Stream.map(([entry, idx]) => ({ entry, name: entry.name, ordinal: idx + 1 })),
-			Stream.mapEffect(({ entry, name, ordinal }) => Effect.gen(function* () {
-				const file = yield* Effect.filterOrFail(Effect.succeed(zip.file(name)), (zipFile): zipFile is JSZip.JSZipObject => zipFile != null && !zipFile.dir && _validPath(name), () => new Parse({ code: 'INVALID_PATH', detail: name, ordinal }));
-				yield* Effect.filterOrFail(Effect.succeed(entry.size), (size) => size <= limits.entryBytes, () => new Parse({ code: 'TOO_LARGE', detail: name, ordinal }));
-				const raw = yield* Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', detail: name, ordinal }), try: () => file.async('arraybuffer') });
-				const cur = yield* Ref.updateAndGet(sizeRef, (count) => count + raw.byteLength);
-				yield* Effect.filterOrFail(Effect.succeed(cur), (cumulative) => cumulative <= limits.totalBytes, () => new Fatal({ code: 'ARCHIVE_LIMIT' }));
-				yield* Effect.filterOrFail(Effect.succeed(cur), (cumulative) => !buf.byteLength || cumulative / buf.byteLength <= limits.compressionRatio, () => new Fatal({ code: 'COMPRESSION_RATIO' }));
-				const content = entry.codec.content(raw);
-				yield* entry.hash ? Crypto.token.hash(content).pipe(Effect.orDie, Effect.filterOrFail((hash) => hash === entry.hash, () => new Parse({ code: 'HASH_MISMATCH', detail: name, ordinal }))) : Effect.void;
-				const assetType = yield* Effect.filterOrFail(Effect.succeed(entry.type), (parsedType): parsedType is string => parsedType != null, () => new Parse({ code: 'MISSING_TYPE', detail: name, ordinal }));
-				return Either.right({ content, name, ordinal, type: assetType, ...(entry.hash && { hash: entry.hash }) });
-			}).pipe(Effect.catchTag('Parse', (err) => Effect.succeed(Either.left(err))))),
-		),
-	)));
+	Stream.fromIterable(manifest.entries).pipe(
+		Stream.filter((entry) => entry.name !== 'manifest.json'),
+		Stream.zipWithIndex,
+		Stream.map(([entry, idx]) => ({ entry, name: entry.name, ordinal: idx + 1 })),
+		Stream.mapAccumEffect(0, (size, { entry, name, ordinal }): Effect.Effect<readonly [number, _Row], Fatal> => Effect.gen(function* () {
+			const zipFile = zip.file(name);
+			yield* zipFile == null || zipFile.dir || !_validPath(name) ? Effect.fail(new Parse({ code: 'INVALID_PATH', detail: name, ordinal })) : Effect.void;
+			yield* entry.size > limits.entryBytes ? Effect.fail(new Parse({ code: 'TOO_LARGE', detail: name, ordinal })) : Effect.void;
+			const raw = yield* Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', detail: name, ordinal }), try: () => (zipFile as JSZip.JSZipObject).async('arraybuffer') });
+			const cur = size + raw.byteLength;
+			yield* cur > limits.totalBytes ? Effect.fail(new Fatal({ code: 'ARCHIVE_LIMIT' })) : Effect.void;
+			yield* buf.byteLength && cur / buf.byteLength > limits.compressionRatio ? Effect.fail(new Fatal({ code: 'COMPRESSION_RATIO' })) : Effect.void;
+			const content = entry.codec.content(raw);
+			yield* entry.hash ? Crypto.hash(content).pipe(Effect.orDie, Effect.flatMap((h) => h === entry.hash ? Effect.void : Effect.fail(new Parse({ code: 'HASH_MISMATCH', detail: name, ordinal })))) : Effect.void;
+			yield* entry.type == null ? Effect.fail(new Parse({ code: 'MISSING_TYPE', detail: name, ordinal })) : Effect.void;
+			const row: _Row = Either.right({ content, name, ordinal, type: entry.type as string, ...(entry.hash && { hash: entry.hash }) });
+			return [cur, row] as const;
+		}).pipe(Effect.catchTag('Parse', (err): Effect.Effect<readonly [number, _Row]> => Effect.succeed([size, Either.left(err)] as const)))),
+	);
 const _zip = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string): _Stream =>
 	Stream.unwrap(Effect.gen(function* () {
 		const JSZip = yield* _drivers.zip();
@@ -152,11 +157,12 @@ const _zip = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string)
 		const zip = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_FORMAT', detail: String(err) }), try: () => JSZip.loadAsync(buf) });
 		return yield* Option.match(Option.fromNullable(zip.file('manifest.json')), {
 			onNone: () => Effect.succeed(_zipNoManifest(zip, assetType)),
-			onSome: (manifestFile) => Effect.gen(function* () {
-				const text = yield* Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) }), try: () => manifestFile.async('text') });
-				const manifest = yield* S.decodeUnknown(S.parseJson(Codec.Manifest))(text).pipe(Effect.mapError((err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) })));
-				return _zipWithManifest(zip, manifest, buf);
-			}),
+			onSome: (manifestFile) =>
+				Effect.tryPromise({ catch: (err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) }), try: () => manifestFile.async('text') }).pipe(
+					Effect.flatMap((text) => S.decodeUnknown(S.parseJson(Codec.Manifest))(text)),
+					Effect.mapError((err) => new Fatal({ code: 'INVALID_MANIFEST', detail: String(err) })),
+					Effect.map((manifest) => _zipWithManifest(zip, manifest, buf)),
+				),
 		});
 	}));
 const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string): _Stream =>
@@ -196,13 +202,13 @@ type _Out<E, R> = Stream.Stream<_Asset & { id: string; updatedAt: number }, E, R
 const _serializeExport = (asset: _Asset & { id: string; updatedAt: number }) => ({ content: asset.content, id: asset.id, type: asset.type, updatedAt: new Date(asset.updatedAt).toISOString() });
 
 const _text = {
-	csv: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.papa().pipe(Effect.map((papa) => Stream.grouped(stream, limits.batchSize).pipe(Stream.zipWithIndex, Stream.map(([chunk, idx]) => `${papa.unparse(Chunk.toArray(chunk).map(_serializeExport), { header: idx === 0, quotes: true })}\n`))))),
-	ndjson: <E, R>(stream: _Out<E, R>) => Stream.grouped(stream, limits.batchSize).pipe(Stream.map((chunk) => `${Chunk.toArray(chunk).map((asset) => JSON.stringify(_serializeExport(asset))).join('\n')}\n`)),
-	xml: <E, R>(stream: _Out<E, R>) => Stream.make('<?xml version="1.0" encoding="UTF-8"?>\n<assets>\n').pipe(
-		Stream.concat(Stream.map(stream, (asset) => `  <asset type="${asset.type}" id="${asset.id}"><![CDATA[${asset.content}]]></asset>\n`)),
+	csv: <E, R>(s: _Out<E, R>) => Stream.unwrap(_drivers.papa().pipe(Effect.map((papa) => Stream.grouped(s, limits.batchSize).pipe(Stream.zipWithIndex, Stream.map(([chunk, idx]) => `${papa.unparse(Chunk.toArray(chunk).map((a) => _serializeExport(a)), { header: idx === 0, quotes: true })}\n`))))),
+	ndjson: <E, R>(s: _Out<E, R>) => Stream.grouped(s, limits.batchSize).pipe(Stream.map((chunk) => `${Chunk.toArray(chunk).map((asset) => JSON.stringify(_serializeExport(asset))).join('\n')}\n`)),
+	xml: <E, R>(s: _Out<E, R>) => Stream.make('<?xml version="1.0" encoding="UTF-8"?>\n<assets>\n').pipe(
+		Stream.concat(s.pipe(Stream.map((asset) => `  <asset type="${asset.type}" id="${asset.id}"><![CDATA[${asset.content}]]></asset>\n`))),
 		Stream.concat(Stream.make('</assets>\n')),
 	),
-	yaml: <E, R>(stream: _Out<E, R>) => Stream.unwrap(_drivers.yaml().pipe(Effect.map((yaml) => Stream.map(stream, (asset) => `---\n${yaml.stringify(_serializeExport(asset))}`)))),
+	yaml: <E, R>(s: _Out<E, R>) => Stream.unwrap(_drivers.yaml().pipe(Effect.map((yaml) => s.pipe(Stream.map((asset) => `---\n${yaml.stringify(_serializeExport(asset))}`))))),
 } as const;
 const _binary = {
 	xlsx: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
@@ -223,7 +229,7 @@ const _binary = {
 		const zip = new ZipClass();
 		const entries: Metadata[] = [];
 		const count = yield* Stream.runFoldEffect(stream, 0, (entryCount, asset) =>
-			(asset.hash == null ? Crypto.token.hash(asset.content).pipe(Effect.orDie) : Effect.succeed(asset.hash)).pipe(Effect.map((hash) => {
+			(asset.hash == null ? Crypto.hash(asset.content).pipe(Effect.orDie) : Effect.succeed(asset.hash)).pipe(Effect.map((hash) => {
 				const entryName = asset.name ?? `${String(entryCount).padStart(5, '0')}_${hash.slice(0, 8)}.txt`;
 				zip.file(entryName, asset.content, { compression: 'DEFLATE' });
 				entries.push(Metadata.from(asset.content, { hash, name: entryName, type: asset.type }));
@@ -241,8 +247,8 @@ const exportBinary = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _binary, opts?
 // --- [PARTITION] -------------------------------------------------------------
 
 const partition = <T extends _Asset>(rows: readonly Either.Either<T, Parse>[]) => {
-	const [failures, rights] = A.separate(rows);
-	return { failures, items: rights, ordinalMap: A.map(rights, (row) => row.ordinal) };
+	const [failures, parsed] = A.separate(rows);
+	return { failures, items: parsed, ordinalMap: parsed.map((row) => row.ordinal) };
 };
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

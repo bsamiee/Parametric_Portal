@@ -22,10 +22,8 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { ReplayGuardService } from '@parametric-portal/server/security/totp-replay';
-import { WorkerPoolService } from '@parametric-portal/server/platform/workers/pool';
 import { Config, Effect, Layer, ManagedRuntime } from 'effect';
 import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
@@ -60,7 +58,6 @@ const BaseInfraLayer = Layer.mergeAll(				// Database repos, search, pure utilit
 	MetricsService.Default,
 	Crypto.Service.Default,
 	Context.Request.SystemLayer,
-	WorkerPoolService.Layer,
 ).pipe(Layer.provideMerge(PlatformLayer));
 const CacheLayer = CacheService.Layer.pipe(			// Provides CacheService + RateLimiter
 	Layer.provideMerge(BaseInfraLayer),
@@ -68,19 +65,21 @@ const CacheLayer = CacheService.Layer.pipe(			// Provides CacheService + RateLim
 const DataLayer = ReplayGuardService.Default.pipe(	// Requires CacheService (provides Redis for replay guard)
 	Layer.provideMerge(CacheLayer),
 );
-const CoreLayer = Layer.mergeAll(					// Infrastructure + Auth services - depends on Data (which includes Platform)
+const CoreLayer = Layer.mergeAll(					// Infrastructure + Audit - depends on Data (which includes Platform)
 	StorageAdapter.Default,
 	AuditService.Default,
+).pipe(Layer.provideMerge(DataLayer));
+const AuthLayer = Layer.mergeAll(					// Auth services - depends on Core (needs AuditService)
 	MfaService.Default,
 	OAuthService.Default,
-).pipe(Layer.provideMerge(DataLayer));
-const DomainLayer = Layer.mergeAll(					// Business logic services - depends on Core (which includes Data + Platform)
+).pipe(Layer.provideMerge(CoreLayer));
+const DomainLayer = Layer.mergeAll(					// Business logic services - depends on Auth (which includes Core + Data + Platform)
 	SessionService.Default,
 	StorageService.Default,
 	SearchService.Default,
 	JobService.Default,
 	PollingService.Default,
-).pipe(Layer.provideMerge(CoreLayer));
+).pipe(Layer.provideMerge(AuthLayer));
 // DomainLayer already includes all lower tiers via Layer.provideMerge chain
 const AppLayer = DomainLayer;
 
@@ -108,11 +107,12 @@ const ServerLayer = Layer.unwrapEffect(
 		return HttpApiBuilder.serve((app) =>
 			app.pipe(
 				Middleware.xForwardedHeaders,
+				Middleware.makeRequestContext(Middleware.makeAppLookup(db)),	// Context FIRST for tracing
 				Middleware.trace,
 				Middleware.security(),
-				Middleware.makeRequestContext(Middleware.makeAppLookup(db)),
+				Middleware.serverTiming,
 				Middleware.metrics,
-				RateLimit.headers,
+				CacheService.headers,
 				HttpMiddleware.logger,
 			),
 		).pipe(

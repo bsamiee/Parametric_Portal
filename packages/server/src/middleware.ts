@@ -29,7 +29,7 @@ const _config = {
 		hops: 1,
 	},
 	security: {
-		base: [['x-content-type-options', 'nosniff'], ['x-frame-options', 'DENY'], ['referrer-policy', 'strict-origin-when-cross-origin']] as const,
+		base: {'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',} satisfies Record<string, string>,
 		hsts: { includeSubDomains: true, maxAge: 31536000 },
 	},
 } as const;
@@ -47,7 +47,7 @@ const _extractClientIp = (headers: Headers.Headers, directIp: Option.Option<stri
 	);
 	return isTrustedProxy
 		? Option.firstSomeOf([
-				pipe(Headers.get(headers, 'x-forwarded-for'), Option.map((raw) => A.filter(raw.split(',').map((segment) => segment.trim()), (segment) => segment !== '' && ipaddr.isValid(segment))), Option.flatMap((xff) => A.get(xff, Math.max(0, xff.length - _config.proxy.hops - 1)))),
+				pipe(Headers.get(headers, 'x-forwarded-for'), Option.map((raw) => A.filter(raw.split(',').map((segment) => segment.trim()), (segment) => segment !== '' && ipaddr.isValid(segment))), Option.flatMap((xff) => A.get(xff, Math.max(0, xff.length - _config.proxy.hops)))),
 				Option.filter(Headers.get(headers, 'cf-connecting-ip'), ipaddr.isValid),
 				Option.filter(Headers.get(headers, 'x-real-ip'), ipaddr.isValid),
 			])
@@ -60,8 +60,17 @@ const trace = HttpMiddleware.make((app) => Effect.gen(function* () {
 	yield* Effect.annotateCurrentSpan('http.status_code', response.status);
 	return Option.match(yield* Effect.optionFromOptional(Effect.currentSpan), { onNone: () => response, onSome: (span) => HttpServerResponse.setHeaders(response, HttpTraceContext.toHeaders(span)) });
 }));
-const security = (hsts: typeof _config.security.hsts | false = _config.security.hsts) => HttpMiddleware.make((app) => app.pipe(Effect.map((res) =>
-	[..._config.security.base, ...(hsts ? [['strict-transport-security', `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}`] as const] : [])].reduce((acc, [key, value]) => HttpServerResponse.setHeader(acc, key, value), res))));
+const security = (hsts: typeof _config.security.hsts | false = _config.security.hsts) =>
+	HttpMiddleware.make((app) => app.pipe(Effect.map((res) =>
+		HttpServerResponse.setHeaders(res, hsts
+			? { ..._config.security.base, 'strict-transport-security': `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}` }
+			: _config.security.base))));
+const serverTiming = HttpMiddleware.make((app) =>
+	Effect.gen(function* () {
+		const start = Date.now();
+		const response = yield* app;
+		return HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Date.now() - start}`);
+	}));
 
 // --- [AUTH_MIDDLEWARE] -------------------------------------------------------
 
@@ -73,14 +82,14 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 		Layer.effect(this, Effect.gen(function* () {
 			const metrics = yield* MetricsService;
 			const audit = yield* AuditService;
-			const onMiss = Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.zipRight(Effect.fail(HttpError.Auth.of('Invalid session'))));
-			const onHit = (s: Context.Request.Session) => Context.Request.update({ session: pipe(s, Option.some) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits)));
 			return SessionAuth.of({
-				bearer: (token: Redacted.Redacted<string>) => Crypto.token.hash(Redacted.value(token)).pipe(
+				bearer: (token: Redacted.Redacted<string>) => Crypto.hash(Redacted.value(token)).pipe(
 					Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
-					Effect.mapError((err) => HttpError.Auth.of('Token hashing failed', err)),
-					Effect.flatMap((hash) => lookup(hash)),
-					Effect.flatMap((opt) => Option.isSome(opt) ? onHit(opt.value) : onMiss),
+					Effect.flatMap(lookup),
+					Effect.flatMap(Option.match({
+						onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
+						onSome: (s) => Context.Request.update({ session: Option.some(s) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))),
+					})),
 				),
 			});
 		}));
@@ -88,7 +97,7 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: Context.UserRole) => Context.Request.session.pipe(
 	Effect.flatMap(({ userId }) => findById(userId)),
 	Effect.mapError((err) => HttpError.Internal.of('User lookup failed', err)),
-	Effect.flatMap((opt) => opt.pipe(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed }))),
+	Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
 	Effect.filterOrFail((user) => Context.UserRole.hasAtLeast(user.role, min), () => HttpError.Forbidden.of('Insufficient permissions')),
 	Effect.asVoid,
 );
@@ -97,19 +106,17 @@ const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Opti
 
 const makeAppLookup =
 	(db: { readonly apps: { readonly byNamespace: (ns: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> } }) =>
-	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>> =>
-		db.apps.byNamespace(namespace).pipe(
-			Effect.map((appOpt) => appOpt.pipe(Option.map((app) => ({ id: app.id, namespace: app.namespace })))),
-			Effect.orElseSucceed(() => Option.none()),
-		);
-const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>>) =>
+	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> =>
+		db.apps.byNamespace(namespace).pipe(Effect.map(Option.map((app) => ({ id: app.id, namespace: app.namespace }))));
+const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown>) =>
 	HttpMiddleware.make((app) => Effect.gen(function* () {
 		const req = yield* HttpServerRequest.HttpServerRequest;
 		const requestId = Option.getOrElse(Headers.get(req.headers, 'x-request-id'), crypto.randomUUID);
 		const namespaceOpt = Headers.get(req.headers, 'x-app-id');
-		const found = yield* (Option.isNone(namespaceOpt)
-			? Effect.succeed(Option.none<{ readonly id: string; readonly namespace: string }>())
-			: findByNamespace(namespaceOpt.value).pipe(Effect.orElseSucceed(Option.none)));
+		const found = yield* Option.match(namespaceOpt, {
+			onNone: () => Effect.succeed(Option.none<{ readonly id: string; readonly namespace: string }>()),
+			onSome: (ns) => findByNamespace(ns).pipe(Effect.orElseSucceed(Option.none)),
+		});
 		const tenantId = Option.match(found, { onNone: () => Context.Request.Id.system, onSome: (item) => item.id });
 		const ctx: Context.Request.Data = {
 			circuit: Option.none(),
@@ -120,14 +127,21 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			tenantId,
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
+		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: () => ({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
 		return yield* Context.Request.within(tenantId, app.pipe(
 			Effect.provideService(Context.Request, ctx),
 			Effect.tap(() => Effect.all([
 				Effect.annotateCurrentSpan('tenant.id', tenantId),
 				Effect.annotateCurrentSpan('request.id', requestId),
-				Option.isSome(namespaceOpt) ? Effect.annotateCurrentSpan('app.namespace', namespaceOpt.value) : Effect.void,
+				...Option.match(namespaceOpt, { onNone: () => [], onSome: (ns) => [Effect.annotateCurrentSpan('app.namespace', ns)] }),
 			], { discard: true })),
-			Effect.map((response) => HttpServerResponse.setHeader(response, 'x-request-id', requestId)),
+			Effect.annotateLogs(logAnnotations),
+			Effect.flatMap((response) => Context.Request.current.pipe(
+				Effect.map((c) => HttpServerResponse.setHeaders(response, {
+					'x-request-id': requestId,
+					...Option.match(c.circuit, { onNone: () => ({}), onSome: (circuit) => ({ 'x-circuit-state': circuit.state }) }),
+				})),
+			)),
 		), ctx);
 	}));
 const cors = (origins?: ReadonlyArray<string>) => {
@@ -142,6 +156,7 @@ const Middleware = {
 	// Global
 	metrics: MetricsService.middleware,
 	security,
+	serverTiming,
 	trace,
 	xForwardedHeaders: HttpMiddleware.xForwardedHeaders,
 	// Auth

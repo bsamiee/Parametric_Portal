@@ -19,7 +19,7 @@ import { Schema as S } from 'effect';
 
 // --- [PRIMITIVES] ------------------------------------------------------------
 
-const BufferSchema: S.Schema<Buffer, Buffer> = S.instanceOf(Buffer);
+const BufferSchema = S.Uint8ArrayFromSelf;
 
 // --- [AUTH: USER] ------------------------------------------------------------
 class User extends Model.Class<User>('User')({							// The principal identity. Belongs to an App.

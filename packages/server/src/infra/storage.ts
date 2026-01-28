@@ -5,9 +5,10 @@
 import { S3, S3ClientInstance } from '@effect-aws/client-s3';
 import { CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Array as A, Chunk, Config, Duration, Effect, type Either, Layer, Match, Metric, Option, pipe, Redacted, Stream } from 'effect';
+import { Array as A, Chunk, Config, Duration, Effect, type Either, Layer, Match, Metric, Option, Redacted, Stream } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -60,16 +61,15 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 		const put: StorageAdapter.Put = ((i: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]) =>
 			$(Array.isArray(i) ? 'put.batch' : 'put', (Array.isArray(i)
 				? Effect.forEach(i as readonly StorageAdapter.PutInput[], _put, { concurrency: _config.batch.concurrency })
-				: _put(i as StorageAdapter.PutInput)) as Effect.Effect<unknown>)
-				.pipe(Effect.withSpan('storage.put'))) as StorageAdapter.Put;
+				: _put(i as StorageAdapter.PutInput)) as Effect.Effect<unknown>).pipe(Telemetry.span('storage.put'))) as StorageAdapter.Put;
 		// --- [GET] ---------------------------------------------------------------
 		const _get = (k: string) => Effect.gen(function* () {
 			const fk = yield* _path(k);
 			const r = yield* s3.getObject({ Bucket: B, Key: fk });
-			const chunks = yield* Option.fromNullable(r.Body).pipe(Option.match({
-				onNone: () => Effect.succeed(Chunk.empty<Uint8Array>()),
-				onSome: (body) => Stream.fromAsyncIterable(body as AsyncIterable<Uint8Array>, (e) => e as Error).pipe(Stream.runCollect),
-			}));
+			const bodyIterable = r.Body as AsyncIterable<Uint8Array> | null | undefined;
+			const chunks = yield* bodyIterable === null || bodyIterable === undefined
+				? Effect.succeed(Chunk.empty<Uint8Array>())
+				: Stream.runCollect(Stream.fromAsyncIterable(bodyIterable, (e) => e as Error));
 			const arr = Chunk.toReadonlyArray(chunks);
 			const body = arr.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
 			return { body, contentType: r.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(r.ETag), key: k, metadata: r.Metadata ?? {}, size: body.length };
@@ -77,8 +77,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 		const get: StorageAdapter.Get = ((i: string | readonly string[]) =>
 			$(Array.isArray(i) ? 'get.batch' : 'get', (Array.isArray(i)
 				? Effect.forEach(i as readonly string[], (k) => _get(k).pipe(Effect.either, Effect.map((r) => [k, r] as const)), { concurrency: _config.batch.concurrency }).pipe(Effect.map((e) => new Map(e)))
-				: _get(i as string)) as Effect.Effect<unknown>)
-				.pipe(Effect.withSpan('storage.get'))) as StorageAdapter.Get;
+				: _get(i as string)) as Effect.Effect<unknown>).pipe(Telemetry.span('storage.get'))) as StorageAdapter.Get;
 		// --- [COPY] --------------------------------------------------------------
 		const _copy = (i: StorageAdapter.CopyInput) => Effect.all([_path(i.sourceKey), _path(i.destKey)]).pipe(
 			Effect.flatMap(([s, d]) => s3.copyObject({
@@ -92,8 +91,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 		const copy: StorageAdapter.Copy = ((i: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]) =>
 			$(Array.isArray(i) ? 'copy.batch' : 'copy', (Array.isArray(i)
 				? Effect.forEach(i as readonly StorageAdapter.CopyInput[], _copy, { concurrency: _config.batch.concurrency })
-				: _copy(i as StorageAdapter.CopyInput)) as Effect.Effect<unknown>)
-				.pipe(Effect.withSpan('storage.copy'))) as StorageAdapter.Copy;
+				: _copy(i as StorageAdapter.CopyInput)) as Effect.Effect<unknown>).pipe(Telemetry.span('storage.copy'))) as StorageAdapter.Copy;
 		// --- [EXISTS] ------------------------------------------------------------
 		const _exists = (k: string) => _path(k).pipe(
 			Effect.flatMap((fk) => s3.headObject({ Bucket: B, Key: fk })),
@@ -104,33 +102,36 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 		const exists: StorageAdapter.Exists = ((i: string | readonly string[]) =>
 			$(Array.isArray(i) ? 'head.batch' : 'head', (Array.isArray(i)
 				? Effect.forEach(i as readonly string[], (k) => _exists(k).pipe(Effect.map((v) => [k, v] as const)), { concurrency: _config.batch.concurrency }).pipe(Effect.map((e) => new Map(e)))
-				: _exists(i as string)) as Effect.Effect<unknown>)
-				.pipe(Effect.withSpan('storage.exists'))) as StorageAdapter.Exists;
+				: _exists(i as string)) as Effect.Effect<unknown>).pipe(Telemetry.span('storage.exists'))) as StorageAdapter.Exists;
 		// --- [REMOVE] ------------------------------------------------------------
 		const remove: StorageAdapter.Remove = ((i: string | readonly string[]) => $('delete', Effect.gen(function* () {
 			const keys = A.ensure(i);
-			const objects = yield* Effect.forEach(keys, (k) => _path(k).pipe(Effect.map((f) => ({ Key: f }))), { concurrency: 'unbounded' });
+			const fullPaths = yield* Effect.forEach(keys, _path, { concurrency: 'unbounded' });
+			const objects = fullPaths.map((f) => ({ Key: f }));
 			const batches = A.chunksOf(objects, _config.batch.deleteLimit);
 			yield* Effect.forEach(batches, (b) => s3.deleteObjects({ Bucket: B, Delete: { Objects: b } }), { concurrency: _config.batch.concurrency });
-		})).pipe(Effect.withSpan('storage.remove'))) as StorageAdapter.Remove;
+		})).pipe(Telemetry.span('storage.remove'))) as StorageAdapter.Remove;
 		// --- [LIST] --------------------------------------------------------------
 		const list = (o?: { prefix?: string; maxKeys?: number; continuationToken?: string }) =>
-			$('list', _path(o?.prefix ?? '').pipe(Effect.flatMap((p) =>
-				s3.listObjectsV2({ Bucket: B, ContinuationToken: o?.continuationToken, MaxKeys: o?.maxKeys ?? 1000, Prefix: p }).pipe(Effect.map((r) => ({
-					continuationToken: r.NextContinuationToken,
-					isTruncated: r.IsTruncated ?? false,
-					items: pipe(r.Contents ?? [], A.map((x) => ({
-						etag: x.ETag ?? '',
-						key: x.Key?.replace(p.replace(o?.prefix ?? '', ''), '') ?? '',
-						lastModified: x.LastModified ?? new Date(),
-						size: x.Size ?? 0,
-					}))),
-				}))),
-			))).pipe(Effect.withSpan('storage.list'));
+			$('list', Effect.gen(function* () {
+				const p = yield* _path(o?.prefix ?? '');
+				const r = yield* s3.listObjectsV2({ Bucket: B, ContinuationToken: o?.continuationToken, MaxKeys: o?.maxKeys ?? 1000, Prefix: p });
+				const prefixStrip = p.replace(o?.prefix ?? '', '');
+				const items = (r.Contents ?? []).map((x) => ({
+					etag: x.ETag ?? '',
+					key: x.Key?.replace(prefixStrip, '') ?? '',
+					lastModified: x.LastModified ?? new Date(),
+					size: x.Size ?? 0,
+				}));
+				return { continuationToken: r.NextContinuationToken, isTruncated: r.IsTruncated ?? false, items };
+			})).pipe(Telemetry.span('storage.list'));
 		const listStream = (o?: { prefix?: string }) =>
 			Stream.paginateEffect(undefined as string | undefined, (token) =>
 				list({ continuationToken: token, prefix: o?.prefix }).pipe(
-					Effect.map((r) => [r.items, Option.fromNullable(r.continuationToken).pipe(Option.filter(() => r.isTruncated))] as const),
+					Effect.map((r) => {
+						const next = r.isTruncated ? Option.fromNullable(r.continuationToken) : Option.none<string>();
+						return [r.items, next] as const;
+					}),
 				),
 			).pipe(Stream.flatMap((element) => Stream.fromIterable(element)));
 		// --- [SIGN] --------------------------------------------------------------
@@ -140,30 +141,26 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 		function sign(i: StorageAdapter.SignInput): Effect.Effect<string, unknown, S3ClientInstance.S3ClientInstance>;
 		function sign(i: StorageAdapter.SignInput) {
 			const expiresIn = Math.floor(Duration.toSeconds(i.expires ?? Duration.hours(1)));
+			const signCopyUrl = (src: string, dst: string, client: typeof S3ClientInstance.S3ClientInstance.Service) =>
+				Effect.tryPromise({ catch: (e) => e as Error, try: () => getSignedUrl(client, new CopyObjectCommand({ Bucket: B, CopySource: `${B}/${src}`, Key: dst }), { expiresIn }) });
 			return $(`sign-${i.op}`, Match.value(i).pipe(
-				Match.when({ op: 'copy' }, (v) => Effect.all([_path(v.sourceKey), _path(v.destKey), S3ClientInstance.S3ClientInstance]).pipe(
-					Effect.flatMap(([src, dst, client]) => Effect.tryPromise({
-						catch: (e) => e as Error,
-						try: () => getSignedUrl(client, new CopyObjectCommand({ Bucket: B, CopySource: `${B}/${src}`, Key: dst }), { expiresIn }),
-					})),
-				)),
+				Match.when({ op: 'copy' }, (v) => Effect.all([_path(v.sourceKey), _path(v.destKey), S3ClientInstance.S3ClientInstance]).pipe(Effect.flatMap(([src, dst, client]) => signCopyUrl(src, dst, client)))),
 				Match.when({ op: 'get' }, (v) => _path(v.key).pipe(Effect.flatMap((k) => s3.getObject({ Bucket: B, Key: k }, { expiresIn, presigned: true })))),
 				Match.when({ op: 'put' }, (v) => _path(v.key).pipe(Effect.flatMap((k) => s3.putObject({ Bucket: B, Key: k }, { expiresIn, presigned: true })))),
 				Match.exhaustive,
-			)).pipe(Effect.withSpan('storage.sign'));
+			)).pipe(Telemetry.span('storage.sign'));
 		}
 		// --- [STREAM] ------------------------------------------------------------
 		const getStream = (k: string) =>
-			$('get-stream', _path(k).pipe(Effect.flatMap((fk) =>
-				s3.getObject({ Bucket: B, Key: fk }).pipe(Effect.map((r) => ({
-					contentType: r.ContentType ?? 'application/octet-stream',
-					etag: Option.fromNullable(r.ETag),
-					size: r.ContentLength ?? 0,
-					stream: Option.fromNullable(r.Body as AsyncIterable<Uint8Array> | undefined).pipe(
-						Option.match({ onNone: () => Stream.empty, onSome: (body) => Stream.fromAsyncIterable(body, (e) => e as Error) }),
-					),
-				}))),
-			))).pipe(Effect.withSpan('storage.getStream'));
+			$('get-stream', Effect.gen(function* () {
+				const fk = yield* _path(k);
+				const r = yield* s3.getObject({ Bucket: B, Key: fk });
+				const bodyIterable = r.Body as AsyncIterable<Uint8Array> | null | undefined;
+				const stream = bodyIterable === null || bodyIterable === undefined
+					? Stream.empty
+					: Stream.fromAsyncIterable(bodyIterable, (e) => e as Error);
+				return { contentType: r.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(r.ETag), size: r.ContentLength ?? 0, stream };
+			})).pipe(Telemetry.span('storage.getStream'));
 		const putStream = (i: { key: string; stream: Stream.Stream<Uint8Array, unknown>; contentType?: string; metadata?: Record<string, string>; partSizeBytes?: number }) =>
 			$('put-stream', Effect.gen(function* () {
 				const fk = yield* _path(i.key);
@@ -177,51 +174,41 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				);
 				const arr = Chunk.toReadonlyArray(chunks);
 				const bytes = arr.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
-				return yield* bytes.length < _config.multipart.threshold
-					? s3.putObject({ Body: bytes, Bucket: B, ContentType: contentType, Key: fk, Metadata: i.metadata }).pipe(
-						Effect.map((r) => ({ etag: r.ETag ?? '', key: i.key, totalSize: bytes.length })),
-					)
-					: Effect.gen(function* () {
-						const createRes = yield* s3.createMultipartUpload({ Bucket: B, ContentType: contentType, Key: fk, Metadata: i.metadata });
-						const uploadId = yield* Effect.fromNullable(createRes.UploadId).pipe(Effect.mapError(() => new Error('Empty uploadId')));
-						const parts = yield* Effect.acquireRelease(
-							Effect.succeed(uploadId),
-							(uid, exit) => exit._tag === 'Failure'
-								? s3.abortMultipartUpload({ Bucket: B, Key: fk, UploadId: uid }).pipe(
-									Effect.tap(() => Effect.logWarning('Multipart aborted', { key: i.key, uploadId: uid })),
-									Effect.catchAll(() => Effect.void),
-								)
-								: Effect.void,
-						).pipe(
-							Effect.flatMap((uid) => Effect.forEach(
-								A.range(0, Math.ceil(bytes.length / partSize) - 1),
-								(idx) => s3.uploadPart({
-									Body: bytes.slice(idx * partSize, Math.min((idx + 1) * partSize, bytes.length)),
-									Bucket: B,
-									Key: fk,
-									PartNumber: idx + 1,
-									UploadId: uid,
-								}).pipe(Effect.map((r) => ({ ETag: r.ETag ?? '', PartNumber: idx + 1 }))),
-								{ concurrency: 3 },
-							)),
-							Effect.scoped,
-						);
-						yield* s3.completeMultipartUpload({ Bucket: B, Key: fk, MultipartUpload: { Parts: parts }, UploadId: uploadId });
-						return { etag: A.last(parts).pipe(Option.map((p) => p.ETag), Option.getOrElse(() => '')), key: i.key, totalSize: bytes.length };
-					});
-			})).pipe(Effect.withSpan('storage.putStream'));
+				const useSimplePut = bytes.length < _config.multipart.threshold;
+				const simplePutResult = useSimplePut
+					? yield* s3.putObject({ Body: bytes, Bucket: B, ContentType: contentType, Key: fk, Metadata: i.metadata }).pipe(Effect.map((r) => ({ etag: r.ETag ?? '', key: i.key, totalSize: bytes.length })))
+					: null;
+				const createRes = useSimplePut ? null : yield* s3.createMultipartUpload({ Bucket: B, ContentType: contentType, Key: fk, Metadata: i.metadata });
+				const uploadId = useSimplePut ? '' : (createRes?.UploadId ?? (yield* Effect.fail(new Error('Empty uploadId'))));
+				const partIndices = A.range(0, Math.ceil(bytes.length / partSize) - 1);
+				const uploadPartForIdx = (uid: string, idx: number) => s3.uploadPart({ Body: bytes.slice(idx * partSize, Math.min((idx + 1) * partSize, bytes.length)), Bucket: B, Key: fk, PartNumber: idx + 1, UploadId: uid });
+				const acquiredUid = useSimplePut ? '' : yield* Effect.acquireRelease(
+					Effect.succeed(uploadId),
+					(uid, exit) => exit._tag === 'Failure' ? s3.abortMultipartUpload({ Bucket: B, Key: fk, UploadId: uid }).pipe(Effect.ignore) : Effect.void,
+				);
+				const rawParts = useSimplePut ? [] : yield* Effect.forEach(partIndices, (idx) => uploadPartForIdx(acquiredUid, idx), { concurrency: 3 }).pipe(Effect.scoped);
+				const parts = rawParts.map((r, idx) => ({ ETag: r.ETag ?? '', PartNumber: idx + 1 }));
+				const multipartResult = useSimplePut ? null : yield* s3.completeMultipartUpload({ Bucket: B, Key: fk, MultipartUpload: { Parts: parts }, UploadId: uploadId }).pipe(Effect.map(() => {
+					const lastPart = A.last(parts);
+					const etag = Option.isSome(lastPart) ? lastPart.value.ETag : '';
+					return { etag, key: i.key, totalSize: bytes.length };
+				}));
+				return simplePutResult ?? multipartResult ?? { etag: '', key: i.key, totalSize: bytes.length };
+			})).pipe(Telemetry.span('storage.putStream'));
 		const abortUpload = (k: string, u: string) =>
-			$('abort-multipart', _path(k).pipe(Effect.flatMap((fk) => s3.abortMultipartUpload({ Bucket: B, Key: fk, UploadId: u })))).pipe(Effect.withSpan('storage.abortUpload'));
+			$('abort-multipart', _path(k).pipe(Effect.flatMap((fk) => s3.abortMultipartUpload({ Bucket: B, Key: fk, UploadId: u })))).pipe(Telemetry.span('storage.abortUpload'));
 		const listUploads = (o?: { prefix?: string }) =>
-			$('list-multipart', _path(o?.prefix ?? '').pipe(Effect.flatMap((p) =>
-				s3.listMultipartUploads({ Bucket: B, Prefix: p }).pipe(Effect.map((r) => ({
-					uploads: pipe(r.Uploads ?? [], A.map((u) => ({
-						initiated: u.Initiated ?? new Date(),
-						key: u.Key?.replace(p.replace(o?.prefix ?? '', ''), '') ?? '',
-						uploadId: u.UploadId ?? '',
-					}))),
-				}))),
-			))).pipe(Effect.withSpan('storage.listUploads'));
+			$('list-multipart', Effect.gen(function* () {
+				const p = yield* _path(o?.prefix ?? '');
+				const r = yield* s3.listMultipartUploads({ Bucket: B, Prefix: p });
+				const prefixStrip = p.replace(o?.prefix ?? '', '');
+				const uploads = (r.Uploads ?? []).map((u) => ({
+					initiated: u.Initiated ?? new Date(),
+					key: u.Key?.replace(prefixStrip, '') ?? '',
+					uploadId: u.UploadId ?? '',
+				}));
+				return { uploads };
+			})).pipe(Telemetry.span('storage.listUploads'));
 		yield* Effect.logInfo('StorageAdapter initialized', { bucket: B });
 		return { abortUpload, copy, exists, get, getStream, list, listStream, listUploads, put, putStream, remove, sign };
 	}),

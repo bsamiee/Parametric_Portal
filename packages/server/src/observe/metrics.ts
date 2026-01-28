@@ -3,7 +3,7 @@
  * No custom types - uses Effect's official types directly.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Effect, HashSet, Metric, MetricLabel, Stream } from 'effect';
+import { Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
 import { Context } from '../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -25,7 +25,11 @@ const _boundaries = {	// SLA-aligned histogram boundaries in seconds for differe
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _extractErrorTag = (err: unknown): string => typeof err === 'object' && err !== null && '_tag' in err ? String(err._tag) : 'UnknownError';
+const errorTag = (err: unknown): string => Match.value(err).pipe(
+	Match.when((e: unknown): e is { _tag: string } => typeof e === 'object' && e !== null && '_tag' in e, (t) => t._tag),
+	Match.when((e: unknown): e is Error => e instanceof Error, (e) => e.constructor.name),
+	Match.orElse(() => 'Unknown'),
+);
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -133,6 +137,8 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		},
 	}),
 }) {
+	// --- [ERROR_TAG] ---------------------------------------------------------
+	static readonly errorTag = errorTag;
 	// --- [LABEL] -------------------------------------------------------------
 	// Single polymorphic label function - accepts any dimensions, filters undefined values. Sanitizes values to prevent overflow and control character issues.
 	static readonly label = (pairs: Record<string, string | undefined>): HashSet.HashSet<MetricLabel.MetricLabel> =>
@@ -173,8 +179,8 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 	): Effect.Effect<A, E, R> =>
 		effect.pipe(
 			Metric.trackDuration(Metric.taggedWithLabels(config.duration, config.labels)),
-			Metric.trackErrorWith(Metric.taggedWithLabels(config.errors, config.labels), _extractErrorTag),
-			Metric.trackDefectWith(Metric.taggedWithLabels(config.errors, config.labels), _extractErrorTag),
+			Metric.trackErrorWith(Metric.taggedWithLabels(config.errors, config.labels), errorTag),
+			Metric.trackDefectWith(Metric.taggedWithLabels(config.errors, config.labels), errorTag),
 		);
 	static readonly trackStream = <A, E, R>(			// Tracks stream element count by incrementing counter for each element.
 		stream: Stream.Stream<A, E, R>,
@@ -227,7 +233,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			yield* Metric.update(activeGauge, 1);
 			return yield* app.pipe(
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.http.duration, baseLabels)),
-				Metric.trackErrorWith(Metric.taggedWithLabels(metrics.errors, tenantLabels), _extractErrorTag),
+				Metric.trackErrorWith(Metric.taggedWithLabels(metrics.errors, tenantLabels), errorTag),
 				Effect.tap((res) => {
 					const withStatus = HashSet.add(baseLabels, MetricLabel.make('status', String(res.status)));
 					return Metric.increment(Metric.taggedWithLabels(metrics.http.requests, withStatus));

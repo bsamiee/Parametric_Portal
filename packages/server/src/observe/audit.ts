@@ -9,6 +9,7 @@ import { Array as A, DateTime, Duration, Effect, Option, Schedule, pipe } from '
 import { Context } from '../context.ts';
 import { Diff } from '../utils/diff.ts';
 import { MetricsService } from './metrics.ts';
+import { Telemetry } from './telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -32,6 +33,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			Effect.logWarning('AUDIT_DEAD_LETTER_NO_FS', { message: 'Dead-letter enabled but FileSystem unavailable', path: _Audit.deadLetter.path }),
 			() => _Audit.deadLetter.enabled && Option.isNone(fs),
 		);
+		yield* Effect.annotateLogsScoped({ 'audit.deadLetter.enabled': String(_Audit.deadLetter.enabled), 'service.name': 'audit' });
 		const parseOp = (operation: string) => {
 			const idx = operation.indexOf('.');
 			const [subject, op] = idx > 0 ? [operation.slice(0, idx), operation.slice(idx + 1)] : ['security', operation];
@@ -64,9 +66,10 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 				Option.flatMap(({ after, before }) => Option.fromNullable(Diff.create(before, after))),
 				Option.orElse(() => Option.fromNullable(config?.details)),
 			);
-		const log = Effect.fn('audit.log')((
+		const log = (
 			operation: string,
-			config?: { readonly subjectId?: string; readonly before?: unknown; readonly after?: unknown; readonly details?: unknown; readonly silent?: boolean },) =>
+			config?: { readonly subjectId?: string; readonly before?: unknown; readonly after?: unknown; readonly details?: unknown; readonly silent?: boolean },
+		) =>
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const parsed = parseOp(operation);
@@ -85,9 +88,11 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					userAgent: ctx.userAgent,
 					userId: pipe(ctx.session, Option.map((s) => s.userId)),
 				};
-				yield* Effect.annotateCurrentSpan('audit.subject', parsed.subject);
-				yield* Effect.annotateCurrentSpan('audit.operation', parsed.op);
-				yield* Effect.annotateCurrentSpan('audit.subjectId', subjectId);
+				yield* Effect.all([
+					Effect.annotateCurrentSpan('audit.operation', parsed.op),
+					Effect.annotateCurrentSpan('audit.subject', parsed.subject),
+					Effect.annotateCurrentSpan('audit.subjectId', subjectId),
+				], { discard: true });
 				yield* pipe(
 					db.audit.log(entry),
 					Effect.tap(() => MetricsService.inc(metrics.audit.writes, labels, 1)),
@@ -101,7 +106,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 						], { discard: true });
 					}),
 				);
-			}));
+			}).pipe(Telemetry.span('audit.log'));
 		const processLine = (line: string) =>
 			pipe(
 				Effect.try(() => JSON.parse(line) as Record<string, unknown>),
@@ -135,17 +140,17 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			});
 		const replayDeadLetters = pipe(
 			fs,
-			Option.filter(() => _Audit.deadLetter.enabled),
 			Option.match({
 				onNone: () => Effect.succeed({ failed: 0, replayed: 0, skipped: true }),
-				onSome: (fileSystem) =>
-					Effect.gen(function* () {
+				onSome: (fileSystem) => _Audit.deadLetter.enabled
+					? Effect.gen(function* () {
 						const tempPath = `${_Audit.deadLetter.path}.processing`;
 						const renamed = yield* pipe(fileSystem.rename(_Audit.deadLetter.path, tempPath), Effect.as(true), Effect.orElseSucceed(() => false));
-						return yield* Effect.if(renamed, { onFalse: () => Effect.succeed({ failed: 0, replayed: 0, skipped: false }), onTrue: () => replayFileContents(fileSystem, tempPath) });
-					}),
+						return yield* (renamed ? replayFileContents(fileSystem, tempPath) : Effect.succeed({ failed: 0, replayed: 0, skipped: false }));
+					})
+					: Effect.succeed({ failed: 0, replayed: 0, skipped: true }),
 			}),
-			Effect.withSpan('audit.replayDeadLetters'),
+			Telemetry.span('audit.replayDeadLetters'),
 		);
 		yield* pipe(
 			replayDeadLetters,

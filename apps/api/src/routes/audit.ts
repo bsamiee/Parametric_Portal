@@ -7,7 +7,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Effect, Option, pipe } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -24,11 +24,11 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 		);
 		return handlers
 			.handle('getByEntity', ({ path: { subject, subjectId }, urlParams: params }) =>
-				RateLimit.apply('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.bySubject(tenantId, subject, subjectId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByEntity', { kind: 'server' }))))
+				CacheService.rateLimit('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.bySubject(tenantId, subject, subjectId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByEntity', { kind: 'server' }))))
 			.handle('getByUser', ({ path: { userId }, urlParams: params }) =>
-				RateLimit.apply('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.byUser(tenantId, userId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByUser', { kind: 'server' }))))
+				CacheService.rateLimit('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.byUser(tenantId, userId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByUser', { kind: 'server' }))))
 			.handle('getMine', ({ urlParams: params }) =>
-				RateLimit.apply('api', pipe(
+				CacheService.rateLimit('api', pipe(
 					Middleware.requireMfaVerified,
 					Effect.zipRight(Context.Request.current),
 					Effect.flatMap((ctx) => {

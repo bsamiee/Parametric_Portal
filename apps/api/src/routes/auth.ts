@@ -21,7 +21,7 @@ import { SessionService } from '@parametric-portal/server/domain/session';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Crypto } from '@parametric-portal/server/security/crypto';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import type { Uuidv7 } from '@parametric-portal/types/types';
 import { DateTime, Effect, Match, Option } from 'effect';
 
@@ -45,7 +45,7 @@ const oauthErr = (provider: Context.OAuthProvider) => (reason: string) => HttpEr
 // --- [OAUTH_HANDLERS] --------------------------------------------------------
 
 const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: typeof OAuthService.Service, provider: Context.OAuthProvider) =>
-	oauth.createAuthorizationUrl(provider).pipe(
+	oauth.authorize(provider).pipe(
 		Effect.flatMap(({ stateCookie, url }) =>
 			HttpServerResponse.json({ url: url.toString() }).pipe(Effect.flatMap(Context.Request.cookie.set('oauth', stateCookie))),
 		),
@@ -89,7 +89,7 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
 					return { isNewUser: existing === null, userId: user.id };
 				}),
 			).pipe(Effect.mapError((e) => e instanceof HttpError.OAuth ? e : HttpError.Internal.of('User creation transaction failed', e)));
-			const { mfaPending, refreshToken, sessionExpiresAt, sessionToken } = yield* session.createForLogin(userId, { isNewUser, provider }).pipe(Effect.mapError(() => err('Session creation failed')));
+			const { mfaPending, refreshToken, sessionExpiresAt, sessionToken } = yield* session.login(userId, { isNewUser, provider }).pipe(Effect.mapError(() => err('Session creation failed')));
 			yield* audit.log(isNewUser ? 'User.create' : 'User.login', { details: { email, provider }, subjectId: userId });
 			return yield* authResponse(sessionToken, sessionExpiresAt, refreshToken, mfaPending, true).pipe(Effect.mapError(() => err('Response build failed')));
 		}),
@@ -102,7 +102,7 @@ const handleRefresh = Effect.fn('auth.refresh')((session: typeof SessionService.
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
 		const refreshIn = yield* Context.Request.cookie.get('refresh', request, () => HttpError.Auth.of('Missing refresh token cookie'));
-		const hashIn = yield* Crypto.token.hash(refreshIn).pipe(Effect.mapError((e) => HttpError.Auth.of('Token hashing failed', e)));
+		const hashIn = yield* Crypto.hash(refreshIn).pipe(Effect.mapError((e) => HttpError.Auth.of('Token hashing failed', e)));
 		const { mfaPending, refreshToken, sessionExpiresAt, sessionToken, userId } = yield* session.refresh(hashIn);
 		yield* audit.log('RefreshToken.refresh', { subjectId: userId });
 		return yield* authResponse(sessionToken, sessionExpiresAt, refreshToken, mfaPending).pipe(Effect.mapError((e) => HttpError.Auth.of('Response build failed', e)));
@@ -141,7 +141,7 @@ const handleMfaStatus = (mfa: typeof MfaService.Service, audit: typeof AuditServ
 		return status;
 	}).pipe(Effect.withSpan('auth.mfa.status', { kind: 'server' }));
 const handleMfaEnroll = (mfa: typeof MfaService.Service, repos: DatabaseServiceShape, audit: typeof AuditService.Service) =>
-	RateLimit.apply('mfa', Effect.gen(function* () {
+	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const sess = yield* Context.Request.session;
 		const userOpt = yield* repos.users.one([{ field: 'id', value: sess.userId }]).pipe(Effect.mapError((e) => HttpError.Internal.of('User lookup failed', e)));
 		const user = yield* Option.match(userOpt, { onNone: () => Effect.fail(HttpError.NotFound.of('user', sess.userId)), onSome: Effect.succeed });
@@ -150,7 +150,7 @@ const handleMfaEnroll = (mfa: typeof MfaService.Service, repos: DatabaseServiceS
 		return result;
 	}));
 const handleMfaVerify = (session: typeof SessionService.Service, audit: typeof AuditService.Service, code: string) =>
-	RateLimit.apply('mfa', Effect.gen(function* () {
+	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const sess = yield* Context.Request.session;
 		const result = yield* session.verifyMfa(sess.id, sess.userId, code);
 		yield* audit.log('MfaSecret.verify', { subjectId: sess.userId });
@@ -165,7 +165,7 @@ const handleMfaDisable = (mfa: typeof MfaService.Service, audit: typeof AuditSer
 		return { success: true as const };
 	}).pipe(Effect.withSpan('auth.mfa.disable', { kind: 'server' }));
 const handleMfaRecover = (session: typeof SessionService.Service, audit: typeof AuditService.Service, code: string) =>
-	RateLimit.apply('mfa', Effect.gen(function* () {
+	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const sess = yield* Context.Request.session;
 		const { remainingCodes } = yield* session.recoverMfa(sess.id, sess.userId, code.toUpperCase());
 		yield* audit.log('MfaSecret.recover', { subjectId: sess.userId });
@@ -188,7 +188,7 @@ const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
 			const request = yield* HttpServerRequest.HttpServerRequest;
 			yield* verifyCsrf(request);
 			yield* Middleware.requireMfaVerified;
-			const pair = yield* Crypto.token.pair.pipe(Effect.mapError((e) => HttpError.Internal.of('Key generation failed', e)));
+			const pair = yield* Crypto.pair.pipe(Effect.mapError((e) => HttpError.Internal.of('Key generation failed', e)));
 			const [{ userId }, metrics] = yield* Effect.all([Context.Request.session, MetricsService]);
 			const encrypted = yield* Crypto.encrypt(pair.token).pipe(
 				Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('Key encryption failed', e))),
@@ -228,12 +228,12 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 		const [repos, oauth, session, audit, mfa] = yield* Effect.all([DatabaseService, OAuthService, SessionService, AuditService, MfaService]);
 		return handlers
 			// OAuth
-			.handleRaw('oauthStart', ({ path: { provider } }) => RateLimit.apply('auth', handleOAuthStart(oauth, provider)))
-			.handleRaw('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) => RateLimit.apply('auth', handleOAuthCallback(oauth, repos, session, audit, provider, code, state)))
+			.handleRaw('oauthStart', ({ path: { provider } }) => CacheService.rateLimit('auth', handleOAuthStart(oauth, provider)))
+			.handleRaw('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) => CacheService.rateLimit('auth', handleOAuthCallback(oauth, repos, session, audit, provider, code, state)))
 			// Session
-			.handleRaw('refresh', () => RateLimit.apply('auth', handleRefresh(session, audit)))
-			.handleRaw('logout', () => RateLimit.apply('api', handleLogout(session, audit)))
-			.handle('me', () => RateLimit.apply('api', handleMe(repos, audit)))
+			.handleRaw('refresh', () => CacheService.rateLimit('auth', handleRefresh(session, audit)))
+			.handleRaw('logout', () => CacheService.rateLimit('api', handleLogout(session, audit)))
+			.handle('me', () => CacheService.rateLimit('api', handleMe(repos, audit)))
 			// MFA
 			.handle('mfaStatus', () => handleMfaStatus(mfa, audit))
 			.handle('mfaEnroll', () => handleMfaEnroll(mfa, repos, audit))
@@ -241,9 +241,9 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 			.handle('mfaDisable', () => handleMfaDisable(mfa, audit))
 			.handle('mfaRecover', ({ payload }) => handleMfaRecover(session, audit, payload.code))
 			// API keys
-			.handle('listApiKeys', () => RateLimit.apply('api', handleListApiKeys(repos, audit)))
-			.handle('createApiKey', ({ payload }) => RateLimit.apply('mutation', handleCreateApiKey(repos, audit, payload)))
-			.handle('deleteApiKey', ({ path: { id } }) => RateLimit.apply('mutation', handleDeleteApiKey(repos, audit, id)));
+			.handle('listApiKeys', () => CacheService.rateLimit('api', handleListApiKeys(repos, audit)))
+			.handle('createApiKey', ({ payload }) => CacheService.rateLimit('mutation', handleCreateApiKey(repos, audit, payload)))
+			.handle('deleteApiKey', ({ path: { id } }) => CacheService.rateLimit('mutation', handleDeleteApiKey(repos, audit, id)));
 	}),
 );
 

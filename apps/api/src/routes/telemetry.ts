@@ -9,14 +9,14 @@
 import { HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Circuit } from '@parametric-portal/server/utils/circuit';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Config, Effect, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const CollectorEndpoint = Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(
-    Config.withDefault(Telemetry.config.defaults.endpointHttp),
+    Config.withDefault(Telemetry.config.defaults.endpoint),
     Config.map((url) => url.replace(':4317', ':4318')),
 );
 const TelemetryCircuit = Circuit.make('telemetry.otlp');
@@ -49,7 +49,7 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
 // --- [LAYERS] ----------------------------------------------------------------
 
 const TelemetryRouteLive = HttpApiBuilder.group(ParametricApi, 'telemetry', (handlers) =>
-    handlers.handle('ingestTraces', ({ request }) => RateLimit.apply('api', handleIngestTraces(request))),
+    handlers.handle('ingestTraces', ({ request }) => CacheService.rateLimit('api', handleIngestTraces(request))),
 );
 
 // --- [EXPORT] ----------------------------------------------------------------

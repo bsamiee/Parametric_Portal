@@ -14,7 +14,7 @@ import { StorageService } from '@parametric-portal/server/domain/storage';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Transfer, TransferError } from '@parametric-portal/server/utils/transfer';
 import { Codec } from '@parametric-portal/types/files';
@@ -44,23 +44,22 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 			...(Option.isSome(asset.name) && { name: asset.name.value }),
 		});
 		const textStream = baseStream.pipe(Stream.zipWithIndex, Stream.map(([asset, idx]) => mapAsset(asset, idx)));	// Text export: use DB content directly (text assets don't have storageRef)
-		const binaryStream = baseStream.pipe(																			// Binary export: hydrate from S3 when storageRef is present
-			Stream.mapEffect((asset) =>
-				Option.match(asset.storageRef, {
-					onNone: () => Effect.succeed(asset),
-					onSome: (s3Key: string) => storage.get(s3Key).pipe(
-						Effect.map((s3Obj) => ({ ...asset, content: Buffer.from(s3Obj.body).toString('base64') })),
-						Effect.catchAll(() => Effect.succeed(asset)), 													// Fallback to DB content if S3 fetch fails
-					),
-				}),
-			),
+		const hydrateAsset = (asset: Asset) => Effect.gen(function* () {												// Binary export: hydrate from S3 when storageRef is present
+			const s3Key = Option.getOrNull(asset.storageRef);
+			const s3Result = yield* s3Key === null ? Effect.succeed(null) : storage.get(s3Key).pipe(Effect.option);
+			return s3Result === null || Option.isNone(s3Result)
+				? asset
+				: { ...asset, content: Buffer.from(s3Result.value.body).toString('base64') };
+		});
+		const binaryStream = baseStream.pipe(
+			Stream.mapEffect(hydrateAsset),
 			Stream.zipWithIndex,
 			Stream.map(([asset, idx]) => mapAsset(asset, idx)),
 		);
 		const auditExport = (name: string, count?: number) =>
 			audit.log('Asset.export', { details: { count: count ?? null, format: codec.ext, name, userId: session.userId }, subjectId: appId });
 		return yield* codec.binary
-			? Telemetry.withSpan(`transfer.serialize.${codec.ext}`, Transfer.exportBinary(binaryStream, codec.ext)).pipe(
+			? Transfer.exportBinary(binaryStream, codec.ext).pipe(
 				Effect.tap((result) => Effect.all([
 					Effect.annotateCurrentSpan('transfer.format', codec.ext),
 					Effect.annotateCurrentSpan('transfer.rows', result.count),
@@ -70,6 +69,7 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 				Effect.mapError((err) => HttpError.Internal.of(`${codec.ext.toUpperCase()} generation failed`, err)),
 				Effect.tap((result) => auditExport(result.name, result.count)),
 				Effect.map((result) => ({ ...result, format: codec.ext })),
+				Telemetry.span(`transfer.serialize.${codec.ext}`),
 			)
 			: (() => {
 				const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
@@ -107,11 +107,12 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 				(buf) => HttpError.Validation.of('body', buf.byteLength === 0 ? 'Empty request body' : `Max import size: ${Transfer.limits.totalBytes} bytes`),
 			),
 		);
-		const parsed = yield* Telemetry.withSpan('transfer.parse', Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
+		const parsed = yield* Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
 			Effect.map((c) => Chunk.toArray(c)),
 			Effect.tap((rows) => Effect.annotateCurrentSpan('transfer.rows.raw', rows.length)),
 			Effect.catchTag('Fatal', (err) => Effect.fail(HttpError.Validation.of('body', err.detail ?? err.code))),
-		));
+			Telemetry.span('transfer.parse'),
+		);
 		const { failures, items } = Transfer.partition(parsed);
 		yield* Effect.all([
 			Effect.annotateCurrentSpan('transfer.format', codec.ext),
@@ -130,7 +131,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 			codec.binary
 				? Effect.gen(function* () {
 					const rawBuf = codec.buf(item.content);
-					const hash = item.hash ?? (yield* Crypto.token.hash(item.content).pipe(Effect.orDie));
+					const hash = item.hash ?? (yield* Crypto.hash(item.content).pipe(Effect.orDie));
 					const s3Key = `assets/${appId}/${hash}.${codec.ext}`;
 					const originalName = item.name ?? `${hash.slice(0, 8)}.${codec.ext}`;
 					yield* storage.put({ body: rawBuf, contentType: codec.mime, key: s3Key, metadata: { type: item.type } });
@@ -162,13 +163,14 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 		const init: BatchResult = { assets: [], dbFailures: [] };
 		const { assets, dbFailures } = dryRun
 			? init
-			: yield* Telemetry.withSpan('transfer.insert', Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), init, (acc, chunk) => processBatch(acc, Chunk.toArray(chunk))).pipe(
+			: yield* Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), init, (acc, chunk) => processBatch(acc, Chunk.toArray(chunk))).pipe(
 					Effect.tap(({ assets: inserted, dbFailures: failed }) => Effect.all([
 						Effect.annotateCurrentSpan('transfer.inserted', inserted.length),
 						Effect.annotateCurrentSpan('transfer.db_failures', failed.length),
 					], { discard: true })),
 					Effect.mapError((err) => HttpError.Internal.of('Import processing failed', err)),
-				));
+					Telemetry.span('transfer.insert'),
+				);
 		yield* !dryRun && A.isNonEmptyReadonlyArray(assets)
 			? search.refresh(appId).pipe(Effect.tapError((err) => Effect.logWarning('Search refresh failed', { error: String(err) })), Effect.catchAll(() => Effect.void))
 			: Effect.void;
@@ -193,8 +195,8 @@ const TransferLive = HttpApiBuilder.group(ParametricApi, 'transfer', (handlers) 
 	Effect.gen(function* () {
 		const [repos, search, audit, storage] = yield* Effect.all([DatabaseService, SearchRepo, AuditService, StorageService]);
 		return handlers
-			.handleRaw('export', ({ urlParams }) => RateLimit.apply('api', handleExport(repos, audit, storage, urlParams)))
-			.handle('import', ({ urlParams }) => RateLimit.apply('mutation', handleImport(repos, search, audit, storage, urlParams)));
+			.handleRaw('export', ({ urlParams }) => CacheService.rateLimit('api', handleExport(repos, audit, storage, urlParams)))
+			.handle('import', ({ urlParams }) => CacheService.rateLimit('mutation', handleImport(repos, search, audit, storage, urlParams)));
 	}),
 );
 

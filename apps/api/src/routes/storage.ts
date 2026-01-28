@@ -9,7 +9,7 @@ import { Middleware } from '@parametric-portal/server/middleware';
 import { StorageService } from '@parametric-portal/server/domain/storage';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import type { Url } from '@parametric-portal/types/types';
 import { DateTime, Duration, Effect, Match, Option, } from 'effect';
 
@@ -90,10 +90,10 @@ const StorageLive = HttpApiBuilder.group(ParametricApi, 'storage', (handlers) =>
 	Effect.gen(function* () {
 		const [storage, audit] = yield* Effect.all([StorageService, AuditService]);
 		return handlers
-			.handle('sign', ({ payload }) => RateLimit.apply('api', handleSign(storage, audit, payload)))
-			.handle('exists', ({ path }) => RateLimit.apply('api', handleExists(storage, path.key)))
-			.handle('remove', ({ path }) => RateLimit.apply('mutation', handleRemove(storage, audit, path.key)))
-			.handle('upload', ({ payload }) => RateLimit.apply('mutation', handleUpload(storage, audit, payload)));
+			.handle('sign', ({ payload }) => CacheService.rateLimit('api', handleSign(storage, audit, payload)))
+			.handle('exists', ({ path }) => CacheService.rateLimit('api', handleExists(storage, path.key)))
+			.handle('remove', ({ path }) => CacheService.rateLimit('mutation', handleRemove(storage, audit, path.key)))
+			.handle('upload', ({ payload }) => CacheService.rateLimit('mutation', handleUpload(storage, audit, payload)));
 	}),
 );
 

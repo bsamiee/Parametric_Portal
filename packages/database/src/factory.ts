@@ -188,7 +188,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 				.pipe(Effect.map(rows => { const { items, total } = Page.strip(rows as readonly { totalCount: number }[]); return Page.offset(items as unknown as readonly S.Schema.Type<M>[], total, start, limit); }));
 		};
 		// --- Mutation methods ------------------------------------------------
-		const put = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, conflict?: { keys: string[]; only?: string[]; occ?: Date }) =>
+		const put = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, conflict?: { keys: string[]; only?: string[]; occ?: Date }): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[] | undefined, RepoConfigError | RepoOccError | SqlError | ParseError | Cause.NoSuchElementException> =>
 			data == null ? Effect.fail(new RepoConfigError({ message: 'data cannot be null or undefined', operation: 'put', table }))
 			: ((isArr: boolean, items: readonly S.Schema.Type<typeof model.insert>[]) =>
 				items.length === 0 ? Effect.succeed(isArr ? [] as S.Schema.Type<M>[] : undefined)
@@ -229,7 +229,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const drop = _makeSoft(sql`NOW()`, sql`IS NULL`);
 		const lift = _makeSoft(sql`NULL`, sql`IS NOT NULL`);
 		// --- Purge method (fail with tagged error if not configured) ---------
-		const purge = (days = 30) => {
+		const purge = (days = 30): Effect.Effect<number, RepoConfigError | SqlError | ParseError | Cause.NoSuchElementException> => {
 			const purgeFn = config.purge;
 			return purgeFn
 				? SqlSchema.single({ execute: (num) => sql`SELECT ${sql.literal(purgeFn)}(${num}) AS count`, Request: S.Number, Result: _CountSchema })(days).pipe(Effect.map(row => row.count))
@@ -237,7 +237,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		};
 		// --- Upsert method (fail with tagged error if not configured) --------
 		/** Polymorphic upsert: single → T, batch → T[] (mirrors input shape). Fails with RepoOccError if OCC check fails. */
-		const upsert = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, occ?: Date) =>
+		const upsert = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, occ?: Date): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[] | undefined, RepoConfigError | RepoOccError | SqlError | ParseError> =>
 			upsertCfg ? data == null ? Effect.fail(new RepoConfigError({ message: 'data cannot be null or undefined', operation: 'upsert', table }))
 			: ((isArr: boolean, items: readonly S.Schema.Type<typeof model.insert>[]) =>
 				items.length === 0 ? Effect.succeed(isArr ? [] as S.Schema.Type<M>[] : undefined)
@@ -259,7 +259,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const _allColNames = Object.keys(cols);
 		const _insertColNames = _allColNames.filter(c => c !== pkCol);
 		/** MERGE with action tracking: returns row + _action ('insert' | 'update'). Polymorphic single/batch. */
-		const merge = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined) =>
+		const merge = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined): Effect.Effect<MergeResult<S.Schema.Type<M>> | readonly MergeResult<S.Schema.Type<M>>[] | undefined, RepoConfigError | SqlError | ParseError> =>
 			upsertCfg ? data == null ? Effect.fail(new RepoConfigError({ message: 'data cannot be null or undefined', operation: 'merge', table }))
 			: ((isArr: boolean, items: readonly Record<string, unknown>[], keys: string[], updateCols: string[]) =>
 				items.length === 0 ? Effect.succeed(isArr ? [] as MergeResult<S.Schema.Type<M>>[] : undefined)
@@ -287,12 +287,12 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const $fnArgs = (spec: { args: (string | { field: string; cast: string })[] }, params: Record<string, unknown>) =>
 			sql.csv(spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
 		/** Call scalar-returning function (SELECT fn(...) AS count → number) */
-		const fn = (name: string, params: Record<string, unknown>) =>
+		const fn = (name: string, params: Record<string, unknown>): Effect.Effect<number, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> =>
 			config.fn ? config.fn[name] ? ((spec: NonNullable<typeof config.fn>[string]) =>
 				SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${$fnArgs(spec, params)}) AS count`, Request: spec.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count))
 			)(config.fn[name]) : Effect.fail(new RepoUnknownFnError({ fn: name, table })) : Effect.fail(new RepoConfigError({ message: 'no functions configured', operation: 'fn', table }));
 		/** Call SETOF-returning function (SELECT * FROM fn(...) → T[]) */
-		const fnSet = (name: string, params: Record<string, unknown>) =>
+		const fnSet = (name: string, params: Record<string, unknown>): Effect.Effect<readonly S.Schema.Type<M>[], RepoConfigError | RepoUnknownFnError | SqlError | ParseError> =>
 			config.fnSet
 				? config.fnSet[name]
 					? ((spec: NonNullable<typeof config.fnSet>[string]) =>

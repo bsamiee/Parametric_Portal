@@ -33,11 +33,6 @@
       "import": "./src/platform/cache.ts",
       "default": "./src/platform/cache.ts"
     },
-    "./security/rate-limit": {
-      "types": "./src/security/rate-limit.ts",
-      "import": "./src/security/rate-limit.ts",
-      "default": "./src/security/rate-limit.ts"
-    },
     "./observe/telemetry": {
       "types": "./src/observe/telemetry.ts",
       "import": "./src/observe/telemetry.ts",
@@ -113,15 +108,30 @@
       "import": "./src/utils/transfer.ts",
       "default": "./src/utils/transfer.ts"
     },
+    "./utils/resilience": {
+      "types": "./src/utils/resilience.ts",
+      "import": "./src/utils/resilience.ts",
+      "default": "./src/utils/resilience.ts"
+    },
     "./infra/handlers/purge-assets": {
       "types": "./src/infra/handlers/purge-assets.ts",
       "import": "./src/infra/handlers/purge-assets.ts",
       "default": "./src/infra/handlers/purge-assets.ts"
     },
-    "./platform/workers/pool": {
-      "types": "./src/platform/workers/pool.ts",
-      "import": "./src/platform/workers/pool.ts",
-      "default": "./src/platform/workers/pool.ts"
+    "./platform/streaming": {
+      "types": "./src/platform/streaming.ts",
+      "import": "./src/platform/streaming.ts",
+      "default": "./src/platform/streaming.ts"
+    },
+    "./platform/websocket": {
+      "types": "./src/platform/websocket.ts",
+      "import": "./src/platform/websocket.ts",
+      "default": "./src/platform/websocket.ts"
+    },
+    "./infra/webhooks": {
+      "types": "./src/infra/webhooks.ts",
+      "import": "./src/infra/webhooks.ts",
+      "default": "./src/infra/webhooks.ts"
     }
   },
   "scripts": {

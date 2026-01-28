@@ -1,20 +1,24 @@
 /**
  * Session lifecycle: creation, rotation, revocation, MFA-verified state.
  * Delegates TOTP/backup verification to MfaService; owns session.verifiedAt transitions.
- * Includes MFA status cache (5min TTL) to reduce per-request DB lookups.
+ *
+ * CACHING: MFA status cached via Effect.Cache (5min TTL) to reduce per-request DB lookups.
+ * Session lookup requires touch() on each access for activity tracking, so not cached.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { type Hex64, Timestamp } from '@parametric-portal/types/types';
 import { Cache, Duration, Effect, Option } from 'effect';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
+import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
 import { Crypto } from '../security/crypto.ts';
 import { MfaService } from './mfa.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _mfaCacheConfig = { capacity: 5000, ttl: Duration.minutes(5) } as const;
+const _cache = { mfa: { capacity: 5000, ttl: Duration.minutes(5) } } as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -23,17 +27,18 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 		const db = yield* DatabaseService;
 		const mfa = yield* MfaService;
 		const metrics = yield* MetricsService;
+		const audit = yield* AuditService;
 		const mfaEnabledCache = yield* Cache.make({
-			capacity: _mfaCacheConfig.capacity,
-			lookup: (userId: string) => mfa.isEnabled(userId).pipe(Effect.catchAll(() => Effect.succeed(false))),
-			timeToLive: _mfaCacheConfig.ttl,
+			capacity: _cache.mfa.capacity,
+			lookup: (userId: string) => mfa.isEnabled(userId),	// Fail-closed: errors propagate, no false default
+			timeToLive: _cache.mfa.ttl,
 		});
 		const create = (userId: string, mfaPending: boolean) => // Does NOT emit metrics - caller is responsible for login metrics with proper tags.
-			Effect.gen(function* () {
+			Telemetry.span(Effect.gen(function* () {
 				const [ctx, session, refresh] = yield* Effect.all([
 					Context.Request.current,
-					Crypto.token.pair,
-					Crypto.token.pair,
+					Crypto.pair,
+					Crypto.pair,
 				]);
 				const sessionExpiresAt = Timestamp.expiresAtDate(Duration.toMillis(Context.Request.config.durations.session));
 				const verifiedAt = mfaPending ? Option.none<Date>() : Option.some(new Date());
@@ -57,61 +62,70 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 					}),
 				], { discard: true }));
 				return { mfaPending, refreshToken: refresh.token, sessionExpiresAt, sessionToken: session.token };
-			}).pipe(Effect.withSpan('session.create'));
-		const createForLogin = (userId: string, opts?: { isNewUser?: boolean; provider?: string }) =>	// Create session for login flow. Checks MFA internally, emits auth.logins metric with tags.
-			Effect.gen(function* () {
-				const mfaPending = yield* mfa.isEnabled(userId).pipe(Effect.catchAll(() => Effect.succeed(false)));
+			}), 'session.create');
+		const login = (userId: string, opts?: { isNewUser?: boolean; provider?: string }) =>	// Create session for login flow. Checks MFA internally, emits auth.logins metric with tags.
+			Telemetry.span(Effect.gen(function* () {
+				const mfaPending = yield* mfa.isEnabled(userId);	// Fail-closed: MFA status must be known
 				const result = yield* create(userId, mfaPending);
-				yield* Effect.when(					// Only emit login metrics when provider is specified (OAuth/password flows, not token refresh)
-					Effect.suspend(() => MetricsService.inc(metrics.auth.logins, MetricsService.label({
-						isNewUser: String(opts?.isNewUser ?? false),
-						provider: opts?.provider, 	// undefined is filtered by MetricsService.label
-					}), 1)),
-					() => opts?.provider !== undefined,
-				);
+				yield* Effect.all([
+					Effect.when(
+						MetricsService.inc(metrics.auth.logins, MetricsService.label({
+							isNewUser: String(opts?.isNewUser ?? false),
+							provider: opts?.provider,
+						}), 1),
+						() => opts?.provider !== undefined,
+					),
+					audit.log('Session.login', { details: { isNewUser: opts?.isNewUser ?? false, mfaPending, provider: opts?.provider }, subjectId: userId }),
+				], { discard: true });
 				return result;
-			}).pipe(Effect.withSpan('session.createForLogin'));
-		const refresh = (hash: Hex64) =>			// Rotate tokens: validate refresh hash, check current MFA state, create new session, revoke old. Emits auth.refreshes metric.
-			Effect.gen(function* () {
+			}), 'session.login');
+		const refresh = (hash: Hex64) =>			// Rotate tokens: validate refresh hash, check current MFA state, revoke old, create new (atomic). Emits auth.refreshes metric.
+			Telemetry.span(Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
-				const tokenOpt = yield* db.refreshTokens.byHashForUpdate(hash);
-				const token = yield* Option.match(tokenOpt, {
-					onNone: () => Effect.fail(HttpError.Auth.of('Invalid refresh token')),
-					onSome: Effect.succeed,
-				});
-				// Verify user still exists and is not deleted/banned
-				const userOpt = yield* db.users.one([{ field: 'id', value: token.userId }]).pipe(Effect.catchAll(() => Effect.succeed(Option.none())));
-				yield* Option.match(userOpt, {
-					onNone: () => Effect.fail(HttpError.Auth.of('User no longer exists')),
-					onSome: Effect.succeed,
-				});
-				// Check current MFA state - user might have enabled MFA since last login
-				const mfaPending = yield* mfa.isEnabled(token.userId).pipe(Effect.catchAll(() => Effect.succeed(false)));
-				const result = yield* create(token.userId, mfaPending);
-				yield* db.refreshTokens.softDelete(token.id);
-				yield* MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: ctx.tenantId }), 1);
+				const token = yield* db.refreshTokens.byHashForUpdate(hash).pipe(
+					Effect.flatMap(Option.match({
+						onNone: () => Effect.fail(HttpError.Auth.of('Invalid refresh token')),
+						onSome: Effect.succeed,
+					})),
+				);
+				yield* db.users.one([{ field: 'id', value: token.userId }]).pipe(
+					Effect.flatMap(Option.match({
+						onNone: () => Effect.fail(HttpError.Auth.of('User no longer exists')),
+						onSome: () => Effect.void,
+					})),
+				);
+				const mfaPending = yield* mfa.isEnabled(token.userId);	// Fail-closed: MFA status must be known
+				const result = yield* db.withTransaction(Effect.gen(function* () {
+					yield* db.refreshTokens.softDelete(token.id);
+					return yield* create(token.userId, mfaPending);
+				}));
+				yield* Effect.all([
+					MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					audit.log('Session.refresh', { details: { mfaPending }, subjectId: token.userId }),
+				], { discard: true });
 				return { ...result, userId: token.userId };
-			}).pipe(
-				Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Auth.of('Token lookup failed', e)),
-				Effect.withSpan('session.refresh'),
-			);
+			}).pipe(Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Auth.of('Token refresh failed', e))), 'session.refresh');
 		const revoke = (sessionId: string) =>	// Revoke single session. Emits auth.logouts metric.
-			Effect.gen(function* () {
+			Telemetry.span(Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* db.sessions.softDelete(sessionId);
-				yield* MetricsService.inc(metrics.auth.logouts, MetricsService.label({ tenant: ctx.tenantId }), 1);
-			}).pipe(
-				Effect.mapError((e) => HttpError.Internal.of('Session revocation failed', e)),
-				Effect.withSpan('session.revoke'),
-			);
-		const revokeAll = (userId: string) =>	// Revoke all sessions and refresh tokens for user. No metrics (bulk operation).
-			Effect.all([
-				db.sessions.softDeleteByUser(userId),
-				db.refreshTokens.softDeleteByUser(userId),
-			], { discard: true }).pipe(
-				Effect.mapError((e) => HttpError.Internal.of('Bulk session revocation failed', e)),
-				Effect.withSpan('session.revokeAll'),
-			);
+				yield* Effect.all([
+					MetricsService.inc(metrics.auth.logouts, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					audit.log('Session.revoke', { subjectId: sessionId }),
+				], { discard: true });
+			}).pipe(Effect.mapError((e) => HttpError.Internal.of('Session revocation failed', e))), 'session.revoke');
+		const revokeAll = (userId: string) =>	// Revoke all sessions and refresh tokens for user atomically. Emits auth.logouts metric.
+			Telemetry.span(Effect.gen(function* () {
+				const ctx = yield* Context.Request.current;
+				yield* db.withTransaction(Effect.all([
+					db.sessions.softDeleteByUser(userId),
+					db.refreshTokens.softDeleteByUser(userId),
+				], { discard: true }));
+				yield* Effect.all([
+					MetricsService.inc(metrics.auth.logouts, MetricsService.label({ bulk: 'true', tenant: ctx.tenantId }), 1),
+					audit.log('Session.revokeAll', { details: { bulk: true }, subjectId: userId }),
+				], { discard: true });
+			}).pipe(Effect.mapError((e) => HttpError.Internal.of('Bulk session revocation failed', e))), 'session.revokeAll');
 		// Verify TOTP code and mark session as verified. Delegates verification to MfaService (which handles mfa.verifications metric).
 		// Invalidates MFA cache since verify() might enable MFA on first successful verification.
 		const verifyMfa = (sessionId: string, userId: string, code: string) =>
@@ -120,16 +134,18 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				Effect.tap(() => db.sessions.verify(sessionId).pipe(
 					Effect.mapError((e) => HttpError.Internal.of('Session verification update failed', e)),
 				)),
+				Effect.tap(() => audit.log('Session.verifyMfa', { details: { userId }, subjectId: sessionId })),
 				Effect.map(() => ({ success: true as const, verifiedAt: new Date() })),
-				Effect.withSpan('session.verifyMfa'),
+				Telemetry.span('session.verifyMfa'),
 			);
 		const recoverMfa = (sessionId: string, userId: string, code: string) =>	// Use backup code and mark session as verified. Delegates verification to MfaService (which handles mfa.recoveryUsed metric).
 			mfa.useRecoveryCode(userId, code).pipe(
 				Effect.tap(() => db.sessions.verify(sessionId).pipe(
 					Effect.mapError((e) => HttpError.Internal.of('Session verification update failed', e)),
 				)),
+				Effect.tap(() => audit.log('Session.recoverMfa', { details: { userId }, subjectId: sessionId })),
 				Effect.map((result) => ({ ...result, verifiedAt: new Date() })),
-				Effect.withSpan('session.recoverMfa'),
+				Telemetry.span('session.recoverMfa'),
 			);
 		const lookup = (hash: Hex64) =>	// Lookup session by token hash. For middleware authentication. Touches session activity, checks MFA state (cached), fails silently on errors.
 			db.sessions.byHash(hash).pipe(
@@ -144,7 +160,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				Effect.catchAll((e) => Effect.logError('Session lookup failed', { error: String(e) }).pipe(Effect.as(Option.none()))),
 			);
 		const invalidateMfaCache = (userId: string) => mfaEnabledCache.invalidate(userId);	// Invalidate MFA cache when status changes (called from MfaService on enable/disable)
-		return { create, createForLogin, invalidateMfaCache, lookup, recoverMfa, refresh, revoke, revokeAll, verifyMfa };
+		return { create, invalidateMfaCache, login, lookup, recoverMfa, refresh, revoke, revokeAll, verifyMfa };
 	}),
 }) {}
 

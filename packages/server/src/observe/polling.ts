@@ -5,6 +5,7 @@
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Duration, Effect, Match, Metric, MetricPolling, MetricState, Option, type Record, Ref, Schedule } from 'effect';
 import { MetricsService } from './metrics.ts';
+import { Telemetry } from './telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -68,7 +69,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 			});
 			yield* Effect.when(Effect.logWarning('Queue depth critical', { threshold: threshold.critical, value }), () => shouldLog);
 			return value;
-		}).pipe(Effect.orElseSucceed(() => 0));
+		}).pipe(Effect.orElseSucceed(() => 0), Telemetry.span('polling.queueDepth', { metrics: false, 'polling.metric': 'jobs_queue_depth' }));
 		const retrySchedule = Schedule.exponential(_config.retry.base).pipe(Schedule.jittered, Schedule.upTo(_config.retry.cap));
 		const polling = MetricPolling.make(metrics.jobs.queueDepth, pollEffect).pipe(MetricPolling.retry(retrySchedule));
 		const launchSchedule = Schedule.spaced(_config.intervals.queueDepth).pipe(Schedule.jittered);

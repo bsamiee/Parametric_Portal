@@ -4,12 +4,14 @@
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { randomBytes } from 'node:crypto';
-import { Clock, Effect, Encoding, Option, Stream } from 'effect';
+import { Clock, Effect, Encoding, Option } from 'effect';
 import { customAlphabet } from 'nanoid';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
+import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
 import { Crypto } from '../security/crypto.ts';
 import { ReplayGuardService } from '../security/totp-replay.ts';
 
@@ -22,24 +24,24 @@ const _config = {
 	totp: { algorithm: 'sha256' as const, digits: 6 as const, periodSec: 30, window: [1, 1] as [number, number] },
 } as const;
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
-const _dbErr = (msg: string) => <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, HttpError.Internal, R> =>
-	eff.pipe(Effect.mapError((e) => HttpError.Internal.of(msg, e)));
-const _findValidBackupCodeIndex = (codes: readonly string[], code: string) =>
-	Stream.fromIterable(codes).pipe(
-		Stream.zipWithIndex,
-		Stream.mapEffect(([saltedHash, index]) => {
-			const idx = saltedHash.indexOf('$');
-			return idx > 0 && idx < saltedHash.length - 1
-				? Crypto.token.hash(`${saltedHash.slice(0, idx)}${code.toUpperCase()}`).pipe(
-						Effect.flatMap((actualHash) => Crypto.token.compare(actualHash, saltedHash.slice(idx + 1))),
-						Effect.map((valid) => ({ index, valid })),
-					)
-				: Effect.succeed({ index, valid: false });
-		}),
-		Stream.runFold(-1, (found, r) => r.valid && found === -1 ? r.index : found),
-	);
+const _matchBackup = (codes: readonly string[], code: string): Effect.Effect<Option.Option<number>> => {
+	const normalizedCode = code.toUpperCase();
+	return Effect.iterate({ found: Option.none<number>(), index: 0 }, {
+		body: ({ index }) => {
+			const entry = codes[index] ?? '';
+			const sep = entry.indexOf('$');
+			const parsed = Option.liftPredicate({ hash: entry.slice(sep + 1), salt: entry.slice(0, sep) }, () => sep > 0 && sep < entry.length - 1);
+			const { hash: storedHash, salt } = Option.getOrElse(parsed, () => ({ hash: '', salt: '' }));
+			return Crypto.hash(`${salt}${normalizedCode}`).pipe(
+				Effect.flatMap((computed) => Crypto.compare(computed, storedHash)),
+				Effect.map((isMatch) => ({ found: Option.liftPredicate(index, () => isMatch && Option.isSome(parsed)), index: index + 1 })),
+			);
+		},
+		while: ({ found, index }) => Option.isNone(found) && index < codes.length,
+	}).pipe(Effect.map(({ found }) => found));
+};
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -47,95 +49,105 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 	effect: Effect.gen(function* () {
 		const db = yield* DatabaseService;
 		const metrics = yield* MetricsService;
+		const audit = yield* AuditService;
 		const replayGuard = yield* ReplayGuardService;
 		const _getMfaOrFail = (userId: string) =>
-			_dbErr(`MFA lookup failed for user ${userId}`)(db.mfaSecrets.byUser(userId)).pipe(
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.fail(HttpError.Auth.of('MFA not enrolled')),
-					onSome: Effect.succeed,
-				})),
+			db.mfaSecrets.byUser(userId).pipe(
+				Effect.mapError((e) => HttpError.Internal.of(`MFA lookup failed for user ${userId}`, e)),
+				Effect.flatMap((opt) => Option.isSome(opt) ? Effect.succeed(opt.value) : Effect.fail(HttpError.Auth.of('MFA not enrolled'))),
 			);
 		const enroll = (userId: string, email: string) =>
-			Effect.gen(function* () {
+			Telemetry.span(Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
-				const existing = yield* _dbErr('MFA enrollment check failed')(db.mfaSecrets.byUser(userId));
-				yield* Option.match(existing, { onNone: () => Effect.void, onSome: (e) => Option.isNone(e.enabledAt) ? Effect.void : Effect.fail(HttpError.Conflict.of('mfa', 'MFA already enabled')) });
-				const secret = yield* Effect.try({ catch: () => HttpError.Internal.of('TOTP secret generation failed'), try: generateSecret });
+				const existing = yield* db.mfaSecrets.byUser(userId).pipe(Effect.mapError((e) => HttpError.Internal.of('MFA enrollment check failed', e)));
+				yield* Effect.when(Effect.fail(HttpError.Conflict.of('mfa', 'MFA already enabled')), () => Option.isSome(existing) && Option.isSome(existing.value.enabledAt));
+				const secret = yield* Effect.sync(generateSecret);
 				const encrypted = yield* Crypto.encrypt(secret).pipe(
-					Effect.catchTag('CryptoEncryptError', (e) => Effect.fail(HttpError.Internal.of('TOTP secret encryption failed', e))),
+					Effect.catchTag('CryptoError', (e) => Effect.fail(HttpError.Internal.of('TOTP secret encryption failed', e))),
 				);
-				const backupCodes = yield* Effect.try({
-					catch: () => HttpError.Internal.of('Backup code generation failed'),
-					try: () => Array.from({ length: _config.backup.count }, customAlphabet(_config.backup.alphabet, _config.backup.length)),
-				});
-				const saltBytes = yield* Effect.sync(() => randomBytes(_config.salt.length));
-				const salt = Encoding.encodeHex(saltBytes);
-				const hashEffects = backupCodes.map((backupCode) => Crypto.token.hash(`${salt}${backupCode.toUpperCase()}`));
-				const hashes = yield* Effect.all(hashEffects, { concurrency: 'unbounded' });
+				const generateCode = customAlphabet(_config.backup.alphabet, _config.backup.length);
+				const backupCodes = Array.from({ length: _config.backup.count }, generateCode);
+				const salt = Encoding.encodeHex(randomBytes(_config.salt.length));
+				const hashes = yield* Effect.forEach(backupCodes, (code) => Crypto.hash(`${salt}${code.toUpperCase()}`), { concurrency: 'unbounded' });
 				const backupHashes = hashes.map((hash) => `${salt}$${hash}`);
-				yield* _dbErr('MFA upsert failed')(db.mfaSecrets.upsert({ backupHashes: [...backupHashes], deletedAt: Option.none<Date>(), enabledAt: Option.none<Date>(), encrypted: Buffer.from(encrypted), updatedAt: undefined, userId }));
-				yield* MetricsService.inc(metrics.mfa.enrollments, MetricsService.label({ tenant: ctx.tenantId }), 1);
+				yield* Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes, encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('MFA upsert failed', e))));
+				yield* Effect.all([
+					MetricsService.inc(metrics.mfa.enrollments, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					audit.log('MfaSecret.enroll', { details: { backupCodesGenerated: _config.backup.count }, subjectId: userId }),
+				], { discard: true });
 				return { backupCodes, qrDataUrl: generateURI({ algorithm: _config.totp.algorithm, digits: _config.totp.digits, issuer: _config.issuer, label: email, period: _config.totp.periodSec, secret }), secret };
-			}).pipe(Effect.withSpan('mfa.enroll'));
+			}), 'mfa.enroll');
 		const verify = (userId: string, code: string) =>
-			Effect.gen(function* () {
+			Telemetry.span(Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* replayGuard.checkLockout(userId);
 				const mfa = yield* _getMfaOrFail(userId);
 				const now = yield* Clock.currentTimeMillis;
 				const timeStep = Math.floor(now / (_config.totp.periodSec * 1000));
 				const secret = yield* Crypto.decrypt(mfa.encrypted).pipe(
-					Effect.catchTag('CryptoDecryptError', (e) => Effect.fail(HttpError.Internal.of('TOTP secret decryption failed', e))),
+					Effect.catchTag('CryptoError', (e) => Effect.fail(HttpError.Internal.of('TOTP secret decryption failed', e))),
 				);
 				const result = yield* Effect.try({
 					catch: () => HttpError.Auth.of('TOTP verification failed'),
 					try: () => verifySync({ algorithm: _config.totp.algorithm, digits: _config.totp.digits, epochTolerance: _config.totp.window, period: _config.totp.periodSec, secret, token: code }),
 				});
-				const delta = result.valid && 'delta' in result ? result.delta : 0;
-				yield* Effect.all([Effect.annotateCurrentSpan('mfa.success', result.valid), delta === 0 ? Effect.void : Effect.annotateCurrentSpan('mfa.delta', delta), MetricsService.inc(metrics.mfa.verifications, MetricsService.label({ tenant: ctx.tenantId }), 1)], { discard: true });
-				yield* result.valid ? Effect.void : Effect.zipRight(replayGuard.recordFailure(userId), Effect.fail(HttpError.Auth.of('Invalid MFA code')));
+				const delta = result.valid ? (result.delta ?? 0) : 0;
+				yield* Effect.all([
+					Effect.annotateCurrentSpan('mfa.success', result.valid),
+					Effect.when(Effect.annotateCurrentSpan('mfa.delta', delta), () => delta !== 0),
+					MetricsService.inc(metrics.mfa.verifications, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					audit.log('MfaSecret.verify', { details: { success: result.valid }, subjectId: userId }),
+				], { discard: true });
+				yield* Effect.when(replayGuard.recordFailure(userId).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid MFA code')))), () => !result.valid);
 				const { alreadyUsed } = yield* replayGuard.checkAndMark(userId, timeStep + delta, code);
-				yield* alreadyUsed ? Effect.zipRight(replayGuard.recordFailure(userId), Effect.fail(HttpError.Auth.of('TOTP code already used'))) : Effect.void;
+				yield* Effect.when(replayGuard.recordFailure(userId).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('TOTP code already used')))), () => alreadyUsed);
 				yield* replayGuard.recordSuccess(userId);
-				yield* Option.isNone(mfa.enabledAt)
-					? _dbErr('MFA enable failed')(db.mfaSecrets.upsert({ backupHashes: [...mfa.backupHashes], deletedAt: Option.none<Date>(), enabledAt: Option.some(new Date()), encrypted: mfa.encrypted, updatedAt: undefined, userId }))
-					: Effect.void;
+				yield* Effect.when(Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes: mfa.backupHashes, enabledAt: Option.some(new Date()), encrypted: mfa.encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('MFA enable failed', e)))), () => Option.isNone(mfa.enabledAt));
 				return { success: true };
-			}).pipe(Effect.withSpan('mfa.verify'));
+			}), 'mfa.verify');
 		const useRecoveryCode = (userId: string, code: string) =>
-			Effect.gen(function* () {
+			Telemetry.span(Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				yield* replayGuard.checkLockout(userId);
 				const mfa = yield* _getMfaOrFail(userId);
-				yield* Option.isNone(mfa.enabledAt) ? Effect.fail(HttpError.Auth.of('MFA not enabled')) : Effect.void;
-				const codeIndex = yield* _findValidBackupCodeIndex(mfa.backupHashes, code);
-				yield* Effect.all([MetricsService.inc(metrics.mfa.recoveryUsed, MetricsService.label({ tenant: ctx.tenantId }), 1), Effect.annotateCurrentSpan('mfa.recovery.success', codeIndex !== -1)], { discard: true });
-				yield* codeIndex === -1 ? Effect.zipRight(replayGuard.recordFailure(userId), Effect.fail(HttpError.Auth.of('Invalid recovery code'))) : Effect.void;
+				yield* Effect.unless(Effect.fail(HttpError.Auth.of('MFA not enabled')), () => Option.isSome(mfa.enabledAt));
+				const codeIndexOpt = yield* _matchBackup(mfa.backupHashes, code);
+				const isValid = Option.isSome(codeIndexOpt);
+				yield* Effect.all([
+					MetricsService.inc(metrics.mfa.recoveryUsed, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					Effect.annotateCurrentSpan('mfa.recovery.success', isValid),
+					audit.log('MfaSecret.useRecoveryCode', { details: { success: isValid }, subjectId: userId }),
+				], { discard: true });
+				yield* Effect.when(replayGuard.recordFailure(userId).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid recovery code')))), () => !isValid);
 				yield* replayGuard.recordSuccess(userId);
-				const updatedCodes = mfa.backupHashes.filter((_, index) => index !== codeIndex);
-				yield* _dbErr('Recovery code update failed')(db.mfaSecrets.upsert({ backupHashes: updatedCodes, deletedAt: Option.none<Date>(), enabledAt: mfa.enabledAt, encrypted: mfa.encrypted, updatedAt: undefined, userId }));
+				const updatedCodes = Option.match(codeIndexOpt, { onNone: () => mfa.backupHashes, onSome: (i) => mfa.backupHashes.filter((_, idx) => idx !== i) }); // NOSONAR S3358
+				yield* Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes: updatedCodes, enabledAt: mfa.enabledAt, encrypted: mfa.encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('Recovery code update failed', e))));
 				return { remainingCodes: updatedCodes.length, success: true };
-			}).pipe(Effect.withSpan('mfa.useRecoveryCode'));
+			}), 'mfa.useRecoveryCode');
 		const disable = (userId: string) =>
-			Effect.gen(function* () {
+			Telemetry.span(Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
-				const opt = yield* _dbErr('MFA status check failed')(db.mfaSecrets.byUser(userId));
-				yield* Option.isSome(opt) ? Effect.void : Effect.fail(HttpError.NotFound.of('mfa'));
-				yield* _dbErr('MFA soft delete failed')(db.mfaSecrets.softDelete(userId));
-				yield* MetricsService.inc(metrics.mfa.disabled, MetricsService.label({ tenant: ctx.tenantId }), 1);
+				const opt = yield* db.mfaSecrets.byUser(userId).pipe(Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)));
+				yield* Effect.when(Effect.fail(HttpError.NotFound.of('mfa')), () => Option.isNone(opt));
+				yield* db.mfaSecrets.softDelete(userId).pipe(Effect.mapError((e) => HttpError.Internal.of('MFA soft delete failed', e)));
+				yield* Effect.all([
+					MetricsService.inc(metrics.mfa.disabled, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					audit.log('MfaSecret.disable', { subjectId: userId }),
+				], { discard: true });
 				return { success: true };
-			}).pipe(Effect.withSpan('mfa.disable'));
+			}), 'mfa.disable');
 		const isEnabled = (userId: string) =>
 			db.mfaSecrets.byUser(userId).pipe(
 				Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)),
-				Effect.map((opt) => Option.isSome(opt) ? Option.isSome(opt.value.enabledAt) : false),
+				Effect.map((opt) => opt.pipe(Option.flatMap((v) => v.enabledAt), Option.isSome)),
 			);
 		const getStatus = (userId: string) =>
 			db.mfaSecrets.byUser(userId).pipe(
 				Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)),
-				Effect.map((opt) => Option.isSome(opt)
-					? ({ enabled: Option.isSome(opt.value.enabledAt), enrolled: true, remainingBackupCodes: opt.value.backupHashes.length } as const)
-					: ({ enabled: false, enrolled: false } as const)),
+				Effect.map(Option.match({
+					onNone: () => ({ enabled: false, enrolled: false }) as const,
+					onSome: (v) => ({ enabled: Option.isSome(v.enabledAt), enrolled: true, remainingBackupCodes: v.backupHashes.length }) as const,
+				})),
 			);
 		return { disable, enroll, getStatus, isEnabled, useRecoveryCode, verify };
 	}),

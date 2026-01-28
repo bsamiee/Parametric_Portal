@@ -3,10 +3,10 @@
  * Wraps raw StorageAdapter with automatic audit logging for mutating operations.
  * Polymorphic API mirrors StorageAdapter: single/batch determined by input shape.
  */
-import { Array as A, Effect, Option, pipe, type Stream } from 'effect';
-import { Context } from '../context.ts';
+import { Effect, Match, pipe, type Stream } from 'effect';
 import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
 import { StorageAdapter } from '../infra/storage.ts';
 
 // --- [SERVICES] --------------------------------------------------------------
@@ -16,108 +16,81 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 		const storage = yield* StorageAdapter;
 		const audit = yield* AuditService;
 		const metrics = yield* MetricsService;
-		const userIdFromContext = (ctx: Context.Request.Data) => Option.match(ctx.session, { onNone: () => undefined, onSome: (s) => s.userId });
-		const _putSingle = (input: StorageAdapter.PutInput) =>
-			Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				const result = yield* storage.put(input);
-				yield* audit.log('Storage.upload', { details: { contentType: input.contentType, key: input.key, size: result.size, userId: userIdFromContext(ctx) }, subjectId: input.key });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-put' }), 1);
-				return result;
-			}).pipe(Effect.withSpan('storageDomain.put'));
-		// Put object(s) with audit logging. Single input → single result; array input → array results.
+		const _traced = <O>(name: string, op: Effect.Effect<O, unknown>, event: string, details: Record<string, unknown>, subjectId: string, count = 1) =>
+			pipe(
+				op,
+				Effect.tap((result) => Effect.all([
+					audit.log(event, { details: { ...details, ...(typeof result === 'object' && result !== null && 'size' in result ? { size: result.size } : {}) }, subjectId }),
+					MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: name }), count),
+				], { discard: true })),
+				Telemetry.span(`storageDomain.${name}`),
+			);
+		const _tracedVoid = (name: string, op: Effect.Effect<void, unknown>, event: string, details: Record<string, unknown>, subjectId: string, count = 1) =>
+			pipe(
+				op,
+				Effect.tap(() => Effect.all([
+					audit.log(event, { details, subjectId }),
+					MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: name }), count),
+				], { discard: true })),
+				Telemetry.span(`storageDomain.${name}`),
+			);
 		function put(input: StorageAdapter.PutInput): Effect.Effect<StorageAdapter.PutResult, unknown>;
 		function put(input: readonly StorageAdapter.PutInput[]): Effect.Effect<readonly StorageAdapter.PutResult[], unknown>;
-		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
-		function put(input: any): any {
-			return Array.isArray(input) ? Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				const results = yield* storage.put(input);
-				yield* audit.log('Storage.upload', { details: { count: input.length, keys: pipe(input as readonly StorageAdapter.PutInput[], A.map((i) => i.key)), totalSize: A.reduce(results, 0, (acc, r) => acc + r.size), userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-put' }), input.length);
-				return results;
-			}).pipe(Effect.withSpan('storageDomain.put.batch')) : _putSingle(input);
+		function put(input: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): Effect.Effect<StorageAdapter.PutResult | readonly StorageAdapter.PutResult[], unknown> {
+			return Match.value(input).pipe(
+				Match.when((v: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): v is readonly StorageAdapter.PutInput[] => Array.isArray(v), (items) => pipe(
+					storage.put(items),
+					Effect.tap((results) => Effect.all([
+						audit.log('Storage.upload', { details: { count: items.length, keys: items.map((i) => i.key), totalSize: results.reduce((acc, r) => acc + r.size, 0) }, subjectId: items[0]?.key ?? '' }),
+						MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'put.batch' }), items.length),
+					], { discard: true })),
+					Telemetry.span('storageDomain.put.batch'),
+				)),
+				Match.orElse((item) => _traced('put', storage.put(item), 'Storage.upload', { contentType: item.contentType, key: item.key }, item.key)),
+			);
 		}
-		const _removeSingle = (key: string) =>
-			Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				yield* storage.remove(key);
-				yield* audit.log('Storage.delete', { details: { deleted: true, key, userId: userIdFromContext(ctx) }, subjectId: key });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-delete' }), 1);
-			}).pipe(Effect.withSpan('storageDomain.remove'));
-		// Remove object(s) with audit logging.
 		function remove(key: string): Effect.Effect<void, unknown>;
 		function remove(keys: readonly string[]): Effect.Effect<void, unknown>;
-		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
-		function remove(keys: any): any {
-			return Array.isArray(keys) ? Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				yield* storage.remove(keys);
-				yield* audit.log('Storage.delete', { details: { count: keys.length, deleted: true, keys, userId: userIdFromContext(ctx) }, subjectId: `batch:${keys.length}` });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-delete' }), keys.length);
-			}).pipe(Effect.withSpan('storageDomain.remove.batch')) : _removeSingle(keys);
+		function remove(keys: string | readonly string[]) {
+			return Match.value(keys).pipe(
+				Match.when((v: string | readonly string[]): v is readonly string[] => Array.isArray(v), (items) => _tracedVoid('remove.batch', storage.remove(items), 'Storage.delete', { count: items.length, keys: items }, items[0] ?? '', items.length)),
+				Match.orElse((item) => _tracedVoid('remove', storage.remove(item), 'Storage.delete', { key: item }, item)),
+			);
 		}
-		const _copySingle = (input: StorageAdapter.CopyInput) =>
-			Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				const result = yield* storage.copy(input);
-				yield* audit.log('Storage.copy', { details: { destKey: input.destKey, sourceKey: input.sourceKey, userId: userIdFromContext(ctx) }, subjectId: input.destKey });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-copy' }), 1);
-				return result;
-			}).pipe(Effect.withSpan('storageDomain.copy'));
-		// Copy object(s) with audit logging. Single input → single result; array input → array results.
 		function copy(input: StorageAdapter.CopyInput): Effect.Effect<StorageAdapter.CopyResult, unknown>;
 		function copy(input: readonly StorageAdapter.CopyInput[]): Effect.Effect<readonly StorageAdapter.CopyResult[], unknown>;
-		// biome-ignore lint/suspicious/noExplicitAny: overload implementation requires any
-		function copy(input: any): any {
-			return Array.isArray(input) ? Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				const results = yield* storage.copy(input);
-				yield* audit.log('Storage.copy', { details: { copies: pipe(input as readonly StorageAdapter.CopyInput[], A.map((i) => ({ dest: i.destKey, source: i.sourceKey }))), count: input.length, userId: userIdFromContext(ctx) }, subjectId: `batch:${input.length}` });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-copy' }), input.length);
-				return results;
-			}).pipe(Effect.withSpan('storageDomain.copy.batch')) : _copySingle(input);
+		function copy(input: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): Effect.Effect<StorageAdapter.CopyResult | readonly StorageAdapter.CopyResult[], unknown> {
+			return Match.value(input).pipe(
+				Match.when((v: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): v is readonly StorageAdapter.CopyInput[] => Array.isArray(v), (items) => pipe(
+					storage.copy(items),
+					Effect.tap(() => Effect.all([
+						audit.log('Storage.copy', { details: { copies: items.map((i) => ({ dest: i.destKey, source: i.sourceKey })), count: items.length }, subjectId: items[0]?.destKey ?? '' }),
+						MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'copy.batch' }), items.length),
+					], { discard: true })),
+					Telemetry.span('storageDomain.copy.batch'),
+				)),
+				Match.orElse((item) => _traced('copy', storage.copy(item), 'Storage.copy', { destKey: item.destKey, sourceKey: item.sourceKey }, item.destKey)),
+			);
 		}
 		const putStream = (input: { key: string; stream: Stream.Stream<Uint8Array, unknown>; contentType?: string; metadata?: Record<string, string>; partSizeBytes?: number }) =>
-			Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				const result = yield* storage.putStream(input);
-				yield* audit.log('Storage.stream_upload', { details: { contentType: input.contentType, key: input.key, size: result.totalSize, userId: userIdFromContext(ctx) }, subjectId: input.key });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-stream-put' }), 1);
-				return result;
-			}).pipe(Effect.withSpan('storageDomain.putStream'));
+			pipe(
+				storage.putStream(input),
+				Effect.tap((result) => Effect.all([
+					audit.log('Storage.stream_upload', { details: { contentType: input.contentType, key: input.key, size: result.totalSize }, subjectId: input.key }),
+					MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'stream-put' })),
+				], { discard: true })),
+				Telemetry.span('storageDomain.putStream'),
+			);
 		const abortUpload = (key: string, uploadId: string) =>
-			Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
-				yield* storage.abortUpload(key, uploadId);
-				yield* audit.log('Storage.abort_multipart', { details: { key, uploadId, userId: userIdFromContext(ctx) }, subjectId: key });
-				yield* MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'domain-abort-multipart' }), 1);
-			}).pipe(Effect.withSpan('storageDomain.abortUpload'));
-		// Pass-through read operations (no audit needed).
-		const get = storage.get;
-		const getStream = storage.getStream;
-		const list = storage.list;
-		const listStream = storage.listStream;
-		const listUploads = storage.listUploads;
-		const exists = storage.exists;
-		const sign = storage.sign;
-		return { abortUpload, copy, exists, get, getStream, list, listStream, listUploads, put, putStream, remove, sign };
+			_tracedVoid('abort-multipart', storage.abortUpload(key, uploadId), 'Storage.abort_multipart', { key, uploadId }, key);
+		return { abortUpload, copy, exists: storage.exists, get: storage.get, getStream: storage.getStream, list: storage.list, listStream: storage.listStream, listUploads: storage.listUploads, put, putStream, remove, sign: storage.sign };
 	}),
 }) {}
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace StorageService {
-	export type CopyInput = StorageAdapter.CopyInput;
-	export type CopyResult = StorageAdapter.CopyResult;
-	export type GetResult = StorageAdapter.GetResult;
-	export type GetStreamResult = StorageAdapter.GetStreamResult;
-	export type ListItem = StorageAdapter.ListItem;
-	export type PutInput = StorageAdapter.PutInput;
-	export type PutResult = StorageAdapter.PutResult;
 	export type Service = typeof StorageService.Service;
-	export type SignInput = StorageAdapter.SignInput;
-	export type SignInputCopy = StorageAdapter.SignInputCopy;
 	export type SignInputGetPut = StorageAdapter.SignInputGetPut;
 }
 

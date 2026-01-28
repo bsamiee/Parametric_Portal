@@ -11,7 +11,7 @@ import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Cookie, CookiesError } from '@effect/platform/Cookies';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
-import { Effect, FiberRef, type Duration, Layer, Option, Schedule, Schema as S } from 'effect';
+import { Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, Record, Schedule, Schema as S } from 'effect';
 import * as D from 'effect/Duration';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -36,13 +36,34 @@ const _cookie = {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-type _UserRoleValue = 'guest' | 'viewer' | 'member' | 'admin' | 'owner';
-const _roleOrder: Record<_UserRoleValue, number> = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 };
+const _UserRoleSchema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
+type _UserRoleValue = S.Schema.Type<typeof _UserRoleSchema>;
+const _roleRank: Record<_UserRoleValue, number> = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 };
+const _RoleOrder = Order.mapInput(Order.number, (role: _UserRoleValue) => _roleRank[role]);
 const UserRole = {
-	hasAtLeast: (role: string, min: _UserRoleValue): boolean => role in _roleOrder && _roleOrder[role as _UserRoleValue] >= _roleOrder[min],
-	Order: _roleOrder,
-	schema: S.Literal('guest', 'viewer', 'member', 'admin', 'owner'),
+	hasAtLeast: (role: string, min: _UserRoleValue): boolean => role in _roleRank && Order.greaterThanOrEqualTo(_RoleOrder)(role as _UserRoleValue, min),
+	Order: _RoleOrder,
+	schema: _UserRoleSchema,
 } as const;
+
+// --- [SERIALIZABLE] ----------------------------------------------------------
+
+/** Schema-backed serializable context for distributed tracing propagation. */
+class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
+	ipAddress: S.optional(S.String),
+	requestId: S.String,
+	sessionId: S.optional(S.String),
+	tenantId: S.String,
+	userId: S.optional(S.String),
+}) {
+	static readonly fromData = (ctx: Context.Request.Data): Serializable =>
+		new Serializable({
+			ipAddress: Option.getOrUndefined(ctx.ipAddress),
+			requestId: ctx.requestId,
+			tenantId: ctx.tenantId,
+			...Option.match(ctx.session, { onNone: () => ({}), onSome: (s) => ({ sessionId: s.id, userId: s.userId }) }),
+		});
+}
 
 // --- [REQUEST] ---------------------------------------------------------------
 
@@ -52,16 +73,12 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 	static override readonly tenantId = FiberRef.get(_ref).pipe(Effect.map((ctx) => ctx.tenantId));
 	static override readonly session = FiberRef.get(_ref).pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.die('No session - route must be protected by SessionAuth middleware'), onSome: Effect.succeed })));
 	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(_ref, (ctx) => ({ ...ctx, ...partial }));
-	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-		Effect.locallyWith(effect, _ref, (ctx) => ({ ...ctx, ...partial }));
-	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> =>
-		Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId: tenantId === _Id.system ? _Id.system : tenantId }));
+	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (ctx) => ({ ...ctx, ...partial }));
+	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId }));
 	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>
-		Effect.gen(function* () {
-			const id = tenantId === _Id.system ? _Id.system : tenantId;
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${id}, true)`.pipe(Effect.andThen(Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId: id })))));
-		});
+		SqlClient.SqlClient.pipe(
+			Effect.flatMap((sql) => sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(Effect.andThen(Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId })))))),
+		);
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({
 		circuit: Option.none(),
 		ipAddress: Option.none(),
@@ -78,6 +95,23 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		read: <A, I extends Readonly<Record<string, string | undefined>>, R>(schema: S.Schema<A, I, R>) => HttpServerRequest.schemaCookies(schema),
 		set: (key: keyof typeof _cookie, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, _cookie[key].name, value, _cookie[key].options),
 	} as const;
+	static readonly toSerializable = FiberRef.get(_ref).pipe(Effect.map(Serializable.fromData));
+	/** Observability attributes for tracing spans. Includes all context fields formatted for OTEL. */
+	static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
+		Record.getSomes({
+			'circuit.name': Option.map(ctx.circuit, (c) => c.name),
+			'circuit.state': Option.map(ctx.circuit, (c) => c.state),
+			'client.ip': ctx.ipAddress,
+			'client.ua': Option.map(ctx.userAgent, (ua) => (ua.length > 120 ? `${ua.slice(0, 117)}...` : ua)),
+			'fiber.id': Option.some(FiberId.threadName(fiberId)),
+			'ratelimit.limit': Option.map(ctx.rateLimit, (rl) => String(rl.limit)),
+			'ratelimit.remaining': Option.map(ctx.rateLimit, (rl) => String(rl.remaining)),
+			'request.id': Option.some(ctx.requestId),
+			'session.id': Option.map(ctx.session, (s) => s.id),
+			'session.mfa': Option.map(ctx.session, (s) => String(s.mfaEnabled)),
+			'tenant.id': Option.some(ctx.tenantId),
+			'user.id': Option.map(ctx.session, (s) => s.userId),
+		});
 	static readonly config = {
 		csrf: { expectedValue: 'XMLHttpRequest', header: 'x-requested-with' },
 		durations: { pkce: D.minutes(10), refresh: D.days(30), session: D.days(7) },
@@ -99,7 +133,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Context = { OAuthProvider, Request, UserRole } as const;
+const Context = { OAuthProvider, Request, Serializable, UserRole } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
@@ -107,6 +141,7 @@ namespace Context {
 	export type OAuthProvider = S.Schema.Type<typeof OAuthProvider>;
 	export type UserRole = S.Schema.Type<typeof UserRole.schema>;
 	export type CookieKey = keyof typeof _cookie;
+	export type Serializable = InstanceType<typeof Serializable>;
 	export namespace Request {
 		export type Id = (typeof Request.Id)[keyof typeof Request.Id];
 		export interface Session {

@@ -6,7 +6,7 @@ import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { SearchService } from '@parametric-portal/server/domain/search';
 import { HttpError } from '@parametric-portal/server/errors';
-import { RateLimit } from '@parametric-portal/server/security/rate-limit';
+import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Effect, Option } from 'effect';
 
@@ -19,7 +19,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 		const requireRole = Middleware.makeRequireRole((id) => repos.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((u) => ({ role: u.role })))));
 		return handlers
 			.handle('search', ({ urlParams }) =>
-				RateLimit.apply('api',
+				CacheService.rateLimit('api',
 					search.query(
 						{
 							entityTypes: urlParams.entityTypes,
@@ -36,7 +36,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 				),
 			)
 			.handle('suggest', ({ urlParams }) =>
-				RateLimit.apply('api',
+				CacheService.rateLimit('api',
 					search.suggest({
 						includeGlobal: urlParams.includeGlobal,
 						limit: urlParams.limit,
@@ -48,7 +48,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 				),
 			)
 			.handle('refresh', ({ payload }) =>
-				RateLimit.apply('api',
+				CacheService.rateLimit('api',
 					requireRole('admin').pipe(
 						Effect.andThen(search.refresh(payload.includeGlobal)),
 						Effect.as({ status: 'ok' as const }),

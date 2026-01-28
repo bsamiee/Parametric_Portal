@@ -241,9 +241,9 @@ const _HealthGroup = HttpApiGroup.make('health')
 		HttpApiEndpoint.get('readiness', '/readiness')
 			.addSuccess(S.Struct({
 				checks: S.Struct({
-					audit: S.optional(S.Literal('healthy', 'degraded', 'alerted')),
-					database: S.Boolean,
-					workers: S.optional(S.Struct({ available: S.Boolean, poolSize: S.Int })),
+					cache: S.Struct({ connected: S.Boolean, latencyMs: S.Number }),
+					database: S.Struct({ healthy: S.Boolean, latencyMs: S.Number }),
+					metrics: S.Literal('healthy', 'degraded', 'alerted'),
 				}),
 				status: S.Literal('ok'),
 			}))

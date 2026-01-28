@@ -1,24 +1,19 @@
 /**
  * Background job processing with database-backed queue.
  * SELECT FOR UPDATE SKIP LOCKED for atomic claim; Circuit breaker resilience; graceful shutdown.
- * Effect APIs: Semaphore (concurrency), Schedule.exponential+jittered (backoff), Schedule.spaced (polling).
+ * Effect APIs: Semaphore (concurrency), Match.value (transitions), Schedule.spaced (polling).
  * [ARCHITECTURE] Hybrid Service Design:
- * JobService intentionally combines job orchestration (enqueue, process, retry) with real-time event
- * streaming (onStatusChange via pg.listen). This differs from SearchRepo/SearchService pattern
- * where pg.listen lives in database layer and domain layer filters the interface.
- * Rationale:
- * - JobService is a complete orchestration system, not just a repository wrapper
- * - Job status events are tightly coupled to processing lifecycle (same service owns both)
- * - No domain wrapper needed - JobService IS the domain logic for background jobs
- * - PgClient access justified: events are internal to job processing, not external data
+ * JobService combines job orchestration (enqueue, process, retry) with real-time event streaming
+ * (onStatusChange via pg.listen). PgClient access justified: events are internal to job processing.
  * Consumers: routes/jobs.ts exposes onStatusChange() via SSE for real-time job dashboards.
  */
 import { PgClient } from '@effect/sql-pg';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Duration, Effect, HashMap, Metric, Option, pipe, Random, Ref, Schedule, Schema as S, Stream } from 'effect';
+import { Duration, Effect, HashMap, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, Stream } from 'effect';
 import { AuditService } from '../observe/audit.ts';
-import { Circuit } from '../utils/circuit.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
+import { Circuit } from '../utils/circuit.ts';
 import { Context } from '../context.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -38,108 +33,115 @@ const B = {
 	batch: { concurrency: 5, size: 10 },
 	breaker: { halfOpen: Duration.seconds(30), threshold: 5 },
 	lock: { minutes: 5 },
-	poll: { busy: Duration.seconds(1), idle: Duration.seconds(10) }, // Adaptive: fast when busy, slow when idle
+	poll: { busy: Duration.seconds(1), idle: Duration.seconds(10) },
 	retry: { base: Duration.seconds(1), cap: Duration.minutes(10), factor: 2 },
 	shutdown: { interval: Duration.millis(100), maxWait: 50 },
 	timeout: Duration.minutes(5),
 } as const;
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _delay = (attempt: number) => pipe(
+	Duration.times(B.retry.base, B.retry.factor ** attempt),
+	Duration.min(B.retry.cap),
+	Duration.toMillis,
+	(ms) => Math.round(ms * (0.8 + Math.random() * 0.4)),
+);
+
 // --- [SERVICE] ---------------------------------------------------------------
 
 class JobService extends Effect.Service<JobService>()('server/Jobs', {
 	scoped: Effect.gen(function* () {
-		const db = yield* DatabaseService;
-		const pg = yield* PgClient.PgClient;
-		const metrics = yield* MetricsService;
-		const audit = yield* AuditService;
+		const [db, pg, metrics, audit] = yield* Effect.all([DatabaseService, PgClient.PgClient, MetricsService, AuditService]);
 		const workerId = crypto.randomUUID();
+		yield* Effect.annotateLogsScoped({ 'service.name': 'jobs', 'worker.id': workerId });
 		type DbJob = Effect.Effect.Success<ReturnType<typeof db.jobs.claimBatch>>[number];
+		type _Result = 'complete' | { readonly retry: { attempt: number; delayMs: number; error: unknown } } | { readonly dead: string };
 		const handlers = yield* Ref.make(HashMap.empty<string, (payload: unknown) => Effect.Effect<void, unknown, never>>());
 		const semaphore = yield* Effect.makeSemaphore(B.batch.concurrency);
 		const inFlight = yield* Ref.make(0);
-		const circuit = Circuit.make('jobs-db', {
-			breaker: { _tag: 'consecutive', threshold: B.breaker.threshold },
-			halfOpenAfter: B.breaker.halfOpen,
-		});
-		const run = <A>(eff: Effect.Effect<A, unknown>) => circuit.execute(eff);
-		const complete = (job: DbJob) =>
-			run(db.jobs.complete(job.id)).pipe(
-				Effect.tap(() => Effect.all([
-					MetricsService.inc(metrics.jobs.completions, MetricsService.label({ type: job.type }), 1),
-					audit.log('Job.complete', { details: { type: job.type }, subjectId: job.id }),
-				], { discard: true })),
-				Effect.withSpan('jobs.complete', { attributes: { 'job.appId': job.appId, 'job.attempts': job.attempts, 'job.id': job.id, 'job.type': job.type } }),
+		const circuit = Circuit.make('jobs-db', { breaker: { _tag: 'consecutive', threshold: B.breaker.threshold }, halfOpenAfter: B.breaker.halfOpen });
+		const run = <A, E>(eff: Effect.Effect<A, E>) => circuit.execute(eff);
+		const _transition = (job: DbJob, result: _Result) =>
+			Match.value(result).pipe(
+				Match.when('complete', () => run(db.jobs.complete(job.id)).pipe(
+					Effect.tap(() => Effect.all([
+						MetricsService.inc(metrics.jobs.completions, MetricsService.label({ type: job.type }), 1),
+						audit.log('Job.complete', { details: { type: job.type }, subjectId: job.id }),
+					], { discard: true })),
+					Telemetry.span('jobs.complete', { 'job.id': job.id, 'job.type': job.type }),
+				)),
+				Match.when({ retry: Match.any }, ({ retry }) => run(db.jobs.retry(job.id, {
+					attempts: retry.attempt, lastError: String(retry.error), scheduledAt: new Date(Date.now() + retry.delayMs),
+				})).pipe(
+					Effect.tap(() => Effect.all([
+						MetricsService.inc(metrics.jobs.failures, MetricsService.label({ type: job.type }), 1),
+						MetricsService.inc(metrics.jobs.retries, MetricsService.label({ type: job.type }), 1),
+						audit.log('Job.retry', { details: { attempt: retry.attempt, delayMs: retry.delayMs, type: job.type }, subjectId: job.id }),
+					], { discard: true })),
+					Telemetry.span('jobs.retry', { 'job.attempts': job.attempts, 'job.id': job.id, 'job.type': job.type }),
+				)),
+				Match.when({ dead: Match.string }, ({ dead }) => run(db.jobs.deadLetter(job.id, dead)).pipe(
+					Effect.tap(() => Effect.all([
+						MetricsService.inc(metrics.jobs.deadLettered, MetricsService.label({ type: job.type }), 1),
+						Effect.logError('Dead letter', { attempts: job.attempts, error: dead, jobId: job.id, type: job.type }),
+						audit.log('Job.dead_letter', { details: { attempts: job.attempts, error: dead, type: job.type }, subjectId: job.id }),
+					], { discard: true })),
+					Telemetry.span('jobs.deadLetter', { 'job.attempts': job.attempts, 'job.id': job.id, 'job.type': job.type }),
+				)),
+				Match.exhaustive,
 			);
-		const deadLetter = (job: DbJob, error: string) =>
-			run(db.jobs.deadLetter(job.id, error)).pipe(
-				Effect.tap(() => Effect.all([
-					MetricsService.inc(metrics.jobs.deadLettered, MetricsService.label({ type: job.type }), 1),
-					Effect.logError('Dead letter', { attempts: job.attempts, error, jobId: job.id, type: job.type }),
-					audit.log('Job.dead_letter', { details: { attempts: job.attempts, error, type: job.type }, subjectId: job.id }),
-				], { discard: true })),
-				Effect.withSpan('jobs.deadLetter', { attributes: { 'job.attempts': job.attempts, 'job.id': job.id, 'job.type': job.type } }),
-			);
-		const retry = (job: DbJob, error: unknown) =>
-			Effect.gen(function* () {
-				const attempt = job.attempts + 1;
-				const exponential = Duration.times(B.retry.base, B.retry.factor ** attempt);
-				const capped = Duration.min(exponential, B.retry.cap);
-				const jitterFactor = yield* Random.nextRange(0.8, 1.2); // Matches Schedule.jittered defaults
-				const delayMs = Math.round(Duration.toMillis(capped) * jitterFactor);
-				yield* run(db.jobs.retry(job.id, { attempts: attempt, lastError: String(error), scheduledAt: new Date(Date.now() + delayMs) }));
-				yield* Effect.all([
-					MetricsService.inc(metrics.jobs.failures, MetricsService.label({ type: job.type }), 1),
-					MetricsService.inc(metrics.jobs.retries, MetricsService.label({ type: job.type }), 1),
-					audit.log('Job.retry', { details: { attempt, delayMs, error: String(error), type: job.type }, subjectId: job.id }),
-				], { discard: true });
-			}).pipe(Effect.withSpan('jobs.retry', { attributes: { 'job.attempts': job.attempts, 'job.id': job.id, 'job.maxAttempts': job.maxAttempts, 'job.type': job.type } }));
-		const outcome = (job: DbJob, error: unknown) => job.attempts + 1 >= job.maxAttempts ? deadLetter(job, String(error)) : retry(job, error);
-		const process = (job: DbJob) =>
-			Effect.gen(function* () {
-				yield* Ref.update(inFlight, (n) => n + 1);
-				const map = yield* Ref.get(handlers);
-				const handler = HashMap.get(map, job.type);
-				const requestId = Option.getOrElse(job.requestId as Option.Option<string>, () => crypto.randomUUID());
-				const sessionFromJob = (job.userId as Option.Option<string>).pipe(Option.map((userId) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId, verifiedAt: Option.none<Date>() })));
-				const ctx: Partial<Context.Request.Data> = { ipAddress: Option.none(), requestId, session: sessionFromJob, userAgent: Option.none() };
-				yield* Context.Request.withinSync(job.appId, Effect.gen(function* () {
-					const labels = MetricsService.label({ tenant: job.appId, type: job.type });
-					yield* Option.match(job.waitMs as Option.Option<number>, {
-						onNone: () => Effect.void,
-						onSome: (ms) => Metric.update(Metric.taggedWithLabels(metrics.jobs.waitDuration, labels), Duration.millis(ms)),
-					});
-					return yield* Option.match(handler, {
-						onNone: () => Effect.logWarning('No handler', { jobId: job.id, type: job.type }).pipe(Effect.andThen(deadLetter(job, 'No handler'))),
-						onSome: (fn) => fn(job.payload).pipe(
-							Effect.timeoutFail({ duration: B.timeout, onTimeout: () => `Timeout ${Duration.toMillis(B.timeout)}ms` }),
-							Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.duration, labels)),
-							Effect.matchEffect({ onFailure: (e) => outcome(job, e), onSuccess: () => complete(job) }),
+		const process = (job: DbJob) => {
+			const map$ = Ref.get(handlers);
+			const requestId = Option.getOrElse(job.requestId as Option.Option<string>, () => crypto.randomUUID());
+			const userId = Option.getOrUndefined(job.userId as Option.Option<string>);
+			const sessionFromJob = (job.userId as Option.Option<string>).pipe(Option.map((uid) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId: uid, verifiedAt: Option.none<Date>() })));
+			const ctx: Partial<Context.Request.Data> = { ipAddress: Option.none(), requestId, session: sessionFromJob, userAgent: Option.none() };
+			const serializable = new Context.Serializable({ requestId, sessionId: Context.Request.Id.job, tenantId: job.appId, userId });
+			const labels = MetricsService.label({ tenant: job.appId, type: job.type });
+			const trackWait = Option.match(job.waitMs as Option.Option<number>, {
+				onNone: () => Effect.void,
+				onSome: (ms) => Metric.update(Metric.taggedWithLabels(metrics.jobs.waitDuration, labels), Duration.millis(ms)),
+			});
+			const noHandler = Effect.logWarning('No handler', { jobId: job.id, type: job.type }).pipe(Effect.andThen(_transition(job, { dead: 'No handler' })));
+			const runHandler = (fn: (payload: unknown) => Effect.Effect<void, unknown, never>) =>
+				fn(job.payload).pipe(
+					Effect.timeoutFail({ duration: B.timeout, onTimeout: () => `Timeout ${Duration.toMillis(B.timeout)}ms` }),
+					Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.duration, labels)),
+					Effect.matchEffect({
+						onFailure: (e) => _transition(job,
+							job.attempts + 1 >= job.maxAttempts
+								? { dead: String(e) }
+								: { retry: { attempt: job.attempts + 1, delayMs: _delay(job.attempts + 1), error: e } },
 						),
-					});
-				}), ctx);
-			}).pipe(
+						onSuccess: () => _transition(job, 'complete'),
+					}),
+				);
+			return Ref.update(inFlight, (n) => n + 1).pipe(
+				Effect.andThen(map$),
+				Effect.map((map) => HashMap.get(map, job.type)),
+				Effect.andThen((handler) => Context.Request.withinSync(job.appId, trackWait.pipe(Effect.andThen(Option.match(handler, { onNone: () => noHandler, onSome: runHandler }))), ctx)),
 				Effect.ensuring(Ref.update(inFlight, (n) => n - 1)),
 				Effect.catchAll((e) => {
-					const errorTag = typeof e === 'object' && e !== null && '_tag' in e ? String(e._tag) : 'UnknownError';
-					return Effect.logError('Process failed', { error: String(e), errorTag, jobId: job.id, type: job.type }).pipe(
-						Effect.andThen(MetricsService.inc(metrics.jobs.failures, MetricsService.label({ errorTag, type: job.type }), 1)),
+					const tag = MetricsService.errorTag(e);
+					return Effect.logError('Process failed', { error: String(e), errorTag: tag, jobId: job.id, type: job.type }).pipe(
+						Effect.andThen(MetricsService.inc(metrics.jobs.failures, MetricsService.label({ errorTag: tag, type: job.type }), 1)),
 					);
 				}),
-				Effect.withSpan('jobs.process', { attributes: { 'job.appId': job.appId, 'job.attempts': job.attempts, 'job.id': job.id, 'job.maxAttempts': job.maxAttempts, 'job.type': job.type } }),
+				Telemetry.span('jobs.process', { 'job.id': job.id, 'job.type': job.type, 'trace.requestId': serializable.requestId, 'trace.tenantId': serializable.tenantId, 'trace.userId': serializable.userId }),
 			);
+		};
 		const poll = run(db.jobs.claimBatch(workerId, B.batch.size, B.lock.minutes)).pipe(
 			Effect.tap((jobs) => jobs.length > 0 ? Effect.logDebug('Claimed', { count: jobs.length, workerId }) : Effect.void),
 			Effect.catchAll((e) => Effect.all([
 				Effect.logWarning('Claim failed', { error: String(e) }),
 				MetricsService.inc(metrics.jobs.failures, MetricsService.label({ type: 'claim' }), 1),
 			], { discard: true }).pipe(Effect.as([] as DbJob[]))),
-			Effect.tap((jobs) => Effect.forEach(jobs, (job) => semaphore.withPermits(1)(process(job)), { concurrency: B.batch.concurrency })),
+			Effect.tap((jobs) => Effect.forEach(jobs, (job) => semaphore.withPermits(1)(process(job)), { concurrency: 'unbounded' })),
 			Effect.map((jobs) => jobs.length),
-			Effect.withSpan('jobs.poll', { attributes: { 'batch.concurrency': B.batch.concurrency, 'batch.size': B.batch.size, 'worker.id': workerId } }),
+			Telemetry.span('jobs.poll', { 'batch.concurrency': B.batch.concurrency, 'batch.size': B.batch.size, 'worker.id': workerId }),
 		);
-		const pollSchedule = Schedule.forever.pipe(	// Adaptive: fast (1s) when busy, slow (10s) when idle
-			Schedule.addDelay((count) => count > 0 ? B.poll.busy : B.poll.idle),
-		);
+		const pollSchedule = Schedule.forever.pipe(Schedule.addDelay((count) => count > 0 ? B.poll.busy : B.poll.idle));
 		const shutdown = Effect.gen(function* () {
 			yield* Effect.logInfo('Shutting down', { workerId });
 			yield* Ref.get(inFlight).pipe(
@@ -148,17 +150,11 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 				Effect.ignore,
 			);
 			const remaining = yield* Ref.get(inFlight);
-			yield* remaining > 0
-				? Effect.logWarning('Shutdown with in-flight', { count: remaining, workerId })
-				: Effect.logInfo('Shutdown complete', { workerId });
+			yield* remaining > 0 ? Effect.logWarning('Shutdown with in-flight', { count: remaining, workerId }) : Effect.logInfo('Shutdown complete', { workerId });
 		});
 		yield* Effect.logInfo('Starting', { workerId });
 		yield* Effect.addFinalizer(() => shutdown);
-		yield* poll.pipe(
-			Effect.repeat(pollSchedule),
-			Effect.forkScoped,
-		);
-		// Queue depth polling moved to PollingService
+		yield* poll.pipe(Effect.repeat(pollSchedule), Effect.forkScoped);
 		const enqueue = <T>(type: string, payloads: T | readonly T[], opts?: { delay?: Duration.Duration; maxAttempts?: number; priority?: 'critical' | 'high' | 'low' | 'normal' }) =>
 			Effect.gen(function* () {
 				const isBatch = Array.isArray(payloads);
@@ -173,22 +169,27 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 					scheduledAt: opts?.delay ? new Date(Date.now() + Duration.toMillis(opts.delay)) : new Date(), status: 'pending', type, updatedAt: undefined, userId,
 				}))));
 				const ids = (inserted as readonly { id: string }[]).map((j) => j.id);
+				const firstId = ids[0];
 				yield* Effect.all([
 					MetricsService.inc(metrics.jobs.enqueued, MetricsService.label({ priority, type }), items.length),
-					audit.log('Job.enqueue', { details: { count: items.length, priority, type }, subjectId: ids[0] ?? 'batch' }),
+					audit.log('Job.enqueue', { details: { count: items.length, priority, type }, subjectId: firstId ?? 'batch' }),
 				], { discard: true });
-				return isBatch ? ids : (ids[0] ?? '');
-			}).pipe(Effect.withSpan('jobs.enqueue', { attributes: { 'job.count': Array.isArray(payloads) ? payloads.length : 1, 'job.maxAttempts': opts?.maxAttempts ?? 5, 'job.priority': opts?.priority ?? 'normal', 'job.type': type } }));
+				yield* Effect.when(Effect.die(new Error('Job insert returned no ID')), () => !isBatch && firstId === undefined);
+				return isBatch ? ids : (firstId as string);
+			}).pipe(
+				Effect.tap(() => Context.Request.toSerializable.pipe(Effect.flatMap((s) => Effect.annotateCurrentSpan({ 'trace.requestId': s.requestId, 'trace.tenantId': s.tenantId, 'trace.userId': s.userId })))),
+				Telemetry.span('jobs.enqueue', { 'job.count': Array.isArray(payloads) ? payloads.length : 1, 'job.maxAttempts': opts?.maxAttempts ?? 5, 'job.priority': opts?.priority ?? 'normal', 'job.type': type }),
+			);
 		return {
 			enqueue,
-			onStatusChange: () =>
-				pg.listen('job_status').pipe(
-					Stream.mapEffect((payload) => S.decodeUnknown(S.parseJson(JobStatusEvent))(payload)),
-				),
-			// Register a job handler. Handler can require Context.Request (provided via withinSync at runtime) and any services available in AppLayer (FileSystem, S3Service, etc.) Requirements are satisfied at runtime by the layer composition.
-			registerHandler: (type: string, handler: (payload: unknown) => Effect.Effect<void, unknown, unknown>) =>
-				Ref.update(handlers, HashMap.set(type, handler as (payload: unknown) => Effect.Effect<void, unknown, never>)),
-			unregisterHandler: (type: string) => Ref.update(handlers, HashMap.remove(type)),
+			onStatusChange: () => pg.listen('job_status').pipe(
+				Stream.mapEffect((payload) => S.decodeUnknown(S.parseJson(JobStatusEvent))(payload).pipe(
+					Effect.catchTag('ParseError', (e) => Effect.logWarning('Invalid job status event', { error: String(e), payload }).pipe(Effect.as(Option.none<JobService.StatusEvent>()))),
+					Effect.map(Option.some),
+				)),
+				Stream.filterMap((opt) => opt),
+			),
+			registerHandler: (type: string, handler: JobService.Handler) => Ref.update(handlers, HashMap.set(type, handler as (payload: unknown) => Effect.Effect<void, unknown, never>)),
 		};
 	}),
 }) {}
@@ -196,6 +197,7 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace JobService {
+	export type Handler = (payload: unknown) => Effect.Effect<void, unknown, unknown>;
 	export type StatusEvent = typeof JobStatusEvent.Type;
 }
 
