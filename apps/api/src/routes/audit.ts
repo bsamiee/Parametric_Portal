@@ -31,11 +31,14 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 				CacheService.rateLimit('api', pipe(
 					Middleware.requireMfaVerified,
 					Effect.zipRight(Context.Request.current),
-					Effect.flatMap((ctx) => {
-						const session = Option.getOrThrow(ctx.session);
-						return repos.audit.byUser(ctx.tenantId, session.userId, params.limit, params.cursor, params);
-					}),
-					Effect.mapError((e) => HttpError.Internal.of('Audit lookup failed', e)),
+					Effect.flatMap((ctx) =>
+						Option.match(ctx.session, {
+							onNone: () => Effect.fail(HttpError.Auth.of('Session required') as HttpError.Auth | HttpError.Internal),
+							onSome: (session) => repos.audit.byUser(ctx.tenantId, session.userId, params.limit, params.cursor, params).pipe(
+								Effect.mapError((e) => HttpError.Internal.of('Audit lookup failed', e) as HttpError.Auth | HttpError.Internal),
+							),
+						}),
+					),
 					Effect.withSpan('audit.getMine', { kind: 'server' }),
 				)));
 	}),

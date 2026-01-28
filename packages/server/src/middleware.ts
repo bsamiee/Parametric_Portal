@@ -25,8 +25,8 @@ const _config = {
 	},
 	proxy: {
 		cidrs: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10'],
-		enabled: false,
-		hops: 1,
+		enabled: process.env['TRUST_PROXY'] === 'true' || process.env['TRUST_PROXY'] === '1',
+		hops: Number.parseInt(process.env['PROXY_HOPS'] ?? '1', 10) || 1,
 	},
 	security: {
 		base: {'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',} satisfies Record<string, string>,
@@ -117,7 +117,11 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			onNone: () => Effect.succeed(Option.none<{ readonly id: string; readonly namespace: string }>()),
 			onSome: (ns) => findByNamespace(ns).pipe(Effect.orElseSucceed(Option.none)),
 		});
-		const tenantId = Option.match(found, { onNone: () => Context.Request.Id.system, onSome: (item) => item.id });
+		// Tenant resolution: no header → default app, header + found → app id, header + not found → unspecified (prevents cross-tenant data mixing)
+		const tenantId = Option.match(namespaceOpt, {
+			onNone: () => Context.Request.Id.default,
+			onSome: () => Option.match(found, { onNone: () => Context.Request.Id.unspecified, onSome: (item) => item.id }),
+		});
 		const ctx: Context.Request.Data = {
 			circuit: Option.none(),
 			ipAddress: _extractClientIp(req.headers, req.remoteAddress),

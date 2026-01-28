@@ -131,7 +131,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 			codec.binary
 				? Effect.gen(function* () {
 					const rawBuf = codec.buf(item.content);
-					const hash = item.hash ?? (yield* Crypto.hash(item.content).pipe(Effect.orDie));
+					const hash = item.hash ?? (yield* Crypto.hash(item.content).pipe(Effect.mapError(() => new TransferError.Fatal({ code: 'PARSER_ERROR', detail: 'Failed to compute content hash' }))));
 					const s3Key = `assets/${appId}/${hash}.${codec.ext}`;
 					const originalName = item.name ?? `${hash.slice(0, 8)}.${codec.ext}`;
 					yield* storage.put({ body: rawBuf, contentType: codec.mime, key: s3Key, metadata: { type: item.type } });

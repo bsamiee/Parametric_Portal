@@ -39,11 +39,11 @@ const _readiness = (polling: PollingService) => pipe(
 			30000,
 		),
 	),
-	Effect.map(({ cache, db }) => ({
+	Effect.map(({ alerts, cache, critical, db }) => ({
 		checks: {
 			cache: { connected: cache.connected, latencyMs: cache.latencyMs },
 			database: { healthy: db.healthy, latencyMs: db.latencyMs },
-			metrics: Match.value({ critical: 0, total: 0 }).pipe(
+			metrics: Match.value({ critical: critical.length, total: alerts.length }).pipe(
 				Match.when(({ critical }) => critical > 0, () => 'alerted' as const),
 				Match.when(({ total }) => total > 0, () => 'degraded' as const),
 				Match.orElse(() => 'healthy' as const),
