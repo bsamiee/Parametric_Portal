@@ -32,7 +32,7 @@ const makeAppRepo = Effect.gen(function* () {
 	const r = yield* repo(App, 'apps', { resolve: { byNamespace: 'namespace' } });
 	return {
 		...r,
-		byNamespace: (namespace: string) => r.by('byNamespace', namespace.toLowerCase()),
+		byNamespace: (namespace: string) => r.by('byNamespace', namespace),
 		updateSettings: (id: string, settings: Record<string, unknown>) => r.set(id, { settings }),
 	};
 });

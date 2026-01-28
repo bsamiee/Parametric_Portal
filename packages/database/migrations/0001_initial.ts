@@ -3,7 +3,6 @@
  * ┌───────────────────────────────────────────────────────────────────────────────┐
  * │ uuidv7()            │ NATIVE time-ordered IDs (no extension, k-sortable)      │
  * │ uuid_extract_timestamp │ Extract creation time from UUIDv7 (NO created_at)    │
- * │ casefold(text)      │ Unicode case folding for proper text comparisons        │
  * │ citext              │ Case-insensitive text columns (extension)               │
  * │ NULLS NOT DISTINCT  │ Proper NULL handling in unique constraints              │
  * │ Covering (INCLUDE)  │ Index-only scans eliminate heap fetches                 │
@@ -16,7 +15,7 @@
  * │ Immutability        │ DB-enforced append-only audit_logs via trigger          │
  * └───────────────────────────────────────────────────────────────────────────────┘
  * EXTENSIONS REQUIRED (CREATE EXTENSION IF NOT EXISTS):
- * - citext (case-insensitive columns: users.email)
+ * - citext (case-insensitive columns: apps.namespace, users.email)
  * - pg_trgm (trigram similarity for fuzzy search)
  * - fuzzystrmatch (levenshtein/soundex fuzzy matchers)
  * - unaccent (diacritic normalization for FTS/similarity)
@@ -29,7 +28,6 @@
  * NEW PG18.1 FUNCTIONS LEVERAGED:
  * - uuidv7() / uuidv4(): Native UUID generation (no uuid-ossp needed)
  * - uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
- * - casefold(text): Unicode case folding for proper comparisons (Turkish İ/i safe)
  * - array_sort(anyarray): Sort array first dimension
  * - array_reverse(anyarray): Reverse array first dimension
  * INDEX STRATEGY:
@@ -113,7 +111,7 @@ export default Effect.gen(function* () {
 		CREATE TABLE apps (
 			id UUID PRIMARY KEY DEFAULT uuidv7(),
 			name TEXT NOT NULL,
-			namespace TEXT NOT NULL,
+			namespace CITEXT NOT NULL,
 			settings JSONB,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			CONSTRAINT apps_name_not_empty CHECK (length(trim(name)) > 0),
@@ -122,7 +120,6 @@ export default Effect.gen(function* () {
 	`;
     yield* sql`COMMENT ON TABLE apps IS 'Tenant isolation root — all user-facing entities scope to an app; use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`CREATE UNIQUE INDEX idx_apps_namespace ON apps(namespace) INCLUDE (id)`;
-    yield* sql`CREATE UNIQUE INDEX idx_apps_namespace_casefold ON apps(casefold(namespace))`;
     yield* sql`CREATE INDEX idx_apps_settings ON apps USING GIN (settings) WHERE settings IS NOT NULL`;
     yield* sql`CREATE TRIGGER apps_updated_at BEFORE UPDATE ON apps FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     yield* sql`INSERT INTO apps (id, name, namespace) VALUES ('00000000-0000-7000-8000-000000000001', 'Default', 'default') ON CONFLICT (id) DO NOTHING`;

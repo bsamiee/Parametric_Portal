@@ -29,6 +29,7 @@ class User extends Model.Class<User>('User')({							// The principal identity. 
 	email: S.String,
 	role: S.String,
 	status: S.String,
+	roleOrder: Model.Generated(S.Number),
 	deletedAt: Model.FieldOption(S.DateFromSelf),						// Internal: soft delete
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}

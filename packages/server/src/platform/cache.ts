@@ -13,7 +13,7 @@ import * as PersistenceRedis from '@effect/experimental/Persistence/Redis';
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimitExceeded, RateLimiter } from '@effect/experimental/RateLimiter';
 import { layerStore as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Config, Duration, Effect, Either, Layer, Match, Metric, Option, pipe, Redacted, Schedule, Schema as S, type Scope } from 'effect';
+import { Config, Duration, Effect, Either, Layer, Match, Metric, Option, pipe, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
 import Redis from 'ioredis';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
@@ -39,8 +39,6 @@ const _Cache = {
 	readonly rateLimit: Record<string, { readonly algorithm: 'token-bucket' | 'fixed-window'; readonly limit: number; readonly onExceeded: 'fail' | 'delay'; readonly recovery: 'email-verify' | undefined; readonly tokens: number; readonly window: Duration.Duration }>;
 	readonly redis: { readonly connectTimeout: number; readonly enableReadyCheck: boolean; readonly host: string; readonly lazyConnect: boolean; readonly maxRetriesPerRequest: number; readonly port: number; readonly prefix: string };
 };
-
-const _cacheRegistry = new Map<string, WeakRef<{ invalidate: (key: unknown) => Effect.Effect<void, unknown> }>>();
 
 const _redisConfig = Config.all({
 	connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(_Cache.redis.connectTimeout)),
@@ -84,20 +82,21 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			Effect.catchAll((err) => Effect.logWarning('Redis pub/sub unavailable', { error: String(err) })),
 		);
 		sub.on('message', (channel, message) => {
-			pipe(
-				Option.liftPredicate(channel, (c) => c === _Cache.pubsub.channel),
-				Option.map(() => pipe(
-					S.decodeUnknownEither(_InvalidationMessage)(JSON.parse(message)),
-					Either.match({
-						onLeft: (err) => { Effect.runFork(Effect.logWarning('Malformed invalidation message', { channel, error: String(err) })); },
-						onRight: (msg) => {
-							Option.fromNullable(_cacheRegistry.get(msg.storeId)?.deref()).pipe(Option.map((ref) => Effect.runFork(ref.invalidate(msg.key).pipe(Effect.ignore))));
-							Effect.runFork(reactivity.invalidate([msg.storeId, msg.key]));
-						},
-					}),
-				)),
-			);
-		});
+		pipe(
+			Option.liftPredicate(channel, (c) => c === _Cache.pubsub.channel),
+			Option.map(() => pipe(
+				Either.try({ catch: (err) => err, try: () => JSON.parse(message) }),
+				Either.flatMap(S.decodeUnknownEither(_InvalidationMessage)),
+				Either.match({
+					onLeft: (err) => { Effect.runFork(Effect.logWarning('Malformed invalidation message', { channel, error: String(err) })); },
+					onRight: (msg) => {
+						const invalidateKey = `${msg.storeId}:${msg.key}`;
+						Effect.runFork(reactivity.invalidate([invalidateKey]));
+					},
+				}),
+			)),
+		);
+	});
 		yield* Effect.logInfo('CacheService initialized', { host: cfg.host, port: cfg.port });
 		return { _prefix: cfg.prefix, _reactivity: reactivity, _redis: redis, _redisOpts: redisOpts };
 	}),
@@ -114,8 +113,9 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 		readonly timeToLive?: Duration.DurationInput;
 		readonly inMemoryCapacity?: number;
 		readonly inMemoryTTL?: Duration.DurationInput;
-	}): Effect.Effect<PersistedCache.PersistedCache<K>, never, S.SerializableWithResult.Context<K> | R | Persistence.ResultPersistence | Scope.Scope> =>
+	}): Effect.Effect<PersistedCache.PersistedCache<K>, never, CacheService | S.SerializableWithResult.Context<K> | R | Persistence.ResultPersistence | Scope.Scope> =>
 		Effect.gen(function* () {
+			const { _reactivity, _redis } = yield* CacheService;
 			const cache = yield* PersistedCache.make({
 				inMemoryCapacity: options.inMemoryCapacity ?? _Cache.defaults.inMemoryCapacity,
 				inMemoryTTL: options.inMemoryTTL ?? _Cache.defaults.inMemoryTTL,
@@ -123,14 +123,40 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 				storeId: options.storeId,
 				timeToLive: () => options.timeToLive ?? _Cache.defaults.ttl,
 			});
-			_cacheRegistry.set(options.storeId, new WeakRef(cache as unknown as { invalidate: (key: unknown) => Effect.Effect<void, unknown> }));
-			yield* Effect.addFinalizer(() => Effect.sync(() => _cacheRegistry.delete(options.storeId)));
-			return cache;
+			const registrations = new Map<string, () => void>();
+			const register = (key: K) => Effect.sync(() => pipe(
+				Option.fromNullable(registrations.get(`${options.storeId}:${PrimaryKey.value(key)}`)),
+				Option.match({
+					onNone: () => {
+						const id = `${options.storeId}:${PrimaryKey.value(key)}`;
+						const cancel = _reactivity.unsafeRegister([id], () => {
+							registrations.delete(id);
+							cancel();
+							Effect.runFork(cache.invalidate(key).pipe(Effect.ignore));
+						});
+						registrations.set(id, cancel);
+					},
+					onSome: () => undefined,
+				}),
+			));
+			const invalidateLocal = (storeId: string, key: string) => Effect.all([
+				_reactivity.invalidate([`${storeId}:${key}`]),
+				Effect.tryPromise(() => _redis.publish(_Cache.pubsub.channel, JSON.stringify({ key, storeId }))).pipe(Effect.timeout(Duration.seconds(2)), Effect.ignore),
+				Effect.serviceOption(MetricsService).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.evictions, MetricsService.label({ storeId })) }))),
+			], { discard: true });
+			yield* Effect.addFinalizer(() => Effect.sync(() => {
+				registrations.forEach((cancel) => { cancel(); });
+				registrations.clear();
+			}));
+			return {
+				get: (key) => register(key).pipe(Effect.andThen(cache.get(key))),
+				invalidate: (key) => register(key).pipe(Effect.andThen(invalidateLocal(options.storeId, PrimaryKey.value(key)))),
+			} as const satisfies PersistedCache.PersistedCache<K>;
 		});
 	// --- [INVALIDATE] - Cross-instance via Reactivity + Redis pub/sub --------
 	static readonly invalidate = (storeId: string, key: string) =>
 		CacheService.pipe(Effect.flatMap(({ _reactivity, _redis }) => Effect.all([
-			_reactivity.invalidate([storeId, key]),
+			_reactivity.invalidate([`${storeId}:${key}`]),
 			Effect.tryPromise(() => _redis.publish(_Cache.pubsub.channel, JSON.stringify({ key, storeId }))).pipe(Effect.timeout(Duration.seconds(2)), Effect.ignore),
 			Effect.serviceOption(MetricsService).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.evictions, MetricsService.label({ storeId })) }))),
 		], { discard: true })));

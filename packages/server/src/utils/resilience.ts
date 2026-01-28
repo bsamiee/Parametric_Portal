@@ -2,7 +2,7 @@
  * Resilience: bulkhead → timeout → hedge → retry → circuit → fallback → memo → span
  * Native Effect APIs: cachedWithTTL (memo), Semaphore (bulkhead), raceAll (hedge)
  */
-import { Data, Duration, Effect, Match, Option, Schedule } from 'effect';
+import { Data, Duration, Effect, Match, Option, pipe, Schedule } from 'effect';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 import { Circuit } from './circuit.ts';
@@ -30,7 +30,7 @@ const _cfg = {
 	}),
 } as const;
 const _sems = new Map<string, Effect.Effect<Effect.Semaphore>>();
-const _memos = new Map<string, { readonly value: unknown; readonly expiry: number }>();
+const _memos = new Map<string, Effect.Effect<unknown, unknown, unknown>>();
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -53,14 +53,33 @@ const _run = <A, E, R>(op: string, eff: Effect.Effect<A, E, R>, cfg: Resilience.
 	});
 	const bulkheadTimeout = cfg.bulkheadTimeout;
 	const withBulkhead: Effect.Effect<A, Resilience.Error<E>, R> = bulkhead === undefined ? pipeline : Effect.suspend(() => {
-		const semEff = _sems.get(op) ?? (() => { const e = Effect.runSync(Effect.cached(Effect.makeSemaphore(bulkhead))); _sems.set(op, e); return e; })();
-		const withPermit = Effect.andThen(semEff, (sem) => sem.withPermits(1)(pipeline));
+		const semEff = Effect.suspend(() => pipe(
+			Option.fromNullable(_sems.get(op)),
+			Option.match({
+				onNone: () => Effect.cached(Effect.makeSemaphore(bulkhead)).pipe(
+					Effect.tap((cached) => Effect.sync(() => _sems.set(op, cached))),
+				),
+				onSome: Effect.succeed,
+			}),
+		));
+		const withPermit = semEff.pipe(
+			Effect.flatten,
+			Effect.flatMap((sem) => sem.withPermits(1)(pipeline)),
+		);
 		return bulkheadTimeout === undefined ? withPermit : withPermit.pipe(Effect.timeoutFail({ duration: bulkheadTimeout, onTimeout: () => BulkheadError.of(op, bulkhead) }), Effect.tapErrorTag('BulkheadError', () => inc('bulkheadRejections')));
 	});
-	const withMemo: Effect.Effect<A, Resilience.Error<E>, R> = memoTtl === undefined ? withBulkhead : Effect.suspend(() => {
-		const cached = _memos.get(op);
-		return cached && cached.expiry > Date.now() ? Effect.succeed(cached.value as A) : Effect.tap(withBulkhead, (v) => Effect.sync(() => _memos.set(op, { expiry: Date.now() + Duration.toMillis(memoTtl), value: v })));
-	});
+	const withMemo: Effect.Effect<A, Resilience.Error<E>, R> = memoTtl === undefined ? withBulkhead : Effect.suspend(() =>
+		pipe(
+			Option.fromNullable(_memos.get(op)),
+			Option.match({
+				onNone: () => Effect.cachedWithTTL(withBulkhead, memoTtl).pipe(
+					Effect.tap((cached) => Effect.sync(() => _memos.set(op, cached as Effect.Effect<unknown, unknown, unknown>))),
+					Effect.flatten,
+				),
+				onSome: (cached) => cached as Effect.Effect<A, Resilience.Error<E>, R>,
+			}),
+		),
+	);
 	return Telemetry.span(withMemo, `resilience.${op}`, { metrics: false, 'resilience.operation': op });
 };
 

@@ -9,7 +9,7 @@
  */
 import { PgClient } from '@effect/sql-pg';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Duration, Effect, HashMap, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, Stream } from 'effect';
+import { Duration, Effect, Function as F, HashMap, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, Stream } from 'effect';
 import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -93,13 +93,13 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 			);
 		const process = (job: DbJob) => {
 			const map$ = Ref.get(handlers);
-			const requestId = Option.getOrElse(job.requestId as Option.Option<string>, () => crypto.randomUUID());
-			const userId = Option.getOrUndefined(job.userId as Option.Option<string>);
-			const sessionFromJob = (job.userId as Option.Option<string>).pipe(Option.map((uid) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId: uid, verifiedAt: Option.none<Date>() })));
+			const requestId = Option.getOrElse(job.requestId, () => crypto.randomUUID());
+			const userId = Option.getOrUndefined(job.userId);
+			const sessionFromJob = (job.userId).pipe(Option.map((uid) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId: uid, verifiedAt: Option.none<Date>() })));
 			const ctx: Partial<Context.Request.Data> = { ipAddress: Option.none(), requestId, session: sessionFromJob, userAgent: Option.none() };
 			const serializable = new Context.Serializable({ requestId, sessionId: Context.Request.Id.job, tenantId: job.appId, userId });
 			const labels = MetricsService.label({ tenant: job.appId, type: job.type });
-			const trackWait = Option.match(job.waitMs as Option.Option<number>, {
+			const trackWait = Option.match(job.waitMs, {
 				onNone: () => Effect.void,
 				onSome: (ms) => Metric.update(Metric.taggedWithLabels(metrics.jobs.waitDuration, labels), Duration.millis(ms)),
 			});
@@ -141,7 +141,12 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 			Effect.map((jobs) => jobs.length),
 			Telemetry.span('jobs.poll', { 'batch.concurrency': B.batch.concurrency, 'batch.size': B.batch.size, 'worker.id': workerId }),
 		);
-		const pollSchedule = Schedule.forever.pipe(Schedule.addDelay((count) => count > 0 ? B.poll.busy : B.poll.idle));
+		const pollSchedule = Schedule.identity<number>().pipe(
+			Schedule.addDelay((count) => Match.value(count > 0).pipe(
+				Match.when(true, () => B.poll.busy),
+				Match.orElse(() => B.poll.idle),
+			)),
+		);
 		const shutdown = Effect.gen(function* () {
 			yield* Effect.logInfo('Shutting down', { workerId });
 			yield* Ref.get(inFlight).pipe(
@@ -182,12 +187,15 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 			);
 		return {
 			enqueue,
-			onStatusChange: () => pg.listen('job_status').pipe(
+			onStatusChange: (): Stream.Stream<JobService.StatusEvent, never, never> => pg.listen('job_status').pipe(
 				Stream.mapEffect((payload) => S.decodeUnknown(S.parseJson(JobStatusEvent))(payload).pipe(
-					Effect.catchTag('ParseError', (e) => Effect.logWarning('Invalid job status event', { error: String(e), payload }).pipe(Effect.as(Option.none<JobService.StatusEvent>()))),
-					Effect.map(Option.some),
+					Effect.matchEffect({
+						onFailure: (e) => Effect.logWarning('Invalid job status event', { error: String(e), payload }).pipe(Effect.as(Option.none<JobService.StatusEvent>())),
+						onSuccess: (parsed) => Effect.succeed(Option.some(parsed)),
+					}),
 				)),
-				Stream.filterMap((opt) => opt),
+				Stream.filterMap(F.identity),
+				Stream.catchAll(() => Stream.empty),
 			),
 			registerHandler: (type: string, handler: JobService.Handler) => Ref.update(handlers, HashMap.set(type, handler as (payload: unknown) => Effect.Effect<void, unknown, never>)),
 		};

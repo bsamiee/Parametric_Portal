@@ -257,7 +257,9 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		// --- Merge method (PG17+ MERGE with action tracking) -----------------
 		// Cache column names for merge
 		const _allColNames = Object.keys(cols);
-		const _insertColNames = _allColNames.filter(c => c !== pkCol);
+		const _insertColNames = _allColNames.filter(c =>
+			c !== pkCol && !(['uuidv7', 'virtual', 'stored'] as const).some(gen => Field.isGen(c, gen)),
+		);
 		/** MERGE with action tracking: returns row + _action ('insert' | 'update'). Polymorphic single/batch. */
 		const merge = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined): Effect.Effect<MergeResult<S.Schema.Type<M>> | readonly MergeResult<S.Schema.Type<M>>[] | undefined, RepoConfigError | SqlError | ParseError> =>
 			upsertCfg ? data == null ? Effect.fail(new RepoConfigError({ message: 'data cannot be null or undefined', operation: 'merge', table }))

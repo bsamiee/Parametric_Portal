@@ -9,7 +9,7 @@ import {
 	type BrokenCircuitError, CircuitState, ConsecutiveBreaker, CountBreaker, type FailureReason, type IBackoffFactory, type IBreaker, type IDisposable, type IHalfOpenAfterBackoffContext, type IsolatedCircuitError,
 	type Policy, SamplingBreaker, type TaskCancelledError, circuitBreaker, handleAll, isBrokenCircuitError, isIsolatedCircuitError, isTaskCancelledError,
 } from 'cockatiel';
-import { Data, Duration, Effect, Match, Metric, Option } from 'effect';
+import { Data, Duration, Effect, Match, Metric, Option, Runtime } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 
@@ -103,9 +103,11 @@ const make = (name: string, config: {
 	const execute = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, E | CircuitError, R> =>
 		Effect.gen(function* () {
 			yield* Context.Request.update({ circuit: Option.some({ name, state: stateTracker.current }) });
-			const ctx = yield* Effect.context<R>();
+			const runtime = yield* Effect.runtime<R>();
+			const fiberRefs = yield* Effect.getFiberRefs;
+			const runtimeWithRefs = Runtime.updateFiberRefs(runtime, () => fiberRefs);
 			const result = yield* _runViaPolicy<A, E>(
-				() => Effect.runPromise(Effect.provide(eff, ctx)),
+				(signal) => Runtime.runPromise(runtimeWithRefs, eff, { signal }),
 				(err) => err as E,
 			);
 			yield* Context.Request.update({ circuit: Option.some({ name, state: stateTracker.current }) });

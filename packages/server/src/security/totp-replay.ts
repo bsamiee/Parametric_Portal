@@ -3,7 +3,7 @@
  * Uses CacheService.redis for replay detection via SET NX.
  * Lockout state kept in-memory via STM TMap (per-worker, acceptable for brute-force protection).
  */
-import { Clock, Duration, Effect, Option, Schedule, STM, TMap } from 'effect';
+import { Clock, Duration, Effect, Match, Option, Schedule, STM, TMap } from 'effect';
 import { HttpError } from '../errors.ts';
 import { CacheService } from '../platform/cache.ts';
 
@@ -20,9 +20,9 @@ const _config = {
 
 class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/ReplayGuardService', {
 	scoped: Effect.gen(function* () {
-		const lockoutMap = yield* TMap.empty<string, { readonly count: number; readonly lockedUntil: number }>().pipe(STM.commit);
+		const lockoutMap = yield* TMap.empty<string, { readonly count: number; readonly lastFailure: number; readonly lockedUntil: number }>().pipe(STM.commit);
 		yield* Clock.currentTimeMillis.pipe(
-			Effect.tap((now) => TMap.retainIf(lockoutMap, (_, s) => s.lockedUntil === 0 || now <= s.lockedUntil + _config.lockout.maxMs).pipe(STM.commit)),
+			Effect.tap((now) => TMap.retainIf(lockoutMap, (_, s) => now <= s.lastFailure + _config.lockout.maxMs).pipe(STM.commit)),
 			Effect.repeat(Schedule.spaced(_config.cleanup.interval)),
 			Effect.forkScoped,
 		);
@@ -51,12 +51,13 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 			recordFailure: (userId: string) =>
 				Effect.all([Clock.currentTimeMillis, TMap.get(lockoutMap, userId).pipe(STM.commit)]).pipe(
 					Effect.flatMap(([now, opt]) => {
-						const prev = Option.getOrElse(opt, () => ({ count: 0, lockedUntil: 0 }));
+						const prev = Option.getOrElse(opt, () => ({ count: 0, lastFailure: now, lockedUntil: 0 }));
 						const count = prev.count + 1;
-						const lockedUntil = count >= _config.lockout.maxAttempts
-							? now + Math.min(_config.lockout.baseMs * (2 ** (count - _config.lockout.maxAttempts)), _config.lockout.maxMs)
-							: 0;
-						return TMap.set(lockoutMap, userId, { count, lockedUntil }).pipe(STM.commit);
+						const lockedUntil = Match.value(count).pipe(
+							Match.when((c) => c >= _config.lockout.maxAttempts, (c) => now + Math.min(_config.lockout.baseMs * (2 ** (c - _config.lockout.maxAttempts)), _config.lockout.maxMs)),
+							Match.orElse(() => 0),
+						);
+						return TMap.set(lockoutMap, userId, { count, lastFailure: now, lockedUntil }).pipe(STM.commit);
 					}),
 				),
 			recordSuccess: (userId: string) => TMap.remove(lockoutMap, userId).pipe(STM.commit),

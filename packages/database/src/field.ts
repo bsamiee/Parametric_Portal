@@ -65,8 +65,8 @@ const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.f
 	userAgent:        { col: 'user_agent',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
 	name:             { col: 'name',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	storageRef:       { col: 'storage_ref',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	namespace:        { col: 'namespace',        sql: 'TEXT',        ts: 'S.String',          mark: 'casefold',  gen: false,    null: false, ref: false,      wrap: false                                                  },
-	email:            { col: 'email',            sql: 'CITEXT',      ts: 'S.String',          mark: 'casefold',  gen: false,    null: false, ref: false,      wrap: false                                                  },
+	namespace:        { col: 'namespace',        sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	email:            { col: 'email',            sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	role:             { col: 'role',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	status:           { col: 'status',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	type:             { col: 'type',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -267,7 +267,7 @@ const _resolve = (fieldOrCol: string): _Resolved | undefined => {											/** 
 const _predMeta = (fieldOrCol: string): { cast: string | undefined; wrap: 'casefold' | undefined } => {		/** Derive predicate metadata from field registry (cast + wrap for SQL predicates) */
 	const entry = _resolve(fieldOrCol);
 	return entry
-		? { cast: _SqlCast[entry.sql as keyof typeof _SqlCast], wrap: entry.mark === 'casefold' ? 'casefold' : undefined }
+		? { cast: _SqlCast[entry.sql as keyof typeof _SqlCast], wrap: entry.sql === 'CITEXT' ? 'casefold' : undefined }
 		: { cast: undefined, wrap: undefined };
 };
 const _isSqlType = (fieldOrCol: string, sqlType: _Sql): boolean => _resolve(fieldOrCol)?.sql === sqlType;	/** Check if field has specific SQL type */

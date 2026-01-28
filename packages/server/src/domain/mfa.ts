@@ -4,7 +4,7 @@
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { randomBytes } from 'node:crypto';
-import { Clock, Effect, Encoding, Option } from 'effect';
+import { Cache, Clock, Duration, Effect, Encoding, Option } from 'effect';
 import { customAlphabet } from 'nanoid';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import { Context } from '../context.ts';
@@ -23,6 +23,8 @@ const _config = {
 	salt: { length: 16 },
 	totp: { algorithm: 'sha256' as const, digits: 6 as const, periodSec: 30, window: [1, 1] as [number, number] },
 } as const;
+const _cache = { enabled: { capacity: 5000, ttl: Duration.minutes(5) } } as const;
+const _epochTolerance = _config.totp.window.map((step) => step * _config.totp.periodSec) as [number, number];
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -51,6 +53,15 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 		const metrics = yield* MetricsService;
 		const audit = yield* AuditService;
 		const replayGuard = yield* ReplayGuardService;
+		const enabledCache = yield* Cache.make({
+			capacity: _cache.enabled.capacity,
+			lookup: (userId: string) =>
+				db.mfaSecrets.byUser(userId).pipe(
+					Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)),
+					Effect.map((opt) => opt.pipe(Option.flatMap((v) => v.enabledAt), Option.isSome)),
+				),
+			timeToLive: _cache.enabled.ttl,
+		});
 		const _getMfaOrFail = (userId: string) =>
 			db.mfaSecrets.byUser(userId).pipe(
 				Effect.mapError((e) => HttpError.Internal.of(`MFA lookup failed for user ${userId}`, e)),
@@ -71,6 +82,7 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 				const hashes = yield* Effect.forEach(backupCodes, (code) => Crypto.hash(`${salt}${code.toUpperCase()}`), { concurrency: 'unbounded' });
 				const backupHashes = hashes.map((hash) => `${salt}$${hash}`);
 				yield* Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes, encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('MFA upsert failed', e))));
+				yield* enabledCache.invalidate(userId);
 				yield* Effect.all([
 					MetricsService.inc(metrics.mfa.enrollments, MetricsService.label({ tenant: ctx.tenantId }), 1),
 					audit.log('MfaSecret.enroll', { details: { backupCodesGenerated: _config.backup.count }, subjectId: userId }),
@@ -89,7 +101,7 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 				);
 				const result = yield* Effect.try({
 					catch: () => HttpError.Auth.of('TOTP verification failed'),
-					try: () => verifySync({ algorithm: _config.totp.algorithm, digits: _config.totp.digits, epochTolerance: _config.totp.window, period: _config.totp.periodSec, secret, token: code }),
+					try: () => verifySync({ algorithm: _config.totp.algorithm, digits: _config.totp.digits, epochTolerance: _epochTolerance, period: _config.totp.periodSec, secret, token: code }),
 				});
 				const delta = result.valid ? (result.delta ?? 0) : 0;
 				yield* Effect.all([
@@ -103,6 +115,7 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 				yield* Effect.when(replayGuard.recordFailure(userId).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('TOTP code already used')))), () => alreadyUsed);
 				yield* replayGuard.recordSuccess(userId);
 				yield* Effect.when(Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes: mfa.backupHashes, enabledAt: Option.some(new Date()), encrypted: mfa.encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('MFA enable failed', e)))), () => Option.isNone(mfa.enabledAt));
+				yield* enabledCache.invalidate(userId);
 				return { success: true };
 			}), 'mfa.verify');
 		const useRecoveryCode = (userId: string, code: string) =>
@@ -130,6 +143,7 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 				const opt = yield* db.mfaSecrets.byUser(userId).pipe(Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)));
 				yield* Effect.when(Effect.fail(HttpError.NotFound.of('mfa')), () => Option.isNone(opt));
 				yield* db.mfaSecrets.softDelete(userId).pipe(Effect.mapError((e) => HttpError.Internal.of('MFA soft delete failed', e)));
+				yield* enabledCache.invalidate(userId);
 				yield* Effect.all([
 					MetricsService.inc(metrics.mfa.disabled, MetricsService.label({ tenant: ctx.tenantId }), 1),
 					audit.log('MfaSecret.disable', { subjectId: userId }),
@@ -137,10 +151,7 @@ class MfaService extends Effect.Service<MfaService>()('server/MfaService', {
 				return { success: true };
 			}), 'mfa.disable');
 		const isEnabled = (userId: string) =>
-			db.mfaSecrets.byUser(userId).pipe(
-				Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)),
-				Effect.map((opt) => opt.pipe(Option.flatMap((v) => v.enabledAt), Option.isSome)),
-			);
+			enabledCache.get(userId);
 		const getStatus = (userId: string) =>
 			db.mfaSecrets.byUser(userId).pipe(
 				Effect.mapError((e) => HttpError.Internal.of('MFA status check failed', e)),

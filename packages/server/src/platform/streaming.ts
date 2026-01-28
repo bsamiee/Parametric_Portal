@@ -135,11 +135,12 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				Match.when('binary', () => raw),
 				Match.exhaustive,
 			);
+			const metricTap = (item: unknown) => format === 'binary' ? _inc(labels, (m) => m.stream.bytes, (item as Uint8Array).length) : _inc(labels, (m) => m.stream.elements);
 			return decoded.pipe(
 				config.retry ? Stream.retry(Schedule.exponential(config.retry.base).pipe(Schedule.intersect(Schedule.recurs(config.retry.times)))) : F.identity,
 				Stream.buffer({ capacity: cfg.capacity, strategy: cfg.strategy }),
 				_withMetrics(labels, config.name, format),
-				Stream.tap((chunk) => format === 'sse' || format === 'multipart' ? _inc(labels, (m) => m.stream.elements) : _inc(labels, (m) => m.stream.bytes, (chunk as Uint8Array).length ?? 1)),
+				Stream.tap(metricTap),
 			);
 		}), { circuit: config.name, retry: false, timeout: false });
 	static readonly emit = <A, E>(config: {	// Emit stream as HTTP response with format encoding, dedupe, batching, throttle
@@ -173,7 +174,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				msgpack: () => pipe(processed, Stream.chunks, Stream.pipeThroughChannel(MsgPack.pack())),
 				json: () => pipe(Stream.make('['), Stream.concat(pipe(processed, Stream.zipWithIndex, Stream.map(([a, i]) => i === 0 ? serialize(a) : `,${serialize(a)}`))), Stream.concat(Stream.make(']')), Stream.encodeText),
 				ndjson: () => pipe(processed, Stream.chunks, Stream.pipeThroughChannel(Ndjson.pack())) as unknown as Stream.Stream<Uint8Array, E, never>,
-				csv: () => pipe(processed, Stream.map((a) => serialize(a)), Stream.chunks, Stream.pipeThroughChannel(Ndjson.pack())) as unknown as Stream.Stream<Uint8Array, E, never>,
+				csv: () => pipe(processed, Stream.map((a) => serialize(a)), Stream.intersperse('\n'), Stream.encodeText),
 				sse: () => Stream.merge(pipe(processed, Stream.map((a) => Sse.encoder.write({ _tag: 'Event', data: sseSerialize(a).data, event: sseSerialize(a).event ?? 'message', id: sseSerialize(a).id })), Stream.encodeText), _heartbeat(_B.heartbeat), { haltStrategy: 'left' }),
 			};
 			const encoded = _encode[config.format]();
@@ -198,7 +199,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 			const raw = yield* Match.value(config.subscribers).pipe(
 				Match.when(1, () => stream.pipe(Stream.share({ ...cap, idleTimeToLive: config.idleTimeToLive }))),
 				Match.when(Match.undefined, () => stream.pipe(Stream.broadcastDynamic(cap))),
-				Match.orElse((n) => stream.pipe(Stream.broadcast(n, cap.capacity as number))),
+				Match.orElse((n) => stream.pipe(Stream.broadcast(n, cap))),
 			);
 			return Match.value(raw).pipe(
 				Match.when(Array.isArray, (arr) => arr.map((s) => withMetrics(s))),
