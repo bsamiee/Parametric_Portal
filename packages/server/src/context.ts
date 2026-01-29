@@ -19,8 +19,7 @@ import { dual } from 'effect/Function';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _Id = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
-const _isSecure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
-const _default: Context.Request.Data = {
+const _ref = FiberRef.unsafeMake<Context.Request.Data>({
 	circuit: Option.none(),
 	cluster: Option.none(),
 	ipAddress: Option.none(),
@@ -29,33 +28,28 @@ const _default: Context.Request.Data = {
 	session: Option.none(),
 	tenantId: _Id.default,
 	userAgent: Option.none(),
-};
-const _ref = FiberRef.unsafeMake<Context.Request.Data>(_default);
-const _cookie = {
-	oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: D.minutes(10), path: '/api/auth/oauth', sameSite: 'lax', secure: _isSecure } },
-	refresh: { name: 'refreshToken', options: { httpOnly: true, maxAge: D.days(30), path: '/api/auth', sameSite: 'lax', secure: _isSecure } },
-} as const satisfies Record<string, { readonly name: string; readonly options: Cookie['options'] }>;
+});
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-const _UserRoleSchema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
-type _UserRoleValue = S.Schema.Type<typeof _UserRoleSchema>;
-const _roleRank: Record<_UserRoleValue, number> = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 };
-const _RoleOrder = Order.mapInput(Order.number, (role: _UserRoleValue) => _roleRank[role]);
-const UserRole = {
-	hasAtLeast: (role: string, min: _UserRoleValue): boolean => role in _roleRank && Order.greaterThanOrEqualTo(_RoleOrder)(role as _UserRoleValue, min),
-	Order: _RoleOrder,
-	schema: _UserRoleSchema,
-} as const;
+
+// UserRole: IIFE encapsulates rank/order internals
+const UserRole = (() => {
+	const schema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
+	type Value = S.Schema.Type<typeof schema>;
+	const rank: Record<Value, number> = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 };
+	const order = Order.mapInput(Order.number, (role: Value) => rank[role]);
+	return {
+		hasAtLeast: (role: string, min: Value): boolean => role in rank && Order.greaterThanOrEqualTo(order)(role as Value, min),
+		Order: order,
+		schema,
+	} as const;
+})();
 
 // Branded types for serialization boundaries
 const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
 const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
-
-// Internal helper: Serializable.fromData needs ShardId->string conversion
-const _makeShardIdString = (shardId: ShardId.ShardId): typeof ShardIdString.Type =>
-	S.decodeSync(ShardIdString)(shardId.toString());
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -77,6 +71,8 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 	tenantId: S.String,
 	userId: S.optional(S.String),
 }) {
+	private static readonly makeShardIdString = (shardId: ShardId.ShardId): typeof ShardIdString.Type =>
+		S.decodeSync(ShardIdString)(shardId.toString());
 	static readonly fromData = (ctx: Context.Request.Data): Serializable =>
 		new Serializable({
 			ipAddress: Option.getOrUndefined(ctx.ipAddress),
@@ -88,7 +84,7 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 				onNone: () => ({}),
 				onSome: (c) => ({
 					runnerId: c.runnerId ?? undefined,
-					shardId: c.shardId ? _makeShardIdString(c.shardId) : undefined,
+					shardId: c.shardId ? Serializable.makeShardIdString(c.shardId) : undefined,
 				}),
 			}),
 		});
@@ -119,12 +115,21 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		userAgent: Option.none(),
 	});
 	static readonly SystemLayer = Layer.succeed(Request, Request.system());
-	static readonly cookie = {	// Cookie: 4 operations over @effect/platform. Schema validation at boundary via `read`. Encryption is domain concern (oauth.ts).
-		clear: (key: keyof typeof _cookie) => (res: HttpServerResponse.HttpServerResponse) => HttpServerResponse.expireCookie(res, _cookie[key].name, _cookie[key].options),
-		get: <E>(key: keyof typeof _cookie, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> => Effect.fromNullable(req.cookies[_cookie[key].name]).pipe(Effect.mapError(onNone)),
-		read: <A, I extends Readonly<Record<string, string | undefined>>, R>(schema: S.Schema<A, I, R>) => HttpServerRequest.schemaCookies(schema),
-		set: (key: keyof typeof _cookie, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, _cookie[key].name, value, _cookie[key].options),
-	} as const;
+	// Cookie: IIFE encapsulates secure flag and config
+	static readonly cookie = (() => {
+		const secure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
+		const cfg = {
+			oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: D.minutes(10), path: '/api/auth/oauth', sameSite: 'lax', secure } },
+			refresh: { name: 'refreshToken', options: { httpOnly: true, maxAge: D.days(30), path: '/api/auth', sameSite: 'lax', secure } },
+		} as const satisfies Record<string, { readonly name: string; readonly options: Cookie['options'] }>;
+		return {
+			clear: (key: keyof typeof cfg) => (res: HttpServerResponse.HttpServerResponse) => HttpServerResponse.expireCookie(res, cfg[key].name, cfg[key].options),
+			get: <E>(key: keyof typeof cfg, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> => Effect.fromNullable(req.cookies[cfg[key].name]).pipe(Effect.mapError(onNone)),
+			keys: Object.keys(cfg) as ReadonlyArray<keyof typeof cfg>,
+			read: <A, I extends Readonly<Record<string, string | undefined>>, R>(schema: S.Schema<A, I, R>) => HttpServerRequest.schemaCookies(schema),
+			set: (key: keyof typeof cfg, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, cfg[key].name, value, cfg[key].options),
+		} as const;
+	})();
 	static readonly toSerializable = FiberRef.get(_ref).pipe(Effect.map(Serializable.fromData));
 	/** Access cluster state, fails with ClusterContextRequired if not in cluster scope */
 	static readonly clusterState = FiberRef.get(_ref).pipe(
@@ -210,7 +215,7 @@ const Context = { OAuthProvider, Request, Serializable, UserRole } as const;
 namespace Context {
 	export type OAuthProvider = S.Schema.Type<typeof OAuthProvider>;
 	export type UserRole = S.Schema.Type<typeof UserRole.schema>;
-	export type CookieKey = keyof typeof _cookie;
+	export type CookieKey = (typeof Request.cookie.keys)[number];
 	export type Serializable = InstanceType<typeof Serializable>;
 	export namespace Request {
 		export type Id = (typeof Request.Id)[keyof typeof Request.Id];
