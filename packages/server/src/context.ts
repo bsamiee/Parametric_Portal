@@ -14,11 +14,12 @@ import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
 import { Data, Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, pipe, Record, Schedule, Schema as S } from 'effect';
 import * as D from 'effect/Duration';
-import { dual } from 'effect/Function';
+import { constant, dual } from 'effect/Function';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _Id = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
+const _clusterDefault: Context.Request.ClusterState = { entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null };
 const _ref = FiberRef.unsafeMake<Context.Request.Data>({
 	circuit: Option.none(),
 	cluster: Option.none(),
@@ -33,9 +34,7 @@ const _ref = FiberRef.unsafeMake<Context.Request.Data>({
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-
-// UserRole: IIFE encapsulates rank/order internals
-const UserRole = (() => {
+const UserRole = (() => {	// UserRole: IIFE encapsulates rank/order internals
 	const schema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
 	type Value = S.Schema.Type<typeof schema>;
 	const rank: Record<Value, number> = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 };
@@ -46,22 +45,17 @@ const UserRole = (() => {
 		schema,
 	} as const;
 })();
-
 // Branded types for serialization boundaries
 const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
 const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
 
 // --- [ERRORS] ----------------------------------------------------------------
 
-/** Cluster context required but not available - use when accessing cluster state outside cluster scope */
-class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<{
-	readonly operation: string;
-}> {}
+class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<{readonly operation: string;}> {} // Cluster context required but not available - use when accessing cluster state outside cluster scope
 
 // --- [SERIALIZABLE] ----------------------------------------------------------
 
-/** Schema-backed serializable context for distributed tracing propagation. */
-class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
+class Serializable extends S.Class<Serializable>('server/Context.Serializable')({	// Schema-backed serializable context for distributed tracing propagation.
 	ipAddress: S.optional(S.String),
 	requestId: S.String,
 	// Cluster fields for cross-pod trace correlation (S.optional = backward compatible)
@@ -71,21 +65,16 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 	tenantId: S.String,
 	userId: S.optional(S.String),
 }) {
-	private static readonly makeShardIdString = (shardId: ShardId.ShardId): typeof ShardIdString.Type =>
-		S.decodeSync(ShardIdString)(shardId.toString());
+	private static readonly makeShardIdString = (shardId: ShardId.ShardId): typeof ShardIdString.Type => S.decodeSync(ShardIdString)(shardId.toString());
 	static readonly fromData = (ctx: Context.Request.Data): Serializable =>
 		new Serializable({
 			ipAddress: Option.getOrUndefined(ctx.ipAddress),
 			requestId: ctx.requestId,
 			tenantId: ctx.tenantId,
-			...Option.match(ctx.session, { onNone: () => ({}), onSome: (s) => ({ sessionId: s.id, userId: s.userId }) }),
-			// Cluster fields: null → undefined for S.optional, ShardId → branded string
-			...Option.match(ctx.cluster, {
-				onNone: () => ({}),
-				onSome: (c) => ({
-					runnerId: c.runnerId ?? undefined,
-					shardId: c.shardId ? Serializable.makeShardIdString(c.shardId) : undefined,
-				}),
+			...Option.match(ctx.session, { onNone: constant({}), onSome: (s) => ({ sessionId: s.id, userId: s.userId }) }),
+			...Option.match(ctx.cluster, {	// Cluster fields: null → undefined for S.optional, ShardId → branded string
+				onNone: constant({}),
+				onSome: (c) => ({ runnerId: c.runnerId ?? undefined, shardId: c.shardId ? Serializable.makeShardIdString(c.shardId) : undefined }),
 			}),
 		});
 }
@@ -95,15 +84,12 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
 	static readonly Id = _Id;
 	static readonly current = FiberRef.get(_ref);
-	static override readonly tenantId = FiberRef.get(_ref).pipe(Effect.map((ctx) => ctx.tenantId));
-	static override readonly session = FiberRef.get(_ref).pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.die('No session - route must be protected by SessionAuth middleware'), onSome: Effect.succeed })));
+	static override readonly tenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
+	static override readonly session = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.die('No session - route must be protected by SessionAuth middleware'), onSome: Effect.succeed })));
 	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(_ref, (ctx) => ({ ...ctx, ...partial }));
 	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (ctx) => ({ ...ctx, ...partial }));
 	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId }));
-	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>
-		SqlClient.SqlClient.pipe(
-			Effect.flatMap((sql) => sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(Effect.andThen(Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId })))))),
-		);
+	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(Effect.andThen(Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId })))))),);
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({
 		circuit: Option.none(),
 		cluster: Option.none(),
@@ -115,8 +101,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		userAgent: Option.none(),
 	});
 	static readonly SystemLayer = Layer.succeed(Request, Request.system());
-	// Cookie: IIFE encapsulates secure flag and config
-	static readonly cookie = (() => {
+	static readonly cookie = (() => {	// Cookie: IIFE encapsulates secure flag and config
 		const secure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
 		const cfg = {
 			oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: D.minutes(10), path: '/api/auth/oauth', sameSite: 'lax', secure } },
@@ -130,44 +115,22 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 			set: (key: keyof typeof cfg, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, cfg[key].name, value, cfg[key].options),
 		} as const;
 	})();
-	static readonly toSerializable = FiberRef.get(_ref).pipe(Effect.map(Serializable.fromData));
-	/** Access cluster state, fails with ClusterContextRequired if not in cluster scope */
-	static readonly clusterState = FiberRef.get(_ref).pipe(
-		Effect.flatMap((ctx) => Option.match(ctx.cluster, {
-			onNone: () => Effect.fail(new ClusterContextRequired({ operation: 'cluster' })),
-			onSome: Effect.succeed,
-		})),
-	);
-	/** Shard ID: Option.none() outside entity scope */
-	static readonly shardId = FiberRef.get(_ref).pipe(
-		Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.shardId)),
-	);
-	/** Runner ID: Option.none() outside cluster scope */
-	static readonly runnerId = FiberRef.get(_ref).pipe(
-		Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.runnerId)),
-	);
-	/** Leader status: false outside cluster/singleton scope */
-	static readonly isLeader = FiberRef.get(_ref).pipe(
-		Effect.map((ctx) => Option.exists(ctx.cluster, (c) => c.isLeader)),
-	);
-	/** Create RunnerId from Snowflake (inlined helper for middleware use) */
-	static readonly makeRunnerId = (snowflake: Snowflake.Snowflake): typeof RunnerId.Type =>
-		S.decodeSync(RunnerId)(String(snowflake));
-	/** Run effect with scoped cluster context (dual: data-first and pipeable) */
+	static readonly toSerializable = Request.current.pipe(Effect.map(Serializable.fromData));
+	static readonly clusterState = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.cluster, { onNone: () => Effect.fail(new ClusterContextRequired({ operation: 'cluster' })), onSome: Effect.succeed })),);
+	static readonly shardId = Request.current.pipe(Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.shardId)));
+	static readonly runnerId = Request.current.pipe(Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.runnerId)));
+	static readonly isLeader = Request.current.pipe(Effect.map((ctx) => Option.exists(ctx.cluster, (c) => c.isLeader)));
+	static readonly makeRunnerId = (snowflake: Snowflake.Snowflake): typeof RunnerId.Type => S.decodeSync(RunnerId)(String(snowflake));
 	static readonly withinCluster: {
 		<A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>): Effect.Effect<A, E, R>;
 		(partial: Partial<Context.Request.ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 	} = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>) =>
 		Effect.locallyWith(effect, _ref, (ctx) => ({
 			...ctx,
-			cluster: Option.some({
-				...Option.getOrElse(ctx.cluster, (): Context.Request.ClusterState => ({ entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null })),
-				...partial,
-			}),
+			cluster: Option.some({ ...Option.getOrElse(ctx.cluster, constant(_clusterDefault)), ...partial }),
 		})),
 	);
-	/** Observability attributes for tracing spans. Includes all context fields formatted for OTEL. */
-	static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
+	static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>	// Observability attributes for tracing spans. Includes all context fields formatted for OTEL.
 		Record.getSomes({
 			'circuit.name': Option.map(ctx.circuit, (c) => c.name),
 			'circuit.state': Option.map(ctx.circuit, (c) => c.state),
@@ -245,10 +208,8 @@ namespace Context {
 			readonly tenantId: string;
 			readonly userAgent: Option.Option<string>;
 		}
-		/** Branded runner ID (18-19 digit snowflake) */
-		export type RunnerId = S.Schema.Type<typeof RunnerId>;
-		/** Cluster state: outer Option in Data, inner nulls avoid nesting */
-		export interface ClusterState {
+		export type RunnerId = S.Schema.Type<typeof RunnerId>;	// Branded runner ID (18-19 digit snowflake)
+		export interface ClusterState {							// Cluster state: outer Option in Data, inner nulls avoid nesting
 			readonly entityId: string | null;
 			readonly entityType: string | null;
 			readonly isLeader: boolean;

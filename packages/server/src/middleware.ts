@@ -8,6 +8,7 @@ import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddle
 import type { Hex64 } from '@parametric-portal/types/types';
 import * as ipaddr from 'ipaddr.js';
 import { Array as A, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
+import { constant } from 'effect/Function';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
@@ -44,7 +45,7 @@ const _extractClientIp = (headers: Headers.Headers, directIp: Option.Option<stri
 		directIp,
 		Option.flatMap(Option.liftThrowable(ipaddr.process)),
 		Option.map((addr) => ipaddr.subnetMatch(addr, { trusted: _trustedCidrs }, 'untrusted') === 'trusted'),
-		Option.getOrElse(() => false),
+		Option.getOrElse(constant(false)),
 	);
 	return isTrustedProxy
 		? Option.firstSomeOf([
@@ -107,8 +108,7 @@ const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Opti
 
 const makeAppLookup =
 	(db: { readonly apps: { readonly byNamespace: (ns: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> } }) =>
-	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> =>
-		db.apps.byNamespace(namespace).pipe(Effect.map(Option.map((app) => ({ id: app.id, namespace: app.namespace }))));
+	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> => db.apps.byNamespace(namespace).pipe(Effect.map(Option.map((app) => ({ id: app.id, namespace: app.namespace }))));
 const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown>) =>
 	HttpMiddleware.make((app) => Effect.gen(function* () {
 		const req = yield* HttpServerRequest.HttpServerRequest;
@@ -118,13 +118,11 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			onNone: () => Effect.succeed(Option.none<{ readonly id: string; readonly namespace: string }>()),
 			onSome: (ns) => findByNamespace(ns).pipe(Effect.orElseSucceed(Option.none)),
 		});
-		// Tenant resolution: no header → default app, header + found → app id, header + not found → unspecified (prevents cross-tenant data mixing)
-		const tenantId = Option.match(namespaceOpt, {
+		const tenantId = Option.match(namespaceOpt, {							// Tenant resolution: no header → default app, header + found → app id, header + not found → unspecified (prevents cross-tenant data mixing)
 			onNone: () => Context.Request.Id.default,
 			onSome: () => Option.match(found, { onNone: () => Context.Request.Id.unspecified, onSome: (item) => item.id }),
 		});
-		// Cluster context: graceful degradation via serviceOption (avoids startup failures)
-		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(
+		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(	// Cluster context: graceful degradation via serviceOption (avoids startup failures)
 			Effect.flatMap(Option.match({
 				onNone: () => Effect.succeed(Option.none<Context.Request.ClusterState>()),
 				onSome: (s) => s.getSnowflake.pipe(
@@ -148,27 +146,23 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			tenantId,
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
-		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: () => ({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
-		// Annotate span with runner ID for cross-pod trace correlation
-		yield* pipe(
+		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: constant({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
+		yield* pipe(	// Annotate span with runner ID for cross-pod trace correlation
 			Option.flatMapNullable(cluster, (c) => c.runnerId),
-			Option.match({
-				onNone: () => Effect.void,
-				onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id),
-			}),
+			Option.match({ onNone: constant(Effect.void), onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id) }),
 		);
 		return yield* Context.Request.within(tenantId, app.pipe(
 			Effect.provideService(Context.Request, ctx),
 			Effect.tap(() => Effect.all([
 				Effect.annotateCurrentSpan('tenant.id', tenantId),
 				Effect.annotateCurrentSpan('request.id', requestId),
-				...Option.match(namespaceOpt, { onNone: () => [], onSome: (ns) => [Effect.annotateCurrentSpan('app.namespace', ns)] }),
+				...Option.match(namespaceOpt, { onNone: constant([]), onSome: (ns) => [Effect.annotateCurrentSpan('app.namespace', ns)] }),
 			], { discard: true })),
 			Effect.annotateLogs(logAnnotations),
 			Effect.flatMap((response) => Context.Request.current.pipe(
 				Effect.map((c) => HttpServerResponse.setHeaders(response, {
 					'x-request-id': requestId,
-					...Option.match(c.circuit, { onNone: () => ({}), onSome: (circuit) => ({ 'x-circuit-state': circuit.state }) }),
+					...Option.match(c.circuit, { onNone: constant({}), onSome: (circuit) => ({ 'x-circuit-state': circuit.state }) }),
 				})),
 			)),
 		), ctx);
