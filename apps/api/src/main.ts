@@ -1,5 +1,6 @@
 /**
- * PENDING 2-STRING DOC HEADER
+ * API server entrypoint: layer composition, middleware pipeline, graceful shutdown.
+ * Architecture: Platform → Services → HTTP (3-tier, linear dependency chain).
  */
 import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
@@ -22,9 +23,10 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
+import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { ReplayGuardService } from '@parametric-portal/server/security/totp-replay';
-import { Config, Effect, Layer, ManagedRuntime } from 'effect';
+import { Config, Effect, Layer } from 'effect';
 import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
 import { HealthLive } from './routes/health.ts';
@@ -35,102 +37,64 @@ import { TelemetryRouteLive } from './routes/telemetry.ts';
 import { TransferLive } from './routes/transfer.ts';
 import { UsersLive } from './routes/users.ts';
 
-// --- [CONSTANTS] -------------------------------------------------------------
+// --- [CONFIG] ----------------------------------------------------------------
 
-const serverConfig = Effect.runSync(
-	Config.all({
-		corsOrigins: Config.string('CORS_ORIGINS').pipe(
-			Config.withDefault('*'),
-			Config.map((s) => s.split(',').map((o) => o.trim()).filter(Boolean) as ReadonlyArray<string>),
-		),
-		port: Config.number('PORT').pipe(Config.withDefault(4000)),
-	}),
-);
-const PlatformLayer = Layer.mergeAll(				// External resources (DB, S3, FileSystem, Telemetry) - no dependencies
-	Client.layer,
-	StorageAdapter.S3ClientLayer,
-	NodeFileSystem.layer,
-	Telemetry.Default,
-);
-const BaseInfraLayer = Layer.mergeAll(				// Database repos, search, pure utilities - depends on Platform
-	DatabaseService.Default,
-	SearchRepo.Default,
-	MetricsService.Default,
-	Crypto.Service.Default,
-	Context.Request.SystemLayer,
-).pipe(Layer.provideMerge(PlatformLayer));
-const CacheLayer = CacheService.Layer.pipe(			// Provides CacheService + RateLimiter
-	Layer.provideMerge(BaseInfraLayer),
-);
-const DataLayer = ReplayGuardService.Default.pipe(	// Requires CacheService (provides Redis for replay guard)
-	Layer.provideMerge(CacheLayer),
-);
-const CoreLayer = Layer.mergeAll(					// Infrastructure + Audit - depends on Data (which includes Platform)
-	StorageAdapter.Default,
-	AuditService.Default,
-).pipe(Layer.provideMerge(DataLayer));
-const AuthLayer = Layer.mergeAll(					// Auth services - depends on Core (needs AuditService)
-	MfaService.Default,
-	OAuthService.Default,
-).pipe(Layer.provideMerge(CoreLayer));
-const DomainLayer = Layer.mergeAll(					// Business logic services - depends on Auth (which includes Core + Data + Platform)
-	SessionService.Default,
-	StorageService.Default,
-	SearchService.Default,
-	JobService.Default,
-	PollingService.Default,
-).pipe(Layer.provideMerge(AuthLayer));
-// DomainLayer already includes all lower tiers via Layer.provideMerge chain
-const AppLayer = DomainLayer;
+const serverConfig = Effect.runSync(Config.all({
+	corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((s) => s.split(',').map((o) => o.trim()).filter(Boolean) as ReadonlyArray<string>)),
+	port: Config.number('PORT').pipe(Config.withDefault(4000)),
+}));
 
-// ManagedRuntime provides:
-// 1. Clean lifecycle management (dispose() for graceful shutdown)
-// 2. Testability (can create test runtime with mock layers)
-// 3. Framework integration (React, Express, etc.)
-const _AppRuntime = ManagedRuntime.make(AppLayer);	// MANAGED RUNTIME - All application services are available via AppRuntime.runPromise/runFork/etc.
+// --- [PLATFORM_LAYER] --------------------------------------------------------
+// External resources: database client, S3, filesystem, telemetry collector.
+
+const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer, NodeFileSystem.layer, Telemetry.Default);
+
+// --- [SERVICES_LAYER] --------------------------------------------------------
+// All application services in dependency order. Single provideMerge chain.
+
+const ServicesLayer = Layer.mergeAll(SessionService.Default, StorageService.Default, SearchService.Default, JobService.Default, PollingService.Default).pipe(
+	Layer.provideMerge(Layer.mergeAll(MfaService.Default, OAuthService.Default)),
+	Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
+	Layer.provideMerge(ReplayGuardService.Default),
+	Layer.provideMerge(CacheService.Layer),
+	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default)),
+	Layer.provideMerge(PlatformLayer),
+);
 
 // --- [HTTP_LAYER] ------------------------------------------------------------
+// Route handlers, auth middleware, API composition.
 
-const SessionAuthLayer = Layer.unwrapEffect(		// Session authentication middleware - Needs SessionService to validate tokens
-	SessionService.pipe(Effect.map((session) => Middleware.Auth.makeLayer((hash) => session.lookup(hash)))),
-).pipe(Layer.provide(AppLayer));
-const RouteLayer = Layer.mergeAll(					// Route handlers - All routes get access to all application services
-	AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive,
-).pipe(Layer.provide(AppLayer));
+const SessionAuthLayer = Layer.unwrapEffect(SessionService.pipe(Effect.map((session) => Middleware.Auth.makeLayer((hash) => session.lookup(hash))))).pipe(Layer.provide(ServicesLayer));
+const RouteLayer = Layer.mergeAll(AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive).pipe(Layer.provide(ServicesLayer));
 const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer));
 
 // --- [SERVER_LAYER] ----------------------------------------------------------
+// HTTP server with middleware pipeline: context → trace → security → metrics → logging.
 
-const ServerLayer = Layer.unwrapEffect(
-	Effect.gen(function* () {
-		const db = yield* DatabaseService;
-		return HttpApiBuilder.serve((app) =>
-			app.pipe(
-				Middleware.xForwardedHeaders,
-				Middleware.makeRequestContext(Middleware.makeAppLookup(db)),	// Context FIRST for tracing
-				Middleware.trace,
-				Middleware.security(),
-				Middleware.serverTiming,
-				Middleware.metrics,
-				CacheService.headers,
-				HttpMiddleware.logger,
-			),
-		).pipe(
-			Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
-			Layer.provide(ApiLayer),
-			Layer.provide(Middleware.cors(serverConfig.corsOrigins)),
-			Layer.provide(SessionAuthLayer),
-			HttpServer.withLogAddress,
-			Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
-		);
-	}),
-).pipe(Layer.provide(AppLayer));
+const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
+	const db = yield* DatabaseService;
+	return HttpApiBuilder.serve((app) => app.pipe(
+		Middleware.xForwardedHeaders,
+		Middleware.makeRequestContext(Middleware.makeAppLookup(db)),
+		Middleware.trace,
+		Middleware.security(),
+		Middleware.serverTiming,
+		Middleware.metrics,
+		CacheService.headers,
+		HttpMiddleware.logger,
+	)).pipe(
+		Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
+		Layer.provide(ApiLayer),
+		Layer.provide(Middleware.cors(serverConfig.corsOrigins)),
+		Layer.provide(SessionAuthLayer),
+		HttpServer.withLogAddress,
+		Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
+	);
+})).pipe(Layer.provide(ServicesLayer));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-NodeRuntime.runMain(
-	Effect.scoped(Layer.launch(ServerLayer)).pipe(
-		Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
-		Effect.ensuring(Effect.logInfo('Server shutdown complete')),
-	),
-);
+NodeRuntime.runMain(Effect.scoped(Layer.launch(ServerLayer)).pipe(
+	Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
+	Effect.ensuring(Effect.logInfo('Server shutdown complete')),
+));
