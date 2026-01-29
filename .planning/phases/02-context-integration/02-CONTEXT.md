@@ -14,8 +14,9 @@ Request handlers access shard ID, runner ID, and leader status via standard Cont
 ## Implementation Decisions
 
 ### Context Availability
-- Cluster context is **explicitly required** — handlers fail if cluster service unavailable
-- Use `ClusterError` with 'Unavailable' reason variant (extends Phase 1 ClusterError)
+- **Middleware**: Graceful degradation via `Effect.serviceOption` — `cluster` field is `Option.none()` when Sharding unavailable (avoids startup failures per research)
+- **Handler accessors**: `Context.Request.cluster` fails with `ClusterError('Unavailable')` when `cluster` field is `Option.none()`
+- This two-layer approach: middleware doesn't block startup, but handlers that require cluster context fail explicitly
 - Local dev runs **single-node cluster mode** — real shard assignment, not mocks
 - Tests must provide cluster context via appropriate layer
 
