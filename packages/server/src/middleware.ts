@@ -124,6 +124,7 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 		});
 		const ctx: Context.Request.Data = {
 			circuit: Option.none(),
+			cluster: Option.none(),
 			ipAddress: _extractClientIp(req.headers, req.remoteAddress),
 			rateLimit: Option.none(),
 			requestId,
