@@ -122,16 +122,9 @@ const _default: Data = {
 **When to use:** All HTTP requests that may interact with cluster
 ```typescript
 // --- [MIDDLEWARE] ------------------------------------------------------------
-import { Sharding, Snowflake } from '@effect/cluster';
+import { Sharding } from '@effect/cluster';
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
 import { Effect, Option, pipe } from 'effect';
-
-// Cluster state factory: produces ClusterState from Sharding service
-const _clusterStateFromSharding = (sharding: Sharding.Sharding) =>
-  Effect.map(sharding.getSnowflake, (snowflake): ClusterState => ({
-    ..._clusterDefault,
-    runnerId: _makeRunnerId(snowflake),
-  }));
 
 // Middleware extension (add to existing makeRequestContext)
 const makeRequestContext = (findByNamespace: Middleware.RequestContextLookup) =>
@@ -139,12 +132,13 @@ const makeRequestContext = (findByNamespace: Middleware.RequestContextLookup) =>
     const req = yield* HttpServerRequest.HttpServerRequest;
     // ... existing context population ...
 
-    // Cluster context: graceful degradation via serviceOption
-    const cluster = yield* pipe(
-      Effect.serviceOption(Sharding.Sharding),
+    // Cluster context: graceful degradation via serviceOption (inline factory)
+    const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(
       Effect.flatMap(Option.match({
         onNone: () => Effect.succeed(Option.none<ClusterState>()),
-        onSome: (sharding) => Effect.map(_clusterStateFromSharding(sharding), Option.some),
+        onSome: (s) => s.getSnowflake.pipe(
+          Effect.map((sf): Option.Option<ClusterState> => Option.some({ ..._clusterDefault, runnerId: _makeRunnerId(sf) })),
+        ),
       })),
     );
 
@@ -159,10 +153,9 @@ const makeRequestContext = (findByNamespace: Middleware.RequestContextLookup) =>
       userAgent: Headers.get(req.headers, 'user-agent'),
     };
 
-    // Span annotation: functional pipeline (no if/else)
+    // Span annotation: Option.flatMapNullable + Effect.asVoid for no-op fallback
     yield* pipe(
-      cluster,
-      Option.flatMap((c) => Option.fromNullable(c.runnerId)),
+      Option.flatMapNullable(cluster, (c) => c.runnerId),
       Option.match({
         onNone: () => Effect.void,
         onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id),
@@ -247,23 +240,18 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 **When to use:** Entity handlers that need full cluster context
 ```typescript
 // --- [ENTITY CONTEXT] --------------------------------------------------------
-import { Entity, ShardId } from '@effect/cluster';
-import { Effect, FiberRef, Option, Ref } from 'effect';
+import { Entity } from '@effect/cluster';
+import { Effect, Ref } from 'effect';
 
-// Usage in ClusterEntityLive: inline Effect.locally (no wrapper helper)
+// Usage in ClusterEntityLive: use withinCluster accessor (no inline FiberRef manipulation)
 const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
   const { entityId, entityType, shardId } = yield* Entity.CurrentAddress;
   const stateRef = yield* Ref.make(EntityState.idle());
   return {
-    process: (envelope) => Effect.locally(
+    process: (envelope) => Context.Request.withinCluster({ entityId, entityType, shardId })(
       Effect.gen(function* () {
         yield* Ref.set(stateRef, EntityState.processing());
         // Handler logic with full cluster context available via Context.Request.cluster
-      }),
-      _ref,
-      (ctx) => ({
-        ...ctx,
-        cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), entityId, entityType, shardId }),
       }),
     ),
     status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse(s))),
@@ -432,11 +420,10 @@ Answers to open questions, verified against @effect/cluster source and codebase 
 **Why:** Leadership is singleton-scoped, not request-scoped. A request may traverse multiple contexts (HTTP → entity → singleton). The context updates as scope changes via `Effect.locallyWith`.
 
 ```typescript
-// Singleton handler wraps work with leader context
-ClusterService.singleton('leader-job', Context.Request.withinCluster(
-  { isLeader: true },
-  Effect.gen(function* () { yield* leaderOnlyWork; }),
-));
+// Singleton handler wraps work with leader context (pipeable form)
+ClusterService.singleton('leader-job', Effect.gen(function* () {
+  yield* leaderOnlyWork;
+}).pipe(Context.Request.withinCluster({ isLeader: true })));
 ```
 
 ### Decision 2: ShardId Type — Official Class for Internal, Branded String for Serialization
