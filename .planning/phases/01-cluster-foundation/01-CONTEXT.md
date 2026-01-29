@@ -19,7 +19,7 @@ Scope: CLUS-01, CLUS-02 from REQUIREMENTS.md.
 - **Polymorphic approach** — Single entity type with union message types, routed via `Match.type`. Not domain-specific entity proliferation.
 - **Snowflake IDs** — Opaque Snowflake IDs for entity routing. Full context (tenant, domain) passed via `Context.Request` (Phase 2 extends this). Sharding routes by Snowflake; context carries metadata separately.
 - **Single facade** — `ClusterService` namespace merges all cluster ops (send/broadcast/singleton) under one import. Consumers use one import, not separate Entity/Sharding/Singleton.
-- **Discriminator pattern** — Claude investigates existing discriminator patterns in middleware/telemetry and chooses `Schema.TaggedRequest` vs custom discriminator based on what aligns with current codebase conventions.
+- **Discriminator pattern** — Uses `Rpc.make` with Schema.TaggedError for RPC boundary serialization. ClusterError discriminates via `error.reason` field with Match.value (11 variants).
 
 ### Error surfacing
 - **Surgical integration** — ClusterError handling follows existing patterns in `circuit.ts`, `telemetry.ts`, `metrics.ts`, `middleware.ts`, `context.ts`. No new error handling paradigm.

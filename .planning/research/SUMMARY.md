@@ -5,6 +5,11 @@
 **Researched:** 2026-01-28
 **Confidence:** HIGH
 
+> **GSD Integration:** This research directory contains cross-cutting domain knowledge.
+> For phase planning, reference specific files via `@.planning/research/{FILE}.md` in PLAN.md context sections.
+> Individual phase research ({phase}-RESEARCH.md) should focus on phase-specific patterns.
+> See: CLUSTER.md, WORKFLOW.md, RPC.md, PLATFORM-*.md, EXPERIMENTAL.md, INTEGRATION.md
+
 ## Executive Summary
 
 The Effect ecosystem provides a complete cluster-native infrastructure stack that directly addresses all 17 active requirements without hand-rolling distributed primitives. `@effect/cluster` replaces DB-locked job queues with Entity-based message dispatch, consistent-hash sharding, and advisory-lock shard ownership. `@effect/workflow` provides saga orchestration with compensation. `@effect/rpc` enables typed WebSocket communication with MsgPack serialization.

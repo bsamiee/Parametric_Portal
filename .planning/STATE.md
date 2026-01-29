@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 1 of 8 (Cluster Foundation)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-01-29 - Completed 01-03-PLAN.md
+Plan: 3 of 3 in current phase
+Status: Phase complete
+Last activity: 2026-01-29 - Phase 1 complete, all 3 plans executed
 
-Progress: [##--------] 8%
+Progress: [##--------] 12%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: 10 min
-- Total execution time: 0.33 hours
+- Total plans completed: 3
+- Average duration: 17 min
+- Total execution time: 0.83 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-cluster-foundation | 2 | 20min | 10min |
+| 01-cluster-foundation | 3 | 50min | 17min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (12min), 01-03 (8min)
-- Trend: Improving
+- Last 5 plans: 01-01 (12min), 01-02 (~30min), 01-03 (8min)
+- Trend: Stable (01-02 was larger scope)
 
 *Updated after each plan completion*
 
@@ -50,6 +50,9 @@ Recent decisions affecting current work:
 - [01-01]: Schema.TaggedError for ClusterError (RPC boundary serialization)
 - [01-01]: Single ClusterError with reason discriminant (11 variants)
 - [01-01]: Match.value(error.reason) pattern for exhaustive error handling
+- [01-02]: Dedicated PgClient for RunnerStorage (advisory lock stability)
+- [01-02]: Transport polymorphism via dispatch table (auto/socket/http/websocket)
+- [01-02]: EntityState with pendingSignal for DurableDeferred compatibility
 - [01-03]: ClusterMetrics gauges auto-provided by Sharding - no duplication needed
 - [01-03]: App-specific metrics: counters for messages/errors, histograms for latency/lifetime
 - [01-03]: trackCluster uses e.reason for error type discrimination
@@ -62,10 +65,14 @@ None yet.
 
 From research and revision feedback - must address during execution:
 
-- [Phase 1]: Advisory locks require stable DB connections - dedicated connection for RunnerStorage (now explicit criterion)
-- [Phase 1]: Entity mailbox overflow risk - set explicit `mailboxCapacity` in toLayer options
-- [Phase 1]: `preemptiveShutdown: true` required for K8s graceful shutdown
-- [Phase 1]: `ClusterError` type guards - no `instanceof` checks [ADDRESSED in 01-01]
+**Resolved in Phase 1:**
+- ~~[Phase 1]: Advisory locks require stable DB connections~~ [ADDRESSED: dedicated PgClient for RunnerStorage]
+- ~~[Phase 1]: Entity mailbox overflow risk~~ [ADDRESSED: mailboxCapacity:100 explicit]
+- ~~[Phase 1]: `preemptiveShutdown: true` for K8s~~ [ADDRESSED: configured in ShardingConfigLive]
+- ~~[Phase 1]: `ClusterError` type guards~~ [ADDRESSED: Match.value(error.reason) pattern]
+- ~~[Phase 8]: ClusterMetrics integration~~ [ADDRESSED: trackCluster utility with e.reason labeling]
+
+**Open for future phases:**
 - [Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime
 - [Phase 3]: Singleton external state must be DB-backed (not in-memory Effect state)
 - [Phase 4]: In-flight job migration during deployment - validate via staging
@@ -76,11 +83,10 @@ From research and revision feedback - must address during execution:
 - [Phase 6]: Workflow schema versioning for long-running workflows
 - [Phase 7]: RpcGroup as shared contract in packages/shared
 - [Phase 7]: RpcMiddleware.Tag for auth context (no manual header parsing)
-- [Phase 8]: ClusterMetrics must integrate with existing MetricsService.label pattern [ADDRESSED in 01-03]
 - [Phase 8]: Effect.timeout on readiness checks to prevent K8s probe failures
 
 ## Session Continuity
 
 Last session: 2026-01-29
-Stopped at: Completed 01-03-PLAN.md
+Stopped at: Phase 1 complete, ready to transition to Phase 2
 Resume file: None

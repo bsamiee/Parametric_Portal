@@ -52,34 +52,18 @@ const _run = <A, E, R>(op: string, eff: Effect.Effect<A, E, R>, cfg: Resilience.
 		return fb === undefined ? yield* t3 : yield* t3.pipe(Effect.catchIf((e): e is E | TimeoutError => !Circuit.is(e), (e) => Effect.zipRight(inc('fallbacks'), fb(e))));
 	});
 	const bulkheadTimeout = cfg.bulkheadTimeout;
-	const withBulkhead: Effect.Effect<A, Resilience.Error<E>, R> = bulkhead === undefined ? pipeline : Effect.suspend(() => {
-		const semEff = Effect.suspend(() => pipe(
-			Option.fromNullable(_sems.get(op)),
-			Option.match({
-				onNone: () => Effect.cached(Effect.makeSemaphore(bulkhead)).pipe(
-					Effect.tap((cached) => Effect.sync(() => _sems.set(op, cached))),
-				),
-				onSome: Effect.succeed,
-			}),
-		));
-		const withPermit = semEff.pipe(
-			Effect.flatten,
-			Effect.flatMap((sem) => sem.withPermits(1)(pipeline)),
-		);
-		return bulkheadTimeout === undefined ? withPermit : withPermit.pipe(Effect.timeoutFail({ duration: bulkheadTimeout, onTimeout: () => BulkheadError.of(op, bulkhead) }), Effect.tapErrorTag('BulkheadError', () => inc('bulkheadRejections')));
-	});
-	const withMemo: Effect.Effect<A, Resilience.Error<E>, R> = memoTtl === undefined ? withBulkhead : Effect.suspend(() =>
-		pipe(
-			Option.fromNullable(_memos.get(op)),
-			Option.match({
-				onNone: () => Effect.cachedWithTTL(withBulkhead, memoTtl).pipe(
-					Effect.tap((cached) => Effect.sync(() => _memos.set(op, cached as Effect.Effect<unknown, unknown, unknown>))),
-					Effect.flatten,
-				),
-				onSome: (cached) => cached as Effect.Effect<A, Resilience.Error<E>, R>,
-			}),
-		),
+	const withBulkhead: Effect.Effect<A, Resilience.Error<E>, R> = bulkhead === undefined ? pipeline : pipe(
+		Option.fromNullable(_sems.get(op)),
+		Option.match({ onNone: () => Effect.cached(Effect.makeSemaphore(bulkhead)).pipe(Effect.tap((c) => Effect.sync(() => { _sems.set(op, c); }))), onSome: Effect.succeed }),
+		Effect.flatten,
+		Effect.flatMap((sem) => sem.withPermits(1)(pipeline)),
+		(e) => bulkheadTimeout === undefined ? e : e.pipe(Effect.timeoutFail({ duration: bulkheadTimeout, onTimeout: () => BulkheadError.of(op, bulkhead) }), Effect.tapErrorTag('BulkheadError', () => inc('bulkheadRejections'))),
 	);
+	const withMemo: Effect.Effect<A, Resilience.Error<E>, R> = memoTtl === undefined ? withBulkhead : pipe(
+		Option.fromNullable(_memos.get(op)),
+		Option.match({ onNone: () => Effect.cachedWithTTL(withBulkhead, memoTtl).pipe(Effect.tap((c) => Effect.sync(() => { _memos.set(op, c); }))), onSome: Effect.succeed }),
+		Effect.flatten,
+	) as Effect.Effect<A, Resilience.Error<E>, R>;
 	return Telemetry.span(withMemo, `resilience.${op}`, { metrics: false, 'resilience.operation': op });
 };
 

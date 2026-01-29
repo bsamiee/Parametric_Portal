@@ -28,7 +28,7 @@ Foundation layer enabling distributed infrastructure.
 
 - [ ] **CLUS-01**: App deploys multi-pod with automatic shard coordination and message routing
   - Why: Zero coordination code in apps — cluster handles entity distribution automatically
-  - Uses: `NodeClusterSocket.layer({ storage: "sql" })`, `Entity.make`, `SqlMessageStorage`, `SqlRunnerStorage`
+  - Uses: `NodeClusterSocket.layer`, `Entity.make`, `SqlMessageStorage.layer`, `SqlRunnerStorage.layer` (storage via Layer.provide)
   - File: `infra/cluster.ts`
 
 - [ ] **CLUS-02**: Work claims via shard ownership instead of DB row locking
@@ -67,7 +67,8 @@ Typed domain events with reliability guarantees.
 
 - [ ] **EVNT-03**: Multi-step process automatically compensates prior steps on failure
   - Why: Distributed transactions need rollback; manual compensation logic is error-prone
-  - Uses: `Workflow.make`, `withCompensation`, `ClusterWorkflowEngine.layer`
+  - Uses: `Workflow.make`, `withCompensation`, `Workflow.addFinalizer`, `ClusterWorkflowEngine.layer`
+  - Pattern: Compensation handlers wrap in `Activity.make`; preserve Cause structure (no flattening)
   - Replaces: Manual rollback logic scattered across handlers
   - File: `infra/workflows.ts`
 
@@ -79,9 +80,15 @@ Typed domain events with reliability guarantees.
 
 - [ ] **EVNT-05**: Entity state transitions are serializable and recoverable after pod restart
   - Why: Complex lifecycles need explicit state; implicit DB column state is fragile
-  - Uses: `Machine.makeSerializable`, `Machine.procedures.make`
+  - Uses: `Machine.makeSerializable`, `Machine.procedures.make`, `KeyValueStore.layerSchema` (simple state), `Persistence.layerResult` (Exit storage with TTL)
   - Replaces: Implicit state via DB columns
   - File: Per-domain entity files
+
+- [ ] **EVNT-06**: Workflow payload schemas support backward-compatible evolution
+  - Why: Long-running workflows (days/weeks) may span schema changes
+  - Uses: `S.optional` for new fields, `S.Union` for versioned types
+  - Pattern: `S.Union(PayloadV1, PayloadV2)` accepts both versions
+  - File: Per-workflow schema definitions
 
 ### Job Processing
 
@@ -89,13 +96,14 @@ Distributed work execution replacing DB-polling queues.
 
 - [ ] **JOBS-01**: Handler processes jobs via message dispatch without DB polling
   - Why: Poll loops waste resources and add latency; Entity mailboxes provide instant dispatch
-  - Uses: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`
+  - Uses: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`, `Entity.keepAlive` (batch jobs)
   - Replaces: Poll loop, `SELECT FOR UPDATE`, semaphore in jobs.ts
   - File: `infra/jobs.ts` (gut + replace)
 
 - [ ] **JOBS-02**: Webhook delivery retries failed attempts with backoff and dead-letters undeliverable
   - Why: External endpoints fail transiently; retries with backoff prevent thundering herd
-  - Uses: `DurableQueue.worker`, `Activity.retry({ times: N })`
+  - Uses: `DurableQueue.worker`, `Activity.retry({ times: N })`, `Activity.raceAll` for timeout+fallback
+  - Pattern: Primary delivery races against dead-letter timeout; first to complete wins
   - Replaces: Custom webhook retry logic
   - File: `infra/webhooks.ts`
 
@@ -126,7 +134,7 @@ Typed bidirectional communication with cross-pod fan-out.
 
 - [ ] **WS-02**: WebSocket messages are schema-validated with typed request/response contracts
   - Why: Catches protocol errors at boundary, enables client code generation
-  - Uses: `RpcGroup.make`, `RpcSerialization.layerMsgPack`, `RpcMiddleware`
+  - Uses: `RpcGroup.make`, `RpcClient.make(RpcGroup)` (typed client), `RpcSerialization.layerMsgPack`, `RpcMiddleware`
   - Replaces: Untyped JSON message protocols
   - File: `platform/websocket.ts`
 
@@ -186,6 +194,10 @@ Explicitly excluded from this milestone.
 | Custom consensus/Raft | Cluster provides Singleton; don't hand-roll leader election |
 | Redis pub/sub for cross-pod | Cluster messaging is typed, traced, persistent — use that |
 | Manual shard management | SqlRunnerStorage handles via advisory locks automatically |
+| Custom message deduplication | Use `Rpc.make({ primaryKey })` + SqlMessageStorage |
+| Manual trace propagation | Use `HttpTraceContext.toHeaders/fromHeaders` |
+| Custom state machines | Use `Machine.makeSerializable` from @effect/experimental |
+| Manual binary serialization | Use `MsgPack.duplexSchema` or `RpcSerialization.layerMsgPack` |
 
 ---
 
@@ -221,6 +233,7 @@ Maps requirements to phases. Updated during roadmap creation.
 | EVNT-03 | Phase 6: Workflows & State Machines | Pending |
 | EVNT-04 | Phase 5: EventBus & Reliability | Pending |
 | EVNT-05 | Phase 6: Workflows & State Machines | Pending |
+| EVNT-06 | Phase 6: Workflows & State Machines | Pending |
 | JOBS-01 | Phase 4: Job Processing | Pending |
 | JOBS-02 | Phase 7: Real-Time Delivery | Pending |
 | STRM-01 | Phase 7: Real-Time Delivery | Pending |
@@ -232,8 +245,8 @@ Maps requirements to phases. Updated during roadmap creation.
 | HLTH-02 | Phase 8: Health & Observability | Pending |
 
 **Coverage:**
-- v1 requirements: 18 total
-- Mapped to phases: 18
+- v1 requirements: 19 total
+- Mapped to phases: 19
 - Unmapped: 0
 
 ---

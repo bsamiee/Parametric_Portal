@@ -12,7 +12,7 @@ Transform monorepo backend from DB-locked job queues to cluster-native infrastru
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Cluster Foundation** - Entity sharding, shard coordination, distributed locking
+- [x] **Phase 1: Cluster Foundation** - Entity sharding, shard coordination, distributed locking (completed 2026-01-29)
 - [ ] **Phase 2: Context Integration** - Request context extended with cluster state
 - [ ] **Phase 3: Singleton & Scheduling** - Leader election, cluster cron for scheduled tasks
 - [ ] **Phase 4: Job Processing** - Entity-based job dispatch replacing DB polling
@@ -27,28 +27,28 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Goal**: Multi-pod deployments coordinate automatically via cluster sharding with no application-level code. Old code adjusts to fit cluster patterns.
 **Depends on**: Nothing (first phase)
 **Requirements**: CLUS-01, CLUS-02
-**Effect APIs**: `Entity.make`, `SqlMessageStorage`, `SqlRunnerStorage`, `NodeClusterSocket.layer`, `ShardingConfig`, `preemptiveShutdown`, `ClusterError`
+**Effect APIs**: `Entity.make`, `SqlMessageStorage`, `SqlRunnerStorage`, `NodeClusterSocket.layer`, `ShardingConfig`, `ShardingConfig.layerFromEnv` (12-factor alternative), `preemptiveShutdown`, `ClusterError`, `Entity.keepAlive` (long operations)
 **Success Criteria** (what must be TRUE):
   1. Entity message sent on Pod A reaches handler on Pod B within 100ms (verifiable via telemetry span)
   2. Shard ownership persists across pod restarts without message loss (SqlRunnerStorage advisory locks hold)
   3. Work claims via shard ownership without `SELECT FOR UPDATE` patterns in codebase
   4. ClusterService exports single `const + namespace` merge under 225 LOC
   5. `preemptiveShutdown: true` configured for K8s graceful shutdown (prevents in-flight message loss)
-  6. Entity handlers implement idempotent pattern via `SqlMessageStorage.saveRequest` deduplication
+  6. Entity handlers implement idempotent pattern via `Rpc.make({ primaryKey })` (automatic deduplication)
   7. Dedicated DB connection for RunnerStorage (prevents shard lock loss from connection recycling)
   8. `ClusterError` type guards used for typed error handling (no `instanceof` checks)
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md - ClusterService facade, ClusterError, Entity schema
-- [ ] 01-02-PLAN.md - Entity layer, SQL storage backends, sharding config
-- [ ] 01-03-PLAN.md - Cluster metrics integration with MetricsService
+- [x] 01-01-PLAN.md - ClusterService facade, ClusterError, Entity schema
+- [x] 01-02-PLAN.md - Entity layer, SQL storage backends, sharding config
+- [x] 01-03-PLAN.md - Cluster metrics integration with MetricsService
 
 ### Phase 2: Context Integration
 **Goal**: Request handlers access shard ID, runner ID, and leader status via standard Context.Request pattern. Middleware populates context; handlers consume.
 **Depends on**: Phase 1
 **Requirements**: CLUS-04
-**Effect APIs**: `Sharding.getShardId`, `isEntityOnLocalRunner`, `FiberRef`, `Context.Request`
+**Effect APIs**: `Sharding.getShardId`, `isEntityOnLocalRunner`, `FiberRef`, `Context.Request`, `FileSystem.watch` (K8s ConfigMap hot-reload)
 **Success Criteria** (what must be TRUE):
   1. Handler accesses `Context.Request.cluster.shardId` with branded type (not loose string)
   2. Handler accesses `Context.Request.cluster.runnerId` for observability tagging
@@ -80,7 +80,7 @@ Plans:
 **Goal**: Jobs process via Entity mailbox dispatch with instant delivery instead of DB poll loops. Old jobs.ts gut + replace; JobService interface unchanged for consumers.
 **Depends on**: Phase 3
 **Requirements**: JOBS-01
-**Effect APIs**: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`, `MessageState`, `defectRetryPolicy`, `Schedule`, `Match.type`
+**Effect APIs**: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`, `MessageState`, `defectRetryPolicy`, `Schedule`, `Match.type`, `DurableQueue.worker` (optional workflow integration), `Entity.keepAlive` (batch jobs), `EntityResource` (per-job resources)
 **Success Criteria** (what must be TRUE):
   1. Job submission to processing latency under 50ms (no poll interval)
   2. JobService interface unchanged for existing callers (same `submit`/`schedule` API)
@@ -90,6 +90,7 @@ Plans:
   6. `defectRetryPolicy` with exponential+jitter configured via `Schedule.compose` (exponential, jitter, cap)
   7. Job result handling uses `Match.type` exhaustively (no if/else chains)
   8. Migration: existing JobService interface unchanged for consumers (drop-in replacement)
+  9. Long-running jobs use `Entity.keepAlive` to prevent eviction during processing
 **Plans**: TBD
 
 Plans:
@@ -99,7 +100,7 @@ Plans:
 **Goal**: Domain events publish reliably with at-least-once delivery and automatic deduplication. Transactional outbox via Activity.make + DurableDeferred.
 **Depends on**: Phase 4
 **Requirements**: EVNT-01, EVNT-02, EVNT-04
-**Effect APIs**: `Entity.make` for routing, `Activity.make`, `DurableDeferred`, `SqlMessageStorage.saveRequest`, `Schema.TaggedRequest`
+**Effect APIs**: `Entity.make` for routing, `Activity.make`, `DurableDeferred`, `SqlMessageStorage.saveRequest`, `Schema.TaggedRequest`, `Ndjson.pack/unpackSchema` (event streaming), `EventLog.schema` (optional event sourcing)
 **Success Criteria** (what must be TRUE):
   1. Event emitted in handler reaches all subscribers across cluster within 200ms
   2. Event publishes only after database transaction commits (no phantom events on rollback)
@@ -116,8 +117,9 @@ Plans:
 ### Phase 6: Workflows & State Machines
 **Goal**: Multi-step processes automatically compensate on failure; entity lifecycles are explicit and recoverable. All compensation logic wrapped in Activity.make. No if/else chains in state transitions.
 **Depends on**: Phase 5
-**Requirements**: EVNT-03, EVNT-05
-**Effect APIs**: `Workflow.make`, `Activity.make`, `withCompensation`, `ClusterWorkflowEngine.layer`, `Machine.makeSerializable`, `Machine.procedures.make`, `Match.type`
+**Requirements**: EVNT-03, EVNT-05, EVNT-06
+**Effect APIs**: `Workflow.make`, `Activity.make`, `withCompensation`, `Workflow.addFinalizer` (runs once on completion, not on suspend), `ClusterWorkflowEngine.layer`, `Machine.makeSerializable`, `Machine.procedures.make`, `Match.type`, `VariantSchema` (polymorphic state schemas), `Persistence.layerResult` (state snapshots with TTL)
+**Layer Composition**: ClusterWorkflowEngine.layer depends on Phase 1 ClusterLive - compose as `Layer.provide(ClusterWorkflowEngine.layer).pipe(Layer.provide(ClusterLive))`
 **Success Criteria** (what must be TRUE):
   1. Saga with 3 steps compensates steps 1-2 when step 3 fails (verified via test)
   2. Workflow state persists across pod restarts (DurableDeferred acknowledgment)
@@ -126,6 +128,8 @@ Plans:
   5. Workflow code contains no non-deterministic operations (timestamps, random via Activities)
   6. Compensation handlers MUST wrap in `Activity.make` (prevents re-execution on replay)
   7. Machine state schemas derive types via `typeof StateSchema.Type` (no separate type declarations)
+  8. Error handling preserves Cause structure (no flattening - required for `withCompensation` callbacks)
+  9. `Workflow.addFinalizer` used for cleanup on completion (not `Effect.ensuring` which runs on each suspend)
 **Plans**: TBD
 
 Plans:
@@ -135,7 +139,7 @@ Plans:
 **Goal**: Events reach connected clients in real-time regardless of which pod they connected to. RpcGroup as shared contract. MsgPack serialization for efficiency.
 **Depends on**: Phase 6
 **Requirements**: STRM-01, STRM-02, WS-01, WS-02, WS-03, JOBS-02
-**Effect APIs**: `StreamingService.sse()`, `handleRaw()`, `Socket.run`, `RpcServer.toHttpAppWebsocket`, `RpcGroup.make`, `RpcSerialization.layerMsgPack`, `RpcMiddleware.Tag`, `Sharding.broadcaster`, `DurableQueue.worker`, `Activity.retry`
+**Effect APIs**: `StreamingService.sse()`, `handleRaw()`, `Socket.run`, `Socket.toChannel` (backpressure-aware), `RpcServer.toHttpAppWebsocket`, `RpcGroup.make`, `Entity.fromRpcGroup` (shared contract), `RpcClient.make(RpcGroup)` (typed client), `RpcSerialization.layerMsgPack`, `RpcMiddleware.Tag`, `Sharding.broadcaster`, `DurableQueue.worker`, `Activity.retry`, `Entity.keepAlive` (long-lived connections)
 **Success Criteria** (what must be TRUE):
   1. SSE endpoint streams events with 30s heartbeat through proxy (connection stays alive)
   2. SSE backpressure prevents OOM on slow clients (sliding buffer verified)
@@ -147,6 +151,9 @@ Plans:
   8. `RpcSerialization.layerMsgPack` for binary efficiency (not JSON serialization)
   9. `RpcMiddleware.Tag` for auth context injection (no manual header parsing)
   10. `RpcGroup` as shared contract between server/client (packages/shared export)
+  11. `Rpc.make({ primaryKey })` for stream resumption and idempotency
+  12. RpcClientError handling integrated with ClusterError taxonomy
+  13. Long-lived WebSocket connections use `Entity.keepAlive` to prevent eviction
 **Plans**: TBD
 
 Plans:
@@ -158,7 +165,7 @@ Plans:
 **Goal**: Kubernetes can determine pod health and route traffic only to ready instances. Cluster metrics integrate with existing MetricsService pattern.
 **Depends on**: Phase 7
 **Requirements**: HLTH-01, HLTH-02
-**Effect APIs**: `Effect.all({ db, cache, cluster }, { concurrency: "unbounded" })`, `Effect.timeout`, `HttpApiGroup.make("health")`, `RunnerHealth.layerK8s`, `ClusterMetrics`, `MetricsService.label`
+**Effect APIs**: `Effect.all({ db, cache, cluster }, { concurrency: "unbounded" })`, `Effect.timeout`, `HttpApiGroup.make("health")`, `RunnerHealth.layerK8s`, `ClusterMetrics`, `MetricsService.label`, `DevTools.layer` (dev-time state inspection)
 **Success Criteria** (what must be TRUE):
   1. `/health` endpoint returns aggregate status of all dependencies with per-dependency latency
   2. `/health/live` returns 200 when process runs (liveness probe)
@@ -179,7 +186,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Cluster Foundation | 0/3 | Planning complete | - |
+| 1. Cluster Foundation | 3/3 | Complete | 2026-01-29 |
 | 2. Context Integration | 0/TBD | Not started | - |
 | 3. Singleton & Scheduling | 0/TBD | Not started | - |
 | 4. Job Processing | 0/TBD | Not started | - |
@@ -191,4 +198,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 ---
 *Roadmap created: 2026-01-28*
 *Depth: comprehensive (8 phases)*
-*Coverage: 18/18 v1 requirements mapped*
+*Coverage: 19/19 v1 requirements mapped*

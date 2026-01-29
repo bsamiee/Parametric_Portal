@@ -68,18 +68,14 @@ const make = (name: string, config: {
 	const userCallback = Option.fromNullable(config.onStateChange);
 	const metrics = config.metrics ?? true;
 	const stateTracker = { current: CircuitState[policy.state], previous: '' };
+	const _updateMetric = (m: MetricsService) => Metric.update(Metric.taggedWithLabels(m.circuit.stateChanges, MetricsService.label({ circuit: name })), stateTracker.current);
 	const disposables: IDisposable[] = [
 		policy.onStateChange((newState) => {
 			stateTracker.previous = stateTracker.current;
 			stateTracker.current = CircuitState[newState];
 			Effect.runFork(Effect.logWarning(`Circuit[${name}] state change`, { from: stateTracker.previous, to: stateTracker.current }));
 			Option.isSome(userCallback) && Effect.runFork(userCallback.value({ name, previous: stateTracker.previous, state: stateTracker.current }));
-			metrics && Effect.runFork(Effect.serviceOption(MetricsService).pipe(
-				Effect.flatMap((opt) => Option.match(opt, {
-					onNone: () => Effect.void,
-					onSome: (m) => Metric.update(Metric.taggedWithLabels(m.circuit.stateChanges, MetricsService.label({ circuit: name })), stateTracker.current),
-				})),
-			));
+			metrics && Effect.runFork(Effect.serviceOption(MetricsService).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: _updateMetric }))));
 		}),
 		policy.onSuccess(({ duration }) => Effect.runFork(Effect.logDebug(`Circuit[${name}] success`, { durationMs: duration }))),
 		policy.onFailure(({ duration, handled }) => Effect.runFork(Effect.logDebug(`Circuit[${name}] failure`, { durationMs: duration, handled }))),
@@ -100,19 +96,16 @@ const make = (name: string, config: {
 				.then((a) => resume(Effect.succeed(a)))
 				.catch((err) => resume(Effect.fail(_isCockatielError(err) ? _toCircuitError(err) : onError(err))));
 		});
+	const _circuitContext = () => Option.some({ name, state: stateTracker.current });
 	const execute = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, E | CircuitError, R> =>
-		Effect.gen(function* () {
-			yield* Context.Request.update({ circuit: Option.some({ name, state: stateTracker.current }) });
-			const runtime = yield* Effect.runtime<R>();
-			const fiberRefs = yield* Effect.getFiberRefs;
-			const runtimeWithRefs = Runtime.updateFiberRefs(runtime, () => fiberRefs);
-			const result = yield* _runViaPolicy<A, E>(
-				(signal) => Runtime.runPromise(runtimeWithRefs, eff, { signal }),
+		Context.Request.update({ circuit: _circuitContext() }).pipe(
+			Effect.zipRight(Effect.all([Effect.runtime<R>(), Effect.getFiberRefs])),
+			Effect.flatMap(([runtime, fiberRefs]) => _runViaPolicy<A, E>(
+				(signal) => Runtime.runPromise(Runtime.updateFiberRefs(runtime, () => fiberRefs), eff, { signal }),
 				(err) => err as E,
-			);
-			yield* Context.Request.update({ circuit: Option.some({ name, state: stateTracker.current }) });
-			return result;
-		});
+			)),
+			Effect.tap(() => Context.Request.update({ circuit: _circuitContext() })),
+		);
 	const instance: Circuit.Instance = {
 		dispose: () => { disposables.forEach((d) => { d.dispose(); }); (config.persist ?? true) && _registry.delete(name); },
 		execute,
