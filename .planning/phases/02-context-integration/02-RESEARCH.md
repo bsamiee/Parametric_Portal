@@ -259,12 +259,16 @@ const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
 }), { /* toLayer options */ });
 ```
 
+### Telemetry Integration
+Context accessors (`shardId`, `runnerId`, `isLeader`, `withinCluster`) are fast FiberRef operations — no `Telemetry.span` needed. Middleware population runs within the request's existing span. Follow `cluster.ts` pattern: wrap operations with `Telemetry.span` only when they have meaningful latency or failure modes (RPC calls, I/O, external services).
+
 ### Anti-Patterns to Avoid
 - **Loose string identifiers for shardId/runnerId:** Use branded types to prevent mixing with entity IDs
 - **Mandatory cluster context:** Use `Option` - not all requests traverse cluster
 - **Polling for cluster state:** Sharding.getShardId is synchronous, no need for polling
 - **Duplicating runner ID calculation:** Cache at middleware entry, propagate via FiberRef
 - **Using await in context population:** All operations must use Effect for proper fiber context
+- **Adding Telemetry.span to FiberRef ops:** Context accessors are O(1) synchronous - spans add overhead without value
 
 ## Don't Hand-Roll
 
