@@ -8,9 +8,12 @@
 
 Phase 2 extends the existing `Context.Request.Data` interface with cluster state (`shardId`, `runnerId`, `isLeader`). The codebase already has a robust FiberRef-based context system in `context.ts` and middleware population in `middleware.ts`. This phase follows the established patterns rather than inventing new ones.
 
-The key insight is that cluster context should be **optional** (`Option<ClusterState>`) since not all requests traverse cluster infrastructure. Middleware populates context at request boundaries; handlers consume via the existing `Context.Request.current` pattern. ShardId and RunnerId require branded types to prevent accidental string mixing.
+**Key Design Decisions:**
+1. **Outer Option, inner nulls**: `cluster: Option.Option<ClusterState>` where `ClusterState` uses `| null` (not nested Options)
+2. **Official ShardId class**: Use `ShardId` from @effect/cluster (implements Equal/Hash) — branded string for serialization only
+3. **RunnerId branded**: `Snowflake.toString()` result as branded string via Schema
 
-**Primary recommendation:** Extend `Context.Request.Data` with `cluster: Option.Option<ClusterState>` following the existing circuit/session pattern. Use `Sharding.getShardId` (synchronous) and `sharding.getSnowflake` (for runner identification) within middleware. Define ShardId/RunnerId as branded strings via Schema.brand.
+**Primary recommendation:** Extend `Context.Request.Data` with `cluster: Option.Option<ClusterState>` following the existing circuit/session pattern. ClusterState uses `null` (not `Option`) for internal optionality to avoid nesting. Use official `ShardId` class directly for internal state, branded strings for serialization.
 
 ## Standard Stack
 
@@ -19,14 +22,16 @@ The established libraries/tools for this domain:
 ### Core
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
-| `effect` | 3.19.15 | FiberRef, Context, Option, Schema | Foundation for all context operations |
-| `@effect/cluster` | 0.56.1 | Sharding service, EntityId, Snowflake | Cluster state access |
-| `@effect/platform` | 0.82.1 | HttpMiddleware, HttpServerRequest | Request context population |
+| `effect` | 3.19.15 | FiberRef, Context, Option, Schema, Match | Foundation for all context operations |
+| `@effect/cluster` | 0.56.0 | Sharding, ShardId, Entity, Snowflake, SocketRunner | Cluster state access |
+| `@effect/platform` | 0.94.2 | HttpMiddleware, HttpServerRequest, HttpTraceContext | Request context population |
+| `@effect/platform-node` | 0.104.1 | NodeClusterSocket, NodeSocket, NodeFileSystem | Node-specific cluster transport |
 
 ### Supporting
 | Library | Version | Purpose | When to Use |
 |---------|---------|---------|-------------|
 | `@effect/rpc` | 0.73.0 | RPC context propagation | Cross-pod trace context |
+| `@effect/workflow` | 0.16.0 | Workflow context, DurableDeferred | Activity context patterns (Phase 5+) |
 
 ### Alternatives Considered
 | Instead of | Could Use | Tradeoff |
@@ -48,172 +53,250 @@ packages/server/src/
 └── infra/cluster.ts     # EXISTS: Sharding service (Phase 1 complete)
 ```
 
-### Pattern 1: Extending Context.Request.Data
-**What:** Add optional cluster state to existing request context interface
-**When to use:** All cluster-aware request handling
-**Example:**
+### Canonical ClusterState Definition
+**What:** Single source of truth for cluster context types
+**Location:** `context.ts` (extends existing Data interface)
 ```typescript
-// Source: context.ts extension following existing pattern
+// --- [IMPORTS] ---------------------------------------------------------------
+import { ShardId, Snowflake } from '@effect/cluster';
+import { Effect, FiberRef, Option, pipe, Schema as S } from 'effect';
+
+// --- [SCHEMA] ----------------------------------------------------------------
+// Branded types for serialization boundaries only
+const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
+const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
+
+// Type extraction (no separate type declarations)
+type RunnerId = typeof RunnerId.Type;
+type ShardIdString = typeof ShardIdString.Type;
+
+// --- [CONSTRUCTORS] ----------------------------------------------------------
+// Trusted internal constructors: Schema.decodeSync validates, brand preserves
+const _makeRunnerId = (snowflake: Snowflake.Snowflake): RunnerId =>
+  S.decodeSync(RunnerId)(Snowflake.toString(snowflake));
+
+const _makeShardIdString = (shardId: ShardId): ShardIdString =>
+  S.decodeSync(ShardIdString)(shardId.toString());  // Instance method, not static
+
+// --- [STATE] -----------------------------------------------------------------
+// ClusterState: outer Option, inner nulls (avoids Option nesting)
 interface ClusterState {
-  readonly shardId: Option.Option<ShardId>;      // Branded, not loose string
-  readonly runnerId: Option.Option<RunnerId>;    // Branded, not loose string
-  readonly isLeader: boolean;                    // Singleton leadership status
-  readonly entityType: Option.Option<string>;    // If within entity handler
-  readonly entityId: Option.Option<string>;      // Specific entity instance
+  readonly shardId: ShardId | null;     // Official class with Equal/Hash
+  readonly runnerId: RunnerId | null;   // Branded string from Snowflake
+  readonly isLeader: boolean;           // Dynamic: set on singleton entry
+  readonly entityType: string | null;   // Set on entity handler entry
+  readonly entityId: string | null;     // Set on entity handler entry
 }
 
+const _clusterDefault: ClusterState = {
+  entityId: null,
+  entityType: null,
+  isLeader: false,
+  runnerId: null,
+  shardId: null,
+};
+
+// --- [CONTEXT EXTENSION] -----------------------------------------------------
+// Extend existing Data interface (alphabetical field order)
 interface Data {
-  // ... existing fields unchanged
-  readonly cluster: Option.Option<ClusterState>;
+  readonly circuit: Option.Option<Circuit>;
+  readonly cluster: Option.Option<ClusterState>;  // NEW
+  readonly ipAddress: Option.Option<string>;
+  readonly rateLimit: Option.Option<RateLimit>;
+  readonly requestId: string;
+  readonly session: Option.Option<Session>;
+  readonly tenantId: string;
+  readonly userAgent: Option.Option<string>;
 }
 
-// Default value includes cluster: Option.none()
-const _default: Context.Request.Data = {
+const _default: Data = {
   circuit: Option.none(),
   cluster: Option.none(),  // NEW
   ipAddress: Option.none(),
-  // ... rest unchanged
+  rateLimit: Option.none(),
+  requestId: crypto.randomUUID(),
+  session: Option.none(),
+  tenantId: _Id.default,
+  userAgent: Option.none(),
 };
 ```
 
-### Pattern 2: Use Official ShardId Class + Branded RunnerId
-**What:** Type-safe identifiers using official @effect/cluster types
-**When to use:** Internal cluster state (ShardId class) and serialization (branded strings)
-**Example:**
-```typescript
-// Source: @effect/cluster ShardId + existing branded pattern
-import { ShardId, Snowflake } from '@effect/cluster';
-import { Schema as S } from 'effect';
-
-// RunnerId: Snowflake as branded string (for serialization)
-const RunnerId = S.String.pipe(
-  S.pattern(/^\d{18,19}$/),  // Snowflake format: 18-19 digit bigint string
-  S.brand('RunnerId'),
-);
-type RunnerId = typeof RunnerId.Type;
-
-// ShardIdString: For Serializable class (cross-pod propagation)
-const ShardIdString = S.String.pipe(
-  S.pattern(/^[a-zA-Z0-9_-]+:\d+$/),  // "group:id" from ShardId.toString()
-  S.brand('ShardIdString'),
-);
-type ShardIdString = typeof ShardIdString.Type;
-
-// Internal constructors for trusted values from Sharding API
-const _makeRunnerId = (snowflake: Snowflake.Snowflake): RunnerId =>
-  String(snowflake) as unknown as RunnerId;
-
-// ClusterState uses official ShardId class directly (not string)
-interface ClusterState {
-  readonly shardId: ShardId | null;        // Official class, null when outside entity
-  readonly runnerId: RunnerId | null;      // Branded string from Snowflake
-  readonly isLeader: boolean;              // Set when entering singleton scope
-  readonly entityType: string | null;      // Set when entering entity handler
-  readonly entityId: string | null;        // Set when entering entity handler
-}
-```
-
-### Pattern 3: Middleware Context Population
+### Pattern: Middleware Context Population
 **What:** Populate cluster context in HTTP middleware before handlers execute
 **When to use:** All HTTP requests that may interact with cluster
-**Example:**
 ```typescript
-// Source: middleware.ts makeRequestContext extension
-const makeRequestContext = (findByNamespace: ...) =>
+// --- [MIDDLEWARE] ------------------------------------------------------------
+import { Sharding, Snowflake } from '@effect/cluster';
+import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
+import { Effect, Option, pipe } from 'effect';
+
+// Cluster state factory: produces ClusterState from Sharding service
+const _clusterStateFromSharding = (sharding: Sharding.Sharding) =>
+  Effect.map(sharding.getSnowflake, (snowflake): ClusterState => ({
+    ..._clusterDefault,
+    runnerId: _makeRunnerId(snowflake),
+  }));
+
+// Middleware extension (add to existing makeRequestContext)
+const makeRequestContext = (findByNamespace: Middleware.RequestContextLookup) =>
   HttpMiddleware.make((app) => Effect.gen(function* () {
     const req = yield* HttpServerRequest.HttpServerRequest;
     // ... existing context population ...
 
-    // Cluster context population (lazy - only if Sharding available)
-    const clusterState = yield* Effect.serviceOption(Sharding.Sharding).pipe(
+    // Cluster context: graceful degradation via serviceOption
+    const cluster = yield* pipe(
+      Effect.serviceOption(Sharding.Sharding),
       Effect.flatMap(Option.match({
         onNone: () => Effect.succeed(Option.none<ClusterState>()),
-        onSome: (sharding) => Effect.gen(function* () {
-          const snowflake = yield* sharding.getSnowflake;
-          const runnerId = _makeRunnerId(Snowflake.toString(snowflake));
-          return Option.some({
-            shardId: Option.none(),  // Set when entering entity handler
-            runnerId: Option.some(runnerId),
-            isLeader: false,  // Updated by singleton context
-            entityType: Option.none(),
-            entityId: Option.none(),
-          });
-        }),
+        onSome: (sharding) => Effect.map(_clusterStateFromSharding(sharding), Option.some),
       })),
     );
 
     const ctx: Context.Request.Data = {
-      // ... existing fields ...
-      cluster: clusterState,
+      circuit: Option.none(),
+      cluster,  // NEW
+      ipAddress: _extractClientIp(req.headers, req.remoteAddress),
+      rateLimit: Option.none(),
+      requestId,
+      session: Option.none(),
+      tenantId,
+      userAgent: Headers.get(req.headers, 'user-agent'),
     };
-    // ... rest of middleware unchanged
+
+    // Span annotation: functional pipeline (no if/else)
+    yield* pipe(
+      cluster,
+      Option.flatMap((c) => Option.fromNullable(c.runnerId)),
+      Option.match({
+        onNone: () => Effect.void,
+        onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id),
+      }),
+    );
+
+    return yield* Context.Request.within(tenantId, app.pipe(
+      Effect.provideService(Context.Request, ctx),
+    ), ctx);
   }));
 ```
 
-### Pattern 4: Handler Access via Static Methods
+### Pattern: Handler Access via Static Methods
 **What:** Expose cluster context via static methods on Context.Request class
 **When to use:** Handler code accessing cluster state
-**Example:**
 ```typescript
-// Source: context.ts Request class extension
+// --- [ACCESSORS] -------------------------------------------------------------
+import { Data, Effect, FiberRef, Option, pipe } from 'effect';
+import { ShardId } from '@effect/cluster';
+
+// Tagged error for missing cluster context (development guard)
+class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<{
+  readonly operation: string;
+}> {}
+
 class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
-  // ... existing static methods ...
+  // ... existing static methods unchanged ...
 
-  /** Access cluster state, fails if not in cluster context */
-  static readonly cluster = FiberRef.get(_ref).pipe(
-    Effect.flatMap((ctx) => Option.match(ctx.cluster, {
-      onNone: () => Effect.die('No cluster context - request not in cluster scope'),
-      onSome: Effect.succeed,
-    })),
+  /** Access cluster state, fails with tagged error if not in cluster scope */
+  static readonly cluster = pipe(
+    FiberRef.get(_ref),
+    Effect.flatMap((ctx) => pipe(
+      ctx.cluster,
+      Option.match({
+        onNone: () => Effect.fail(new ClusterContextRequired({ operation: 'cluster' })),
+        onSome: Effect.succeed,
+      }),
+    )),
   );
 
-  /** Access shard ID if available */
-  static readonly shardId = Request.cluster.pipe(
-    Effect.flatMap((c) => Option.match(c.shardId, {
-      onNone: () => Effect.succeed(Option.none<ShardId>()),
-      onSome: (id) => Effect.succeed(Option.some(id)),
-    })),
+  /** Access shard ID: Option.none() outside entity scope, Option.some(ShardId) inside */
+  static readonly shardId: Effect.Effect<Option.Option<ShardId>, never, never> = pipe(
+    FiberRef.get(_ref),
+    Effect.map((ctx) => pipe(
+      ctx.cluster,
+      Option.flatMap((c) => Option.fromNullable(c.shardId)),
+    )),
   );
 
-  /** Access runner ID for observability tagging */
-  static readonly runnerId = Request.cluster.pipe(
-    Effect.map((c) => c.runnerId),
+  /** Access runner ID: Option.none() outside cluster, Option.some(RunnerId) inside */
+  static readonly runnerId: Effect.Effect<Option.Option<RunnerId>, never, never> = pipe(
+    FiberRef.get(_ref),
+    Effect.map((ctx) => pipe(
+      ctx.cluster,
+      Option.flatMap((c) => Option.fromNullable(c.runnerId)),
+    )),
   );
 
-  /** Check leader status for conditional logic */
-  static readonly isLeader = Request.cluster.pipe(
-    Effect.map((c) => c.isLeader),
+  /** Check leader status: false outside cluster/singleton scope */
+  static readonly isLeader: Effect.Effect<boolean, never, never> = pipe(
+    FiberRef.get(_ref),
+    Effect.map((ctx) => pipe(
+      ctx.cluster,
+      Option.map((c) => c.isLeader),
+      Option.getOrElse(() => false),
+    )),
   );
+
+  /** Update cluster context within current fiber */
+  static readonly updateCluster = (partial: Partial<ClusterState>) =>
+    FiberRef.update(_ref, (ctx) => ({
+      ...ctx,
+      cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
+    }));
+
+  /** Run effect with scoped cluster context (reverts after completion) */
+  static readonly withinCluster = <A, E, R>(
+    partial: Partial<ClusterState>,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> =>
+    Effect.locallyWith(effect, _ref, (ctx) => ({
+      ...ctx,
+      cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
+    }));
 }
 ```
 
-### Pattern 5: Entity Handler Context Scoping
+### Pattern: Entity Handler Context Scoping
 **What:** Update cluster context when entering entity handler scope
 **When to use:** Entity handlers that need full cluster context
-**Example:**
 ```typescript
-// Source: cluster.ts entity layer enhancement
+// --- [ENTITY CONTEXT] --------------------------------------------------------
+import { Entity, ShardId } from '@effect/cluster';
+import { Effect, FiberRef, Option } from 'effect';
+
+// Wrap entity handler with cluster context injection
 const withEntityContext = <A, E, R>(
   entityType: string,
   entityId: string,
-  shardId: string,
+  shardId: ShardId,  // Official class, not string
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>
   Effect.locallyWith(effect, _ref, (ctx) => ({
     ...ctx,
     cluster: Option.some({
-      ...Option.getOrElse(ctx.cluster, () => ({
-        shardId: Option.none(),
-        runnerId: Option.none(),
-        isLeader: false,
-        entityType: Option.none(),
-        entityId: Option.none(),
-      })),
-      shardId: Option.some(_makeShardId(shardId)),
-      entityType: Option.some(entityType),
-      entityId: Option.some(entityId),
+      ...Option.getOrElse(ctx.cluster, () => _clusterDefault),
+      entityId,
+      entityType,
+      shardId,
     }),
   }));
+
+// Usage in ClusterEntityLive (from cluster.ts)
+const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
+  const currentAddress = yield* Entity.CurrentAddress;
+  const stateRef = yield* Ref.make(EntityState.idle());
+  return {
+    process: (envelope) => withEntityContext(
+      'Cluster',
+      currentAddress.entityId,
+      currentAddress.shardId,
+      Effect.gen(function* () {
+        // Handler logic with full cluster context available
+        yield* Ref.set(stateRef, EntityState.processing());
+        // ... process payload
+      }),
+    ),
+    status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse(s))),
+  };
+}), { /* toLayer options */ });
 ```
 
 ### Anti-Patterns to Avoid
@@ -229,15 +312,21 @@ Problems that look simple but have existing solutions:
 
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
-| Shard ID type | Branded string schema | `ShardId` class from @effect/cluster | Has Equal/Hash protocols, structural equality |
-| Shard ID calculation | Custom consistent hash | `Sharding.getShardId(entityId, group)` | Already computed, synchronous access |
-| Shard ID serialization | Custom format | `ShardId.toString()` / `fromString()` | Official bidirectional conversion |
+| Shard ID type | Branded string schema | `ShardId` class from @effect/cluster | Equal/Hash protocols, **cached instances** |
+| Shard ID calculation | Custom consistent hash | `sharding.getShardId(entityId, group)` | Synchronous, returns ShardId |
+| Shard ID serialization | Custom format | `shardId.toString()` / `ShardId.fromString()` | Instance method for stringify |
+| Shard locality check | Custom DB query | `sharding.hasShardId(shardId)` | Synchronous boolean, no I/O |
+| Entity address in handler | Manual parameter threading | `Entity.CurrentAddress` context tag | Automatically provides shardId, entityId, entityType |
+| Runner network address | Environment parsing | `Entity.CurrentRunnerAddress` | Provides host/port from cluster |
 | Runner identification | Environment variable parsing | `sharding.getSnowflake` | Cluster-assigned, globally unique |
+| Snowflake timestamp | Manual bit manipulation | `Snowflake.timestamp(sf)` / `Snowflake.toParts(sf)` | Handles epoch correctly |
 | Leader election status | DB-backed flag polling | `Singleton.make` context scope | Automatic via shard assignment |
-| Context propagation | Manual parameter threading | FiberRef.locally/locallyWith | Automatic child fiber inheritance |
+| Context propagation | Manual parameter threading | `FiberRef.locally` / `FiberRef.locallyWith` | Automatic child fiber inheritance |
 | Cross-pod serialization | Custom JSON mapping | `Schema.Class` with `fromData` | Automatic encode/decode, validation |
-| Cross-pod trace context | Manual header extraction | RPC automatic propagation | Built into @effect/rpc |
-| Request-scoped state | Context.Tag with explicit provision | FiberRef with default | No R type pollution, cleaner handlers |
+| Cross-pod trace context | Manual header extraction | `HttpTraceContext.toHeaders/fromHeaders` | W3C/B3 format support |
+| Request-scoped state | `Context.Tag` with explicit provision | FiberRef with default | No R type pollution |
+| Header manipulation | Manual string concat | `HttpServerResponse.setHeaders` | Type-safe, chainable |
+| Proxy header extraction | Custom X-Forwarded parsing | `HttpMiddleware.xForwardedHeaders` | Standard compliant |
 
 **Key insight:** The existing FiberRef-based context pattern in context.ts is the correct architecture. Cluster state is just another optional field following the established `circuit`, `session`, `rateLimit` pattern. Use `ShardId` CLASS directly (not string) for internal state — it provides structural equality and hash protocols.
 
@@ -279,170 +368,181 @@ Problems that look simple but have existing solutions:
 **How to avoid:** Fetch runner ID per-request from `sharding.getSnowflake`. The operation is fast (no I/O).
 **Warning signs:** Multiple pods reporting same runner ID in metrics
 
-## Code Examples
+### Pitfall 7: FiberRef in Workflow Activities
+**What goes wrong:** Context populated via FiberRef at workflow start is lost after suspension
+**Why it happens:** Workflow replay reconstructs from persisted state, not memory
+**How to avoid:** Capture context in workflow **payload** at submission time, not via FiberRef
+**Warning signs:** Null/default context values in resumed workflow activities
 
-Verified patterns from official sources and codebase conventions:
+## Advanced Effect APIs
 
-### Complete ClusterState Schema
+### FiberRef Advanced Patterns
 ```typescript
-// Source: context.ts following existing Schema patterns
-import { Option, Schema as S } from 'effect';
+// --- [FIBERREF ADVANCED] -----------------------------------------------------
+import { Effect, FiberRef, Option } from 'effect';
 
-// --- [SCHEMA] ----------------------------------------------------------------
+// FiberRef.locallyScoped: modification lasts for duration of Scope
+// Useful for entity handlers with explicit Scope lifecycle
+const withEntityScope = <A, E, R>(
+  partial: Partial<ClusterState>,
+  effect: Effect.Effect<A, E, R | Scope>,
+): Effect.Effect<A, E, R | Scope> =>
+  FiberRef.locallyScoped(_ref, { ..._default, cluster: Option.some({ ..._clusterDefault, ...partial }) })
+    .pipe(Effect.zipRight(effect));
 
-// Branded types for cluster identifiers
-const ShardId = S.String.pipe(S.pattern(/^shard-\d+$/), S.brand('ShardId'));
-const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
+// FiberRef.getAndUpdate: atomic get-and-update, returns old value
+static readonly markAsLeader = FiberRef.getAndUpdate(_ref, (ctx) => ({
+  ...ctx,
+  cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), isLeader: true }),
+})).pipe(Effect.map((old) => Option.flatMapNullable(old.cluster, (c) => c.isLeader)));
 
-// Internal constructors for trusted values from Sharding API
-const _makeShardId = (raw: string): typeof ShardId.Type => raw as unknown as typeof ShardId.Type;
-const _makeRunnerId = (raw: string): typeof RunnerId.Type => raw as unknown as typeof RunnerId.Type;
-
-// ClusterState interface following existing pattern
-interface ClusterState {
-  readonly shardId: Option.Option<typeof ShardId.Type>;
-  readonly runnerId: Option.Option<typeof RunnerId.Type>;
-  readonly isLeader: boolean;
-  readonly entityType: Option.Option<string>;
-  readonly entityId: Option.Option<string>;
-}
-
-// Default cluster state (used when entering entity context)
-const _clusterDefault: ClusterState = {
-  entityId: Option.none(),
-  entityType: Option.none(),
-  isLeader: false,
-  runnerId: Option.none(),
-  shardId: Option.none(),
-};
-```
-
-### Context.Request Extension
-```typescript
-// Source: context.ts Request class with cluster accessors
-class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
-  // ... existing methods unchanged ...
-
-  /** Access cluster context. Dies if not in cluster scope (development guard). */
-  static readonly cluster = FiberRef.get(_ref).pipe(
-    Effect.flatMap((ctx) => Option.match(ctx.cluster, {
-      onNone: () => Effect.die('No cluster context'),
-      onSome: Effect.succeed,
-    })),
-  );
-
-  /** Access shard ID if within entity handler. Returns Option.none() outside entity scope. */
-  static readonly shardId = FiberRef.get(_ref).pipe(
-    Effect.map((ctx) => Option.flatMap(ctx.cluster, (c) => c.shardId)),
-  );
-
-  /** Access runner ID for metrics tagging. Returns Option.none() outside cluster scope. */
-  static readonly runnerId = FiberRef.get(_ref).pipe(
-    Effect.map((ctx) => Option.flatMap(ctx.cluster, (c) => c.runnerId)),
-  );
-
-  /** Check leader status for conditional logic. Returns false outside cluster scope. */
-  static readonly isLeader = FiberRef.get(_ref).pipe(
-    Effect.map((ctx) => Option.match(ctx.cluster, {
-      onNone: () => false,
-      onSome: (c) => c.isLeader,
-    })),
-  );
-
-  /** Update cluster context within current fiber scope. */
-  static readonly updateCluster = (partial: Partial<ClusterState>) =>
-    FiberRef.update(_ref, (ctx) => ({
+// FiberRef.modify: transform value and return computed result in one atomic operation
+static readonly enterEntityScope = (entityType: string, entityId: string, shardId: ShardId) =>
+  FiberRef.modify(_ref, (ctx) => {
+    const wasInCluster = Option.isSome(ctx.cluster);
+    const newCtx = {
       ...ctx,
-      cluster: Option.some({
-        ...Option.getOrElse(ctx.cluster, () => _clusterDefault),
-        ...partial,
-      }),
-    }));
-
-  /** Run effect with scoped cluster context (reverts after). */
-  static readonly withinCluster = <A, E, R>(
-    partial: Partial<ClusterState>,
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E, R> =>
-    Effect.locallyWith(effect, _ref, (ctx) => ({
-      ...ctx,
-      cluster: Option.some({
-        ...Option.getOrElse(ctx.cluster, () => _clusterDefault),
-        ...partial,
-      }),
-    }));
-}
-```
-
-### Middleware Cluster Context Population
-```typescript
-// Source: middleware.ts makeRequestContext with cluster population
-import { Sharding, Snowflake } from '@effect/cluster';
-
-const makeRequestContext = (findByNamespace: ...) =>
-  HttpMiddleware.make((app) => Effect.gen(function* () {
-    const req = yield* HttpServerRequest.HttpServerRequest;
-    const requestId = Option.getOrElse(Headers.get(req.headers, 'x-request-id'), crypto.randomUUID);
-    // ... existing tenant/namespace resolution ...
-
-    // Cluster context: lazy initialization, graceful degradation
-    const clusterState = yield* Effect.serviceOption(Sharding.Sharding).pipe(
-      Effect.flatMap(Option.match({
-        onNone: () => Effect.succeed(Option.none<ClusterState>()),
-        onSome: (sharding) => Effect.gen(function* () {
-          const snowflake = yield* sharding.getSnowflake;
-          return Option.some({
-            entityId: Option.none(),
-            entityType: Option.none(),
-            isLeader: false,
-            runnerId: Option.some(_makeRunnerId(Snowflake.toString(snowflake))),
-            shardId: Option.none(),
-          });
-        }),
-      })),
-    );
-
-    const ctx: Context.Request.Data = {
-      circuit: Option.none(),
-      cluster: clusterState,  // NEW
-      ipAddress: _extractClientIp(req.headers, req.remoteAddress),
-      rateLimit: Option.none(),
-      requestId,
-      session: Option.none(),
-      tenantId,
-      userAgent: Headers.get(req.headers, 'user-agent'),
+      cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), entityType, entityId, shardId }),
     };
-
-    // Add cluster annotations to current span
-    yield* Option.match(clusterState, {
-      onNone: () => Effect.void,
-      onSome: (c) => Effect.all([
-        Option.match(c.runnerId, {
-          onNone: () => Effect.void,
-          onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id),
-        }),
-      ], { discard: true }),
-    });
-
-    return yield* Context.Request.within(tenantId, app.pipe(
-      Effect.provideService(Context.Request, ctx),
-      // ... rest unchanged
-    ), ctx);
-  }));
+    return [wasInCluster, newCtx] as const;  // [returnValue, newState]
+  });
 ```
+
+### Dual Pattern for Pipeable APIs
+```typescript
+// --- [DUAL PATTERN] ----------------------------------------------------------
+import { dual } from 'effect/Function';
+
+// dual enables both data-first and data-last (pipeable) signatures
+static readonly withinCluster: {
+  <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<ClusterState>): Effect.Effect<A, E, R>;
+  (partial: Partial<ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+} = dual(
+  2,
+  <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<ClusterState>): Effect.Effect<A, E, R> =>
+    FiberRef.locallyWith(_ref, (ctx) => ({
+      ...ctx,
+      cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
+    }))(effect)
+);
+
+// Usage:
+// Data-first: Context.Request.withinCluster(myEffect, { isLeader: true })
+// Data-last:  myEffect.pipe(Context.Request.withinCluster({ isLeader: true }))
+```
+
+### Option Functional Patterns
+```typescript
+// --- [OPTION PATTERNS] -------------------------------------------------------
+import { Option } from 'effect';
+
+// Option.flatMapNullable: combines flatMap + fromNullable (most common pattern)
+const runnerId = Option.flatMapNullable(ctx.cluster, (c) => c.runnerId);
+
+// Option.exists: predicate check returning boolean (no Effect wrapper)
+const isCurrentlyLeader = Option.exists(ctx.cluster, (c) => c.isLeader);
+
+// Option.contains: equality check using Equivalence
+const isInShard = (targetShardId: ShardId) =>
+  Option.flatMapNullable(ctx.cluster, (c) => c.shardId).pipe(
+    Option.containsWith(ShardId.Equivalence)(targetShardId)
+  );
+```
+
+### Match Exhaustive Patterns
+```typescript
+// --- [MATCH PATTERNS] --------------------------------------------------------
+import { Match } from 'effect';
+
+// Match.tagsExhaustive: compile-time exhaustiveness for tagged unions
+const handleClusterError = Match.type<ClusterError>().pipe(
+  Match.tagsExhaustive({
+    MailboxFull: (e) => Effect.logWarning('Backpressure needed', { entityId: e.entityId }),
+    SendTimeout: (e) => Effect.logError('SLA exceeded', { entityId: e.entityId }),
+    PersistenceError: (e) => Effect.logError('Storage failure', { cause: e.cause }),
+    // ... all other variants required at compile time
+  })
+);
+
+// Match.discriminatorsExhaustive: for non-_tag discriminant fields
+const matchByReason = Match.type<ClusterError>().pipe(
+  Match.discriminatorsExhaustive('reason')({
+    AlreadyProcessingMessage: (e) => /* ... */,
+    MailboxFull: (e) => /* ... */,
+    // ... compile-time exhaustive
+  })
+);
+```
+
+## Additional Patterns
 
 ### Observability Attributes Extension
+**What:** Extend `toAttrs` for cluster context in traces
 ```typescript
-// Source: context.ts toAttrs extension
+// --- [OBSERVABILITY] ---------------------------------------------------------
+import { FiberId, Option, pipe, Record } from 'effect';
+import { ShardId } from '@effect/cluster';
+
+// Extend existing toAttrs (add to existing Record.getSomes call)
+// Use Option.flatMapNullable for concise null-to-Option conversion
 static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
   Record.getSomes({
-    // ... existing attributes ...
-    'cluster.entity_id': Option.flatMap(ctx.cluster, (c) => c.entityId),
-    'cluster.entity_type': Option.flatMap(ctx.cluster, (c) => c.entityType),
+    // ... existing attributes unchanged ...
+    'cluster.entity_id': Option.flatMapNullable(ctx.cluster, (c) => c.entityId),
+    'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (c) => c.entityType),
     'cluster.is_leader': Option.map(ctx.cluster, (c) => String(c.isLeader)),
-    'cluster.runner_id': Option.flatMap(ctx.cluster, (c) => c.runnerId),
-    'cluster.shard_id': Option.flatMap(ctx.cluster, (c) => c.shardId),
+    'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (c) => c.runnerId),
+    'cluster.shard_id': Option.flatMapNullable(ctx.cluster, (c) => c.shardId).pipe(
+      Option.map((s) => s.toString()),  // Instance method
+    ),
   });
+```
+
+### Serializable Class Extension
+**What:** Extend existing Context.Serializable for cross-pod trace propagation
+```typescript
+// --- [SERIALIZABLE] ----------------------------------------------------------
+import { ShardId } from '@effect/cluster';
+import { Option, pipe, Schema as S } from 'effect';
+
+// Branded schemas for serialization (same as in Canonical ClusterState)
+const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
+const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
+
+// Extend existing Serializable class (add fields, preserve fromData pattern)
+class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
+  // Existing fields unchanged
+  ipAddress: S.optional(S.String),
+  requestId: S.String,
+  sessionId: S.optional(S.String),
+  tenantId: S.String,
+  userId: S.optional(S.String),
+  // NEW: Cluster fields (optional for backward compatibility)
+  runnerId: S.optional(RunnerId),
+  shardId: S.optional(ShardIdString),
+}) {
+  static readonly fromData = (ctx: Context.Request.Data): Serializable =>
+    new Serializable({
+      ipAddress: Option.getOrUndefined(ctx.ipAddress),
+      requestId: ctx.requestId,
+      tenantId: ctx.tenantId,
+      ...pipe(ctx.session, Option.match({
+        onNone: () => ({}),
+        onSome: (s) => ({ sessionId: s.id, userId: s.userId }),
+      })),
+      // NEW: Extract cluster fields (null → undefined for S.optional)
+      ...Option.match(ctx.cluster, {
+        onNone: () => ({}),
+        onSome: (c) => ({
+          runnerId: c.runnerId ?? undefined,
+          shardId: Option.flatMapNullable(Option.some(c), (x) => x.shardId).pipe(
+            Option.map((s) => S.decodeSync(ShardIdString)(s.toString())),  // Instance method
+            Option.getOrUndefined,
+          ),
+        }),
+      }),
+    });
+}
 ```
 
 ## State of the Art
@@ -465,8 +565,6 @@ Answers to open questions, verified against @effect/cluster source and codebase 
 
 ### Decision 1: Leader Status Strategy — Dynamic Update on Singleton Entry
 
-**Question:** Cache at middleware entry or check dynamically?
-
 **Resolution:** Hybrid approach following Effect patterns:
 - **runnerId**: Cached at middleware entry via `sharding.getSnowflake` (doesn't change during request)
 - **isLeader**: Dynamic — set to `true` when entering singleton handler scope via `Context.Request.withinCluster`
@@ -474,101 +572,97 @@ Answers to open questions, verified against @effect/cluster source and codebase 
 
 **Why:** Leadership is singleton-scoped, not request-scoped. A request may traverse multiple contexts (HTTP → entity → singleton). The context updates as scope changes via `Effect.locallyWith`.
 
-**Pattern:**
 ```typescript
-// In singleton handler (ClusterService.singleton)
-ClusterService.singleton('leader-job', Effect.gen(function* () {
-  yield* Context.Request.updateCluster({ isLeader: true });
-  yield* leaderOnlyWork;
-}));
+// Singleton handler wraps work with leader context
+ClusterService.singleton('leader-job', Context.Request.withinCluster(
+  { isLeader: true },
+  Effect.gen(function* () { yield* leaderOnlyWork; }),
+));
 ```
 
-### Decision 2: ShardId Type — Use Official ShardId Class, String Schema for Serialization
+### Decision 2: ShardId Type — Official Class for Internal, Branded String for Serialization
 
-**Question:** Better approach for ShardId format validation?
+**Resolution:** Use `ShardId` class directly in ClusterState, convert to branded string for serialization.
 
-**Resolution:** @effect/cluster exports `ShardId` as a CLASS with rich semantics:
+| Layer | Type | Why |
+|-------|------|-----|
+| Internal (ClusterState) | `ShardId \| null` | Equal/Hash protocols, structural equality |
+| Serialization (Serializable) | `ShardIdString` (branded) | String-safe for JSON/RPC |
+| Context field | `Option<ClusterState>` | Outer Option, inner nulls |
 
-```typescript
-// From @effect/cluster/ShardId.ts
-class ShardId {
-  readonly group: string;     // Entity group name
-  readonly id: number;        // Shard number (1 to shardsPerGroup)
-  readonly [TypeId]: TypeId;  // Unique symbol for branding
-}
-
-// Factory and conversion
-ShardId.make(group: string, id: number): ShardId
-ShardId.toString(shardId: ShardId): string    // e.g., "default:42"
-ShardId.fromString(s: string): ShardId        // Parse back
-```
-
-**Implementation:**
-- **Internal ClusterState**: Store `ShardId` class directly (implements Equal/Hash for maps/sets)
-- **Serializable class**: Convert to string via `ShardId.toString()` with branded schema
-- **Context interface**: Use `ShardId | null` (not Option — internal only, avoids Option nesting)
-
-**Branded string schema for serialization:**
-```typescript
-// For Context.Serializable cross-pod propagation
-const ShardIdString = S.String.pipe(
-  S.pattern(/^[a-zA-Z0-9_-]+:\d+$/),  // "group:id" format from ShardId.toString()
-  S.brand('ShardIdString'),
-);
-```
-
-**Why not plain string:** ShardId class has:
-- Structural equality via `Equal.symbol` (works in Effect maps/sets)
-- Hash protocol for efficient lookups
-- Type safety preventing accidental mixing with entity IDs
+**Key APIs from @effect/cluster:**
+- `ShardId.make(group, id)` — Factory
+- `ShardId.toString(shardId)` — "group:id" string
+- `ShardId.fromString(s)` — Parse back
+- `ShardId` implements `Equal`, `Hash` — Works in Effect data structures
 
 ### Decision 3: Cross-Pod Serialization — Extend Existing Serializable Class
 
-**Question:** Best dense/polymorphic solution for cross-pod context?
+**Resolution:** Extend `Context.Serializable` with optional cluster fields (backward compatible).
 
-**Resolution:** Extend the existing `Context.Serializable` class (Schema.Class pattern):
-
-```typescript
-// Source: context.ts - extend existing Serializable class
-class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
-  // Existing fields
-  ipAddress: S.optional(S.String),
-  requestId: S.String,
-  sessionId: S.optional(S.String),
-  tenantId: S.String,
-  userId: S.optional(S.String),
-  // NEW: Cluster fields (optional for backward compatibility)
-  runnerId: S.optional(S.String),      // Snowflake as string
-  shardId: S.optional(ShardIdString),  // "group:id" format
-}) {
-  static readonly fromData = (ctx: Context.Request.Data): Serializable =>
-    new Serializable({
-      // ... existing extraction ...
-      runnerId: pipe(ctx.cluster, Option.flatMap((c) => c.runnerId), Option.map(String), Option.getOrUndefined),
-      shardId: pipe(ctx.cluster, Option.flatMap((c) => c.shardId), Option.map(ShardId.toString), Option.getOrUndefined),
-    });
-}
-```
-
-**Why this approach:**
-1. **Polymorphic**: Same class handles with/without cluster fields
-2. **Backward compatible**: Optional fields — old consumers unaffected
-3. **No hand-rolling**: Uses Schema.Class automatic serialization
-4. **Dense**: Single class, not separate cluster-specific serializable
-5. **Established pattern**: Follows existing `fromData` factory method
+**What to serialize:**
+- `runnerId` — Correlation for distributed traces
+- `shardId` — Routing context for cross-pod calls
+- `traceId` / `spanId` — For workflow trace correlation (future phases)
 
 **What NOT to serialize:**
-- `isLeader`: Request-scoped flag, not meaningful across pods
-- `entityType`/`entityId`: Context-specific, changes during request lifecycle
-- Full ClusterState: Only propagate correlation identifiers (runnerId, shardId)
+- `isLeader` — Singleton-scoped, not meaningful across pods
+- `entityType`/`entityId` — Changes during request lifecycle
+
+**Properties:**
+1. **Polymorphic**: Same class handles with/without cluster fields
+2. **Backward compatible**: Optional fields — old consumers unaffected
+3. **Schema-driven**: Uses `S.Class` automatic encode/decode
+4. **Single source**: No separate cluster-specific serializable class
+
+### Decision 4: Workflow Context vs Request Context (Forward-Looking)
+
+**Context lifecycle comparison:**
+
+| Aspect | Request Context | Workflow Context |
+|--------|-----------------|------------------|
+| **Lifetime** | Single HTTP request (ms-sec) | Minutes to days (across suspensions) |
+| **Storage** | FiberRef (in-memory) | Persisted via WorkflowEngine storage |
+| **Propagation** | Automatic via FiberRef fork | Explicit via payload/executionId parameters |
+| **Serialization** | Optional (`Context.Serializable`) | **MANDATORY** for all cross-boundary types |
+
+**Key insight:** Workflow handlers cannot access `Context.Request` FiberRef directly because:
+1. Workflows may resume on different pods after suspension
+2. FiberRef state is not serialized across pod boundaries
+3. The `executionId` becomes the primary correlation key
+
+**Resolution for Phase 5+:** Capture cluster context in workflow **payload** at submission time:
+```typescript
+// At workflow submission, serialize context into payload
+const submitWorkflow = (domainPayload: DomainPayload) =>
+  Effect.gen(function* () {
+    const serializable = yield* Context.Request.toSerializable;
+    return yield* WorkflowEngine.execute(OrderWorkflow, {
+      ...domainPayload,
+      context: serializable,  // Captured at submission, available after resumption
+    });
+  });
+```
+
+**Activity context access pattern:**
+- **CORRECT:** Access context from workflow payload: `payload.context.tenantId`
+- **INCORRECT:** Access via FiberRef: `yield* Context.Request.current` (returns defaults after suspension)
 
 ## Sources
 
 ### Primary (HIGH confidence)
 - [Effect Fibers Documentation](https://effect.website/docs/concurrency/fibers/) - FiberRef semantics, fork behavior
 - [Effect Branded Types](https://effect.website/docs/code-style/branded-types/) - Schema.brand patterns
-- [Sharding.ts Source](https://github.com/Effect-TS/effect/blob/main/packages/cluster/src/Sharding.ts) - getShardId, getSnowflake APIs
+- [Sharding.ts Source](https://github.com/Effect-TS/effect/blob/main/packages/cluster/src/Sharding.ts) - getShardId, getSnowflake, hasShardId APIs
+- [ShardId.ts Source](https://github.com/Effect-TS/effect/blob/main/packages/cluster/src/ShardId.ts) - make, toString, fromString, Equal/Hash
+- [Entity.ts Source](https://github.com/Effect-TS/effect/blob/main/packages/cluster/src/Entity.ts) - CurrentAddress, CurrentRunnerAddress context tags
+- [Snowflake.ts Source](https://github.com/Effect-TS/effect/blob/main/packages/cluster/src/Snowflake.ts) - timestamp, toParts, machineId extraction
+- [HttpMiddleware.ts Source](https://effect-ts.github.io/effect/platform/HttpMiddleware.ts.html) - make, logger control, tracer filtering
+- [HttpTraceContext.ts Source](https://github.com/Effect-TS/effect/blob/main/packages/platform/src/HttpTraceContext.ts) - toHeaders/fromHeaders, W3C/B3 support
 - [FiberRef ZIO Documentation](https://zio.dev/reference/state-management/fiberref/) - Copy-on-fork semantics (Effect follows same patterns)
+- [Effect.ts API](https://effect-ts.github.io/effect/effect/Effect.ts.html) - locallyWith, serviceOption, fn patterns
+- [Workflow.ts API](https://effect-ts.github.io/effect/workflow/Workflow.ts.html) - Context propagation in workflows
+- [DurableDeferred.ts API](https://effect-ts.github.io/effect/workflow/DurableDeferred.ts.html) - Token-based cross-pod signaling
 
 ### Codebase (HIGH confidence)
 - `/packages/server/src/context.ts` - Existing FiberRef pattern, Request class, Data interface
@@ -579,6 +673,7 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 ### Secondary (MEDIUM confidence)
 - [DeepWiki Cluster Management](https://deepwiki.com/Effect-TS/effect/5.2-cluster-management) - Sharding service overview
 - [DeepWiki Fibers and Concurrency](https://deepwiki.com/Effect-TS/effect/3.1-fibers) - FiberRef propagation
+- [Effect Workflow README](https://github.com/Effect-TS/effect/blob/main/packages/workflow/README.md) - Workflow context patterns
 
 ### Tertiary (LOW confidence)
 - [Effect Cluster ETL Tutorial](https://mufraggi.eu/articles/effect-cluster-etl) - Real-world usage (limited detail)
@@ -586,10 +681,18 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 ## Metadata
 
 **Confidence breakdown:**
-- Standard stack: HIGH - All packages in catalog, APIs verified against source
+- Standard stack: HIGH - All packages in catalog, APIs verified against official docs
 - Architecture patterns: HIGH - Follows established context.ts/middleware.ts patterns
 - Pitfalls: HIGH - FiberRef semantics well-documented, verified against ZIO/Effect docs
-- Code examples: HIGH - Synthesized from existing codebase patterns
+- Code examples: HIGH - Verified against @effect/cluster, @effect/platform, effect sources
+- Don't Hand-Roll: HIGH - Verified APIs (hasShardId, CurrentAddress, flatMapNullable, etc.)
 
-**Research date:** 2026-01-29
+**Research date:** 2026-01-29 (updated with deep library research)
 **Valid until:** 2026-02-28 (30 days - stable APIs, patterns well-established)
+
+**Research agents used:**
+- @effect/cluster: ShardId class semantics, Entity.CurrentAddress, Snowflake APIs
+- @effect/platform: HttpMiddleware patterns, HttpTraceContext
+- @effect/platform-node: NodeClusterSocket layer composition
+- @effect/workflow: Context lifecycle in workflows, activity context patterns
+- Effect core: FiberRef advanced APIs, Option.flatMapNullable, Match.tagsExhaustive, dual pattern
