@@ -58,15 +58,16 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md - ClusterState schema, Context.Request extension with cluster accessors
+- [x] 02-01-PLAN.md - ClusterState schema, Context.Request extension with cluster accessors
 - [ ] 02-02-PLAN.md - Middleware cluster population, Serializable extension, observability
 
 ### Phase 3: Singleton & Scheduling
 **Goal**: Scheduled tasks and leader-only processes execute exactly once with automatic state persistence, health tracking, and dead man's switch. Not wrappers — intelligent coordination that handles state handoff across leader migrations.
 **Depends on**: Phase 2
 **Requirements**: CLUS-03
-**Effect APIs**: `Singleton.make`, `ClusterCron.make`, `Snowflake.Generator`, `skipIfOlderThan`, `KeyValueStore.layerSchema` (state persistence), `Metric.gauge` (heartbeat tracking)
+**Effect APIs**: `Singleton.make`, `ClusterCron.make`, `Snowflake.Generator`, `skipIfOlderThan`, `KeyValueStore.layerSchema` (state persistence), `Metric.gauge` (heartbeat tracking), `Context.Request.withinCluster` (Phase 2)
 **Pre-wired from Phase 1**: `ClusterService.singleton()` and `ClusterService.cron()` factory methods exist — extend with state/health capabilities
+**Pre-wired from Phase 2**: `Context.Request.withinCluster` accessor for scoped cluster context propagation
 **Success Criteria** (what must be TRUE):
   1. Cron job configured for 1-minute interval fires exactly once per minute with 3+ pods running
   2. Leader-only process migrates to surviving pod within 30 seconds after leader pod death
@@ -77,6 +78,8 @@ Plans:
   7. `ClusterService.cron()` merges Singleton + ClusterCron when schedule provided (single factory)
   8. `skipIfOlderThan` prevents accumulated job burst after downtime
   9. Snowflake IDs generated cluster-wide without collisions
+  10. Entity handlers wrap execution with `Context.Request.withinCluster({ entityId, entityType, shardId })` — downstream code accesses via `Context.Request.cluster`
+  11. Singleton handlers set `isLeader: true` via `withinCluster` on entry — `Context.Request.isLeader` returns `true` within singleton scope
 **Plans**: TBD
 
 Plans:
@@ -203,7 +206,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Cluster Foundation | 3/3 | Complete | 2026-01-29 |
-| 2. Context Integration | 0/2 | Planned | - |
+| 2. Context Integration | 1/2 | In progress | - |
 | 3. Singleton & Scheduling | 0/TBD | Not started | - |
 | 4. Job Processing | 0/TBD | Not started | - |
 | 5. EventBus & Reliability | 0/TBD | Not started | - |
