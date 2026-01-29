@@ -248,7 +248,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			readonly entityType: string;
 		},
 	): Effect.Effect<A, E, R | MetricsService> =>
-		Effect.flatMap(MetricsService, (metrics) => {
+		Effect.flatMap(MetricsService, (metrics) => { // NOSONAR S3358
 			const labels = MetricsService.label({
 				entity_type: config.entityType,
 				operation: config.operation,

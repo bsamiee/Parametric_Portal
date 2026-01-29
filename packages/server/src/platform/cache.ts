@@ -124,30 +124,23 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 				timeToLive: () => options.timeToLive ?? _Cache.defaults.ttl,
 			});
 			const registrations = new Map<string, () => void>();
-			const register = (key: K) => Effect.sync(() => pipe(
-				Option.fromNullable(registrations.get(`${options.storeId}:${PrimaryKey.value(key)}`)),
-				Option.match({
-					onNone: () => {
-						const id = `${options.storeId}:${PrimaryKey.value(key)}`;
-						const cancel = _reactivity.unsafeRegister([id], () => {
-							registrations.delete(id);
-							cancel();
-							Effect.runFork(cache.invalidate(key).pipe(Effect.ignore));
-						});
-						registrations.set(id, cancel);
-					},
-					onSome: () => undefined,
-				}),
-			));
+			const makeInvalidator = (id: string, key: K) => () => {
+				const c = registrations.get(id);
+				registrations.delete(id);
+				c?.();
+				Effect.runFork(cache.invalidate(key).pipe(Effect.ignore));
+			};
+			const register = (key: K) => {
+				const id = `${options.storeId}:${PrimaryKey.value(key)}`;
+				return Effect.sync(() => registrations.has(id) || registrations.set(id, _reactivity.unsafeRegister([id], makeInvalidator(id, key))));
+			};
 			const invalidateLocal = (storeId: string, key: string) => Effect.all([
 				_reactivity.invalidate([`${storeId}:${key}`]),
 				Effect.tryPromise(() => _redis.publish(_Cache.pubsub.channel, JSON.stringify({ key, storeId }))).pipe(Effect.timeout(Duration.seconds(2)), Effect.ignore),
 				Effect.serviceOption(MetricsService).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.evictions, MetricsService.label({ storeId })) }))),
 			], { discard: true });
-			yield* Effect.addFinalizer(() => Effect.sync(() => {
-				registrations.forEach((cancel) => { cancel(); });
-				registrations.clear();
-			}));
+			const cleanup = () => { registrations.forEach((c) => { c(); }); registrations.clear(); };
+			yield* Effect.addFinalizer(() => Effect.sync(cleanup));
 			return {
 				get: (key) => register(key).pipe(Effect.andThen(cache.get(key))),
 				invalidate: (key) => register(key).pipe(Effect.andThen(invalidateLocal(options.storeId, PrimaryKey.value(key)))),
@@ -243,7 +236,7 @@ const _rateLimit = <A, E, R>(preset: CacheService.RateLimitPreset, handler: Effe
 						MetricsService.inc(metrics.rateLimit.storeFailures, labels),
 					], { discard: true }).pipe(Effect.as({ delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window })),
 				),
-				Effect.tap((result) => Context.Request.update({ rateLimit: Option.some(result) })),
+				Effect.tap((result) => Context.Request.update({ rateLimit: Option.some(result) })), // NOSONAR S3358
 				Effect.andThen(handler),
 			);
 		}),

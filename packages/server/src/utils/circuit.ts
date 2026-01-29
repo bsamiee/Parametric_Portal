@@ -9,7 +9,8 @@ import {
 	type BrokenCircuitError, CircuitState, ConsecutiveBreaker, CountBreaker, type FailureReason, type IBackoffFactory, type IBreaker, type IDisposable, type IHalfOpenAfterBackoffContext, type IsolatedCircuitError,
 	type Policy, SamplingBreaker, type TaskCancelledError, circuitBreaker, handleAll, isBrokenCircuitError, isIsolatedCircuitError, isTaskCancelledError,
 } from 'cockatiel';
-import { Data, Duration, Effect, Match, Metric, Option, Runtime } from 'effect';
+import { Data, Duration, Effect, type FiberRefs, Match, Metric, Option, Runtime, flow, unsafeCoerce } from 'effect';
+import { constant } from 'effect/Function';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 
@@ -87,23 +88,23 @@ const make = (name: string, config: {
 		Match.orElse((e) => CircuitError.fromExecution(name, e instanceof Error ? e : new Error(String(e)))),
 	);
 	const _isCockatielError = (err: unknown): boolean => isBrokenCircuitError(err) || isTaskCancelledError(err) || isIsolatedCircuitError(err);
-	const _runViaPolicy = <A, E>(
-		fn: (signal: AbortSignal) => Promise<A>,
+	const _runViaPolicy = <A, E, R>(
+		runtime: Runtime.Runtime<R>,
+		fiberRefs: FiberRefs.FiberRefs,
+		eff: Effect.Effect<A, E, R>,
 		onError: (err: unknown) => E | CircuitError,
-	): Effect.Effect<A, E | CircuitError, never> =>
-		Effect.async<A, E | CircuitError, never>((resume, signal) => {
-			policy.execute(({ signal: policySignal }) => fn(policySignal), signal)
-				.then((a) => resume(Effect.succeed(a)))
-				.catch((err) => resume(Effect.fail(_isCockatielError(err) ? _toCircuitError(err) : onError(err))));
+	): Effect.Effect<A, E | CircuitError, never> => {
+		const mapError = (err: unknown) => _isCockatielError(err) ? _toCircuitError(err) : onError(err);
+		const runner = (ctx: { signal: AbortSignal }) => Runtime.runPromise(Runtime.updateFiberRefs(runtime, constant(fiberRefs)), eff, { signal: ctx.signal });
+		return Effect.async<A, E | CircuitError, never>((resume, signal) => {
+			policy.execute(runner, signal).then(flow(Effect.succeed<A>, resume)).catch(flow(mapError, Effect.fail, resume));
 		});
+	};
 	const _circuitContext = () => Option.some({ name, state: stateTracker.current });
 	const execute = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, E | CircuitError, R> =>
 		Context.Request.update({ circuit: _circuitContext() }).pipe(
 			Effect.zipRight(Effect.all([Effect.runtime<R>(), Effect.getFiberRefs])),
-			Effect.flatMap(([runtime, fiberRefs]) => _runViaPolicy<A, E>(
-				(signal) => Runtime.runPromise(Runtime.updateFiberRefs(runtime, () => fiberRefs), eff, { signal }),
-				(err) => err as E,
-			)),
+			Effect.flatMap(([runtime, fiberRefs]) => _runViaPolicy<A, E, R>(runtime, fiberRefs, eff, unsafeCoerce)),
 			Effect.tap(() => Context.Request.update({ circuit: _circuitContext() })),
 		);
 	const instance: Circuit.Instance = {

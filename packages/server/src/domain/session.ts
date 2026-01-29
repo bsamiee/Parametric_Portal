@@ -9,6 +9,7 @@ import { DatabaseService } from '@parametric-portal/database/repos';
 import { type Hex64, Timestamp } from '@parametric-portal/types/types';
 import type { SqlError } from '@effect/sql/SqlError';
 import { Duration, Effect, Option } from 'effect';
+import { constant, identity } from 'effect/Function';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { AuditService } from '../observe/audit.ts';
@@ -33,7 +34,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 					Crypto.pair,
 				]);
 				const sessionExpiresAt = Timestamp.expiresAtDate(Duration.toMillis(Context.Request.config.durations.session));
-				const verifiedAt = mfaPending ? Option.none<Date>() : Option.some(new Date());
+				const verifiedAt = mfaPending ? Option.none<Date>() : Option.some(new Date(Timestamp.nowSync())); // NOSONAR S3358
 				yield* withTx(Effect.all([
 					db.sessions.insert({
 						deletedAt: Option.none(),
@@ -71,51 +72,45 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 				], { discard: true });
 				return result;
 			}), 'session.login');
+		const invalidTokenError = constant(HttpError.Auth.of('Invalid refresh token'));
+		const userNotFoundError = constant(HttpError.Auth.of('User no longer exists'));
 		const refresh = (hash: Hex64) =>			// Rotate tokens: validate refresh hash, check current MFA state, revoke old, create new (atomic). Emits auth.refreshes metric.
 			Telemetry.span(Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
+				const tenantId = yield* Context.Request.tenantId;
 				const refreshed = yield* db.withTransaction(Effect.gen(function* () {
-					const token = yield* db.refreshTokens.byHashForUpdate(hash).pipe(
-						Effect.flatMap(Option.match({
-							onNone: () => Effect.fail(HttpError.Auth.of('Invalid refresh token')),
-							onSome: Effect.succeed,
-						})),
-					);
-					yield* db.users.one([{ field: 'id', value: token.userId }]).pipe(
-						Effect.flatMap(Option.match({
-							onNone: () => Effect.fail(HttpError.Auth.of('User no longer exists')),
-							onSome: () => Effect.void,
-						})),
-					);
+					const tokenOpt = yield* db.refreshTokens.byHashForUpdate(hash);
+					const token = Option.getOrThrowWith(tokenOpt, invalidTokenError);
+					const userOpt = yield* db.users.one([{ field: 'id', value: token.userId }]);
+					Option.getOrThrowWith(userOpt, userNotFoundError);
 					const mfaPending = yield* mfa.isEnabled(token.userId);	// Fail-closed: MFA status must be known
 					yield* db.refreshTokens.softDelete(token.id);
-					const result = yield* create(token.userId, mfaPending, (eff) => eff);
+					const result = yield* create(token.userId, mfaPending, identity);
 					return { mfaPending, result, userId: token.userId };
 				}));
 				yield* Effect.all([
-					MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					MetricsService.inc(metrics.auth.refreshes, MetricsService.label({ tenant: tenantId }), 1),
 					audit.log('Session.refresh', { details: { mfaPending: refreshed.mfaPending }, subjectId: refreshed.userId }),
 				], { discard: true });
 				return { ...refreshed.result, userId: refreshed.userId };
 			}).pipe(Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Auth.of('Token refresh failed', e))), 'session.refresh');
 		const revoke = (sessionId: string) =>	// Revoke single session. Emits auth.logouts metric.
 			Telemetry.span(Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
+				const tenantId = yield* Context.Request.tenantId;
 				yield* db.sessions.softDelete(sessionId);
 				yield* Effect.all([
-					MetricsService.inc(metrics.auth.logouts, MetricsService.label({ tenant: ctx.tenantId }), 1),
+					MetricsService.inc(metrics.auth.logouts, MetricsService.label({ tenant: tenantId }), 1),
 					audit.log('Session.revoke', { subjectId: sessionId }),
 				], { discard: true });
 			}).pipe(Effect.mapError((e) => HttpError.Internal.of('Session revocation failed', e))), 'session.revoke');
 		const revokeAll = (userId: string) =>	// Revoke all sessions and refresh tokens for user atomically. Emits auth.logouts metric.
 			Telemetry.span(Effect.gen(function* () {
-				const ctx = yield* Context.Request.current;
+				const tenantId = yield* Context.Request.tenantId;
 				yield* db.withTransaction(Effect.all([
 					db.sessions.softDeleteByUser(userId),
 					db.refreshTokens.softDeleteByUser(userId),
 				], { discard: true }));
 				yield* Effect.all([
-					MetricsService.inc(metrics.auth.logouts, MetricsService.label({ bulk: 'true', tenant: ctx.tenantId }), 1),
+					MetricsService.inc(metrics.auth.logouts, MetricsService.label({ bulk: 'true', tenant: tenantId }), 1),
 					audit.log('Session.revokeAll', { details: { bulk: true }, subjectId: userId }),
 				], { discard: true });
 			}).pipe(Effect.mapError((e) => HttpError.Internal.of('Bulk session revocation failed', e))), 'session.revokeAll');
@@ -126,7 +121,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 					Effect.mapError((e) => HttpError.Internal.of('Session verification update failed', e)),
 				)),
 				Effect.tap(() => audit.log('Session.verifyMfa', { details: { userId }, subjectId: sessionId })),
-				Effect.map(() => ({ success: true as const, verifiedAt: new Date() })),
+				Effect.map(() => ({ success: true as const, verifiedAt: new Date(Timestamp.nowSync()) })),
 				Telemetry.span('session.verifyMfa'),
 			);
 		const recoverMfa = (sessionId: string, userId: string, code: string) =>	// Use backup code and mark session as verified. Delegates verification to MfaService (which handles mfa.recoveryUsed metric).
@@ -135,7 +130,7 @@ class SessionService extends Effect.Service<SessionService>()('server/SessionSer
 					Effect.mapError((e) => HttpError.Internal.of('Session verification update failed', e)),
 				)),
 				Effect.tap(() => audit.log('Session.recoverMfa', { details: { userId }, subjectId: sessionId })),
-				Effect.map((result) => ({ ...result, verifiedAt: new Date() })),
+				Effect.map((result) => ({ ...result, verifiedAt: new Date(Timestamp.nowSync()) })),
 				Telemetry.span('session.recoverMfa'),
 			);
 		const lookup = (hash: Hex64) =>	// Lookup session by token hash. For middleware authentication. Touches session activity, checks MFA state (cached), fails silently on errors.

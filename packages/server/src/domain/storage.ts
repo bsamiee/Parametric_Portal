@@ -3,7 +3,8 @@
  * Wraps raw StorageAdapter with automatic audit logging for mutating operations.
  * Polymorphic API mirrors StorageAdapter: single/batch determined by input shape.
  */
-import { Array as A, Effect, Match, Option, pipe, Predicate, Record, type Stream } from 'effect';
+import { Array as A, Effect, Match, Number as N, Option, pipe, Predicate, Record, Struct, type Stream } from 'effect';
+import { constant } from 'effect/Function';
 import { AuditService } from '../observe/audit.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 import { StorageAdapter } from '../infra/storage.ts';
@@ -14,22 +15,18 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 	effect: Effect.gen(function* () {
 		const storage = yield* StorageAdapter;
 		const audit = yield* AuditService;
+		const _sizeFromResult = (result: unknown) => Match.value(result).pipe(
+			Match.when(Predicate.isRecord, (r) => pipe(
+				Record.get(r as Record<string, unknown>, 'size'),
+				Option.filter(Predicate.isNumber), // NOSONAR S3358
+				Option.match({ onNone: constant({}), onSome: (size) => ({ size }) }),
+			)),
+			Match.orElse(constant({})),
+		);
 		const _traced = <O>(name: string, op: Effect.Effect<O, unknown>, event: string, details: Record<string, unknown>, subjectId: string) =>
 			pipe(
 				op,
-				Effect.tap((result) => Effect.all([
-					audit.log(event, { details: {
-						...details,
-						...Match.value(result).pipe(
-							Match.when(Predicate.isRecord, (r) => pipe(
-								Record.get(r as Record<string, unknown>, 'size'),
-								Option.filter(Predicate.isNumber),
-								Option.match({ onNone: () => ({}), onSome: (size) => ({ size }) }),
-							)),
-							Match.orElse(() => ({})),
-						),
-					}, subjectId }),
-				], { discard: true })),
+				Effect.tap((result) => audit.log(event, { details: { ...details, ..._sizeFromResult(result) }, subjectId })),
 				Telemetry.span(`storageDomain.${name}`),
 			);
 		const _tracedVoid = (name: string, op: Effect.Effect<void, unknown>, event: string, details: Record<string, unknown>, subjectId: string) =>
@@ -44,13 +41,15 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 		function put(input: readonly StorageAdapter.PutInput[]): Effect.Effect<readonly StorageAdapter.PutResult[], unknown>;
 		function put(input: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): Effect.Effect<StorageAdapter.PutResult | readonly StorageAdapter.PutResult[], unknown> {
 			return Match.value(input).pipe(
-				Match.when((v: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): v is readonly StorageAdapter.PutInput[] => Array.isArray(v), (items) => pipe(
-					storage.put(items),
-					Effect.tap((results) => Effect.all([
-						audit.log('Storage.upload', { details: { count: items.length, keys: items.map((i) => i.key), totalSize: results.reduce((acc, r) => acc + r.size, 0) }, subjectId: pipe(A.head(items), Option.map((i) => i.key), Option.getOrUndefined) }),
-					], { discard: true })),
-					Telemetry.span('storageDomain.put.batch'),
-				)),
+				Match.when((v: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): v is readonly StorageAdapter.PutInput[] => Array.isArray(v), (items) => {
+					const keys = pipe(items, A.map(Struct.get('key')));
+					const subjectId = pipe(A.head(keys), Option.getOrUndefined);
+					return pipe(
+						storage.put(items),
+						Effect.tap((results) => audit.log('Storage.upload', { details: { count: items.length, keys, totalSize: pipe(results, A.map(Struct.get('size')), N.sumAll) }, subjectId })),
+						Telemetry.span('storageDomain.put.batch'),
+					);
+				}),
 				Match.orElse((item) => _traced('put', storage.put(item), 'Storage.upload', { contentType: item.contentType, key: item.key }, item.key)),
 			);
 		}
@@ -66,13 +65,15 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 		function copy(input: readonly StorageAdapter.CopyInput[]): Effect.Effect<readonly StorageAdapter.CopyResult[], unknown>;
 		function copy(input: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): Effect.Effect<StorageAdapter.CopyResult | readonly StorageAdapter.CopyResult[], unknown> {
 			return Match.value(input).pipe(
-				Match.when((v: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): v is readonly StorageAdapter.CopyInput[] => Array.isArray(v), (items) => pipe(
-					storage.copy(items),
-					Effect.tap(() => Effect.all([
-						audit.log('Storage.copy', { details: { copies: items.map((i) => ({ dest: i.destKey, source: i.sourceKey })), count: items.length }, subjectId: pipe(A.head(items), Option.map((i) => i.destKey), Option.getOrUndefined) }),
-					], { discard: true })),
-					Telemetry.span('storageDomain.copy.batch'),
-				)),
+				Match.when((v: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): v is readonly StorageAdapter.CopyInput[] => Array.isArray(v), (items) => {
+					const copies = pipe(items, A.map((i) => ({ dest: i.destKey, source: i.sourceKey })));
+					const subjectId = pipe(A.head(items), Option.map(Struct.get('destKey')), Option.getOrUndefined);
+					return pipe(
+						storage.copy(items),
+						Effect.tap(() => audit.log('Storage.copy', { details: { copies, count: items.length }, subjectId })),
+						Telemetry.span('storageDomain.copy.batch'),
+					);
+				}),
 				Match.orElse((item) => _traced('copy', storage.copy(item), 'Storage.copy', { destKey: item.destKey, sourceKey: item.sourceKey }, item.destKey)),
 			);
 		}

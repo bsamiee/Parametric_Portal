@@ -20,48 +20,51 @@ class BulkheadError extends Data.TaggedError('BulkheadError')<{ readonly operati
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _cfg = {
-	defaults: { bulkhead: 10, hedgeDelay: Duration.millis(100), threshold: 5, timeout: Duration.seconds(30) },
-	nonRetriable: new Set(['Auth', 'Conflict', 'Forbidden', 'Gone', 'NotFound', 'RateLimit', 'TimeoutError', 'Validation']),
-	schedules: (<const T extends Record<string, Schedule.Schedule<unknown, unknown, never>>>(t: T) => ({ ...t, true: t['default'] }))({ 	// NOSONAR S3358
-		default: Schedule.exponential(Duration.millis(100), 2).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3)), Schedule.upTo(Duration.seconds(10))),
-		fast: Schedule.exponential(Duration.millis(50), 1.5).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(2)), Schedule.upTo(Duration.seconds(2))),
-		slow: Schedule.exponential(Duration.millis(500), 2).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(5)), Schedule.upTo(Duration.seconds(30))),
-	}),
-} as const;
-const _sems = new Map<string, Effect.Effect<Effect.Semaphore>>();
-const _memos = new Map<string, Effect.Effect<unknown, unknown, unknown>>();
+const _config = (() => {
+	const mkSchedules = <const T extends Record<string, Schedule.Schedule<unknown, unknown, never>>>(t: T) => ({ ...t, true: t['default'] });
+	return {
+		defaults: { bulkhead: 10, hedgeDelay: Duration.millis(100), threshold: 5, timeout: Duration.seconds(30) },
+		memos: new Map<string, Effect.Effect<unknown, unknown, unknown>>(),
+		nonRetriable: new Set(['Auth', 'Conflict', 'Forbidden', 'Gone', 'NotFound', 'RateLimit', 'TimeoutError', 'Validation']) as ReadonlySet<string>,
+		schedules: mkSchedules({
+			default: Schedule.exponential(Duration.millis(100), 2).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3)), Schedule.upTo(Duration.seconds(10))),
+			fast: Schedule.exponential(Duration.millis(50), 1.5).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(2)), Schedule.upTo(Duration.seconds(2))),
+			slow: Schedule.exponential(Duration.millis(500), 2).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(5)), Schedule.upTo(Duration.seconds(30))),
+		}),
+		sems: new Map<string, Effect.Effect<Effect.Semaphore>>(),
+	} as const;
+})();
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _run = <A, E, R>(op: string, eff: Effect.Effect<A, E, R>, cfg: Resilience.Config<A, E, R> = {}): Effect.Effect<A, Resilience.Error<E>, R> => {
-	const timeout = cfg.timeout === false ? undefined : (cfg.timeout ?? _cfg.defaults.timeout);
-	const schedule = Match.value(cfg.retry).pipe(Match.when(false, () => undefined), Match.when(Match.string, (k) => _cfg.schedules[k]), Match.when(true, () => _cfg.schedules.default), Match.when(undefined, () => _cfg.schedules.default), Match.orElse((s) => s));
+	const timeout = cfg.timeout === false ? undefined : (cfg.timeout ?? _config.defaults.timeout);
+	const schedule = Match.value(cfg.retry).pipe(Match.when(false, () => undefined), Match.when(Match.string, (k) => _config.schedules[k]), Match.when(true, () => _config.schedules.default), Match.when(undefined, () => _config.schedules.default), Match.orElse((s) => s));
 	const circuitName = cfg.circuit === false ? undefined : (cfg.circuit ?? op);
-	const threshold = cfg.threshold ?? _cfg.defaults.threshold;
+	const threshold = cfg.threshold ?? _config.defaults.threshold;
 	const bulkhead = cfg.bulkhead === false ? undefined : cfg.bulkhead;
-	const hedge = Match.value(cfg.hedge).pipe(Match.when(false, () => undefined), Match.when(Match.number, (n) => ({ attempts: Math.max(2, n), delay: _cfg.defaults.hedgeDelay })), Match.orElse((h) => h));
+	const hedge = Match.value(cfg.hedge).pipe(Match.when(false, () => undefined), Match.when(Match.number, (n) => ({ attempts: Math.max(2, n), delay: _config.defaults.hedgeDelay })), Match.orElse((h) => h));
 	const memoTtl = cfg.memoize === true ? Duration.minutes(5) : cfg.memoize;
 	const inc = (k: keyof MetricsService['resilience']) => Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({ onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.resilience[k], MetricsService.label({ operation: op })) }));
 	const pipeline: Effect.Effect<A, Resilience.Error<E>, R> = Effect.gen(function* () {
 		const t0: Effect.Effect<A, E | TimeoutError, R> = timeout === undefined ? eff : eff.pipe(Effect.timeoutFail({ duration: timeout, onTimeout: () => TimeoutError.of(op, timeout) }), Effect.tapErrorTag('TimeoutError', () => inc('timeouts')));
 		const t1 = hedge === undefined ? t0 : Effect.raceAll(Array.from({ length: hedge.attempts }, (_, i) => Effect.tapBoth(i === 0 ? t0 : Effect.delay(t0, Duration.times(hedge.delay, i)), { onFailure: () => Effect.void, onSuccess: () => i > 0 ? inc('hedges') : Effect.void })));
-		const t2 = schedule === undefined ? t1 : t1.pipe(Effect.tapError(() => inc('retries')), Effect.retry({ schedule, while: (e) => !_cfg.nonRetriable.has((e as { _tag?: string })?._tag ?? '') }));
+		const t2 = schedule === undefined ? t1 : t1.pipe(Effect.tapError(() => inc('retries')), Effect.retry({ schedule, while: (e) => !_config.nonRetriable.has((e as { _tag?: string })?._tag ?? '') }));
 		const t3: Effect.Effect<A, Resilience.Error<E>, R> = circuitName === undefined ? t2 : Circuit.make(circuitName, { breaker: { _tag: 'consecutive', threshold } }).execute(t2).pipe(Effect.catchIf((e) => Circuit.is(e, 'Cancelled'), Effect.die));
 		const fb = cfg.fallback;
 		return fb === undefined ? yield* t3 : yield* t3.pipe(Effect.catchIf((e): e is E | TimeoutError => !Circuit.is(e), (e) => Effect.zipRight(inc('fallbacks'), fb(e))));
 	});
 	const bulkheadTimeout = cfg.bulkheadTimeout;
 	const withBulkhead: Effect.Effect<A, Resilience.Error<E>, R> = bulkhead === undefined ? pipeline : pipe(
-		Option.fromNullable(_sems.get(op)),
-		Option.match({ onNone: () => Effect.cached(Effect.makeSemaphore(bulkhead)).pipe(Effect.tap((c) => Effect.sync(() => { _sems.set(op, c); }))), onSome: Effect.succeed }),
+		Option.fromNullable(_config.sems.get(op)),
+		Option.match({ onNone: () => Effect.cached(Effect.makeSemaphore(bulkhead)).pipe(Effect.tap((c) => Effect.sync(() => { _config.sems.set(op, c); }))), onSome: Effect.succeed }),
 		Effect.flatten,
 		Effect.flatMap((sem) => sem.withPermits(1)(pipeline)),
 		(e) => bulkheadTimeout === undefined ? e : e.pipe(Effect.timeoutFail({ duration: bulkheadTimeout, onTimeout: () => BulkheadError.of(op, bulkhead) }), Effect.tapErrorTag('BulkheadError', () => inc('bulkheadRejections'))),
 	);
 	const withMemo: Effect.Effect<A, Resilience.Error<E>, R> = memoTtl === undefined ? withBulkhead : pipe(
-		Option.fromNullable(_memos.get(op)),
-		Option.match({ onNone: () => Effect.cachedWithTTL(withBulkhead, memoTtl).pipe(Effect.tap((c) => Effect.sync(() => { _memos.set(op, c); }))), onSome: Effect.succeed }),
+		Option.fromNullable(_config.memos.get(op)),
+		Option.match({ onNone: () => Effect.cachedWithTTL(withBulkhead, memoTtl).pipe(Effect.tap((c) => Effect.sync(() => { _config.memos.set(op, c); }))), onSome: Effect.succeed }),
 		Effect.flatten,
 	) as Effect.Effect<A, Resilience.Error<E>, R>;
 	return Telemetry.span(withMemo, `resilience.${op}`, { metrics: false, 'resilience.operation': op });
@@ -82,10 +85,10 @@ const Resilience: Resilience = Object.assign(
 		Bulkhead: BulkheadError,
 		Circuit: Circuit.Error,
 		current: Circuit.current,
-		defaults: _cfg.defaults,
+		defaults: _config.defaults,
 		is: ((err: unknown, tag?: 'BulkheadError' | 'CircuitError' | 'TimeoutError') => Match.value(tag).pipe(Match.when('BulkheadError', () => err instanceof BulkheadError), Match.when('CircuitError', () => Circuit.is(err)), Match.when('TimeoutError', () => err instanceof TimeoutError), Match.orElse(() => err instanceof BulkheadError || Circuit.is(err) || err instanceof TimeoutError))) as Resilience['is'],
 		run: _run,
-		schedules: _cfg.schedules,
+		schedules: _config.schedules,
 		Timeout: TimeoutError,
 	},
 );
@@ -97,10 +100,10 @@ interface Resilience {
 	readonly Bulkhead: typeof BulkheadError;
 	readonly Circuit: typeof Circuit.Error;
 	readonly current: typeof Circuit.current;
-	readonly defaults: typeof _cfg.defaults;
+	readonly defaults: typeof _config.defaults;
 	readonly is: { (err: unknown): err is Resilience.Error<unknown>; (err: unknown, tag: 'BulkheadError'): err is BulkheadError; (err: unknown, tag: 'CircuitError'): err is Circuit.Error; (err: unknown, tag: 'TimeoutError'): err is TimeoutError };
 	readonly run: typeof _run;
-	readonly schedules: typeof _cfg.schedules;
+	readonly schedules: typeof _config.schedules;
 	readonly Timeout: typeof TimeoutError;
 }
 namespace Resilience {
@@ -108,7 +111,7 @@ namespace Resilience {
 	export type BulkheadError = InstanceType<typeof BulkheadError>;
 	export type CircuitError = Circuit.Error;
 	export type Error<E> = E | TimeoutError | BulkheadError | CircuitError;
-	export type RetryMode = keyof typeof _cfg.schedules | boolean;
+	export type RetryMode = keyof typeof _config.schedules | boolean;
 	export type Config<A = unknown, E = unknown, R = unknown> = {
 		readonly bulkhead?: number | false;
 		readonly bulkheadTimeout?: Duration.Duration;

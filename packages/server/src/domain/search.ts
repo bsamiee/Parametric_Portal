@@ -12,6 +12,7 @@
  */
 import { SearchRepo } from '@parametric-portal/database/search';
 import { Effect, Option, pipe } from 'effect';
+import { constant } from 'effect/Function';
 import { Context } from '../context.ts';
 import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -24,6 +25,7 @@ class SearchService extends Effect.Service<SearchService>()('server/Search', {
 		const searchRepo = yield* SearchRepo;
 		const audit = yield* AuditService;
 		const metrics = yield* MetricsService;
+		const _userId = (ctx: Context.Request.Data, fallback: string) => pipe(ctx.session, Option.map((s) => s.userId), Option.getOrElse(constant(fallback)));
 		const query = (
 			options: {
 				readonly embedding?: readonly number[];
@@ -38,7 +40,7 @@ class SearchService extends Effect.Service<SearchService>()('server/Search', {
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-				const userId = pipe(ctx.session, Option.map((s) => s.userId), Option.getOrElse(() => 'anonymous'));
+				const userId = _userId(ctx, 'anonymous');
 				const result = yield* searchRepo.search({ ...options, scopeId }, pagination);
 				yield* Effect.all([
 					audit.log('Search.query', {
@@ -53,7 +55,7 @@ class SearchService extends Effect.Service<SearchService>()('server/Search', {
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-				const userId = pipe(ctx.session, Option.map((s) => s.userId), Option.getOrElse(() => 'anonymous'));
+				const userId = _userId(ctx, 'anonymous');
 				const result = yield* searchRepo.suggest({ ...options, scopeId });
 				yield* Effect.all([
 					audit.log('Search.suggest', {
@@ -68,7 +70,7 @@ class SearchService extends Effect.Service<SearchService>()('server/Search', {
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-				const userId = pipe(ctx.session, Option.map((s) => s.userId), Option.getOrElse(() => 'system'));
+				const userId = _userId(ctx, 'system');
 				yield* searchRepo.refresh(scopeId, includeGlobal);
 				yield* Effect.all([
 					audit.log('Search.refresh', { details: { includeGlobal, scopeId }, subjectId: userId }),

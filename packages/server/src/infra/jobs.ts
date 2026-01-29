@@ -191,7 +191,7 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 				Stream.mapEffect((payload) => S.decodeUnknown(S.parseJson(JobStatusEvent))(payload).pipe(
 					Effect.matchEffect({
 						onFailure: (e) => Effect.logWarning('Invalid job status event', { error: String(e), payload }).pipe(Effect.as(Option.none<JobService.StatusEvent>())),
-						onSuccess: (parsed) => Effect.succeed(Option.some(parsed)),
+						onSuccess: (parsed) => Effect.succeed(Option.some(parsed)), // NOSONAR S3358
 					}),
 				)),
 				Stream.filterMap(F.identity),
