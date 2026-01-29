@@ -7,12 +7,14 @@
  * - Type-safe keys via CookieKey union
  * - Encryption handled at domain layer (oauth.ts), not here
  */
+import type { ShardId, Snowflake } from '@effect/cluster';
 import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Cookie, CookiesError } from '@effect/platform/Cookies';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
-import { Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, Record, Schedule, Schema as S } from 'effect';
+import { Data, Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, Record, Schedule, Schema as S } from 'effect';
 import * as D from 'effect/Duration';
+import { dual } from 'effect/Function';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -20,6 +22,7 @@ const _Id = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-00
 const _isSecure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
 const _default: Context.Request.Data = {
 	circuit: Option.none(),
+	cluster: Option.none(),
 	ipAddress: Option.none(),
 	rateLimit: Option.none(),
 	requestId: crypto.randomUUID(),
@@ -45,6 +48,21 @@ const UserRole = {
 	Order: _RoleOrder,
 	schema: _UserRoleSchema,
 } as const;
+
+// Branded types for serialization boundaries
+const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
+const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
+
+// Internal helper: Serializable.fromData needs ShardId->string conversion
+const _makeShardIdString = (shardId: ShardId.ShardId): typeof ShardIdString.Type =>
+	S.decodeSync(ShardIdString)(shardId.toString());
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+/** Cluster context required but not available - use when accessing cluster state outside cluster scope */
+class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<{
+	readonly operation: string;
+}> {}
 
 // --- [SERIALIZABLE] ----------------------------------------------------------
 
@@ -81,6 +99,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		);
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({
 		circuit: Option.none(),
+		cluster: Option.none(),
 		ipAddress: Option.none(),
 		rateLimit: Option.none(),
 		requestId,
@@ -96,6 +115,41 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		set: (key: keyof typeof _cookie, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, _cookie[key].name, value, _cookie[key].options),
 	} as const;
 	static readonly toSerializable = FiberRef.get(_ref).pipe(Effect.map(Serializable.fromData));
+	/** Access cluster state, fails with ClusterContextRequired if not in cluster scope */
+	static readonly clusterState = FiberRef.get(_ref).pipe(
+		Effect.flatMap((ctx) => Option.match(ctx.cluster, {
+			onNone: () => Effect.fail(new ClusterContextRequired({ operation: 'cluster' })),
+			onSome: Effect.succeed,
+		})),
+	);
+	/** Shard ID: Option.none() outside entity scope */
+	static readonly shardId = FiberRef.get(_ref).pipe(
+		Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.shardId)),
+	);
+	/** Runner ID: Option.none() outside cluster scope */
+	static readonly runnerId = FiberRef.get(_ref).pipe(
+		Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.runnerId)),
+	);
+	/** Leader status: false outside cluster/singleton scope */
+	static readonly isLeader = FiberRef.get(_ref).pipe(
+		Effect.map((ctx) => Option.exists(ctx.cluster, (c) => c.isLeader)),
+	);
+	/** Create RunnerId from Snowflake (inlined helper for middleware use) */
+	static readonly makeRunnerId = (snowflake: Snowflake.Snowflake): typeof RunnerId.Type =>
+		S.decodeSync(RunnerId)(String(snowflake));
+	/** Run effect with scoped cluster context (dual: data-first and pipeable) */
+	static readonly withinCluster: {
+		<A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>): Effect.Effect<A, E, R>;
+		(partial: Partial<Context.Request.ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+	} = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>) =>
+		Effect.locallyWith(effect, _ref, (ctx) => ({
+			...ctx,
+			cluster: Option.some({
+				...Option.getOrElse(ctx.cluster, (): Context.Request.ClusterState => ({ entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null })),
+				...partial,
+			}),
+		})),
+	);
 	/** Observability attributes for tracing spans. Includes all context fields formatted for OTEL. */
 	static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
 		Record.getSomes({
@@ -162,12 +216,23 @@ namespace Context {
 		}
 		export interface Data {
 			readonly circuit: Option.Option<Circuit>;
+			readonly cluster: Option.Option<ClusterState>;
 			readonly ipAddress: Option.Option<string>;
 			readonly rateLimit: Option.Option<RateLimit>;
 			readonly requestId: string;
 			readonly session: Option.Option<Session>;
 			readonly tenantId: string;
 			readonly userAgent: Option.Option<string>;
+		}
+		/** Branded runner ID (18-19 digit snowflake) */
+		export type RunnerId = S.Schema.Type<typeof RunnerId>;
+		/** Cluster state: outer Option in Data, inner nulls avoid nesting */
+		export interface ClusterState {
+			readonly entityId: string | null;
+			readonly entityType: string | null;
+			readonly isLeader: boolean;
+			readonly runnerId: RunnerId | null;
+			readonly shardId: ShardId.ShardId | null;
 		}
 	}
 }
