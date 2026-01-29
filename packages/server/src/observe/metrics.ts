@@ -15,6 +15,7 @@ const _config = {
 	},
 } as const;
 const _boundaries = {	// SLA-aligned histogram boundaries in seconds for different operation types.
+	cluster: 	[0.001, 0.01, 0.05, 0.1, 0.5, 1, 5] as const,				// Message latency (target <100ms)
 	http: 		[0.001, 0.01, 0.1, 1, 10, 100] as const,					// Web request latencies
 	jobs: 		[0.01, 0.1, 1, 10, 100, 1000] as const,						// Background processing
 	oauth: 		[0.1, 0.5, 1, 2, 5, 10, 30] as const,						// OAuth token exchanges (external APIs)
@@ -57,6 +58,33 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			misses: Metric.counter('cache_misses_total'),
 		},
 		circuit: { stateChanges: Metric.frequency('circuit_state_changes_total') },
+
+		// NOTE: @effect/cluster/ClusterMetrics provides these gauges automatically:
+		// - effect_cluster_entities, effect_cluster_singletons, effect_cluster_runners,
+		// - effect_cluster_runners_healthy, effect_cluster_shards
+		// These are auto-updated by Sharding internals and exported via Telemetry.Default OTLP layer.
+		// We only define APP-SPECIFIC metrics below (counters/histograms that ClusterMetrics doesn't provide).
+
+		cluster: {
+
+			// Entity lifecycle metrics - important for capacity planning and debugging idle timeout
+			entityActivations: Metric.counter('cluster_entity_activations_total'),
+			entityDeactivations: Metric.counter('cluster_entity_deactivations_total'),
+
+			// Entity lifetime histogram - helps tune maxIdleTime settings
+			entityLifetime: Metric.timerWithBoundaries('cluster_entity_lifetime_seconds',
+				[1, 5, 30, 60, 300, 600, 1800, 3600]),  // Up to 1 hour
+
+			// Error counter - labeled by type (MailboxFull, RunnerUnavailable, etc.)
+			errors: Metric.counter('cluster_errors_total'),
+
+			// Histogram for message latency (SLA target: <100ms)
+			messageLatency: Metric.timerWithBoundaries('cluster_message_latency_seconds', _boundaries.cluster),
+			messagesReceived: Metric.counter('cluster_messages_received_total'),
+			// Counters for app-level operations (ClusterMetrics doesn't track these)
+			messagesSent: Metric.counter('cluster_messages_sent_total'),
+			redeliveries: Metric.counter('cluster_redeliveries_total'),
+		},
 		errors: Metric.frequency('errors_total'),
 		fiber: { active: Metric.fiberActive, failures: Metric.fiberFailures, lifetimes: Metric.fiberLifetimes, started: Metric.fiberStarted, successes: Metric.fiberSuccesses },
 		http: {
