@@ -61,37 +61,46 @@ Plans:
 - [ ] 02-01: TBD
 
 ### Phase 3: Singleton & Scheduling
-**Goal**: Scheduled tasks and leader-only processes execute exactly once across cluster regardless of pod count. External state (DB-backed) for singleton recovery, not in-memory Effect state.
+**Goal**: Scheduled tasks and leader-only processes execute exactly once with automatic state persistence, health tracking, and dead man's switch. Not wrappers — intelligent coordination that handles state handoff across leader migrations.
 **Depends on**: Phase 2
 **Requirements**: CLUS-03
-**Effect APIs**: `Singleton.make`, `ClusterCron.make`, `Snowflake.Generator`, `skipIfOlderThan`
+**Effect APIs**: `Singleton.make`, `ClusterCron.make`, `Snowflake.Generator`, `skipIfOlderThan`, `KeyValueStore.layerSchema` (state persistence), `Metric.gauge` (heartbeat tracking)
+**Pre-wired from Phase 1**: `ClusterService.singleton()` and `ClusterService.cron()` factory methods exist — extend with state/health capabilities
 **Success Criteria** (what must be TRUE):
   1. Cron job configured for 1-minute interval fires exactly once per minute with 3+ pods running
   2. Leader-only process migrates to surviving pod within 30 seconds after leader pod death
-  3. Singleton cold start uses external state (DB-backed, not in-memory Effect state) for recovery
-  4. Snowflake IDs generated cluster-wide without collisions
-  5. `ClusterCron` uses `skipIfOlderThan` for late execution handling (no accumulated job burst)
-  6. Singleton external state design explicit (DB-backed state loaded on startup, not reconstructed from events)
+  3. `ClusterService.singleton()` accepts optional typed `state` schema — persisted to DB via KeyValueStore
+  4. Singleton state survives leader migration without reconstruction (DB-backed, loaded on startup)
+  5. Singleton heartbeat tracked as gauge (`singleton.{name}.last_execution`) — updated after each run
+  6. Health check integration: singleton considered unhealthy if no execution in 2x expected interval
+  7. `ClusterService.cron()` merges Singleton + ClusterCron when schedule provided (single factory)
+  8. `skipIfOlderThan` prevents accumulated job burst after downtime
+  9. Snowflake IDs generated cluster-wide without collisions
 **Plans**: TBD
 
 Plans:
 - [ ] 03-01: TBD
 
 ### Phase 4: Job Processing
-**Goal**: Jobs process via Entity mailbox dispatch with instant delivery instead of DB poll loops. Old jobs.ts gut + replace; JobService interface unchanged for consumers.
+**Goal**: Jobs process via Entity mailbox with priority, deduplication, dead-letter handling, and batch efficiency. Single polymorphic `submit` handles all cases. Interface unchanged for existing callers.
 **Depends on**: Phase 3
 **Requirements**: JOBS-01
-**Effect APIs**: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`, `MessageState`, `defectRetryPolicy`, `Schedule`, `Match.type`, `DurableQueue.worker` (optional workflow integration), `Entity.keepAlive` (batch jobs), `EntityResource` (per-job resources)
+**Effect APIs**: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`, `MessageState`, `defectRetryPolicy`, `Schedule`, `Match.type`, `Entity.keepAlive` (batch jobs), `EntityResource` (per-job resources), `Effect.interrupt` (cancellation), `Ref` (status tracking)
+**Pattern from Phase 1**: Follow ClusterEntity structure — ProcessPayload/StatusPayload, EntityState, defectRetryPolicy composition
 **Success Criteria** (what must be TRUE):
   1. Job submission to processing latency under 50ms (no poll interval)
   2. JobService interface unchanged for existing callers (same `submit`/`schedule` API)
-  3. In-flight jobs survive pod restart via message persistence (SqlMessageStorage)
-  4. No `SELECT FOR UPDATE` or poll loop in jobs.ts (gut + replace complete)
-  5. File under 225 LOC with polymorphic `submit` handling single/batch
-  6. `defectRetryPolicy` with exponential+jitter configured via `Schedule.compose` (exponential, jitter, cap)
-  7. Job result handling uses `Match.type` exhaustively (no if/else chains)
-  8. Migration: existing JobService interface unchanged for consumers (drop-in replacement)
-  9. Long-running jobs use `Entity.keepAlive` to prevent eviction during processing
+  3. `submit` is polymorphic — single job or batch array, same function
+  4. Priority levels (high/normal/low) affect processing order via weighted scheduling
+  5. Deduplication via optional `dedupeKey` — uses `Rpc.make({ primaryKey })` internally
+  6. Failed jobs dead-letter to `job_dlq` table after configurable max retries
+  7. `JobService.cancel(jobId)` interrupts in-flight job via Effect.interrupt
+  8. `JobService.status(jobId)` returns current state (queued/processing/complete/failed/cancelled)
+  9. In-flight jobs survive pod restart via message persistence (SqlMessageStorage)
+  10. No `SELECT FOR UPDATE` or poll loop in jobs.ts (gut + replace complete)
+  11. File under 225 LOC with `const + namespace` merge pattern
+  12. Metrics: `job.queue_depth`, `job.processing_seconds`, `job.failures_total`, `job.dlq_size`
+  13. Long-running jobs use `Entity.keepAlive` automatically when duration > maxIdleTime
 **Plans**: TBD
 
 Plans:
@@ -163,17 +172,18 @@ Plans:
 - [ ] 07-03: TBD
 
 ### Phase 8: Health & Observability
-**Goal**: Kubernetes can determine pod health and route traffic only to ready instances. Cluster metrics integrate with existing MetricsService pattern.
+**Goal**: Kubernetes can determine pod health and route traffic only to ready instances. Singleton health integration from Phase 3.
 **Depends on**: Phase 7
 **Requirements**: HLTH-01, HLTH-02
-**Effect APIs**: `Effect.all({ db, cache, cluster }, { concurrency: "unbounded" })`, `Effect.timeout`, `HttpApiGroup.make("health")`, `RunnerHealth.layerK8s`, `ClusterMetrics`, `MetricsService.label`, `DevTools.layer` (dev-time state inspection)
+**Effect APIs**: `Effect.all({ db, cache, cluster }, { concurrency: "unbounded" })`, `Effect.timeout`, `HttpApiGroup.make("health")`, `DevTools.layer` (dev-time state inspection)
+**Pre-wired from Phase 1**: `RunnerHealth.layerK8s` already configured in cluster.ts; `effect_cluster_*` gauges auto-exported via OTLP
 **Success Criteria** (what must be TRUE):
   1. `/health` endpoint returns aggregate status of all dependencies with per-dependency latency
   2. `/health/live` returns 200 when process runs (liveness probe)
   3. `/health/ready` returns 200 only when all dependencies healthy (readiness probe)
   4. Unhealthy dependency causes readiness failure within 10 seconds (not stale cache)
-  5. Cluster metrics (shard count, message throughput) exported to existing metrics infrastructure
-  6. `ClusterMetrics` gauges integrated with existing `MetricsService.label` pattern (no parallel metrics system)
+  5. Singleton health checks integrated — dead man's switch from Phase 3 feeds into readiness
+  6. `effect_cluster_*` gauges auto-exported via Telemetry.Default OTLP layer (no manual integration)
   7. `Effect.timeout` on readiness checks prevents K8s probe failures from slow dependencies
 **Plans**: TBD
 
@@ -198,5 +208,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 ---
 *Roadmap created: 2026-01-28*
+*Refined: 2026-01-29 (Phase 3, 4, 8 enhanced with Phase 1 learnings)*
 *Depth: comprehensive (8 phases)*
 *Coverage: 19/19 v1 requirements mapped*

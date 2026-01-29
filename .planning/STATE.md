@@ -63,6 +63,9 @@ Recent decisions affecting current work:
 - [02-Research]: `isLeader` updated dynamically via `Context.Request.withinCluster` on singleton entry
 - [02-Research]: Extend existing `Context.Serializable` class (not separate cluster serializable)
 - [02-Research]: ClusterState uses `null` (not Option) for internal optionality - simpler nesting
+- [Refinement]: Phase 3 singleton adds typed state persistence + heartbeat health tracking
+- [Refinement]: Phase 4 jobs adds priority, deduplication, DLQ, cancellation, status query
+- [Refinement]: Phase 8 uses auto-exported effect_cluster_* gauges (no manual integration)
 
 ### Pending Todos
 
@@ -81,16 +84,24 @@ From research and revision feedback - must address during execution:
 
 **Open for future phases:**
 - [Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime
-- [Phase 3]: Singleton external state must be DB-backed (not in-memory Effect state)
+- [Phase 3]: Singleton state persistence via KeyValueStore.layerSchema — research API
+- [Phase 3]: Heartbeat gauge pattern for dead man's switch health integration
+- [Phase 4]: Priority scheduling pattern — weighted mailbox or external scheduler
+- [Phase 4]: Dead-letter table schema and retry exhaustion flow
+- [Phase 4]: Job cancellation via Effect.interrupt — validate entity handles gracefully
 - [Phase 4]: In-flight job migration during deployment - validate via staging
-- [Phase 4]: `defectRetryPolicy` with exponential+jitter via Schedule.compose
-- [Phase 5]: Transactional outbox via Activity.make + DurableDeferred (now explicit pattern)
+- [Phase 5]: Verify Ndjson.pack/unpackSchema API exists in @effect/cluster 0.56.1
+- [Phase 5]: Verify EventLog.schema API exists for optional event sourcing
+- [Phase 5]: Transactional outbox via Activity.make + DurableDeferred
+- [Phase 6]: Research Machine.makeSerializable integration with Entity pattern
+- [Phase 6]: Verify VariantSchema API in @effect/experimental current version
 - [Phase 6]: Compensation handlers MUST wrap in Activity.make
 - [Phase 6]: Machine state schemas derive types (no separate declarations)
-- [Phase 6]: Workflow schema versioning for long-running workflows
+- [Phase 7]: Verify Entity.fromRpcGroup API for shared RPC contracts
 - [Phase 7]: RpcGroup as shared contract in packages/shared
 - [Phase 7]: RpcMiddleware.Tag for auth context (no manual header parsing)
 - [Phase 8]: Effect.timeout on readiness checks to prevent K8s probe failures
+- [Phase 8]: Singleton dead man's switch feeds into readiness probe
 
 ## Session Continuity
 
