@@ -35,8 +35,7 @@ class SearchService extends Effect.Service<SearchService>()('server/Search', {
 				readonly includeSnippets?: boolean;
 				readonly term: string;
 			},
-			pagination?: { cursor?: string; limit?: number },
-		) =>
+			pagination?: { cursor?: string; limit?: number },) =>
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
 				const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;

@@ -14,14 +14,6 @@ import { Telemetry } from '../observe/telemetry.ts';
 import { Resilience } from '../utils/resilience.ts';
 import { Crypto } from '../security/crypto.ts';
 
-// --- [CONSTANTS] -------------------------------------------------------------
-
-const _resilience = {github: { circuit: 'oauth.github', retry: 'fast', timeout: Duration.seconds(10) } satisfies Resilience.Config,} as const;
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const GitHubUserSchema = S.Struct({ email: S.NullishOr(S.String), id: S.Number });
-
 // --- [CLASSES] ---------------------------------------------------------------
 
 class OAuthState extends S.Class<OAuthState>('OAuthState')({
@@ -89,11 +81,11 @@ const _githubApiCall = (tokens: OAuth2Tokens) =>
 			HttpClientRequest.setHeaders({ 'Authorization': `Bearer ${tokens.accessToken()}`, 'User-Agent': 'ParametricPortal/1.0' }),
 		);
 		const response = yield* client.execute(request).pipe(Effect.scoped);
-		const data = yield* HttpClientResponse.schemaBodyJson(GitHubUserSchema)(response);
+		const data = yield* HttpClientResponse.schemaBodyJson(S.Struct({ email: S.NullishOr(S.String), id: S.Number }))(response);
 		return toResult(tokens, { email: data.email ?? null, id: String(data.id) });
 	}).pipe(Effect.provide(FetchHttpClient.layer));
 const githubResult = (tokens: OAuth2Tokens): Effect.Effect<ReturnType<typeof toResult>, HttpError.OAuth> =>
-	Resilience.run('oauth.github', _githubApiCall(tokens), _resilience.github).pipe(
+	Resilience.run('oauth.github', _githubApiCall(tokens), { retry: 'fast', timeout: Duration.seconds(10) }).pipe(
 		Effect.mapError((e) =>
 			Resilience.is(e, 'CircuitError')
 				? HttpError.OAuth.of('github', 'Service temporarily unavailable (circuit open)')

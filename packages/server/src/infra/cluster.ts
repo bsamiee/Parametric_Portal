@@ -16,13 +16,13 @@ import { Telemetry } from '../observe/telemetry.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-	cron: { skipIfOlderThan: Duration.minutes(5) },
+	cron: 	{ skipIfOlderThan: Duration.minutes(5) },
 	entity: { concurrency: 1, mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
-	retry: {
-		defect: { base: Duration.millis(100), factor: 2, maxAttempts: 5 },
-		transient: { base: Duration.millis(50), cap: Duration.seconds(5), maxAttempts: 3 },
+	retry: 	{
+		defect:    { base: Duration.millis(100), factor: 2, maxAttempts: 5 },
+		transient: { base: Duration.millis(50),  cap: Duration.seconds(5), maxAttempts: 3 },
 	},
-	sla: { sendTimeout: Duration.millis(100) },
+	sla: 	{ sendTimeout: Duration.millis(100) },
 } as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
@@ -103,89 +103,69 @@ class ClusterError extends S.TaggedError<ClusterError>()('ClusterError', {
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-// Dedicated PgClient for RunnerStorage - prevents advisory lock loss from connection recycling
-const RunnerStoragePgClient = PgClient.layerConfig({
-	applicationName: Config.succeed('cluster-runner-storage'),
-	connectionTTL: Config.succeed(Duration.hours(24)),
-	connectTimeout: Config.succeed(Duration.seconds(10)),
-	database: Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
-	host: Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
-	idleTimeout: Config.succeed(Duration.hours(24)),
-	maxConnections: Config.succeed(1),
-	minConnections: Config.succeed(1),
-	password: Config.redacted('POSTGRES_PASSWORD'),
-	port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
-	spanAttributes: Config.succeed({ 'db.system': 'postgresql', 'service.name': 'cluster-runner-storage' }),
-	username: Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
-});
-const RunnerStorageLive = SqlRunnerStorage.layer.pipe(Layer.provide(RunnerStoragePgClient));
-const MessageStorageLive = SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer));
-const SnowflakeLive = Snowflake.layerGenerator;
-const ShardingConfigLive = ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, preemptiveShutdown: true, shardsPerGroup: 100 });
-const RpcSerializationLive = RpcSerialization.layerMsgPack;
-// K8s client: Undici for connection pooling + keep-alive, FileSystem for service account token/CA cert
-const K8sHttpClientLive = K8sHttpClient.layer.pipe(Layer.provide(NodeHttpClient.layerUndici), Layer.provide(NodeFileSystem.layer));
-// Health mode dispatch - ping requires Runners dependency (Phase 3 when Singleton available)
-const RunnerHealthLive = Layer.unwrapEffect(Effect.gen(function* () {
-	const env = yield* Config.string('NODE_ENV').pipe(Config.withDefault('development'));
-	const mode = yield* Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto'));
-	const namespace = yield* Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default'));
-	const labelSelector = yield* Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal'));
+// Consolidated storage: dedicated PgClient for RunnerStorage (prevents advisory lock loss from connection recycling)
+const _storageLayers = (() => {
+	const runnerPgClient = PgClient.layerConfig({
+		applicationName: Config.succeed('cluster-runner-storage'),
+		connectionTTL: Config.succeed(Duration.hours(24)),
+		connectTimeout: Config.succeed(Duration.seconds(10)),
+		database: Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
+		host: Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
+		idleTimeout: Config.succeed(Duration.hours(24)),
+		maxConnections: Config.succeed(1),
+		minConnections: Config.succeed(1),
+		password: Config.redacted('POSTGRES_PASSWORD'),
+		port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
+		spanAttributes: Config.succeed({ 'db.system': 'postgresql', 'service.name': 'cluster-runner-storage' }),
+		username: Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
+	});
+	return Layer.mergeAll(
+		SqlRunnerStorage.layer.pipe(Layer.provide(runnerPgClient)),
+		SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
+		ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, preemptiveShutdown: true, shardsPerGroup: 100 }),
+		Snowflake.layerGenerator,
+	);
+})();
+const _healthLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Health mode: K8s in production, noop otherwise (consolidated config read)
+	const [env, mode, namespace, labelSelector] = yield* Effect.all([
+		Config.string('NODE_ENV').pipe(Config.withDefault('development')),
+		Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto')),
+		Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default')),
+		Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal')),
+	]);
 	const useK8s = mode === 'k8s' || (mode === 'auto' && env === 'production');
 	yield* Effect.logDebug('Cluster health mode selected', { mode, useK8s });
-	return useK8s ? RunnerHealth.layerK8s({ labelSelector, namespace }).pipe(Layer.provide(K8sHttpClientLive)) : RunnerHealth.layerNoop;
+	return useK8s
+		? RunnerHealth.layerK8s({ labelSelector, namespace }).pipe(Layer.provide(K8sHttpClient.layer), Layer.provide(NodeHttpClient.layerUndici), Layer.provide(NodeFileSystem.layer))
+		: RunnerHealth.layerNoop;
 }));
-
-// Shared storage dependencies for all transports
-const StorageDeps = Layer.mergeAll(RunnerStorageLive, MessageStorageLive, ShardingConfigLive, SnowflakeLive);
-
-// Transport-specific layers - polymorphic via dispatch table (not if/else)
-const _httpTransport = HttpRunner.layerClient.pipe(
-	Layer.provide(HttpRunner.layerClientProtocolHttpDefault),
-	Layer.provide(RpcSerializationLive),
-	Layer.provide(FetchHttpClient.layer),
-	Layer.provide(RunnerHealthLive),
-	Layer.provide(StorageDeps),
-);
-const _websocketTransport = HttpRunner.layerClient.pipe(
-	Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault),
-	Layer.provide(NodeSocket.layerWebSocketConstructor),
-	Layer.provide(RpcSerializationLive),
-	Layer.provide(FetchHttpClient.layer),
-	Layer.provide(RunnerHealthLive),
-	Layer.provide(StorageDeps),
-);
-const _socketTransport = SocketRunner.layerClientOnly.pipe(
-	Layer.provide(NodeClusterSocket.layerClientProtocol),
-	Layer.provide(RpcSerializationLive),
-	Layer.provide(RunnerHealthLive),
-	Layer.provide(StorageDeps),
-);
-
-// Transport dispatch table - source of truth for available modes (type derived from keys)
-const _transports = {
-	auto: _socketTransport.pipe(Layer.catchAll((e) => Layer.effectDiscard(Effect.logWarning('Socket transport unavailable, using HTTP', { error: String(e) })).pipe(Layer.provideMerge(_httpTransport)))),
-	http: _httpTransport,
-	socket: _socketTransport,
-	websocket: _websocketTransport,
+const _transportBase = Layer.mergeAll(RpcSerialization.layerMsgPack, _healthLayer, _storageLayers);	// Shared transport base: serialization + health + storage (DRY across all transports)
+const _transports = {	// Transport dispatch table - protocol-specific layers only, base provided once
+	auto: SocketRunner.layerClientOnly.pipe(
+		Layer.provide(NodeClusterSocket.layerClientProtocol),
+		Layer.provide(_transportBase),
+		Layer.catchAll((e) => Layer.effectDiscard(Effect.logWarning('Socket transport unavailable, using HTTP', { error: String(e) })).pipe(
+			Layer.provideMerge(HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase))),
+		)),
+	),
+	http: HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase)),
+	socket: SocketRunner.layerClientOnly.pipe(Layer.provide(NodeClusterSocket.layerClientProtocol), Layer.provide(_transportBase)),
+	websocket: HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault), Layer.provide(NodeSocket.layerWebSocketConstructor), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase)),
 } as const;
-type _TransportMode = keyof typeof _transports;
-
-// Polymorphic transport selection via config
-const TransportLive = Layer.unwrapEffect(Effect.gen(function* () {
+const _transportLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Polymorphic transport selection via config
 	const mode = yield* Config.string('CLUSTER_TRANSPORT').pipe(
-		Config.withDefault('auto' satisfies _TransportMode),
-		Config.map((m): _TransportMode => m in _transports ? m as _TransportMode : 'auto'),
+		Config.withDefault<keyof typeof _transports>('auto'),
+		Config.map((m): keyof typeof _transports => (m in _transports ? (m as keyof typeof _transports) : 'auto')),
 	);
 	yield* Effect.logInfo('Cluster transport selected', { mode });
 	return _transports[mode];
 }));
-const ClusterLive = ClusterEntityLive.pipe(Layer.provide(TransportLive));
+const _clusterLayer = ClusterEntityLive.pipe(Layer.provide(_transportLayer));	// Entity layer with transport wiring
 
 // --- [SERVICE] ---------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
-	dependencies: [ClusterLive],
+	dependencies: [_clusterLayer],
 	effect: Effect.gen(function* () {
 		const sharding = yield* Sharding.Sharding;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'cluster' });
@@ -225,25 +205,23 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 }) {
 	static readonly Config = _CONFIG;
 	static readonly Error = ClusterError;
-	static readonly Layer = ClusterLive;
+	static readonly Layer = _clusterLayer;
 	static readonly Payload = { Process: ProcessPayload, Status: StatusPayload } as const;
 	static readonly Response = { Status: StatusResponse } as const;
 	// Layer factories - compose at startup, pre-wired with ClusterLive + telemetry spans
-	static readonly singleton = <E, R>(name: string, run: Effect.Effect<void, E, R>, options?: { readonly shardGroup?: string }) =>
-		Singleton.make(name, Telemetry.span(run, `singleton.${name}`), options).pipe(Layer.provide(ClusterLive));
+	static readonly singleton = <E, R>(name: string, run: Effect.Effect<void, E, R>, options?: { readonly shardGroup?: string }) => Singleton.make(name, Telemetry.span(run, `singleton.${name}`), options).pipe(Layer.provide(_clusterLayer));
 	static readonly cron = <E, R>(config: {
 		readonly name: string;
 		readonly cron: Parameters<typeof ClusterCron.make>[0]['cron'];
 		readonly execute: Effect.Effect<void, E, R>;
 		readonly shardGroup?: string;
-		readonly skipIfOlderThan?: Duration.DurationInput;
-	}) => ClusterCron.make({
+		readonly skipIfOlderThan?: Duration.DurationInput;}) => ClusterCron.make({
 		cron: config.cron,
 		execute: Telemetry.span(config.execute, `cron.${config.name}`),
 		name: config.name,
 		shardGroup: config.shardGroup,
 		skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
-	}).pipe(Layer.provide(ClusterLive));
+	}).pipe(Layer.provide(_clusterLayer));
 }
 
 // --- [NAMESPACE] -------------------------------------------------------------
