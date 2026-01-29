@@ -52,17 +52,18 @@ const Update = {
 
 // --- [HELPERS] ---------------------------------------------------------------
 
-const _isSingle = (input: unknown): input is string | [string, unknown] =>
-	typeof input === 'string' || (Array.isArray(input) && input.length === 2 && typeof input[0] === 'string');
-const _isPredArray = (pred: Pred | readonly Pred[]): pred is readonly Pred[] =>
-	Array.isArray(pred) && pred.length > 0 && !('field' in pred || 'raw' in pred || typeof pred[0] === 'string');
+const _isSingle = (input: unknown): input is string | [string, unknown] => typeof input === 'string' || (Array.isArray(input) && input.length === 2 && typeof input[0] === 'string');
+const _isPredArray = (pred: Pred | readonly Pred[]): pred is readonly Pred[] => Array.isArray(pred) && pred.length > 0 && !('field' in pred || 'raw' in pred || typeof pred[0] === 'string');
 const _buildPreds = (uuidv7Col: string | undefined) => (filter: Record<string, unknown>): Pred[] =>
 	Object.entries(filter).flatMap(([key, val]): Pred[] =>
-		val === undefined || (Array.isArray(val) && val.length === 0) ? []
-		: key === 'after' && uuidv7Col ? [{ field: uuidv7Col, op: 'tsGte', value: val }]
-		: key === 'before' && uuidv7Col ? [{ field: uuidv7Col, op: 'tsLte', value: val }]
-		: Array.isArray(val) ? [{ field: key, op: 'in', values: val }]
-		: [{ field: key, value: val }]
+		Match.value({ key, uuidv7Col, val }).pipe(
+			Match.when({ val: Match.undefined }, () => []),
+			Match.when({ val: (v) => Array.isArray(v) && (v as unknown[]).length === 0 }, () => []),
+			Match.when({ key: 'after', uuidv7Col: Match.string }, ({ uuidv7Col, val }) => [{ field: uuidv7Col, op: 'tsGte' as const, value: val }]),
+			Match.when({ key: 'before', uuidv7Col: Match.string }, ({ uuidv7Col, val }) => [{ field: uuidv7Col, op: 'tsLte' as const, value: val }]),
+			Match.when({ val: (v) => Array.isArray(v) }, ({ key, val }) => [{ field: key, op: 'in' as const, values: val as unknown[] }]),
+			Match.orElse(({ key, val }) => [{ field: key, value: val }]),
+		)
 	);
 
 // --- [FACTORY] ---------------------------------------------------------------
@@ -81,9 +82,20 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const autoEntry = Field.pick('autoUpdate', cols);
 		// --- SQL fragments ---------------------------------------------------
 		const $active = softEntry ? sql` AND ${sql(softEntry.col)} IS NULL` : sql``;
-		const $fresh = expEntry ? (expEntry.null ? sql` AND (${sql(expEntry.col)} IS NULL OR ${sql(expEntry.col)} > NOW())` : sql` AND ${sql(expEntry.col)} > NOW()`) : sql``;
+		const $fresh = Option.fromNullable(expEntry).pipe(
+			Option.match({
+				onNone: () => sql``,
+				onSome: (entry) => Match.value(entry.null).pipe(
+					Match.when(true, () => sql` AND (${sql(entry.col)} IS NULL OR ${sql(entry.col)} > NOW())`),
+					Match.orElse(() => sql` AND ${sql(entry.col)} > NOW()`),
+				),
+			}),
+		);
 		const $touch = autoEntry ? sql`, ${sql(autoEntry.col)} = NOW()` : sql``;
-		const $scope = (scope?: Record<string, unknown>) => scope ? sql` AND ${sql.and(Object.entries(scope).map(([col, val]) => sql`${sql(col)} = ${val}`))}` : sql``;
+		const $scope = (scope?: Record<string, unknown>) => {
+			const frags = scope ? Object.entries(scope).map(([col, val]) => sql`${sql(col)} = ${val}`) : [];
+			return frags.length > 0 ? sql` AND ${sql.and(frags)}` : sql``;
+		};
 		const $target = (target: string | [string, unknown]) => typeof target === 'string' ? sql`${sql(pkCol)} = ${target}${pkCast}` : sql`${sql(target[0])} = ${target[1]}`;
 		const $lock = (lock: false | 'update' | 'share' | 'nowait' | 'skip') => lock ? ({ nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[lock] : sql``;
 		const $order = (asc: boolean) => asc ? sql`ORDER BY ${sql(pkCol)} ASC` : sql`ORDER BY ${sql(pkCol)} DESC`;
@@ -92,7 +104,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			containedBy: ({ col, value }) => sql`${col} <@ ${value}::jsonb`,
 			contains: ({ col, value }) => sql`${col} @> ${value}::jsonb`,
 			hasKey: ({ col, value }) => sql`${col} ? ${value}`,
-			hasKeys: ({ col, values }) => values.length === 0 ? sql`TRUE` : sql`${col} ?& ARRAY[${sql.csv(values.map(k => sql`${k}`))}]::text[]`,
+			hasKeys: ({ col, values }) => { const arr = values.map(k => sql`${k}`); return values.length === 0 ? sql`TRUE` : sql`${col} ?& ARRAY[${sql.csv(arr)}]::text[]`; },
 			in: ({ col, values }) => values.length === 0 ? sql`FALSE` : sql`${col} IN ${sql.in(values)}`,
 			notNull: ({ col }) => sql`${col} IS NOT NULL`,
 			null: ({ col }) => sql`${col} IS NULL`,
@@ -100,18 +112,21 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			tsLte: ({ col, value }) => sql`uuid_extract_timestamp(${col}) <= ${value}`,
 		} as const satisfies Record<string, (ctx: { col: Statement.Fragment; value: unknown; values: unknown[]; $cast: string | undefined }) => Statement.Fragment>;
 		const toFrag = (pred: Pred): Statement.Fragment =>
-			'raw' in pred ? pred.raw
-			: Array.isArray(pred) ? sql`${sql(pred[0])} = ${pred[1]}`
-			: ((p: { field: string; value?: unknown; values?: unknown[]; op?: string; cast?: string; wrap?: string }) => {
-				const { field, op = 'eq', value, values = [], cast, wrap } = p;
-				const meta = Field.predMeta(field), $cast = cast ?? meta.cast, $wrap = wrap ?? meta.wrap;
-				const col = $wrap ? sql`${sql.literal($wrap)}(${sql(field)})` : sql`${sql(field)}`;
-				const handler = _fragOps[op as keyof typeof _fragOps];
-				return handler ? handler({ $cast, col, value, values }) : sql`${col} ${_cmpOps[op as keyof typeof _cmpOps] ?? _cmpOps.eq} ${value}${$cast ? sql`::${sql.literal($cast)}` : sql``}`;
-			})(pred as { field: string; value?: unknown; values?: unknown[]; op?: string; cast?: string; wrap?: string });
-		const $where = (pred: Pred | readonly Pred[]) => {
+			Match.value(pred).pipe(
+				Match.when((p: Pred): p is { raw: Statement.Fragment } => 'raw' in p, (p) => p.raw),
+				Match.when((p: Pred): p is [string, unknown] => Array.isArray(p), (p) => sql`${sql(p[0])} = ${p[1]}`),
+				Match.orElse((p) => {
+					const { field, op = 'eq', value, values = [], cast, wrap } = p;
+					const meta = Field.predMeta(field), $cast = cast ?? meta.cast, $wrap = wrap ?? meta.wrap;
+					const col = $wrap ? sql`${sql.literal($wrap)}(${sql(field)})` : sql`${sql(field)}`;
+					const handler = _fragOps[op as keyof typeof _fragOps];
+					const castFrag = $cast ? sql`::${sql.literal($cast)}` : sql``;
+					return handler ? handler({ $cast, col, value, values }) : sql`${col} ${_cmpOps[op as keyof typeof _cmpOps] ?? _cmpOps.eq} ${value}${castFrag}`;
+				}),
+			) as Statement.Fragment;
+		const $where = (pred: Pred | readonly Pred[]): Statement.Fragment => {
 			const list = _isPredArray(pred) ? pred : [pred];
-			return list.length > 0 ? sql.and(list.map(toFrag)) : sql`TRUE`;
+			return list.length > 0 ? sql.and(list.map((p) => toFrag(p))) : sql`TRUE`;
 		};
 		/** Convert single target or bulk predicate to WHERE fragment */
 		const $input = (input: string | Pred | readonly Pred[]) => _isSingle(input) ? $target(input) : $where(input);
@@ -119,17 +134,16 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const preds = _buildPreds(Field.pick('gen:uuidv7', cols)?.col);
 		// --- Update entries with NOW/INC/JSONB support -----------------------
 		// Symbol checks first (fast path), then primitives, then special ops, then JSONB fallback
-		const $entries = (updates: Record<string, unknown>) => Object.entries(updates).map(([col, val]): Statement.Fragment =>
-			val === _NOW_SYM ? sql`${sql(col)} = NOW()`
-			: typeof val !== 'object' || val === null ? sql`${sql(col)} = ${val}`
-			: _INC_SYM in val ? sql`${sql(col)} = ${sql(col)} + ${(val as { [_INC_SYM]: number })[_INC_SYM]}`
-			: _JSONB_SYM in val ? ((op: { [_JSONB_SYM]: 'set' | 'del'; path: string[]; value?: unknown }) =>
-				op[_JSONB_SYM] === 'del'
-					? sql`${sql(col)} = ${sql(col)} #- ${`{${op.path.join(',')}}`}::text[]`
-					: sql`${sql(col)} = jsonb_set(${sql(col)}, ${`{${op.path.join(',')}}`}::text[], ${JSON.stringify(op.value)}::jsonb)`
-			)(val as { [_JSONB_SYM]: 'set' | 'del'; path: string[]; value?: unknown })
-			: sql`${sql(col)} = ${pg.json(val)}`,
-		);
+		// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: entry transform requires branching for all update types
+		const $entries = (updates: Record<string, unknown>) => Object.entries(updates).map(([col, val]): Statement.Fragment => {
+			const op = typeof val === 'object' && val !== null && _JSONB_SYM in val ? val as { [_JSONB_SYM]: 'set' | 'del'; path: string[]; value?: unknown } : null;
+			const pathStr = op ? `{${op.path.join(',')}}` : '';
+			return val === _NOW_SYM ? sql`${sql(col)} = NOW()`
+				: typeof val !== 'object' || val === null ? sql`${sql(col)} = ${val}`
+				: _INC_SYM in val ? sql`${sql(col)} = ${sql(col)} + ${(val as { [_INC_SYM]: number })[_INC_SYM]}`
+				: op ? (op[_JSONB_SYM] === 'del' ? sql`${sql(col)} = ${sql(col)} #- ${pathStr}::text[]` : sql`${sql(col)} = jsonb_set(${sql(col)}, ${pathStr}::text[], ${JSON.stringify(op.value)}::jsonb)`)
+				: sql`${sql(col)} = ${pg.json(val)}`;
+		});
 		/** Build EXCLUDED column assignments for upsert */
 		const $excluded = (keys: string[], only?: string[]) => {
 			const excl = new Set([pkCol, ...keys]);
@@ -141,7 +155,11 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const base = yield* Model.makeRepository(model, { idColumn: pkCol, spanPrefix: table, tableName: table });
 		const resolverEntries = Object.entries(config.resolve ?? {}).map(([name, spec]) => {
 			const isMany = typeof spec === 'string' && spec.startsWith('many:');
-			const fields = isMany ? [spec.slice(5)] : Array.isArray(spec) ? spec : [spec];
+			const fields = Match.value({ isArray: Array.isArray(spec), isMany }).pipe(
+				Match.when({ isMany: true }, () => [(spec as string).slice(5)]),
+				Match.when({ isArray: true }, () => spec as string[]),
+				Match.orElse(() => [spec as string]),
+			);
 			const $cf = fields.map(f => { const w = Field.predMeta(f).wrap; return w ? sql`${sql.literal(w)}(${sql(f)})` : sql`${sql(f)}`; });
 			const wh = (keys: unknown[]) => fields.length === 1
 				? sql`${$cf[0]} IN ${sql.in(keys)}`
@@ -166,8 +184,9 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			SqlSchema.findOne({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}${$lock(lock)}`, Request: S.Void, Result: model })(undefined);
 		const page = (pred: Pred | readonly Pred[], opts: { limit?: number; cursor?: string; asc?: boolean } = {}) => {
 			const { limit = Page.bounds.default, cursor, asc = false } = opts;
+			const $cmp = asc ? sql`>` : sql`<`;
 			return Page.decode(cursor).pipe(Effect.flatMap(decoded => {
-				const cursorFrag = Option.match(decoded, { onNone: () => sql``, onSome: cur => sql`AND ${sql(pkCol)} ${asc ? sql`>` : sql`<`} ${cur.id}${pkCast}` });
+				const cursorFrag = Option.match(decoded, { onNone: () => sql``, onSome: cur => sql`AND ${sql(pkCol)} ${$cmp} ${cur.id}${pkCast}` });
 				return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
 					SELECT base.*, totals.total_count FROM base CROSS JOIN totals WHERE TRUE ${cursorFrag} ${$order(asc)} LIMIT ${limit + 1}`
 					.pipe(Effect.map(rows => { const { items, total } = Page.strip(rows as readonly { totalCount: number }[]); return Page.keyset(items as unknown as readonly S.Schema.Type<M>[], total, limit, item => ({ id: (item as Record<string, unknown>)[pkCol] as string }), Option.isSome(decoded)); }));
@@ -177,10 +196,17 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			sql`SELECT COUNT(*)::int AS count FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([r]) => (r as { count: number }).count));
 		const exists = (pred: Pred | readonly Pred[]) =>
 			sql`SELECT EXISTS(SELECT 1 FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}) AS exists`.pipe(Effect.map(([r]) => (r as { exists: boolean }).exists));
-		const agg = <T extends AggSpec>(pred: Pred | readonly Pred[], spec: T): Effect.Effect<AggResult<T>, SqlError | ParseError> =>
-			sql`SELECT ${sql.csv(Object.entries(spec).map(([fn, col]) =>
-				fn === 'count' ? sql`COUNT(*)::int AS count` : sql`${sql.literal(fn.toUpperCase())}(${sql(col as string)})${fn === 'sum' || fn === 'avg' ? sql`::numeric` : sql``} AS ${sql(fn)}`))} FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([row]) =>
-					row as AggResult<T>));
+		const _aggFrag = {
+			avg: (col: string) => sql`AVG(${sql(col)})::numeric AS avg`,
+			count: () => sql`COUNT(*)::int AS count`,
+			max: (col: string) => sql`MAX(${sql(col)}) AS max`,
+			min: (col: string) => sql`MIN(${sql(col)}) AS min`,
+			sum: (col: string) => sql`SUM(${sql(col)})::numeric AS sum`,
+		} as const;
+		const agg = <T extends AggSpec>(pred: Pred | readonly Pred[], spec: T): Effect.Effect<AggResult<T>, SqlError | ParseError> => {
+			const frags = Object.entries(spec).map(([fn, col]) => _aggFrag[fn as keyof typeof _aggFrag](col as string));
+			return sql`SELECT ${sql.csv(frags)} FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([row]) => row as AggResult<T>));
+		};
 		const pageOffset = (pred: Pred | readonly Pred[], opts: { limit?: number; offset?: number; asc?: boolean } = {}) => {
 			const { limit = Page.bounds.default, offset: start = 0, asc = false } = opts;
 			return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
@@ -216,11 +242,11 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const setIf = (target: string | [string, unknown], updates: Record<string, unknown>, when: Pred | readonly Pred[], scope?: Record<string, unknown>) => set(target, updates, scope, when);
 		// --- Soft delete methods (fail with tagged error if not configured) ----
 		const _makeSoft = (ts: Statement.Fragment, guard: Statement.Fragment) => ((input: string | readonly string[] | Pred | readonly Pred[], scope?: Record<string, unknown>) =>
-			softEntry ? ((col: string) =>
+			softEntry ? ((col: string, $bulk: Statement.Fragment) =>
 				typeof input === 'string'
 					? SqlSchema.single({ execute: () => sql`UPDATE ${sql(table)} SET ${sql(col)} = ${ts}${$touch} WHERE ${$target(input)}${$scope(scope)} AND ${sql(col)} ${guard} RETURNING *`, Request: S.Void, Result: model })(undefined)
-					: sql`UPDATE ${sql(table)} SET ${sql(col)} = ${ts}${$touch} WHERE ${Array.isArray(input) && input.length > 0 && typeof input[0] === 'string' ? sql`${sql(pkCol)} IN ${sql.in(input as string[])}` : $where(input as Pred | readonly Pred[])}${$scope(scope)} AND ${sql(col)} ${guard} RETURNING 1`.pipe(Effect.map(rows => rows.length))
-			)(softEntry.col) : Effect.fail(new RepoConfigError({ message: 'soft delete column not configured', operation: 'drop', table }))
+					: sql`UPDATE ${sql(table)} SET ${sql(col)} = ${ts}${$touch} WHERE ${$bulk}${$scope(scope)} AND ${sql(col)} ${guard} RETURNING 1`.pipe(Effect.map(rows => rows.length))
+			)(softEntry.col, Array.isArray(input) && input.length > 0 && typeof input[0] === 'string' ? sql`${sql(pkCol)} IN ${sql.in(input as string[])}` : $where(input as Pred | readonly Pred[])) : Effect.fail(new RepoConfigError({ message: 'soft delete column not configured', operation: 'drop', table }))
 		) as {
 			(input: string, scope?: Record<string, unknown>): Effect.Effect<S.Schema.Type<M>, SqlError | ParseError | Cause.NoSuchElementException | RepoConfigError>;
 			(input: readonly string[], scope?: Record<string, unknown>): Effect.Effect<number, SqlError | RepoConfigError>;
@@ -246,7 +272,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 						sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(upsertCfg.keys)}) DO UPDATE SET ${sql.csv(upsertCfg.updates)}${$touch}${occCheck} RETURNING *`,
 						Request: model.insert, Result: model })(items[0])
 						.pipe(Effect.flatMap(opt => Option.match(opt, {
-							onNone: () => Effect.fail((occ ? new RepoOccError({ expected: occ, pk: String((items[0] as Record<string, unknown>)[pkCol]), table }) : new RepoConfigError({ message: 'unexpected empty result', operation: 'upsert', table })) as RepoOccError | RepoConfigError),
+							onNone: () => Effect.fail(occ ? new RepoOccError({ expected: occ, pk: String((items[0] as Record<string, unknown>)[pkCol]), table }) : new RepoConfigError({ message: 'unexpected empty result', operation: 'upsert', table })),
 							onSome: row => Effect.succeed((isArr ? [row] : row) as S.Schema.Type<M> | S.Schema.Type<M>[]),
 						})))
 				)(occ ? sql` WHERE ${sql(table)}.updated_at = ${occ}` : sql``)
@@ -290,18 +316,20 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			sql.csv(spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
 		/** Call scalar-returning function (SELECT fn(...) AS count → number) */
 		const fn = (name: string, params: Record<string, unknown>): Effect.Effect<number, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> =>
-			config.fn ? config.fn[name] ? ((spec: NonNullable<typeof config.fn>[string]) =>
-				SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${$fnArgs(spec, params)}) AS count`, Request: spec.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count))
-			)(config.fn[name]) : Effect.fail(new RepoUnknownFnError({ fn: name, table })) : Effect.fail(new RepoConfigError({ message: 'no functions configured', operation: 'fn', table }));
+			Match.value({ cfg: config.fn, spec: config.fn?.[name] }).pipe(
+				Match.when({ cfg: Match.undefined }, () => Effect.fail(new RepoConfigError({ message: 'no functions configured', operation: 'fn', table }))),
+				Match.when({ spec: Match.undefined }, () => Effect.fail(new RepoUnknownFnError({ fn: name, table }))),
+				// biome-ignore lint/style/noNonNullAssertion: Match.when guarantees spec is defined at orElse
+				Match.orElse(({ spec }) => SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${$fnArgs(spec!, params)}) AS count`, Request: spec!.params, Result: _CountSchema })(params).pipe(Effect.map(row => row.count))),
+			);
 		/** Call SETOF-returning function (SELECT * FROM fn(...) → T[]) */
 		const fnSet = (name: string, params: Record<string, unknown>): Effect.Effect<readonly S.Schema.Type<M>[], RepoConfigError | RepoUnknownFnError | SqlError | ParseError> =>
-			config.fnSet
-				? config.fnSet[name]
-					? ((spec: NonNullable<typeof config.fnSet>[string]) =>
-						SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${$fnArgs(spec, params)})`, Request: spec.params, Result: model })(params)
-					)(config.fnSet[name])
-					: Effect.fail(new RepoUnknownFnError({ fn: name, table }))
-				: Effect.fail(new RepoConfigError({ message: 'no fnSet functions configured', operation: 'fnSet', table }));
+			Match.value({ cfg: config.fnSet, spec: config.fnSet?.[name] }).pipe(
+				Match.when({ cfg: Match.undefined }, () => Effect.fail(new RepoConfigError({ message: 'no fnSet functions configured', operation: 'fnSet', table }))),
+				Match.when({ spec: Match.undefined }, () => Effect.fail(new RepoUnknownFnError({ fn: name, table }))),
+				// biome-ignore lint/style/noNonNullAssertion: Match.when guarantees spec is defined at orElse
+				Match.orElse(({ spec }) => SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${$fnArgs(spec!, params)})`, Request: spec!.params, Result: model })(params)),
+			);
 		// --- Transaction support ---------------------------------------------
 		/** Run effect within a transaction. Caller controls the transaction boundary. */
 		const withTransaction = sql.withTransaction;
