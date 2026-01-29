@@ -107,10 +107,11 @@ Plans:
 - [ ] 04-01: TBD
 
 ### Phase 5: EventBus & Reliability
-**Goal**: Domain events publish reliably with at-least-once delivery and automatic deduplication. Transactional outbox via Activity.make + DurableDeferred.
+**Goal**: Domain events publish reliably with at-least-once delivery and automatic deduplication. EventBus replaces `StreamingService.channel()` for cross-pod pub/sub. Transactional outbox via Activity.make + DurableDeferred.
 **Depends on**: Phase 4
 **Requirements**: EVNT-01, EVNT-02, EVNT-04
-**Effect APIs**: `Entity.make` for routing, `Activity.make`, `DurableDeferred`, `SqlMessageStorage.saveRequest`, `Schema.TaggedRequest`, `Ndjson.pack/unpackSchema` (event streaming), `EventLog.schema` (optional event sourcing)
+**Effect APIs**: `Entity.make` for routing, `Activity.make`, `DurableDeferred`, `SqlMessageStorage.saveRequest`, `Schema.TaggedRequest`, `Sharding.broadcaster` (replaces local PubSub)
+**Streaming.ts Impact**: `StreamingService.channel()` deprecated — use `EventBus.subscribe()` for cross-pod events. Local SSE delivery via `sse()` remains unchanged.
 **Success Criteria** (what must be TRUE):
   1. Event emitted in handler reaches all subscribers across cluster within 200ms
   2. Event publishes only after database transaction commits (no phantom events on rollback)
@@ -118,7 +119,8 @@ Plans:
   4. EventBus exports typed domain event contracts via Schema (not untyped JSON)
   5. Single polymorphic `emit` function handles single event or batch
   6. Event emission wrapped in `Activity.make` for replay-safe idempotency
-  7. Transactional outbox uses `DurableDeferred` for commit acknowledgment (event waits for DB commit)
+  7. Transactional outbox uses `DurableDeferred` for commit acknowledgment
+  8. `StreamingService.channel()` marked deprecated with migration path to EventBus
 **Plans**: TBD
 
 Plans:
@@ -146,30 +148,32 @@ Plans:
 - [ ] 06-01: TBD
 
 ### Phase 7: Real-Time Delivery
-**Goal**: Events reach connected clients in real-time regardless of which pod they connected to. RpcGroup as shared contract. MsgPack serialization for efficiency.
+**Goal**: Events reach connected clients in real-time regardless of which pod they connected to. New WebSocketService via RpcServer.toHttpAppWebsocket. SSE via existing StreamingService.sse(). Cross-pod via EventBus (Phase 5).
 **Depends on**: Phase 6
 **Requirements**: STRM-01, STRM-02, WS-01, WS-02, WS-03, JOBS-02
-**Effect APIs**: `StreamingService.sse()`, `handleRaw()`, `Socket.run`, `Socket.toChannel` (backpressure-aware), `RpcServer.toHttpAppWebsocket`, `RpcGroup.make`, `Entity.fromRpcGroup` (shared contract), `RpcClient.make(RpcGroup)` (typed client), `RpcSerialization.layerMsgPack`, `RpcMiddleware.Tag`, `Sharding.broadcaster`, `DurableQueue.worker`, `Activity.retry`, `Entity.keepAlive` (long-lived connections)
+**Effect APIs**: `Socket.run`, `Socket.toChannel`, `RpcServer.toHttpAppWebsocket`, `RpcGroup.make`, `RpcClient.make(RpcGroup)`, `RpcSerialization.layerMsgPack`, `RpcMiddleware.Tag`, `DurableQueue.worker`, `Activity.retry`, `Entity.keepAlive`
+**File Changes**:
+  - `streaming.ts`: Keep `sse()`, `emit()`, `ingest()`. Remove deprecated `channel()`, `broadcast()` (replaced by EventBus Phase 5)
+  - `websocket.ts`: NEW — WebSocketService with RpcGroup contract
+  - `webhooks.ts`: NEW — DurableQueue.worker with retry + dead-letter
+**Pre-wired from Phase 1**: `_websocketTransport` and `RpcSerialization.layerMsgPack` already configured in cluster.ts
 **Success Criteria** (what must be TRUE):
-  1. SSE endpoint streams events with 30s heartbeat through proxy (connection stays alive)
+  1. SSE endpoint streams events with 30s heartbeat (uses existing StreamingService.sse)
   2. SSE backpressure prevents OOM on slow clients (sliding buffer verified)
   3. WebSocket client reconnects automatically within 5 seconds after disconnect
   4. WebSocket messages validate against Schema (invalid messages rejected with typed error)
-  5. Event published on Pod A reaches SSE/WebSocket clients on Pod B within 200ms
+  5. Event published on Pod A reaches SSE/WebSocket clients on Pod B within 200ms (via EventBus)
   6. Webhook delivery retries 3x with exponential backoff, then dead-letters
-  7. All real-time services use `Sharding.broadcaster` for cross-pod fan-out (no Redis pub/sub)
-  8. `RpcSerialization.layerMsgPack` for binary efficiency (not JSON serialization)
-  9. `RpcMiddleware.Tag` for auth context injection (no manual header parsing)
-  10. `RpcGroup` as shared contract between server/client (packages/shared export)
-  11. `Rpc.make({ primaryKey })` for stream resumption and idempotency
-  12. RpcClientError handling integrated with ClusterError taxonomy
-  13. Long-lived WebSocket connections use `Entity.keepAlive` to prevent eviction
+  7. Cross-pod fan-out uses EventBus.broadcast (no Redis pub/sub, no local PubSub)
+  8. `RpcGroup` as shared contract in packages/shared (server + client import same types)
+  9. WebSocketService under 225 LOC with `const + namespace` merge
+  10. Long-lived connections use `Entity.keepAlive` to prevent eviction
 **Plans**: TBD
 
-Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
-- [ ] 07-03: TBD
+Plans (suggested):
+- [ ] 07-01: TBD (likely WebSocketService with RpcGroup contract)
+- [ ] 07-02: TBD (likely streaming.ts cleanup — remove deprecated channel/broadcast)
+- [ ] 07-03: TBD (likely WebhookService with DurableQueue)
 
 ### Phase 8: Health & Observability
 **Goal**: Kubernetes can determine pod health and route traffic only to ready instances. Singleton health integration from Phase 3.
