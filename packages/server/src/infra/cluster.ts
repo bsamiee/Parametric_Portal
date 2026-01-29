@@ -15,30 +15,24 @@ import { Telemetry } from '../observe/telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-// Single source of truth for status - derived by both EntityState and StatusResponse
-const _STATUS = ['idle', 'processing', 'suspended', 'complete', 'failed'] as const;
-// Single source of truth for transport modes - used in config validation
-const _TRANSPORT = ['socket', 'http', 'websocket', 'auto'] as const;
-const _HEALTH_MODE = ['k8s', 'noop', 'auto'] as const;
 const _CONFIG = {
 	cron: { skipIfOlderThan: Duration.minutes(5) },
 	entity: { concurrency: 1, mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
-	health: { default: 'auto' satisfies typeof _HEALTH_MODE[number] },
 	retry: {
 		defect: { base: Duration.millis(100), factor: 2, maxAttempts: 5 },
 		transient: { base: Duration.millis(50), cap: Duration.seconds(5), maxAttempts: 3 },
 	},
 	sla: { sendTimeout: Duration.millis(100) },
-	transport: { default: 'auto' satisfies typeof _TRANSPORT[number] },
 } as const;
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const IdempotencyKey = S.String.pipe(S.minLength(1), S.maxLength(255), S.pattern(/^[a-zA-Z0-9:_-]+$/), S.brand('IdempotencyKey'));
 const SnowflakeId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId'));
+const EntityStatus = S.Literal('idle', 'processing', 'suspended', 'complete', 'failed');
 class ProcessPayload extends S.Class<ProcessPayload>('ProcessPayload')({ data: S.Unknown, entityId: SnowflakeId, idempotencyKey: S.optional(IdempotencyKey) }) {}
 class StatusPayload extends S.Class<StatusPayload>('StatusPayload')({ entityId: SnowflakeId }) {}
-class StatusResponse extends S.Class<StatusResponse>('StatusResponse')({ status: S.Literal(..._STATUS), updatedAt: S.Number }) {}
+class StatusResponse extends S.Class<StatusResponse>('StatusResponse')({ status: EntityStatus, updatedAt: S.Number }) {}
 class EntityProcessError extends S.TaggedError<EntityProcessError>()('EntityProcessError', { cause: S.optional(S.Unknown), message: S.String }) {}
 const ClusterEntity = Entity.make('Cluster', [
 	// primaryKey: idempotencyKey required for determinism (Date.now() violates replay safety per research)
@@ -50,7 +44,7 @@ const ClusterEntity = Entity.make('Cluster', [
 
 class EntityState extends S.Class<EntityState>('EntityState')({
 	pendingSignal: S.optional(S.Struct({ name: S.String, token: S.String })),
-	status: S.Literal(..._STATUS),
+	status: EntityStatus,
 	updatedAt: S.Number,
 }) {
 	static readonly idle = () => new EntityState({ status: 'idle', updatedAt: Date.now() });
@@ -134,7 +128,7 @@ const K8sHttpClientLive = K8sHttpClient.layer.pipe(Layer.provide(NodeHttpClient.
 // Health mode dispatch - ping requires Runners dependency (Phase 3 when Singleton available)
 const RunnerHealthLive = Layer.unwrapEffect(Effect.gen(function* () {
 	const env = yield* Config.string('NODE_ENV').pipe(Config.withDefault('development'));
-	const mode = yield* Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault(_CONFIG.health.default));
+	const mode = yield* Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto'));
 	const namespace = yield* Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default'));
 	const labelSelector = yield* Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal'));
 	const useK8s = mode === 'k8s' || (mode === 'auto' && env === 'production');
@@ -168,21 +162,23 @@ const _socketTransport = SocketRunner.layerClientOnly.pipe(
 	Layer.provide(StorageDeps),
 );
 
-// Polymorphic transport selection via config-driven dispatch table
+// Transport dispatch table - source of truth for available modes (type derived from keys)
+const _transports = {
+	auto: _socketTransport.pipe(Layer.catchAll((e) => Layer.effectDiscard(Effect.logWarning('Socket transport unavailable, using HTTP', { error: String(e) })).pipe(Layer.provideMerge(_httpTransport)))),
+	http: _httpTransport,
+	socket: _socketTransport,
+	websocket: _websocketTransport,
+} as const;
+type _TransportMode = keyof typeof _transports;
+
+// Polymorphic transport selection via config
 const TransportLive = Layer.unwrapEffect(Effect.gen(function* () {
-	type Mode = typeof _TRANSPORT[number];
 	const mode = yield* Config.string('CLUSTER_TRANSPORT').pipe(
-		Config.withDefault(_CONFIG.transport.default),
-		Config.map((m): Mode => (_TRANSPORT as readonly string[]).includes(m) ? m as Mode : 'auto'),
+		Config.withDefault('auto' satisfies _TransportMode),
+		Config.map((m): _TransportMode => m in _transports ? m as _TransportMode : 'auto'),
 	);
 	yield* Effect.logInfo('Cluster transport selected', { mode });
-	const transports: Record<Mode, typeof _httpTransport> = {
-		auto: _socketTransport.pipe(Layer.catchAll((e) => Layer.effectDiscard(Effect.logWarning('Socket transport unavailable, using HTTP', { error: String(e) })).pipe(Layer.provideMerge(_httpTransport)))),
-		http: _httpTransport,
-		socket: _socketTransport,
-		websocket: _websocketTransport,
-	};
-	return transports[mode];
+	return _transports[mode];
 }));
 const ClusterLive = ClusterEntityLive.pipe(Layer.provide(TransportLive));
 
@@ -258,6 +254,7 @@ namespace ClusterService {
 	export type ErrorReason = Error['reason'];
 	export type IdempotencyKey = typeof IdempotencyKey.Type;
 	export type SnowflakeId = typeof SnowflakeId.Type;
+	export type Status = typeof EntityStatus.Type;
 	export type ProcessPayload = InstanceType<typeof ClusterService.Payload.Process>;
 	export type StatusPayload = InstanceType<typeof ClusterService.Payload.Status>;
 	export type StatusResponse = InstanceType<typeof ClusterService.Response.Status>;
