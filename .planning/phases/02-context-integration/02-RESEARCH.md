@@ -62,30 +62,26 @@ import { ShardId, Snowflake } from '@effect/cluster';
 import { Effect, FiberRef, Option, pipe, Schema as S } from 'effect';
 
 // --- [SCHEMA] ----------------------------------------------------------------
-// Branded types for serialization boundaries only
+// Branded types for serialization boundaries only (types inlined via typeof)
 const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
 const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
 
-// Type extraction (no separate type declarations)
-type RunnerId = typeof RunnerId.Type;
-type ShardIdString = typeof ShardIdString.Type;
-
 // --- [CONSTRUCTORS] ----------------------------------------------------------
 // Trusted internal constructors: Schema.decodeSync validates, brand preserves
-const _makeRunnerId = (snowflake: Snowflake.Snowflake): RunnerId =>
+const _makeRunnerId = (snowflake: Snowflake.Snowflake): typeof RunnerId.Type =>
   S.decodeSync(RunnerId)(Snowflake.toString(snowflake));
 
-const _makeShardIdString = (shardId: ShardId): ShardIdString =>
-  S.decodeSync(ShardIdString)(shardId.toString());  // Instance method, not static
+const _makeShardIdString = (shardId: ShardId): typeof ShardIdString.Type =>
+  S.decodeSync(ShardIdString)(shardId.toString());
 
 // --- [STATE] -----------------------------------------------------------------
 // ClusterState: outer Option, inner nulls (avoids Option nesting)
 interface ClusterState {
-  readonly shardId: ShardId | null;     // Official class with Equal/Hash
-  readonly runnerId: RunnerId | null;   // Branded string from Snowflake
-  readonly isLeader: boolean;           // Dynamic: set on singleton entry
-  readonly entityType: string | null;   // Set on entity handler entry
-  readonly entityId: string | null;     // Set on entity handler entry
+  readonly shardId: ShardId | null;              // Official class with Equal/Hash
+  readonly runnerId: typeof RunnerId.Type | null; // Branded via typeof (no separate type alias)
+  readonly isLeader: boolean;                    // Dynamic: set on singleton entry
+  readonly entityType: string | null;            // Set on entity handler entry
+  readonly entityId: string | null;              // Set on entity handler entry
 }
 
 const _clusterDefault: ClusterState = {
@@ -184,55 +180,36 @@ const makeRequestContext = (findByNamespace: Middleware.RequestContextLookup) =>
 **When to use:** Handler code accessing cluster state
 ```typescript
 // --- [ACCESSORS] -------------------------------------------------------------
-import { Data, Effect, FiberRef, Option, pipe } from 'effect';
+import { Data, Effect, FiberRef, Option } from 'effect';
+import { dual } from 'effect/Function';
 import { ShardId } from '@effect/cluster';
 
-// Tagged error for missing cluster context (development guard)
-class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<{
-  readonly operation: string;
-}> {}
+class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<{ readonly operation: string }> {}
 
 class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
   // ... existing static methods unchanged ...
 
   /** Access cluster state, fails with tagged error if not in cluster scope */
-  static readonly cluster = pipe(
-    FiberRef.get(_ref),
-    Effect.flatMap((ctx) => pipe(
-      ctx.cluster,
-      Option.match({
-        onNone: () => Effect.fail(new ClusterContextRequired({ operation: 'cluster' })),
-        onSome: Effect.succeed,
-      }),
-    )),
+  static readonly cluster = FiberRef.get(_ref).pipe(
+    Effect.flatMap((ctx) => Option.match(ctx.cluster, {
+      onNone: () => Effect.fail(new ClusterContextRequired({ operation: 'cluster' })),
+      onSome: Effect.succeed,
+    })),
   );
 
-  /** Access shard ID: Option.none() outside entity scope, Option.some(ShardId) inside */
-  static readonly shardId: Effect.Effect<Option.Option<ShardId>, never, never> = pipe(
-    FiberRef.get(_ref),
-    Effect.map((ctx) => pipe(
-      ctx.cluster,
-      Option.flatMap((c) => Option.fromNullable(c.shardId)),
-    )),
+  /** Shard ID: Option.none() outside entity scope */
+  static readonly shardId = FiberRef.get(_ref).pipe(
+    Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.shardId)),
   );
 
-  /** Access runner ID: Option.none() outside cluster, Option.some(RunnerId) inside */
-  static readonly runnerId: Effect.Effect<Option.Option<RunnerId>, never, never> = pipe(
-    FiberRef.get(_ref),
-    Effect.map((ctx) => pipe(
-      ctx.cluster,
-      Option.flatMap((c) => Option.fromNullable(c.runnerId)),
-    )),
+  /** Runner ID: Option.none() outside cluster scope */
+  static readonly runnerId = FiberRef.get(_ref).pipe(
+    Effect.map((ctx) => Option.flatMapNullable(ctx.cluster, (c) => c.runnerId)),
   );
 
-  /** Check leader status: false outside cluster/singleton scope */
-  static readonly isLeader: Effect.Effect<boolean, never, never> = pipe(
-    FiberRef.get(_ref),
-    Effect.map((ctx) => pipe(
-      ctx.cluster,
-      Option.map((c) => c.isLeader),
-      Option.getOrElse(() => false),
-    )),
+  /** Leader status: false outside cluster/singleton scope */
+  static readonly isLeader = FiberRef.get(_ref).pipe(
+    Effect.map((ctx) => Option.exists(ctx.cluster, (c) => c.isLeader)),
   );
 
   /** Update cluster context within current fiber */
@@ -242,15 +219,16 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
       cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
     }));
 
-  /** Run effect with scoped cluster context (reverts after completion) */
-  static readonly withinCluster = <A, E, R>(
-    partial: Partial<ClusterState>,
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, E, R> =>
-    Effect.locallyWith(effect, _ref, (ctx) => ({
+  /** Run effect with scoped cluster context (dual: data-first and pipeable) */
+  static readonly withinCluster: {
+    <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<ClusterState>): Effect.Effect<A, E, R>;
+    (partial: Partial<ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  } = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<ClusterState>) =>
+    FiberRef.locallyWith(_ref, (ctx) => ({
       ...ctx,
       cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
-    }));
+    }))(effect),
+  );
 }
 ```
 
@@ -374,106 +352,6 @@ Problems that look simple but have existing solutions:
 **How to avoid:** Capture context in workflow **payload** at submission time, not via FiberRef
 **Warning signs:** Null/default context values in resumed workflow activities
 
-## Advanced Effect APIs
-
-### FiberRef Advanced Patterns
-```typescript
-// --- [FIBERREF ADVANCED] -----------------------------------------------------
-import { Effect, FiberRef, Option } from 'effect';
-
-// FiberRef.locallyScoped: modification lasts for duration of Scope
-// Useful for entity handlers with explicit Scope lifecycle
-const withEntityScope = <A, E, R>(
-  partial: Partial<ClusterState>,
-  effect: Effect.Effect<A, E, R | Scope>,
-): Effect.Effect<A, E, R | Scope> =>
-  FiberRef.locallyScoped(_ref, { ..._default, cluster: Option.some({ ..._clusterDefault, ...partial }) })
-    .pipe(Effect.zipRight(effect));
-
-// FiberRef.getAndUpdate: atomic get-and-update, returns old value
-static readonly markAsLeader = FiberRef.getAndUpdate(_ref, (ctx) => ({
-  ...ctx,
-  cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), isLeader: true }),
-})).pipe(Effect.map((old) => Option.flatMapNullable(old.cluster, (c) => c.isLeader)));
-
-// FiberRef.modify: transform value and return computed result in one atomic operation
-static readonly enterEntityScope = (entityType: string, entityId: string, shardId: ShardId) =>
-  FiberRef.modify(_ref, (ctx) => {
-    const wasInCluster = Option.isSome(ctx.cluster);
-    const newCtx = {
-      ...ctx,
-      cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), entityType, entityId, shardId }),
-    };
-    return [wasInCluster, newCtx] as const;  // [returnValue, newState]
-  });
-```
-
-### Dual Pattern for Pipeable APIs
-```typescript
-// --- [DUAL PATTERN] ----------------------------------------------------------
-import { dual } from 'effect/Function';
-
-// dual enables both data-first and data-last (pipeable) signatures
-static readonly withinCluster: {
-  <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<ClusterState>): Effect.Effect<A, E, R>;
-  (partial: Partial<ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
-} = dual(
-  2,
-  <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<ClusterState>): Effect.Effect<A, E, R> =>
-    FiberRef.locallyWith(_ref, (ctx) => ({
-      ...ctx,
-      cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
-    }))(effect)
-);
-
-// Usage:
-// Data-first: Context.Request.withinCluster(myEffect, { isLeader: true })
-// Data-last:  myEffect.pipe(Context.Request.withinCluster({ isLeader: true }))
-```
-
-### Option Functional Patterns
-```typescript
-// --- [OPTION PATTERNS] -------------------------------------------------------
-import { Option } from 'effect';
-
-// Option.flatMapNullable: combines flatMap + fromNullable (most common pattern)
-const runnerId = Option.flatMapNullable(ctx.cluster, (c) => c.runnerId);
-
-// Option.exists: predicate check returning boolean (no Effect wrapper)
-const isCurrentlyLeader = Option.exists(ctx.cluster, (c) => c.isLeader);
-
-// Option.contains: equality check using Equivalence
-const isInShard = (targetShardId: ShardId) =>
-  Option.flatMapNullable(ctx.cluster, (c) => c.shardId).pipe(
-    Option.containsWith(ShardId.Equivalence)(targetShardId)
-  );
-```
-
-### Match Exhaustive Patterns
-```typescript
-// --- [MATCH PATTERNS] --------------------------------------------------------
-import { Match } from 'effect';
-
-// Match.tagsExhaustive: compile-time exhaustiveness for tagged unions
-const handleClusterError = Match.type<ClusterError>().pipe(
-  Match.tagsExhaustive({
-    MailboxFull: (e) => Effect.logWarning('Backpressure needed', { entityId: e.entityId }),
-    SendTimeout: (e) => Effect.logError('SLA exceeded', { entityId: e.entityId }),
-    PersistenceError: (e) => Effect.logError('Storage failure', { cause: e.cause }),
-    // ... all other variants required at compile time
-  })
-);
-
-// Match.discriminatorsExhaustive: for non-_tag discriminant fields
-const matchByReason = Match.type<ClusterError>().pipe(
-  Match.discriminatorsExhaustive('reason')({
-    AlreadyProcessingMessage: (e) => /* ... */,
-    MailboxFull: (e) => /* ... */,
-    // ... compile-time exhaustive
-  })
-);
-```
-
 ## Additional Patterns
 
 ### Observability Attributes Extension
@@ -502,13 +380,7 @@ static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId):
 **What:** Extend existing Context.Serializable for cross-pod trace propagation
 ```typescript
 // --- [SERIALIZABLE] ----------------------------------------------------------
-import { ShardId } from '@effect/cluster';
-import { Option, pipe, Schema as S } from 'effect';
-
-// Branded schemas for serialization (same as in Canonical ClusterState)
-const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
-const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
-
+// RunnerId, ShardIdString schemas defined once in [SCHEMA] section above
 // Extend existing Serializable class (add fields, preserve fromData pattern)
 class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
   // Existing fields unchanged
@@ -526,17 +398,17 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
       ipAddress: Option.getOrUndefined(ctx.ipAddress),
       requestId: ctx.requestId,
       tenantId: ctx.tenantId,
-      ...pipe(ctx.session, Option.match({
+      ...Option.match(ctx.session, {
         onNone: () => ({}),
         onSome: (s) => ({ sessionId: s.id, userId: s.userId }),
-      })),
+      }),
       // NEW: Extract cluster fields (null → undefined for S.optional)
       ...Option.match(ctx.cluster, {
         onNone: () => ({}),
         onSome: (c) => ({
           runnerId: c.runnerId ?? undefined,
           shardId: Option.flatMapNullable(Option.some(c), (x) => x.shardId).pipe(
-            Option.map((s) => S.decodeSync(ShardIdString)(s.toString())),  // Instance method
+            Option.map(_makeShardIdString),  // Use constructor from [CONSTRUCTORS] section
             Option.getOrUndefined,
           ),
         }),
