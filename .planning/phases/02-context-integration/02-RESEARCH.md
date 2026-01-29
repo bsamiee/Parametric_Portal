@@ -229,6 +229,16 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
       cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), ...partial }),
     }))(effect),
   );
+
+  /** Atomic enter entity scope: updates context and returns whether already in cluster (for metrics/logging) */
+  static readonly enterEntityScope = (entityType: string, entityId: string, shardId: ShardId) =>
+    FiberRef.modify(_ref, (ctx): [boolean, typeof ctx] => {
+      const wasInCluster = Option.isSome(ctx.cluster);
+      return [wasInCluster, {
+        ...ctx,
+        cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), entityType, entityId, shardId }),
+      }];
+    });
 }
 ```
 
@@ -238,38 +248,22 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 ```typescript
 // --- [ENTITY CONTEXT] --------------------------------------------------------
 import { Entity, ShardId } from '@effect/cluster';
-import { Effect, FiberRef, Option } from 'effect';
+import { Effect, FiberRef, Option, Ref } from 'effect';
 
-// Wrap entity handler with cluster context injection
-const withEntityContext = <A, E, R>(
-  entityType: string,
-  entityId: string,
-  shardId: ShardId,  // Official class, not string
-  effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, E, R> =>
-  Effect.locallyWith(effect, _ref, (ctx) => ({
-    ...ctx,
-    cluster: Option.some({
-      ...Option.getOrElse(ctx.cluster, () => _clusterDefault),
-      entityId,
-      entityType,
-      shardId,
-    }),
-  }));
-
-// Usage in ClusterEntityLive (from cluster.ts)
+// Usage in ClusterEntityLive: inline Effect.locally (no wrapper helper)
 const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
-  const currentAddress = yield* Entity.CurrentAddress;
+  const { entityId, entityType, shardId } = yield* Entity.CurrentAddress;
   const stateRef = yield* Ref.make(EntityState.idle());
   return {
-    process: (envelope) => withEntityContext(
-      'Cluster',
-      currentAddress.entityId,
-      currentAddress.shardId,
+    process: (envelope) => Effect.locally(
       Effect.gen(function* () {
-        // Handler logic with full cluster context available
         yield* Ref.set(stateRef, EntityState.processing());
-        // ... process payload
+        // Handler logic with full cluster context available via Context.Request.cluster
+      }),
+      _ref,
+      (ctx) => ({
+        ...ctx,
+        cluster: Option.some({ ...Option.getOrElse(ctx.cluster, () => _clusterDefault), entityId, entityType, shardId }),
       }),
     ),
     status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse(s))),
@@ -359,10 +353,8 @@ Problems that look simple but have existing solutions:
 ```typescript
 // --- [OBSERVABILITY] ---------------------------------------------------------
 import { FiberId, Option, pipe, Record } from 'effect';
-import { ShardId } from '@effect/cluster';
 
 // Extend existing toAttrs (add to existing Record.getSomes call)
-// Use Option.flatMapNullable for concise null-to-Option conversion
 static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>
   Record.getSomes({
     // ... existing attributes unchanged ...
@@ -370,9 +362,7 @@ static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId):
     'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (c) => c.entityType),
     'cluster.is_leader': Option.map(ctx.cluster, (c) => String(c.isLeader)),
     'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (c) => c.runnerId),
-    'cluster.shard_id': Option.flatMapNullable(ctx.cluster, (c) => c.shardId).pipe(
-      Option.map((s) => s.toString()),  // Instance method
-    ),
+    'cluster.shard_id': pipe(ctx.cluster, Option.flatMapNullable((c) => c.shardId), Option.map((s) => s.toString())),
   });
 ```
 
@@ -407,10 +397,7 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
         onNone: () => ({}),
         onSome: (c) => ({
           runnerId: c.runnerId ?? undefined,
-          shardId: Option.flatMapNullable(Option.some(c), (x) => x.shardId).pipe(
-            Option.map(_makeShardIdString),  // Use constructor from [CONSTRUCTORS] section
-            Option.getOrUndefined,
-          ),
+          shardId: c.shardId ? _makeShardIdString(c.shardId) : undefined,
         }),
       }),
     });
