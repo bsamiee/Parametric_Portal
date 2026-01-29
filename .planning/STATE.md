@@ -10,28 +10,29 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 2 of 8 (Context Integration)
-Plan: 0 of TBD in current phase
-Status: Research complete, ready to plan
-Last activity: 2026-01-29 - Phase 2 research complete
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-01-29 - Completed 02-01-PLAN.md
 
-Progress: [##--------] 12%
+Progress: [###-------] 25%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
-- Average duration: 17 min
-- Total execution time: 0.83 hours
+- Total plans completed: 4
+- Average duration: 14 min
+- Total execution time: 0.93 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-cluster-foundation | 3 | 50min | 17min |
+| 02-context-integration | 1 | 6min | 6min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (12min), 01-02 (~30min), 01-03 (8min)
-- Trend: Stable (01-02 was larger scope)
+- Last 5 plans: 01-01 (12min), 01-02 (~30min), 01-03 (8min), 02-01 (6min)
+- Trend: Improving (02-01 was focused scope)
 
 *Updated after each plan completion*
 
@@ -63,9 +64,19 @@ Recent decisions affecting current work:
 - [02-Research]: `isLeader` updated dynamically via `Context.Request.withinCluster` on singleton entry
 - [02-Research]: Extend existing `Context.Serializable` class (not separate cluster serializable)
 - [02-Research]: ClusterState uses `null` (not Option) for internal optionality - simpler nesting
+- [02-Plan]: `_makeRunnerId` inlined into `Request.makeRunnerId` static method (single usage site)
+- [02-Plan]: `_clusterDefault` inlined into `withinCluster` via Option.getOrElse (single usage site)
+- [02-Plan]: `updateCluster` pattern not needed — `withinCluster` covers all practical cases
+- [02-Plan]: `enterEntityScope` deferred to Phase 3+ (useful for nested call metrics, not Phase 2 scope)
+- [02→03]: Entity handlers wrap with `withinCluster({ entityId, entityType, shardId })` — Phase 3 success criteria #10
+- [02→03]: Singleton handlers wrap with `withinCluster({ isLeader: true })` — Phase 3 success criteria #11
 - [Refinement]: Phase 3 singleton adds typed state persistence + heartbeat health tracking
 - [Refinement]: Phase 4 jobs adds priority, deduplication, DLQ, cancellation, status query
 - [Refinement]: Phase 8 uses auto-exported effect_cluster_* gauges (no manual integration)
+- [02-01]: ClusterContextRequired local error (avoids circular import)
+- [02-01]: Accessor named 'clusterState' not 'cluster' (TypeScript class conflict)
+- [02-01]: String(snowflake) for conversion (Snowflake has no toString method)
+- [02-01]: Type imports only for ShardId/Snowflake (namespace type references)
 
 ### Pending Todos
 
@@ -81,6 +92,9 @@ From research and revision feedback - must address during execution:
 - ~~[Phase 1]: `preemptiveShutdown: true` for K8s~~ [ADDRESSED: configured in ShardingConfigLive]
 - ~~[Phase 1]: `ClusterError` type guards~~ [ADDRESSED: Match.value(error.reason) pattern]
 - ~~[Phase 8]: ClusterMetrics integration~~ [ADDRESSED: trackCluster utility with e.reason labeling]
+
+**Resolved in Phase 2:**
+- ~~[02-01]: Circular import from cluster.ts~~ [ADDRESSED: local ClusterContextRequired error]
 
 **Open for future phases:**
 - [Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime
@@ -106,5 +120,5 @@ From research and revision feedback - must address during execution:
 ## Session Continuity
 
 Last session: 2026-01-29
-Stopped at: Phase 1 complete, ready to transition to Phase 2
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
