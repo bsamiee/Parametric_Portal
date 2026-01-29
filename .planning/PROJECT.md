@@ -99,11 +99,13 @@ HealthService (observe/health.ts) — aggregated dependency checks
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| @effect/cluster as foundation | Native distributed coordination vs DIY DB locks | — Pending |
-| Extend Context.Request with cluster state | Consistent access pattern, per-request context | — Pending |
-| Gut + replace vs deprecate + parallel | Clean break, no mixed patterns, same file paths | — Pending |
-| EventBus owns pub/sub | StreamingService becomes pure delivery, single source of truth | — Pending |
-| <225 LOC constraint | Enforces algorithmic density, prevents helper spam | — Pending |
+| @effect/cluster as foundation | Native distributed coordination vs DIY DB locks | ✓ Confirmed |
+| Extend Context.Request with cluster state | Consistent access pattern, per-request context | ✓ Confirmed |
+| Gut + replace jobs.ts | Poll-based queue incompatible with Entity model | ✓ Confirmed |
+| Keep cache.ts rate limiting | DurableRateLimiter is workflow-context only | ✓ Confirmed |
+| Keep streaming.ts for SSE | Add Entity routing for cross-pod, keep local delivery | ✓ Confirmed |
+| EventBus owns pub/sub | StreamingService becomes pure delivery, single source of truth | ✓ Confirmed |
+| <225 LOC constraint | Enforces algorithmic density, prevents helper spam | ✓ Confirmed |
 
 ---
-*Last updated: 2026-01-28 after initialization*
+*Last updated: 2026-01-28 after requirements definition*

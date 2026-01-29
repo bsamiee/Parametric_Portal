@@ -24,7 +24,7 @@ parametric-portal/
 ├── tools/                  # Build scripts, automation
 ├── tests/                  # E2E tests (Playwright)
 ├── .planning/              # GSD agent documentation
-│   └── codebase/          # Architecture and analysis docs
+│   └── codebase/           # Architecture and analysis docs
 ├── nx.json                 # Nx workspace configuration
 ├── pnpm-workspace.yaml     # PNPM catalog and workspace definition
 ├── tsconfig.base.json      # Shared TypeScript configuration

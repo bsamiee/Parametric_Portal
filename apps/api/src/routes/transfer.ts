@@ -127,17 +127,19 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 			() => HttpError.Validation.of('body', failures.length > 0 ? `All ${failures.length} rows failed validation` : 'Empty file - no data to import'),
 		);
 		type BatchResult = { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] };
+		const hashError = new TransferError.Fatal({ code: 'PARSER_ERROR', detail: 'Failed to compute content hash' });
+		const toHashError = () => hashError;
 		const prepareItem = (item: typeof items[number]) =>	// Prepare items: binary → S3 upload + metadata JSON, text → direct DB content
 			codec.binary
 				? Effect.gen(function* () {
 					const rawBuf = codec.buf(item.content);
-					const hash = item.hash ?? (yield* Crypto.hash(item.content).pipe(Effect.mapError(() => new TransferError.Fatal({ code: 'PARSER_ERROR', detail: 'Failed to compute content hash' }))));
-					const s3Key = `assets/${appId}/${hash}.${codec.ext}`;
-					const originalName = item.name ?? `${hash.slice(0, 8)}.${codec.ext}`;
+					const computedHash = yield* (item.hash === undefined ? Crypto.hash(item.content) : Effect.succeed(item.hash)).pipe(Effect.mapError(toHashError));
+					const s3Key = `assets/${appId}/${computedHash}.${codec.ext}`;
+					const originalName = item.name ?? `${computedHash.slice(0, 8)}.${codec.ext}`;
 					yield* storage.put({ body: rawBuf, contentType: codec.mime, key: s3Key, metadata: { type: item.type } });
-					const metadata = JSON.stringify({ hash, mime: codec.mime, originalName, size: rawBuf.byteLength, storageRef: s3Key });
+					const metadata = JSON.stringify({ hash: computedHash, mime: codec.mime, originalName, size: rawBuf.byteLength, storageRef: s3Key });
 					return {
-						appId, content: metadata, deletedAt: Option.none(), hash: pipe(hash, Option.some),
+						appId, content: metadata, deletedAt: Option.none(), hash: pipe(computedHash, Option.some),
 						name: pipe(originalName, Option.some), status: 'active' as const, storageRef: pipe(s3Key, Option.some),
 						type: item.type, updatedAt: undefined, userId: pipe(session.userId, Option.some),
 					};

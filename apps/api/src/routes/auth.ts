@@ -74,13 +74,9 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
 						Effect.map((e) => Buffer.from(e)),
 						Effect.catchAll(() => Effect.fail(err('Access token encryption failed'))),
 					);
-					const encRefresh = yield* Option.match(result.refresh, {
-						onNone: () => Effect.succeed(Option.none<Buffer>()),
-						onSome: (rt) => Crypto.encrypt(rt).pipe(
-							Effect.map((e) => Option.some(Buffer.from(e))),
-							Effect.catchAll(() => Effect.fail(err('Refresh token encryption failed'))),
-						),
-					});
+					const encRefresh = yield* Option.isSome(result.refresh)
+						? Crypto.encrypt(result.refresh.value).pipe(Effect.map((e) => Option.some(Buffer.from(e))), Effect.catchAll(() => Effect.fail(err('Refresh token encryption failed'))))
+						: Effect.succeed(Option.none<Buffer>());
 					yield* repos.oauthAccounts.upsert({
 						accessEncrypted: encAccess, deletedAt: Option.none(), expiresAt: result.expiresAt,
 						externalId: result.externalId, provider, refreshEncrypted: encRefresh,

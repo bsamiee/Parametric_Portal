@@ -28,17 +28,10 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 			.handle('getByUser', ({ path: { userId }, urlParams: params }) =>
 				CacheService.rateLimit('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.byUser(tenantId, userId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByUser', { kind: 'server' }))))
 			.handle('getMine', ({ urlParams: params }) =>
-				CacheService.rateLimit('api', pipe(
-					Middleware.requireMfaVerified,
-					Effect.zipRight(Context.Request.current),
-					Effect.flatMap((ctx) =>
-						Option.match(ctx.session, {
-							onNone: () => Effect.fail(HttpError.Auth.of('Session required') as HttpError.Auth | HttpError.Internal),
-							onSome: (session) => repos.audit.byUser(ctx.tenantId, session.userId, params.limit, params.cursor, params).pipe(
-								Effect.mapError((e) => HttpError.Internal.of('Audit lookup failed', e) as HttpError.Auth | HttpError.Internal),
-							),
-						}),
-					),
+				CacheService.rateLimit('api', Middleware.requireMfaVerified.pipe(
+					Effect.zipRight(Effect.all([Context.Request.current, Context.Request.session])),
+					Effect.flatMap(([ctx, session]) => repos.audit.byUser(ctx.tenantId, session.userId, params.limit, params.cursor, params)),
+					Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Internal.of('Audit lookup failed', e) as HttpError.Auth | HttpError.Internal),
 					Effect.withSpan('audit.getMine', { kind: 'server' }),
 				)));
 	}),
