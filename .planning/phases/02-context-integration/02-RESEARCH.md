@@ -76,29 +76,41 @@ const _default: Context.Request.Data = {
 };
 ```
 
-### Pattern 2: Branded Types for ShardId/RunnerId
-**What:** Type-safe identifiers preventing accidental mixing
-**When to use:** All cluster state fields that are string identifiers
+### Pattern 2: Use Official ShardId Class + Branded RunnerId
+**What:** Type-safe identifiers using official @effect/cluster types
+**When to use:** Internal cluster state (ShardId class) and serialization (branded strings)
 **Example:**
 ```typescript
-// Source: Existing types.ts pattern + @effect/cluster Snowflake
-// Place in context.ts near other schema definitions
+// Source: @effect/cluster ShardId + existing branded pattern
+import { ShardId, Snowflake } from '@effect/cluster';
+import { Schema as S } from 'effect';
 
-const ShardId = S.String.pipe(
-  S.pattern(/^shard-\d+$/),  // Match cluster format: "shard-0", "shard-99"
-  S.brand('ShardId'),
-);
-type ShardId = typeof ShardId.Type;
-
+// RunnerId: Snowflake as branded string (for serialization)
 const RunnerId = S.String.pipe(
-  S.pattern(/^\d{18,19}$/),  // Snowflake format from sharding.getSnowflake
+  S.pattern(/^\d{18,19}$/),  // Snowflake format: 18-19 digit bigint string
   S.brand('RunnerId'),
 );
 type RunnerId = typeof RunnerId.Type;
 
-// Unsafe constructor for trusted internal use (from sharding APIs)
-const _makeShardId = (raw: string): ShardId => raw as unknown as ShardId;
-const _makeRunnerId = (raw: string): RunnerId => raw as unknown as RunnerId;
+// ShardIdString: For Serializable class (cross-pod propagation)
+const ShardIdString = S.String.pipe(
+  S.pattern(/^[a-zA-Z0-9_-]+:\d+$/),  // "group:id" from ShardId.toString()
+  S.brand('ShardIdString'),
+);
+type ShardIdString = typeof ShardIdString.Type;
+
+// Internal constructors for trusted values from Sharding API
+const _makeRunnerId = (snowflake: Snowflake.Snowflake): RunnerId =>
+  String(snowflake) as unknown as RunnerId;
+
+// ClusterState uses official ShardId class directly (not string)
+interface ClusterState {
+  readonly shardId: ShardId | null;        // Official class, null when outside entity
+  readonly runnerId: RunnerId | null;      // Branded string from Snowflake
+  readonly isLeader: boolean;              // Set when entering singleton scope
+  readonly entityType: string | null;      // Set when entering entity handler
+  readonly entityId: string | null;        // Set when entering entity handler
+}
 ```
 
 ### Pattern 3: Middleware Context Population
@@ -217,14 +229,17 @@ Problems that look simple but have existing solutions:
 
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
+| Shard ID type | Branded string schema | `ShardId` class from @effect/cluster | Has Equal/Hash protocols, structural equality |
 | Shard ID calculation | Custom consistent hash | `Sharding.getShardId(entityId, group)` | Already computed, synchronous access |
+| Shard ID serialization | Custom format | `ShardId.toString()` / `fromString()` | Official bidirectional conversion |
 | Runner identification | Environment variable parsing | `sharding.getSnowflake` | Cluster-assigned, globally unique |
-| Leader election status | DB-backed flag polling | `Singleton.make` context | Automatic via shard assignment |
+| Leader election status | DB-backed flag polling | `Singleton.make` context scope | Automatic via shard assignment |
 | Context propagation | Manual parameter threading | FiberRef.locally/locallyWith | Automatic child fiber inheritance |
+| Cross-pod serialization | Custom JSON mapping | `Schema.Class` with `fromData` | Automatic encode/decode, validation |
 | Cross-pod trace context | Manual header extraction | RPC automatic propagation | Built into @effect/rpc |
 | Request-scoped state | Context.Tag with explicit provision | FiberRef with default | No R type pollution, cleaner handlers |
 
-**Key insight:** The existing FiberRef-based context pattern in context.ts is the correct architecture. Cluster state is just another optional field following the established `circuit`, `session`, `rateLimit` pattern.
+**Key insight:** The existing FiberRef-based context pattern in context.ts is the correct architecture. Cluster state is just another optional field following the established `circuit`, `session`, `rateLimit` pattern. Use `ShardId` CLASS directly (not string) for internal state — it provides structural equality and hash protocols.
 
 ## Common Pitfalls
 
@@ -444,24 +459,108 @@ static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId):
 - `undefined` for missing values: Use `Option.none()` (Effect convention)
 - Manual trace context propagation: Automatic via @effect/rpc
 
-## Open Questions
+## Resolved Technical Decisions
 
-Things that couldn't be fully resolved:
+Answers to open questions, verified against @effect/cluster source and codebase patterns:
 
-1. **Leader status detection timing**
-   - What we know: Singleton registration provides leadership, but status may change during request
-   - What's unclear: Whether isLeader should be cached per-request or checked dynamically
-   - Recommendation: Cache at middleware entry; singletons re-register via Sharding events if leadership changes
+### Decision 1: Leader Status Strategy — Dynamic Update on Singleton Entry
 
-2. **ShardId format validation**
-   - What we know: Sharding.getShardId returns internal shard ID format
-   - What's unclear: Exact string format (observed "shard-0" to "shard-99" in docs)
-   - Recommendation: Use permissive pattern initially (`/^shard-\d+$/`), tighten after validation
+**Question:** Cache at middleware entry or check dynamically?
 
-3. **Cross-pod context serialization**
-   - What we know: RPC propagates trace context automatically
-   - What's unclear: Whether full ClusterState should serialize across RPC boundaries
-   - Recommendation: Only propagate what's needed (requestId, tenantId via existing Serializable class)
+**Resolution:** Hybrid approach following Effect patterns:
+- **runnerId**: Cached at middleware entry via `sharding.getSnowflake` (doesn't change during request)
+- **isLeader**: Dynamic — set to `true` when entering singleton handler scope via `Context.Request.withinCluster`
+- **shardId**: Dynamic — set when entering entity handler scope
+
+**Why:** Leadership is singleton-scoped, not request-scoped. A request may traverse multiple contexts (HTTP → entity → singleton). The context updates as scope changes via `Effect.locallyWith`.
+
+**Pattern:**
+```typescript
+// In singleton handler (ClusterService.singleton)
+ClusterService.singleton('leader-job', Effect.gen(function* () {
+  yield* Context.Request.updateCluster({ isLeader: true });
+  yield* leaderOnlyWork;
+}));
+```
+
+### Decision 2: ShardId Type — Use Official ShardId Class, String Schema for Serialization
+
+**Question:** Better approach for ShardId format validation?
+
+**Resolution:** @effect/cluster exports `ShardId` as a CLASS with rich semantics:
+
+```typescript
+// From @effect/cluster/ShardId.ts
+class ShardId {
+  readonly group: string;     // Entity group name
+  readonly id: number;        // Shard number (1 to shardsPerGroup)
+  readonly [TypeId]: TypeId;  // Unique symbol for branding
+}
+
+// Factory and conversion
+ShardId.make(group: string, id: number): ShardId
+ShardId.toString(shardId: ShardId): string    // e.g., "default:42"
+ShardId.fromString(s: string): ShardId        // Parse back
+```
+
+**Implementation:**
+- **Internal ClusterState**: Store `ShardId` class directly (implements Equal/Hash for maps/sets)
+- **Serializable class**: Convert to string via `ShardId.toString()` with branded schema
+- **Context interface**: Use `ShardId | null` (not Option — internal only, avoids Option nesting)
+
+**Branded string schema for serialization:**
+```typescript
+// For Context.Serializable cross-pod propagation
+const ShardIdString = S.String.pipe(
+  S.pattern(/^[a-zA-Z0-9_-]+:\d+$/),  // "group:id" format from ShardId.toString()
+  S.brand('ShardIdString'),
+);
+```
+
+**Why not plain string:** ShardId class has:
+- Structural equality via `Equal.symbol` (works in Effect maps/sets)
+- Hash protocol for efficient lookups
+- Type safety preventing accidental mixing with entity IDs
+
+### Decision 3: Cross-Pod Serialization — Extend Existing Serializable Class
+
+**Question:** Best dense/polymorphic solution for cross-pod context?
+
+**Resolution:** Extend the existing `Context.Serializable` class (Schema.Class pattern):
+
+```typescript
+// Source: context.ts - extend existing Serializable class
+class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
+  // Existing fields
+  ipAddress: S.optional(S.String),
+  requestId: S.String,
+  sessionId: S.optional(S.String),
+  tenantId: S.String,
+  userId: S.optional(S.String),
+  // NEW: Cluster fields (optional for backward compatibility)
+  runnerId: S.optional(S.String),      // Snowflake as string
+  shardId: S.optional(ShardIdString),  // "group:id" format
+}) {
+  static readonly fromData = (ctx: Context.Request.Data): Serializable =>
+    new Serializable({
+      // ... existing extraction ...
+      runnerId: pipe(ctx.cluster, Option.flatMap((c) => c.runnerId), Option.map(String), Option.getOrUndefined),
+      shardId: pipe(ctx.cluster, Option.flatMap((c) => c.shardId), Option.map(ShardId.toString), Option.getOrUndefined),
+    });
+}
+```
+
+**Why this approach:**
+1. **Polymorphic**: Same class handles with/without cluster fields
+2. **Backward compatible**: Optional fields — old consumers unaffected
+3. **No hand-rolling**: Uses Schema.Class automatic serialization
+4. **Dense**: Single class, not separate cluster-specific serializable
+5. **Established pattern**: Follows existing `fromData` factory method
+
+**What NOT to serialize:**
+- `isLeader`: Request-scoped flag, not meaningful across pods
+- `entityType`/`entityId`: Context-specific, changes during request lifecycle
+- Full ClusterState: Only propagate correlation identifiers (runnerId, shardId)
 
 ## Sources
 

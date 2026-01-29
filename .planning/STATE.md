@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** Apps deploy multi-pod with zero coordination code
-**Current focus:** Phase 1 - Cluster Foundation
+**Current focus:** Phase 2 - Context Integration
 
 ## Current Position
 
-Phase: 1 of 8 (Cluster Foundation)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-01-29 - Phase 1 complete, all 3 plans executed
+Phase: 2 of 8 (Context Integration)
+Plan: 0 of TBD in current phase
+Status: Research complete, ready to plan
+Last activity: 2026-01-29 - Phase 2 research complete
 
 Progress: [##--------] 12%
 
@@ -56,6 +56,13 @@ Recent decisions affecting current work:
 - [01-03]: ClusterMetrics gauges auto-provided by Sharding - no duplication needed
 - [01-03]: App-specific metrics: counters for messages/errors, histograms for latency/lifetime
 - [01-03]: trackCluster uses e.reason for error type discrimination
+- [02-Research]: Use official `ShardId` class from @effect/cluster (not branded string)
+- [02-Research]: ShardId has Equal/Hash protocols - use directly in ClusterState interface
+- [02-Research]: `ShardId.toString()` / `fromString()` for serialization boundary
+- [02-Research]: RunnerId as branded string from `Snowflake.toString()`
+- [02-Research]: `isLeader` updated dynamically via `Context.Request.withinCluster` on singleton entry
+- [02-Research]: Extend existing `Context.Serializable` class (not separate cluster serializable)
+- [02-Research]: ClusterState uses `null` (not Option) for internal optionality - simpler nesting
 
 ### Pending Todos
 

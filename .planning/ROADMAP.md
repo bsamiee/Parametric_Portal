@@ -48,12 +48,13 @@ Plans:
 **Goal**: Request handlers access shard ID, runner ID, and leader status via standard Context.Request pattern. Middleware populates context; handlers consume.
 **Depends on**: Phase 1
 **Requirements**: CLUS-04
-**Effect APIs**: `Sharding.getShardId`, `isEntityOnLocalRunner`, `FiberRef`, `Context.Request`, `FileSystem.watch` (K8s ConfigMap hot-reload)
+**Effect APIs**: `ShardId` (class with Equal/Hash), `Sharding.getShardId`, `sharding.getSnowflake`, `ShardId.toString/fromString`, `FiberRef.locally/locallyWith`, `Effect.serviceOption`, `Schema.Class` (Serializable extension)
 **Success Criteria** (what must be TRUE):
-  1. Handler accesses `Context.Request.cluster.shardId` with branded type (not loose string)
-  2. Handler accesses `Context.Request.cluster.runnerId` for observability tagging
-  3. Handler accesses `Context.Request.cluster.isLeader` for conditional logic
-  4. Context population occurs in middleware with no handler boilerplate
+  1. Handler accesses `Context.Request.cluster.shardId` with `ShardId` class type (not loose string)
+  2. Handler accesses `Context.Request.cluster.runnerId` with branded `RunnerId` type
+  3. Handler accesses `Context.Request.cluster.isLeader` for conditional logic (updated on singleton entry)
+  4. Context population occurs in middleware with graceful degradation via `Effect.serviceOption`
+  5. `Context.Serializable` extended with optional runnerId/shardId for cross-pod traces
 **Plans**: TBD
 
 Plans:
