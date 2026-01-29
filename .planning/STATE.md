@@ -5,34 +5,34 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** Apps deploy multi-pod with zero coordination code
-**Current focus:** Phase 2 - Context Integration
+**Current focus:** Phase 3 - Entity Singleton
 
 ## Current Position
 
 Phase: 2 of 8 (Context Integration)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-01-29 - Completed 02-01-PLAN.md
+Plan: 2 of 2 in current phase
+Status: Phase complete
+Last activity: 2026-01-29 - Completed 02-02-PLAN.md
 
-Progress: [###-------] 25%
+Progress: [####------] 31%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
-- Average duration: 14 min
-- Total execution time: 0.93 hours
+- Total plans completed: 5
+- Average duration: 12 min
+- Total execution time: 1.0 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-cluster-foundation | 3 | 50min | 17min |
-| 02-context-integration | 1 | 6min | 6min |
+| 02-context-integration | 2 | 8min | 4min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (12min), 01-02 (~30min), 01-03 (8min), 02-01 (6min)
-- Trend: Improving (02-01 was focused scope)
+- Last 5 plans: 01-02 (~30min), 01-03 (8min), 02-01 (6min), 02-02 (2min)
+- Trend: Fast execution for focused plans
 
 *Updated after each plan completion*
 
@@ -68,8 +68,8 @@ Recent decisions affecting current work:
 - [02-Plan]: `_clusterDefault` inlined into `withinCluster` via Option.getOrElse (single usage site)
 - [02-Plan]: `updateCluster` pattern not needed — `withinCluster` covers all practical cases
 - [02-Plan]: `enterEntityScope` deferred to Phase 3+ (useful for nested call metrics, not Phase 2 scope)
-- [02→03]: Entity handlers wrap with `withinCluster({ entityId, entityType, shardId })` — Phase 3 success criteria #10
-- [02→03]: Singleton handlers wrap with `withinCluster({ isLeader: true })` — Phase 3 success criteria #11
+- [02->03]: Entity handlers wrap with `withinCluster({ entityId, entityType, shardId })` — Phase 3 success criteria #10
+- [02->03]: Singleton handlers wrap with `withinCluster({ isLeader: true })` — Phase 3 success criteria #11
 - [Refinement]: Phase 3 singleton adds typed state persistence + heartbeat health tracking
 - [Refinement]: Phase 4 jobs adds priority, deduplication, DLQ, cancellation, status query
 - [Refinement]: Phase 8 uses auto-exported effect_cluster_* gauges (no manual integration)
@@ -77,6 +77,9 @@ Recent decisions affecting current work:
 - [02-01]: Accessor named 'clusterState' not 'cluster' (TypeScript class conflict)
 - [02-01]: String(snowflake) for conversion (Snowflake has no toString method)
 - [02-01]: Type imports only for ShardId/Snowflake (namespace type references)
+- [02-02]: Effect.serviceOption(Sharding.Sharding) for graceful degradation
+- [02-02]: Span annotation with cluster.runner_id for trace correlation
+- [02-02]: S.optional for backward compatible Serializable extension
 
 ### Pending Todos
 
@@ -95,6 +98,7 @@ From research and revision feedback - must address during execution:
 
 **Resolved in Phase 2:**
 - ~~[02-01]: Circular import from cluster.ts~~ [ADDRESSED: local ClusterContextRequired error]
+- ~~[02-02]: Middleware cluster context population~~ [ADDRESSED: Effect.serviceOption graceful degradation]
 
 **Open for future phases:**
 - [Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime
@@ -120,5 +124,5 @@ From research and revision feedback - must address during execution:
 ## Session Continuity
 
 Last session: 2026-01-29
-Stopped at: Completed 02-01-PLAN.md
+Stopped at: Completed 02-02-PLAN.md (Phase 2 complete)
 Resume file: None
