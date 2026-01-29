@@ -239,6 +239,37 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			Stream.map(([item]) => item),
 		);
 	};
+	// --- [CLUSTER_TRACKING] --------------------------------------------------
+	/** Track cluster operation with error classification. Labels errors by type (e.reason for ClusterError). */
+	static readonly trackCluster = <A, E extends { readonly reason: string }, R>(
+		effect: Effect.Effect<A, E, R>,
+		config: {
+			readonly operation: 'send' | 'broadcast' | 'receive';
+			readonly entityType: string;
+		},
+	): Effect.Effect<A, E, R | MetricsService> =>
+		Effect.flatMap(MetricsService, (metrics) => {
+			const labels = MetricsService.label({
+				entity_type: config.entityType,
+				operation: config.operation,
+			});
+			return effect.pipe(
+				Effect.tap(() => Match.value(config.operation).pipe(
+					Match.when('send', () => Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesSent, labels))),
+					Match.when('receive', () => Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesReceived, labels))),
+					Match.when('broadcast', () => Effect.void),
+					Match.exhaustive,
+				)),
+				Metric.trackDuration(Metric.taggedWithLabels(metrics.cluster.messageLatency, labels)),
+				Effect.tapError((e) => {
+					const errorLabels = MetricsService.label({
+						entity_type: config.entityType,
+						type: e.reason,  // ClusterError.reason: 'MailboxFull' | 'RunnerUnavailable' | etc.
+					});
+					return Metric.increment(Metric.taggedWithLabels(metrics.cluster.errors, errorLabels));
+				}),
+			);
+		});
 	// --- [HTTP_MIDDLEWARE] ---------------------------------------------------
 	static readonly middleware = HttpMiddleware.make((app) =>	/** HTTP metrics middleware - tracks active requests, duration, errors per tenant. */
 		Effect.gen(function* () {
