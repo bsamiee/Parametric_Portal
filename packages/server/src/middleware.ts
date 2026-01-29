@@ -3,6 +3,7 @@
  * Organized into 3 blocks: global, auth, context.
  */
 /** biome-ignore-all assist/source/useSortedKeys: <Organization> */
+import { Sharding } from '@effect/cluster';
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
 import type { Hex64 } from '@parametric-portal/types/types';
 import * as ipaddr from 'ipaddr.js';
@@ -122,9 +123,24 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			onNone: () => Context.Request.Id.default,
 			onSome: () => Option.match(found, { onNone: () => Context.Request.Id.unspecified, onSome: (item) => item.id }),
 		});
+		// Cluster context: graceful degradation via serviceOption (avoids startup failures)
+		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(
+			Effect.flatMap(Option.match({
+				onNone: () => Effect.succeed(Option.none<Context.Request.ClusterState>()),
+				onSome: (s) => s.getSnowflake.pipe(
+					Effect.map((sf): Option.Option<Context.Request.ClusterState> => Option.some({
+						entityId: null,
+						entityType: null,
+						isLeader: false,
+						runnerId: Context.Request.makeRunnerId(sf),
+						shardId: null,
+					})),
+				),
+			})),
+		);
 		const ctx: Context.Request.Data = {
 			circuit: Option.none(),
-			cluster: Option.none(),
+			cluster,
 			ipAddress: _extractClientIp(req.headers, req.remoteAddress),
 			rateLimit: Option.none(),
 			requestId,
@@ -133,6 +149,14 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
 		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: () => ({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
+		// Annotate span with runner ID for cross-pod trace correlation
+		yield* pipe(
+			Option.flatMapNullable(cluster, (c) => c.runnerId),
+			Option.match({
+				onNone: () => Effect.void,
+				onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id),
+			}),
+		);
 		return yield* Context.Request.within(tenantId, app.pipe(
 			Effect.provideService(Context.Request, ctx),
 			Effect.tap(() => Effect.all([
