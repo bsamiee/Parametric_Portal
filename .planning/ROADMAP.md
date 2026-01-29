@@ -37,10 +37,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   6. Entity handlers implement idempotent pattern via `SqlMessageStorage.saveRequest` deduplication
   7. Dedicated DB connection for RunnerStorage (prevents shard lock loss from connection recycling)
   8. `ClusterError` type guards used for typed error handling (no `instanceof` checks)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 01-01: TBD
+- [ ] 01-01-PLAN.md - ClusterService facade, ClusterError, Entity schema
+- [ ] 01-02-PLAN.md - Entity layer, SQL storage backends, sharding config
+- [ ] 01-03-PLAN.md - Cluster metrics integration with MetricsService
 
 ### Phase 2: Context Integration
 **Goal**: Request handlers access shard ID, runner ID, and leader status via standard Context.Request pattern. Middleware populates context; handlers consume.
@@ -177,7 +179,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Cluster Foundation | 0/TBD | Not started | - |
+| 1. Cluster Foundation | 0/3 | Planning complete | - |
 | 2. Context Integration | 0/TBD | Not started | - |
 | 3. Singleton & Scheduling | 0/TBD | Not started | - |
 | 4. Job Processing | 0/TBD | Not started | - |
