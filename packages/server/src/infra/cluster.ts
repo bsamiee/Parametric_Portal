@@ -188,8 +188,8 @@ namespace ClusterService {
   export type Error = InstanceType<typeof ClusterError>;
   export type ErrorReason = Error['reason'];
   export type Config = typeof _CONFIG;
-  export type IdempotencyKey = typeof IdempotencyKey.Type;
-  export type SnowflakeId = typeof SnowflakeId.Type;
+  export type IdempotencyKey = S.Schema.Type<typeof IdempotencyKey>;
+  export type SnowflakeId = S.Schema.Type<typeof SnowflakeId>;
   export type ProcessPayload = InstanceType<typeof ClusterService.Payload.Process>;
   export type StatusPayload = InstanceType<typeof ClusterService.Payload.Status>;
   export type StatusResponse = InstanceType<typeof ClusterService.Response.Status>;
