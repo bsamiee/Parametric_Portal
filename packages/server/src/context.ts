@@ -12,7 +12,7 @@ import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Cookie, CookiesError } from '@effect/platform/Cookies';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
-import { Data, Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, Record, Schedule, Schema as S } from 'effect';
+import { Data, Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, pipe, Record, Schedule, Schema as S } from 'effect';
 import * as D from 'effect/Duration';
 import { dual } from 'effect/Function';
 
@@ -70,7 +70,10 @@ class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<
 class Serializable extends S.Class<Serializable>('server/Context.Serializable')({
 	ipAddress: S.optional(S.String),
 	requestId: S.String,
+	// Cluster fields for cross-pod trace correlation (S.optional = backward compatible)
+	runnerId: S.optional(RunnerId),
 	sessionId: S.optional(S.String),
+	shardId: S.optional(ShardIdString),
 	tenantId: S.String,
 	userId: S.optional(S.String),
 }) {
@@ -80,6 +83,14 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 			requestId: ctx.requestId,
 			tenantId: ctx.tenantId,
 			...Option.match(ctx.session, { onNone: () => ({}), onSome: (s) => ({ sessionId: s.id, userId: s.userId }) }),
+			// Cluster fields: null → undefined for S.optional, ShardId → branded string
+			...Option.match(ctx.cluster, {
+				onNone: () => ({}),
+				onSome: (c) => ({
+					runnerId: c.runnerId ?? undefined,
+					shardId: c.shardId ? _makeShardIdString(c.shardId) : undefined,
+				}),
+			}),
 		});
 }
 
@@ -157,6 +168,11 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 			'circuit.state': Option.map(ctx.circuit, (c) => c.state),
 			'client.ip': ctx.ipAddress,
 			'client.ua': Option.map(ctx.userAgent, (ua) => (ua.length > 120 ? `${ua.slice(0, 117)}...` : ua)),
+			'cluster.entity_id': Option.flatMapNullable(ctx.cluster, (c) => c.entityId),
+			'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (c) => c.entityType),
+			'cluster.is_leader': Option.map(ctx.cluster, (c) => String(c.isLeader)),
+			'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (c) => c.runnerId),
+			'cluster.shard_id': pipe(ctx.cluster, Option.flatMapNullable((c) => c.shardId), Option.map((s) => s.toString())),
 			'fiber.id': Option.some(FiberId.threadName(fiberId)),
 			'ratelimit.limit': Option.map(ctx.rateLimit, (rl) => String(rl.limit)),
 			'ratelimit.remaining': Option.map(ctx.rateLimit, (rl) => String(rl.remaining)),
