@@ -55,10 +55,11 @@ Plans:
   3. Handler accesses `Context.Request.cluster.isLeader` for conditional logic (updated on singleton entry)
   4. Context population occurs in middleware with graceful degradation via `Effect.serviceOption`
   5. `Context.Serializable` extended with optional runnerId/shardId for cross-pod traces
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: TBD
+- [ ] 02-01-PLAN.md - ClusterState schema, Context.Request extension with cluster accessors
+- [ ] 02-02-PLAN.md - Middleware cluster population, Serializable extension, observability
 
 ### Phase 3: Singleton & Scheduling
 **Goal**: Scheduled tasks and leader-only processes execute exactly once with automatic state persistence, health tracking, and dead man's switch. Not wrappers — intelligent coordination that handles state handoff across leader migrations.
@@ -202,7 +203,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Cluster Foundation | 3/3 | Complete | 2026-01-29 |
-| 2. Context Integration | 0/TBD | Not started | - |
+| 2. Context Integration | 0/2 | Planned | - |
 | 3. Singleton & Scheduling | 0/TBD | Not started | - |
 | 4. Job Processing | 0/TBD | Not started | - |
 | 5. EventBus & Reliability | 0/TBD | Not started | - |
