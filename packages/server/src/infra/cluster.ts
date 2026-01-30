@@ -8,7 +8,7 @@ import { FetchHttpClient, Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
 import { PgClient } from '@effect/sql-pg';
-import { Boolean as B, Cause, Chunk, Clock, Config, Duration, Effect, Layer, Ref, Schedule, Schema as S } from 'effect';
+import { Boolean as B, Cause, Chunk, Clock, Config, Data, Duration, Effect, Layer, Match, Number as N, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -21,6 +21,15 @@ const _CONFIG = {
 	retry: 	{
 		defect:    { base: Duration.millis(100), factor: 2, maxAttempts: 5 },
 		transient: { base: Duration.millis(50),  cap: Duration.seconds(5), maxAttempts: 3 },
+	},
+	singleton: {
+		graceMs: Duration.toMillis(Duration.seconds(60)),
+		heartbeatInterval: Duration.seconds(30),
+		keyPrefix: 'singleton-state:',
+		migrationSlaMs: 10_000,
+		schemaVersion: 1,
+		// N.clamp ensures threshold stays within bounds — self-documenting validation
+		threshold: N.clamp({ maximum: 5, minimum: 1 })(2),
 	},
 	sla: 	{ sendTimeout: Duration.millis(100) },
 } as const;
@@ -106,6 +115,34 @@ class ClusterError extends S.TaggedError<ClusterError>()('ClusterError', {
 	// Transient reasons via Set membership — O(1) lookup, scales with more reasons
 	static readonly _transient: ReadonlySet<ClusterError['reason']> = new Set(['MailboxFull', 'SendTimeout']);
 	static readonly isTransient = (e: ClusterError): boolean => ClusterError._transient.has(e.reason);
+}
+
+class SingletonError extends Data.TaggedError('SingletonError')<{
+	readonly reason: 'StateLoadFailed' | 'StatePersistFailed' | 'SchemaDecodeFailed' | 'HeartbeatFailed' | 'LeaderHandoffFailed';
+	readonly cause?: unknown;
+	readonly singletonName: string;
+}> {
+	// Set-based retryable check — O(1) lookup, matches ClusterError._transient pattern
+	static readonly _retryable: ReadonlySet<SingletonError['reason']> = new Set(['StateLoadFailed', 'StatePersistFailed']);
+	static readonly isRetryable = (e: SingletonError): boolean => SingletonError._retryable.has(e.reason);
+
+	// Static factories — match ClusterError.from* pattern for consistency
+	static readonly fromStateLoad = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'StateLoadFailed', singletonName: name });
+	static readonly fromStatePersist = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'StatePersistFailed', singletonName: name });
+	static readonly fromSchemaDecode = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'SchemaDecodeFailed', singletonName: name });
+	static readonly fromHeartbeat = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'HeartbeatFailed', singletonName: name });
+	static readonly fromLeaderHandoff = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'LeaderHandoffFailed', singletonName: name });
+
+	// Exhaustive factory via Match.type — compile-time guarantee all reasons have factory
+	// Use when reason comes from external source (e.g., deserialized error)
+	static readonly from = Match.type<{ reason: SingletonError['reason']; name: string; cause?: unknown }>().pipe(
+		Match.when({ reason: 'StateLoadFailed' }, ({ name, cause }) => SingletonError.fromStateLoad(name, cause)),
+		Match.when({ reason: 'StatePersistFailed' }, ({ name, cause }) => SingletonError.fromStatePersist(name, cause)),
+		Match.when({ reason: 'SchemaDecodeFailed' }, ({ name, cause }) => SingletonError.fromSchemaDecode(name, cause)),
+		Match.when({ reason: 'HeartbeatFailed' }, ({ name, cause }) => SingletonError.fromHeartbeat(name, cause)),
+		Match.when({ reason: 'LeaderHandoffFailed' }, ({ name, cause }) => SingletonError.fromLeaderHandoff(name, cause)),
+		Match.exhaustive,
+	);
 }
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -210,7 +247,7 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 	}),
 }) {
 	static readonly Config = _CONFIG;
-	static readonly Error = ClusterError;
+	static readonly Error = { Cluster: ClusterError, Singleton: SingletonError };
 	static readonly Layer = _clusterLayer;
 	static readonly Payload = { Process: ProcessPayload, Status: StatusPayload } as const;
 	static readonly Response = { Status: StatusResponse } as const;
@@ -242,6 +279,8 @@ namespace ClusterService {
 	export type ProcessPayload = InstanceType<typeof ClusterService.Payload.Process>;
 	export type StatusPayload = InstanceType<typeof ClusterService.Payload.Status>;
 	export type StatusResponse = InstanceType<typeof ClusterService.Response.Status>;
+	export type SingletonError = InstanceType<typeof SingletonError>;
+	export type SingletonErrorReason = SingletonError['reason'];
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
