@@ -1,214 +1,171 @@
 /**
- * Background job processing with database-backed queue.
- * SELECT FOR UPDATE SKIP LOCKED for atomic claim; Circuit breaker resilience; graceful shutdown.
- * Effect APIs: Semaphore (concurrency), Match.value (transitions), Schedule.spaced (polling).
- * [ARCHITECTURE] Hybrid Service Design:
- * JobService combines job orchestration (enqueue, process, retry) with real-time event streaming
- * (onStatusChange via pg.listen). PgClient access justified: events are internal to job processing.
- * Consumers: routes/jobs.ts exposes onStatusChange() via SSE for real-time job dashboards.
+ * Entity-based job processing via @effect/cluster mailbox dispatch.
+ * Replaces poll-based queue with instant consistent-hash routing.
  */
-import { PgClient } from '@effect/sql-pg';
+import { Entity, Sharding } from '@effect/cluster';
+import { Rpc } from '@effect/rpc';
+import { Clock, Duration, Effect, Fiber, FiberMap, HashMap, Layer, Metric, Option, Queue, Ref, Schedule, Schema as S, Stream } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Duration, Effect, Function as F, HashMap, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, Stream } from 'effect';
-import { AuditService } from '../observe/audit.ts';
+import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
-import { Circuit } from '../utils/circuit.ts';
-import { Context } from '../context.ts';
+import { ClusterService } from './cluster.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const JobStatusEvent = S.Struct({
-	appId: S.UUID,
-	jobId: S.UUID,
-	previousStatus: S.String,
-	status: S.String,
-	timestamp: S.Number,
-	type: S.String,
-});
+const JobPriority = S.Literal('critical', 'high', 'normal', 'low');
+const JobStatus = S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
+const JobErrorReason = S.Literal('NotFound', 'AlreadyCancelled', 'HandlerMissing', 'Validation', 'Processing', 'MaxRetries', 'RunnerUnavailable', 'Timeout');
+
+class JobPayload extends S.Class<JobPayload>('JobPayload')({
+	batchId: S.optional(S.String), dedupeKey: S.optional(S.String),
+	duration: S.optionalWith(S.Literal('short', 'long'), { default: () => 'short' as const }),
+	maxAttempts: S.optionalWith(S.Number, { default: () => 3 }), payload: S.Unknown,
+	priority: S.optionalWith(JobPriority, { default: () => 'normal' as const }), type: S.String,
+}) {}
+
+class JobStatusResponse extends S.Class<JobStatusResponse>('JobStatusResponse')({
+	attempts: S.Number, 
+	history: S.Array(S.Struct({ error: S.optional(S.String), status: JobStatus, timestamp: S.Number })),result: S.optional(S.Unknown), status: JobStatus,
+}) {}
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+class JobError extends S.TaggedError<JobError>()('JobError', { cause: S.optional(S.Unknown), jobId: S.optional(S.String), reason: JobErrorReason }) {
+	static readonly fromNotFound = (jobId: string) => new JobError({ jobId, reason: 'NotFound' });
+	static readonly fromCancelled = (jobId: string) => new JobError({ jobId, reason: 'AlreadyCancelled' });
+	static readonly fromHandlerMissing = (jobId: string, type: string) => new JobError({ cause: { type }, jobId, reason: 'HandlerMissing' });
+	static readonly fromValidation = (jobId: string, cause: unknown) => new JobError({ cause, jobId, reason: 'Validation' });
+	static readonly fromProcessing = (jobId: string, cause: unknown) => new JobError({ cause, jobId, reason: 'Processing' });
+	static readonly fromMaxRetries = (jobId: string, cause: unknown) => new JobError({ cause, jobId, reason: 'MaxRetries' });
+	static readonly fromRunnerUnavailable = (jobId: string, cause?: unknown) => new JobError({ cause, jobId, reason: 'RunnerUnavailable' });
+	static readonly fromTimeout = (jobId: string, cause?: unknown) => new JobError({ cause, jobId, reason: 'Timeout' });
+	static readonly _terminal: ReadonlySet<typeof JobErrorReason.Type> = new Set(['Validation', 'HandlerMissing', 'AlreadyCancelled', 'NotFound']);
+	static readonly isTerminal = (e: JobError): boolean => JobError._terminal.has(e.reason);
+}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = {
-	batch: { concurrency: 5, size: 10 },
-	breaker: { halfOpen: Duration.seconds(30), threshold: 5 },
-	lock: { minutes: 5 },
-	poll: { busy: Duration.seconds(1), idle: Duration.seconds(10) },
-	retry: { base: Duration.seconds(1), cap: Duration.minutes(10), factor: 2 },
-	shutdown: { interval: Duration.millis(100), maxWait: 50 },
-	timeout: Duration.minutes(5),
+const _CONFIG = {
+	entity: { concurrency: 1, mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
+	pools: { critical: 4, high: 3, low: 1, normal: 2 } as const,
+	retry: Schedule.exponential(Duration.millis(100)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(5)), Schedule.upTo(Duration.seconds(30)), Schedule.whileInput((e: JobError) => !JobError.isTerminal(e)), Schedule.resetAfter(Duration.minutes(5)), Schedule.collectAllInputs),
 } as const;
 
-// --- [FUNCTIONS] -------------------------------------------------------------
+// --- [CONTEXT] ---------------------------------------------------------------
 
-const _delay = (attempt: number) => pipe(
-	Duration.times(B.retry.base, B.retry.factor ** attempt),
-	Duration.min(B.retry.cap),
-	Duration.toMillis,
-	(ms) => Math.round(ms * (0.8 + Math.random() * 0.4)),
-);
+class JobContext extends Effect.Tag('JobContext')<JobContext, {
+	readonly jobId: string;
+	readonly priority: typeof JobPriority.Type;
+	readonly reportProgress: (pct: number, message: string) => Effect.Effect<void>;
+}>() {}
 
-// --- [SERVICE] ---------------------------------------------------------------
+// --- [ENTITY] ----------------------------------------------------------------
+
+const JobEntity = Entity.make('Job', [
+	Rpc.make('submit', { error: JobError, payload: JobPayload.fields, primaryKey: (p: typeof JobPayload.Type) => p.dedupeKey ?? crypto.randomUUID(), success: S.Struct({ duplicate: S.Boolean, jobId: S.String }) }),
+	Rpc.make('status', { payload: S.Struct({ jobId: S.String }), success: JobStatusResponse }),
+	Rpc.make('progress', { payload: S.Struct({ jobId: S.String }), stream: true, success: S.Struct({ message: S.String, pct: S.Number }) }),
+	Rpc.make('cancel', { error: JobError, payload: S.Struct({ jobId: S.String }), success: S.Void }),
+]);
+
+// --- [LAYERS] ----------------------------------------------------------------
+
+const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
+	const currentAddress = yield* Entity.CurrentAddress;
+	const handlers = yield* Ref.make(HashMap.empty<string, (payload: unknown) => Effect.Effect<unknown, unknown, never>>());
+	const runningJobs = yield* FiberMap.make<string>();
+	const jobStates = yield* Ref.make(HashMap.empty<string, typeof JobStatusResponse.Type>());
+	const progressQueue = yield* Queue.sliding<{ jobId: string; pct: number; message: string }>(100);
+	const [db, metrics, sharding] = yield* Effect.all([DatabaseService, MetricsService, Sharding.Sharding]);
+
+	const processJob = (jobId: string, envelope: typeof JobPayload.Type) =>
+		Telemetry.span(Context.Request.withinCluster({ entityId: currentAddress.entityId, entityType: currentAddress.entityType, shardId: currentAddress.shardId })(Effect.gen(function* () {
+			const handler = yield* Ref.get(handlers).pipe(Effect.map(HashMap.get(envelope.type)), Effect.flatMap(Option.match({ onNone: () => Effect.fail(JobError.fromHandlerMissing(jobId, envelope.type)), onSome: Effect.succeed })));
+			const ts = yield* Clock.currentTimeMillis;
+			yield* Ref.update(jobStates, HashMap.set(jobId, new JobStatusResponse({ attempts: 1, history: [{ status: 'processing', timestamp: ts }], status: 'processing' })));
+			const longJob = envelope.duration === 'long';
+			yield* Effect.when(Entity.keepAlive(true), () => longJob);
+			yield* Effect.provideService(handler(envelope.payload).pipe(Effect.mapError((e) => JobError.fromProcessing(jobId, e))), JobContext, { jobId, priority: envelope.priority ?? 'normal', reportProgress: (pct, message) => Queue.offer(progressQueue, { jobId, message, pct }) }).pipe(MetricsService.trackJob({ jobType: envelope.type, operation: 'process', priority: envelope.priority }), Effect.ensuring(Effect.when(Entity.keepAlive(false), () => longJob)));
+			const completeTs = yield* Clock.currentTimeMillis;
+			yield* Ref.update(jobStates, HashMap.modify(jobId, (s) => new JobStatusResponse({ ...s, history: [...s.history, { status: 'complete', timestamp: completeTs }], status: 'complete' })));
+			yield* Metric.increment(metrics.jobs.completions);
+		}).pipe(Effect.catchTag('JobError', (e) => JobError.isTerminal(e)
+			? Effect.gen(function* () {
+				const tenantId = yield* Context.Request.tenantId;
+				yield* db.jobDlq.insert({ appId: tenantId, attempts: 1, dlqAt: undefined, errorHistory: [{ error: String(e.cause), timestamp: Date.now() }], errorReason: e.reason, originalJobId: jobId, payload: envelope.payload, replayedAt: Option.none(), requestId: Option.none(), type: envelope.type, userId: Option.none() });
+				yield* Metric.increment(metrics.jobs.deadLettered);
+				return yield* Effect.fail(e);
+			})
+			: Effect.fail(e)))), 'job.process', { 'job.id': jobId, 'job.type': envelope.type, metrics: false });
+
+	return {
+		cancel: (envelope) => FiberMap.get(runningJobs, envelope.payload.jobId).pipe(Effect.catchTag('NoSuchElementException', () => Effect.fail(JobError.fromNotFound(envelope.payload.jobId))), Effect.flatMap((fiber) => Effect.gen(function* () {
+			yield* Fiber.interrupt(fiber);
+			yield* FiberMap.remove(runningJobs, envelope.payload.jobId);
+			const ts = yield* Clock.currentTimeMillis;
+			yield* Ref.update(jobStates, HashMap.modify(envelope.payload.jobId, (s) => new JobStatusResponse({ ...s, history: [...s.history, { status: 'cancelled', timestamp: ts }], status: 'cancelled' })));
+			yield* Metric.increment(metrics.jobs.cancellations);
+		}))),
+		progress: (envelope) => Stream.fromQueue(progressQueue).pipe(Stream.filter((p) => p.jobId === envelope.payload.jobId), Stream.map(({ pct, message }) => ({ message, pct }))),
+		status: (envelope) => Ref.get(jobStates).pipe(Effect.map(HashMap.get(envelope.payload.jobId)), Effect.flatMap(Option.match({ onNone: () => Effect.succeed(new JobStatusResponse({ attempts: 0, history: [], status: 'queued' })), onSome: Effect.succeed }))),
+		submit: (envelope) => Effect.gen(function* () {
+			const jobId = yield* sharding.getSnowflake.pipe(Effect.map(String));
+			yield* Metric.increment(metrics.jobs.enqueued);
+			yield* FiberMap.run(runningJobs, jobId)(processJob(jobId, envelope.payload).pipe(Effect.onInterrupt(() => Effect.logInfo('Job interrupted', { jobId }))));
+			return { duplicate: false, jobId };
+		}),
+	};
+}), { concurrency: _CONFIG.entity.concurrency, defectRetryPolicy: _CONFIG.retry, mailboxCapacity: _CONFIG.entity.mailboxCapacity, maxIdleTime: _CONFIG.entity.maxIdleTime, spanAttributes: { 'entity.service': 'job-processing', 'entity.version': 'v1' } });
+
+// --- [SERVICES] --------------------------------------------------------------
 
 class JobService extends Effect.Service<JobService>()('server/Jobs', {
+	dependencies: [JobEntityLive.pipe(Layer.provide(ClusterService.Layer)), DatabaseService.Default, MetricsService.Default],
 	scoped: Effect.gen(function* () {
-		const [db, pg, metrics, audit] = yield* Effect.all([DatabaseService, PgClient.PgClient, MetricsService, AuditService]);
-		const workerId = crypto.randomUUID();
-		yield* Effect.annotateLogsScoped({ 'service.name': 'jobs', 'worker.id': workerId });
-		type DbJob = Effect.Effect.Success<ReturnType<typeof db.jobs.claimBatch>>[number];
-		type _Result = 'complete' | { readonly retry: { attempt: number; delayMs: number; error: unknown } } | { readonly dead: string };
-		const handlers = yield* Ref.make(HashMap.empty<string, (payload: unknown) => Effect.Effect<void, unknown, never>>());
-		const semaphore = yield* Effect.makeSemaphore(B.batch.concurrency);
-		const inFlight = yield* Ref.make(0);
-		const circuit = Circuit.make('jobs-db', { breaker: { _tag: 'consecutive', threshold: B.breaker.threshold }, halfOpenAfter: B.breaker.halfOpen });
-		const run = <A, E>(eff: Effect.Effect<A, E>) => circuit.execute(eff);
-		const _transition = (job: DbJob, result: _Result) =>
-			Match.value(result).pipe(
-				Match.when('complete', () => run(db.jobs.complete(job.id)).pipe(
-					Effect.tap(() => Effect.all([
-						MetricsService.inc(metrics.jobs.completions, MetricsService.label({ type: job.type }), 1),
-						audit.log('Job.complete', { details: { type: job.type }, subjectId: job.id }),
-					], { discard: true })),
-					Telemetry.span('jobs.complete', { 'job.id': job.id, 'job.type': job.type }),
-				)),
-				Match.when({ retry: Match.any }, ({ retry }) => run(db.jobs.retry(job.id, {
-					attempts: retry.attempt, lastError: String(retry.error), scheduledAt: new Date(Date.now() + retry.delayMs),
-				})).pipe(
-					Effect.tap(() => Effect.all([
-						MetricsService.inc(metrics.jobs.failures, MetricsService.label({ type: job.type }), 1),
-						MetricsService.inc(metrics.jobs.retries, MetricsService.label({ type: job.type }), 1),
-						audit.log('Job.retry', { details: { attempt: retry.attempt, delayMs: retry.delayMs, type: job.type }, subjectId: job.id }),
-					], { discard: true })),
-					Telemetry.span('jobs.retry', { 'job.attempts': job.attempts, 'job.id': job.id, 'job.type': job.type }),
-				)),
-				Match.when({ dead: Match.string }, ({ dead }) => run(db.jobs.deadLetter(job.id, dead)).pipe(
-					Effect.tap(() => Effect.all([
-						MetricsService.inc(metrics.jobs.deadLettered, MetricsService.label({ type: job.type }), 1),
-						Effect.logError('Dead letter', { attempts: job.attempts, error: dead, jobId: job.id, type: job.type }),
-						audit.log('Job.dead_letter', { details: { attempts: job.attempts, error: dead, type: job.type }, subjectId: job.id }),
-					], { discard: true })),
-					Telemetry.span('jobs.deadLetter', { 'job.attempts': job.attempts, 'job.id': job.id, 'job.type': job.type }),
-				)),
-				Match.exhaustive,
-			);
-		const process = (job: DbJob) => {
-			const map$ = Ref.get(handlers);
-			const requestId = Option.getOrElse(job.requestId, () => crypto.randomUUID());
-			const userId = Option.getOrUndefined(job.userId);
-			const sessionFromJob = (job.userId).pipe(Option.map((uid) => ({ id: Context.Request.Id.job, mfaEnabled: false, userId: uid, verifiedAt: Option.none<Date>() })));
-			const ctx: Partial<Context.Request.Data> = { ipAddress: Option.none(), requestId, session: sessionFromJob, userAgent: Option.none() };
-			const serializable = new Context.Serializable({ requestId, sessionId: Context.Request.Id.job, tenantId: job.appId, userId });
-			const labels = MetricsService.label({ tenant: job.appId, type: job.type });
-			const trackWait = Option.match(job.waitMs, {
-				onNone: () => Effect.void,
-				onSome: (ms) => Metric.update(Metric.taggedWithLabels(metrics.jobs.waitDuration, labels), Duration.millis(ms)),
-			});
-			const noHandler = Effect.logWarning('No handler', { jobId: job.id, type: job.type }).pipe(Effect.andThen(_transition(job, { dead: 'No handler' })));
-			const runHandler = (fn: (payload: unknown) => Effect.Effect<void, unknown, never>) =>
-				fn(job.payload).pipe(
-					Effect.timeoutFail({ duration: B.timeout, onTimeout: () => `Timeout ${Duration.toMillis(B.timeout)}ms` }),
-					Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.duration, labels)),
-					Effect.matchEffect({
-						onFailure: (e) => _transition(job,
-							job.attempts + 1 >= job.maxAttempts
-								? { dead: String(e) }
-								: { retry: { attempt: job.attempts + 1, delayMs: _delay(job.attempts + 1), error: e } },
-						),
-						onSuccess: () => _transition(job, 'complete'),
-					}),
-				);
-			return Ref.update(inFlight, (n) => n + 1).pipe(
-				Effect.andThen(map$),
-				Effect.map((map) => HashMap.get(map, job.type)),
-				Effect.andThen((handler) => Context.Request.withinSync(job.appId, trackWait.pipe(Effect.andThen(Option.match(handler, { onNone: () => noHandler, onSome: runHandler }))), ctx)),
-				Effect.ensuring(Ref.update(inFlight, (n) => n - 1)),
-				Effect.catchAll((e) => {
-					const tag = MetricsService.errorTag(e);
-					return Effect.logError('Process failed', { error: String(e), errorTag: tag, jobId: job.id, type: job.type }).pipe(
-						Effect.andThen(MetricsService.inc(metrics.jobs.failures, MetricsService.label({ errorTag: tag, type: job.type }), 1)),
-					);
-				}),
-				Telemetry.span('jobs.process', { 'job.id': job.id, 'job.type': job.type, 'trace.requestId': serializable.requestId, 'trace.tenantId': serializable.tenantId, 'trace.userId': serializable.userId }),
-			);
-		};
-		const poll = run(db.jobs.claimBatch(workerId, B.batch.size, B.lock.minutes)).pipe(
-			Effect.tap((jobs) => jobs.length > 0 ? Effect.logDebug('Claimed', { count: jobs.length, workerId }) : Effect.void),
-			Effect.catchAll((e) => Effect.all([
-				Effect.logWarning('Claim failed', { error: String(e) }),
-				MetricsService.inc(metrics.jobs.failures, MetricsService.label({ type: 'claim' }), 1),
-			], { discard: true }).pipe(Effect.as([] as DbJob[]))),
-			Effect.tap((jobs) => Effect.forEach(jobs, (job) => semaphore.withPermits(1)(process(job)), { concurrency: 'unbounded' })),
-			Effect.map((jobs) => jobs.length),
-			Telemetry.span('jobs.poll', { 'batch.concurrency': B.batch.concurrency, 'batch.size': B.batch.size, 'worker.id': workerId }),
-		);
-		const pollSchedule = Schedule.identity<number>().pipe(
-			Schedule.addDelay((count) => Match.value(count > 0).pipe(
-				Match.when(true, () => B.poll.busy),
-				Match.orElse(() => B.poll.idle),
-			)),
-		);
-		const shutdown = Effect.gen(function* () {
-			yield* Effect.logInfo('Shutting down', { workerId });
-			yield* Ref.get(inFlight).pipe(
-				Effect.filterOrFail((n) => n === 0, () => 'waiting'),
-				Effect.retry(Schedule.spaced(B.shutdown.interval).pipe(Schedule.intersect(Schedule.recurs(B.shutdown.maxWait)))),
-				Effect.ignore,
-			);
-			const remaining = yield* Ref.get(inFlight);
-			yield* remaining > 0 ? Effect.logWarning('Shutdown with in-flight', { count: remaining, workerId }) : Effect.logInfo('Shutdown complete', { workerId });
+		const [sharding, handlers, db, counter] = yield* Effect.all([Sharding.Sharding, Ref.make(HashMap.empty<string, JobService.Handler>()), DatabaseService, Ref.make(0)]);
+		const getClient = yield* sharding.makeClient(JobEntity);
+		const routeByPriority = (p: keyof typeof _CONFIG.pools) => Ref.getAndUpdate(counter, (c) => c + 1).pipe(Effect.map((n) => `job-${p}-${n % _CONFIG.pools[p]}`));
+		const submit = <T>(type: string, payloads: T | readonly T[], opts?: { dedupeKey?: string; maxAttempts?: number; priority?: typeof JobPriority.Type }) => Effect.gen(function* () {
+			const items = Array.isArray(payloads) ? payloads : [payloads];
+			const priority = opts?.priority ?? 'normal';
+			const batchId = items.length > 1 ? crypto.randomUUID() : undefined;
+			const results = yield* Effect.forEach(items, (payload, idx) => Effect.gen(function* () {
+				const entityId = yield* routeByPriority(priority);
+				return yield* Context.Request.withinCluster({ entityId, entityType: 'Job' })(getClient(entityId)['submit']({ batchId, dedupeKey: opts?.dedupeKey ? `${opts.dedupeKey}:${idx}` : undefined, maxAttempts: opts?.maxAttempts, payload, priority, type }).pipe(Effect.map((r) => r.jobId)));
+			}), { concurrency: 'unbounded' });
+			return Array.isArray(payloads) ? results : results[0];
 		});
-		yield* Effect.logInfo('Starting', { workerId });
-		yield* Effect.addFinalizer(() => shutdown);
-		yield* poll.pipe(Effect.repeat(pollSchedule), Effect.forkScoped);
-		const enqueue = <T>(type: string, payloads: T | readonly T[], opts?: { delay?: Duration.Duration; maxAttempts?: number; priority?: 'critical' | 'high' | 'low' | 'normal' }) =>
-			Effect.gen(function* () {
-				const isBatch = Array.isArray(payloads);
-				const items = isBatch ? payloads : [payloads];
-				const priority = opts?.priority ?? 'normal';
-				const maxAttempts = opts?.maxAttempts ?? 5;
-				const ctx = yield* Context.Request.current;
-				const userId = ctx.session.pipe(Option.map((s) => s.userId));
-				const inserted = yield* run(db.jobs.put(items.map((payload) => ({
-					appId: ctx.tenantId, attempts: 0, lastError: Option.none(), lockedBy: Option.none(), lockedUntil: Option.none(),
-					maxAttempts, payload, priority, requestId: pipe(ctx.requestId, Option.some),
-					scheduledAt: opts?.delay ? new Date(Date.now() + Duration.toMillis(opts.delay)) : new Date(), status: 'pending', type, updatedAt: undefined, userId,
-				}))));
-				const ids = (inserted as readonly { id: string }[]).map((j) => j.id);
-				const firstId = ids[0];
-				yield* Effect.all([
-					MetricsService.inc(metrics.jobs.enqueued, MetricsService.label({ priority, type }), items.length),
-					audit.log('Job.enqueue', { details: { count: items.length, priority, type }, subjectId: firstId ?? 'batch' }),
-				], { discard: true });
-				yield* Effect.when(Effect.die(new Error('Job insert returned no ID')), () => !isBatch && firstId === undefined);
-				return isBatch ? ids : (firstId as string);
-			}).pipe(
-				Effect.tap(() => Context.Request.toSerializable.pipe(Effect.flatMap((s) => Effect.annotateCurrentSpan({ 'trace.requestId': s.requestId, 'trace.tenantId': s.tenantId, 'trace.userId': s.userId })))),
-				Telemetry.span('jobs.enqueue', { 'job.count': Array.isArray(payloads) ? payloads.length : 1, 'job.maxAttempts': opts?.maxAttempts ?? 5, 'job.priority': opts?.priority ?? 'normal', 'job.type': type }),
-			);
+		const validateBatch = <T>(items: readonly T[], validator: (item: T) => Effect.Effect<void, JobError>) =>
+			Effect.all(items.map((item, idx) => validator(item).pipe(Effect.mapError((e) => ({ error: e, idx })))), { concurrency: 'unbounded', mode: 'validate' });
+		const replay = (dlqId: string) => Effect.gen(function* () {
+			const entry = yield* db.jobDlq.get(dlqId);
+			yield* Option.match(entry, { onNone: () => Effect.fail(JobError.fromNotFound(dlqId)), onSome: (e) => submit(e.type, e.payload, { priority: 'normal' }).pipe(Effect.zipRight(db.jobDlq.markReplayed(dlqId))) });
+		});
 		return {
-			enqueue,
-			onStatusChange: (): Stream.Stream<JobService.StatusEvent, never, never> => pg.listen('job_status').pipe(
-				Stream.mapEffect((payload) => S.decodeUnknown(S.parseJson(JobStatusEvent))(payload).pipe(
-					Effect.matchEffect({
-						onFailure: (e) => Effect.logWarning('Invalid job status event', { error: String(e), payload }).pipe(Effect.as(Option.none<JobService.StatusEvent>())),
-						onSuccess: (parsed) => Effect.succeed(Option.some(parsed)), // NOSONAR S3358
-					}),
-				)),
-				Stream.filterMap(F.identity),
-				Stream.catchAll(() => Stream.empty),
-			),
-			registerHandler: (type: string, handler: JobService.Handler) => Ref.update(handlers, HashMap.set(type, handler as (payload: unknown) => Effect.Effect<void, unknown, never>)),
+			cancel: (jobId: string) => getClient(jobId)['cancel']({ jobId }), enqueue: submit,
+			registerHandler: <T>(type: string, handler: (payload: T) => Effect.Effect<void, unknown, never>) => Ref.update(handlers, HashMap.set(type, handler as JobService.Handler)),
+			replay, status: (jobId: string) => getClient(jobId)['status']({ jobId }), submit, validateBatch,
 		};
 	}),
-}) {}
+}) {
+	static readonly Config = _CONFIG;
+	static readonly Context = JobContext;
+	static readonly Error = JobError;
+	static readonly Payload = JobPayload;
+	static readonly Response = { Status: JobStatusResponse } as const;
+}
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace JobService {
-	export type Handler = (payload: unknown) => Effect.Effect<void, unknown, unknown>;
-	export type StatusEvent = typeof JobStatusEvent.Type;
+	export type Handler = (payload: unknown) => Effect.Effect<void, unknown, never>;
+	export type Priority = typeof JobPriority.Type;
+	export type Status = typeof JobStatus.Type;
+	export type Error = InstanceType<typeof JobError>;
+	export type Context = Effect.Effect.Context<typeof JobContext>;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { B as JOB_TUNING, JobService };
+export { JobService };
