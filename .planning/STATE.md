@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** Apps deploy multi-pod with zero coordination code
-**Current focus:** Phase 3 - Entity Singleton
+**Current focus:** Phase 4 - Job Processing
 
 ## Current Position
 
-Phase: 3 of 8 (Entity Singleton)
-Plan: 3 of 3 in current phase (Phase 3 Complete)
-Status: Phase complete
-Last activity: 2026-01-29 - Completed 03-03-PLAN.md
+Phase: 4 of 8 (Job Processing)
+Plan: 1 of 4 in current phase
+Status: In progress
+Last activity: 2026-01-30 - Completed 04-01-PLAN.md
 
-Progress: [######----] 56%
+Progress: [######----] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 8
-- Average duration: 10 min
-- Total execution time: 1.3 hours
+- Total plans completed: 9
+- Average duration: 9 min
+- Total execution time: 1.4 hours
 
 **By Phase:**
 
@@ -30,9 +30,10 @@ Progress: [######----] 56%
 | 01-cluster-foundation | 3 | 50min | 17min |
 | 02-context-integration | 2 | 8min | 4min |
 | 03-singleton-scheduling | 3 | 22min | 7min |
+| 04-job-processing | 1 | 6min | 6min |
 
 **Recent Trend:**
-- Last 5 plans: 02-01 (6min), 02-02 (2min), 03-01 (8min), 03-02 (8min), 03-03 (6min)
+- Last 5 plans: 02-02 (2min), 03-01 (8min), 03-02 (8min), 03-03 (6min), 04-01 (6min)
 - Trend: Consistent execution pace
 
 *Updated after each plan completion*
@@ -90,6 +91,8 @@ Recent decisions affecting current work:
 - [03-03]: withinCluster wraps ENTIRE handler (gen body + ensuring + matchCauseEffect) for complete context propagation
 - [03-03]: DateTime.distanceDuration for Duration-based staleness calculation
 - [03-03]: ClusterService static exports for health check utilities (Phase 8 integration)
+- [04-01]: listPending uses page() method with keyset pagination (find() lacks limit/order options)
+- [04-01]: error_history stored as JSONB array with CHECK constraint validation
 
 ### Pending Todos
 
@@ -117,10 +120,16 @@ From research and revision feedback - must address during execution:
 **Resolved in Phase 3:**
 - ~~[Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime~~ [ADDRESSED: cron factory includes skipIfOlderThan config option in 03-02]
 
+**Resolved in Phase 4 Research:**
+- ~~[Phase 4]: Priority scheduling pattern — weighted mailbox or external scheduler~~ [ADDRESSED: Entity-prefix routing with pool sizing (4:3:2:1); no official priority mailbox API exists]
+- ~~[Phase 4]: Dead-letter table schema and retry exhaustion flow~~ [ADDRESSED: Schedule.onDecision + ScheduleDecision.isDone for exhaustion detection; terminal errors immediate DLQ]
+- ~~[Phase 4]: Job cancellation via Effect.interrupt — validate entity handles gracefully~~ [ADDRESSED: Effect.onInterrupt for cancel cleanup + Effect.uninterruptible for critical sections + FiberMap.remove atomic]
+- ~~[Phase 4]: Machine.makeSerializable for job state~~ [ADDRESSED: NO - JobState too simple; use Schema.Class + Ref pattern; reserve Machine for Phase 6 sagas]
+
+**Resolved in Phase 4 Plan 1:**
+- ~~[Phase 4]: JobDlq database infrastructure~~ [ADDRESSED: Model.Class, repo methods, SQL migration with RLS in 04-01]
+
 **Open for future phases:**
-- [Phase 4]: Priority scheduling pattern — weighted mailbox or external scheduler
-- [Phase 4]: Dead-letter table schema and retry exhaustion flow
-- [Phase 4]: Job cancellation via Effect.interrupt — validate entity handles gracefully
 - [Phase 4]: In-flight job migration during deployment - validate via staging
 - [Phase 5]: Verify Ndjson.pack/unpackSchema API exists in @effect/cluster 0.56.1
 - [Phase 5]: Verify EventLog.schema API exists for optional event sourcing
@@ -137,6 +146,6 @@ From research and revision feedback - must address during execution:
 
 ## Session Continuity
 
-Last session: 2026-01-29
-Stopped at: Completed 03-03-PLAN.md (Phase 3 complete)
+Last session: 2026-01-30
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
