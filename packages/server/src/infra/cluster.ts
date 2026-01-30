@@ -12,6 +12,7 @@ import type { SqlError } from '@effect/sql/SqlError';
 import { PgClient } from '@effect/sql-pg';
 import { Array as A, Boolean as B, Cause, Chunk, Clock, Config, Data, Duration, Effect, Layer, Match, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
+import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 
@@ -67,21 +68,28 @@ const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
 	const initTs = yield* Clock.currentTimeMillis;
 	const stateRef = yield* Ref.make(EntityState.idle(initTs));
 	return {
-		process: (envelope) => Effect.gen(function* () {
-			const ts = yield* Clock.currentTimeMillis;
-			yield* Ref.set(stateRef, EntityState.processing(ts));
-			yield* Effect.logDebug('Entity processing', { entityId: currentAddress.entityId, idempotencyKey: envelope.payload.idempotencyKey });
-			const completeTs = yield* Clock.currentTimeMillis;
-			yield* Ref.set(stateRef, new EntityState({ status: 'complete', updatedAt: completeTs }));
-		}).pipe(
-			Effect.ensuring(Clock.currentTimeMillis.pipe(Effect.flatMap((ts) => Ref.update(stateRef, (s) => new EntityState({ ...s, updatedAt: ts }))))),
-			Effect.matchCauseEffect({
-				onFailure: (cause) => Effect.fail(new EntityProcessError({
-					cause,
-					message: B.match(Chunk.isNonEmpty(Cause.defects(cause)), { onFalse: () => Cause.pretty(cause), onTrue: () => 'Internal error' }),
-				})),
-				onSuccess: Effect.succeed,
-			}),
+		// withinCluster wraps ENTIRE handler: gen body + ensuring + matchCauseEffect
+		process: (envelope) => Context.Request.withinCluster({
+			entityId: currentAddress.entityId,
+			entityType: currentAddress.entityType,
+			shardId: currentAddress.shardId,
+		})(
+			Effect.gen(function* () {
+				const ts = yield* Clock.currentTimeMillis;
+				yield* Ref.set(stateRef, EntityState.processing(ts));
+				yield* Effect.logDebug('Entity processing', { entityId: currentAddress.entityId, idempotencyKey: envelope.payload.idempotencyKey });
+				const completeTs = yield* Clock.currentTimeMillis;
+				yield* Ref.set(stateRef, new EntityState({ status: 'complete', updatedAt: completeTs }));
+			}).pipe(
+				Effect.ensuring(Clock.currentTimeMillis.pipe(Effect.flatMap((ts) => Ref.update(stateRef, (s) => new EntityState({ ...s, updatedAt: ts }))))),
+				Effect.matchCauseEffect({
+					onFailure: (cause) => Effect.fail(new EntityProcessError({
+						cause,
+						message: B.match(Chunk.isNonEmpty(Cause.defects(cause)), { onFalse: () => Cause.pretty(cause), onTrue: () => 'Internal error' }),
+					})),
+					onSuccess: Effect.succeed,
+				}),
+			),
 		),
 		status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse({ status: s.status, updatedAt: s.updatedAt }))),
 	};
