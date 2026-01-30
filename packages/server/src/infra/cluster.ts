@@ -2,7 +2,7 @@
  * ClusterService facade for multi-pod coordination via @effect/cluster.
  * Entity sharding, shard ownership via advisory locks, distributed message routing.
  */
-import { ClusterCron, Entity, EntityId, HttpRunner, K8sHttpClient, RunnerHealth, Sharding, ShardingConfig, Singleton, Snowflake, SocketRunner, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
+import { ClusterCron, ClusterMetrics, Entity, EntityId, HttpRunner, K8sHttpClient, RunnerHealth, Sharding, ShardingConfig, Singleton, Snowflake, SocketRunner, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
 import type { AlreadyProcessingMessage, MailboxFull, PersistenceError } from '@effect/cluster/ClusterError';
 import { Error as PlatformError, FetchHttpClient, KeyValueStore, Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket } from '@effect/platform-node';
@@ -10,7 +10,7 @@ import { Rpc, RpcSerialization } from '@effect/rpc';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
 import { PgClient } from '@effect/sql-pg';
-import { Array as A, Boolean as B, Cause, Chunk, Clock, Config, Data, Duration, Effect, Layer, Match, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Boolean as B, Cause, Chunk, Clock, Config, Data, DateTime, Duration, Effect, Layer, Match, Metric, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -261,6 +261,94 @@ const _transportLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Polymorp
 }));
 const _clusterLayer = ClusterEntityLive.pipe(Layer.provide(_transportLayer));	// Entity layer with transport wiring
 
+// --- [HEALTH] ----------------------------------------------------------------
+
+// Staleness check — DateTime.distanceDuration for clean Duration arithmetic
+// N.between for self-documenting range validation
+const _checkStaleness = (intervalMs: number, lastExecMs: number) =>
+	Clock.currentTimeMillis.pipe(
+		Effect.map((now) => {
+			const elapsed = DateTime.distanceDuration(
+				DateTime.unsafeMake(now),
+				DateTime.unsafeMake(lastExecMs),
+			);
+			const elapsedMs = Duration.toMillis(elapsed);
+			const threshold = intervalMs * _CONFIG.singleton.threshold;
+			return {
+				elapsed,
+				elapsedMs,
+				healthy: N.between({ maximum: threshold, minimum: 0 })(elapsedMs),
+			};
+		}),
+	);
+
+// Singleton health check — validates heartbeat against expected interval
+const checkSingletonHealth = (config: ReadonlyArray<{ readonly name: string; readonly expectedIntervalMs: number }>) =>
+	Telemetry.span(Effect.gen(function* () {
+		const metrics = yield* MetricsService;
+
+		// Effect.forEach with concurrency for parallel health checks
+		const results = yield* Effect.forEach(config, ({ name, expectedIntervalMs }) =>
+			Metric.value(Metric.taggedWithLabels(
+				metrics.singleton.lastExecution,
+				MetricsService.label({ singleton: name }),
+			)).pipe(
+				Effect.flatMap((state: { readonly value: number }) =>
+					_checkStaleness(expectedIntervalMs, state.value).pipe(
+						Effect.map((staleness) => ({
+							healthy: staleness.healthy,
+							lastExecution: B.match(state.value > 0, {
+								onFalse: () => 'never',
+								onTrue: () => DateTime.formatIso(DateTime.unsafeMake(state.value)),
+							}),
+							name,
+							// Duration.format for human-readable staleness: "2h 30m"
+							staleFormatted: B.match(state.value > 0, {
+								onFalse: () => 'N/A',
+								onTrue: () => Duration.format(staleness.elapsed),
+							}),
+							staleMs: staleness.elapsedMs,
+						})),
+					),
+				),
+			),
+		{ concurrency: 'unbounded' });
+
+		// Array.partition for single-pass healthy/unhealthy split
+		const [healthy, unhealthy] = A.partition(results, (r) => r.healthy);
+
+		return {
+			healthy: A.isEmptyArray(unhealthy),
+			healthyCount: healthy.length,
+			singletons: results,
+			unhealthyCount: unhealthy.length,
+		};
+	}), 'cluster.checkSingletonHealth');
+
+// Cluster-wide health aggregation — uses ClusterMetrics official gauges
+// Uses Telemetry.span for tracing (matches codebase pattern)
+const checkClusterHealth = () =>
+	Telemetry.span(Effect.all({
+		entities: Metric.value(ClusterMetrics.entities),
+		runners: Metric.value(ClusterMetrics.runners),
+		runnersHealthy: Metric.value(ClusterMetrics.runnersHealthy),
+		shards: Metric.value(ClusterMetrics.shards),
+		singletons: Metric.value(ClusterMetrics.singletons),
+	}).pipe(
+		Effect.map((m) => ({
+			// Convert bigint gauge values to numbers for JSON serialization
+			degraded: Number(m.runnersHealthy.value) < Number(m.runners.value),
+			healthy: Number(m.runnersHealthy.value) > 0 && Number(m.singletons.value) > 0,
+			metrics: {
+				entities: Number(m.entities.value),
+				runners: Number(m.runners.value),
+				runnersHealthy: Number(m.runnersHealthy.value),
+				shards: Number(m.shards.value),
+				singletons: Number(m.singletons.value),
+			},
+		})),
+	), 'cluster.checkClusterHealth');
+
 // --- [SERVICE] ---------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
@@ -321,6 +409,9 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 		shardGroup: config.shardGroup,
 		skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
 	}).pipe(Layer.provide(_clusterLayer));
+	// Health check utilities - exported for Phase 8 health endpoint integration
+	static readonly checkClusterHealth = checkClusterHealth;
+	static readonly checkSingletonHealth = checkSingletonHealth;
 }
 
 // --- [NAMESPACE] -------------------------------------------------------------
@@ -337,6 +428,29 @@ namespace ClusterService {
 	export type StatusResponse = InstanceType<typeof ClusterService.Response.Status>;
 	export type SingletonError = InstanceType<typeof SingletonError>;
 	export type SingletonErrorReason = SingletonError['reason'];
+	export interface SingletonHealthResult {
+		readonly singletons: ReadonlyArray<{
+			readonly name: string;
+			readonly healthy: boolean;
+			readonly lastExecution: string;
+			readonly staleFormatted: string;
+			readonly staleMs: number;
+		}>;
+		readonly healthy: boolean;
+		readonly healthyCount: number;
+		readonly unhealthyCount: number;
+	}
+	export interface ClusterHealthResult {
+		readonly healthy: boolean;
+		readonly degraded: boolean;
+		readonly metrics: {
+			readonly entities: number;
+			readonly runners: number;
+			readonly runnersHealthy: number;
+			readonly shards: number;
+			readonly singletons: number;
+		};
+	}
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
