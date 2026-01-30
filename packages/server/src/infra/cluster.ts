@@ -4,11 +4,13 @@
  */
 import { ClusterCron, Entity, EntityId, HttpRunner, K8sHttpClient, RunnerHealth, Sharding, ShardingConfig, Singleton, Snowflake, SocketRunner, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
 import type { AlreadyProcessingMessage, MailboxFull, PersistenceError } from '@effect/cluster/ClusterError';
-import { FetchHttpClient, Socket } from '@effect/platform';
+import { Error as PlatformError, FetchHttpClient, KeyValueStore, Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
+import { SqlClient } from '@effect/sql';
+import type { SqlError } from '@effect/sql/SqlError';
 import { PgClient } from '@effect/sql-pg';
-import { Boolean as B, Cause, Chunk, Clock, Config, Data, Duration, Effect, Layer, Match, Number as N, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Boolean as B, Cause, Chunk, Clock, Config, Data, Duration, Effect, Layer, Match, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -169,6 +171,52 @@ const _storageLayers = (() => {	// Consolidated storage: dedicated PgClient for 
 		Snowflake.layerGenerator,
 	);
 })();
+
+// SQL-backed KeyValueStore for singleton state persistence
+// NOTE: modify() is NOT atomic across concurrent executions — wrap critical sections in SqlClient.withTransaction
+// Required table: CREATE TABLE kv_store (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW());
+// This layer requires SqlClient.SqlClient to be provided (typically via DbClient.layer)
+const _kvStoreLayers = Layer.effect(
+	KeyValueStore.KeyValueStore,
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		// Helper: map SqlError to PlatformError.SystemError for KeyValueStore interface compatibility
+		const mapError = <A, R>(effect: Effect.Effect<A, SqlError, R>, method: string) =>
+			effect.pipe(
+				Effect.mapError((e) => new PlatformError.SystemError({ cause: e, method, module: 'KeyValueStore', reason: 'Unknown' })),
+			);
+		// Helper: get value as Option<string>
+		const _get = (key: string) =>
+			mapError(
+				sql<{ value: string }>`SELECT value FROM kv_store WHERE key = ${key}`.pipe(
+					Effect.map(A.head),
+					Effect.map(Option.map((r) => r.value)),
+				),
+				'get',
+			);
+		return KeyValueStore.make({
+			clear: mapError(sql`DELETE FROM kv_store`.pipe(Effect.asVoid), 'clear'),
+			get: (key) => _get(key),
+			getUint8Array: (key) => _get(key).pipe(
+				Effect.map(Option.map((v) => new TextEncoder().encode(v))),
+			),
+			remove: (key) => mapError(sql`DELETE FROM kv_store WHERE key = ${key}`.pipe(Effect.asVoid), 'remove'),
+			set: (key, value) =>
+				mapError(
+					sql`INSERT INTO kv_store (key, value, updated_at) VALUES (${key}, ${typeof value === 'string' ? value : Buffer.from(value).toString('base64')}, NOW())
+						ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`.pipe(Effect.asVoid),
+					'set',
+				),
+			size: mapError(
+				sql<{ count: number }>`SELECT COUNT(*)::int AS count FROM kv_store`.pipe(
+					Effect.map((r) => r[0]?.count ?? 0),
+				),
+				'size',
+			),
+		});
+	}),
+);
+
 const _healthLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Health mode: K8s in production, noop otherwise (consolidated config read)
 	const [env, mode, namespace, labelSelector] = yield* Effect.all([
 		Config.string('NODE_ENV').pipe(Config.withDefault('development')),
