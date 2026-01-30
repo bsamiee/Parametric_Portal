@@ -8,10 +8,10 @@
  * This decoupling enables clean layer composition in main.ts.
  */
 import { SqlClient } from '@effect/sql';
-import { type Context, Effect, Schema as S } from 'effect';
+import { Clock, type Context, Effect, Schema as S } from 'effect';
 import { Client } from './client.ts';
 import { repo, Update } from './factory.ts';
-import { ApiKey, App, Asset, AuditLog, Job, MfaSecret, OauthAccount, RefreshToken, Session, User } from './models.ts';
+import { ApiKey, App, Asset, AuditLog, Job, KvStore, MfaSecret, OauthAccount, RefreshToken, Session, User } from './models.ts';
 
 // --- [USER_REPO] -------------------------------------------------------------
 
@@ -57,7 +57,7 @@ const makeSessionRepo = Effect.gen(function* () {
 		softDeleteByIp: (ip: string) => r.fn('revoke_sessions_by_ip', { ip }),
 		softDeleteByUser: (userId: string) => r.drop([{ field: 'user_id', value: userId }]),
 		touch: (id: string) => r.set(id, { updated_at: Update.now }),
-		verify: (id: string) => r.setIf(id, { verified_at: Update.now }, { field: 'verified_at', op: 'null' }),
+		verify: (id: string) => r.set(id, { verified_at: Update.now }, undefined, { field: 'verified_at', op: 'null' }),
 	};
 });
 
@@ -125,11 +125,13 @@ const makeAssetRepo = Effect.gen(function* () {
 		byHash: (hash: string) => r.one([{ field: 'hash', value: hash }]),
 		byUser: (userId: string) => r.find([{ field: 'user_id', value: userId }]),
 		byUserKeyset: (userId: string, limit: number, cursor?: string) => r.page([{ field: 'user_id', value: userId }], { cursor, limit }),
-		findStaleForPurge: (olderThanDays: number) => r.find([	/** Find soft-deleted assets with storageRef older than specified days (for S3 cleanup). */
-			{ field: 'deleted_at', op: 'notNull' },
-			{ field: 'deleted_at', op: 'lt', value: new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000) },
-			{ field: 'storage_ref', op: 'notNull' },
-		]),
+		findStaleForPurge: (olderThanDays: number) => Clock.currentTimeMillis.pipe(	// Find soft-deleted assets with storageRef older than specified days (for S3 cleanup). Uses Clock for testability.
+			Effect.andThen((now) => r.find([
+				{ field: 'deleted_at', op: 'notNull' },
+				{ field: 'deleted_at', op: 'lt', value: new Date(now - olderThanDays * 24 * 60 * 60 * 1000) },
+				{ field: 'storage_ref', op: 'notNull' },
+			])),
+		),
 		insertMany: (items: readonly S.Schema.Type<typeof Asset.insert>[]) => r.put(items as S.Schema.Type<typeof Asset.insert>[]),
 		restore: (id: string, appId: string) => r.lift(id, { app_id: appId }),
 		softDelete: (id: string, appId: string) => r.drop(id, { app_id: appId }),
@@ -193,19 +195,36 @@ const makeJobRepo = Effect.gen(function* () {
 	};
 });
 
+// --- [KV_STORE_REPO] ---------------------------------------------------------
+
+const makeKvStoreRepo = Effect.gen(function* () {
+	const r = yield* repo(KvStore, 'kv_store', {
+		conflict: { keys: ['key'], only: ['value', 'expiresAt'] },
+		fn: { delete_kv_by_prefix: { args: ['prefix'], params: S.Struct({ prefix: S.String }) } },
+		purge: 'purge_kv_store',
+		resolve: { byKey: 'key' },
+	});
+	return {
+		...r,
+		byKey: (key: string) => r.by('byKey', key),
+		deleteByPrefix: (prefix: string) => r.fn('delete_kv_by_prefix', { prefix }),
+		getJson: <A, I>(key: string, schema: S.Schema<A, I, never>) => r.by('byKey', key).pipe(Effect.flatMap(r.json.decode('value', schema))),
+		setJson: <A, I>(key: string, value: A, schema: S.Schema<A, I, never>, expiresAt?: Date) => r.json.encode(schema)(value).pipe(Effect.flatMap((v) => r.upsert({ expiresAt, key, value: v }))),
+	};
+});
+
 // --- [SERVICES] --------------------------------------------------------------
 
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, refreshTokens, assets, audit, mfaSecrets, jobs] = yield* Effect.all([
+		const [users, apps, sessions, apiKeys, oauthAccounts, refreshTokens, assets, audit, mfaSecrets, jobs, kvStore] = yield* Effect.all([
 			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeRefreshTokenRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo,
+			makeOauthAccountRepo, makeRefreshTokenRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeKvStoreRepo,
 		]);
-		return { apiKeys, apps, assets, audit, jobs, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, refreshTokens, sessions, users, withTransaction: sqlClient.withTransaction };
+		return { apiKeys, apps, assets, audit, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, refreshTokens, sessions, users, withTransaction: sqlClient.withTransaction };
 	}),
 }) {}
-
 type DatabaseServiceShape = Context.Tag.Service<typeof DatabaseService>;
 
 // --- [EXPORT] ----------------------------------------------------------------

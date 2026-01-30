@@ -7,8 +7,7 @@ import { Sharding } from '@effect/cluster';
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
 import type { Hex64 } from '@parametric-portal/types/types';
 import * as ipaddr from 'ipaddr.js';
-import { Array as A, Clock, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
-import { constant } from 'effect/Function';
+import { Array as A, Duration, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
@@ -45,7 +44,7 @@ const _extractClientIp = (headers: Headers.Headers, directIp: Option.Option<stri
 		directIp,
 		Option.flatMap(Option.liftThrowable(ipaddr.process)),
 		Option.map((addr) => ipaddr.subnetMatch(addr, { trusted: _trustedCidrs }, 'untrusted') === 'trusted'),
-		Option.getOrElse(constant(false)),
+		Option.getOrElse(() => false),
 	);
 	return isTrustedProxy
 		? Option.firstSomeOf([
@@ -68,12 +67,8 @@ const security = (hsts: typeof _config.security.hsts | false = _config.security.
 			? { ..._config.security.base, 'strict-transport-security': `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}` }
 			: _config.security.base))));
 const serverTiming = HttpMiddleware.make((app) =>
-	Effect.gen(function* () {
-		const startMs = yield* Clock.currentTimeMillis;
-		const response = yield* app;
-		const endMs = yield* Clock.currentTimeMillis;
-		return HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${endMs - startMs}`);
-	}));
+	Effect.timed(app).pipe(Effect.map(([duration, response]) =>
+		HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`))));
 
 // --- [AUTH_MIDDLEWARE] -------------------------------------------------------
 
@@ -88,10 +83,10 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 			return SessionAuth.of({
 				bearer: (token: Redacted.Redacted<string>) => Crypto.hash(Redacted.value(token)).pipe(
 					Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
-					Effect.flatMap(lookup),
+					Effect.flatMap(lookup), // NOSONAR S3358
 					Effect.flatMap(Option.match({
 						onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
-						onSome: (s) => Context.Request.update({ session: Option.some(s) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))),
+						onSome: (s) => Context.Request.update({ session: Option.some(s) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))), // NOSONAR S3358
 					})),
 				),
 			});
@@ -121,20 +116,18 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 		});
 		const tenantId = Option.match(namespaceOpt, {							// Tenant resolution: no header → default app, header + found → app id, header + not found → unspecified (prevents cross-tenant data mixing)
 			onNone: () => Context.Request.Id.default,
-			onSome: () => Option.match(found, { onNone: () => Context.Request.Id.unspecified, onSome: (item) => item.id }),
+			onSome: () => Option.getOrElse(Option.map(found, (item) => item.id), () => Context.Request.Id.unspecified), // NOSONAR S3358
 		});
 		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(	// Cluster context: graceful degradation via serviceOption (avoids startup failures)
 			Effect.flatMap(Option.match({
-				onNone: () => Effect.succeed(Option.none<Context.Request.ClusterState>()),
-				onSome: (s) => s.getSnowflake.pipe(
-					Effect.map((sf): Option.Option<Context.Request.ClusterState> => Option.some({
-						entityId: null,
-						entityType: null,
-						isLeader: false,
-						runnerId: Context.Request.makeRunnerId(sf),
-						shardId: null,
-					})),
-				),
+				onNone: () => Effect.succeedNone,
+				onSome: (s) => Effect.map(s.getSnowflake, (sf): Option.Option<Context.Request.ClusterState> => Option.some({ // NOSONAR S3358
+					entityId: null,
+					entityType: null,
+					isLeader: false,
+					runnerId: Context.Request.makeRunnerId(sf),
+					shardId: null,
+				})),
 			})),
 		);
 		const ctx: Context.Request.Data = {
@@ -147,25 +140,27 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			tenantId,
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
-		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: constant({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
+		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: () => ({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
 		yield* pipe(	// Annotate span with runner ID for cross-pod trace correlation
 			Option.flatMapNullable(cluster, (c) => c.runnerId),
-			Option.match({ onNone: constant(Effect.void), onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id) }),
+			Option.match({ onNone: () => Effect.void, onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id) }),
 		);
 		return yield* Context.Request.within(tenantId, app.pipe(
 			Effect.provideService(Context.Request, ctx),
-			Effect.tap(() => Effect.all([
+			Effect.tap(Effect.all([
 				Effect.annotateCurrentSpan('tenant.id', tenantId),
 				Effect.annotateCurrentSpan('request.id', requestId),
-				...Option.match(namespaceOpt, { onNone: constant([]), onSome: (ns) => [Effect.annotateCurrentSpan('app.namespace', ns)] }),
+				...A.map(A.fromOption(namespaceOpt), (ns) => Effect.annotateCurrentSpan('app.namespace', ns)),
 			], { discard: true })),
 			Effect.annotateLogs(logAnnotations),
-			Effect.flatMap((response) => Context.Request.current.pipe(
-				Effect.map((c) => HttpServerResponse.setHeaders(response, {
-					'x-request-id': requestId,
-					...Option.match(c.circuit, { onNone: constant({}), onSome: (circuit) => ({ 'x-circuit-state': circuit.state }) }),
-				})),
-			)),
+			Effect.flatMap((response) => Effect.gen(function* () {
+				const c = yield* Context.Request.current;
+				const circuitHeader = c.circuit.pipe(Option.map((circuit) => circuit.state));
+				return HttpServerResponse.setHeaders(response, Option.match(circuitHeader, {
+					onNone: () => ({ 'x-request-id': requestId }),
+					onSome: (state) => ({ 'x-request-id': requestId, 'x-circuit-state': state }),
+				}));
+			})),
 		), ctx);
 	}));
 const cors = (origins?: ReadonlyArray<string>) => {

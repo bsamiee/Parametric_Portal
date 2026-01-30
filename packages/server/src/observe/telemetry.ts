@@ -19,7 +19,7 @@
 import { Otlp } from '@effect/opentelemetry';
 import { FetchHttpClient } from '@effect/platform';
 import { Array as A, Boolean, Cause, Clock, Config as Cfg, Duration, Effect, FiberId, HashSet, Layer, Logger, LogLevel, Option, pipe, type Tracer } from 'effect';
-import { dual } from 'effect/Function';
+import { constant, dual } from 'effect/Function';
 import { Context } from '../context.ts';
 import { MetricsService } from './metrics.ts';
 
@@ -54,7 +54,7 @@ const _kindPatterns: ReadonlyArray<readonly [Tracer.SpanKind, ReadonlyArray<stri
 const _inferKind = (name: string): Tracer.SpanKind =>
 	pipe(
 		_kindPatterns,
-		A.findFirst(([, prefixes]) => A.some(prefixes, (p) => name.startsWith(p))),
+		A.findFirst(([, prefixes]) => A.some(prefixes, (p) => name.startsWith(p))), // NOSONAR S3358
 		Option.map(([kind]) => kind),
 		Option.getOrElse((): Tracer.SpanKind => 'internal'),
 	);
@@ -74,14 +74,14 @@ const _causeAttrs = (cause: Cause.Cause<unknown>): Record<string, unknown> => {
 };
 const _recordErrorEvent = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
 	Effect.flatMap(Effect.optionFromOptional(Effect.currentSpan), Option.match({
-		onNone: () => Effect.void,
-		onSome: (span) => Clock.currentTimeMillis.pipe(Effect.flatMap((nowMs) => Effect.sync(() => {
+		onNone: constant(Effect.void),
+		onSome: (span) => Effect.flatMap(Clock.currentTimeMillis, (nowMs) => { // NOSONAR S3358
 			const attrs = _causeAttrs(cause);
-			Boolean.match('error' in attrs && attrs['error'] === true, {
-				onFalse: () => undefined,
-				onTrue: () => { span.event('exception', BigInt(nowMs * 1_000_000), { 'exception.message': attrs['exception.message'], 'exception.stacktrace': attrs['exception.stacktrace'], 'exception.type': attrs['exception.type'] }); },
-			});
-		}))),
+			return Effect.when(
+				Effect.sync(() => span.event('exception', BigInt(nowMs * 1_000_000), { 'exception.message': attrs['exception.message'], 'exception.stacktrace': attrs['exception.stacktrace'], 'exception.type': attrs['exception.type'] })),
+				constant('error' in attrs && attrs['error'] === true),
+			);
+		}),
 	}));
 const _span: {
 	(name: string, opts?: Telemetry.SpanOpts): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;

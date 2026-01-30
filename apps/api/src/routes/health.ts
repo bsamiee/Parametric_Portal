@@ -7,6 +7,7 @@ import { HttpApiBuilder } from '@effect/platform';
 import { Client } from '@parametric-portal/database/client';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
+import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Boolean as B, Effect, Match, pipe } from 'effect';
@@ -58,7 +59,8 @@ const _readiness = (polling: PollingService) => pipe(
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 	Effect.andThen(PollingService, (polling) => handlers
 		.handle('liveness', () => _liveness)
-		.handle('readiness', () => _readiness(polling)),
+		.handle('readiness', () => _readiness(polling))
+		.handle('clusterHealth', () => ClusterService.checkHealth.cluster().pipe(Effect.map((cluster) => ({ cluster })))),
 	),
 );
 

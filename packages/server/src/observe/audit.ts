@@ -5,7 +5,7 @@
  */
 import { FileSystem } from '@effect/platform';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Array as A, Clock, DateTime, Duration, Effect, Option, Schedule, pipe } from 'effect';
+import { Array as A, Clock, DateTime, Duration, Effect, Function as F, Option, Schedule, pipe } from 'effect';
 import { Context } from '../context.ts';
 import { Diff } from '../utils/diff.ts';
 import { MetricsService } from './metrics.ts';
@@ -102,7 +102,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 						return Effect.all([
 							Effect.logWarning('AUDIT_FAILURE', { error, isSecurity: parsed.isSecurity, operation: `${parsed.subject}.${parsed.op}`, subjectId }),
 							MetricsService.inc(metrics.audit.failures, labels, 1),
-							Effect.when(writeDeadLetter(entry, error, timestampMs), () => forceDeadLetter),
+							Effect.when(writeDeadLetter(entry, error, timestampMs), F.constant(forceDeadLetter)),
 						], { discard: true });
 					}),
 				);
@@ -146,10 +146,10 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					onFalse: () => Effect.succeed({ failed: 0, replayed: 0, skipped: true }),
 					onTrue: () => Effect.gen(function* () {
 						const tempPath = `${_Audit.deadLetter.path}.processing`;
-						const renamed = yield* pipe(fileSystem.rename(_Audit.deadLetter.path, tempPath), Effect.as(true), Effect.orElseSucceed(() => false));
+						const renamed = yield* pipe(fileSystem.rename(_Audit.deadLetter.path, tempPath), Effect.as(true), Effect.orElseSucceed(F.constFalse));
 						return yield* Effect.if(renamed, {
-							onFalse: () => Effect.succeed({ failed: 0, replayed: 0, skipped: false }),
-							onTrue: () => replayFileContents(fileSystem, tempPath),
+							onFalse: F.constant(Effect.succeed({ failed: 0, replayed: 0, skipped: false })),
+							onTrue: F.constant(replayFileContents(fileSystem, tempPath)),
 						});
 					}),
 				}),

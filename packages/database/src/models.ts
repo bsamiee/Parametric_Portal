@@ -170,6 +170,17 @@ class Job extends Model.Class<Job>('Job')({								// Background task. Belongs t
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
 
+// --- [INFRA: KV_STORE] -------------------------------------------------------
+class KvStore extends Model.Class<KvStore>('KvStore')({					// Cluster infrastructure state (singleton state, feature flags).
+	// IMPORTANT: No appId — cluster-wide infrastructure state, NOT tenant-scoped
+	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
+	id: Model.Generated(S.UUID),
+	key: S.String,
+	value: S.String,
+	expiresAt: Model.FieldOption(S.DateFromSelf),						// Optional TTL for automatic purge
+	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
+}) {}
+
 // --- [SEARCH: DOCUMENT] ------------------------------------------------------
 class SearchDocument extends Model.Class<SearchDocument>('SearchDocument')({
 	entityType: S.String,
@@ -195,4 +206,4 @@ class SearchEmbedding extends Model.Class<SearchEmbedding>('SearchEmbedding')({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ApiKey, App, Asset, AuditLog, Job, MfaSecret, OauthAccount, RefreshToken, SearchDocument, SearchEmbedding, Session, User };
+export { ApiKey, App, Asset, AuditLog, Job, KvStore, MfaSecret, OauthAccount, RefreshToken, SearchDocument, SearchEmbedding, Session, User };

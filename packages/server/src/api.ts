@@ -248,6 +248,24 @@ const _HealthGroup = HttpApiGroup.make('health')
 				status: S.Literal('ok'),
 			}))
 			.addError(HttpError.ServiceUnavailable),
+	)
+	.add(
+		HttpApiEndpoint.get('clusterHealth', '/cluster')
+			.addSuccess(S.Struct({
+				cluster: S.Struct({
+					degraded: S.Boolean,
+					healthy: S.Boolean,
+					metrics: S.Struct({
+						entities: S.Number,
+						runners: S.Number,
+						runnersHealthy: S.Number,
+						shards: S.Number,
+						singletons: S.Number,
+					}),
+				}),
+			}))
+			.addError(HttpError.ServiceUnavailable)
+			.annotate(OpenApi.Exclude, true),
 	);
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
 	.prefix('/v1')

@@ -96,6 +96,9 @@ const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.f
 	lockedUntil:      { col: 'locked_until',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
 	waitMs:           { col: 'wait_ms',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
 	durationMs:       { col: 'duration_ms',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
+	// KV store fields (cluster infrastructure state)
+	kvKey:            { col: 'key',              sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
+	kvValue:          { col: 'value',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 });
 const _Tables = {
 	apps: {
@@ -136,6 +139,9 @@ const _Tables = {
 	jobs: {
 		fields: 	[_Registry.id, _Registry.appId, _Registry.userId, _Registry.requestId, _Registry.type, _Registry.payload, _Registry.priority, _Registry.status, _Registry.attempts, _Registry.maxAttempts, _Registry.scheduledAt, _Registry.startedAt, _Registry.completedAt, _Registry.lastError, _Registry.lockedBy, _Registry.lockedUntil, _Registry.waitMs, _Registry.durationMs, _Registry.updatedAt],
 		fk: 		[[_Registry.userId, _Fk.RESTRICT]] as const},
+	kvStore: {
+		fields: 	[_Registry.id, _Registry.kvKey, _Registry.kvValue, _Registry.expiresAt, _Registry.updatedAt],
+		unique: 	[[_Registry.kvKey]]},
 } as const;
 
 // --- [DERIVED_TYPES] ---------------------------------------------------------

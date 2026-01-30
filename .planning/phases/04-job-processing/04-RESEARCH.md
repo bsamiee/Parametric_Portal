@@ -1,493 +1,989 @@
 # Phase 4: Job Processing - Research
 
 **Researched:** 2026-01-30
-**Domain:** @effect/cluster Entity-based job dispatch, priority scheduling, deduplication, dead-letter handling
+**Domain:** @effect/cluster Entity-based job dispatch, priority routing, deduplication, dead-letter handling
 **Confidence:** HIGH
 
 ## Summary
 
-Phase 4 replaces the poll-based job queue in jobs.ts with Entity-based message dispatch. The current implementation uses `SELECT FOR UPDATE SKIP LOCKED` with a poll loop (1-10 second intervals), which wastes resources and adds latency. Entity mailboxes provide instant dispatch with consistent-hash routing, removing the need for DB polling entirely.
+Phase 4 replaces poll-based job queue with Entity mailbox dispatch. Current `jobs.ts` uses `SELECT FOR UPDATE SKIP LOCKED` with 1-10s polling; Entity mailboxes provide instant dispatch via consistent-hash routing.
 
-The architecture follows the ClusterEntity pattern established in Phase 1-3: `Entity.make("Job", [...])` with typed RPC messages, `defectRetryPolicy` for transient failures, and `Context.Request.withinCluster` for cluster context propagation. Priority scheduling requires external coordination since @effect/cluster mailboxes are FIFO by default — the recommended pattern is priority-weighted entity routing where different priority levels route to different entity pools.
-
-**Primary recommendation:** Create a JobEntity with polymorphic messages (`submit`, `status`, `cancel`), use `Rpc.make({ primaryKey })` for deduplication via optional `dedupeKey`, implement priority as weighted routing to priority-specific entity pools, and leverage `Entity.keepAlive` for batch jobs exceeding `maxIdleTime`. DLQ is a separate DB table with `replayJob` capability.
+**Architecture:** JobEntity with polymorphic messages (`submit`, `status`, `progress`, `cancel`), `Rpc.make({ primaryKey })` for deduplication, `RpcMiddleware.Tag` for context injection, priority via `toLayerMailbox` or weighted pool routing, DLQ as DB table with replay capability.
 
 ## Standard Stack
 
-### Core
-| Library | Version | Purpose | Why Standard |
-|---------|---------|---------|--------------|
-| `@effect/cluster` | 0.56.1 | Entity sharding, message dispatch | Official Effect cluster package, SqlMessageStorage persistence |
-| `effect` | 3.19.15 | Core runtime, Schedule, Match, Schema, Ref | Foundation for all Effect code |
-| `@effect/sql-pg` | 0.50.1 | PostgreSQL for job_dlq table | Already in catalog, consistent with existing repos |
+| Library | Version | Purpose |
+|---------|---------|---------|
+| `@effect/cluster` | 0.56.1 | Entity, Rpc, RpcMiddleware, Sharding, SqlMessageStorage |
+| `@effect/workflow` | 0.2.0 | DurableQueue, DurableDeferred, DurableRateLimiter |
+| `effect` | 3.19.15 | Schema, Match, Duration, Ref, FiberMap, Chunk, Supervisor, Schedule |
+| `@effect/sql-pg` | 0.50.1 | job_dlq table persistence |
 
-### Supporting
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `@effect/rpc` | 0.73.0 | RPC protocol with primaryKey deduplication | Already used for Entity message contracts |
+All packages in pnpm-workspace.yaml catalog. No new dependencies.
 
-### Alternatives Considered
-| Instead of | Could Use | Tradeoff |
-|------------|-----------|----------|
-| Entity mailbox dispatch | Keep poll-based queue | Polling wastes CPU, adds 1-10s latency vs instant dispatch |
-| Weighted entity routing | Single mailbox with priority reordering | @effect/cluster mailboxes are FIFO; external priority needed |
-| DB-based DLQ table | Redis dead-letter queue | DB aligns with existing job schema, enables replay without data migration |
+## Architecture
 
-**Installation:**
-All packages already in pnpm-workspace.yaml catalog. No new dependencies required.
-
-## Architecture Patterns
-
-### Recommended Project Structure
 ```
 packages/server/src/infra/
-├── cluster.ts           # ClusterService (unchanged from Phase 1-3)
-└── jobs.ts              # JobService (gut + replace, Entity-based dispatch)
+├── cluster.ts    # ClusterService (unchanged)
+└── jobs.ts       # JobService (gut + replace with Entity dispatch)
 
 packages/database/src/
-├── models.ts            # Add JobDlq model
-└── repos.ts             # Add jobDlq repo methods
+├── models.ts     # Add JobDlq model
+└── repos.ts      # Add jobDlq repo methods
 ```
 
-### Pattern 1: Job Entity with Polymorphic Messages
-**What:** Single Job entity handling submit, status, and cancel operations
-**When to use:** All job processing flows
-**Example:**
+## Schema & Errors
+
 ```typescript
-// Source: Phase 1 ClusterEntity pattern + CONTEXT.md decisions
-const JobPayload = S.Struct({
-  type: S.String,
-  payload: S.Unknown,
-  priority: S.optional(S.Literal('high', 'normal', 'low')),
-  dedupeKey: S.optional(S.String),
-  batchId: S.optional(S.String),
-});
-const JobStatusResponse = S.Struct({
-  status: S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled'),
-  attempts: S.Number,
-  history: S.Array(S.Struct({ status: S.String, timestamp: S.Number, error: S.optional(S.String) })),
-  result: S.optional(S.Unknown),
-});
-
-const JobEntity = Entity.make("Job", [
-  Rpc.make("submit", {
-    payload: JobPayload,
-    success: S.Struct({ jobId: S.String }),
-    error: JobError,
-    primaryKey: (p) => p.dedupeKey ?? crypto.randomUUID(), // Deduplication via primaryKey
-  }),
-  Rpc.make("status", { payload: S.Struct({ jobId: S.String }), success: JobStatusResponse }),
-  Rpc.make("cancel", { payload: S.Struct({ jobId: S.String }), success: S.Void, error: JobError }),
-]);
-```
-
-### Pattern 2: Priority-Weighted Entity Routing
-**What:** Route jobs to priority-specific entity IDs for weighted scheduling
-**When to use:** Jobs with high/normal/low priority levels
-**Example:**
-```typescript
-// Source: Distributed Weighted Round-Robin research + @effect/cluster patterns
-const _priorityWeights = { critical: 4, high: 3, normal: 2, low: 1 } as const;
-const _priorityQueues = {
-  critical: Array.from({ length: 4 }, (_, i) => `job-critical-${i}`),
-  high: Array.from({ length: 3 }, (_, i) => `job-high-${i}`),
-  normal: Array.from({ length: 2 }, (_, i) => `job-normal-${i}`),
-  low: ['job-low-0'],
-} as const;
-
-const routeByPriority = (priority: keyof typeof _priorityWeights) => {
-  const pool = _priorityQueues[priority];
-  return pool[Math.floor(Math.random() * pool.length)]; // Random within priority pool
-};
-
-// Higher priority = more entity instances = more parallel capacity
-const submit = (payload: JobPayload) =>
-  client(routeByPriority(payload.priority ?? 'normal')).submit(payload);
-```
-
-### Pattern 3: Entity.keepAlive for Long-Running Jobs
-**What:** Prevent entity deactivation during batch processing
-**When to use:** Jobs exceeding `maxIdleTime` (5 minutes default)
-**Example:**
-```typescript
-// Source: Entity.ts API research + EntityResource documentation
-const JobEntityLive = JobEntity.toLayer(Effect.gen(function*() {
-  const currentAddress = yield* Entity.CurrentAddress;
-  return {
-    submit: ({ type, payload }) => Effect.gen(function*() {
-      const estimatedDuration = estimateJobDuration(type);
-      // Enable keepAlive for jobs exceeding idle threshold
-      yield* Effect.when(
-        Entity.keepAlive(true),
-        () => estimatedDuration > Duration.toMillis(_CONFIG.entity.maxIdleTime)
-      );
-      // ... job processing
-      yield* Entity.keepAlive(false); // Disable after completion
-    }),
-  };
-}), {
-  maxIdleTime: Duration.minutes(5),
-  concurrency: 1,
-  mailboxCapacity: 100,
-  defectRetryPolicy: _retryPolicy,
-});
-```
-
-### Pattern 4: Deduplication via Rpc.make primaryKey
-**What:** SqlMessageStorage checks primaryKey, returns existing result for duplicates
-**When to use:** Jobs with optional `dedupeKey` field
-**Example:**
-```typescript
-// Source: SqlMessageStorage research + @effect/cluster docs
-// Rpc.make primaryKey enables SqlMessageStorage deduplication
-Rpc.make("submit", {
-  payload: JobPayload,
-  success: JobResult,
-  primaryKey: (p) => p.dedupeKey ?? p.jobId, // Unique per job or dedupe key
-});
-
-// SqlMessageStorage.saveRequest returns Success | Duplicate
-// Duplicate case returns original request ID + last reply
-// Entity handler receives deduplicated requests only
-```
-
-### Pattern 5: Dead-Letter Queue with Replay
-**What:** Failed jobs move to job_dlq table after max retries; replayable
-**When to use:** Jobs exceeding maxAttempts or with unrecoverable errors
-**Example:**
-```typescript
-// Source: CONTEXT.md decisions + existing repos.ts patterns
-// DLQ table: original job data + error history + replay metadata
-const JobDlq = Model.Class('JobDlq')({
-  id: Model.Generated(S.UUID),
-  originalJobId: S.UUID,
-  appId: S.UUID,
-  type: S.String,
-  payload: Model.JsonFromString(S.Unknown),
-  attempts: S.Number,
-  errorHistory: Model.JsonFromString(S.Array(S.Struct({ error: S.String, timestamp: S.Number }))),
-  failedAt: S.DateFromSelf,
-  replayedAt: Model.FieldOption(S.DateFromSelf),
-});
-
-// Replay moves DLQ entry back to queue, preserving history
-const replayJob = (dlqId: string) => Effect.gen(function*() {
-  const dlqEntry = yield* db.jobDlq.get(dlqId);
-  yield* client(routeByPriority('normal')).submit({
-    type: dlqEntry.type,
-    payload: dlqEntry.payload,
-    // Original job metadata preserved for audit trail
-  });
-  yield* db.jobDlq.set(dlqId, { replayedAt: new Date() });
-});
-```
-
-### Pattern 6: Effect.interrupt for Job Cancellation
-**What:** Cancel in-flight jobs via fiber interruption
-**When to use:** `JobService.cancel(jobId)` API
-**Example:**
-```typescript
-// Source: Effect Fibers documentation + Entity handler patterns
-const JobEntityLive = JobEntity.toLayer(Effect.gen(function*() {
-  const runningJobs = yield* Ref.make(HashMap.empty<string, Fiber.RuntimeFiber<void, JobError>>());
-  return {
-    submit: ({ jobId, type, payload }) => Effect.gen(function*() {
-      const fiber = yield* processJob(type, payload).pipe(
-        Effect.onInterrupt(() => Effect.logInfo('Job cancelled', { jobId })),
-        Effect.fork,
-      );
-      yield* Ref.update(runningJobs, HashMap.set(jobId, fiber));
-      yield* Fiber.join(fiber);
-      yield* Ref.update(runningJobs, HashMap.remove(jobId));
-    }),
-    cancel: ({ jobId }) => Ref.get(runningJobs).pipe(
-      Effect.flatMap((map) => Option.match(HashMap.get(map, jobId), {
-        onNone: () => Effect.fail(new JobError({ reason: 'NotFound' })),
-        onSome: (fiber) => Fiber.interrupt(fiber).pipe(Effect.asVoid),
-      })),
-    ),
-  };
-}));
-```
-
-### Anti-Patterns to Avoid
-- **Poll loops for job claiming:** Entity mailboxes provide instant dispatch; polling wastes resources
-- **In-memory priority queues:** Lost on pod restart; use Entity routing for weighted scheduling
-- **`SELECT FOR UPDATE SKIP LOCKED`:** Replaced by shard-based message routing
-- **Separate submit/submitBatch APIs:** Single polymorphic submit handles `T | readonly T[]`
-- **Ignoring `maxIdleTime`:** Long jobs need `Entity.keepAlive` or they deactivate mid-processing
-
-## Don't Hand-Roll
-
-| Problem | Don't Build | Use Instead | Why |
-|---------|-------------|-------------|-----|
-| Job deduplication | Manual Redis/DB lookup | `Rpc.make({ primaryKey })` | SqlMessageStorage returns Duplicate automatically |
-| Message persistence | Custom DB queue | `SqlMessageStorage.layer` | Built-in at-least-once delivery |
-| Priority scheduling | Manual reordering in mailbox | Weighted entity pool routing | Mailboxes are FIFO; external routing achieves priority |
-| Job cancellation | Custom cancel flag polling | `Effect.interrupt` + Fiber reference | Fiber model handles cleanup automatically |
-| Retry backoff | Custom delay calculation | `resilience.ts` patterns | Already has exponential + jitter + cap |
-| Status tracking | DB polling for status | `Ref` in Entity state + RPC query | In-memory state, persisted via SqlMessageStorage |
-
-**Key insight:** The existing `resilience.ts` module provides production-ready retry patterns — use `Resilience.schedules.default` or compose with `Schedule.intersect` for job-specific policies. Don't reinvent backoff logic.
-
-## Common Pitfalls
-
-### Pitfall 1: Mailbox FIFO Blocks Priority Processing
-**What goes wrong:** High-priority jobs wait behind low-priority jobs in same entity mailbox.
-**Why it happens:** @effect/cluster mailboxes process messages in FIFO order.
-**How to avoid:** Route jobs to priority-specific entity pools (more instances for higher priority). Critical jobs get 4 entities, high gets 3, normal gets 2, low gets 1.
-**Warning signs:** High-priority job latency equals low-priority latency.
-
-### Pitfall 2: Long-Running Jobs Deactivate Mid-Processing
-**What goes wrong:** Entity shuts down after `maxIdleTime` while job still processing.
-**Why it happens:** `maxIdleTime: Duration.minutes(5)` triggers deactivation even during active processing.
-**How to avoid:** Call `Entity.keepAlive(true)` at start of long jobs, disable after completion. For batch jobs, track estimated duration and enable keepAlive conditionally.
-**Warning signs:** Jobs fail with interruption errors after ~5 minutes.
-
-### Pitfall 3: Duplicate Job Submissions Without dedupeKey
-**What goes wrong:** Same job submits multiple times, executes multiple times.
-**Why it happens:** Fire-and-forget pattern without idempotency key.
-**How to avoid:** Always provide `dedupeKey` for jobs that must be idempotent. `primaryKey` in Rpc.make uses this for SqlMessageStorage deduplication.
-**Warning signs:** Duplicate side effects, double-processing in logs.
-
-### Pitfall 4: Validation Errors Retry Instead of DLQ
-**What goes wrong:** ParseError jobs retry forever, never reaching DLQ.
-**Why it happens:** Generic retry policy catches all errors including validation.
-**How to avoid:** Skip retries for `ParseError`/`ValidationError` tags — DLQ immediately. Use `Effect.catchTag` to route validation errors directly to dead-letter.
-**Warning signs:** Jobs stuck in pending with ParseError, retry count climbing.
-
-### Pitfall 5: JobService Interface Changes
-**What goes wrong:** Existing callers break when jobs.ts is replaced.
-**Why it happens:** New Entity-based API uses different method signatures.
-**How to avoid:** Preserve `JobService.enqueue(type, payload, opts)` signature exactly. New implementation wraps Entity dispatch internally. Success criteria requires unchanged interface.
-**Warning signs:** Compile errors in files importing JobService.
-
-### Pitfall 6: Missing Transaction Rollback on Job Failure
-**What goes wrong:** Partial side effects persist when job fails mid-execution.
-**Why it happens:** Job handlers don't wrap in database transaction.
-**How to avoid:** Use `Context.Request.withinSync` which wraps in SQL transaction. Auto-rollback on Effect failure.
-**Warning signs:** Inconsistent data states after job failures.
-
-## Code Examples
-
-### Complete JobEntity Setup (Dense Style)
-```typescript
-// Source: Phase 1 patterns + CONTEXT.md decisions + resilience.ts integration
-import { Entity, Rpc, Sharding, SqlMessageStorage } from '@effect/cluster';
-import { Duration, Effect, HashMap, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
-import { Context } from '../context.ts';
-import { MetricsService } from '../observe/metrics.ts';
-import { Resilience } from '../utils/resilience.ts';
-
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const JobPayload = S.Struct({
+const JobPriority = S.Literal('critical', 'high', 'normal', 'low');
+const JobStatus = S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
+
+class JobPayload extends S.Class<JobPayload>('JobPayload')({
   batchId: S.optional(S.String),
   dedupeKey: S.optional(S.String),
+  duration: S.optional(S.Literal('short', 'long'), { default: () => 'short' as const }),
+  maxAttempts: S.optional(S.Number, { default: () => 3 }),
   payload: S.Unknown,
-  priority: S.optional(S.Literal('critical', 'high', 'normal', 'low')),
+  priority: S.optional(JobPriority, { default: () => 'normal' as const }),
   type: S.String,
-});
-const JobStatus = S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
-const JobStatusResponse = S.Struct({
+}) {}
+
+class JobStatusResponse extends S.Class<JobStatusResponse>('JobStatusResponse')({
   attempts: S.Number,
   history: S.Array(S.Struct({ error: S.optional(S.String), status: JobStatus, timestamp: S.Number })),
   result: S.optional(S.Unknown),
   status: JobStatus,
-});
+}) {}
 
 // --- [ERRORS] ----------------------------------------------------------------
 
-class JobError extends S.TaggedError<JobError>()('JobError', {
-  cause: S.optional(S.Unknown),
-  reason: S.Literal('NotFound', 'AlreadyCancelled', 'HandlerMissing', 'Validation', 'Processing'),
-}) {}
+class JobError extends Data.TaggedError('JobError')<{
+  readonly cause?: unknown;
+  readonly jobId?: string;
+  readonly reason: 'NotFound' | 'AlreadyCancelled' | 'HandlerMissing' | 'Validation' | 'Processing' | 'MaxRetries' | 'RunnerUnavailable' | 'Timeout';
+}> {
+  static readonly fromNotFound = (jobId: string) => new JobError({ jobId, reason: 'NotFound' });
+  static readonly fromCancelled = (jobId: string) => new JobError({ jobId, reason: 'AlreadyCancelled' });
+  static readonly fromHandlerMissing = (jobId: string, type: string) => new JobError({ cause: { type }, jobId, reason: 'HandlerMissing' });
+  static readonly fromValidation = (jobId: string, cause: unknown) => new JobError({ cause, jobId, reason: 'Validation' });
+  static readonly fromProcessing = (jobId: string, cause: unknown) => new JobError({ cause, jobId, reason: 'Processing' });
+  static readonly fromMaxRetries = (jobId: string, cause: unknown) => new JobError({ cause, jobId, reason: 'MaxRetries' });
+  static readonly fromRunnerUnavailable = (jobId: string, cause?: unknown) => new JobError({ cause, jobId, reason: 'RunnerUnavailable' });
+  static readonly fromTimeout = (jobId: string, cause?: unknown) => new JobError({ cause, jobId, reason: 'Timeout' });
+  // Set-based classification — O(1) lookup, scales with more reasons
+  static readonly _terminal: ReadonlySet<JobError['reason']> = new Set(['Validation', 'HandlerMissing', 'AlreadyCancelled', 'NotFound']);
+  static readonly _transient: ReadonlySet<JobError['reason']> = new Set(['Timeout', 'RunnerUnavailable']);
+  static readonly isTerminal = (e: JobError): boolean => JobError._terminal.has(e.reason);
+  static readonly isTransient = (e: JobError): boolean => JobError._transient.has(e.reason);
+}
+```
+
+## JobState
+
+```typescript
+class JobState extends S.Class<JobState>('JobState')({
+  attempts: S.Number,
+  completedAt: S.optional(S.Number),
+  createdAt: S.Number,
+  lastError: S.optional(S.String),
+  result: S.optional(S.Unknown),
+  status: JobStatus,
+}) {
+  static readonly queued = (ts: number) => new JobState({ attempts: 0, createdAt: ts, status: 'queued' });
+  static readonly processing = (state: JobState, ts: number) => new JobState({ ...state, status: 'processing' });
+  static readonly completed = (state: JobState, result: unknown, ts: number) => new JobState({ ...state, completedAt: ts, result, status: 'complete' });
+  static readonly failed = (state: JobState, error: string, ts: number) => new JobState({ ...state, attempts: state.attempts + 1, completedAt: ts, lastError: error, status: 'failed' });
+  static readonly cancelled = (state: JobState, ts: number) => new JobState({ ...state, completedAt: ts, status: 'cancelled' });
+}
+```
+
+## JobEntity & Layer
+
+```typescript
+import { Entity, Rpc, RpcMiddleware, Sharding } from '@effect/cluster';
+import { Chunk, Clock, Data, Duration, Effect, FiberMap, HashMap, Match, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
+import { Context } from '../context.ts';
+import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
+import { Resilience } from '../utils/resilience.ts';
+import { DatabaseService } from '@parametric-portal/database/repos';
+
+// --- [CONFIG] ----------------------------------------------------------------
+
+const _CONFIG = {
+  entity: { concurrency: 1, mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
+  pools: { critical: 4, high: 3, normal: 2, low: 1 } as const,
+  retry: Schedule.exponential(Duration.millis(100)).pipe(
+    Schedule.jittered,
+    Schedule.intersect(Schedule.recurs(5)),
+    Schedule.upTo(Duration.seconds(30)),
+    Schedule.whileInput((e: JobError) => !JobError.isTerminal(e)),  // Skip terminal errors
+    Schedule.resetAfter(Duration.minutes(5)),
+    Schedule.collectAllInputs,
+  ),
+} as const;
+
+// --- [MIDDLEWARE] ------------------------------------------------------------
+
+class JobContext extends Effect.Tag('JobContext')<JobContext, {
+  readonly jobId: string;
+  readonly tenantId: string;
+  readonly priority: typeof JobPriority.Type;
+}>() {}
+
+class JobMiddleware extends RpcMiddleware.Tag<JobMiddleware>()('JobMiddleware', { provides: JobContext }) {}
 
 // --- [ENTITY] ----------------------------------------------------------------
 
-const JobEntity = Entity.make("Job", [
-  Rpc.make("submit", {
+const JobEntity = Entity.make('Job', [
+  Rpc.make('submit', {
     error: JobError,
-    payload: JobPayload,
-    primaryKey: (p) => p.dedupeKey ?? crypto.randomUUID(),
-    success: S.Struct({ jobId: S.String }),
+    payload: JobPayload.fields,
+    primaryKey: (p) => p.dedupeKey ?? null,  // null = no deduplication for non-idempotent jobs
+    success: S.Struct({ jobId: S.String, duplicate: S.Boolean }),
   }),
-  Rpc.make("status", { payload: S.Struct({ jobId: S.String }), success: JobStatusResponse }),
-  Rpc.make("cancel", { error: JobError, payload: S.Struct({ jobId: S.String }), success: S.Void }),
+  Rpc.make('status', { payload: S.Struct({ jobId: S.String }), success: JobStatusResponse }),
+  Rpc.make('progress', { payload: S.Struct({ jobId: S.String }), success: S.Struct({ pct: S.Number, message: S.String }), stream: true }),
+  Rpc.make('cancel', { error: JobError, payload: S.Struct({ jobId: S.String }), success: S.Void }),
 ]);
+
+// --- [ENTITY LAYER] ----------------------------------------------------------
+
+const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
+  const currentAddress = yield* Entity.CurrentAddress;
+  const handlers = yield* Ref.make(HashMap.empty<string, (payload: unknown) => Effect.Effect<unknown, unknown, never>>());
+  const runningJobs = yield* FiberMap.make<string>();
+  const jobStates = yield* Ref.make(HashMap.empty<string, typeof JobStatusResponse.Type>());
+  const db = yield* DatabaseService;
+  const metrics = yield* MetricsService;
+
+  const processJob = (jobId: string, envelope: typeof JobPayload.Type) => Context.Request.withinCluster({
+    entityId: currentAddress.entityId,
+    entityType: currentAddress.entityType,
+    shardId: currentAddress.shardId,
+  })(Effect.gen(function* () {
+    const handler = yield* Ref.get(handlers).pipe(
+      Effect.map(HashMap.get(envelope.type)),
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.fail(JobError.fromHandlerMissing(jobId, envelope.type)),
+        onSome: Effect.succeed,
+      })),
+    );
+    const ts = yield* Clock.currentTimeMillis;
+    yield* Ref.update(jobStates, HashMap.set(jobId, new JobStatusResponse({
+      attempts: 1, history: [{ status: 'processing', timestamp: ts }], status: 'processing',
+    })));
+    const longJob = envelope.duration === 'long';
+    yield* Effect.when(Entity.keepAlive(true), () => longJob);
+    yield* MetricsService.trackEffect(
+      handler(envelope.payload).pipe(Effect.mapError((e) => JobError.fromProcessing(jobId, e))),
+      { duration: metrics.jobs.duration, errors: metrics.errors, labels: MetricsService.label({ jobType: envelope.type, priority: envelope.priority }) },
+    ).pipe(Effect.ensuring(Effect.when(Entity.keepAlive(false), () => longJob)));
+    const completeTs = yield* Clock.currentTimeMillis;
+    yield* Ref.update(jobStates, HashMap.modify(jobId, (s) => new JobStatusResponse({ ...s, history: [...s.history, { status: 'complete', timestamp: completeTs }], status: 'complete' })));
+    yield* Metric.increment(metrics.jobs.completions);
+  }).pipe(
+    Effect.catchTag('JobError', (e) => JobError.isTerminal(e)
+      ? db.jobDlq.insert({ appId: envelope.appId ?? 'system', attempts: 1, errorHistory: [{ error: String(e.cause), timestamp: Date.now() }], errorReason: e.reason, originalJobId: jobId, payload: envelope.payload, type: envelope.type }).pipe(Effect.zipRight(Metric.increment(metrics.jobs.deadLettered)), Effect.zipRight(Effect.fail(e)))
+      : Effect.fail(e)),
+  ));
+
+  return {
+    cancel: (envelope) => FiberMap.get(runningJobs, envelope.payload.jobId).pipe(
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.fail(JobError.fromNotFound(envelope.payload.jobId)),
+        onSome: (fiber) => FiberMap.remove(runningJobs, envelope.payload.jobId).pipe(Effect.asVoid),
+      })),
+    ),
+    status: (envelope) => Ref.get(jobStates).pipe(
+      Effect.map(HashMap.get(envelope.payload.jobId)),
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.succeed(new JobStatusResponse({ attempts: 0, history: [], status: 'queued' })),
+        onSome: Effect.succeed,
+      })),
+    ),
+    submit: (envelope) => Effect.gen(function* () {
+      const sharding = yield* Sharding.Sharding;
+      const jobId = yield* sharding.getSnowflake.pipe(Effect.map(String));
+      yield* Metric.increment(metrics.jobs.enqueued);
+      yield* FiberMap.run(runningJobs, jobId)(processJob(jobId, envelope.payload).pipe(Effect.onInterrupt(() => Effect.logInfo('Job cancelled', { jobId }))));
+      return { jobId, duplicate: false };
+    }),
+  };
+}), {
+  concurrency: _CONFIG.entity.concurrency,
+  defectRetryPolicy: _CONFIG.retry,
+  mailboxCapacity: _CONFIG.entity.mailboxCapacity,
+  maxIdleTime: _CONFIG.entity.maxIdleTime,
+  spanAttributes: { 'entity.service': 'job-processing', 'entity.version': 'v1' },
+});
 ```
 
-### JobService Facade (Interface Preservation)
+## JobService
+
 ```typescript
-// Source: CONTEXT.md requirement - interface unchanged for existing callers
 class JobService extends Effect.Service<JobService>()('server/Jobs', {
-  dependencies: [ClusterService.Layer],
+  dependencies: [JobEntityLive, DatabaseService.Default, MetricsService.Default],
   scoped: Effect.gen(function* () {
     const sharding = yield* Sharding.Sharding;
     const getClient = yield* sharding.makeClient(JobEntity);
     const handlers = yield* Ref.make(HashMap.empty<string, JobService.Handler>());
     const metrics = yield* MetricsService;
+    const db = yield* DatabaseService;
 
-    // Priority routing: more entity instances for higher priority
-    const _pools = { critical: 4, high: 3, low: 1, normal: 2 } as const;
-    const routeByPriority = (p: keyof typeof _pools) =>
-      `job-${p}-${Math.floor(Math.random() * _pools[p])}`;
+    const routeByPriority = (jobId: string, p: keyof typeof _CONFIG.pools) => {
+      const hash = jobId.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0);
+      return `job-${p}-${Math.abs(hash) % _CONFIG.pools[p]}`;
+    };
 
-    // Polymorphic submit: single job or batch array
     const submit = <T>(type: string, payloads: T | readonly T[], opts?: {
-      delay?: Duration.Duration;
+      dedupeKey?: string;
       maxAttempts?: number;
-      priority?: 'critical' | 'high' | 'low' | 'normal';
+      priority?: typeof JobPriority.Type;
     }) => Effect.gen(function* () {
       const items = Array.isArray(payloads) ? payloads : [payloads];
       const priority = opts?.priority ?? 'normal';
       const batchId = items.length > 1 ? crypto.randomUUID() : undefined;
-
-      const results = yield* Effect.forEach(items, (payload) =>
-        getClient(routeByPriority(priority)).submit({
-          batchId,
-          payload,
-          priority,
-          type,
-        }).pipe(Effect.map((r) => r.jobId)),
-        { concurrency: 'unbounded' }
+      // Priority separation via Chunk.partition
+      const chunks = Chunk.fromIterable(items.map((payload, idx) => ({ payload, idx })));
+      const results = yield* Effect.forEach(Chunk.toArray(chunks), ({ payload, idx }) =>
+        Context.Request.withinCluster({ entityId: routeByPriority(priority), entityType: 'Job' })(
+          getClient(routeByPriority(priority)).submit({
+            batchId,
+            dedupeKey: opts?.dedupeKey ? `${opts.dedupeKey}:${idx}` : undefined,
+            maxAttempts: opts?.maxAttempts,
+            payload,
+            priority,
+            type,
+          }).pipe(Effect.map((r) => r.jobId)),
+        ),
+        { concurrency: 'unbounded' },
       );
-
-      yield* MetricsService.inc(metrics.jobs.enqueued, MetricsService.label({ priority, type }), items.length);
+      yield* Metric.incrementBy(metrics.jobs.enqueued, items.length);
       return Array.isArray(payloads) ? results : results[0];
+    });
+
+    // Batch validation with Effect.all mode: 'validate'
+    const validateBatch = <T>(items: readonly T[], validator: (item: T) => Effect.Effect<void, JobError>) =>
+      Effect.all(items.map((item, idx) => validator(item).pipe(Effect.mapError((e) => ({ idx, error: e })))), { mode: 'validate', concurrency: 'unbounded' });
+
+    const replay = (dlqId: string) => Effect.gen(function* () {
+      const entry = yield* db.jobDlq.get(dlqId);
+      yield* Option.match(entry, {
+        onNone: () => Effect.fail(JobError.fromNotFound(dlqId)),
+        onSome: (e) => submit(e.type, e.payload, { priority: 'normal' }).pipe(Effect.zipRight(db.jobDlq.markReplayed(dlqId))),
+      });
     });
 
     return {
       cancel: (jobId: string) => getClient(jobId).cancel({ jobId }),
-      registerHandler: (type: string, handler: JobService.Handler) =>
-        Ref.update(handlers, HashMap.set(type, handler)),
+      registerHandler: <T>(type: string, handler: (payload: T) => Effect.Effect<void, unknown, never>) => Ref.update(handlers, HashMap.set(type, handler as JobService.Handler)),
+      replay,
       status: (jobId: string) => getClient(jobId).status({ jobId }),
       submit,
+      validateBatch,
     };
   }),
-}) {}
+}) {
+  // Static properties for value access (matching cluster.ts pattern)
+  static readonly Config = _CONFIG;
+  static readonly Context = JobContext;
+  static readonly Error = JobError;
+  static readonly Payload = JobPayload;
+  static readonly Response = { Status: JobStatusResponse } as const;
+}
 
 namespace JobService {
   export type Handler = (payload: unknown) => Effect.Effect<void, unknown, never>;
+  export type Priority = typeof JobPriority.Type;
+  export type Status = typeof JobStatus.Type;
+  export type Error = InstanceType<typeof JobError>;
+  export type Context = Effect.Effect.Context<typeof JobContext>;
+}
+
+export { JobService };
+```
+
+## JobDlq Model & Repo
+
+```typescript
+// models.ts — add to existing models (follows existing Model.Class patterns)
+class JobDlq extends Model.Class<JobDlq>('JobDlq')({
+  id: Model.Generated(S.UUID),
+  originalJobId: S.UUID,
+  appId: S.UUID,
+  type: S.String,
+  payload: Model.JsonFromString(S.Unknown),
+  errorReason: S.String,  // 'MaxRetries' | 'Validation' | 'HandlerMissing' | 'RunnerUnavailable'
+  attempts: S.Number,
+  errorHistory: Model.JsonFromString(S.Array(S.Struct({ error: S.String, timestamp: S.Number }))),
+  dlqAt: Model.DateTimeInsertFromDate,
+  replayedAt: Model.FieldOption(S.DateFromSelf),
+  requestId: Model.FieldOption(S.UUID),  // For cross-pod trace correlation
+  userId: Model.FieldOption(S.UUID),     // Audit trail
+}) {}
+
+// repos.ts — add to DatabaseService
+jobDlq: {
+  get: (id: string) => sql`SELECT * FROM job_dlq WHERE id = ${id}`.pipe(Effect.map(A.head)),
+  insert: (data: typeof JobDlq.insert.Type) => sql`INSERT INTO job_dlq ${sql.insert(data)}`.pipe(Effect.asVoid),
+  markReplayed: (id: string) => sql`UPDATE job_dlq SET replayed_at = NOW() WHERE id = ${id}`.pipe(Effect.asVoid),
+  listPending: (opts?: { type?: string; limit?: number }) => sql`
+    SELECT * FROM job_dlq WHERE replayed_at IS NULL
+    ${opts?.type ? sql`AND type = ${opts.type}` : sql``}
+    ORDER BY failed_at DESC LIMIT ${opts?.limit ?? 100}
+  `,
 }
 ```
 
-### Metrics Integration (job.* namespace)
+## Migration SQL
+
+```sql
+CREATE TABLE job_dlq (
+  id UUID PRIMARY KEY DEFAULT uuidv7(),
+  original_job_id UUID NOT NULL,
+  app_id UUID NOT NULL,
+  type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  error_reason TEXT NOT NULL,
+  attempts INTEGER NOT NULL,
+  error_history JSONB NOT NULL,
+  dlq_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  replayed_at TIMESTAMPTZ,
+  request_id UUID,
+  user_id UUID,
+  CONSTRAINT job_dlq_error_history_array CHECK (jsonb_typeof(error_history) = 'array')
+);
+CREATE INDEX idx_job_dlq_type ON job_dlq(type) WHERE replayed_at IS NULL;
+CREATE INDEX idx_job_dlq_dlq_at ON job_dlq(dlq_at) WHERE replayed_at IS NULL;
+CREATE INDEX idx_job_dlq_request ON job_dlq(request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX idx_job_dlq_app_id_fk ON job_dlq(app_id);
+CREATE TRIGGER job_dlq_updated_at BEFORE UPDATE ON job_dlq FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE OR REPLACE FUNCTION purge_job_dlq(p_older_than_days INT DEFAULT 30)
+RETURNS INT LANGUAGE sql AS $$
+    WITH purged AS (
+        DELETE FROM job_dlq WHERE replayed_at IS NOT NULL
+          AND replayed_at < NOW() - (p_older_than_days || ' days')::interval
+        RETURNING id
+    )
+    SELECT COUNT(*)::int FROM purged
+$$;
+```
+
+## Codebase Refinements
+
+**Preserve API Contracts** (existing consumers):
+| API | Signature | Consumers |
+|-----|-----------|-----------|
+| `enqueue` | `<T>(type, payloads, opts?) => Effect<string \| string[]>` | `purge-assets.ts` |
+| `registerHandler` | `(type, handler) => Effect<void>` | `purge-assets.ts` |
+| `submit` | Alias for `enqueue` | New callers (Phase 4 terminology) |
+
+**Files to Create/Modify**:
+| File | Change | Priority |
+|------|--------|----------|
+| `packages/database/src/models.ts` | Add `JobDlq` model | CRITICAL |
+| `packages/database/src/repos.ts` | Add `makeJobDlqRepo` | CRITICAL |
+| `packages/database/migrations/0002_*.ts` | Add `job_dlq` table | CRITICAL |
+| `packages/server/src/infra/jobs.ts` | Gut + replace with Entity | CRITICAL |
+| `packages/server/src/utils/resilience.ts` | Add `job` schedule | HIGH |
+
+**Integration Points**:
+| From | To | Pattern |
+|------|----|---------|
+| `jobs.ts` | `cluster.ts` | `JobEntityLive.pipe(Layer.provide(ClusterService.Layer))` |
+| `jobs.ts` | `context.ts` | `Context.Request.withinCluster({ entityId, entityType, shardId })` |
+| `jobs.ts` | `metrics.ts` | `MetricsService.trackEffect` for duration/errors |
+| `jobs.ts` | `resilience.ts` | `Resilience.schedules.job` for retry policy |
+| `jobs.ts` | `repos.ts` | `DatabaseService.jobDlq` for DLQ operations |
+
+## Metrics Integration
+
 ```typescript
-// Source: CONTEXT.md success criteria #12 + existing MetricsService patterns
 // Add to MetricsService in observe/metrics.ts
 jobs: {
+  cancellations: Metric.counter('jobs_cancelled_total'),
   completions: Metric.counter('jobs_completed_total'),
   deadLettered: Metric.counter('jobs_dead_lettered_total'),
-  dlqSize: Metric.gauge('jobs_dlq_size'),              // NEW: DLQ depth
+  dlqSize: Metric.gauge('jobs_dlq_size'),
   duration: Metric.timerWithBoundaries('jobs_duration_seconds', _boundaries.jobs),
   enqueued: Metric.counter('jobs_enqueued_total'),
   failures: Metric.counter('jobs_failed_total'),
-  processingSeconds: Metric.timerWithBoundaries('jobs_processing_seconds', _boundaries.jobs), // NEW
+  processingSeconds: Metric.timerWithBoundaries('jobs_processing_seconds', _boundaries.jobs),
   queueDepth: Metric.gauge('jobs_queue_depth'),
   retries: Metric.counter('jobs_retried_total'),
   waitDuration: Metric.timerWithBoundaries('jobs_wait_duration_seconds', _boundaries.jobs),
 }
 ```
 
-### DLQ Table Schema
-```sql
--- Source: CONTEXT.md decisions + existing jobs table pattern
-CREATE TABLE job_dlq (
-    id UUID PRIMARY KEY DEFAULT uuidv7(),
-    original_job_id UUID NOT NULL,
-    app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-    type TEXT NOT NULL,
-    payload JSONB NOT NULL,
-    attempts INTEGER NOT NULL,
-    error_history JSONB NOT NULL, -- Array of { error, timestamp }
-    failed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    replayed_at TIMESTAMPTZ,
-    CONSTRAINT job_dlq_error_history_array CHECK (jsonb_typeof(error_history) = 'array')
-);
+## Don't Hand-Roll
 
-CREATE INDEX idx_job_dlq_app ON job_dlq(app_id) WHERE replayed_at IS NULL;
-CREATE INDEX idx_job_dlq_type ON job_dlq(type) WHERE replayed_at IS NULL;
-CREATE INDEX idx_job_dlq_failed ON job_dlq(failed_at) WHERE replayed_at IS NULL;
-```
+| Problem | Use Instead | Why |
+|---------|-------------|-----|
+| Per-job resources | `EntityResource.make` | Lifecycle-scoped resources with auto-cleanup on idle |
+| Job ID generation | `sharding.getSnowflake` | Sortable, machine-aware, no collisions |
+| Job deduplication | `Rpc.make({ primaryKey })` | `SaveResult.Duplicate` returns existing jobId automatically |
+| Duplicate detection | `requestIdForPrimaryKey(address, tag, key)` | Direct dedupeKey → Snowflake lookup, no scan |
+| Message persistence | `SqlMessageStorage.layer` | Built-in at-least-once delivery |
+| Context propagation | `Envelope.headers` | Cross-pod tenant/session via request headers |
+| Priority scheduling | Weighted entity pool routing | Mailboxes are FIFO; pool sizing achieves priority |
+| Job cancellation | `OutgoingEnvelope.interrupt(address, id, requestId)` | Native cancellation persisted across restarts |
+| Startup recovery | `unprocessedMessages(shards)` | Shard-filtered recovery; no full table scan |
+| Progress streaming | `Reply.Chunk` with `stream: true` on Rpc | Sequence numbers ensure ordered delivery |
+| Failure categorization | `Reply.WithExit.fromDefect()` / `.interrupt()` | Structured failure replies for DLQ |
+| External API rate limiting | `DurableRateLimiter.rateLimit` | Cluster-wide, replay-safe rate limiting |
+| Webhook job completion | `DurableDeferred.tokenFromPayload` | External systems complete jobs via token |
+| Retry backoff | `Resilience.run` or `resilience.ts` schedules | Exponential + jitter + cap + circuit + bulkhead |
+| Status tracking | `Ref` in Entity state | In-memory state, persisted via SqlMessageStorage |
+| Long job eviction | `Entity.keepAlive(true/false)` | Prevents maxIdleTime deactivation |
+| Batch splitting | `Chunk.partition` | Priority separation in single pass |
+| Batch validation | `Effect.all({ mode: 'validate' })` | Collect ALL errors, not fail-fast |
+| Concurrent processing | `Effect.forEach({ concurrency })` | Built-in concurrency control |
+| Batched status lookup | `Request/RequestResolver.makeBatched` | Auto-batch identical requests in same tick |
+| Automatic tracing | `Effect.fn('name')` | Named spans without manual Telemetry.span |
+| Priority pools | `Pool.makeWithTTL` | Dynamic worker pools with TTL lifecycle |
+| Progress streaming | `Queue.sliding(capacity)` | Drop old progress when subscriber is slow |
+| Fiber monitoring | `Supervisor.track` + `supervisor.value` | Auto-track forked fibers; no manual Ref |
+| Fiber lifecycle | `supervisor.onStart` / `onEnd` | Hook job launch/completion for metrics |
+| Retry state reset | `Schedule.resetAfter(duration)` | Clear retry count after recovery window |
+| Error history | `Schedule.collectAllInputs` | Accumulate all retry errors for DLQ |
+| Schedule observability | `Schedule.onDecision` + `ScheduleDecision.isDone` | Hook Continue/Done for metrics, detect exhaustion |
+| Terminal error filter | `Schedule.whileInput((e) => !isTerminal(e))` | Skip retry for validation/not-found errors |
+| Phased retry | `Schedule.andThen` | Aggressive-then-gentle without manual if/else |
+| Conditional reset | `Schedule.resetWhen((error) => isTransient(error))` | Reset on successful transient recovery |
+
+## Pitfalls
+
+| Pitfall | Symptom | Solution |
+|---------|---------|----------|
+| FIFO blocks priority | High-priority latency equals low-priority | Route to priority-specific entity pools (4:3:2:1 ratio) |
+| Long jobs deactivate | Jobs fail with interruption after ~5min | Call `Entity.keepAlive(true)` at start, disable after |
+| Duplicate submissions | Same job executes multiple times | Always provide `dedupeKey` for idempotent jobs |
+| Validation errors retry forever | ParseError jobs stuck retrying | Skip retry for Validation/ParseError, DLQ immediately |
+| Interface changes break callers | Compile errors in imports | Preserve `JobService.submit(type, payload, opts)` signature |
+| Partial side effects persist | Inconsistent data after failure | Use `Context.Request.withinSync` for SQL transaction wrap |
+| Missing `primaryKey` on submit RPC | Duplicates processed multiple times | Always define `primaryKey` extractor |
+| Handler throws sync exception | Unhandled defect | Wrap in `Effect.try` or use `Effect.gen` |
+| Runner dies mid-job | Jobs stuck in-flight | Wire `Runners.onRunnerUnavailable` → auto-DLQ/retry |
+| No health pre-check | High-priority jobs routed to unhealthy workers | Use `Runners.ping()` before priority routing |
+
+## Runner System (Already in cluster.ts)
+
+| API | Status | Job Processing Note |
+|-----|--------|---------------------|
+| `RunnerHealth.layerK8s` | ✓ Used | Pod liveness for failover |
+| `SqlRunnerStorage.layer` | ✓ Used | Dedicated PgClient (prevents lock loss) |
+| `SocketRunner.layerClientOnly` | ✓ Used | Transport layer |
+| `Runners.ping` | Available | Pre-submit health validation for priority jobs |
+| `Runners.onRunnerUnavailable` | **GAP** | Hook for immediate job failure handling |
+| `RunnerStorage.makeMemory` | Available | Test acceleration (skip SQL) |
+
+## Durable APIs (Phase 4 Capabilities)
+
+| Module | Function | Signature | Phase 4 Use |
+|--------|----------|-----------|-------------|
+| `DurableQueue` | `make` | `({ name, payload, success, idempotencyKey })` | Define queue with typed schemas |
+| `DurableQueue` | `process` | `(queue, payload) => Effect<Success>` | Submit + block until complete |
+| `DurableQueue` | `worker` | `(queue, handler, { concurrency }) => Layer` | Continuous worker layer |
+| `DurableDeferred` | `token` | `(deferred) => Effect<string>` | Generate unique token for webhooks |
+| `DurableDeferred` | `await` | `(deferred) => Effect<Success>` | Suspend until external resolution |
+| `DurableDeferred` | `succeed` | `(deferred, token, value) => Effect<void>` | External completion signal |
+| `DurableRateLimiter` | `rateLimit` | `({ name, algorithm, window, limit, key })` | Acquire cluster-wide token |
+| `DurableClock` | `sleep` | `({ name, duration, inMemoryThreshold? })` | Durable sleep; skip DB for short waits |
+
+**DurableRateLimiter Algorithms:**
+- `'fixed-window'` — Reset at window boundary
+- `'token-bucket'` — Continuous refill
+
+**Decision Matrix:**
+| Use Case | Entity Dispatch | DurableQueue |
+|----------|-----------------|--------------|
+| Fire-and-forget | YES | NO |
+| Return results to caller | NO (status polling) | YES (blocks) |
+| External webhook completion | With DurableDeferred | Built-in |
+| Sub-second latency | YES | NO |
+| Cluster-wide rate limiting | NO | YES (DurableRateLimiter) |
+| Long retry delays | defectRetryPolicy | DurableClock (survives restart) |
+
+## Workflow APIs (Future Phase 6)
+
+| Module | Key Functions | When to Use |
+|--------|---------------|-------------|
+| `Workflow` | `make`, `execute`, `withCompensation` | Multi-step saga with rollback |
+| `Activity` | `make`, `idempotencyKey({ includeAttempt })` | Retry-aware non-deterministic steps |
 
 ## State of the Art
 
-| Old Approach | Current Approach | When Changed | Impact |
-|--------------|------------------|--------------|--------|
-| `SELECT FOR UPDATE SKIP LOCKED` | Entity mailbox dispatch | Phase 4 | Eliminates poll latency, reduces DB load |
-| DB row as queue | SqlMessageStorage persistence | @effect/cluster | Built-in durability, deduplication |
-| Manual retry with _delay function | `Resilience.schedules` + `defectRetryPolicy` | Phase 4 | Unified retry patterns across codebase |
-| `onStatusChange` via pg.listen | Entity state + RPC query | Phase 4 | No separate postgres listener needed |
-| Semaphore for concurrency | Entity `concurrency` option | Phase 4 | Per-entity concurrency control |
+| Deprecated | Replacement | Impact |
+|------------|-------------|--------|
+| `SELECT FOR UPDATE SKIP LOCKED` | Entity mailbox dispatch | No poll latency, reduced DB load |
+| `db.jobs.claimBatch()` | Entity message routing | Instant dispatch |
+| `Circuit` wrapper in jobs | `defectRetryPolicy` | Unified retry in entity config |
+| Poll loop with `Schedule.spaced` | Mailbox subscription | No polling overhead |
+| Manual `_delay` function | `Resilience.schedules.default` | Consistent backoff patterns |
 
-**Deprecated/outdated:**
-- `db.jobs.claimBatch()`: Replaced by Entity message routing
-- `Circuit` wrapper in job processing: `defectRetryPolicy` handles transient failures
-- `poll` loop with `Schedule.spaced`: Instant dispatch via mailbox
-- `_delay` function: Use `Resilience.schedules.default`
+## Effect Core APIs (Job-Relevant)
 
-## Open Questions
+### Pool (Priority Worker Management)
 
-### 1. Priority Scheduling Implementation
-- What we know: @effect/cluster mailboxes are FIFO; no built-in priority support
-- What's unclear: Optimal entity pool sizing for priority levels
-- Recommendation: Start with ratio 4:3:2:1 (critical:high:normal:low), tune based on job metrics
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Pool.make` | `({ acquire, size, concurrency?, targetUtilization? })` | Fixed-size worker pools for predictable workloads |
+| `Pool.makeWithTTL` | `({ acquire, min, max, timeToLive, timeToLiveStrategy?, ... })` | **Elastic pools**: shrink during idle, expand under load |
+| `Pool.get` | `Pool<A> => Effect<A, never, Scope>` | Acquire worker within scope; auto-release on scope exit |
+| `Pool.invalidate` | `(pool, value) => Effect<void>` | Remove faulty workers; lazy replacement |
 
-### 2. Entity.keepAlive Duration Tracking
-- What we know: `Entity.keepAlive(true)` prevents deactivation; must disable when done
-- What's unclear: How to automatically detect job completion for disabling
-- Recommendation: Wrap job handler in Effect that ensures `keepAlive(false)` in finalizer
+**TTL Strategies:**
+- `'creation'` — Workers expire based on age (predictable turnover)
+- `'usage'` — Workers expire after inactivity (resource-efficient)
 
-### 3. Batch Atomicity Semantics (Claude's Discretion)
-- What we know: All jobs in batch get shared batchId
-- What's unclear: Should batch fail atomically or allow partial success?
-- Recommendation: Partial success — each job independent, batchId for correlation only
+**Priority Pool Pattern:**
+```typescript
+const priorityPools = {
+  critical: yield* Pool.makeWithTTL({ min: 4, max: 8, timeToLive: Duration.minutes(30) }),
+  high: yield* Pool.makeWithTTL({ min: 3, max: 6, timeToLive: Duration.minutes(20) }),
+  normal: yield* Pool.makeWithTTL({ min: 2, max: 4, timeToLive: Duration.minutes(10) }),
+  low: yield* Pool.makeWithTTL({ min: 1, max: 2, timeToLive: Duration.minutes(5) }),
+};
+```
 
-### 4. Job Result Storage
-- What we know: `status().result` should return completed job results
-- What's unclear: How long to retain results, storage mechanism
-- Recommendation: Store in Entity state (SqlMessageStorage), 7-day TTL matches CONTEXT.md decision
+### Request/RequestResolver (Batched Lookups)
 
-### 5. DLQ Replay Rate Limiting
-- What we know: `replayJob(dlqId)` moves job back to queue
-- What's unclear: Should replay have rate limiting to prevent thundering herd?
-- Recommendation: Use normal priority for replays, no special rate limiting
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Request.tagged` | `<Tag>(tag) => Request.Constructor` | Define `JobStatusRequest` with discriminant |
+| `Request.Class` | `class extends Request.Class<Success, Error, Props>` | Typed request definition |
+| `RequestResolver.makeBatched` | `(handler: NonEmptyArray<A> => Effect<void>)` | **Batch status lookups**: single DB query for N requests |
+| `RequestResolver.fromEffectTagged` | `({ Tag1: handler1, ... })` | Discriminated union handlers |
+| `RequestResolver.batchN` | `(resolver, n) => Resolver` | Limit concurrent batch size |
+| `RequestResolver.around` | `(resolver, before, after)` | Resource setup/teardown per batch |
+
+**Batched Status Lookup Pattern:**
+```typescript
+class JobStatusRequest extends Request.TaggedClass('JobStatusRequest')<
+  typeof JobStatusResponse.Type,
+  JobError,
+  { readonly jobId: string }
+>() {}
+
+const statusResolver = RequestResolver.makeBatched((requests: NonEmptyArray<JobStatusRequest>) =>
+  Effect.gen(function* () {
+    const jobIds = requests.map((r) => r.jobId);
+    const results = yield* db.jobs.getStatusBatch(jobIds);
+    yield* Effect.forEach(requests, (req) => {
+      const status = results.get(req.jobId);
+      return status
+        ? Request.succeed(req, status)
+        : Request.fail(req, JobError.fromNotFound(req.jobId));
+    });
+  })
+);
+```
+
+### Effect Batch & Concurrency Operations
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.all` | `(effects, { mode?, concurrency? })` | Aggregate independent effects |
+| `Effect.all` (mode: 'validate') | Collects ALL errors via Option | **Batch validation**: don't fail-fast |
+| `Effect.all` (mode: 'either') | Collects results as Either | Mixed success/failure handling |
+| `Effect.forEach` | `(items, fn, { concurrency?, batching? })` | **Parallel job processing** with configurable concurrency |
+| `Effect.filter` | `(predicate: (a) => Effect<boolean>)` | Effectful filtering (e.g., permission checks) |
+| `Effect.partition` | `(predicate: (a) => Effect<boolean>)` | Split into [falses, trues] groups |
+| `Effect.validateAll` | `(items, fn) => Effect<A[], E[]>` | Run ALL, accumulate ALL errors |
+| `Effect.validateFirst` | `(items, fn) => Effect<A, E[]>` | Find first success, collect failures |
+
+**Validation Pattern:**
+```typescript
+// mode: 'validate' wraps success/failure in Option (no short-circuit)
+const results = yield* Effect.all(
+  jobs.map((job) => validateJob(job)),
+  { mode: 'validate', concurrency: 'unbounded' }
+);
+const [failures, successes] = A.partition(results, Option.isNone);
+```
+
+### Effect Timeout & Race Patterns
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.timeout` | `(effect, duration) => Effect<A, E \| TimeoutException>` | **Job deadlines**: fail if processing exceeds limit |
+| `Effect.timeoutTo` | `({ onTimeout, onSuccess })` | Graceful degradation on timeout (return cached/default) |
+| `Effect.timeoutFail` | `(effect, { duration, onTimeout })` | Custom timeout error |
+| `Effect.race` | `(effect1, effect2) => Effect` | First completion wins |
+| `Effect.raceAll` | `(effects) => Effect` | First of N completions |
+| `Effect.raceFirst` | `(effects) => Effect` | Optimized first-success |
+
+**Deadline Pattern:**
+```typescript
+const processWithDeadline = (job: Job) =>
+  processJob(job).pipe(
+    Effect.timeout(Duration.seconds(30)),
+    Effect.catchTag('TimeoutException', () =>
+      Effect.fail(JobError.fromTimeout(job.id, { deadline: '30s' }))
+    )
+  );
+```
+
+### Effect Interruption Control
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.interruptible` | `(effect) => Effect` | Allow cancellation at checkpoints |
+| `Effect.uninterruptible` | `(effect) => Effect` | **Critical sections**: state commits, finalizers |
+| `Effect.onInterrupt` | `(effect, cleanup)` | Cleanup on cancellation (release locks, notify) |
+| `Effect.disconnect` | `(effect) => Effect` | Isolate effect from parent interruption |
+
+**Cancellation-Safe Pattern:**
+```typescript
+const processJob = (jobId: string) => Effect.gen(function* () {
+  yield* Ref.update(state, JobState.processing(ts));
+  yield* Effect.interruptible(processPayload);  // Cancellable work
+  yield* Effect.uninterruptible(            // Critical: commit result
+    Ref.update(state, JobState.completed(ts))
+  );
+}).pipe(
+  Effect.onInterrupt(() =>
+    db.jobDlq.insert({ reason: 'Cancelled', jobId })
+  )
+);
+```
+
+### Effect Resource Management
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.acquireRelease` | `(acquire, release)` | Connection/lock with guaranteed cleanup |
+| `Effect.acquireUseRelease` | `(acquire, use, release)` | Scoped resource lifecycle |
+| `Effect.ensuring` | `(effect, finalizer)` | Post-job cleanup (metrics, logging) |
+| `Effect.addFinalizer` | `(finalizer) => Effect<void, never, Scope>` | Add cleanup to current scope |
+
+### Effect Retry & Repeat
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.retry` | `(effect, schedule)` | **Transient failure recovery** (network, rate limits) |
+| `Effect.repeat` | `(effect, schedule)` | Periodic execution (polling, heartbeats) |
+| `Effect.retryWhile` | `(effect, predicate)` | Retry while error matches condition |
+| `Effect.retryUntil` | `(effect, predicate)` | Retry until success condition |
+
+### Effect Fiber Management
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.fork` | `(effect) => Effect<Fiber>` | Background job execution |
+| `Effect.forkScoped` | `(effect) => Effect<Fiber, never, Scope>` | Scoped fiber with auto-cleanup |
+| `Effect.forkDaemon` | `(effect) => Effect<Fiber>` | Independent fiber (monitoring, metrics) |
+| `Effect.awaitAllChildren` | `Effect<void>` | Wait for all spawned jobs |
+| `Effect.supervised` | `(effect, supervisor)` | Custom fiber tracking (job counts) |
+
+### Effect Caching
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.cached` | `(effect) => Effect<Effect<A>>` | One-time expensive computation |
+| `Effect.cachedWithTTL` | `(effect, duration)` | **Cached status lookups**: refresh after TTL |
+| `Effect.cachedInvalidateWithTTL` | `(effect, duration)` | Manual invalidation + TTL |
+
+**Cached Status Pattern:**
+```typescript
+const getJobConfig = yield* Effect.cachedWithTTL(
+  loadJobConfigFromDb,
+  Duration.minutes(5)
+);
+// First call: loads from DB
+// Subsequent calls within 5min: returns cached
+```
+
+### Effect Observability
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.withSpan` | `(effect, name, { attributes? })` | **Distributed tracing** for job execution |
+| `Effect.annotateCurrentSpan` | `(key, value)` | Add runtime attributes to active span |
+| `Effect.annotateLogs` | `(effect, annotations)` | Contextual logging (jobId, type) |
+| `Effect.annotateLogsScoped` | `(annotations)` | Scoped log annotations |
+| `Effect.fn` | `(name)(effect)` | Named function with automatic span |
+
+### Effect Error Handling
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Effect.catchTag` | `(tag, handler)` | Handle specific `JobError` reasons |
+| `Effect.catchTags` | `({ Tag1: handler1, ... })` | Multi-reason recovery |
+| `Effect.tapError` | `(effect, onError)` | Error logging without changing error |
+| `Effect.tapBoth` | `({ onFailure, onSuccess })` | Divergent side effects |
+| `Effect.catchAllCause` | `(effect, handler)` | Handle full Cause (defects, interrupts) |
+
+### ExecutionStrategy
+
+| Strategy | Constructor | Job Processing Use |
+|----------|-------------|-------------------|
+| `Sequential` | `ExecutionStrategy.sequential` | Ordered job dependencies |
+| `Parallel` | `ExecutionStrategy.parallel` | Max throughput, unbounded concurrency |
+| `ParallelN` | `ExecutionStrategy.parallelN(n)` | **Controlled parallelism**: protect DB connections |
+
+### Chunk Batch Operations
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Chunk.fromIterable` | `(iterable) => Chunk` | Convert job array to Chunk |
+| `Chunk.chunksOf` | `(chunk, n) => Chunk<Chunk>` | **Batch splitting**: process in groups of N |
+| `Chunk.partition` | `(chunk, predicate) => [falses, trues]` | Priority separation |
+| `Chunk.splitAt` | `(chunk, n) => [left, right]` | Take first N for immediate processing |
+| `Chunk.flatten` | `(chunk) => Chunk` | Flatten nested batches |
+| `Chunk.groupBy` | `(chunk, f) => HashMap<K, NonEmptyChunk>` | Group jobs by type/priority |
+
+**Batch Splitting Pattern:**
+```typescript
+const jobs = Chunk.fromIterable(incomingJobs);
+const batches = Chunk.chunksOf(jobs, 10);  // Process in batches of 10
+yield* Effect.forEach(Chunk.toArray(batches), processBatch, { concurrency: 4 });
+```
+
+### Data.TaggedError Patterns
+
+| Function | Signature | Job Processing Use |
+|----------|-----------|-------------------|
+| `Data.TaggedError(tag)` | `<Props>() => ErrorClass` | Define `JobError` with discriminant |
+| `Data.TaggedEnum` | `<{ Variant: Props }>()` | Discriminated union for job states |
+| `Data.case` | `() => Class with structural equality` | Immutable job payloads |
+
+**TaggedError Pattern:**
+```typescript
+class JobError extends Data.TaggedError('JobError')<{
+  readonly reason: 'NotFound' | 'Timeout' | 'Validation';
+  readonly jobId?: string;
+  readonly cause?: unknown;
+}> {
+  // Static factories for ergonomic construction
+  static readonly fromNotFound = (jobId: string) => new JobError({ jobId, reason: 'NotFound' });
+  static readonly fromTimeout = (jobId: string, cause?: unknown) => new JobError({ cause, jobId, reason: 'Timeout' });
+  // Set-based classification for O(1) lookup
+  static readonly _terminal = new Set(['NotFound', 'Validation']);
+  static readonly isTerminal = (e: JobError) => JobError._terminal.has(e.reason);
+}
+```
 
 ## Sources
 
-### Primary (HIGH confidence)
-- [Entity.ts documentation](https://effect-ts.github.io/effect/cluster/Entity.ts.html) - toLayer options, keepAlive, CurrentAddress
-- [Rpc.ts documentation](https://effect-ts.github.io/effect/cluster/Rpc.ts.html) - primaryKey deduplication mechanism
-- [SqlMessageStorage source](https://github.com/Effect-TS/effect/blob/main/packages/cluster/src/SqlMessageStorage.ts) - saveRequest returns Success | Duplicate
-- [Effect Fibers documentation](https://effect.website/docs/concurrency/fibers/) - interrupt, join, fiber lifecycle
-- [Effect 3.19 Release Notes](https://effect.website/blog/releases/effect/319/) - Cluster updates, RunnerStorage
+**@effect/cluster:**
+- [Entity.ts](https://effect-ts.github.io/effect/cluster/Entity.ts.html) - Entity.make, toLayer, toLayerMailbox, keepAlive
+- [EntityResource.ts](https://effect-ts.github.io/effect/cluster/EntityResource.ts.html) - Per-entity lifecycle resources
+- [Rpc.ts](https://effect-ts.github.io/effect/cluster/Rpc.ts.html) - primaryKey, stream, annotate
+- [RpcMiddleware.ts](https://effect-ts.github.io/effect/rpc/RpcMiddleware.ts.html) - Context injection
+- [SqlMessageStorage.ts](https://effect-ts.github.io/effect/cluster/SqlMessageStorage.ts.html) - Message persistence
 
-### Secondary (MEDIUM confidence)
-- [Effect Cluster ETL Tutorial](https://mufraggi.eu/articles/effect-cluster-etl) - Real-world Entity patterns, workflow deduplication
-- [DeepWiki Cluster Management](https://deepwiki.com/Effect-TS/effect/5.2-cluster-management) - Entity configuration, storage backends
-- [Distributed Weighted Round-Robin](https://www.researchgate.net/publication/221643481) - Priority scheduling algorithm research
+**@effect/workflow:**
+- [DurableQueue.ts](https://effect-ts.github.io/effect/workflow/DurableQueue.ts.html) - Result-returning jobs
+- [DurableDeferred.ts](https://effect-ts.github.io/effect/workflow/DurableDeferred.ts.html) - Webhook completion
+- [DurableRateLimiter.ts](https://effect-ts.github.io/effect/workflow/DurableRateLimiter.ts.html) - Cluster-wide rate limiting
 
-### Codebase (HIGH confidence)
-- `/packages/server/src/infra/jobs.ts` - Current poll-based implementation (to be replaced)
-- `/packages/server/src/infra/cluster.ts` - Phase 1-3 ClusterEntity pattern, withinCluster
-- `/packages/server/src/utils/resilience.ts` - Retry schedules, circuit breaker integration
-- `/packages/server/src/observe/metrics.ts` - MetricsService.label, counter/gauge patterns
-- `/packages/server/src/context.ts` - Context.Request.withinSync, withinCluster
-- `/packages/database/src/repos.ts` - Existing job repo methods (claimBatch, deadLetter)
-- `/packages/database/src/models.ts` - Job model structure
-- `.planning/phases/01-cluster-foundation/01-RESEARCH.md` - Entity.toLayer options, defectRetryPolicy
-- `.planning/research/INTEGRATION.md` - Jobs migration strategy, Effect.fn patterns
+**effect core:**
+- [Effect.ts](https://effect-ts.github.io/effect/effect/Effect.ts.html) - all, forEach, timeout, retry, fork, withSpan, catchTag
+- [Pool.ts](https://effect-ts.github.io/effect/effect/Pool.ts.html) - make, makeWithTTL, get, invalidate
+- [Request.ts](https://effect-ts.github.io/effect/effect/Request.ts.html) - tagged, Class, succeed, fail
+- [RequestResolver.ts](https://effect-ts.github.io/effect/effect/RequestResolver.ts.html) - makeBatched, fromEffectTagged, batchN, around
+- [RequestBlock.ts](https://effect-ts.github.io/effect/effect/RequestBlock.ts.html) - Batch execution ordering
+- [ExecutionStrategy.ts](https://effect-ts.github.io/effect/effect/ExecutionStrategy.ts.html) - sequential, parallel, parallelN
+- [Data.ts](https://effect-ts.github.io/effect/effect/Data.ts.html) - TaggedError, TaggedEnum, case
+- [Chunk.ts](https://effect-ts.github.io/effect/effect/Chunk.ts.html) - chunksOf, partition, groupBy, flatten
+- [Schedule.ts](https://effect-ts.github.io/effect/effect/Schedule.ts.html) - resetAfter, collectAllInputs, onDecision
+- [Supervisor.ts](https://effect-ts.github.io/effect/effect/Supervisor.ts.html) - Fiber tracking
 
-## Metadata
-
-**Confidence breakdown:**
-- Standard stack: HIGH - All packages in catalog, versions verified
-- Architecture patterns: HIGH - Verified against Phase 1-3 patterns and official docs
-- Priority scheduling: MEDIUM - Weighted routing is standard pattern; optimal sizing needs tuning
-- Entity.keepAlive: MEDIUM - API confirmed in source; exact usage pattern from docs
-- DLQ schema: HIGH - Follows existing repo patterns, standard audit trail design
-- Pitfalls: HIGH - Based on existing jobs.ts analysis + Entity documentation
+**Codebase:**
+- `/packages/server/src/infra/cluster.ts` - ClusterEntity pattern, ClusterError static factories
+- `/packages/server/src/utils/resilience.ts` - Retry schedules
+- `/packages/server/src/observe/metrics.ts` - MetricsService patterns
+- `/packages/server/src/context.ts` - withinCluster, Context.Request.Id.job
 
 **Research date:** 2026-01-30
-**Valid until:** 2026-02-28 (30 days - stable package, active development)
+**Valid until:** 2026-02-28
+
+## Entity System API
+
+| API | Signature | Phase 4 Use |
+|-----|-----------|-------------|
+| `Entity.make` | `(type, protocol[]) => Entity` | Define JobEntity with submit/status/cancel RPCs |
+| `Entity.toLayer` | `(handlers, opts) => Layer` | Register entity, configure concurrency=1, mailbox=100, defectRetryPolicy |
+| `Entity.CurrentAddress` | `Tag<EntityAddress>` | Access shardId/entityId for Context.Request.withinCluster |
+| `Entity.keepAlive` | `(enabled) => Effect<void>` | Prevent eviction for `duration === 'long'` jobs |
+| `Entity.makeTestClient` | `(entity, layer) => Effect<Client>` | Unit test handlers without full cluster |
+| `EntityResource.make` | `({ acquire, idleTimeToLive }) => Effect<Resource>` | Per-job resources surviving restarts, auto-cleanup on idle |
+| `EntityResource.CloseScope` | Branded `Scope` | Resources survive shard movement (NOT standard Scope) |
+| `EntityProxy.toRpcGroup` | `(entity) => RpcGroup` | Convert Entity to RpcGroup; auto-generates `{rpc}Discard` variants |
+| `EntityProxy.toHttpApiGroup` | `(name, entity) => HttpApiGroup` | Generate `POST /{name}/{entityId}/{rpc}` endpoints |
+| `EntityProxyServer.layerHttpApi` | `(api, name, entity) => Layer` | Wire JobEntity into HTTP API |
+
+**Entity.toLayer Options:**
+| Option | Value | Purpose |
+|--------|-------|---------|
+| `maxIdleTime` | `Duration.minutes(5)` | Eviction timeout for idle entities |
+| `concurrency` | `1` | Ordered message processing per entity |
+| `mailboxCapacity` | `100` | Queue size before MailboxFull error |
+| `defectRetryPolicy` | `Schedule.exponential(...).pipe(Schedule.jittered)` | Defect recovery |
+| `spanAttributes` | `{ 'entity.service': 'job-processing' }` | OTEL metadata |
+
+**Avoid for Phase 4:**
+| API | Reason |
+|-----|--------|
+| `Entity.toLayerMailbox` | FIFO sufficient; custom dequeue adds complexity |
+| `ClusterWorkflowEngine` | Phase 6 saga scope |
+| `EntityResource.makeK8sPod` | Advanced K8s not needed |
+
+## @effect/rpc API (Job Processing Focus)
+
+### Rpc.make Options (CRITICAL)
+
+| Option | Type | Job Processing Use |
+|--------|------|-------------------|
+| `tag` | `string` | RPC identifier: `'submit'`, `'status'`, `'cancel'`, `'progress'` |
+| `payload` | `Schema.Struct.Fields \| Schema.Schema.Any` | Request schema; struct fields auto-wrapped in `Schema.Struct()` |
+| `success` | `Schema.Schema.Any` | Response schema; `JobStatusResponse`, `{ jobId, duplicate }` |
+| `error` | `Schema.Schema.All` | Typed error; use `JobError` with discriminated reasons |
+| `stream` | `boolean` | When `true`, success becomes `Stream<Success, Error>`; use for `progress` RPC |
+| `primaryKey` | `(payload) => string \| null` | **CRITICAL**: Deduplication key extractor; `null` disables for non-idempotent jobs |
+
+**primaryKey Semantics:**
+- When provided: `SaveResult.Duplicate` returns existing result instead of re-executing
+- When `null` returned: No deduplication (fire-and-forget jobs)
+- Internal: Implements `PrimaryKey.symbol` protocol on payload class
+- Pattern: `(p) => p.dedupeKey ?? null` — optional deduplication per-job
+
+### RpcClient Generation
+
+| Function | Job Processing Use |
+|----------|-------------------|
+| `RpcClient.make(group)` | Not used directly; Entity provides client via `sharding.makeClient(Entity)` |
+| `withHeaders(headers)` | Propagate tenant context via `Envelope.headers` |
+| `withHeadersEffect(effect)` | Dynamic header injection from `Context.Request.toSerializable` |
+
+**Entity vs RpcClient:**
+- Entity jobs use `sharding.makeClient(JobEntity)` — handles shard routing automatically
+- RpcClient is for non-clustered RPC (HTTP, WebSocket); Entity client wraps RpcClient internally
+
+### RpcClientError
+
+| Type | Discrimination | Job Processing Use |
+|------|----------------|-------------------|
+| `RpcClientError` | `TypeId` symbol | Base error for transport failures |
+
+**Pattern:** Map to `JobError.fromRunnerUnavailable` in ClusterService error mapper:
+```typescript
+Match.when(RpcClientError.TypeId in e, () => JobError.fromRunnerUnavailable(jobId, e))
+```
+
+### RpcGroup Composition
+
+| Function | Job Processing Use |
+|----------|-------------------|
+| `RpcGroup.make(...rpcs)` | Construct JobEntity protocol array |
+| `add(rpc)` | Extend group incrementally (not used; Entity takes array) |
+| `merge(groups)` | Combine multiple RPC groups (future: job types as separate groups) |
+| `middleware(tag)` | Apply `JobMiddleware` to all RPCs in group |
+| `prefix(string)` | Namespace collision avoidance (not needed for Entity) |
+| `annotate(key, value)` | Attach metadata to group |
+| `annotateRpcs(key, value)` | Attach metadata to individual RPCs |
+| `toLayer(handlers)` | Convert to Layer; Entity uses `Entity.toLayer` instead |
+| `toHandlersContext()` | Direct handler access (testing) |
+
+### RpcMiddleware (Context Injection)
+
+| Option | Type | Job Processing Use |
+|--------|------|-------------------|
+| `provides` | `Context.Tag<any, any>` | Inject `JobContext` (jobId, tenantId, priority) into handlers |
+| `failure` | `Schema.Schema.All` | Typed middleware failure; use `JobError` with `'Validation'` reason |
+| `requiredForClient` | `boolean` | Force client-side middleware (auth headers) |
+| `optional` | `boolean` | When `true`, failures default to `Schema.Never` |
+| `wrap` | `boolean` | Use `RpcMiddlewareWrap` interface for request transformation |
+
+**JobMiddleware Pattern:**
+```typescript
+class JobContext extends Effect.Tag('JobContext')<JobContext, {
+  readonly jobId: string;
+  readonly tenantId: string;
+  readonly priority: JobPriority;
+}>() {}
+
+class JobMiddleware extends RpcMiddleware.Tag<JobMiddleware>()('JobMiddleware', {
+  provides: JobContext,
+  failure: JobError,
+}) {}
+```
+
+**Client Middleware:**
+```typescript
+RpcMiddleware.layerClient(JobMiddleware, Effect.gen(function* () {
+  const ctx = yield* Context.Request.current;
+  return {
+    handler: ({ rpc, request }) => Effect.succeed({
+      ...request,
+      headers: request.headers.set('x-tenant-id', ctx.tenantId),
+    }),
+  };
+}))
+```
+
+### RpcWorker (Background Processing)
+
+| Function | Job Processing Use |
+|----------|-------------------|
+| `InitialMessage` | Structured message for worker initialization |
+| `makeInitialMessage` | Serialize Effect to worker-transferable data |
+| `initialMessage` | Decode incoming worker message |
+| `layerInitialMessage` | Layer for worker message handling |
+
+**Note:** RpcWorker is for browser/Node worker threads, NOT cluster job workers. Entity mailbox dispatch replaces worker pool patterns for distributed jobs.
+
+### RpcSchema (Streaming)
+
+| Type | Job Processing Use |
+|------|-------------------|
+| `RpcSchema.Stream<A, E>` | Progress streaming: `Rpc.make('progress', { stream: true })` |
+| `isStreamSchema(schema)` | Type guard for stream detection |
+| `getStreamSchemas(ast)` | Extract success/failure schemas from AST |
+
+**Progress Streaming Pattern:**
+```typescript
+Rpc.make('progress', {
+  payload: S.Struct({ jobId: S.String }),
+  success: S.Struct({ pct: S.Number, message: S.String }),
+  stream: true,  // Handler returns Stream<{ pct, message }, JobError>
+})
+
+// Handler implementation:
+progress: ({ jobId }) => Stream.fromQueue(progressQueue).pipe(
+  Stream.filter((p) => p.jobId === jobId),
+  Stream.map(({ pct, message }) => ({ pct, message })),
+)
+```
+
+### RpcSerialization
+
+| Layer | Job Processing Use |
+|-------|-------------------|
+| `layerMsgPack` | **RECOMMENDED**: Binary efficiency for Entity messages (already in cluster.ts) |
+| `layerJson` | Not recommended; larger payloads |
+| `layerNdjson` | HTTP streaming only |
+
+**Note:** `RpcSerialization.layerMsgPack` is already configured in `cluster.ts` transport layers.
+
+## RPC Gaps & Workarounds
+
+| Gap | Workaround |
+|-----|------------|
+| `primaryKey` duplicate returns no jobId | Track in Entity state: `HashMap<dedupeKey, jobId>` |
+| No built-in priority mailbox | Route to priority-specific entity pools (4:3:2:1 ratio) |
+| `stream: true` error channel is `Schema.Never` | Errors flow through stream failure schema |
+
+## RpcMessage Types (Cancellation)
+
+| Type | Job Processing Use |
+|------|-------------------|
+| `RpcMessage.Interrupt` | Client cancellation with `requestId` + `interruptors: FiberId[]` |
+| `RpcServer.fiberIdClientInterrupt` | Distinguish user cancellation from system interrupt |
+| `ResponseDefect` | Unhandled defect → DLQ entry |

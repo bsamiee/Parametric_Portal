@@ -31,7 +31,7 @@ const _stateToEntries = (state: MetricState.MetricState<unknown>, name: string, 
 		Match.when(MetricState.isSummaryState, (s) => [
 			{ labels, name: `${name}_count`, type: 'summary_count', value: s.count },
 			{ labels, name: `${name}_sum`, type: 'summary_sum', value: s.sum },
-			...A.filterMap([...s.quantiles], ([q, v]) => Option.map(v, (val) => ({
+			...A.filterMap([...s.quantiles], ([q, v]) => Option.map(v, (val) => ({ // NOSONAR S3358
 				labels: { ...labels, quantile: String(q) },
 				name,
 				type: 'summary_quantile' as const,

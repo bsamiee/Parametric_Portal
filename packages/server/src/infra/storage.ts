@@ -6,6 +6,8 @@ import { S3, S3ClientInstance } from '@effect-aws/client-s3';
 import { CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Array as A, Chunk, Config, Duration, Effect, type Either, Exit, Layer, Match, Metric, Option, Redacted, Stream } from 'effect';
+import { constant, unsafeCoerce } from 'effect/Function';
+import { Struct } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -69,7 +71,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 			const bodyIterable = r.Body as AsyncIterable<Uint8Array> | null | undefined;
 			const chunks = yield* Option.match(Option.fromNullable(bodyIterable), {
 				onNone: () => Effect.succeed(Chunk.empty<Uint8Array>()),
-				onSome: (iterable) => Stream.runCollect(Stream.fromAsyncIterable(iterable, (e) => e as Error)),
+				onSome: (iterable) => Stream.runCollect(Stream.fromAsyncIterable(iterable, unsafeCoerce)),
 			});
 			const body = _concatBytes(Chunk.toReadonlyArray(chunks));
 			return { body, contentType: r.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(r.ETag), key: k, metadata: r.Metadata ?? {}, size: body.length };
@@ -190,7 +192,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				const rawParts = useSimplePut ? [] : yield* Effect.forEach(partIndices, (idx) => uploadPartForIdx(acquiredUid, idx), { concurrency: 3 }).pipe(Effect.scoped);
 				const parts = rawParts.map((r, idx) => ({ ETag: r.ETag ?? '', PartNumber: idx + 1 }));
 				const multipartResult = useSimplePut ? null : yield* s3.completeMultipartUpload({ Bucket: B, Key: fk, MultipartUpload: { Parts: parts }, UploadId: uploadId }).pipe(Effect.map(() => ({
-					etag: A.last(parts).pipe(Option.map((p) => p.ETag), Option.getOrElse(() => '')),
+					etag: A.last(parts).pipe(Option.map(Struct.get('ETag')), Option.getOrElse(constant(''))),
 					key: i.key,
 					totalSize: bytes.length,
 				})));

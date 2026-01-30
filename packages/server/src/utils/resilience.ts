@@ -75,8 +75,7 @@ const _run = <A, E, R>(op: string, eff: Effect.Effect<A, E, R>, cfg: Resilience.
 const Resilience: Resilience = Object.assign(
 	<A, E, R>(cfg?: Resilience.Config<A, E, R>) => <This, Args extends unknown[]>(
 		target: ((this: This, ...args: Args) => Effect.Effect<A, E, R>) | undefined,
-		ctx: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Effect.Effect<A, E, R>> | ClassFieldDecoratorContext<This, (this: This, ...args: Args) => Effect.Effect<A, E, R>>,
-	) => {
+		ctx: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Effect.Effect<A, E, R>> | ClassFieldDecoratorContext<This, (this: This, ...args: Args) => Effect.Effect<A, E, R>>,) => {
 		const name = String(ctx.name);
 		const wrap = (fn: (this: This, ...args: Args) => Effect.Effect<A, E, R>) => function (this: This, ...args: Args) { return _run(`${(this as { constructor?: { name?: string } })?.constructor?.name ?? 'Anon'}.${name}`, fn.apply(this, args), cfg); };
 		return ctx.kind === 'method' && target ? wrap(target) : (init: (this: This, ...args: Args) => Effect.Effect<A, E, R>) => wrap(init);

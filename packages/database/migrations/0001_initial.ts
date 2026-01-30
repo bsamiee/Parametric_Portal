@@ -567,6 +567,54 @@ export default Effect.gen(function* () {
 	`;
     yield* sql`COMMENT ON FUNCTION purge_jobs IS 'Hard-delete completed/dead jobs older than N days'`;
     // ═══════════════════════════════════════════════════════════════════════════
+    // KV_STORE: Cluster-wide key-value persistence (singleton state, feature flags)
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql`
+		CREATE TABLE kv_store (
+			id UUID PRIMARY KEY DEFAULT uuidv7(),
+			key TEXT NOT NULL,
+			value TEXT NOT NULL,
+			expires_at TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			CONSTRAINT kv_store_key_unique UNIQUE (key)
+		)
+	`;
+    yield* sql`COMMENT ON TABLE kv_store IS 'Cluster infrastructure state — singleton state, feature flags; NOT tenant-scoped; use uuid_extract_timestamp(id) for creation time'`;
+    yield* sql`COMMENT ON COLUMN kv_store.key IS 'Namespaced key pattern: {prefix}:{name} (e.g., singleton-state:cleanup-job)'`;
+    yield* sql`COMMENT ON COLUMN kv_store.value IS 'JSON-encoded state; use S.parseJson(schema) for typed access'`;
+    yield* sql`COMMENT ON COLUMN kv_store.expires_at IS 'Optional TTL — purge_kv_store() removes expired entries'`;
+    yield* sql`CREATE INDEX idx_kv_store_key ON kv_store(key) INCLUDE (value)`;
+    yield* sql`CREATE INDEX idx_kv_store_expires ON kv_store(expires_at) WHERE expires_at IS NOT NULL`;
+    yield* sql`CREATE TRIGGER kv_store_updated_at BEFORE UPDATE ON kv_store FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    yield* sql`
+		CREATE OR REPLACE FUNCTION purge_kv_store(p_older_than_days INT DEFAULT 30)
+		RETURNS INT
+		LANGUAGE sql
+		AS $$
+			WITH purged AS (
+				DELETE FROM kv_store
+				WHERE expires_at IS NOT NULL AND expires_at < NOW() - (p_older_than_days || ' days')::interval
+				RETURNING id
+			)
+			SELECT COUNT(*)::int FROM purged
+		$$
+	`;
+    yield* sql`COMMENT ON FUNCTION purge_kv_store IS 'Hard-delete expired kv_store entries older than N days'`;
+    yield* sql`
+		CREATE OR REPLACE FUNCTION delete_kv_by_prefix(p_prefix TEXT)
+		RETURNS INT
+		LANGUAGE sql
+		AS $$
+			WITH deleted AS (
+				DELETE FROM kv_store
+				WHERE key LIKE p_prefix || '%'
+				RETURNING id
+			)
+			SELECT COUNT(*)::int FROM deleted
+		$$
+	`;
+    yield* sql`COMMENT ON FUNCTION delete_kv_by_prefix IS 'Hard-delete kv_store entries by key prefix pattern'`;
+    // ═══════════════════════════════════════════════════════════════════════════
     // IP-BASED FUNCTIONS: Abuse detection and session management
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`

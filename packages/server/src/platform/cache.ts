@@ -13,7 +13,7 @@ import * as PersistenceRedis from '@effect/experimental/Persistence/Redis';
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimitExceeded, RateLimiter } from '@effect/experimental/RateLimiter';
 import { layerStore as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Config, Duration, Effect, Either, Function as F, Layer, Match, Metric, Number as N, Option, pipe, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
+import { Config, Duration, Effect, Function as F, Layer, Match, Metric, Number as N, Option, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
 import Redis from 'ioredis';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
@@ -33,13 +33,7 @@ const _Cache = {
 		mutation: { algorithm: 'token-bucket', limit: 100, onExceeded: 'delay', recovery: undefined, tokens: 5, window: Duration.minutes(1) },
 	},
 	redis: { connectTimeout: 5000, enableReadyCheck: true, host: 'localhost', lazyConnect: false, maxRetriesPerRequest: 3, port: 6379, prefix: 'persist:' },
-} as const satisfies {
-	readonly defaults: { readonly inMemoryCapacity: number; readonly inMemoryTTL: Duration.Duration; readonly ttl: Duration.Duration };
-	readonly pubsub: { readonly channel: string };
-	readonly rateLimit: Record<string, { readonly algorithm: 'token-bucket' | 'fixed-window'; readonly limit: number; readonly onExceeded: 'fail' | 'delay'; readonly recovery: 'email-verify' | undefined; readonly tokens: number; readonly window: Duration.Duration }>;
-	readonly redis: { readonly connectTimeout: number; readonly enableReadyCheck: boolean; readonly host: string; readonly lazyConnect: boolean; readonly maxRetriesPerRequest: number; readonly port: number; readonly prefix: string };
-};
-
+} as const;
 const _redisConfig = Config.all({
 	connectTimeout: Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(_Cache.redis.connectTimeout)),
 	enableReadyCheck: Config.boolean('REDIS_READY_CHECK').pipe(Config.withDefault(_Cache.redis.enableReadyCheck)),
@@ -54,9 +48,6 @@ const _redisConfig = Config.all({
 	socketTimeout: Config.integer('REDIS_SOCKET_TIMEOUT').pipe(Config.withDefault(15000)),
 });
 
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const _InvalidationMessage = S.Struct({ key: S.String, storeId: S.String });
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -81,22 +72,12 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			Effect.retry(Schedule.exponential(Duration.millis(100)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3)))),
 			Effect.catchAll((err) => Effect.logWarning('Redis pub/sub unavailable', { error: String(err) })),
 		);
-		sub.on('message', (channel, message) => {
-		pipe(
-			Option.liftPredicate(channel, (c) => c === _Cache.pubsub.channel),
-			Option.map(() => pipe(
-				Either.try({ catch: (err) => err, try: () => JSON.parse(message) }),
-				Either.flatMap(S.decodeUnknownEither(_InvalidationMessage)),
-				Either.match({
-					onLeft: (err) => { Effect.runFork(Effect.logWarning('Malformed invalidation message', { channel, error: String(err) })); },
-					onRight: (msg) => {
-						const invalidateKey = `${msg.storeId}:${msg.key}`;
-						Effect.runFork(reactivity.invalidate([invalidateKey]));
-					},
-				}),
-			)),
-		);
-	});
+		sub.on('message', (ch, msg) => ch === _Cache.pubsub.channel && Effect.runFork(
+			S.decodeUnknown(S.Struct({ key: S.String, storeId: S.String }))(JSON.parse(msg)).pipe(
+				Effect.flatMap(({ key, storeId }) => reactivity.invalidate([`${storeId}:${key}`])),
+				Effect.catchAll((err) => Effect.logWarning('Malformed invalidation message', { channel: ch, error: String(err) })),
+			),
+		));
 		yield* Effect.logInfo('CacheService initialized', { host: cfg.host, port: cfg.port });
 		return { _prefix: cfg.prefix, _reactivity: reactivity, _redis: redis, _redisOpts: redisOpts };
 	}),
@@ -129,20 +110,18 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 				c?.();
 				Effect.runFork(cache.invalidate(key).pipe(Effect.ignore));
 			};
-			const register = (key: K) => {
+			const register = (key: K) => Effect.sync(() => {
 				const id = `${options.storeId}:${PrimaryKey.value(key)}`;
-				return Effect.sync(() => registrations.has(id) || registrations.set(id, _reactivity.unsafeRegister([id], makeInvalidator(id, key))));
-			};
-			const invalidateLocal = (storeId: string, key: string) => Effect.all([
-				_reactivity.invalidate([`${storeId}:${key}`]),
-				Effect.tryPromise(() => _redis.publish(_Cache.pubsub.channel, JSON.stringify({ key, storeId }))).pipe(Effect.timeout(Duration.seconds(2)), Effect.ignore),
-				Effect.serviceOption(MetricsService).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.evictions, MetricsService.label({ storeId })) }))),
-			], { discard: true });
-			const cleanup = () => { registrations.forEach((c) => { c(); }); registrations.clear(); };
-			yield* Effect.addFinalizer(() => Effect.sync(cleanup));
+				return registrations.has(id) || registrations.set(id, _reactivity.unsafeRegister([id], makeInvalidator(id, key)));
+			});
+			yield* Effect.addFinalizer(() => Effect.sync(() => { registrations.forEach((c) => { c(); }); registrations.clear(); }));
 			return {
 				get: (key) => register(key).pipe(Effect.andThen(cache.get(key))),
-				invalidate: (key) => register(key).pipe(Effect.andThen(invalidateLocal(options.storeId, PrimaryKey.value(key)))),
+				invalidate: (key) => register(key).pipe(Effect.andThen(Effect.all([
+					_reactivity.invalidate([`${options.storeId}:${PrimaryKey.value(key)}`]),
+					Effect.tryPromise(() => _redis.publish(_Cache.pubsub.channel, JSON.stringify({ key: PrimaryKey.value(key), storeId: options.storeId }))).pipe(Effect.timeout(Duration.seconds(2)), Effect.ignore),
+					Effect.serviceOption(MetricsService).pipe(Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (m) => MetricsService.inc(m.cache.evictions, MetricsService.label({ storeId: options.storeId })) }))),
+				], { discard: true }))),
 			} as const satisfies PersistedCache.PersistedCache<K>;
 		});
 	// --- [INVALIDATE] - Cross-instance via Reactivity + Redis pub/sub --------
@@ -172,7 +151,6 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			});
 		}));
 	// --- [HEALTH] - Redis connection + latency via Effect.timed --------------
-	// [FIX #4] Use Effect.timed instead of manual Clock operations
 	static readonly health = (): Effect.Effect<CacheService.Health, never, CacheService> =>
 		CacheService.pipe(
 			Effect.flatMap((s) => Effect.tryPromise(() => s._redis.ping()).pipe(Effect.timed)),
@@ -190,11 +168,9 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 	// --- [REDIS] - Raw access for specialized ops ----------------------------
 	static readonly redis = CacheService.pipe(Effect.map((s) => s._redis));
 	// --- [LAYER] - Full cache infrastructure ---------------------------------
-	// [FIX #2] Unified Redis connection - RateLimiter uses memory store by default, Redis store shares config
-	static readonly Layer = CacheService.Default.pipe(
+	static readonly Layer = CacheService.Default.pipe(	// Unified Redis connection - RateLimiter uses memory store by default, Redis store shares config
 		Layer.provideMerge(rateLimiterLayer),
 		Layer.provideMerge(Layer.unwrapEffect(
-			// [FIX] Use layerStore (runtime values) instead of layerStoreConfig (Config objects)
 			Config.all({ prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')), redis: _redisConfig, store: Config.string('RATE_LIMIT_STORE').pipe(Config.withDefault('memory')) }).pipe(
 				Effect.map(({ prefix, redis, store }) => Match.value(store).pipe(
 					Match.when('redis', () => layerStoreRedis({ host: redis.host, password: redis.password, port: redis.port, prefix })),
@@ -203,18 +179,16 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			),
 		)),
 	);
-	// Full layer adds ResultPersistence for PersistedCache consumers
-	static readonly LayerWithPersistence = CacheService.Layer.pipe(Layer.provideMerge(CacheService.Persistence));
+	static readonly LayerWithPersistence = CacheService.Layer.pipe(Layer.provideMerge(CacheService.Persistence));	// Full layer adds ResultPersistence for PersistedCache consumers
 }
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-// Proper type-safe error handling using RateLimitExceeded discriminant
 const _rateLimit = <A, E, R>(preset: CacheService.RateLimitPreset, handler: Effect.Effect<A, E, R>) =>
 	Effect.all([RateLimiter, Context.Request.current, HttpServerRequest.HttpServerRequest, MetricsService, AuditService]).pipe(
 		Effect.flatMap(([limiter, ctx, request, metrics, audit]) => {
 			const config = _Cache.rateLimit[preset];
-			const ip = pipe(ctx.ipAddress, Option.orElse(() => request.remoteAddress), Option.getOrElse(() => 'unknown'));
+			const ip = ctx.ipAddress.pipe(Option.orElse(() => request.remoteAddress), Option.getOrElse(() => 'unknown'));
 			const labels = MetricsService.label({ preset });
 			return limiter.consume({ algorithm: config.algorithm, key: `${preset}:${ip}`, limit: config.limit, onExceeded: config.onExceeded, tokens: config.tokens, window: config.window }).pipe(
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.rateLimit.checkDuration, labels)),
@@ -225,7 +199,7 @@ const _rateLimit = <A, E, R>(preset: CacheService.RateLimitPreset, handler: Effe
 						audit.log('rate_limited', { details: { limit: err.limit, preset, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter) } }),
 					], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.RateLimit.of(Duration.toMillis(err.retryAfter), {
 						limit: err.limit, remaining: err.remaining, resetAfterMs: Duration.toMillis(err.retryAfter),
-						...pipe(Option.fromNullable(config.recovery), Option.match({ onNone: () => ({}), onSome: (ra) => ({ recoveryAction: ra }) })),
+						...(config.recovery ? { recoveryAction: config.recovery } : {}),
 					}))))
 					: Effect.all([
 						Effect.logWarning('Rate limit store unavailable (fail-open)', { error: String(err), preset }),
@@ -241,16 +215,10 @@ const _rateLimit = <A, E, R>(preset: CacheService.RateLimitPreset, handler: Effe
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
-// [FIX #6] Removed CacheError - use Persistence.PersistenceError directly
-interface CacheServiceTypes {
-	RateLimitPreset: keyof typeof _Cache.rateLimit;
-	SetNXResult: { readonly alreadyExists: boolean; readonly key: string };
-	Health: { readonly connected: boolean; readonly latencyMs: number };
-}
 declare namespace CacheService {
-	type RateLimitPreset = CacheServiceTypes['RateLimitPreset'];
-	type SetNXResult = CacheServiceTypes['SetNXResult'];
-	type Health = CacheServiceTypes['Health'];
+	type RateLimitPreset = keyof typeof _Cache.rateLimit;
+	type SetNXResult = { readonly alreadyExists: boolean; readonly key: string };
+	type Health = { readonly connected: boolean; readonly latencyMs: number };
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
