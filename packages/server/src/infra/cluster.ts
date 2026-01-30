@@ -8,7 +8,7 @@ import { FetchHttpClient, Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
 import { PgClient } from '@effect/sql-pg';
-import { Cause, Chunk, Config, Duration, Effect, Layer, Ref, Schedule, Schema as S } from 'effect';
+import { Boolean as B, Cause, Chunk, Clock, Config, Duration, Effect, Layer, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -46,24 +46,30 @@ class EntityState extends S.Class<EntityState>('EntityState')({
 	pendingSignal: S.optional(S.Struct({ name: S.String, token: S.String })),
 	status: EntityStatus,
 	updatedAt: S.Number,
-}) {
-	static readonly idle = () => new EntityState({ status: 'idle', updatedAt: Date.now() });
-	static readonly processing = () => new EntityState({ status: 'processing', updatedAt: Date.now() });
-	static readonly suspended = (signal: { name: string; token: string }) => new EntityState({ pendingSignal: signal, status: 'suspended', updatedAt: Date.now() });
+}) { // Factories accept timestamp for testability via Clock layer mocking
+	static readonly idle = (ts: number) => new EntityState({ status: 'idle', updatedAt: ts });
+	static readonly processing = (ts: number) => new EntityState({ status: 'processing', updatedAt: ts });
+	static readonly suspended = (signal: { name: string; token: string }, ts: number) => new EntityState({ pendingSignal: signal, status: 'suspended', updatedAt: ts });
 }
 const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
 	const currentAddress = yield* Entity.CurrentAddress;
-	const stateRef = yield* Ref.make(EntityState.idle());
+	const initTs = yield* Clock.currentTimeMillis;
+	const stateRef = yield* Ref.make(EntityState.idle(initTs));
 	return {
 		process: (envelope) => Effect.gen(function* () {
-			yield* Ref.set(stateRef, EntityState.processing());
+			const ts = yield* Clock.currentTimeMillis;
+			yield* Ref.set(stateRef, EntityState.processing(ts));
 			yield* Effect.logDebug('Entity processing', { entityId: currentAddress.entityId, idempotencyKey: envelope.payload.idempotencyKey });
-			yield* Ref.set(stateRef, new EntityState({ status: 'complete', updatedAt: Date.now() }));
+			const completeTs = yield* Clock.currentTimeMillis;
+			yield* Ref.set(stateRef, new EntityState({ status: 'complete', updatedAt: completeTs }));
 		}).pipe(
-			Effect.ensuring(Ref.update(stateRef, (s) => new EntityState({ ...s, updatedAt: Date.now() }))),
-			Effect.catchAllCause((cause) => {
-				const isDefect = Chunk.isNonEmpty(Cause.defects(cause));
-				return Effect.fail(new EntityProcessError({ cause, message: isDefect ? 'Internal error' : Cause.pretty(cause) }));
+			Effect.ensuring(Clock.currentTimeMillis.pipe(Effect.flatMap((ts) => Ref.update(stateRef, (s) => new EntityState({ ...s, updatedAt: ts }))))),
+			Effect.matchCauseEffect({
+				onFailure: (cause) => Effect.fail(new EntityProcessError({
+					cause,
+					message: B.match(Chunk.isNonEmpty(Cause.defects(cause)), { onFalse: () => Cause.pretty(cause), onTrue: () => 'Internal error' }),
+				})),
+				onSuccess: Effect.succeed,
 			}),
 		),
 		status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse({ status: s.status, updatedAt: s.updatedAt }))),
@@ -97,14 +103,14 @@ class ClusterError extends S.TaggedError<ClusterError>()('ClusterError', {
 	static readonly fromSendTimeout = (entityId: string, cause?: unknown) => new ClusterError({ cause, entityId, reason: 'SendTimeout' });
 	static readonly fromSerializationError = (cause?: unknown) => new ClusterError({ cause, reason: 'SerializationError' });
 	static readonly fromSuspended = (entityId: string, resumeToken: string) => new ClusterError({ entityId, reason: 'Suspended', resumeToken });
-	// Transient reasons inline - no external const needed
-	static readonly isTransient = (e: ClusterError): boolean => e.reason === 'MailboxFull' || e.reason === 'SendTimeout';
+	// Transient reasons via Set membership — O(1) lookup, scales with more reasons
+	static readonly _transient: ReadonlySet<ClusterError['reason']> = new Set(['MailboxFull', 'SendTimeout']);
+	static readonly isTransient = (e: ClusterError): boolean => ClusterError._transient.has(e.reason);
 }
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-// Consolidated storage: dedicated PgClient for RunnerStorage (prevents advisory lock loss from connection recycling)
-const _storageLayers = (() => {
+const _storageLayers = (() => {	// Consolidated storage: dedicated PgClient for RunnerStorage (prevents advisory lock loss from connection recycling)
 	const runnerPgClient = PgClient.layerConfig({
 		applicationName: Config.succeed('cluster-runner-storage'),
 		connectionTTL: Config.succeed(Duration.hours(24)),

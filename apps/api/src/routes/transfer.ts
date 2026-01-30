@@ -18,7 +18,7 @@ import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Transfer, TransferError } from '@parametric-portal/server/utils/transfer';
 import { Codec } from '@parametric-portal/types/files';
-import { Array as A, Chunk, DateTime, Effect, Metric, Option, pipe, Stream } from 'effect';
+import { Array as A, Chunk, DateTime, Effect, Function as F, Metric, Option, pipe, Stream } from 'effect';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -44,12 +44,15 @@ const handleExport = Effect.fn('transfer.export')((repos: DatabaseServiceShape, 
 			...(Option.isSome(asset.name) && { name: asset.name.value }),
 		});
 		const textStream = baseStream.pipe(Stream.zipWithIndex, Stream.map(([asset, idx]) => mapAsset(asset, idx)));	// Text export: use DB content directly (text assets don't have storageRef)
-		const hydrateAsset = (asset: Asset) => Effect.gen(function* () {												// Binary export: hydrate from S3 when storageRef is present
-			const s3Key = Option.getOrNull(asset.storageRef);
-			const s3Result = yield* s3Key === null ? Effect.succeed(null) : storage.get(s3Key).pipe(Effect.option);
-			return s3Result === null || Option.isNone(s3Result)
-				? asset
-				: { ...asset, content: Buffer.from(s3Result.value.body).toString('base64') };
+		const hydrateAsset = (asset: Asset) => Option.match(asset.storageRef, {	// Binary export: hydrate from S3 when storageRef is present
+			onNone: () => Effect.succeed(asset),
+			onSome: (s3Key) => storage.get(s3Key).pipe(
+				Effect.option,
+				Effect.map(Option.match({
+					onNone: () => asset,
+					onSome: (s3Result) => ({ ...asset, content: Buffer.from(s3Result.body).toString('base64') }),
+				})),
+			),
 		});
 		const binaryStream = baseStream.pipe(
 			Stream.mapEffect(hydrateAsset),
@@ -98,7 +101,7 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 		const session = yield* Context.Request.session;
 		const appId = ctx.tenantId;
 		const codec = Codec(params.format);
-		const dryRun = Option.getOrElse(params.dryRun, () => false);
+		const dryRun = Option.getOrElse(params.dryRun, F.constant(false));
 		const body = yield* HttpServerRequest.HttpServerRequest.pipe(
 			Effect.flatMap((req) => req.arrayBuffer),
 			Effect.mapError((err) => HttpError.Internal.of('Failed to read request body', err)),
@@ -173,9 +176,10 @@ const handleImport = Effect.fn('transfer.import')((repos: DatabaseServiceShape, 
 					Effect.mapError((err) => HttpError.Internal.of('Import processing failed', err)),
 					Telemetry.span('transfer.insert'),
 				);
-		yield* !dryRun && A.isNonEmptyReadonlyArray(assets)
-			? search.refresh(appId).pipe(Effect.tapError((err) => Effect.logWarning('Search refresh failed', { error: String(err) })), Effect.catchAll(() => Effect.void))
-			: Effect.void;
+		yield* Effect.when(
+			search.refresh(appId).pipe(Effect.tapError((err) => Effect.logWarning('Search refresh failed', { error: String(err) })), Effect.catchAll(() => Effect.void)),
+			() => !dryRun && A.isNonEmptyReadonlyArray(assets),
+		);
 		const totalFailures = failures.length + A.reduce(dbFailures, 0, (count, err) => count + err.rows.length);
 		yield* Effect.all([
 			MetricsService.inc(metrics.transfer.imports, MetricsService.label({ app: appId, dryRun: String(dryRun), format: codec.ext })),

@@ -7,7 +7,7 @@ import { Sharding } from '@effect/cluster';
 import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddleware, HttpServerRequest, HttpServerResponse, HttpTraceContext } from '@effect/platform';
 import type { Hex64 } from '@parametric-portal/types/types';
 import * as ipaddr from 'ipaddr.js';
-import { Array as A, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
+import { Array as A, Clock, Effect, Layer, Metric, Option, pipe, Redacted } from 'effect';
 import { constant } from 'effect/Function';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
@@ -69,9 +69,10 @@ const security = (hsts: typeof _config.security.hsts | false = _config.security.
 			: _config.security.base))));
 const serverTiming = HttpMiddleware.make((app) =>
 	Effect.gen(function* () {
-		const start = Date.now();
+		const startMs = yield* Clock.currentTimeMillis;
 		const response = yield* app;
-		return HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Date.now() - start}`);
+		const endMs = yield* Clock.currentTimeMillis;
+		return HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${endMs - startMs}`);
 	}));
 
 // --- [AUTH_MIDDLEWARE] -------------------------------------------------------

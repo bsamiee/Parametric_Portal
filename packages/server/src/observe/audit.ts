@@ -5,7 +5,7 @@
  */
 import { FileSystem } from '@effect/platform';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Array as A, DateTime, Duration, Effect, Option, Schedule, pipe } from 'effect';
+import { Array as A, Clock, DateTime, Duration, Effect, Option, Schedule, pipe } from 'effect';
 import { Context } from '../context.ts';
 import { Diff } from '../utils/diff.ts';
 import { MetricsService } from './metrics.ts';
@@ -39,23 +39,23 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			const [subject, op] = idx > 0 ? [operation.slice(0, idx), operation.slice(idx + 1)] : ['security', operation];
 			return { isSecurity: subject === 'security' && _Audit.securityOps.has(op), op, subject };
 		};
-		const serializeEntry = (entry: Record<string, unknown>, error: string) =>
+		const serializeEntry = (entry: Record<string, unknown>, error: string, timestampMs: number) =>
 			JSON.stringify({
 				...entry,
 				_error: error,
-				_timestamp: DateTime.unsafeNow(),
+				_timestamp: DateTime.formatIso(DateTime.unsafeMake(timestampMs)),
 				changes: pipe(entry['changes'] as Option.Option<unknown>, Option.getOrNull),
 				requestId: pipe(entry['requestId'] as Option.Option<unknown>, Option.getOrNull),
 				userId: pipe(entry['userId'] as Option.Option<unknown>, Option.getOrNull),
 			});
-		const writeDeadLetter = (entry: Record<string, unknown>, error: string) =>
+		const writeDeadLetter = (entry: Record<string, unknown>, error: string, timestampMs: number) =>
 			pipe(
 				fs,
 				Option.filter(() => _Audit.deadLetter.enabled),
 				Option.match({
 					onNone: () => Effect.void,
 					onSome: (f) => pipe(
-						f.writeFileString(_Audit.deadLetter.path, `${serializeEntry(entry, error)}\n`, { flag: 'a' }),
+						f.writeFileString(_Audit.deadLetter.path, `${serializeEntry(entry, error, timestampMs)}\n`, { flag: 'a' }),
 						Effect.catchAll((e) => Effect.logError('AUDIT_DEAD_LETTER_FAILED', { deadLetterError: String(e), originalError: error })),
 					),
 				}),
@@ -72,6 +72,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 		) =>
 			Effect.gen(function* () {
 				const ctx = yield* Context.Request.current;
+				const timestampMs = yield* Clock.currentTimeMillis;
 				const parsed = parseOp(operation);
 				const forceDeadLetter = parsed.isSecurity || !(config?.silent ?? false);
 				const subjectId = config?.subjectId ?? (parsed.isSecurity ? ctx.requestId : Context.Request.Id.unspecified);
@@ -84,7 +85,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					requestId: pipe(ctx.requestId, Option.some),
 					subject: parsed.subject,
 					subjectId,
-					timestamp: DateTime.unsafeNow(),
+					timestamp: DateTime.formatIso(DateTime.unsafeMake(timestampMs)),
 					userAgent: ctx.userAgent,
 					userId: pipe(ctx.session, Option.map((s) => s.userId)),
 				};
@@ -98,11 +99,10 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					Effect.tap(() => MetricsService.inc(metrics.audit.writes, labels, 1)),
 					Effect.catchAll((dbError) => {
 						const error = String(dbError);
-						const deadLetterEffect = forceDeadLetter ? writeDeadLetter(entry, error) : Effect.void;
 						return Effect.all([
 							Effect.logWarning('AUDIT_FAILURE', { error, isSecurity: parsed.isSecurity, operation: `${parsed.subject}.${parsed.op}`, subjectId }),
 							MetricsService.inc(metrics.audit.failures, labels, 1),
-							deadLetterEffect,
+							Effect.when(writeDeadLetter(entry, error, timestampMs), () => forceDeadLetter),
 						], { discard: true });
 					}),
 				);
@@ -142,13 +142,17 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			fs,
 			Option.match({
 				onNone: () => Effect.succeed({ failed: 0, replayed: 0, skipped: true }),
-				onSome: (fileSystem) => _Audit.deadLetter.enabled
-					? Effect.gen(function* () {
+				onSome: (fileSystem) => Effect.if(_Audit.deadLetter.enabled, {
+					onFalse: () => Effect.succeed({ failed: 0, replayed: 0, skipped: true }),
+					onTrue: () => Effect.gen(function* () {
 						const tempPath = `${_Audit.deadLetter.path}.processing`;
 						const renamed = yield* pipe(fileSystem.rename(_Audit.deadLetter.path, tempPath), Effect.as(true), Effect.orElseSucceed(() => false));
-						return yield* (renamed ? replayFileContents(fileSystem, tempPath) : Effect.succeed({ failed: 0, replayed: 0, skipped: false }));
-					})
-					: Effect.succeed({ failed: 0, replayed: 0, skipped: true }),
+						return yield* Effect.if(renamed, {
+							onFalse: () => Effect.succeed({ failed: 0, replayed: 0, skipped: false }),
+							onTrue: () => replayFileContents(fileSystem, tempPath),
+						});
+					}),
+				}),
 			}),
 			Telemetry.span('audit.replayDeadLetters'),
 		);
@@ -158,7 +162,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			Effect.catchAll((e) => Effect.logError('Dead-letter replay fiber failed', { error: String(e) })),
 			Effect.forkScoped,
 		);
-		yield* Effect.logInfo('AuditService initialized', { deadLetterEnabled: _Audit.deadLetter.enabled, replayIntervalMs: Duration.toMillis(_Audit.deadLetter.interval) });
+		yield* Effect.logInfo('AuditService initialized', { deadLetterEnabled: _Audit.deadLetter.enabled, replayInterval: Duration.format(_Audit.deadLetter.interval) });
 		return { log, replayDeadLetters };
 	}),
 }) {}

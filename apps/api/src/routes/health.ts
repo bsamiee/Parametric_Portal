@@ -9,7 +9,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Effect, Match, pipe } from 'effect';
+import { Boolean as B, Effect, Match, pipe } from 'effect';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -43,11 +43,10 @@ const _readiness = (polling: PollingService) => pipe(
 		checks: {
 			cache: { connected: cache.connected, latencyMs: cache.latencyMs },
 			database: { healthy: db.healthy, latencyMs: db.latencyMs },
-			metrics: Match.value({ critical: critical.length, total: alerts.length }).pipe(
-				Match.when(({ critical }) => critical > 0, () => 'alerted' as const),
-				Match.when(({ total }) => total > 0, () => 'degraded' as const),
-				Match.orElse(() => 'healthy' as const),
-			),
+			metrics: B.match(critical.length > 0, {
+				onFalse: () => B.match(alerts.length > 0, { onFalse: () => 'healthy' as const, onTrue: () => 'degraded' as const }),
+				onTrue: () => 'alerted' as const,
+			}),
 		},
 		status: 'ok' as const,
 	})),

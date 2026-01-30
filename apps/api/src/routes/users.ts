@@ -10,7 +10,7 @@ import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -19,16 +19,14 @@ const handleUpdateRole = Effect.fn('users.updateRole')(
         Effect.gen(function* () {
             yield* Middleware.requireMfaVerified;
             yield* requireRole('admin');
-            const user = yield* pipe(
-                repos.users.one([{ field: 'id', value: targetUserId }]),
+            const user = yield* repos.users.one([{ field: 'id', value: targetUserId }]).pipe(
                 Effect.mapError((e) => HttpError.Internal.of('User lookup failed', e)),
-                Effect.flatMap((opt) => Option.match(opt, {
+                Effect.flatMap(Option.match({
                     onNone: () => Effect.fail(HttpError.NotFound.of('user', targetUserId)),
                     onSome: Effect.succeed,
                 })),
             );
-            const updatedUser = yield* pipe(
-                repos.users.update({ ...user, role: newRole, updatedAt: undefined }),
+            const updatedUser = yield* repos.users.update({ ...user, role: newRole, updatedAt: undefined }).pipe(
                 Effect.mapError((e) => HttpError.Internal.of('Role update failed', e)),
             );
             yield* audit.log('User.update', {

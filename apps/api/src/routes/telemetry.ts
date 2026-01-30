@@ -11,7 +11,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { Circuit } from '@parametric-portal/server/utils/circuit';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Config, Effect, Schema as S } from 'effect';
+import { Config, Effect, Function as F, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -42,7 +42,7 @@ const handleIngestTraces = Effect.fn('telemetry.ingest')((request: HttpServerReq
         return HttpServerResponse.empty({ status: 202 });
     }).pipe(
         Effect.tapError((e) => Effect.logWarning('Telemetry proxy failed', { error: String(e) })),
-        Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 202 })),
+        Effect.orElseSucceed(F.constant(HttpServerResponse.empty({ status: 202 }))),
     ),
 );
 

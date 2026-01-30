@@ -5,7 +5,7 @@
  */
 import { timingSafeEqual } from 'node:crypto';
 import { type Hex64, Uuidv7 } from '@parametric-portal/types/types';
-import { Cache, Config, Data, Duration, Effect, Encoding, Either, Redacted } from 'effect';
+import { Cache, Config, Data, Duration, Effect, Encoding, Either, Number as N, Redacted } from 'effect';
 import { Context } from '../context.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 
@@ -82,8 +82,11 @@ const compare = (a: string, b: string): Effect.Effect<boolean> =>
 const decrypt = (bytes: Uint8Array): Effect.Effect<string, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.tenantId;
-		const valid = bytes.length >= _config.minBytes && bytes[0] !== undefined && bytes[0] >= _config.version.min && bytes[0] <= _config.version.max;
-		yield* valid ? Effect.void : Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'decrypt', tenantId }));
+		yield* Effect.filterOrFail(
+			Effect.succeed(bytes),
+			(b) => b.length >= _config.minBytes && b[0] !== undefined && N.between({ maximum: _config.version.max, minimum: _config.version.min })(b[0]),
+			() => new CryptoError({ code: 'INVALID_FORMAT', op: 'decrypt', tenantId }),
+		);
 		const iv = bytes.slice(1, 1 + _config.iv);
 		const cipher = bytes.slice(1 + _config.iv);
 		const svc = yield* Service;

@@ -22,7 +22,7 @@ pre-commit:
       run: |
         violation=0
         for file in {staged_files}; do
-          matches=$(grep -nE '\b(try\s*\{|throw\s+|let\s+|var\s+|for\s*\(|while\s*\(|if\s*\()' "$file" 2>/dev/null | grep -vE '^[0-9]+:\s*(//|\*|/\*)|Symbol\.for' || true)
+          matches=$(grep -nE '\b(try\s*\{|throw\s+|let\s+|var\s+|for\s*\(|while\s*\(|if\s*\()' "$file" 2>/dev/null | grep -vE '^[0-9]+:\s*(//|\*|/\*)|Symbol\.for|Effect\.if' || true)
           if [ -n "$matches" ]; then
             echo "[ERROR] Imperative pattern in $file"
             echo "$matches"

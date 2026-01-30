@@ -23,12 +23,11 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import type { Uuidv7 } from '@parametric-portal/types/types';
-import { DateTime, Effect, Match, Option } from 'effect';
+import { DateTime, Effect, Option } from 'effect';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const requireOption = <A, E>(opt: Option.Option<A>, onNone: () => E): Effect.Effect<A, E> =>
-	Option.match(opt, { onNone: () => Effect.fail(onNone()), onSome: Effect.succeed });
+const requireOption = <A, E>(opt: Option.Option<A>, onNone: () => E): Effect.Effect<A, E> => Option.match(opt, { onNone: () => Effect.fail(onNone()), onSome: Effect.succeed });
 const verifyCsrf = (req: HttpServerRequest.HttpServerRequest) =>
 	requireOption(
 		Option.filter(Headers.get(req.headers, Context.Request.config.csrf.header), (v) => v === Context.Request.config.csrf.expectedValue),
@@ -46,13 +45,9 @@ const oauthErr = (provider: Context.OAuthProvider) => (reason: string) => HttpEr
 
 const handleOAuthStart = Effect.fn('auth.oauth.start')((oauth: typeof OAuthService.Service, provider: Context.OAuthProvider) =>
 	oauth.authorize(provider).pipe(
-		Effect.flatMap(({ stateCookie, url }) =>
-			HttpServerResponse.json({ url: url.toString() }).pipe(Effect.flatMap(Context.Request.cookie.set('oauth', stateCookie))),
+		Effect.flatMap(({ stateCookie, url }) => HttpServerResponse.json({ url: url.toString() }).pipe(Effect.flatMap(Context.Request.cookie.set('oauth', stateCookie))),
 		),
-		Effect.mapError((e) => Match.value(e).pipe(
-			Match.when((x: unknown): x is HttpError.OAuth => x instanceof HttpError.OAuth, (x) => x),
-			Match.orElse((x) => HttpError.OAuth.of(provider, x instanceof Error ? x.message : 'Authorization URL creation failed')),
-		)),
+		Effect.mapError((e) => e instanceof HttpError.OAuth ? e : HttpError.OAuth.of(provider, e instanceof Error ? e.message : 'Authorization URL creation failed')),
 	),
 );
 const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
@@ -66,23 +61,27 @@ const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
 			const { isNewUser, userId } = yield* repos.withTransaction(
 				Effect.gen(function* () {
 					const existingOpt = yield* repos.users.byEmail(appId, email).pipe(Effect.mapError(() => err('User lookup failed')));
-					const existing = Option.getOrNull(existingOpt);
-					const user = yield* existing === null
-						? repos.users.insert({ appId, deletedAt: Option.none(), email, role: 'member', status: 'active', updatedAt: undefined }).pipe(Effect.mapError(() => err('User creation failed')))
-						: Effect.succeed(existing);
+					const { isNewUser, user } = yield* Option.match(existingOpt, {
+						onNone: () => repos.users.insert({ appId, deletedAt: Option.none(), email, role: 'member', status: 'active', updatedAt: undefined }).pipe(
+							Effect.mapError(() => err('User creation failed')),
+							Effect.map((u) => ({ isNewUser: true, user: u })),
+						),
+						onSome: (existing) => Effect.succeed({ isNewUser: false, user: existing }),
+					});
 					const encAccess = yield* Crypto.encrypt(result.access).pipe(
 						Effect.map((e) => Buffer.from(e)),
 						Effect.catchAll(() => Effect.fail(err('Access token encryption failed'))),
 					);
-					const encRefresh = yield* Option.isSome(result.refresh)
-						? Crypto.encrypt(result.refresh.value).pipe(Effect.map((e) => Option.some(Buffer.from(e))), Effect.catchAll(() => Effect.fail(err('Refresh token encryption failed'))))
-						: Effect.succeed(Option.none<Buffer>());
+					const encRefresh = yield* Option.match(result.refresh, {
+						onNone: () => Effect.succeed(Option.none<Buffer>()),
+						onSome: (refresh) => Crypto.encrypt(refresh).pipe(Effect.map((e) => Option.some(Buffer.from(e))), Effect.catchAll(() => Effect.fail(err('Refresh token encryption failed')))),
+					});
 					yield* repos.oauthAccounts.upsert({
 						accessEncrypted: encAccess, deletedAt: Option.none(), expiresAt: result.expiresAt,
 						externalId: result.externalId, provider, refreshEncrypted: encRefresh,
 						scope: Option.none(), updatedAt: undefined, userId: user.id,
 					}).pipe(Effect.asVoid, Effect.mapError(() => err('OAuth account upsert failed')));
-					return { isNewUser: existing === null, userId: user.id };
+					return { isNewUser, userId: user.id };
 				}),
 			).pipe(Effect.mapError((e) => e instanceof HttpError.OAuth ? e : HttpError.Internal.of('User creation transaction failed', e)));
 			const { mfaPending, refreshToken, sessionExpiresAt, sessionToken } = yield* session.login(userId, { isNewUser, provider }).pipe(Effect.mapError(() => err('Session creation failed')));
@@ -186,9 +185,7 @@ const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
 			yield* Middleware.requireMfaVerified;
 			const pair = yield* Crypto.pair.pipe(Effect.mapError((e) => HttpError.Internal.of('Key generation failed', e)));
 			const [{ userId }, metrics] = yield* Effect.all([Context.Request.session, MetricsService]);
-			const encrypted = yield* Crypto.encrypt(pair.token).pipe(
-				Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('Key encryption failed', e))),
-			);
+			const encrypted = yield* Crypto.encrypt(pair.token).pipe(Effect.catchAll((e) => Effect.fail(HttpError.Internal.of('Key encryption failed', e))),);
 			const key = yield* repos.apiKeys.insert({
 				deletedAt: Option.none(), encrypted: Buffer.from(encrypted), expiresAt: Option.fromNullable(input.expiresAt), hash: pair.hash,
 				lastUsedAt: Option.none(), name: input.name, updatedAt: undefined, userId,

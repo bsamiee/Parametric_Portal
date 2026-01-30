@@ -3,7 +3,7 @@
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
-import { Array as A, Chunk, Effect, Either, Option, Schema as S, Stream } from 'effect';
+import { Array as A, Chunk, Clock, Effect, Either, Option, Schema as S, Stream } from 'effect';
 import type JSZip from 'jszip';
 import { PassThrough, Readable } from 'node:stream';
 import { Crypto } from '../security/crypto.ts';
@@ -212,6 +212,7 @@ const _text = {
 } as const;
 const _binary = {
 	xlsx: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
+		const ts = yield* Clock.currentTimeMillis;
 		const excel = yield* _drivers.excel();
 		const chunks: Buffer[] = [];
 		const pt = new PassThrough();
@@ -222,9 +223,10 @@ const _binary = {
 		const count = yield* Stream.runFold(stream, 0, (rowCount, asset) => { sheet.addRow(_serializeExport(asset)).commit(); return rowCount + 1; });
 		sheet.commit();
 		yield* Effect.promise(() => wb.commit());
-		return { count, data: Buffer.concat(chunks).toString('base64'), name: name ?? `export-${Date.now()}.xlsx` };
+		return { count, data: Buffer.concat(chunks).toString('base64'), name: name ?? `export-${ts}.xlsx` };
 	}),
 	zip: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
+		const ts = yield* Clock.currentTimeMillis;
 		const ZipClass = yield* _drivers.zip();
 		const zip = new ZipClass();
 		const entries: Metadata[] = [];
@@ -238,7 +240,7 @@ const _binary = {
 		);
 		zip.file('manifest.json', JSON.stringify({ entries, version: 1 }, null, 2));
 		const data = yield* Effect.promise(() => zip.generateAsync({ compression: 'DEFLATE', type: 'base64' }));
-		return { count, data, name: name ?? `export-${Date.now()}.zip` };
+		return { count, data, name: name ?? `export-${ts}.zip` };
 	}),
 } as const;
 const exportText = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _text): Stream.Stream<Uint8Array, E, R> => Stream.map(_text[fmt](stream), new TextEncoder().encode);

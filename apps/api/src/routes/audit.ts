@@ -8,7 +8,7 @@ import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Effect, Option, pipe } from 'effect';
+import { Effect, Option } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -16,10 +16,9 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 	Effect.gen(function* () {
 		const repos = yield* DatabaseService;
 		const requireRole = Middleware.makeRequireRole((id) => repos.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((u) => ({ role: u.role })))));
-		const adminLookup = <A>(find: Effect.Effect<A, unknown>) => pipe(
-			Middleware.requireMfaVerified,
-			Effect.zipRight(requireRole('admin')),
-			Effect.zipRight(find),
+		const adminLookup = <A>(find: Effect.Effect<A, unknown>) => Middleware.requireMfaVerified.pipe(
+			Effect.andThen(requireRole('admin')),
+			Effect.andThen(find),
 			Effect.mapError((e) => HttpError.Internal.of('Audit lookup failed', e)),
 		);
 		return handlers
@@ -29,7 +28,7 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 				CacheService.rateLimit('api', adminLookup(Context.Request.tenantId.pipe(Effect.flatMap((tenantId) => repos.audit.byUser(tenantId, userId, params.limit, params.cursor, params)))).pipe(Effect.withSpan('audit.getByUser', { kind: 'server' }))))
 			.handle('getMine', ({ urlParams: params }) =>
 				CacheService.rateLimit('api', Middleware.requireMfaVerified.pipe(
-					Effect.zipRight(Effect.all([Context.Request.current, Context.Request.session])),
+					Effect.andThen(Effect.all([Context.Request.current, Context.Request.session])),
 					Effect.flatMap(([ctx, session]) => repos.audit.byUser(ctx.tenantId, session.userId, params.limit, params.cursor, params)),
 					Effect.mapError((e) => e instanceof HttpError.Auth ? e : HttpError.Internal.of('Audit lookup failed', e) as HttpError.Auth | HttpError.Internal),
 					Effect.withSpan('audit.getMine', { kind: 'server' }),

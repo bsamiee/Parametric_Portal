@@ -13,7 +13,7 @@ import * as PersistenceRedis from '@effect/experimental/Persistence/Redis';
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimitExceeded, RateLimiter } from '@effect/experimental/RateLimiter';
 import { layerStore as layerStoreRedis } from '@effect/experimental/RateLimiter/Redis';
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import { Config, Duration, Effect, Either, Layer, Match, Metric, Option, pipe, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
+import { Config, Duration, Effect, Either, Function as F, Layer, Match, Metric, Number as N, Option, pipe, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
 import Redis from 'ioredis';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
@@ -102,7 +102,6 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 	}),
 }) {
 	// --- [PERSISTENCE_LAYER] - ResultPersistence backed by Redis -------------
-	// [FIX #1] Use Persistence/Redis.layerResult with full config
 	static readonly Persistence: Layer.Layer<Persistence.ResultPersistence, never, CacheService> = Layer.unwrapScoped(
 		CacheService.pipe(Effect.map((s) => PersistenceRedis.layerResult(s._redisOpts))),
 	);
@@ -157,10 +156,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 	static readonly rateLimit: {
 		<A, E, R>(preset: CacheService.RateLimitPreset, handler: Effect.Effect<A, E, R>): Effect.Effect<A, E | HttpError.RateLimit, R | AuditService | CacheService | MetricsService | RateLimiter>;
 		(preset: CacheService.RateLimitPreset): <A, E, R>(handler: Effect.Effect<A, E, R>) => Effect.Effect<A, E | HttpError.RateLimit, R | AuditService | CacheService | MetricsService | RateLimiter>;
-	} = ((presetOrHandler: CacheService.RateLimitPreset | Effect.Effect<unknown, unknown, unknown>, maybeHandler?: Effect.Effect<unknown, unknown, unknown>) =>
-		maybeHandler === undefined
-			? <A, E, R>(handler: Effect.Effect<A, E, R>) => _rateLimit(presetOrHandler as CacheService.RateLimitPreset, handler)
-			: _rateLimit(presetOrHandler as CacheService.RateLimitPreset, maybeHandler)) as never;
+	} = F.dual(2, <A, E, R>(preset: CacheService.RateLimitPreset, handler: Effect.Effect<A, E, R>) => _rateLimit(preset, handler));
 	// --- [HEADERS] - HTTP middleware for X-RateLimit-* -----------------------
 	static readonly headers = HttpMiddleware.make((app) =>
 		Effect.gen(function* () {
@@ -170,7 +166,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 				onNone: () => response,
 				onSome: (r) => HttpServerResponse.setHeaders(response, {
 					'X-RateLimit-Limit': String(r.limit),
-					'X-RateLimit-Remaining': String(Math.max(0, r.remaining)),
+					'X-RateLimit-Remaining': String(N.clamp({ maximum: r.limit, minimum: 0 })(r.remaining)),
 					'X-RateLimit-Reset': String(Math.ceil(Duration.toMillis(r.resetAfter) / 1000)),
 				}),
 			});
@@ -181,7 +177,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 		CacheService.pipe(
 			Effect.flatMap((s) => Effect.tryPromise(() => s._redis.ping()).pipe(Effect.timed)),
 			Effect.map(([duration, result]) => ({ connected: result === 'PONG', latencyMs: Math.round(Duration.toMillis(duration)) })),
-			Effect.orElseSucceed(() => ({ connected: false, latencyMs: 0 })),
+			Effect.orElseSucceed(F.constant({ connected: false, latencyMs: 0 })),
 		);
 	// --- [SET_NX] - Atomic set-if-not-exists (replay protection) -------------
 	static readonly setNX = (key: string, value: string, ttl: Duration.Duration): Effect.Effect<CacheService.SetNXResult, never, CacheService> =>

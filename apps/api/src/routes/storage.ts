@@ -11,7 +11,7 @@ import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import type { Url } from '@parametric-portal/types/types';
-import { DateTime, Duration, Effect, Match, Option, } from 'effect';
+import { DateTime, Duration, Effect } from 'effect';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -24,14 +24,8 @@ const handleSign = Effect.fn('storage.sign')((
 		const metrics = yield* MetricsService;
 		const expires = Duration.seconds(payload.expiresInSeconds);
 		const expiresAt = DateTime.addDuration(DateTime.unsafeNow(), expires);
-		const input: StorageService.SignInputGetPut = Match.value(payload.op).pipe(
-			Match.when('get', () => ({ expires, key: payload.key, op: 'get' as const })),
-			Match.when('put', () => ({ expires, key: payload.key, op: 'put' as const })),
-			Match.exhaustive,
-		);
-		const url = yield* storage.sign(input).pipe(
-			Effect.mapError((err) => HttpError.Internal.of('Failed to generate presigned URL', err)),
-		);
+		const input: StorageService.SignInputGetPut = { expires, key: payload.key, op: payload.op };
+		const url = yield* storage.sign(input).pipe(Effect.mapError((err) => HttpError.Internal.of('Failed to generate presigned URL', err)),);
 		yield* Effect.all([
 			MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: `sign-${payload.op}` })),
 			audit.log('Storage.sign', { details: { expiresInSeconds: payload.expiresInSeconds, key: payload.key, op: payload.op }, subjectId: payload.key }),
@@ -66,14 +60,10 @@ const handleUpload = Effect.fn('storage.upload')((
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const [metrics, fs] = yield* Effect.all([MetricsService, FileSystem.FileSystem]);
-		const key = Option.getOrElse(Option.fromNullable(payload.key), () => payload.file.name);
-		const contentType = Option.getOrElse(Option.fromNullable(payload.contentType), () => payload.file.contentType);
-		const body = yield* fs.readFile(payload.file.path).pipe(
-			Effect.mapError((err) => HttpError.Internal.of('Failed to read uploaded file', err)),
-		);
-		const result = yield* storage.put({ body, contentType, key }).pipe(
-			Effect.mapError((err) => HttpError.Internal.of('Failed to store object', err)),
-		);
+		const key = payload.key ?? payload.file.name;
+		const contentType = payload.contentType ?? payload.file.contentType;
+		const body = yield* fs.readFile(payload.file.path).pipe(Effect.mapError((err) => HttpError.Internal.of('Failed to read uploaded file', err)),);
+		const result = yield* storage.put({ body, contentType, key }).pipe(Effect.mapError((err) => HttpError.Internal.of('Failed to store object', err)),);
 		yield* Effect.all([
 			MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'upload' })),
 			MetricsService.inc(metrics.storage.multipart.uploads, MetricsService.label({})),

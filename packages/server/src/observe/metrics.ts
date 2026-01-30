@@ -3,7 +3,7 @@
  * No custom types - uses Effect's official types directly.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
+import { Boolean as B, Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
 import { Context } from '../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -186,9 +186,10 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		labels: HashSet.HashSet<MetricLabel.MetricLabel>,
 		value = 1,
 	): Effect.Effect<void> =>
-		value === 1
-			? Metric.increment(Metric.taggedWithLabels(counter, labels))
-			: Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value);
+		B.match(value === 1, {
+			onFalse: () => Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value),
+			onTrue: () => Metric.increment(Metric.taggedWithLabels(counter, labels)),
+		});
 	// --- [GAUGE] -------------------------------------------------------------
 	static readonly gauge = (								// Update gauge with labels using official Metric.update API.
 		gauge: Metric.Metric.Gauge<number>,
@@ -230,11 +231,10 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		const interval = config.logInterval ?? 1000;
 		return stream.pipe(
 			Stream.zipWithIndex,
-			Stream.tap(([, idx]) =>
-				idx > 0 && idx % interval === 0
-					? Effect.logInfo('Stream progress', { items: idx, ...config.labels })
-					: Effect.void,
-			),
+			Stream.tap(([, idx]) => Effect.when(
+				Effect.logInfo('Stream progress', { items: idx, ...config.labels }),
+				() => idx > 0 && idx % interval === 0,
+			)),
 			Stream.tap(() => Metric.increment(Metric.taggedWithLabels(config.counter, labels))),
 			Stream.map(([item]) => item),
 		);

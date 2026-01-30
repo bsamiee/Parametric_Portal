@@ -3,7 +3,7 @@
  * MetricPolling.retry for resilience; Schedule.jittered to prevent thundering herd.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Duration, Effect, Match, Metric, MetricPolling, MetricState, Option, type Record, Ref, Schedule } from 'effect';
+import { Array as A, Duration, Effect, Match, Metric, MetricPolling, MetricState, Option, type Record, Ref, Schedule } from 'effect';
 import { MetricsService } from './metrics.ts';
 import { Telemetry } from './telemetry.ts';
 
@@ -31,12 +31,12 @@ const _stateToEntries = (state: MetricState.MetricState<unknown>, name: string, 
 		Match.when(MetricState.isSummaryState, (s) => [
 			{ labels, name: `${name}_count`, type: 'summary_count', value: s.count },
 			{ labels, name: `${name}_sum`, type: 'summary_sum', value: s.sum },
-			...[...s.quantiles].filter(([, v]) => Option.isSome(v)).map(([q, v]) => ({
+			...A.filterMap([...s.quantiles], ([q, v]) => Option.map(v, (val) => ({
 				labels: { ...labels, quantile: String(q) },
 				name,
-				type: 'summary_quantile',
-				value: Option.getOrElse(v, () => 0),
-			})),
+				type: 'summary_quantile' as const,
+				value: val,
+			}))),
 		]),
 		Match.when(MetricState.isFrequencyState, (s) => [...s.occurrences.entries()].map(([category, count]) => ({
 			labels: { ...labels, category },

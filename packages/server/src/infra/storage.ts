@@ -5,7 +5,7 @@
 import { S3, S3ClientInstance } from '@effect-aws/client-s3';
 import { CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Array as A, Chunk, Config, Duration, Effect, type Either, Layer, Match, Metric, Option, Redacted, Stream } from 'effect';
+import { Array as A, Chunk, Config, Duration, Effect, type Either, Exit, Layer, Match, Metric, Option, Redacted, Stream } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -27,8 +27,8 @@ const _env = Config.all({
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
-const _path = (key: string) =>
-	Context.Request.tenantId.pipe(Effect.map((t) => t === Context.Request.Id.system ? `system/${key}` : `tenants/${t}/${key}`));
+const _path = (key: string) => Context.Request.tenantId.pipe(Effect.map((t) => t === Context.Request.Id.system ? `system/${key}` : `tenants/${t}/${key}`));
+const _concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => chunks.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -67,11 +67,11 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 			const fk = yield* _path(k);
 			const r = yield* s3.getObject({ Bucket: B, Key: fk });
 			const bodyIterable = r.Body as AsyncIterable<Uint8Array> | null | undefined;
-			const chunks = yield* bodyIterable === null || bodyIterable === undefined
-				? Effect.succeed(Chunk.empty<Uint8Array>())
-				: Stream.runCollect(Stream.fromAsyncIterable(bodyIterable, (e) => e as Error));
-			const arr = Chunk.toReadonlyArray(chunks);
-			const body = arr.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
+			const chunks = yield* Option.match(Option.fromNullable(bodyIterable), {
+				onNone: () => Effect.succeed(Chunk.empty<Uint8Array>()),
+				onSome: (iterable) => Stream.runCollect(Stream.fromAsyncIterable(iterable, (e) => e as Error)),
+			});
+			const body = _concatBytes(Chunk.toReadonlyArray(chunks));
 			return { body, contentType: r.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(r.ETag), key: k, metadata: r.Metadata ?? {}, size: body.length };
 		});
 		const get: StorageAdapter.Get = ((i: string | readonly string[]) =>
@@ -96,8 +96,10 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 		const _exists = (k: string) => _path(k).pipe(
 			Effect.flatMap((fk) => s3.headObject({ Bucket: B, Key: fk })),
 			Effect.as(true),
-			Effect.catchTag('NotFound', () => Effect.succeed(false)),
-			Effect.catchTag('SdkError', () => Effect.succeed(false)),
+			Effect.catchTags({
+				NotFound: () => Effect.succeed(false),
+				SdkError: () => Effect.succeed(false),
+			}),
 		);
 		const exists: StorageAdapter.Exists = ((i: string | readonly string[]) =>
 			$(Array.isArray(i) ? 'head.batch' : 'head', (Array.isArray(i)
@@ -172,8 +174,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 					Stream.map(({ chunk }) => chunk),
 					Stream.runCollect,
 				);
-				const arr = Chunk.toReadonlyArray(chunks);
-				const bytes = arr.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
+				const bytes = _concatBytes(Chunk.toReadonlyArray(chunks));
 				const useSimplePut = bytes.length < _config.multipart.threshold;
 				const simplePutResult = useSimplePut
 					? yield* s3.putObject({ Body: bytes, Bucket: B, ContentType: contentType, Key: fk, Metadata: i.metadata }).pipe(Effect.map((r) => ({ etag: r.ETag ?? '', key: i.key, totalSize: bytes.length })))
@@ -184,15 +185,15 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				const uploadPartForIdx = (uid: string, idx: number) => s3.uploadPart({ Body: bytes.slice(idx * partSize, Math.min((idx + 1) * partSize, bytes.length)), Bucket: B, Key: fk, PartNumber: idx + 1, UploadId: uid });
 				const acquiredUid = useSimplePut ? '' : yield* Effect.acquireRelease(
 					Effect.succeed(uploadId),
-					(uid, exit) => exit._tag === 'Failure' ? s3.abortMultipartUpload({ Bucket: B, Key: fk, UploadId: uid }).pipe(Effect.ignore) : Effect.void,
+					(uid, exit) => Exit.isFailure(exit) ? s3.abortMultipartUpload({ Bucket: B, Key: fk, UploadId: uid }).pipe(Effect.ignore) : Effect.void,
 				);
 				const rawParts = useSimplePut ? [] : yield* Effect.forEach(partIndices, (idx) => uploadPartForIdx(acquiredUid, idx), { concurrency: 3 }).pipe(Effect.scoped);
 				const parts = rawParts.map((r, idx) => ({ ETag: r.ETag ?? '', PartNumber: idx + 1 }));
-				const multipartResult = useSimplePut ? null : yield* s3.completeMultipartUpload({ Bucket: B, Key: fk, MultipartUpload: { Parts: parts }, UploadId: uploadId }).pipe(Effect.map(() => {
-					const lastPart = A.last(parts);
-					const etag = Option.isSome(lastPart) ? lastPart.value.ETag : '';
-					return { etag, key: i.key, totalSize: bytes.length };
-				}));
+				const multipartResult = useSimplePut ? null : yield* s3.completeMultipartUpload({ Bucket: B, Key: fk, MultipartUpload: { Parts: parts }, UploadId: uploadId }).pipe(Effect.map(() => ({
+					etag: A.last(parts).pipe(Option.map((p) => p.ETag), Option.getOrElse(() => '')),
+					key: i.key,
+					totalSize: bytes.length,
+				})));
 				return simplePutResult ?? multipartResult ?? { etag: '', key: i.key, totalSize: bytes.length };
 			})).pipe(Telemetry.span('storage.putStream'));
 		const abortUpload = (k: string, u: string) =>
