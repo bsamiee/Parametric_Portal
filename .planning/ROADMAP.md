@@ -80,10 +80,12 @@ Plans:
   9. Snowflake IDs generated cluster-wide without collisions
   10. Entity handlers wrap execution with `Context.Request.withinCluster({ entityId, entityType, shardId })` — downstream code accesses via `Context.Request.cluster`
   11. Singleton handlers set `isLeader: true` via `withinCluster` on entry — `Context.Request.isLeader` returns `true` within singleton scope
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: TBD
+- [ ] 03-01-PLAN.md - SingletonError, singleton metrics, SQL-backed KeyValueStore layer
+- [ ] 03-02-PLAN.md - Extend singleton/cron factories with state persistence, lifecycle hooks
+- [ ] 03-03-PLAN.md - Entity withinCluster wrapping, singleton health check utilities
 
 ### Phase 4: Job Processing
 **Goal**: Jobs process via Entity mailbox with priority, deduplication, dead-letter handling, and batch efficiency. Single polymorphic `submit` handles all cases. Interface unchanged for existing callers.
