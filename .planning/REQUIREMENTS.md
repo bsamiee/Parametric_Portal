@@ -94,7 +94,7 @@ Typed domain events with reliability guarantees.
 
 Distributed work execution replacing DB-polling queues.
 
-- [ ] **JOBS-01**: Handler processes jobs via message dispatch without DB polling
+- [x] **JOBS-01**: Handler processes jobs via message dispatch without DB polling
   - Why: Poll loops waste resources and add latency; Entity mailboxes provide instant dispatch
   - Uses: `Entity.make("Job", [...])`, `Sharding.send`, `mailboxCapacity`, `Entity.keepAlive` (batch jobs)
   - Replaces: Poll loop, `SELECT FOR UPDATE`, semaphore in jobs.ts
@@ -234,7 +234,7 @@ Maps requirements to phases. Updated during roadmap creation.
 | EVNT-04 | Phase 5: EventBus & Reliability | Pending |
 | EVNT-05 | Phase 6: Workflows & State Machines | Pending |
 | EVNT-06 | Phase 6: Workflows & State Machines | Pending |
-| JOBS-01 | Phase 4: Job Processing | Pending |
+| JOBS-01 | Phase 4: Job Processing | Complete |
 | JOBS-02 | Phase 7: Real-Time Delivery | Pending |
 | STRM-01 | Phase 7: Real-Time Delivery | Pending |
 | STRM-02 | Phase 7: Real-Time Delivery | Pending |

@@ -110,9 +110,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md - JobDlq model, repo methods, SQL migration (Wave 1)
-- [ ] 04-02-PLAN.md - JobEntity implementation, gut + replace jobs.ts (Wave 2)
-- [ ] 04-03-PLAN.md - MetricsService extension with job.* metrics (Wave 2)
+- [x] 04-01-PLAN.md - JobDlq model, repo methods, SQL migration (Wave 1)
+- [x] 04-02-PLAN.md - JobEntity implementation, gut + replace jobs.ts (Wave 2)
+- [x] 04-03-PLAN.md - MetricsService extension with job.* metrics (Wave 2)
 
 ### Phase 5: EventBus & Reliability
 **Goal**: Domain events publish reliably with at-least-once delivery and automatic deduplication. EventBus replaces `StreamingService.channel()` for cross-pod pub/sub. Transactional outbox via Activity.make + DurableDeferred.
@@ -212,7 +212,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 1. Cluster Foundation | 3/3 | Complete | 2026-01-29 |
 | 2. Context Integration | 2/2 | Complete | 2026-01-29 |
 | 3. Singleton & Scheduling | 3/3 | Complete | 2026-01-29 |
-| 4. Job Processing | 0/3 | Ready for execution | - |
+| 4. Job Processing | 3/3 | Complete | 2026-01-30 |
 | 5. EventBus & Reliability | 0/TBD | Not started | - |
 | 6. Workflows & State Machines | 0/TBD | Not started | - |
 | 7. Real-Time Delivery | 0/TBD | Not started | - |
