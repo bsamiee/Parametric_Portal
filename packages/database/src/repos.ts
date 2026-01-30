@@ -11,7 +11,7 @@ import { SqlClient } from '@effect/sql';
 import { Clock, type Context, Effect, Schema as S } from 'effect';
 import { Client } from './client.ts';
 import { repo, Update } from './factory.ts';
-import { ApiKey, App, Asset, AuditLog, Job, KvStore, MfaSecret, OauthAccount, RefreshToken, Session, User } from './models.ts';
+import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, RefreshToken, Session, User } from './models.ts';
 
 // --- [USER_REPO] -------------------------------------------------------------
 
@@ -195,6 +195,24 @@ const makeJobRepo = Effect.gen(function* () {
 	};
 });
 
+// --- [JOB_DLQ_REPO] ----------------------------------------------------------
+
+const makeJobDlqRepo = Effect.gen(function* () {
+	const r = yield* repo(JobDlq, 'job_dlq', {
+		purge: 'purge_job_dlq',
+	});
+	return {
+		...r,
+		get: (id: string) => r.one([{ field: 'id', value: id }]),
+		insert: r.insert,
+		listPending: (opts?: { type?: string; limit?: number; cursor?: string }) => r.page([
+			{ field: 'replayed_at', op: 'null' },
+			...(opts?.type ? [{ field: 'type', value: opts.type }] : []),
+		], { cursor: opts?.cursor, limit: opts?.limit ?? 100 }),
+		markReplayed: (id: string) => r.set(id, { replayed_at: Update.now }),
+	};
+});
+
 // --- [KV_STORE_REPO] ---------------------------------------------------------
 
 const makeKvStoreRepo = Effect.gen(function* () {
@@ -218,11 +236,11 @@ const makeKvStoreRepo = Effect.gen(function* () {
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, refreshTokens, assets, audit, mfaSecrets, jobs, kvStore] = yield* Effect.all([
+		const [users, apps, sessions, apiKeys, oauthAccounts, refreshTokens, assets, audit, mfaSecrets, jobs, jobDlq, kvStore] = yield* Effect.all([
 			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeRefreshTokenRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeKvStoreRepo,
+			makeOauthAccountRepo, makeRefreshTokenRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo,
 		]);
-		return { apiKeys, apps, assets, audit, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, refreshTokens, sessions, users, withTransaction: sqlClient.withTransaction };
+		return { apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, refreshTokens, sessions, users, withTransaction: sqlClient.withTransaction };
 	}),
 }) {}
 type DatabaseServiceShape = Context.Tag.Service<typeof DatabaseService>;
