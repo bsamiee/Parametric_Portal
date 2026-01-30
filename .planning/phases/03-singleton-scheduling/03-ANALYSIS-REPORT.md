@@ -21,8 +21,8 @@ The research document is solid but contains several opportunities for optimizati
 | Import | Purpose | Current Usage Gap | Optimization |
 |--------|---------|-------------------|--------------|
 | `Data.TaggedEnum` | ADT construction | Research uses separate classes | Single `Data.taggedEnum` for state machines |
-| `Effect.fn` | Effectful function definition | Not mentioned | Replace loose function + pipe patterns |
-| `Effect.gen` + `yield*` shorthand | Generator with auto-inferring | Verbose `Effect.gen(function* () {})` | Use `Effect.fn` for simpler cases |
+| `Telemetry.span` | Named tracing with context | Codebase uses extensively | **Use Telemetry.span NOT Effect.fn** — codebase pattern |
+| `Effect.gen` + `yield*` shorthand | Generator with auto-inferring | Verbose `Effect.gen(function* () {})` | Use `Effect.gen` with `Telemetry.span` wrapping |
 | `Effect.zipWith` | Parallel combination | Uses `Effect.all` everywhere | More expressive for binary combinations |
 | `Option.fromNullable` | Nullable → Option | Used but underutilized | Replace ternary null checks |
 | `Schedule.addDelay` | Dynamic delay addition | Not mentioned | Heartbeat jitter without full Schedule rebuild |
@@ -333,7 +333,7 @@ Research patterns don't follow REQUIREMENTS.md section order:
 
 ### Minor Changes
 
-8. **Use `Effect.fn`** — for stateless effectful functions
+8. **Use `Telemetry.span`** — for named tracing (codebase pattern, NOT Effect.fn)
 9. **Add `Sharding.isShutdown`** — leader handoff detection
 10. **Use `EntityId.make`** — branded ID creation
 11. **Add `SubscriptionRef`** — reactive heartbeat state (optional)
@@ -348,7 +348,7 @@ Research patterns don't follow REQUIREMENTS.md section order:
 | # | Import | Status |
 |---|--------|--------|
 | 1 | `Data.taggedEnum` | ADD — for state ADTs |
-| 2 | `Effect.fn` | ADD — cleaner function definition |
+| 2 | `Telemetry.span` | USED — codebase pattern (NOT Effect.fn) |
 | 3 | `Schedule.addDelay` | VERIFY — jitter addition |
 | 4 | `Schedule.tapInput` | ADD — debug logging |
 | 5 | `Metric.trackDuration` | VERIFY — auto-timing |

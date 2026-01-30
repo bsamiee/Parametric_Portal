@@ -90,9 +90,7 @@ const decrypt = (bytes: Uint8Array): Effect.Effect<string, CryptoError, Service>
 		const iv = bytes.slice(1, 1 + _config.iv);
 		const cipher = bytes.slice(1 + _config.iv);
 		const svc = yield* Service;
-		const key = yield* svc.deriveKey(tenantId).pipe(
-			Effect.mapError((e) => new CryptoError({ cause: e, code: 'KEY_FAILED', op: 'decrypt', tenantId })),
-		);
+		const key = yield* svc.deriveKey(tenantId).pipe(Effect.mapError((e) => new CryptoError({ cause: e, code: 'KEY_FAILED', op: 'decrypt', tenantId })),);
 		const plaintext = yield* Effect.tryPromise({
 			catch: (e) => new CryptoError({ cause: e, code: 'OP_FAILED', op: 'decrypt', tenantId }),
 			try: () => crypto.subtle.decrypt({ iv, name: 'AES-GCM' }, key, cipher),
@@ -103,9 +101,7 @@ const encrypt = (plaintext: string): Effect.Effect<Uint8Array, CryptoError, Serv
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.tenantId;
 		const svc = yield* Service;
-		const key = yield* svc.deriveKey(tenantId).pipe(
-			Effect.mapError((e) => new CryptoError({ cause: e, code: 'KEY_FAILED', op: 'encrypt', tenantId })),
-		);
+		const key = yield* svc.deriveKey(tenantId).pipe(Effect.mapError((e) => new CryptoError({ cause: e, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
 		const iv = crypto.getRandomValues(new Uint8Array(_config.iv));
 		const ciphertext = yield* Effect.tryPromise({
 			catch: (e) => new CryptoError({ cause: e, code: 'OP_FAILED', op: 'encrypt', tenantId }),
@@ -125,12 +121,8 @@ const hash = (input: string): Effect.Effect<Hex64> =>
 	);
 const hmac = (key: string, data: string): Effect.Effect<Hex64> =>
 	Effect.gen(function* () {
-		const cryptoKey = yield* Effect.promise(() =>
-			crypto.subtle.importKey('raw', _encoder.encode(key), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']),
-		);
-		const signature = yield* Effect.promise(() =>
-			crypto.subtle.sign('HMAC', cryptoKey, _encoder.encode(data)),
-		);
+		const cryptoKey = yield* Effect.promise(() =>crypto.subtle.importKey('raw', _encoder.encode(key), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']),);
+		const signature = yield* Effect.promise(() =>crypto.subtle.sign('HMAC', cryptoKey, _encoder.encode(data)),);
 		return Encoding.encodeHex(new Uint8Array(signature)) as Hex64;
 	}).pipe(Telemetry.span('crypto.hmac'));
 const pair = Effect.gen(function* () {

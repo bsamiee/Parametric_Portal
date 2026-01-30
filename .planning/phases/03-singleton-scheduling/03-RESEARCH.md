@@ -60,7 +60,7 @@ The established libraries/tools for this domain:
 | `Duration.parts` | Structured breakdown | `Duration.parts(d)` → { hours, minutes, seconds } for detailed metrics |
 | `Effect.andThen` | Mixed-type chaining | Auto-unwraps Effect/value/Promise; cleaner than flatMap+orElseSucceed |
 | `Effect.catchTags` | Multi-error catching | Single call handles multiple tagged errors without chaining |
-| `Effect.fn` | Named tracing | Automatic span creation for named effectful functions |
+| `Effect.fn` | Named tracing | **NOTE: Codebase uses `Telemetry.span` instead — provides richer context** |
 | `Effect.forEach` | Parallel iteration | Built-in `{ concurrency: 'unbounded' }` option; cleaner than map+all |
 | `Effect.if` | Effectful branching | Native if-then-else for effects; cleaner than ternary for Effect results |
 | `Effect.raceFirst` | Shutdown racing | Cleaner than Effect.race for first-to-complete semantics |
@@ -312,7 +312,8 @@ const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
     (conn) => DbPool.release(conn),
   ));
 
-  // Effect.fn for named tracing — automatic span creation
+  // NOTE: Research shows Effect.fn, but CODEBASE uses Telemetry.span instead
+  // In implementation, use: Telemetry.span(Effect.gen(...), 'EntityProcess')
   const process = Effect.fn('EntityProcess')((envelope: Envelope) =>
     Context.Request.withinCluster({
       entityId: addr.entityId,
@@ -483,7 +484,8 @@ const forceStorageSync = Sharding.Sharding.pipe(
   Effect.andThen(() => Effect.logInfo('Storage refreshed manually')),
 );
 
-// Clear message state — Effect.fn for named tracing
+// Clear message state — NOTE: CODEBASE uses Telemetry.span instead of Effect.fn
+// In implementation: Telemetry.span(resetEffect, 'resetEntityState')
 const resetEntityState = Effect.fn('resetEntityState')(
   (entityType: string, entityId: string) =>
     Sharding.Sharding.pipe(
@@ -691,7 +693,7 @@ Problems that look simple but have existing solutions:
 | Error catching chains | Multiple `Effect.catchTag` calls | `Effect.catchTags({ Tag1: h1, Tag2: h2 })` | Single call for multi-error handling |
 | Mixed-type chaining | `Effect.flatMap` + `orElseSucceed` | `Effect.andThen` | Auto-unwraps Effect/value/Promise |
 | Effectful branching | Ternary returning Effects | `Effect.if(cond, { onTrue, onFalse })` | Native if-then-else for Effect results |
-| Named effect functions | Anonymous `Effect.gen` | `Effect.fn('name')(...)` | Automatic tracing span per function |
+| Named effect functions | Anonymous `Effect.gen` | `Telemetry.span(effect, 'name')` | **CODEBASE uses Telemetry.span NOT Effect.fn** |
 | Shutdown racing | `Effect.race` + manual polling | `Effect.raceFirst` + `Effect.repeatWhile` | Cleaner shutdown coordination |
 | Exit handling | `Effect.exit` + `Exit.match` | `Effect.matchCauseEffect` | Direct cause matching without conversion |
 | Shutdown detection | Manual exit inspection | `Exit.isInterrupted(exit)` | Distinguish graceful shutdown from failure |
@@ -1026,7 +1028,7 @@ static readonly cron = <E, R>(config: {
 - GROUP1: Added `Array.partition`, `Array.groupBy`, `Boolean.match`, `Number.between`, `Number.clamp`
 - GROUP1: Added `DateTime.distanceDuration` for staleness calculation
 - GROUP2: Applied `Effect.catchTags`, `Effect.andThen`, `Effect.matchCauseEffect`, `Effect.if` patterns
-- GROUP2: Added `Effect.fn` for named tracing, `FiberMap` for fiber tracking
+- GROUP2: Added `Telemetry.span` for named tracing (NOT Effect.fn — codebase pattern), `FiberMap` for fiber tracking
 - GROUP2: Added `Exit.isInterrupted` for shutdown detection, `Effect.annotateCurrentSpan` for spans
 - GROUP3: Applied `Match.exhaustive` for exhaustive matching
 - GROUP3: Added `HashMap`, `HashSet`, `Function.dual` patterns

@@ -12,9 +12,9 @@
 
 ## MEDIUM Priority
 
-- [Line 186-221] Current: Anonymous Effect.gen function | Use: Effect.fn('CoordinatorSingleton') | Reason: Named function with automatic tracing span
-- [Line 235-254] Current: Anonymous makeCron function body | Use: Effect.fn('CronExecutor') | Reason: Tracing spans for cron execution lifecycle
-- [Line 268-299] Current: Anonymous entity handler | Use: Effect.fn('EntityProcess') | Reason: Named spans for entity processing traces
+- [Line 186-221] Current: Anonymous Effect.gen function | Use: Telemetry.span(Effect.gen(...), 'CoordinatorSingleton') | Reason: **CODEBASE uses Telemetry.span NOT Effect.fn** — provides richer context capture
+- [Line 235-254] Current: Anonymous makeCron function body | Use: Telemetry.span(Effect.gen(...), 'CronExecutor') | Reason: **CODEBASE uses Telemetry.span NOT Effect.fn** — tracing spans for cron execution
+- [Line 268-299] Current: Anonymous entity handler | Use: Telemetry.span(Effect.gen(...), 'EntityProcess') | Reason: **CODEBASE uses Telemetry.span NOT Effect.fn** — named spans for entity processing
 - [Line 316-328] Current: Manual Array.map + Effect.all | Use: Effect.forEach with concurrency option | Reason: forEach with { concurrency: 'unbounded' } cleaner than map+all
 - [Line 331-341] Current: Effect.all for cluster health | Use: Effect.all with ExecutionStrategy.parallel | Reason: Explicit parallelism control via ExecutionStrategy
 - [Line 412-418] Current: Effect.repeat + filterOrFail | Use: Effect.repeatWhile | Reason: repeatWhile cleaner for condition-based repetition
