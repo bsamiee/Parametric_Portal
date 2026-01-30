@@ -58,26 +58,19 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			misses: Metric.counter('cache_misses_total'),
 		},
 		circuit: { stateChanges: Metric.frequency('circuit_state_changes_total') },
-
 		// NOTE: @effect/cluster/ClusterMetrics provides these gauges automatically:
 		// - effect_cluster_entities, effect_cluster_singletons, effect_cluster_runners,
 		// - effect_cluster_runners_healthy, effect_cluster_shards
 		// These are auto-updated by Sharding internals and exported via Telemetry.Default OTLP layer.
 		// We only define APP-SPECIFIC metrics below (counters/histograms that ClusterMetrics doesn't provide).
-
 		cluster: {
-
 			// Entity lifecycle metrics - important for capacity planning and debugging idle timeout
 			entityActivations: Metric.counter('cluster_entity_activations_total'),
 			entityDeactivations: Metric.counter('cluster_entity_deactivations_total'),
-
 			// Entity lifetime histogram - helps tune maxIdleTime settings
-			entityLifetime: Metric.timerWithBoundaries('cluster_entity_lifetime_seconds',
-				[1, 5, 30, 60, 300, 600, 1800, 3600]),  // Up to 1 hour
-
+			entityLifetime: Metric.timerWithBoundaries('cluster_entity_lifetime_seconds', [1, 5, 30, 60, 300, 600, 1800, 3600]),  // Up to 1 hour
 			// Error counter - labeled by type (MailboxFull, RunnerUnavailable, etc.)
 			errors: Metric.counter('cluster_errors_total'),
-
 			// Histogram for message latency (SLA target: <100ms)
 			messageLatency: Metric.timerWithBoundaries('cluster_message_latency_seconds', _boundaries.cluster),
 			messagesReceived: Metric.counter('cluster_messages_received_total'),
@@ -93,11 +86,14 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			requests: Metric.counter('http_requests_total'),
 		},
 		jobs: {
+			cancellations: Metric.counter('jobs_cancelled_total'),
 			completions: Metric.counter('jobs_completed_total'),
 			deadLettered: Metric.counter('jobs_dead_lettered_total'),
+			dlqSize: Metric.gauge('jobs_dlq_size'),
 			duration: Metric.timerWithBoundaries('jobs_duration_seconds', _boundaries.jobs),
 			enqueued: Metric.counter('jobs_enqueued_total'),
 			failures: Metric.counter('jobs_failed_total'),
+			processingSeconds: Metric.timerWithBoundaries('jobs_processing_seconds', _boundaries.jobs),
 			queueDepth: Metric.gauge('jobs_queue_depth'),
 			retries: Metric.counter('jobs_retried_total'),
 			waitDuration: Metric.timerWithBoundaries('jobs_wait_duration_seconds', _boundaries.jobs),
@@ -130,10 +126,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			refreshes: Metric.counter('search_refreshes_total', { description: 'Total index refreshes' }),
 			suggestions: Metric.counter('search_suggestions_total', { description: 'Total suggestion requests' }),
 		},
-
-		// Singleton execution metrics — labeled by singleton name via MetricsService.label({ singleton: name })
-		// NOTE: Module-level metric constants prevent duplicate Prometheus registration on service restart
-		singleton: {
+		singleton: {	// Singleton execution metrics — labeled by singleton name via MetricsService.label({ singleton: name })
 			duration: Metric.timerWithBoundaries('singleton_duration_seconds', _boundaries.jobs),
 			executions: Metric.counter('singleton_executions_total'),
 			lastExecution: Metric.gauge('singleton_last_execution_timestamp'),
@@ -201,7 +194,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			onTrue: () => Metric.increment(Metric.taggedWithLabels(counter, labels)),
 		});
 	// --- [GAUGE] -------------------------------------------------------------
-	static readonly gauge = (								// Update gauge with labels using official Metric.update API.
+	static readonly gauge = (							// Update gauge with labels using official Metric.update API.
 		gauge: Metric.Metric.Gauge<number>,
 		labels: HashSet.HashSet<MetricLabel.MetricLabel>,
 		delta: number,
@@ -250,8 +243,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		);
 	};
 	// --- [CLUSTER_TRACKING] --------------------------------------------------
-	/** Track cluster operation with error classification. Labels errors by type (e.reason for ClusterError). */
-	static readonly trackCluster = <A, E extends { readonly reason: string }, R>(
+	static readonly trackCluster = <A, E extends { readonly reason: string }, R>(	// Track cluster operation with error classification. Labels errors by type (e.reason for ClusterError)
 		effect: Effect.Effect<A, E, R>,
 		config: {
 			readonly operation: 'send' | 'broadcast' | 'receive';
@@ -280,8 +272,41 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 				}),
 			);
 		});
+	// --- [JOB_TRACKING] ------------------------------------------------------
+	/** Track job operation with type and priority labels. Labels errors by reason for JobError. */
+	static readonly trackJob = <A, E extends { readonly reason: string }, R>(
+		config: {
+			readonly operation: 'submit' | 'process' | 'cancel' | 'replay';
+			readonly jobType: string;
+			readonly priority?: string;
+		},
+	) => (effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R | MetricsService> =>
+		Effect.flatMap(MetricsService, (metrics) => {
+			const labels = MetricsService.label({
+				job_type: config.jobType,
+				operation: config.operation,
+				priority: config.priority,
+			});
+			return effect.pipe(
+				Effect.tap(() => Match.value(config.operation).pipe(
+					Match.when('submit', () => Metric.increment(Metric.taggedWithLabels(metrics.jobs.enqueued, labels))),
+					Match.when('cancel', () => Metric.increment(Metric.taggedWithLabels(metrics.jobs.cancellations, labels))),
+					Match.when('process', () => Effect.void),
+					Match.when('replay', () => Effect.void),
+					Match.exhaustive,
+				)),
+				Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.processingSeconds, labels)),
+				Effect.tapError((e) => {
+					const errorLabels = MetricsService.label({
+						job_type: config.jobType,
+						reason: e.reason,
+					});
+					return Metric.increment(Metric.taggedWithLabels(metrics.jobs.failures, errorLabels));
+				}),
+			);
+		});
 	// --- [HTTP_MIDDLEWARE] ---------------------------------------------------
-	static readonly middleware = HttpMiddleware.make((app) =>	/** HTTP metrics middleware - tracks active requests, duration, errors per tenant. */
+	static readonly middleware = HttpMiddleware.make((app) =>	// HTTP metrics middleware - tracks active requests, duration, errors per tenant
 		Effect.gen(function* () {
 			const metrics = yield* MetricsService;
 			const req = yield* HttpServerRequest.HttpServerRequest;
