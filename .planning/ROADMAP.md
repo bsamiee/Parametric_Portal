@@ -107,10 +107,12 @@ Plans:
   11. File under 225 LOC with `const + namespace` merge pattern
   12. Metrics: `job.queue_depth`, `job.processing_seconds`, `job.failures_total`, `job.dlq_size`
   13. Long-running jobs use `Entity.keepAlive` automatically when duration > maxIdleTime
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: TBD
+- [ ] 04-01-PLAN.md - JobDlq model, repo methods, SQL migration
+- [ ] 04-02-PLAN.md - JobEntity implementation, gut + replace jobs.ts
+- [ ] 04-03-PLAN.md - MetricsService extension with job.* metrics
 
 ### Phase 5: EventBus & Reliability
 **Goal**: Domain events publish reliably with at-least-once delivery and automatic deduplication. EventBus replaces `StreamingService.channel()` for cross-pod pub/sub. Transactional outbox via Activity.make + DurableDeferred.
@@ -209,8 +211,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 |-------|----------------|--------|-----------|
 | 1. Cluster Foundation | 3/3 | Complete | 2026-01-29 |
 | 2. Context Integration | 2/2 | Complete | 2026-01-29 |
-| 3. Singleton & Scheduling | 0/TBD | Not started | - |
-| 4. Job Processing | 0/TBD | Not started | - |
+| 3. Singleton & Scheduling | 3/3 | Complete | 2026-01-29 |
+| 4. Job Processing | 0/3 | Planning complete | - |
 | 5. EventBus & Reliability | 0/TBD | Not started | - |
 | 6. Workflows & State Machines | 0/TBD | Not started | - |
 | 7. Real-Time Delivery | 0/TBD | Not started | - |
