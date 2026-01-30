@@ -84,6 +84,9 @@ Recent decisions affecting current work:
 - [03-01]: Data.TaggedError for SingletonError (not Schema.TaggedError) - internal errors don't cross RPC
 - [03-01]: PlatformError.SystemError with reason 'Unknown' for SqlError mapping
 - [03-01]: Layer.effect pattern for KeyValueStore to access SqlClient dependency
+- [03-02]: Effect.repeat(Schedule.recurWhile) for condition-based shutdown detection (Effect.repeatWhile doesn't exist)
+- [03-02]: Local variable binding (stateOpts) for type narrowing in closures (non-null assertions rejected by linter)
+- [03-02]: Error tags BadArgument, ParseError, SystemError for KeyValueStore.SchemaStore operations
 - [03-03]: withinCluster wraps ENTIRE handler (gen body + ensuring + matchCauseEffect) for complete context propagation
 - [03-03]: DateTime.distanceDuration for Duration-based staleness calculation
 - [03-03]: ClusterService static exports for health check utilities (Phase 8 integration)
@@ -111,8 +114,10 @@ From research and revision feedback - must address during execution:
 - ~~[Phase 3]: Singleton state persistence via KeyValueStore.layerSchema~~ [ADDRESSED: _kvStoreLayers in 03-01]
 - ~~[Phase 3]: Heartbeat gauge pattern for dead man's switch health integration~~ [ADDRESSED: checkSingletonHealth in 03-03]
 
+**Resolved in Phase 3:**
+- ~~[Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime~~ [ADDRESSED: cron factory includes skipIfOlderThan config option in 03-02]
+
 **Open for future phases:**
-- [Phase 3]: `skipIfOlderThan` for ClusterCron to prevent accumulated job burst after downtime
 - [Phase 4]: Priority scheduling pattern — weighted mailbox or external scheduler
 - [Phase 4]: Dead-letter table schema and retry exhaustion flow
 - [Phase 4]: Job cancellation via Effect.interrupt — validate entity handles gracefully
