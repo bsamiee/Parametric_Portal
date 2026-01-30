@@ -37,7 +37,7 @@ const PurgeAssets = {
 	enqueue: (jobService: typeof JobService.Service) =>
 		Context.Request.withinSync(
 			Context.Request.Id.system,
-			jobService.enqueue('purge-assets', null, { delay: _config.schedule.interval }),
+			jobService.enqueue('purge-assets', null),
 			Context.Request.system(),
 		),
 	handler: (db: DatabaseServiceShape, storage: typeof StorageService.Service, audit: typeof AuditService.Service) =>
