@@ -10,7 +10,7 @@ import { Rpc, RpcSerialization } from '@effect/rpc';
 import { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
 import { PgClient } from '@effect/sql-pg';
-import { Array as A, Boolean as B, Cause, Chunk, Clock, Config, Data, DateTime, Duration, Effect, Layer, Match, Metric, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Boolean as B, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, Exit, FiberMap, Layer, Match, Metric, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -349,6 +349,26 @@ const checkClusterHealth = () =>
 		})),
 	), 'cluster.checkClusterHealth');
 
+// --- [UTILITIES] -------------------------------------------------------------
+
+// Cron utilities: preview schedule, validate manual trigger timing
+// cronNextRuns: Preview upcoming execution times (debugging UI, schedule validation)
+// Use Cron.sequence for iterator, take first N entries
+const cronNextRuns = (cron: Cron.Cron, count: number): Effect.Effect<ReadonlyArray<Date>> =>
+	Clock.currentTimeMillis.pipe(
+		Effect.map((now) => {
+			const seq = Cron.sequence(cron, new Date(now));
+			return A.makeBy(count, () => seq.next().value);
+		}),
+	);
+
+// cronMatchesNow: Check if current time matches schedule (manual trigger validation)
+// Use Cron.match to verify datetime aligns with cron expression
+const cronMatchesNow = (cron: Cron.Cron): Effect.Effect<boolean> =>
+	Clock.currentTimeMillis.pipe(
+		Effect.map((now) => Cron.match(cron, new Date(now))),
+	);
+
 // --- [SERVICE] ---------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
@@ -395,23 +415,160 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 	static readonly Layer = _clusterLayer;
 	static readonly Payload = { Process: ProcessPayload, Status: StatusPayload } as const;
 	static readonly Response = { Status: StatusResponse } as const;
-	// Layer factories - compose at startup, pre-wired with ClusterLive + telemetry spans
-	static readonly singleton = <E, R>(name: string, run: Effect.Effect<void, E, R>, options?: { readonly shardGroup?: string }) => Singleton.make(name, Telemetry.span(run, `singleton.${name}`), options).pipe(Layer.provide(_clusterLayer));
+	// --- Singleton Factory: Enhanced with state persistence, lifecycle hooks, graceful shutdown ---
+	// State loaded on startup, passed to run as Ref, auto-persists on scope close
+	// Lifecycle hooks: onBecomeLeader/onLoseLeadership execute at appropriate times
+	// Graceful shutdown: Effect.raceFirst + sharding.isShutdown, Exit.isInterrupted distinguishes shutdown from failure
+	static readonly singleton = <E, R, StateSchema extends S.Schema.Any = never>(
+		name: string,
+		run: (stateRef: Ref.Ref<S.Schema.Type<StateSchema>>) => Effect.Effect<void, E, R>,
+		options?: {
+			readonly shardGroup?: string;
+			readonly state?: { readonly schema: StateSchema; readonly initial: S.Schema.Type<StateSchema> };
+			readonly onBecomeLeader?: Effect.Effect<void, never, R>;
+			readonly onLoseLeadership?: Effect.Effect<void, never, R>;
+		},
+	) => {
+		// State key: namespaced with _CONFIG.singleton.keyPrefix
+		const stateKey = `${_CONFIG.singleton.keyPrefix}${name}`;
+
+		return Singleton.make(
+			name,
+			Effect.gen(function* () {
+				const metrics = yield* MetricsService;
+				const sharding = yield* Sharding.Sharding;
+				yield* Effect.annotateLogsScoped({ 'service.name': `singleton.${name}` });
+
+				// FiberMap for fiber tracking with auto-cleanup (GROUP3 pattern)
+				const fibers = yield* FiberMap.make<string>();
+
+				// Lifecycle hooks with finalizer — Telemetry.span wraps entire singleton work below
+				yield* options?.onBecomeLeader ?? Effect.void;
+				yield* Effect.addFinalizer(() => options?.onLoseLeadership ?? Effect.void);
+
+				// Heartbeat update: Clock.currentTimeMillis for testability (GROUP1 pattern)
+				const updateHeartbeat = Clock.currentTimeMillis.pipe(
+					Effect.tap((ts) => Metric.set(metrics.singleton.lastExecution, ts)),
+					Effect.tap(() => Metric.increment(metrics.singleton.executions)),
+				);
+
+				// State initialization: load from KV store or use initial
+				const stateOpts = options?.state;
+				const stateRef = yield* (stateOpts
+					? Effect.gen(function* () {
+							const kv = yield* KeyValueStore.KeyValueStore;
+							const store = kv.forSchema(stateOpts.schema);
+							// Load state with error mapping (GROUP2: Effect.catchTags)
+							// Error tags: ParseError, SystemError, BadArgument
+							const loaded = yield* store.get(stateKey).pipe(
+								Effect.catchTags({
+									BadArgument: (e) => Effect.fail(SingletonError.fromStateLoad(name, e)),
+									ParseError: (e) => Effect.fail(SingletonError.fromSchemaDecode(name, e)),
+									SystemError: (e) => Effect.fail(SingletonError.fromStateLoad(name, e)),
+								}),
+								Effect.map(Option.getOrElse(() => stateOpts.initial)),
+							);
+							const ref = yield* Ref.make(loaded);
+							// Auto-persist on scope close
+							yield* Effect.addFinalizer(() =>
+								Ref.get(ref).pipe(
+									Effect.flatMap((state) => store.set(stateKey, state)),
+									Effect.catchTags({
+										BadArgument: () => Effect.logWarning('State persist failed on shutdown (BadArgument)'),
+										ParseError: () => Effect.logWarning('State persist failed on shutdown (ParseError)'),
+										SystemError: () => Effect.logWarning('State persist failed on shutdown (SystemError)'),
+									}),
+									Effect.catchAllCause((cause) => Effect.logError('State persist failed', { cause })),
+								),
+							);
+							return ref;
+						})
+					: Ref.make(undefined as unknown as S.Schema.Type<StateSchema>));
+
+				// Shutdown detection: Effect.repeat with Schedule.recurWhile
+				const awaitShutdown = sharding.isShutdown.pipe(
+					Effect.repeat(Schedule.recurWhile((shutdown: boolean) => !shutdown)),
+					Effect.tap(() => Effect.logInfo(`Singleton ${name} detected shutdown`)),
+				);
+
+				// Main work wrapped with context and metrics
+				const mainWork = Context.Request.withinCluster({ isLeader: true })(
+					MetricsService.trackEffect(
+						Telemetry.span(run(stateRef), `singleton.${name}`, { metrics: false }),
+						{
+							duration: metrics.singleton.duration,
+							errors: metrics.errors,
+							labels: MetricsService.label({ singleton: name }),
+						},
+					).pipe(Effect.tap(() => updateHeartbeat)),
+				);
+
+				// Run with shutdown coordination via FiberMap
+				yield* FiberMap.run(fibers, 'main-work')(mainWork);
+
+				// Race work against shutdown signal
+				const exit = yield* Effect.raceFirst(Effect.never, awaitShutdown).pipe(Effect.exit);
+
+				// Exit.isInterrupted distinguishes graceful shutdown from failure (GROUP2 pattern)
+				yield* B.match(Exit.isInterrupted(exit), {
+					onFalse: () => Effect.logWarning(`Singleton ${name} exited unexpectedly`),
+					onTrue: () => Effect.logInfo(`Singleton ${name} interrupted gracefully`),
+				});
+			}),
+			{ shardGroup: options?.shardGroup },
+		).pipe(
+			Layer.provide(_clusterLayer),
+			Layer.provide(_kvStoreLayers),
+		);
+	};
+
+	// --- Cron Factory: Enhanced with MetricsService.trackEffect and withinCluster context ---
+	// NOTE: Cron jobs are stateless by default. For stateful cron, use singleton with Schedule instead.
 	static readonly cron = <E, R>(config: {
 		readonly name: string;
 		readonly cron: Parameters<typeof ClusterCron.make>[0]['cron'];
 		readonly execute: Effect.Effect<void, E, R>;
 		readonly shardGroup?: string;
-		readonly skipIfOlderThan?: Duration.DurationInput;}) => ClusterCron.make({
-		cron: config.cron,
-		execute: Telemetry.span(config.execute, `cron.${config.name}`),
-		name: config.name,
-		shardGroup: config.shardGroup,
-		skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
-	}).pipe(Layer.provide(_clusterLayer));
+		readonly skipIfOlderThan?: Duration.DurationInput;
+		readonly calculateNextRunFromPrevious?: boolean;
+	}) =>
+		ClusterCron.make({
+			calculateNextRunFromPrevious: config.calculateNextRunFromPrevious ?? false,
+			cron: config.cron,
+			execute: Effect.gen(function* () {
+				const metrics = yield* MetricsService;
+				yield* Effect.annotateLogsScoped({ 'service.name': `cron.${config.name}` });
+
+				// Heartbeat update: Clock.currentTimeMillis for testability
+				const updateHeartbeat = Clock.currentTimeMillis.pipe(
+					Effect.tap((ts) => Metric.set(metrics.singleton.lastExecution, ts)),
+					Effect.tap(() => Metric.increment(metrics.singleton.executions)),
+				);
+
+				// Execute within cluster context with trackEffect
+				// Telemetry.span({ metrics: false }) + MetricsService.trackEffect for custom labels (codebase pattern)
+				yield* Context.Request.withinCluster({ isLeader: true })(
+					MetricsService.trackEffect(
+						Telemetry.span(config.execute, `cron.${config.name}`, { metrics: false }),
+						{
+							duration: metrics.singleton.duration,
+							errors: metrics.errors,
+							labels: MetricsService.label({ singleton: config.name, type: 'cron' }),
+						},
+					).pipe(Effect.tap(() => updateHeartbeat)),
+				);
+			}),
+			name: config.name,
+			shardGroup: config.shardGroup,
+			skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
+		}).pipe(Layer.provide(_clusterLayer));
 	// Health check utilities - exported for Phase 8 health endpoint integration
 	static readonly checkClusterHealth = checkClusterHealth;
 	static readonly checkSingletonHealth = checkSingletonHealth;
+
+	// Cron utilities - schedule preview and validation
+	static readonly cronNextRuns = cronNextRuns;
+	static readonly cronMatchesNow = cronMatchesNow;
 }
 
 // --- [NAMESPACE] -------------------------------------------------------------
