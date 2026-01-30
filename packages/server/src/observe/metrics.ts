@@ -130,6 +130,16 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			refreshes: Metric.counter('search_refreshes_total', { description: 'Total index refreshes' }),
 			suggestions: Metric.counter('search_suggestions_total', { description: 'Total suggestion requests' }),
 		},
+
+		// Singleton execution metrics — labeled by singleton name via MetricsService.label({ singleton: name })
+		// NOTE: Module-level metric constants prevent duplicate Prometheus registration on service restart
+		singleton: {
+			duration: Metric.timerWithBoundaries('singleton_duration_seconds', _boundaries.jobs),
+			executions: Metric.counter('singleton_executions_total'),
+			lastExecution: Metric.gauge('singleton_last_execution_timestamp'),
+			stateErrors: Metric.counter('singleton_state_errors_total'),
+			stateOperations: Metric.counter('singleton_state_operations_total'),
+		},
 		storage: {
 			bytes: Metric.counter('storage_bytes_total'),
 			duration: Metric.timerWithBoundaries('storage_operation_duration_seconds', _boundaries.storage),
