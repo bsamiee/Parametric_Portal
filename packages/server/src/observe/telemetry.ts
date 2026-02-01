@@ -13,13 +13,12 @@
  * - Stack Traces: Always captured by default (opt-out via captureStackTrace: false)
  * - Correlation: Logs within span get trace/span IDs via withSpanAnnotations
  * [LAYER]
- * - Telemetry.Default — Provides OTLP export + configured logger
+ * - Telemetry.Default — Provides OTLP export + configured logger (trace propagation disabled on exporter)
  */
-/** biome-ignore-all lint/suspicious/noShadowRestrictedNames: <Boolean shadow> */
 import { Otlp } from '@effect/opentelemetry';
-import { FetchHttpClient } from '@effect/platform';
-import { Array as A, Boolean, Cause, Clock, Config as Cfg, Duration, Effect, FiberId, HashSet, Layer, Logger, LogLevel, Option, pipe, type Tracer } from 'effect';
-import { constant, dual } from 'effect/Function';
+import { FetchHttpClient, HttpClient } from '@effect/platform';
+import { Array as A, Cause, Clock, Config as Cfg, Duration, Effect, FiberId, HashSet, Layer, Logger, LogLevel, Option, pipe, type Tracer } from 'effect';
+import { dual } from 'effect/Function';
 import { Context } from '../context.ts';
 import { MetricsService } from './metrics.ts';
 
@@ -44,24 +43,18 @@ const _telemetryConfig = Cfg.all({
 	serviceVersion: Cfg.string('npm_package_version').pipe(Cfg.withDefault(_config.defaults.service.version)),
 });
 const _kindPatterns: ReadonlyArray<readonly [Tracer.SpanKind, ReadonlyArray<string>]> = [
-	['consumer',  ['jobs.process', 'jobs.poll']],
-	['producer',  ['jobs.enqueue']],
-	['server', 	  ['auth.', 'health.', 'transfer.', 'users.']],
+	['consumer', ['jobs.process', 'jobs.poll']],
+	['producer', ['jobs.enqueue']],
+	['server', ['auth.', 'health.', 'transfer.', 'users.']],
 ] as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _inferKind = (name: string): Tracer.SpanKind =>
-	pipe(
-		_kindPatterns,
-		A.findFirst(([, prefixes]) => A.some(prefixes, (p) => name.startsWith(p))), // NOSONAR S3358
-		Option.map(([kind]) => kind),
-		Option.getOrElse((): Tracer.SpanKind => 'internal'),
-	);
+const _inferKind = (name: string): Tracer.SpanKind => pipe(_kindPatterns, A.findFirst(([, prefixes]) => A.some(prefixes, (p) => name.startsWith(p))), Option.map(([kind]) => kind), Option.getOrElse((): Tracer.SpanKind => 'internal'));
 const _causeAttrs = (cause: Cause.Cause<unknown>): Record<string, unknown> => {
 	const pretty = A.head(Cause.prettyErrors(cause));
 	const msg = pipe(pretty, Option.map((e) => e.message), Option.getOrElse(() => Cause.pretty(cause)));
-	const stack = pipe(pretty, Option.flatMap((e) => Option.fromNullable(e.stack)), Option.getOrUndefined);
+	const stack = pipe(pretty, Option.flatMapNullable((e) => e.stack), Option.getOrUndefined);
 	const base = { 'exception.message': msg, 'exception.stacktrace': stack };
 	return Cause.match(cause, {
 		onDie: (defect) => ({ ...base, 'error': true, 'exception.type': defect instanceof Error ? defect.constructor.name : 'Defect' }),
@@ -72,17 +65,21 @@ const _causeAttrs = (cause: Cause.Cause<unknown>): Record<string, unknown> => {
 		onSequential: (left) => ({ ...left, 'error.sequential': true }),
 	});
 };
-const _recordErrorEvent = (cause: Cause.Cause<unknown>): Effect.Effect<void> =>
-	Effect.flatMap(Effect.optionFromOptional(Effect.currentSpan), Option.match({
-		onNone: constant(Effect.void),
-		onSome: (span) => Effect.flatMap(Clock.currentTimeMillis, (nowMs) => { // NOSONAR S3358
-			const attrs = _causeAttrs(cause);
-			return Effect.when(
-				Effect.sync(() => span.event('exception', BigInt(nowMs * 1_000_000), { 'exception.message': attrs['exception.message'], 'exception.stacktrace': attrs['exception.stacktrace'], 'exception.type': attrs['exception.type'] })),
-				constant('error' in attrs && attrs['error'] === true),
-			);
-		}),
-	}));
+const _annotateError = Effect.tapErrorCause((cause: Cause.Cause<unknown>) => {
+	const attrs = _causeAttrs(cause);
+	return pipe(
+		Effect.all({ nowNs: Clock.currentTimeNanos, span: Effect.optionFromOptional(Effect.currentSpan) }),
+		Effect.flatMap(({ span, nowNs }) =>
+			Effect.all([
+				Option.match(span, {
+					onNone: () => Effect.void,
+					onSome: (s) => Effect.when(Effect.sync(() => s.event('exception', nowNs, { 'exception.message': attrs['exception.message'], 'exception.stacktrace': attrs['exception.stacktrace'], 'exception.type': attrs['exception.type'] })), () => attrs['error'] === true),
+				}),
+				Effect.annotateCurrentSpan(attrs),
+			], { discard: true }),
+		),
+	);
+});
 const _span: {
 	(name: string, opts?: Telemetry.SpanOpts): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 	<A, E, R>(self: Effect.Effect<A, E, R>, name: string, opts?: Telemetry.SpanOpts): Effect.Effect<A, E, R>;
@@ -93,26 +90,16 @@ const _span: {
 			Effect.flatMap(([ctx, fiberId]) => {
 				const ctxAttrs = Context.Request.toAttrs(ctx, fiberId);
 				const kind = opts?.kind ?? pipe(ctx.circuit, Option.map((): Tracer.SpanKind => 'client'), Option.getOrElse(() => _inferKind(name)));
-				const coreSpan = self.pipe(
-					Effect.tapErrorCause((cause) => Effect.all([_recordErrorEvent(cause), Effect.annotateCurrentSpan(_causeAttrs(cause))], { discard: true })),
-					Effect.withSpan(name, { attributes: { ...ctxAttrs, ...opts }, captureStackTrace: opts?.captureStackTrace !== false, kind }),
-					Effect.withLogSpan(name),
-					Effect.annotateLogs(ctxAttrs),
-				);
-				return Boolean.match(opts?.metrics !== false, {
-					onFalse: () => coreSpan,
-					onTrue: () => Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({
-						onNone: () => coreSpan,
-						onSome: (m) => MetricsService.trackEffect(coreSpan, { duration: m.http.duration, errors: m.errors, labels: MetricsService.label({ operation: name, tenant: ctx.tenantId }) }),
-					})),
-				});
+				const coreSpan = self.pipe(_annotateError, Effect.withSpan(name, { attributes: { ...ctxAttrs, ...opts }, captureStackTrace: opts?.captureStackTrace !== false, kind }), Effect.withLogSpan(name), Effect.annotateLogs(ctxAttrs));
+				return opts?.metrics === false
+					? coreSpan
+					: Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({
+							onNone: () => coreSpan,
+							onSome: (m) => MetricsService.trackEffect(coreSpan, { duration: m.http.duration, errors: m.errors, labels: MetricsService.label({ operation: name, tenant: ctx.tenantId }) }),
+						}));
 			}),
-			Effect.catchAll(() => self.pipe(
-				Effect.tapErrorCause((cause) => Effect.all([_recordErrorEvent(cause), Effect.annotateCurrentSpan(_causeAttrs(cause))], { discard: true })),
-				Effect.withSpan(name, { attributes: opts, captureStackTrace: opts?.captureStackTrace !== false, kind: opts?.kind ?? _inferKind(name) }),
-				Effect.withLogSpan(name),
-			)),
-		),
+			Effect.catchAll(() => self.pipe(_annotateError, Effect.withSpan(name, { attributes: opts, captureStackTrace: opts?.captureStackTrace !== false, kind: opts?.kind ?? _inferKind(name) }), Effect.withLogSpan(name))),
+		) as Effect.Effect<A, E, R>,
 );
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -120,6 +107,7 @@ const _span: {
 const _Default = Layer.unwrapEffect(
 	_telemetryConfig.pipe(Effect.map((cfg) => {
 		const exp = _config.exporters[cfg.environment];
+		const baseLogger = cfg.environment === 'production' ? Logger.jsonLogger : Logger.prettyLogger({ colors: 'auto', mode: 'auto' });
 		return Layer.mergeAll(
 			Otlp.layerJson({
 				baseUrl: cfg.endpoint,
@@ -127,6 +115,7 @@ const _Default = Layer.unwrapEffect(
 				loggerExportInterval: exp.interval,
 				maxBatchSize: exp.batchSize,
 				metricsExportInterval: exp.interval,
+				replaceLogger: Logger.withSpanAnnotations(baseLogger),
 				resource: {
 					attributes: {
 						'deployment.environment.name': cfg.environment,
@@ -144,31 +133,22 @@ const _Default = Layer.unwrapEffect(
 				shutdownTimeout: exp.shutdownTimeout,
 				tracerExportInterval: exp.tracerInterval,
 			}),
-			Logger.replace(Logger.defaultLogger, Logger.withSpanAnnotations(cfg.environment === 'production' ? Logger.jsonLogger : Logger.prettyLogger({ colors: 'auto', mode: 'auto' }))),
 			Logger.minimumLogLevel(cfg.logLevel),
 		);
 	})),
-).pipe(Layer.provide(FetchHttpClient.layer));
+).pipe(Layer.provide(Layer.effect(HttpClient.HttpClient, Effect.map(HttpClient.HttpClient, HttpClient.withTracerPropagation(false)))), Layer.provide(FetchHttpClient.layer));
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const Telemetry = {
-	config: _config,
-	Default: _Default,
-	span: _span,
-} as const;
+const Telemetry = { Default: _Default, span: _span } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Telemetry {
 	export type Config = Cfg.Config.Success<typeof _telemetryConfig>;
 	export type Environment = Config['environment'];
-	export type SpanOpts = Tracer.SpanOptions['attributes'] & {
-		readonly captureStackTrace?: false;
-		readonly kind?: Tracer.SpanKind;
-		readonly metrics?: false;
-	};
+	export type SpanOpts = Tracer.SpanOptions['attributes'] & { readonly captureStackTrace?: false; readonly kind?: Tracer.SpanKind; readonly metrics?: false };
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
