@@ -8,10 +8,10 @@
  * This decoupling enables clean layer composition in main.ts.
  */
 import { SqlClient } from '@effect/sql';
-import { Clock, type Context, Effect, Schema as S } from 'effect';
+import { Clock, type Context, Effect, Option, Schema as S } from 'effect';
 import { Client } from './client.ts';
 import { repo, Update } from './factory.ts';
-import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, RefreshToken, Session, User } from './models.ts';
+import { ApiKey, App, Asset, AuditLog, EventOutbox, Job, JobDlq, KvStore, MfaSecret, OauthAccount, RefreshToken, Session, User } from './models.ts';
 
 // --- [USER_REPO] -------------------------------------------------------------
 
@@ -214,6 +214,45 @@ const makeJobDlqRepo = Effect.gen(function* () {
 	};
 });
 
+// --- [EVENT_OUTBOX_REPO] -----------------------------------------------------
+
+const makeEventOutboxRepo = Effect.gen(function* () {
+	const r = yield* repo(EventOutbox, 'event_outbox', {
+		conflict: { keys: ['eventId'], only: [] },		// Dedupe by eventId — reject duplicates
+		purge: 'purge_event_outbox',
+		resolve: { byEventId: 'eventId' },
+	});
+	return {
+		...r,
+		byEventId: (eventId: string) => r.by('byEventId', eventId),
+		countPending: () => r.count([{ field: 'status', value: 'pending' }]),
+		listPending: (limit = 100) => r.page([{ field: 'status', value: 'pending' }], { limit }),
+		markFailed: (id: string) => r.set(id, { status: 'failed' }),
+		markPublished: (id: string) => r.set(id, { published_at: Update.now, status: 'published' }),
+		/**
+		 * Offer event to outbox — MUST be called within db.withTransaction() scope.
+		 *
+		 * CRITICAL: This insert participates in the current SQL transaction.
+		 * Events become visible only after transaction commits, preventing phantom events.
+		 *
+		 * Usage:
+		 * ```typescript
+		 * yield* db.withTransaction(Effect.gen(function* () {
+		 *   yield* db.orders.insert(order);
+		 *   yield* db.eventOutbox.offer({ appId, eventId, eventType: 'order.placed', payload });
+		 * }));
+		 * ```
+		 */
+		offer: (event: { appId: string; eventId: string; eventType: string; payload: unknown }) =>
+			r.insert({ appId: event.appId, eventId: event.eventId, eventType: event.eventType, payload: event.payload, publishedAt: Option.none(), status: 'pending' }),
+		/**
+		 * Take pending events for broadcast — used by outbox worker.
+		 * Returns events in FIFO order (by id, which is UUIDv7 time-ordered).
+		 */
+		takePending: (limit = 100) => r.page([{ field: 'status', value: 'pending' }], { asc: true, limit }),
+	};
+});
+
 // --- [KV_STORE_REPO] ---------------------------------------------------------
 
 const makeKvStoreRepo = Effect.gen(function* () {
@@ -237,11 +276,11 @@ const makeKvStoreRepo = Effect.gen(function* () {
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, refreshTokens, assets, audit, mfaSecrets, jobs, jobDlq, kvStore] = yield* Effect.all([
+		const [users, apps, sessions, apiKeys, oauthAccounts, refreshTokens, assets, audit, mfaSecrets, jobs, jobDlq, eventOutbox, kvStore] = yield* Effect.all([
 			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeRefreshTokenRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo,
+			makeOauthAccountRepo, makeRefreshTokenRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeJobDlqRepo, makeEventOutboxRepo, makeKvStoreRepo,
 		]);
-		return { apiKeys, apps, assets, audit, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, refreshTokens, sessions, users, withTransaction: sqlClient.withTransaction };
+		return { apiKeys, apps, assets, audit, eventOutbox, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, refreshTokens, sessions, users, withTransaction: sqlClient.withTransaction };
 	}),
 }) {}
 type DatabaseServiceShape = Context.Tag.Service<typeof DatabaseService>;
