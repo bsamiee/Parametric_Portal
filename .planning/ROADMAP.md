@@ -129,10 +129,12 @@ Plans:
   6. Event emission wrapped in `Activity.make` for replay-safe idempotency
   7. Transactional outbox uses `DurableDeferred` for commit acknowledgment
   8. `StreamingService.channel()` marked deprecated with migration path to EventBus
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: TBD
+- [ ] 05-01-PLAN.md - EventOutbox model, migration, DLQ extension (Wave 1)
+- [ ] 05-02-PLAN.md - EventBus service with VariantSchema, broadcaster, outbox (Wave 2)
+- [ ] 05-03-PLAN.md - DevTools layer, streaming.ts deprecation (Wave 2)
 
 ### Phase 6: Workflows & State Machines
 **Goal**: Multi-step processes automatically compensate on failure; entity lifecycles are explicit and recoverable. All compensation logic wrapped in Activity.make. No if/else chains in state transitions.
@@ -213,7 +215,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 2. Context Integration | 2/2 | Complete | 2026-01-29 |
 | 3. Singleton & Scheduling | 3/3 | Complete | 2026-01-29 |
 | 4. Job Processing | 3/3 | Complete | 2026-01-30 |
-| 5. EventBus & Reliability | 0/TBD | Not started | - |
+| 5. EventBus & Reliability | 0/3 | Not started | - |
 | 6. Workflows & State Machines | 0/TBD | Not started | - |
 | 7. Real-Time Delivery | 0/TBD | Not started | - |
 | 8. Health & Observability | 0/TBD | Not started | - |
