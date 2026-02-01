@@ -187,6 +187,18 @@ class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Unified dead-letter 
 	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job/event was replayed (null = pending)
 }) {}
 
+// --- [EVENTS: EVENT_OUTBOX] --------------------------------------------------
+class EventOutbox extends Model.Class<EventOutbox>('EventOutbox')({		// Transactional outbox for domain events. Belongs to an App.
+	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — NO created_at COLUMN
+	id: Model.Generated(S.UUID),
+	appId: S.UUID,														// Tenant scope
+	eventId: S.UUID,													// Unique event identifier (for deduplication)
+	eventType: S.String,												// Event type: 'user.created', 'order.placed' (dot-notation)
+	payload: Model.JsonFromString(S.Unknown),							// Full event envelope
+	status: S.String,													// 'pending' | 'published' | 'failed'
+	publishedAt: Model.FieldOption(S.DateFromSelf),						// When event was broadcast
+}) {}
+
 // --- [INFRA: KV_STORE] -------------------------------------------------------
 class KvStore extends Model.Class<KvStore>('KvStore')({					// Cluster infrastructure state (singleton state, feature flags).
 	// IMPORTANT: No appId — cluster-wide infrastructure state, NOT tenant-scoped
@@ -223,4 +235,4 @@ class SearchEmbedding extends Model.Class<SearchEmbedding>('SearchEmbedding')({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, RefreshToken, SearchDocument, SearchEmbedding, Session, User };
+export { ApiKey, App, Asset, AuditLog, EventOutbox, Job, JobDlq, KvStore, MfaSecret, OauthAccount, RefreshToken, SearchDocument, SearchEmbedding, Session, User };
