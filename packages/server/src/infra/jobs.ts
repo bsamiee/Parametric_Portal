@@ -168,6 +168,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 				payload: envelope.payload,
 				replayedAt: Option.none(),
 				requestId: Option.none(),
+				source: 'job',
 				type: envelope.type,
 				userId: Option.none(),
 			})),
@@ -281,7 +282,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 // --- [SERVICES] --------------------------------------------------------------
 
 class JobService extends Effect.Service<JobService>()('server/Jobs', {
-	dependencies: [JobEntityLive.pipe(Layer.provide(ClusterService.Layer)), DatabaseService.Default, MetricsService.Default],
+	dependencies: [JobEntityLive.pipe(Layer.provideMerge(ClusterService.Layer)), DatabaseService.Default, MetricsService.Default],
 	scoped: Effect.gen(function* () {
 		const { sharding, handlers, db, counter, statusHub } = yield* Effect.all({ counter: Ref.make(0), db: DatabaseService, handlers: _handlers, sharding: Sharding.Sharding, statusHub: _statusHub });
 		const getClient = yield* sharding.makeClient(JobEntity);

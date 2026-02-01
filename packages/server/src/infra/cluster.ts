@@ -4,7 +4,7 @@
  */
 import { ClusterCron, ClusterMetrics, Entity, EntityId, HttpRunner, K8sHttpClient, RunnerHealth, Sharding, ShardingConfig, Singleton, Snowflake, SocketRunner, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
 import { FetchHttpClient, Socket } from '@effect/platform';
-import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket } from '@effect/platform-node';
+import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket, NodeSocketServer } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
 import { PgClient } from '@effect/sql-pg';
 import { Array as A, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, FiberMap, HashSet, Layer, Metric, Option, Predicate, Ref, Schedule, Schema as S } from 'effect';
@@ -31,6 +31,7 @@ const _CONFIG = {
 		schemaVersion: 1,
 		threshold: 2,												// 2x expected interval before staleness
 	},
+	socketServer: { port: 9000 },
 } as const;
 const _scheduleRetry = (max: number, cap = _CONFIG.retry.cap) => Schedule.exponential(_CONFIG.retry.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(max)), Schedule.upTo(cap));
 
@@ -148,13 +149,24 @@ const _healthLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Health mode
 		: RunnerHealth.layerNoop;
 }));
 const _transportBase = Layer.mergeAll(RpcSerialization.layerMsgPack, _healthLayer, _storageLayers);
-const _httpLayer = HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase));
+// Client-only HTTP layer for fallback (no local entity hosting, only message passing)
+// Uses provideMerge to expose ShardingConfig, maintaining type compatibility with socket layer
+const _httpClientLayer = HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provideMerge(_transportBase));
+// Full socket runner layer for entity hosting
+const _socketLayer = SocketRunner.layer.pipe(
+	Layer.provide(NodeSocketServer.layer({ port: _CONFIG.socketServer.port })),
+	Layer.provide(NodeClusterSocket.layerClientProtocol),
+	Layer.provideMerge(_transportBase));
 const _transports = {
-	auto: SocketRunner.layerClientOnly.pipe(Layer.provide(NodeClusterSocket.layerClientProtocol), Layer.provide(_transportBase),
-		Layer.catchAll((e) => Effect.logWarning('Socket unavailable, using HTTP', { error: String(e) }).pipe(Effect.as(_httpLayer), Layer.unwrapEffect))),
-	http: _httpLayer,
-	socket: SocketRunner.layerClientOnly.pipe(Layer.provide(NodeClusterSocket.layerClientProtocol), Layer.provide(_transportBase)),
-	websocket: HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault), Layer.provide(NodeSocket.layerWebSocketConstructor), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase)),
+	auto: _socketLayer.pipe(
+		Layer.catchAll((e) => Effect.logWarning('Socket unavailable, using HTTP client-only (no local entity hosting)', { error: String(e) }).pipe(Effect.as(_httpClientLayer), Layer.unwrapEffect))),
+	http: _httpClientLayer,
+	socket: _socketLayer,
+	websocket: HttpRunner.layerWebsocketClientOnly.pipe(
+		Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault),
+		Layer.provide(NodeSocket.layerWebSocketConstructor),
+		Layer.provide(FetchHttpClient.layer),
+		Layer.provideMerge(_transportBase)),
 } as const;
 const _transportLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Polymorphic transport selection via config
 	const mode = yield* Config.string('CLUSTER_TRANSPORT').pipe(
@@ -164,7 +176,7 @@ const _transportLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Polymorp
 	yield* Effect.logInfo('Cluster transport selected', { mode });
 	return _transports[mode];
 }));
-const _clusterLayer = ClusterEntityLive.pipe(Layer.provide(_transportLayer));	// Entity layer with transport wiring
+const _clusterLayer = ClusterEntityLive.pipe(Layer.provideMerge(_transportLayer));	// Entity layer with transport wiring, provideMerge exposes Sharding+ShardingConfig
 
 // --- [SERVICE] ---------------------------------------------------------------
 

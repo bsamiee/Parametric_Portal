@@ -16,6 +16,7 @@ import { OAuthService } from '@parametric-portal/server/domain/oauth';
 import { SearchService } from '@parametric-portal/server/domain/search';
 import { SessionService } from '@parametric-portal/server/domain/session';
 import { StorageService } from '@parametric-portal/server/domain/storage';
+import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { JobService } from '@parametric-portal/server/infra/jobs';
 import { StorageAdapter } from '@parametric-portal/server/infra/storage';
 import { AuditService } from '@parametric-portal/server/observe/audit';
@@ -57,7 +58,7 @@ const ServicesLayer = Layer.mergeAll(SessionService.Default, StorageService.Defa
 	Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
 	Layer.provideMerge(ReplayGuardService.Default),
 	Layer.provideMerge(CacheService.Layer),
-	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default)),
+	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default, ClusterService.Layer)),
 	Layer.provideMerge(PlatformLayer),
 );
 
@@ -94,7 +95,12 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-NodeRuntime.runMain(Effect.scoped(Layer.launch(ServerLayer)).pipe(
+// NOTE: CurrentAddress requirement is a phantom type from @effect/cluster Entity.toLayer.
+// Entity handlers yield Entity.CurrentAddress internally, but Entity.toLayer uses Exclude<RX, CurrentAddress>
+// to remove it from layer requirements. TypeScript sometimes fails to compute this exclusion properly.
+// This type assertion is safe because CurrentAddress is only available within entity scope (not app level).
+// ShardingConfig is provided by ClusterService.Layer via _storageLayers.
+NodeRuntime.runMain((Effect.scoped(Layer.launch(ServerLayer)).pipe(
 	Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
 	Effect.ensuring(Effect.logInfo('Server shutdown complete')),
-));
+) as Effect.Effect<never>));
