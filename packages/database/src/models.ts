@@ -171,19 +171,20 @@ class Job extends Model.Class<Job>('Job')({								// Background task. Belongs t
 }) {}
 
 // --- [JOBS: JOB_DLQ] ---------------------------------------------------------
-class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Dead-lettered job. Belongs to an App. No updatedAt (append-mostly).
+class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Unified dead-letter queue for jobs and events. Belongs to an App. No updatedAt (append-mostly).
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract DLQ creation time — NO dlqAt COLUMN
 	id: Model.Generated(S.UUID),
-	originalJobId: S.UUID,												// Link to original job (NO FK — job may be purged before replay)
+	source: S.String,													// Discriminant: 'job' | 'event' — identifies origin type
+	originalJobId: S.UUID,												// Link to original job/event (NO FK — source may be purged before replay)
 	appId: S.UUID,														// Tenant scope
 	userId: Model.FieldOption(S.UUID),									// Audit trail (FK RESTRICT — users never hard-deleted)
 	requestId: Model.FieldOption(S.UUID),								// Correlation for cross-pod traces
-	type: S.String,														// Job type
+	type: S.String,														// Job type or event type
 	payload: Model.JsonFromString(S.Unknown),							// Original payload
-	errorReason: S.String,												// Discriminant: MaxRetries | Validation | HandlerMissing | RunnerUnavailable | Timeout | Panic
+	errorReason: S.String,												// Job: MaxRetries | Validation | HandlerMissing | RunnerUnavailable | Timeout | Panic; Event: DeliveryFailed | DeserializationFailed | DuplicateEvent | HandlerMissing | HandlerTimeout
 	attempts: S.Number,													// Total attempts before dead-letter
 	errorHistory: Model.JsonFromString(S.Array(S.Struct({ error: S.String, timestamp: S.Number }))),	// Error trail
-	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job was replayed (null = pending)
+	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job/event was replayed (null = pending)
 }) {}
 
 // --- [INFRA: KV_STORE] -------------------------------------------------------
