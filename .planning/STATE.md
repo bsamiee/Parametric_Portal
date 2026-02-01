@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-01-28)
 
 **Core value:** Apps deploy multi-pod with zero coordination code
-**Current focus:** Phase 4 - Job Processing
+**Current focus:** Phase 5 - EventBus & Reliability
 
 ## Current Position
 
-Phase: 4 of 8 (Job Processing)
-Plan: 3 of 3 in current phase (Phase 4 Complete)
-Status: Phase complete
-Last activity: 2026-01-30 - Completed 04-03-PLAN.md
+Phase: 5 of 8 (EventBus & Reliability)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-02-01 - Completed 05-01-PLAN.md
 
-Progress: [#######---] 68%
+Progress: [########--] 75%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11
+- Total plans completed: 12
 - Average duration: 8 min
 - Total execution time: 1.7 hours
 
@@ -31,9 +31,10 @@ Progress: [#######---] 68%
 | 02-context-integration  | 2     | 8min  | 4min     |
 | 03-singleton-scheduling | 3     | 22min | 7min     |
 | 04-job-processing       | 3     | 22min | 7min     |
+| 05-eventbus-reliability | 1     | 2min  | 2min     |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (6min), 04-01 (6min), 04-02 (12min), 04-03 (4min)
+- Last 5 plans: 04-01 (6min), 04-02 (12min), 04-03 (4min), 05-01 (2min)
 - Trend: Consistent execution pace
 
 *Updated after each plan completion*
@@ -97,6 +98,9 @@ Recent decisions affecting current work:
 - [04-02]: primaryKey uses crypto.randomUUID() fallback for non-idempotent jobs
 - [04-02]: FiberMap.get with catchTag pattern (returns Effect, not Option)
 - [04-02]: dlqAt: undefined for auto-generation via Model.DateTimeInsertFromDate
+- [05-01]: Unified DLQ with source discriminator (job|event) rather than separate tables
+- [05-01]: Model.FieldOption creates required Option field in insert schema — pass Option.none() explicitly
+- [05-01]: Page options use `asc: boolean` not `order: 'asc'`
 
 ### Pending Todos
 
@@ -136,11 +140,13 @@ From research and revision feedback - must address during execution:
 **Resolved in Phase 4 Plan 2:**
 - ~~[Phase 4]: Entity-based job dispatch~~ [ADDRESSED: JobEntity with mailbox routing, priority pools, FiberMap tracking]
 
+**Resolved in Phase 5 Plan 1:**
+- ~~[Phase 5]: Transactional outbox via Activity.make + DurableDeferred~~ [ADDRESSED: EventOutbox table + offer() method participates in SQL transaction scope]
+
 **Open for future phases:**
 - [Phase 4]: In-flight job migration during deployment - validate via staging
 - [Phase 5]: Verify Ndjson.pack/unpackSchema API exists in @effect/cluster 0.56.1
 - [Phase 5]: Verify EventLog.schema API exists for optional event sourcing
-- [Phase 5]: Transactional outbox via Activity.make + DurableDeferred
 - [Phase 6]: Research Machine.makeSerializable integration with Entity pattern
 - [Phase 6]: Verify VariantSchema API in @effect/experimental current version
 - [Phase 6]: Compensation handlers MUST wrap in Activity.make
@@ -153,6 +159,6 @@ From research and revision feedback - must address during execution:
 
 ## Session Continuity
 
-Last session: 2026-01-30
-Stopped at: Completed 04-03-PLAN.md (Phase 4 complete)
+Last session: 2026-02-01
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
