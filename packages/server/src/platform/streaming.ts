@@ -70,6 +70,26 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 			);
 			return HttpServerResponse.stream(body, { contentType: 'text/event-stream', headers: Headers.fromInput({ 'Cache-Control': 'no-cache', Connection: 'keep-alive' }) });
 		});
+	/**
+	 * @deprecated Use EventBus.subscribe() for cross-pod event delivery.
+	 * channel() only works within a single pod. EventBus provides:
+	 * - Cluster-wide broadcast via Sharding.broadcaster
+	 * - Typed domain events via VariantSchema
+	 * - At-least-once delivery with deduplication
+	 * - Transactional outbox (events only publish after commit)
+	 *
+	 * Migration:
+	 * ```typescript
+	 * // Before (single-pod only)
+	 * const channel = yield* StreamingService.channel('topic');
+	 * yield* channel.publish(event);
+	 * const stream = channel.subscribe;
+	 *
+	 * // After (cluster-wide)
+	 * yield* EventBus.emit({ _tag: 'OrderCreated', ...data });
+	 * yield* EventBus.subscribe('order', (e) => Effect.logInfo('Order event', e));
+	 * ```
+	 */
 	static readonly channel = <A>(name: string, config?: {	// Tenant-scoped pub/sub channel - lazy creation, shared across routes.
 		readonly capacity?: number }): Effect.Effect<StreamingService.Channel<A>, never, Scope> =>
 		_channelSem.withPermits(1)(Effect.gen(function* () {
@@ -182,6 +202,22 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 			const headers = config.format === 'sse' ? { 'Cache-Control': 'no-cache', Connection: 'keep-alive' } : { 'Content-Disposition': `attachment; filename="${filename}"` };
 			return HttpServerResponse.stream(encoded.pipe(Stream.buffer({ capacity: cfg.capacity, strategy: cfg.strategy }), _withMetrics(labels, config.name, config.format), Stream.tap((chunk) => _inc(labels, (m) => m.stream.bytes, chunk.length)), Stream.ensuring(Effect.logDebug('Stream closed', { direction: 'emit', format: config.format, stream: config.name, tenant: tenantId }))), { contentType: cfg.contentType, headers: Headers.fromInput(headers) });
 		});
+	/**
+	 * @deprecated Use EventBus.emit() for cross-pod event publishing.
+	 * broadcast() only works within a single pod. EventBus provides:
+	 * - Cluster-wide delivery via Sharding.broadcaster
+	 * - Transactional outbox (events only publish after commit)
+	 * - At-least-once delivery with automatic retries
+	 *
+	 * Migration:
+	 * ```typescript
+	 * // Before (single-pod only)
+	 * const streams = yield* StreamingService.broadcast({ source, subscribers: 3 });
+	 *
+	 * // After (cluster-wide)
+	 * yield* EventBus.emit({ _tag: 'OrderCreated', ...data });
+	 * ```
+	 */
 	static readonly broadcast = <A, E>(config: {	// Unified broadcast for fan-out - mode inferred: subscribers=1 → share, undefined → broadcastDynamic, N → broadcast(N)
 		readonly source: Stream.Stream<A, E, never> | Subscribable.Subscribable<A, E, never>;
 		readonly name?: string;
