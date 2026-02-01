@@ -1,452 +1,330 @@
 # Phase 5: EventBus & Reliability - Research
 
-**Researched:** 2026-01-31
-**Domain:** Typed domain events, transactional outbox, at-least-once delivery, event deduplication via @effect/cluster
-**Confidence:** HIGH
+**Researched:** 2026-02-01 | **Confidence:** HIGH | **Valid until:** 2026-02-28
+**Domain:** Typed domain events, transactional outbox, at-least-once delivery, broadcaster fan-out
 
 ## Summary
 
-Phase 5 implements reliable domain event publishing using @effect/cluster's broadcaster API for cross-pod fan-out, Activity.make for replay-safe idempotency, and DurableDeferred for transactional outbox acknowledgment. The existing `StreamingService.channel()` will be deprecated in favor of an EventBus that provides typed contracts via a single polymorphic VariantSchema.
+EventBus implements reliable domain event publishing via `Sharding.broadcaster` for cross-pod fan-out, `Activity.make` for replay-safe idempotency, and `PersistedQueue` for transactional outbox. Single `events.ts` file (~250 LOC) replaces `StreamingService.channel()` with typed contracts via polymorphic VariantSchema.
 
-**Architecture:** Single DomainEvent VariantSchema with dot-notation tags (`user.created`, `order.placed`), envelope injection at emit-time (eventId, correlationId, causationId), Sharding.broadcaster for cluster-wide fan-out, Activity.make wrapping for replay-safe deduplication, transactional outbox via emit + DB write in same transaction with auto-publish on commit.
+**Architecture:** Single DomainEvent VariantSchema with hierarchical tags, envelope injection at emit-time (eventId via Snowflake contains timestamp), `PersistedQueue.offer/take` for transactional outbox with built-in idempotency + automatic retry, unified DLQ via Phase 4's `job_dlq` table with `source` discriminator.
 
-**Key Design Decisions:**
-1. **Single polymorphic VariantSchema**: All domain events defined in one schema with dot-notation hierarchy
-2. **Fat events**: Full payload included — subscribers don't need to fetch additional data
-3. **Envelope injection**: eventId (UUIDv7), correlationId, causationId added at emit — NOT base class extension
-4. **Durable by default**: Subscriptions persist and resume from last offset on restart
-5. **Unified DLQ**: Events share job_dlq table (Phase 4) with source discriminator
-6. **Auto-batch + single function**: One `emit()` handles single event or array, auto-batches within window
-
-**Primary recommendation:** Implement EventBus as Effect.Service with broadcaster-backed fan-out, Activity.make for idempotency, and DurableDeferred for transactional commit acknowledgment. Match existing cluster.ts/jobs.ts patterns exactly.
+**Key Decisions:** (1) Single `_VS` const for VariantSchema—no loose type/const extraction, (2) Fat events with full payload, (3) Polymorphic `emit()` handles single/Chunk via `Match.value`, (4) Unified DLQ with jobs, (5) `broadcaster` over `Entity.make` (fire-and-forget fan-out), (6) `Match.type` exhaustive handlers—no dispatch tables or type casting, (7) `Effect.when`/`Option.match`—no imperative control flow, (8) Unified `EventBus` namespace export with nested types.
 
 ## Standard Stack
 
-The established libraries/tools for this domain:
-
-### Core
-| Library | Version | Purpose | Why Standard |
-|---------|---------|---------|--------------|
-| `@effect/cluster` | 0.56.1 | Sharding.broadcaster, RecipientType.Topic, Entity fan-out | Official cluster messaging |
-| `@effect/workflow` | 0.2.0 | Activity.make, DurableDeferred, idempotency keys | Replay-safe execution |
-| `effect` | 3.19.15 | PubSub, Schema, Match, Duration, Stream, Chunk | Core primitives |
-| `@effect/sql-pg` | 0.50.1 | Event outbox table, DLQ extension | Transactional persistence |
-
-### Key Imports by Package
-
-**effect** (30 key imports):
-| Import | Purpose | Integration Pattern |
-|--------|---------|---------------------|
-| `PubSub.sliding` | Local event buffering | `PubSub.sliding<DomainEvent>(256)` — drop old on overflow |
-| `PubSub.subscribe` | Scoped subscription | `Stream.fromPubSub(hub, { scoped: true })` — auto-cleanup |
-| `Stream.fromPubSub` | Event stream creation | Converts PubSub to Stream for processing |
-| `Stream.groupByKey` | Event partitioning | `Stream.groupByKey(e => e.aggregateId)` — ordered per-aggregate |
-| `Stream.mapEffect` | Effectful processing | Handler invocation with error tracking |
-| `Stream.throttle` | Backpressure | `Stream.throttle({ units: 100, duration: Duration.seconds(1) })` |
-| `Chunk.fromIterable` | Batch processing | Convert arrays to Chunk for batch operations |
-| `Chunk.isNonEmpty` | Guard check | Type-safe non-empty batch validation |
-| `Schema.TaggedRequest` | Event contracts | `Schema.TaggedRequest('user.created')({ ... })` |
-| `Schema.Union` | Polymorphic events | Single union of all TaggedRequest variants |
-| `Schema.brand` | EventId branding | `S.UUID.pipe(S.brand('EventId'))` — type-safe IDs |
-| `Match.type` | Event dispatch | `Match.type<DomainEvent>().pipe(Match.tag('user.created', handler))` |
-| `Match.exhaustive` | Exhaustive handling | Compile-time guarantee all events handled |
-| `HashMap.empty` | Handler registry | `Ref.make(HashMap.empty<string, Handler>())` |
-| `FiberMap.make` | Subscription tracking | Track active subscription fibers |
-| `FiberMap.run` | Managed execution | `FiberMap.run(subs, eventType)(handler)` |
-| `Ref.modify` | Atomic updates | Idempotency key tracking |
-| `HashSet.has` | O(1) membership | Processed event ID lookup |
-| `Option.some` | Envelope wrapping | Metadata injection |
-| `Clock.currentTimeMillis` | Testable timestamps | Replace `Date.now()` for determinism |
-| `Duration.millis` | Dedupe window | `Duration.minutes(5)` for idempotency TTL |
-| `Effect.all` | Parallel emission | `{ concurrency: 'unbounded' }` for batch |
-| `Effect.forEach` | Ordered processing | Per-event handler invocation |
-| `Effect.retry` | Transient recovery | `Schedule.exponential` for retries |
-| `Effect.catchTag` | Error routing | `catchTag('TerminalError', dlq)` |
-| `Effect.tap` | Side effects | Metrics, logging without value change |
-| `Effect.ensuring` | Cleanup | Offset commit on completion |
-| `Effect.interruptible` | Cancel points | Graceful subscription shutdown |
-| `Effect.annotateLogsScoped` | Context | `{ 'event.type': type }` for traces |
-| `Data.TaggedError` | Event errors | `EventError extends Data.TaggedError` |
-
-**@effect/cluster** (12 key imports):
-| Import | Purpose | Integration Pattern |
-|--------|---------|---------------------|
-| `Sharding.Sharding` | Core service | Access broadcaster, entities |
-| `Sharding.broadcaster` | Fan-out messaging | `yield* sharding.broadcaster(Topic)` — all pods receive |
-| `RecipientType.Topic` | Topic definition | `RecipientType.Topic('domain-events', eventSchema)` |
-| `Entity.CurrentAddress` | Context access | Shard/entity context for correlation |
-| `SqlMessageStorage.layer` | Event persistence | At-least-once delivery via SQL |
-| `SqlMessageStorage.saveRequest` | Outbox write | Persist event in transaction |
-| `Snowflake.layerGenerator` | Event ID generation | Cluster-wide unique IDs |
-| `EntityId.make` | Subscription ID | Branded subscriber identity |
-| `Envelope.headers` | Context propagation | Tenant/correlation via headers |
-| `Reply.Void` | Ack response | Subscription acknowledgment |
-| `RunnerHealth.layerK8s` | Cluster health | Pod liveness for failover |
-| `ShardingConfig.layer` | Configuration | `{ shardsPerGroup: 100 }` |
-
-**@effect/workflow** (8 key imports):
-| Import | Purpose | Integration Pattern |
-|--------|---------|---------------------|
-| `Activity.make` | Replay-safe execution | Wrap event handlers for idempotency |
-| `Activity.CurrentAttempt` | Retry tracking | Access attempt count for backoff |
-| `DurableDeferred.make` | Commit signal | Wait for transaction commit before publish |
-| `DurableDeferred.succeed` | Complete signal | Transaction committed, proceed with publish |
-| `DurableDeferred.await` | Block until commit | Pause emission until DB confirms |
-| `DurableDeferred.token` | External resolution | Token for async commit notification |
-| `DurableClock.sleep` | Durable delays | Retry delays that survive restart |
-| `Workflow.withCompensation` | Rollback | Compensate failed event side-effects |
-
-**@effect/experimental** (5 key imports):
-| Import | Purpose | Integration Pattern |
-|--------|---------|---------------------|
-| `VariantSchema.make` | Polymorphic events | `VariantSchema.make({ tag: 'user.created', ... })` |
-| `VariantSchema.Union` | Event union | Combine all event variants into single schema |
-| `Machine.make` | Subscription state | State machine for subscription lifecycle |
-| `Reactivity.make` | Change propagation | Cross-instance event notification |
-| `PersistedCache` | Dedupe cache | Fast processed-ID lookup with TTL |
-
-### Supporting
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| `ioredis` | 5.4.2 | Dedupe window cache | High-volume deduplication |
-| `@effect/platform` | 0.94.2 | FileSystem for dead-letter | DLQ file backup |
+| Library | Version | Key Imports | Purpose |
+|---------|---------|-------------|---------|
+| `@effect/cluster` | 0.56.1 | `Sharding.broadcaster`, `RecipientType.Topic`, `Snowflake` | Cluster fan-out, ID generation |
+| `@effect/workflow` | 0.2.0 | `Activity.make`, `Workflow.withCompensation`, `DurableDeferred`, `DurableClock`, `DurableQueue` | Replay-safe handlers, sagas, acknowledgment, durable delays |
+| `@effect/experimental` | 0.48.0 | `VariantSchema.make`, `PersistedCache`, `PersistedQueue`, `Reactivity`, `Machine` | Schema variants, two-tier cache, outbox, invalidation, state machines |
+| `effect` | 3.19.15 | `PubSub.sliding`, `Chunk`, `HashSet`, `Match.type`, `Predicate`, `Request`, `RequestResolver` | Backpressure, polymorphic handling, batched lookups |
 
 ### Alternatives Considered
 | Instead of | Could Use | Tradeoff |
 |------------|-----------|----------|
-| Sharding.broadcaster | Local PubSub | Single-pod only, no cluster fan-out |
-| Activity.make | Manual dedupe table | Loses replay-safety, more code |
-| DurableDeferred | pg_notify | Ties to PostgreSQL, less portable |
-| VariantSchema | Tagged union per file | Fragmented, no single source of truth |
+| `Sharding.broadcaster` | Local PubSub | Single-pod only, no cluster fan-out |
+| `Activity.make` | Manual dedupe table | Loses replay-safety, more code |
+| `PersistedQueue` | Manual outbox + polling | Loses built-in idempotency + retry |
+| VariantSchema.Class | Tagged union per file | Fragmented, no single source of truth |
+| Data-driven `_Actions` | Inline literals | Duplication, no single source of truth |
 
-**Installation:**
-All packages already in pnpm-workspace.yaml catalog. No new dependencies required.
+**Installation:** All packages in pnpm-workspace.yaml catalog. No new dependencies.
 
-### Configuration (Add to events.ts _CONFIG)
+## Implementation Files
 
-```typescript
-import { Duration, Number as N } from 'effect';
-
-const _CONFIG = {
-  batch: { maxSize: 100, windowMs: Duration.millis(50) },
-  dedupe: { ttl: Duration.minutes(5), maxSize: 10_000 },
-  delivery: { maxAttempts: 5, backoff: Duration.millis(100) },
-  hub: { capacity: 256 },
-  retry: {
-    base: Duration.millis(100),
-    cap: Duration.seconds(30),
-    maxAttempts: 5,
-  },
-} as const;
-```
-
-### Errors (events.ts)
-
-```typescript
-import { Data, Match, Schema as S } from 'effect';
-
-const EventErrorReason = S.Literal(
-  'DeliveryFailed',
-  'DeserializationFailed',
-  'DuplicateEvent',
-  'HandlerMissing',
-  'HandlerTimeout',
-  'MaxRetries',
-  'TransactionRollback',
-  'ValidationFailed',
-);
-
-class EventError extends S.TaggedError<EventError>()('EventError', {
-  cause: S.optional(S.Unknown),
-  eventId: S.optional(S.String),
-  eventType: S.optional(S.String),
-  reason: EventErrorReason,
-}) {
-  static readonly _terminal: ReadonlySet<typeof EventErrorReason.Type> = new Set([
-    'DuplicateEvent', 'HandlerMissing', 'TransactionRollback', 'ValidationFailed',
-  ]);
-  static readonly _retryable: ReadonlySet<typeof EventErrorReason.Type> = new Set([
-    'DeliveryFailed', 'HandlerTimeout',
-  ]);
-  static readonly isTerminal = (e: EventError): boolean => EventError._terminal.has(e.reason);
-  static readonly isRetryable = (e: EventError): boolean => EventError._retryable.has(e.reason);
-  static readonly from = (eventId: string, reason: typeof EventErrorReason.Type, cause?: unknown) =>
-    new EventError({ cause, eventId, reason });
-}
-```
-
-## Architecture Patterns
-
-### Recommended Project Structure
 ```
 packages/server/src/
 ├── events/
-│   ├── bus.ts          # EventBus service + emit/subscribe
-│   ├── schema.ts       # DomainEvent VariantSchema + envelope
-│   └── handlers.ts     # Event handler registration
-├── infra/
-│   ├── cluster.ts      # EXTEND: Add broadcaster topic
-│   └── jobs.ts         # Reference for Entity patterns
-└── observe/
-    └── metrics.ts      # EXTEND: Add event metrics
+│   └── events.ts       # EventBus service (~250 LOC) - schema + bus + handlers merged
+├── observe/
+│   ├── devtools.ts     # Optional DevTools layer (~25 LOC)
+│   └── metrics.ts      # EXTEND: Add event metrics
+└── infra/
+    └── cluster.ts      # Reference for patterns
 
 packages/database/
 ├── migrations/
-│   └── 0003_event_outbox.ts  # Outbox + dedupe tables
+│   └── 0003_event_outbox.ts  # Outbox + DLQ extension (~25 LOC)
 └── src/
     ├── models.ts       # EXTEND: EventOutbox model
     └── repos.ts        # EXTEND: eventOutbox repo
 ```
 
-### Pattern 1: DomainEvent VariantSchema (Single Polymorphic Schema)
-
-**What:** All domain events in one VariantSchema with dot-notation tags
-**When to use:** Every domain event — single source of truth
+### File 1: `packages/server/src/events/events.ts`
 
 ```typescript
-// Source: @effect/experimental/VariantSchema + effect/Schema
-import { VariantSchema } from '@effect/experimental';
-import { Schema as S } from 'effect';
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-// Branded types for type-safe IDs
-const EventId = S.UUID.pipe(S.brand('EventId'));
-const CorrelationId = S.UUID.pipe(S.brand('CorrelationId'));
-const CausationId = S.UUID.pipe(S.brand('CausationId'));
-
-// Envelope injected at emit-time (NOT base class)
-const EventEnvelope = S.Struct({
-  eventId: EventId,
-  correlationId: CorrelationId,
-  causationId: S.optional(CausationId),
-});
-
-// Event payloads — fat events with full data
-const UserCreatedPayload = S.Struct({
-  userId: S.UUID,
-  email: S.String,
-  role: S.String,
-  appId: S.UUID,
-});
-
-const OrderPlacedPayload = S.Struct({
-  orderId: S.UUID,
-  userId: S.UUID,
-  items: S.Array(S.Struct({ productId: S.UUID, quantity: S.Number, price: S.Number })),
-  total: S.Number,
-});
-
-// Single polymorphic VariantSchema — dot-notation hierarchy
-const DomainEvent = S.Union(
-  S.TaggedRequest('user.created')({
-    ...EventEnvelope.fields,
-    payload: UserCreatedPayload,
-  }, { failure: S.Never, success: S.Void }),
-  S.TaggedRequest('user.updated')({
-    ...EventEnvelope.fields,
-    payload: S.Struct({ userId: S.UUID, changes: S.Unknown }),
-  }, { failure: S.Never, success: S.Void }),
-  S.TaggedRequest('order.placed')({
-    ...EventEnvelope.fields,
-    payload: OrderPlacedPayload,
-  }, { failure: S.Never, success: S.Void }),
-  S.TaggedRequest('order.shipped')({
-    ...EventEnvelope.fields,
-    payload: S.Struct({ orderId: S.UUID, trackingNumber: S.String }),
-  }, { failure: S.Never, success: S.Void }),
-);
-type DomainEvent = S.Schema.Type<typeof DomainEvent>;
-
-// Derive event type literals for type-safe subscription
-type EventType = DomainEvent['_tag'];
-const EventTypes = ['user.created', 'user.updated', 'order.placed', 'order.shipped'] as const;
-```
-
-### Pattern 2: EventBus Service (Emit + Subscribe)
-
-**What:** Effect.Service with polymorphic emit, typed subscribe, broadcaster fan-out
-**When to use:** All event publishing and subscription
-
-```typescript
-// Source: @effect/cluster/Sharding + effect/PubSub + effect/Stream
-import { Entity, RecipientType, Sharding } from '@effect/cluster';
-import { Activity, DurableDeferred } from '@effect/workflow';
-import { Clock, Duration, Effect, FiberMap, HashMap, Layer, Match, Metric, Option, PubSub, Ref, Schedule, Schema as S, Stream } from 'effect';
+import { DeliverAt, RecipientType, Sharding, Snowflake, SqlMessageStorage } from '@effect/cluster';
+import { PersistedCache, PersistedQueue, Reactivity, VariantSchema } from '@effect/experimental';
+import { Activity, DurableClock, DurableRateLimiter } from '@effect/workflow';
+import { Chunk, Clock, DateTime, Duration, Effect, Exit, HashSet, Match, Metric, Option, PrimaryKey, PubSub, Schema as S, Stream } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
+import { Resilience } from '../utils/resilience.ts';
+import { ClusterService } from '../infra/cluster.ts';
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+// VariantSchema factory: single source for variants, Class, Field (no loose const/type extraction)
+const _VS = VariantSchema.make({ variants: ['order', 'payment', 'system', 'user'] as const, defaultVariant: 'system' });
+
+// Error properties: Match.type for compile-time exhaustiveness (vs dispatch table which silently returns undefined on new variants)
+const EventErrorReason = S.Literal('DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'HandlerMissing', 'HandlerTimeout', 'MaxRetries', 'TransactionRollback', 'ValidationFailed');
+const _errorProps = Match.type<typeof EventErrorReason.Type>().pipe(
+	Match.when('DeliveryFailed', () => ({ retryable: true, terminal: false })),
+	Match.when('DeserializationFailed', () => ({ retryable: false, terminal: true })),
+	Match.when('DuplicateEvent', () => ({ retryable: false, terminal: true })),
+	Match.when('HandlerMissing', () => ({ retryable: false, terminal: true })),
+	Match.when('HandlerTimeout', () => ({ retryable: true, terminal: false })),
+	Match.when('MaxRetries', () => ({ retryable: false, terminal: true })),
+	Match.when('TransactionRollback', () => ({ retryable: false, terminal: true })),
+	Match.when('ValidationFailed', () => ({ retryable: false, terminal: true })),
+	Match.exhaustive, // Adding new reason forces handling—dispatch table silently fails
+);
+
+class EventError extends S.TaggedError<EventError>()('EventError', {
+	cause: S.optional(S.Unknown),
+	eventId: S.optional(S.String),
+	reason: EventErrorReason,
+}) {
+	get isTerminal(): boolean { return _errorProps(this.reason).terminal; }
+	get isRetryable(): boolean { return _errorProps(this.reason).retryable; }
+	static readonly from = (eventId: string, reason: typeof EventErrorReason.Type, cause?: unknown) => new EventError({ cause, eventId, reason });
+}
+
+// Domain event class via _VS.Class (NOT Events.Struct—Struct not extendable)
+// Creates Schema.Class with static variant accessors: DomainEvent.order, DomainEvent.user, etc.
+class DomainEvent extends _VS.Class('DomainEvent')({
+	eventId: S.UUID.pipe(S.brand('EventId')),
+	aggregateId: S.String,
+	correlationId: S.optional(S.UUID),
+	causationId: S.optional(S.UUID),
+	// NOTE: No occurredAt field—eventId (Snowflake) contains timestamp via Snowflake.timestamp()
+	payload: _VS.Field({
+		order: S.Struct({ action: S.Literal('placed', 'shipped', 'delivered', 'cancelled'), orderId: S.UUID, status: S.String, items: S.Array(S.Struct({ sku: S.String, qty: S.Number })) }),
+		payment: S.Struct({ action: S.Literal('initiated', 'completed', 'failed', 'refunded'), paymentId: S.UUID, amount: S.Number, currency: S.String }),
+		system: S.Struct({ action: S.Literal('started', 'stopped', 'health'), details: S.optional(S.Unknown) }),
+		user: S.Struct({ action: S.Literal('created', 'updated', 'deleted'), userId: S.UUID, email: S.optional(S.String), changes: S.optional(S.Unknown) }),
+	}),
+}) {
+	[PrimaryKey.symbol]() { return `event:${this.eventId}`; }
+}
+
+// Envelope wraps event with emit timestamp + trace context (Class for PrimaryKey + static accessors)
+class EventEnvelope extends S.Class<EventEnvelope>('EventEnvelope')({
+	event: DomainEvent,
+	emittedAt: S.DateTimeUtcFromNumber,
+	traceContext: S.optional(S.Struct({ traceId: S.String, spanId: S.String, parentSpanId: S.optional(S.String) })),
+}) {
+	[PrimaryKey.symbol]() { return `envelope:${this.event.eventId}`; }
+}
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-  batch: { maxSize: 100, windowMs: Duration.millis(50) },
-  dedupe: { ttl: Duration.minutes(5) },
-  hub: { capacity: 256 },
-  retry: Schedule.exponential(Duration.millis(100)).pipe(
-    Schedule.jittered,
-    Schedule.intersect(Schedule.recurs(5)),
-    Schedule.upTo(Duration.seconds(30)),
-    Schedule.whileInput((e: EventError) => !EventError.isTerminal(e)),
-  ),
+	batch: { maxSize: 100, window: Duration.millis(50) },
+	broadcast: { bulkhead: 5, threshold: 3, timeout: Duration.millis(100) },
+	buffer: { capacity: 256, replay: 16 },
+	dedupe: { ttl: Duration.minutes(5), inMemoryCapacity: 10000, inMemoryTTL: Duration.minutes(5) },
+	rateLimit: { window: Duration.seconds(1), limit: 100, algorithm: 'token-bucket' as const },
+	retry: { maxAttempts: 5, timeout: Duration.seconds(30), backoffBase: Duration.millis(100) },
 } as const;
 
-// Topic for cluster-wide broadcast
-const DomainEventTopic = RecipientType.Topic('domain-events', DomainEvent);
+// Default event handler via Match.type—exhaustive, no type casting, no dispatch table
+const _handleDefault = Match.type<DomainEvent>().pipe(
+	Match.tag('order', (e) => Match.value(e.payload.action).pipe(
+		Match.when('placed', () => Effect.logInfo('Order placed', { orderId: e.payload.orderId })),
+		Match.when('shipped', () => Effect.logInfo('Order shipped', { orderId: e.payload.orderId })),
+		Match.when('delivered', () => Effect.logInfo('Order delivered', { orderId: e.payload.orderId })),
+		Match.when('cancelled', () => Effect.logInfo('Order cancelled', { orderId: e.payload.orderId })),
+		Match.exhaustive,
+	)),
+	Match.tag('user', (e) => Match.value(e.payload.action).pipe(
+		Match.when('created', () => Effect.logInfo('User created', { userId: e.payload.userId })),
+		Match.when('updated', () => Effect.logInfo('User updated', { userId: e.payload.userId })),
+		Match.when('deleted', () => Effect.logInfo('User deleted', { userId: e.payload.userId })),
+		Match.exhaustive,
+	)),
+	Match.tag('payment', () => Effect.void),
+	Match.tag('system', () => Effect.void),
+	Match.exhaustive,
+);
 
 // --- [SERVICE] ---------------------------------------------------------------
 
 class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
-  dependencies: [ClusterService.Layer, DatabaseService.Default, MetricsService.Default],
-  scoped: Effect.gen(function* () {
-    const sharding = yield* Sharding.Sharding;
-    const db = yield* DatabaseService;
-    const metrics = yield* MetricsService;
-    const statusHub = yield* PubSub.sliding<DomainEvent>(_CONFIG.hub.capacity);
-    const handlers = yield* Ref.make(HashMap.empty<EventType, EventBus.Handler>());
-    const subscriptions = yield* FiberMap.make<string>();
-    const processedIds = yield* Ref.make(new Set<string>());
+	dependencies: [ClusterService.Layer, DatabaseService.Default, MetricsService.Default, Reactivity.layer, PersistedCache.layer],
+	scoped: Effect.gen(function* () {
+		const sharding = yield* Sharding.Sharding;
+		const db = yield* DatabaseService;
+		const metrics = yield* MetricsService;
+		const reactivity = yield* Reactivity.Reactivity;
+		const statusHub = yield* PubSub.sliding<EventEnvelope>({ capacity: _CONFIG.buffer.capacity, replay: _CONFIG.buffer.replay });
+		const broadcaster = yield* sharding.broadcaster(RecipientType.Topic('domain-events', EventEnvelope));
+		// Two-tier dedupe: in-memory LRU (hot path O(1)) + persistent fallback (cold path)
+		const dedupCache = yield* PersistedCache.make({
+			storeId: 'event-processed',
+			lookup: (key: EventBus.DedupKey) => Effect.succeed(undefined),
+			timeToLive: (_key, exit) => Match.value(Exit.isSuccess(exit)).pipe(Match.when(true, () => Duration.hours(24)), Match.orElse(() => _CONFIG.dedupe.ttl)),
+			inMemoryCapacity: _CONFIG.dedupe.inMemoryCapacity,
+			inMemoryTTL: _CONFIG.dedupe.inMemoryTTL,
+		});
+		const outboxQueue = yield* PersistedQueue.make({ name: 'event-outbox', schema: EventEnvelope });
 
-    yield* Effect.annotateLogsScoped({ 'service.name': 'eventbus' });
+		yield* Effect.annotateLogsScoped({ 'service.name': 'eventbus' });
 
-    // Broadcaster for cluster-wide fan-out
-    const broadcaster = yield* sharding.broadcaster(DomainEventTopic);
+		// Process envelope with Activity.make for replay-safe idempotency
+		const _processEnvelope = (envelope: EventEnvelope, handler: (event: DomainEvent) => Effect.Effect<void, EventError>) =>
+			Telemetry.span(
+				Context.Request.withinCluster({ entityType: 'EventBus' })(
+					dedupCache.get(new EventBus.DedupKey({ eventId: envelope.event.eventId })).pipe(
+						Effect.flatMap(Option.match({
+							onSome: () => Metric.increment(metrics.events.duplicatesSkipped).pipe(Effect.asVoid),
+							onNone: () => Activity.make({
+								name: `handler.${envelope.event.payload._tag}`,
+								idempotencyKey: () => `${envelope.event.payload._tag}:${envelope.event.eventId}`,
+								execute: Activity.CurrentAttempt.pipe(Effect.flatMap((attempt) =>
+									handler(envelope.event).pipe(Effect.timeout(Duration.millis(Duration.toMillis(_CONFIG.retry.timeout) * (attempt.attemptNumber + 1)))),
+								)),
+							}).pipe(
+								Activity.retry({ times: _CONFIG.retry.maxAttempts }),
+								Effect.tap(() => dedupCache.set(new EventBus.DedupKey({ eventId: envelope.event.eventId }), Exit.succeed(undefined))),
+							),
+						})),
+						Effect.catchAll((e) => Clock.currentTimeMillis.pipe(
+							Effect.flatMap((ts) => db.deadLetter.insert({
+								appId: 'system', attempts: 1, errorHistory: [{ error: String(e), timestamp: ts }],
+								errorReason: 'MaxRetries', source: 'event', sourceId: envelope.event.eventId, type: envelope.event.payload._tag, payload: envelope,
+							})),
+							Effect.zipRight(Metric.increment(metrics.events.deadLettered)),
+							Effect.asVoid,
+						)),
+					),
+				),
+				'eventbus.processEnvelope',
+				{ 'event.id': envelope.event.eventId, 'event.type': envelope.event.payload._tag },
+			);
 
-    // Polymorphic emit — handles single event or array, auto-batches
-    const emit = <T extends DomainEvent | readonly DomainEvent[]>(
-      events: T,
-    ): Effect.Effect<T extends readonly DomainEvent[] ? void : void, EventError, never> =>
-      Effect.gen(function* () {
-        const items = Array.isArray(events) ? events : [events];
-        const ctx = yield* Context.Request.current;
-        const ts = yield* Clock.currentTimeMillis;
+		// Outbox worker: rate-limited broadcast with circuit-protected delivery
+		const _broadcastCircuit = (envelope: EventEnvelope) => {
+			const circuitName = `eventbus.broadcast.${envelope.event.payload._tag}`;
+			return Resilience.run(circuitName, broadcaster.send(envelope), {
+				bulkhead: _CONFIG.broadcast.bulkhead,
+				circuit: circuitName,
+				retry: false, // Workflow handles retries via PersistedQueue
+				threshold: _CONFIG.broadcast.threshold,
+				timeout: _CONFIG.broadcast.timeout,
+			});
+		};
+		yield* Effect.forkScoped(
+			outboxQueue.take(
+				(envelope, { id, attempts }) => Telemetry.span(
+					Effect.all([
+						DurableRateLimiter.rateLimit({ name: 'eventbus.broadcast', algorithm: _CONFIG.rateLimit.algorithm, window: _CONFIG.rateLimit.window, limit: _CONFIG.rateLimit.limit, key: `event:${envelope.event.payload._tag}` }),
+						Effect.when(DurableClock.sleep({ name: `retry-backoff-${id}`, duration: Duration.millis(Duration.toMillis(_CONFIG.retry.backoffBase) * Math.pow(2, attempts - 1)), inMemoryThreshold: Duration.seconds(5) }), () => attempts > 1),
+					], { discard: true }).pipe(
+						Effect.zipRight(_broadcastCircuit(envelope)),
+						Effect.tap(() => dedupCache.set(new EventBus.DedupKey({ eventId: envelope.event.eventId }), Exit.succeed(undefined))),
+						Effect.tap(() => Metric.increment(metrics.events.processed)),
+						Effect.catchAll((e) => attempts >= _CONFIG.retry.maxAttempts
+							? Clock.currentTimeMillis.pipe(
+								Effect.flatMap((ts) => db.deadLetter.insert({ appId: 'system', attempts, errorHistory: [{ error: String(e), timestamp: ts }], errorReason: 'MaxRetries', source: 'event', sourceId: envelope.event.eventId, type: envelope.event.payload._tag, payload: envelope })),
+								Effect.asVoid,
+							)
+							: Effect.fail(e),
+						),
+					),
+					'eventbus.outbox.process',
+					{ 'event.id': envelope.event.eventId, 'outbox.attempt': attempts },
+				),
+				{ maxAttempts: _CONFIG.retry.maxAttempts },
+			),
+		);
 
-        // Inject envelope for each event
-        const enriched = items.map((event) => ({
-          ...event,
-          eventId: event.eventId ?? crypto.randomUUID(),
-          correlationId: event.correlationId ?? ctx.requestId,
-          causationId: event.causationId,
-        }));
+		// Startup recovery: reprocess unprocessed messages
+		yield* Effect.all([sharding.getAssignedShardIds, Clock.currentTimeMillis]).pipe(
+			Effect.flatMap(([shards, now]) => SqlMessageStorage.unprocessedMessages(shards, now)),
+			Effect.flatMap((pending) => Chunk.fromIterable(pending).pipe(
+				Chunk.match({ onEmpty: () => Effect.void, onNonEmpty: (items) => broadcaster.sendAll(Chunk.toArray(items)).pipe(Effect.tap(() => Effect.logInfo('Recovered pending events', { count: Chunk.size(items) }))) }),
+			)),
+			Effect.catchAll((e) => Effect.logWarning('Startup recovery failed', { error: String(e) })),
+		);
 
-        // Transactional outbox: write to outbox in current transaction
-        yield* Effect.forEach(enriched, (event) =>
-          db.eventOutbox.insert({
-            appId: ctx.tenantId,
-            eventId: event.eventId,
-            eventType: event._tag,
-            payload: event,
-            status: 'pending',
-          }),
-        );
+		// Polymorphic emit: handles single event or Chunk via Match.value (no ternary, no Predicate)
+		const emit = (input: DomainEvent | Chunk.Chunk<DomainEvent>, opts?: { scheduledAt?: number }) => {
+			const items = Match.value(input).pipe(Match.when(Chunk.isChunk, (c) => c), Match.orElse((e) => Chunk.of(e)));
+			return Telemetry.span(
+				Effect.all([Context.Request.current, sharding.getSnowflake]).pipe(
+					Effect.flatMap(([ctx, sf]) => {
+						const deliverAt = Option.fromNullable(opts?.scheduledAt).pipe(Option.map(DateTime.unsafeMake));
+						const enriched = Chunk.map(items, (e): EventEnvelope => ({
+							event: { ...e, eventId: e.eventId ?? String(sf), correlationId: e.correlationId ?? ctx.requestId },
+							emittedAt: DateTime.unsafeMake(Snowflake.timestamp(sf)),
+							traceContext: Option.some({ traceId: ctx.traceId, spanId: ctx.spanId }),
+							...Option.match(deliverAt, { onNone: () => ({}), onSome: (dt) => ({ [DeliverAt.symbol]: () => dt }) }),
+						}));
+						const keys = HashSet.toArray(HashSet.fromIterable(Chunk.flatMap(enriched, (e) => [`events:${e.event.payload._tag}`, `aggregate:${e.event.aggregateId}`, 'events:all'])));
+						return reactivity.mutation(keys, Effect.forEach(enriched, (e) => outboxQueue.offer(e, { id: e.event.eventId }))).pipe(
+							Effect.zipRight(Effect.all([Metric.incrementBy(metrics.events.emitted, Chunk.size(enriched)), PubSub.publishAll(statusHub, Chunk.toArray(enriched))], { discard: true })),
+						);
+					}),
+				),
+				'eventbus.emit',
+				{ 'event.batch': Chunk.size(items) > 1, 'event.count': Chunk.size(items) },
+			);
+		};
 
-        // DurableDeferred: wait for transaction commit before broadcast
-        const commitSignal = yield* DurableDeferred.make<void, never>();
-        yield* Effect.addFinalizer(() =>
-          db.withTransaction.pipe(
-            Effect.flatMap(() => DurableDeferred.succeed(commitSignal, undefined)),
-            Effect.catchAll(() => Effect.void),
-          ),
-        );
-        yield* DurableDeferred.await(commitSignal);
+		// Subscribe returns Stream that re-executes on invalidation (no fork—Reactivity handles lifecycle)
+		const subscribe = <T extends EventBus.Variant>(
+			eventType: T,
+			handler: EventBus.Handler<T>,
+			options?: { filter?: (e: S.Schema.Type<(typeof DomainEvent)[T]>) => boolean },
+		) =>
+			broadcaster.subscribe.pipe(
+				Effect.map((queue) =>
+					reactivity.stream([`events:${eventType}`, 'events:all'],
+						Stream.fromQueue(queue).pipe(
+							Stream.filter((e): e is EventEnvelope => e.event.payload._tag === eventType && Option.getOrElse(Option.fromNullable(options?.filter), () => () => true)(_VS.extract(eventType)(e.event))),
+							Stream.debounce(Duration.millis(10)), // Suppress rapid bursts before buffering
+							Stream.bufferChunks({ capacity: _CONFIG.buffer.capacity, strategy: 'sliding' }),
+							Stream.mapChunks((chunk) => Chunk.compact(Chunk.dedupe(chunk))), // compact removes falsy in single pass
+							Stream.throttle({ units: _CONFIG.rateLimit.limit, duration: _CONFIG.rateLimit.window, strategy: 'enforce' }), // Subscriber-side rate control
+							Stream.mapEffect((chunk) => Chunk.forEach(chunk, (e) => _processEnvelope(e, handler as EventBus.Handler))), // Direct Chunk.forEach avoids allocation
+						),
+					),
+				),
+				Stream.unwrap,
+			);
 
-        // Activity.make wraps broadcast for replay-safe idempotency
-        yield* Activity.make({
-          name: 'broadcast-events',
-          execute: Effect.forEach(
-            enriched,
-            (event) => broadcaster.send(event).pipe(
-              Effect.tap(() => Metric.increment(metrics.events.emitted)),
-              Effect.tap(() => PubSub.publish(statusHub, event)),
-            ),
-            { concurrency: 'unbounded' },
-          ),
-        });
+		// Register default handler via Match.type (exhaustive, no iteration, no type casting)
+		yield* Effect.forkScoped(
+			broadcaster.subscribe.pipe(
+				Effect.flatMap((queue) => Stream.fromQueue(queue).pipe(
+					Stream.mapEffect((e) => _handleDefault(e.event)),
+					Stream.runDrain,
+				)),
+			),
+		).pipe(Effect.tap(() => Effect.logInfo('Default event handler registered')));
 
-        // Mark outbox entries as published
-        yield* Effect.forEach(enriched, (event) =>
-          db.eventOutbox.markPublished(event.eventId),
-        );
-      }).pipe(
-        Telemetry.span('eventbus.emit', { 'event.count': String(Array.isArray(events) ? events.length : 1) }),
-        Effect.mapError((e) => EventError.from('', 'DeliveryFailed', e)),
-      );
-
-    // Type-safe subscribe with filter
-    const subscribe = <T extends EventType>(
-      eventType: T,
-      handler: (event: Extract<DomainEvent, { _tag: T }>) => Effect.Effect<void, unknown, never>,
-      options?: { filter?: (event: Extract<DomainEvent, { _tag: T }>) => boolean },
-    ): Effect.Effect<void, never, never> =>
-      Effect.gen(function* () {
-        yield* Ref.update(handlers, HashMap.set(eventType, handler as EventBus.Handler));
-
-        // Subscribe to broadcaster topic
-        const stream = yield* broadcaster.subscribe.pipe(Effect.map(Stream.fromQueue));
-
-        yield* FiberMap.run(subscriptions, eventType)(
-          stream.pipe(
-            Stream.filter((event): event is Extract<DomainEvent, { _tag: T }> =>
-              event._tag === eventType && (options?.filter?.(event as Extract<DomainEvent, { _tag: T }>) ?? true),
-            ),
-            Stream.mapEffect((event) =>
-              // Dedupe check
-              Ref.modify(processedIds, (ids) => {
-                const key = event.eventId;
-                return ids.has(key) ? [true, ids] : [false, new Set([...ids, key])];
-              }).pipe(
-                Effect.flatMap((isDupe) =>
-                  isDupe
-                    ? Effect.succeed({ status: 'duplicate' as const })
-                    : handler(event).pipe(
-                        Effect.retry(_CONFIG.retry),
-                        Effect.catchAll((e) =>
-                          db.dlq.insert({
-                            appId: event.payload.appId ?? 'system',
-                            attempts: 1,
-                            errorHistory: [{ error: String(e), timestamp: Date.now() }],
-                            errorReason: 'MaxRetries',
-                            originalJobId: event.eventId,
-                            payload: event,
-                            source: 'event',
-                            type: event._tag,
-                          }).pipe(
-                            Effect.zipRight(Metric.increment(metrics.events.deadLettered)),
-                            Effect.as({ status: 'failed' as const }),
-                          ),
-                        ),
-                        Effect.tap(() => Metric.increment(metrics.events.processed)),
-                        Effect.as({ status: 'processed' as const }),
-                      ),
-                ),
-              ),
-            ),
-            Stream.runDrain,
-          ).pipe(Effect.interruptible),
-        );
-      });
-
-    // Status stream for SSE consumption
-    const statusStream = yield* Stream.fromPubSub(statusHub, { scoped: true });
-
-    yield* Effect.logInfo('EventBus initialized');
-
-    return { emit, onEvent: () => statusStream, subscribe };
-  }),
+		return { emit, subscribe, onEvent: () => Stream.fromPubSub(statusHub, { scoped: true }) };
+	}),
 }) {
-  static readonly Config = _CONFIG;
-  static readonly Error = EventError;
-  static readonly Schema = { DomainEvent, EventEnvelope, EventTypes };
-  static readonly Topic = DomainEventTopic;
+	static readonly Config = _CONFIG;
+	static readonly Error = EventError;
+	static readonly Event = DomainEvent;
+	static readonly Envelope = EventEnvelope;
+	static readonly Topic = RecipientType.Topic('domain-events', EventEnvelope);
 }
-
-// --- [NAMESPACE] -------------------------------------------------------------
-
 namespace EventBus {
-  export type Handler = (event: DomainEvent) => Effect.Effect<void, unknown, never>;
-  export type Error = InstanceType<typeof EventError>;
-  export type EventType = DomainEvent['_tag'];
+	export type Variant = (typeof _VS.variants)[number];
+	export type Event = DomainEvent;
+	export type Envelope = EventEnvelope;
+	export type Handler<T extends Variant = Variant> = (event: S.Schema.Type<(typeof DomainEvent)[T]>) => Effect.Effect<void, EventError>;
+	export class DedupKey extends S.Class<DedupKey>('DedupKey')({ eventId: S.String }) {
+		[PrimaryKey.symbol]() { return `dedup:${this.eventId}`; }
+	}
 }
 
 // --- [EXPORT] ----------------------------------------------------------------
@@ -454,489 +332,449 @@ namespace EventBus {
 export { EventBus };
 ```
 
-### Pattern 3: Transactional Outbox with DurableDeferred
-
-**What:** Emit + DB write in same transaction, auto-publish on commit
-**When to use:** Every event emission to ensure no phantom events
+### File 2: `packages/server/src/observe/devtools.ts`
 
 ```typescript
-// Source: @effect/workflow/DurableDeferred + @effect/sql transactions
-import { DurableDeferred } from '@effect/workflow';
-import { SqlClient } from '@effect/sql';
-import { Effect } from 'effect';
+import { DevTools } from '@effect/experimental';
+import { NodeSocket } from '@effect/platform-node';
+import { Config, Duration, Effect, Layer, Match, Option } from 'effect';
 
-// Outbox pattern: write event to outbox table, publish after commit
-const emitWithOutbox = <E extends DomainEvent>(event: E) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const db = yield* DatabaseService;
+// --- [CONSTANTS] -------------------------------------------------------------
 
-    // Create commit signal
-    const commitSignal = yield* DurableDeferred.make<void, never>();
+const _CONFIG = { timeout: Duration.seconds(1), url: 'ws://localhost:34437' } as const;
 
-    // Within same transaction: write outbox + business data
-    yield* sql.withTransaction(
-      Effect.gen(function* () {
-        // Write event to outbox (pending status)
-        yield* db.eventOutbox.insert({
-          eventId: event.eventId,
-          eventType: event._tag,
-          payload: event,
-          status: 'pending',
-        });
+// --- [LAYERS] ----------------------------------------------------------------
 
-        // Register finalizer to signal commit
-        yield* Effect.addFinalizer(() =>
-          DurableDeferred.succeed(commitSignal, undefined).pipe(Effect.ignore),
-        );
-      }),
-    );
+// DevToolsLayer with inline tracer and connection test—no loose const
+const DevToolsLayer = Layer.unwrapEffect(
+	Effect.all({ env: Config.string('NODE_ENV').pipe(Config.withDefault('development')), enabled: Config.boolean('DEVTOOLS_ENABLED').pipe(Config.withDefault(false)) }).pipe(
+		Effect.map(({ env, enabled }) => env !== 'production' && enabled),
+		Effect.filterOrElse((shouldConnect) => shouldConnect, () => Effect.succeed(Layer.empty)),
+		Effect.flatMap(() => Effect.async<boolean>((resume) => {
+			const ws = new WebSocket(_CONFIG.url);
+			ws.onopen = () => { ws.close(); resume(Effect.succeed(true)); };
+			ws.onerror = () => { ws.close(); resume(Effect.succeed(false)); };
+			return Effect.sync(() => ws.close());
+		}).pipe(Effect.timeout(_CONFIG.timeout), Effect.map(Option.getOrElse(() => false)))),
+		Effect.filterOrElse((available) => available, () => Effect.logDebug('DevTools server unavailable').pipe(Effect.as(Layer.empty))),
+		Effect.flatMap(() => Effect.logInfo('DevTools tracer enabled').pipe(Effect.as(
+			DevTools.Client.layerTracer.pipe(Layer.provide(NodeSocket.layerWebSocket(_CONFIG.url))),
+		))),
+	),
+);
 
-    // Wait for commit confirmation
-    yield* DurableDeferred.await(commitSignal);
+// --- [EXPORT] ----------------------------------------------------------------
 
-    // Now safe to broadcast — transaction committed
-    yield* broadcaster.send(event);
-
-    // Mark as published
-    yield* db.eventOutbox.markPublished(event.eventId);
-  });
+export { DevToolsLayer };
 ```
 
-### Pattern 4: Activity-Wrapped Handlers for Replay Safety
-
-**What:** Event handlers wrapped in Activity.make for idempotent execution
-**When to use:** Handlers with side effects (email, payments, external APIs)
+### File 3: `packages/database/migrations/0003_event_outbox.ts`
 
 ```typescript
-// Source: @effect/workflow/Activity
-import { Activity } from '@effect/workflow';
-import { Effect, Match } from 'effect';
-
-// Handler registration with Activity wrapping
-const registerHandler = <T extends EventType>(
-  eventType: T,
-  handler: (event: Extract<DomainEvent, { _tag: T }>) => Effect.Effect<void, unknown, never>,
-) =>
-  Effect.gen(function* () {
-    const wrappedHandler = (event: Extract<DomainEvent, { _tag: T }>) =>
-      Activity.make({
-        name: `handle-${eventType}`,
-        execute: handler(event),
-      });
-
-    yield* Ref.update(handlers, HashMap.set(eventType, wrappedHandler as EventBus.Handler));
-  });
-
-// Example: payment handler with Activity
-const paymentHandler = Activity.make({
-  name: 'process-payment-event',
-  execute: (event: Extract<DomainEvent, { _tag: 'order.placed' }>) =>
-    Effect.gen(function* () {
-      const attempt = yield* Activity.CurrentAttempt;
-      yield* Effect.logInfo('Processing payment', { orderId: event.payload.orderId, attempt });
-
-      // Idempotent: Activity.make ensures single execution even on replay
-      yield* paymentService.charge(event.payload.orderId, event.payload.total);
-    }),
-});
-```
-
-### Pattern 5: Event Deduplication with Sliding Window
-
-**What:** Deduplicate events using eventId + TTL window
-**When to use:** All event consumption to handle at-least-once redelivery
-
-```typescript
-// Source: effect/Ref + effect/HashSet + @effect/experimental/PersistedCache
-import { PersistedCache } from '@effect/experimental';
-import { Duration, Effect, HashSet, Ref, Schema as S } from 'effect';
-
-// Dedupe schema for PersistedCache
-class DedupeKey extends S.Class<DedupeKey>('DedupeKey')({
-  eventId: S.String,
-  consumerId: S.String,
-}) {
-  static readonly make = (eventId: string, consumerId: string) =>
-    new DedupeKey({ consumerId, eventId });
-}
-
-// Dedupe cache with TTL
-const makeDedupeCache = (consumerId: string) =>
-  CacheService.cache<typeof DedupeKey, never>({
-    inMemoryCapacity: 10_000,
-    inMemoryTTL: Duration.minutes(1),
-    lookup: () => Effect.succeed(undefined),
-    storeId: `event-dedupe:${consumerId}`,
-    timeToLive: Duration.minutes(5),
-  });
-
-// Check-and-mark pattern
-const processIfNotDuplicate = <E extends DomainEvent>(
-  event: E,
-  consumerId: string,
-  handler: (e: E) => Effect.Effect<void, unknown, never>,
-) =>
-  Effect.gen(function* () {
-    const cache = yield* makeDedupeCache(consumerId);
-    const key = DedupeKey.make(event.eventId, consumerId);
-
-    // Try to claim processing — returns Duplicate if already processed
-    const claimed = yield* CacheService.setNX(
-      `dedupe:${consumerId}:${event.eventId}`,
-      'processing',
-      Duration.minutes(5),
-    );
-
-    return yield* Match.value(claimed).pipe(
-      Match.when({ alreadyExists: true }, () =>
-        Effect.succeed({ status: 'duplicate' as const }),
-      ),
-      Match.when({ alreadyExists: false }, () =>
-        handler(event).pipe(
-          Effect.tap(() => cache.invalidate(key)),
-          Effect.as({ status: 'processed' as const }),
-        ),
-      ),
-      Match.exhaustive,
-    );
-  });
-```
-
-### Pattern 6: Resilience Integration (Refactored)
-
-**What:** Extend resilience.ts with event-agnostic terminology
-**When to use:** Event handlers with rate limiting, circuit breaking
-
-```typescript
-// Source: Extend packages/server/src/utils/resilience.ts
-
-// Add to _config.schedules
-const _config = {
-  // ... existing schedules
-  schedules: {
-    // ... existing
-    event: Schedule.exponential(Duration.millis(100)).pipe(
-      Schedule.jittered,
-      Schedule.intersect(Schedule.recurs(5)),
-      Schedule.upTo(Duration.seconds(30)),
-      Schedule.whileInput((e: EventError) => !EventError.isTerminal(e)),
-      Schedule.resetAfter(Duration.minutes(5)),
-    ),
-  },
-  // Add event-specific defaults
-  event: {
-    bulkhead: 10,
-    threshold: 3,
-    timeout: Duration.seconds(30),
-  },
-} as const;
-
-// Add Resilience.runEvent helper (matches Resilience.run pattern)
-const runEvent = <A, E, R>(
-  eventType: string,
-  effect: Effect.Effect<A, E, R>,
-  cfg?: Resilience.Config<A, E, R>,
-): Effect.Effect<A, Resilience.Error<E>, R> =>
-  Resilience.run(`event.${eventType}`, effect, {
-    bulkhead: cfg?.bulkhead ?? _config.event.bulkhead,
-    circuit: cfg?.circuit ?? `event.${eventType}`,
-    retry: cfg?.retry ?? 'event',
-    threshold: cfg?.threshold ?? _config.event.threshold,
-    timeout: cfg?.timeout ?? _config.event.timeout,
-    ...cfg,
-  });
-```
-
-### Pattern 7: Unified DLQ Extension
-
-**What:** Extend job_dlq table to support events with source discriminator
-**When to use:** Failed events that exhaust retries
-
-```typescript
-// Migration: 0003_event_outbox.ts
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
 
 export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-
-  // Event outbox table (transactional outbox pattern)
-  yield* sql`
-    CREATE TABLE event_outbox (
-      id UUID PRIMARY KEY DEFAULT uuidv7(),
-      app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-      event_id UUID NOT NULL UNIQUE,
-      event_type TEXT NOT NULL,
-      payload JSONB NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      published_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      CONSTRAINT event_outbox_status_check CHECK (status IN ('pending', 'published', 'failed'))
-    )
-  `;
-  yield* sql`CREATE INDEX idx_event_outbox_pending ON event_outbox(status, created_at) WHERE status = 'pending'`;
-  yield* sql`CREATE INDEX idx_event_outbox_event_id ON event_outbox(event_id)`;
-
-  // Extend job_dlq with source discriminator
-  yield* sql`ALTER TABLE job_dlq ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'job'`;
-  yield* sql`ALTER TABLE job_dlq ADD CONSTRAINT job_dlq_source_check CHECK (source IN ('job', 'event'))`;
-  yield* sql`CREATE INDEX idx_dlq_source ON job_dlq(source, error_reason) WHERE replayed_at IS NULL`;
+	const sql = yield* SqlClient.SqlClient;
+	yield* sql`
+		CREATE TABLE event_outbox (
+			id UUID PRIMARY KEY DEFAULT uuidv7(),
+			app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+			event_id UUID NOT NULL UNIQUE,
+			event_type TEXT NOT NULL,
+			payload JSONB NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			published_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			CONSTRAINT event_outbox_status_check CHECK (status IN ('pending', 'published', 'failed'))
+		)
+	`;
+	yield* sql`CREATE INDEX idx_event_outbox_pending ON event_outbox(status, created_at) WHERE status = 'pending'`;
+	yield* sql`CREATE INDEX idx_event_outbox_event_id ON event_outbox(event_id)`;
+	yield* sql`ALTER TABLE job_dlq ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'job'`;
+	yield* sql`ALTER TABLE job_dlq ADD CONSTRAINT job_dlq_source_check CHECK (source IN ('job', 'event'))`;
+	yield* sql`CREATE INDEX idx_dlq_source ON job_dlq(source, error_reason) WHERE replayed_at IS NULL`;
 });
 ```
 
-### Pattern 8: Metrics Integration
+## Persistence API Reference
 
-**What:** Add event-specific metrics to MetricsService
-**When to use:** Observability for event flow
+### PersistedCache (Recommended)
 
-```typescript
-// Add to MetricsService in observe/metrics.ts
-events: {
-  deadLettered: Metric.counter('events_dead_lettered_total'),
-  deliveryDuration: Metric.timerWithBoundaries('events_delivery_duration_seconds', [0.001, 0.01, 0.05, 0.1, 0.5, 1]),
-  duplicates: Metric.counter('events_duplicates_total'),
-  emitted: Metric.counter('events_emitted_total'),
-  failures: Metric.counter('events_failures_total'),
-  processed: Metric.counter('events_processed_total'),
-  subscriptions: Metric.gauge('events_subscriptions_active'),
-},
-
-// Tracking helper (matches MetricsService.trackJob pattern)
-static readonly trackEvent = <A, E extends { readonly reason?: string }, R>(
-  config: {
-    readonly operation: 'emit' | 'process' | 'subscribe';
-    readonly eventType: string;
-  },
-) => (effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R | MetricsService> =>
-  Effect.flatMap(MetricsService, (metrics) => {
-    const labels = MetricsService.label({
-      event_type: config.eventType,
-      operation: config.operation,
-    });
-    return effect.pipe(
-      Effect.tap(() => Match.value(config.operation).pipe(
-        Match.when('emit', () => Metric.increment(Metric.taggedWithLabels(metrics.events.emitted, labels))),
-        Match.when('process', () => Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels))),
-        Match.when('subscribe', () => Metric.update(Metric.taggedWithLabels(metrics.events.subscriptions, labels), 1)),
-        Match.exhaustive,
-      )),
-      Metric.trackDuration(Metric.taggedWithLabels(metrics.events.deliveryDuration, labels)),
-      Effect.tapError((e) => {
-        const errorLabels = MetricsService.label({
-          event_type: config.eventType,
-          reason: e.reason ?? 'Unknown',
-        });
-        return Metric.increment(Metric.taggedWithLabels(metrics.events.failures, errorLabels));
-      }),
-    );
-  });
-```
-
-### Pattern 9: StreamingService Deprecation Path
-
-**What:** Mark StreamingService.channel() deprecated, provide migration
-**When to use:** Existing channel() consumers during transition
+Two-tier caching: in-memory LRU (hot path O(1)) + persistent fallback (cold path). Use for high-throughput deduplication (10K+ events/sec).
 
 ```typescript
-// In streaming.ts — add deprecation warning
-class StreamingService extends Effect.Service<StreamingService>()('server/Streaming', {
-  // ... existing
-}) {
-  /**
-   * @deprecated Use EventBus.subscribe() for domain events.
-   * StreamingService.channel() will be removed in Phase 7.
-   *
-   * Migration:
-   * ```typescript
-   * // Before
-   * StreamingService.channel('user-events', (event) => ...)
-   *
-   * // After
-   * EventBus.subscribe('user.created', (event) => ...)
-   * ```
-   */
-  static readonly channel = (
-    channelName: string,
-    handler: (event: unknown) => Effect.Effect<void, unknown, never>,
-  ) =>
-    Effect.gen(function* () {
-      yield* Effect.logWarning('StreamingService.channel() is deprecated. Use EventBus.subscribe()');
-      // ... existing implementation
-    });
-}
+import { PersistedCache } from '@effect/experimental';
+
+// DedupKey nested in EventBus namespace—colocated with consumer
+// Keys MUST implement PrimaryKey.symbol—raw strings fail at runtime
+const dedupCache = yield* PersistedCache.make({
+	storeId: 'event-processed',
+	lookup: (key: EventBus.DedupKey) => Effect.succeed(undefined), // Cache miss returns undefined
+	timeToLive: (_key, exit) => Match.value(Exit.isSuccess(exit)).pipe(
+		Match.when(true, () => Duration.hours(24)),
+		Match.orElse(() => Duration.minutes(5)),
+	),
+	inMemoryCapacity: 10000, // LRU eviction threshold
+	inMemoryTTL: Duration.minutes(5), // In-memory expiration
+});
+
+yield* dedupCache.get(new EventBus.DedupKey({ eventId })); // Hot: in-memory first, cold: persistent fallback
+yield* dedupCache.set(key, Exit.succeed(undefined)); // Store Exit (not raw boolean)
+yield* dedupCache.invalidate(key); // Force re-lookup on next get
 ```
 
-### Anti-Patterns to Avoid
+### ResultPersistence (Low-Volume)
 
-- **Loose event types**: Never define events outside the central VariantSchema
-- **Emit without transaction**: Always use outbox pattern — never `broadcaster.send()` directly
-- **Handler without Activity**: Side-effectful handlers MUST be wrapped in Activity.make
-- **Manual dedupe logic**: Use PersistedCache/setNX — don't hand-roll dedupe tables
-- **Synchronous emit**: Use DurableDeferred for commit acknowledgment — never assume commit
-- **Per-event retry config**: Use centralized `_CONFIG.retry` schedule — no inline Schedule
+Persistent-only storage for infrequent lookups. DB round-trip per access.
 
-## Don't Hand-Roll
+```typescript
+import { Persistence } from '@effect/experimental';
 
-| Problem | Don't Build | Use Instead | Why |
-|---------|-------------|-------------|-----|
-| Event ID generation | UUID v4 | `Snowflake.layerGenerator` | Sortable, cluster-unique, timestamp-embedded |
-| Cross-pod broadcast | Redis pub/sub wrapper | `Sharding.broadcaster` | Integrated with cluster, typed, at-least-once |
-| Replay-safe handlers | Manual dedupe table | `Activity.make` | Workflow engine ensures single execution |
-| Commit acknowledgment | pg_notify listener | `DurableDeferred` | Portable, Effect-native, testable |
-| Event schema union | Separate files per event | `S.Union` + `S.TaggedRequest` | Single source of truth, exhaustive matching |
-| Dedupe window | Manual `Map<string, Date>` | `PersistedCache` + `CacheService.setNX` | TTL, persistence, cluster-aware |
-| Backpressure | Manual queue management | `Stream.throttle` + `PubSub.sliding` | Built-in, configurable strategies |
-| Handler registry | `Map<string, Function>` | `Ref.make(HashMap.empty)` | Effect-native, concurrent-safe |
-| Subscription tracking | Manual fiber management | `FiberMap.make` + `FiberMap.run` | Automatic cleanup, scoped lifecycle |
-| Error categorization | String matching | Set-based `_terminal`/`_retryable` | O(1) lookup, scales with error types |
-| Envelope injection | Base class inheritance | Object spread at emit-time | No class hierarchy, flexible metadata |
-| Metrics per event | Inline Metric calls | `MetricsService.trackEvent` | Consistent labels, DRY |
-| DLQ insertion | Manual SQL | Extend `job_dlq` with `source` | Unified table, single replay mechanism |
-| Event timestamps | `Date.now()` | `Clock.currentTimeMillis` | Testable, Effect-native |
-| Batch emission | `forEach` + emit | Single `emit(events)` | Auto-batches, single transaction |
+const dedupStore = yield* Persistence.ResultPersistence.pipe(
+	Effect.flatMap((p) => p.make({
+		storeId: 'event-processed',
+		timeToLive: (_key, exit) => Exit.isSuccess(exit) ? Duration.hours(24) : Duration.minutes(5),
+	})),
+);
+```
 
-**Key insight:** The EventBus is a thin orchestration layer over existing @effect/cluster broadcaster + @effect/workflow Activity. No custom messaging protocol needed — broadcaster handles cross-pod delivery, Activity handles idempotency, DurableDeferred handles transaction coordination.
+| Aspect | PersistedCache | ResultPersistence |
+|--------|----------------|-------------------|
+| **Performance** | O(1) hot path | DB round-trip |
+| **Memory** | LRU-bounded | None |
+| **Use case** | High-throughput | Low-volume |
 
-## Common Pitfalls
+## RequestResolver Batching
 
-### Pitfall 1: Phantom Events on Transaction Rollback
+Automatic request batching for event replay scenarios—multiple concurrent lookups within window batch into single DB query.
 
-**What goes wrong:** Event published but transaction rolled back — subscribers process non-existent data
-**Why it happens:** Broadcasting before transaction commits
-**How to avoid:** Always use DurableDeferred to wait for commit before broadcast. Outbox pattern: write to outbox table in transaction, publish only after commit confirmation.
-**Warning signs:** "Event not found" errors in handlers, orphan processing
+```typescript
+import { RequestResolver as ExpRequestResolver } from '@effect/experimental';
+import { Request, RequestResolver, Duration, Effect, HashMap, Option } from 'effect';
 
-### Pitfall 2: Duplicate Event Processing
+// Request class nested in namespace—colocated with resolver
+class GetEventRequest extends Request.TaggedClass('GetEventRequest')<EventBus.Event, EventBus.Error, { readonly eventId: string }>() {}
 
-**What goes wrong:** Same event processed multiple times causing duplicate side effects
-**Why it happens:** At-least-once delivery + missing deduplication
-**How to avoid:** Wrap handlers in Activity.make for replay-safe idempotency. Use eventId + consumerId as dedupe key with TTL window.
-**Warning signs:** Duplicate emails, double charges, duplicate database entries
+// Inline resolver—no loose const
+const eventLoader = yield* ExpRequestResolver.dataLoader(
+	RequestResolver.makeBatched((requests: NonEmptyArray<GetEventRequest>) =>
+		db.events.getByIds(requests.map((r) => r.eventId)).pipe(
+			Effect.flatMap((results) => Effect.forEach(requests, (req) =>
+				Option.match(HashMap.get(results, req.eventId), {
+					onSome: (event) => Request.succeed(req, event),
+					onNone: () => Request.fail(req, EventBus.Error.from(req.eventId, 'HandlerMissing')),
+				}),
+			)),
+		),
+	),
+	{ window: Duration.millis(10), maxBatchSize: 100 },
+);
+```
 
-### Pitfall 3: Handler Missing Activity Wrapper
+## Machine State Patterns
 
-**What goes wrong:** Side effects execute multiple times on workflow replay
-**Why it happens:** Handler not wrapped in Activity.make — workflow replays re-execute
-**How to avoid:** ALL handlers with side effects (email, payment, external API) MUST use Activity.make
-**Warning signs:** Multiple external API calls for single event, idempotency key violations
+Recoverable subscriber state machines with Actor.send dispatch, Procedure.Context.forkWith for background work, and Machine.restore for crash recovery.
 
-### Pitfall 4: Emit Without Outbox
+```typescript
+import { Machine, Procedure, Actor, MachineDefect } from '@effect/experimental';
 
-**What goes wrong:** Events lost on service crash between emit and acknowledgment
-**Why it happens:** Direct broadcast without persistence
-**How to avoid:** ALWAYS write to event_outbox table first, broadcast only after commit
-**Warning signs:** "Event never received" in distributed traces, missing events
+// Request schemas for typed dispatch via Actor.send
+class ProcessEvent extends S.TaggedRequest<ProcessEvent>()('ProcessEvent', { failure: EventError, success: S.Void, payload: { eventId: S.String } }) {}
+class GetStatus extends S.TaggedRequest<GetStatus>()('GetStatus', { failure: EventError, success: S.Struct({ status: S.String, count: S.Number }), payload: {} }) {}
 
-### Pitfall 5: Loose Event Type Definition
+const SubscriberMachine = Machine.makeSerializable({
+	state: S.Struct({ status: S.Literal('idle', 'processing', 'paused'), lastEventId: S.optional(S.String), processedCount: S.Number }),
+	requests: S.Union(ProcessEvent, GetStatus),
+})({
+	init: (input: { subscriberId: string }, previousState?) => Effect.gen(function* () {
+		const state = previousState ?? { status: 'idle' as const, processedCount: 0 };
+		return Procedure.make<typeof SubscriberMachine.requests.Type, typeof SubscriberMachine.state.Type>()
+			('ProcessEvent', (ctx) => ctx.forkWith({ ...ctx.state, status: 'processing' })(
+				Effect.succeed({ ...ctx.state, lastEventId: ctx.request.eventId, processedCount: ctx.state.processedCount + 1 }),
+			).pipe(Effect.map(([_, s]) => [undefined, s] as const)))
+			('GetStatus', (ctx) => Effect.succeed([{ status: ctx.state.status, count: ctx.state.processedCount }, ctx.state] as const));
+	}),
+});
 
-**What goes wrong:** Event contracts diverge between producer and consumer
-**Why it happens:** Events defined in multiple files, not central VariantSchema
-**How to avoid:** Single DomainEvent VariantSchema — all events derive from one source
-**Warning signs:** Deserialization failures, "unknown event type" errors
+// Startup: restore from persisted snapshot or boot fresh
+const snapshot = yield* db.machineSnapshots.get('subscriber:sub-1').pipe(Effect.option);
+const actor = yield* Option.match(snapshot, {
+	onNone: () => Machine.boot(SubscriberMachine, { subscriberId: 'sub-1' }),
+	onSome: (s) => Machine.restore(SubscriberMachine, s), // Resume with full state
+});
+yield* Actor.send(actor, new ProcessEvent({ eventId: 'evt-123' })); // Typed dispatch—returns Effect<Void, EventError>
+// Actor.subscribe replaces manual PubSub for state change streams
+const stateChanges = Actor.subscribe(actor); // Stream<State>—re-emits on each state transition
+yield* Effect.addFinalizer(() => Machine.snapshot(actor).pipe(Effect.flatMap((s) => db.machineSnapshots.set('subscriber:sub-1', s))));
 
-### Pitfall 6: Blocking on Slow Subscriber
+// Machine.retry for init failure recovery (vs defectRetryPolicy which handles running defects only)
+const ResilientMachine = Machine.retry(Schedule.exponential(Duration.millis(100)).pipe(Schedule.compose(Schedule.recurs(5))))(SubscriberMachine);
+```
 
-**What goes wrong:** One slow subscriber blocks all event delivery
-**Why it happens:** Synchronous fan-out without backpressure
-**How to avoid:** Use `PubSub.sliding` + `Stream.throttle` for per-subscriber backpressure. Broadcaster handles fan-out asynchronously.
-**Warning signs:** Increasing latency, timeout errors, queue depth spikes
+## DurableRateLimiter Throttling
 
-### Pitfall 7: Missing Correlation Context
+Cluster-wide rate limiting within workflows—coordinates across all pods via persistent storage.
 
-**What goes wrong:** Events can't be traced back to originating request
-**Why it happens:** Not propagating correlationId/causationId
-**How to avoid:** Envelope injection at emit-time includes `correlationId` from `Context.Request.requestId`
-**Warning signs:** Broken distributed traces, orphan events in logs
+```typescript
+import { DurableRateLimiter } from '@effect/workflow';
 
-### Pitfall 8: DLQ Without Source Discrimination
+// Inline rate limit call—no loose const factory
+// Usage in webhook worker:
+Effect.gen(function* () {
+	yield* DurableRateLimiter.rateLimit({
+		name: 'webhookDelivery',
+		algorithm: 'token-bucket', // OR 'fixed-window' (resets at boundary)
+		window: Duration.seconds(1),
+		limit: 10, // 10 webhooks/second per destination
+		key: `webhook:${payload.webhookUrl}`,
+	});
+	yield* sendWebhook(payload);
+});
 
-**What goes wrong:** Can't distinguish job DLQ from event DLQ
-**Why it happens:** Using same job_dlq table without source column
-**How to avoid:** Add `source` column to job_dlq (`'job'` | `'event'`), filter by source in replay
-**Warning signs:** Wrong replay logic applied, job handlers receiving events
+// Variable token consumption for expensive operations (inline, not loose const)
+yield* DurableRateLimiter.rateLimit({
+	name: 'apiLimit',
+	algorithm: 'token-bucket',
+	window: Duration.seconds(1),
+	limit: 100,
+	key: 'api:heavy',
+	tokens: 10, // Consumes 10 tokens (heavy operation)
+});
+```
 
-## State of the Art
+## Activity Advanced Patterns
 
-| Old Approach | Current Approach | When Changed | Impact |
-|--------------|------------------|--------------|--------|
-| StreamingService.channel() | EventBus.subscribe() | Phase 5 | Typed contracts, cluster-wide delivery |
-| Local PubSub | Sharding.broadcaster | @effect/cluster | Cross-pod fan-out, at-least-once |
-| Manual dedupe table | Activity.make | @effect/workflow | Replay-safe, no custom code |
-| pg_notify for commit | DurableDeferred | @effect/workflow | Portable, Effect-native |
-| Separate event schemas | VariantSchema union | Phase 5 decision | Single source of truth |
-| emit/emitBatch split | Single polymorphic emit | Phase 5 decision | Auto-batching, simpler API |
+Multi-channel delivery, adaptive retry, current attempt tracking.
 
-**Deprecated/outdated:**
-- `StreamingService.channel()`: Replaced by EventBus — lacks typed contracts, single-pod only
-- Manual dedupe tables: Activity.make handles idempotency automatically
-- Per-event error handling: Unified EventError with Set-based classification
+```typescript
+import { Activity } from '@effect/workflow';
+
+// Multi-provider delivery—first success wins, others cancelled
+const DeliverViaFastest = Activity.raceAll('deliveryChannels', [
+	Activity.make({ name: 'webhook', execute: sendWebhook(envelope) }),
+	Activity.make({ name: 'grpc', execute: sendGrpc(envelope) }),
+	Activity.make({ name: 'queue', execute: sendToQueue(envelope) }),
+]);
+
+// Adaptive retry—longer timeout on later attempts
+const AdaptiveActivity = Activity.make({
+	name: 'adaptiveRetry',
+	execute: Effect.gen(function* () {
+		const attempt = yield* Activity.CurrentAttempt;
+		const timeout = Duration.millis(1000 * (attempt.attemptNumber + 1));
+		return yield* externalCall.pipe(Effect.timeout(timeout));
+	}),
+});
+
+// Idempotency key with attempt number for retry-specific tracking
+const keyWithAttempt = yield* Activity.idempotencyKey('process', { includeAttempt: true });
+// Returns: "process:attempt-1" on first try, "process:attempt-2" on retry
+```
+
+## DurableQueue vs PersistedQueue
+
+| Aspect | DurableQueue | PersistedQueue |
+|--------|--------------|----------------|
+| **Abstraction** | High-level (workflow-native) | Low-level (experimental) |
+| **process()** | Submits + blocks until worker completes | N/A (fire-and-forget only) |
+| **worker()** | Returns Layer with concurrency control | Manual `take()` loop required |
+| **Idempotency** | Built-in via `idempotencyKey` | Via `id` parameter on `offer()` |
+| **Context** | Requires WorkflowEngine | Standalone |
+| **Use case** | Webhook delivery with ack | Event outbox (transactional) |
+
+```typescript
+import { DurableQueue } from '@effect/workflow';
+
+const WebhookQueue = DurableQueue.make({
+	name: 'WebhookQueue',
+	payload: S.Struct({ webhookUrl: S.String, eventId: S.String, body: S.Unknown }),
+	success: S.Struct({ statusCode: S.Number }),
+	error: EventError,
+	idempotencyKey: (p) => p.eventId,
+});
+
+// Enqueue and await completion (blocks until worker processes)
+const result = yield* DurableQueue.process(WebhookQueue, payload);
+
+// Worker Layer with HttpClient combinators—no manual retry/timeout/header logic
+const WebhookWorkerLayer = DurableQueue.worker(
+	WebhookQueue,
+	Effect.fn(function* ({ webhookUrl, eventId, body }) {
+		const client = yield* HttpClient.HttpClient;
+		const sig = yield* computeHmacSignature(body, eventId);
+		return yield* HttpClientRequest.post(webhookUrl).pipe(
+			HttpClientRequest.bodyJson(body),
+			HttpClientRequest.setHeaders(Headers.fromInput({ 'X-Webhook-Signature': sig, 'Content-Type': 'application/json', 'X-Event-Id': eventId })),
+			client.execute,
+			HttpClient.filterStatusOk, // Fail with ResponseError on non-2xx
+			HttpClientResponse.schemaBodyJson(S.Struct({ statusCode: S.Number })), // Validate ack response
+			HttpClient.retryTransient({ mode: 'both', times: 3, schedule: Schedule.exponential(Duration.millis(100)) }),
+			HttpClient.withTracerPropagation(true), // Forward trace context
+		);
+	}),
+	{ concurrency: 5 },
+);
+```
+
+## Transactional Outbox Pattern
+
+### Transaction Boundary Requirement
+
+Events MUST be offered to outbox within the same SQL transaction as the domain mutation:
+
+```typescript
+// CORRECT: emit inside transaction
+yield* db.transaction(Effect.gen(function* () {
+	yield* db.orders.insert(order);
+	yield* eventBus.emit({ _tag: 'order', payload: { action: 'placed', orderId: order.id, ... } });
+}));
+// Event only visible after transaction commits - no phantom events on rollback
+
+// WRONG: emit outside transaction
+yield* db.orders.insert(order);
+yield* eventBus.emit(...); // If this fails, order exists without event!
+```
+
+### PersistedQueue Transaction Semantics
+
+`PersistedQueue.offer()` participates in the current SQL transaction when called within a transactional context. The message becomes visible only after commit.
+
+## Reactivity Patterns
+
+### mutation() vs stream()
+
+| Method | Purpose | Re-execution |
+|--------|---------|--------------|
+| `mutation(keys, effect)` | Wrap writes, invalidate keys after completion | N/A |
+| `stream(keys, streamEffect)` | Subscribe to changes, re-execute on invalidation | Yes - entire stream re-created |
+
+### stream() Usage (CRITICAL)
+
+`reactivity.stream()` re-executes the provided Stream on key invalidation. Do NOT fork inside:
+
+```typescript
+// WRONG: fork defeats re-execution
+reactivity.stream(keys, Effect.gen(function* () {
+	yield* Effect.forkScoped(myStream.pipe(Stream.runDrain)); // Runs once, never re-executes!
+}));
+
+// CORRECT: return Stream directly
+reactivity.stream(keys, myStream); // Re-executes on invalidation
+```
+
+## Anti-Patterns
+
+| Don't | Use Instead |
+|-------|-------------|
+| Redis pub/sub, manual broadcast | `Sharding.broadcaster` — cluster-integrated, typed |
+| Manual dedupe table | `Activity.make` with `idempotencyKey` — built-in replay tracking |
+| `ResultPersistence` for high-throughput | `PersistedCache` — two-tier with in-memory LRU |
+| Manual outbox + polling | `PersistedQueue.offer/take` or `DurableQueue.worker` |
+| `Map<string, Handler>`, manual refresh | `Reactivity.mutation/stream` — auto-invalidation |
+| `new Set()` for deduplication | `HashSet.fromIterable` — Effect standard |
+| `Chunk.filter(Chunk.dedupe(c), pred)` | `Chunk.compact(Chunk.dedupe(c))` — single pass O(n) |
+| Manual buffering + timer | `Stream.aggregateWithin(sink, Schedule)` — time-windowed batching |
+| No debounce on rapid events | `Stream.debounce(Duration)` — suppress bursts |
+| Manual rate limiting in stream | `Stream.throttle({ units, duration, strategy })` — built-in throttle |
+| `Effect.forEach(Chunk.toArray(c))` | `Chunk.forEach(c, fn)` — direct iteration, no allocation |
+| `Object.keys(obj) as Type[]` | `const tuple as const` — compile-time type safety |
+| `Events.Struct({ ... })` | `_VS.Class(id)({ ... })` — Struct not extendable |
+| Separate `occurredAt` field | `Snowflake.timestamp(eventId)` or `Snowflake.dateTime(eventId)` — embedded timestamp |
+| Logging raw Snowflake IDs | `Snowflake.toParts(sf)` — decompose to timestamp, machineId, sequence for debugging |
+| No entity lifecycle monitoring | `sharding.getRegistrationEvents` stream — emits EntityRegistered/SingletonRegistered |
+| `sharding.reset` without result check | `Effect.filterOrFail(sharding.reset(id), identity)` — false means reset failed |
+| Raw string as Persistence key | `EventBus.DedupKey` class with `PrimaryKey.symbol` — type-safe key |
+| `Effect.forkScoped` inside `reactivity.stream` | Return Stream directly — fork defeats re-execution |
+| Emit outside SQL transaction | Wrap in `db.transaction()` — prevents phantom events |
+| Manual batching logic | `RequestResolver.dataLoader` — automatic time-window batching |
+| Ad-hoc `Ref` + `FiberMap` state | `Machine.makeSerializable` — recoverable state machines |
+| `Effect.ensuring` in workflow | `Workflow.addFinalizer` — runs once on completion, not every suspend |
+| Compensation without Activity wrap | Wrap in `Activity.make` — prevents re-execution on replay |
+| `Effect.sleep` for retry delays | `DurableClock.sleep` — survives pod restarts |
+| Polling for external completion | `DurableDeferred.await` — durable suspension |
+| Non-deterministic ops outside Activity | Wrap in `Activity.make` — ensures same value on replay |
+| `Effect.fork` without Activity in workflow | `Activity.make` — fork loses replay tracking |
+| Manual Ref-based rate limiting | `DurableRateLimiter.rateLimit` — cluster-wide coordination |
+| Sequential delivery to multiple channels | `Activity.raceAll` — first success wins, others cancelled |
+| Manual retry logic for HTTP | `HttpClient.retryTransient({ mode: 'both', times: N })` — auto retry classification |
+| Manual timeout on HTTP calls | `HttpClient.transform` with `Effect.timeout` — scoped per-request timeout |
+| Manual header construction | `Headers.fromInput({ key: value })` — typed header builder |
+| Raw `httpClient.post` | `HttpClientRequest.post(url).pipe(bodyJson, setHeaders)` — fluent request building |
+| Manual status code checks | `HttpClient.filterStatusOk` — fail with ResponseError on non-2xx |
+| No trace propagation | `HttpClient.withTracerPropagation(true)` — forward trace context |
+| Logging headers with secrets | `Headers.redact(['Authorization', 'X-Webhook-Signature'])` — safe logging |
+| Manual scheduled delivery check | `DeliverAt.isDeliverAt(msg)` + `DeliverAt.toMillis(msg)` — type-safe guards |
+| Entity without defect recovery | `Entity.toLayer(h, { defectRetryPolicy: Schedule })` — auto-restart on defects |
+| Snowflake string conversion | `Snowflake.SnowflakeFromString` schema — validated conversion with error channel |
+| Manual machine boot + Ref state | `Machine.restore(machine, snapshot)` — resume from persisted state |
+| Direct method call on machine | `Actor.send(actor, Request)` — typed dispatch, returns `Effect<Success, Error>` |
+| Manual PubSub for machine state | `Actor.subscribe(actor)` — typed state change stream |
+| Machine init failure unhandled | `Machine.retry(Schedule)(machine)` — retry init failures (vs defectRetryPolicy) |
+| Untyped defect in entity handler | `MachineDefect.wrap(cause)` — structured defect tracking |
+| Inline state update in Procedure | `ctx.forkWith(state)(effect)` — state-preserving background work |
+| `_mkBrandedId` factory helpers | Inline `S.UUID.pipe(S.brand('X'))` — no single-use helpers |
+| `_VARIANTS` const extraction | Inline in `VariantSchema.make({ variants: [...] })` — no loose const |
+| Optional field on all variants | `_VS.FieldOnly('order', 'payment')(S.UUID)` — variant-restricted fields |
+| Excluded field per variant | `_VS.FieldExcept('system')(S.Unknown)` — applies to all except specified |
+| `type EventType = ...` extraction | `(typeof _VS.variants)[number]` in namespace — derive, don't duplicate |
+| `_ActionSchema` helper function | Inline `S.Literal(...)` in Field mapping — no indirection |
+| `_DefaultHandlers` dispatch table | `Match.type` exhaustive handler — no type casting, compile-checked |
+| `if (x) { ... }` imperative check | `Effect.when(..., () => condition)` — declarative |
+| `condition ? A : B` ternary | `Match.value(condition).pipe(Match.when(...))` — exhaustive |
+| `arr.length > 0 ?` empty check | `Chunk.match({ onEmpty, onNonEmpty })` — pattern match |
+| `Predicate.hasProperty(x, Symbol.iterator)` | `Match.value(x).pipe(Match.when(Chunk.isChunk, ...))` — typed |
+| `(x.payload as { foo: T })` type casting | `_VS.extract(variant)(x)` — runtime-safe variant access |
+| Multiple `export { A, B, C }` | Single `export { EventBus }` — unified namespace |
+| Module-level `DedupKey` class | `EventBus.DedupKey` in namespace — colocated with consumer |
+| `_DomainEventTopic` loose const | `EventBus.Topic` static — no module pollution |
+
+## Critical Pitfalls
+
+| Pitfall | Solution |
+|---------|----------|
+| Broadcast before commit → phantom events | `PersistedQueue.offer` waits for transaction commit |
+| At-least-once + no dedupe → duplicate processing | `Activity.make({ idempotencyKey })` — built-in replay tracking |
+| Sync fan-out → slow subscriber blocks all | `PubSub.sliding` + `Stream.bufferChunks({ strategy: 'sliding' })` |
+| Manual timer for DB batch writes | `Stream.aggregateWithin(Sink.collectAll(), Schedule.spaced(Duration.seconds(1)))` |
+| No burst suppression → handler thrashing | `Stream.debounce(Duration.millis(10))` before processing |
+| DB round-trip per dedupe check → latency | `PersistedCache` with `inMemoryCapacity` for hot path O(1) |
+| `withCompensation` without Activity wrap → replay re-executes | Always wrap compensation handler in `Activity.make` |
+| `Effect.ensuring` in workflow → runs on every suspend | Use `Workflow.addFinalizer` for once-only completion cleanup |
+| `Events.Struct` used for class definition → not extendable | Use `_VS.Class(id)({ ... })` from VariantSchema.make |
+| `Object.keys()` for variants → loses type safety | Derive via `(typeof _VS.variants)[number]` |
+| Raw string key in Persistence → runtime error | Use `EventBus.DedupKey` class implementing `PrimaryKey.symbol` |
+| Fork inside `reactivity.stream` → runs once, never re-executes | Return Stream directly; Reactivity manages lifecycle |
+| Emit outside transaction → phantom events on rollback | Always emit within `db.transaction()` scope |
+| Concurrent lookups without batching → N+1 queries | `RequestResolver.dataLoader` with time window |
+| Subscriber crash loses position → reprocess from start | `Machine.restore(machine, snapshot)` — resume from persisted snapshot |
+| Non-deterministic ops in workflow → different values on replay | Wrap `Date.now()`, `Math.random()`, external calls in `Activity.make` |
+| `Effect.sleep` in workflow → loses position on restart | `DurableClock.sleep` persists to DB for long delays |
+| DurableDeferred without token storage → deadlock | Include token in outbound request for external completion |
+| `Effect.fork` in workflow without Activity → lost on replay | Use `Activity.make` for tracked execution |
+| Type casting `(e.payload as X)` → loses variant safety | Use `_VS.extract(variant)(e)` for runtime-safe access |
+| Dispatch table + Object.entries → no compile-time checks | `Match.type` exhaustive pattern matching |
+| `if`/ternary control flow → imperative, hard to compose | `Effect.when`, `Match.value`, `Option.match` patterns |
+| Module-level loose const pollution → fragmented exports | Colocate in class statics + namespace |
 
 ## Open Questions
 
-1. **Dedupe window duration**
-   - What we know: 5 minutes is standard for most event systems
-   - What's unclear: Optimal balance between memory usage and late duplicate detection
-   - Recommendation: Start with 5 minutes, monitor duplicate rate, adjust per event type if needed
-
-2. **Broadcaster vs PubSub for local subscribers**
-   - What we know: Broadcaster handles cross-pod, PubSub is in-process
-   - What's unclear: Latency tradeoff for same-pod subscribers
-   - Recommendation: Use broadcaster universally — simplifies architecture, negligible overhead
-
-3. **Event schema versioning strategy**
-   - What we know: S.optional handles additive changes
-   - What's unclear: Breaking change migration across running pods
-   - Recommendation: Version via tag suffix only for breaking changes (`user.created.v2`), prefer additive
+| Question | Recommendation |
+|----------|----------------|
+| Dedupe window duration | Start 5 min, adjust per event type based on duplicate rate |
+| Schema versioning for breaking changes | Use `fieldEvolve` for migration; prefer additive via `S.optional` |
+| Broadcaster vs local PubSub | Broadcaster universally — simpler, negligible overhead for single-pod |
+| EventLog vs PersistedQueue | PersistedQueue for fire-and-forget; EventLog for full event sourcing with conflict detection |
 
 ## Sources
 
-### Primary (HIGH confidence)
-- [@effect/cluster docs](https://effect-ts.github.io/effect/docs/cluster) - Sharding, broadcaster, Entity patterns
-- [@effect/workflow README](https://github.com/Effect-TS/effect/blob/main/packages/workflow/README.md) - Activity.make, DurableDeferred, idempotency
-- [Effect PubSub docs](https://effect.website/docs/concurrency/pubsub/) - PubSub API, sliding/bounded strategies
-- [DeepWiki Cluster Management](https://deepwiki.com/Effect-TS/effect/5.2-cluster-management) - Sharding architecture, fan-out patterns
+**Core:** [@effect/cluster Docs](https://effect-ts.github.io/effect/docs/cluster) | [@effect/workflow README](https://github.com/Effect-TS/effect/blob/main/packages/workflow/README.md) | [VariantSchema API](https://effect-ts.github.io/effect/experimental/VariantSchema.ts.html)
 
-### Codebase (HIGH confidence)
-- `/packages/server/src/infra/cluster.ts` - ClusterService patterns, broadcaster API reference
-- `/packages/server/src/infra/jobs.ts` - Entity dispatch patterns to match
-- `/packages/server/src/context.ts` - withinCluster, Context.Request patterns
-- `/packages/server/src/utils/resilience.ts` - Retry/circuit patterns to extend
-- `/packages/server/src/observe/metrics.ts` - MetricsService.trackEffect pattern
-- `/packages/database/migrations/0002_job_dlq.ts` - DLQ schema to extend
+**Codebase:** `cluster.ts` (broadcaster patterns), `jobs.ts` (Entity + _StatusProps pattern), `resilience.ts` (composition patterns), `context.ts` (withinCluster)
 
-### Secondary (MEDIUM confidence)
-- [Microservices.io Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html) - Outbox pattern design
-- [Microservices.io Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html) - Deduplication patterns
-- [Confluent Message Delivery](https://docs.confluent.io/kafka/design/delivery-semantics.html) - At-least-once semantics
-- [Lydtech Kafka Deduplication](https://www.lydtechconsulting.com/blog/kafka-deduplication-patterns---part-1-of-2) - Deduplication strategies
-
-### Tertiary (LOW confidence)
-- [Effect Patterns GitHub](https://github.com/PaulJPhilp/EffectPatterns) - Community patterns reference
+**Patterns:** [Transactional Outbox](https://microservices.io/patterns/data/transactional-outbox.html) | [Idempotent Consumer](https://microservices.io/patterns/communication-style/idempotent-consumer.html)
 
 ## Metadata
 
-**Confidence breakdown:**
-- Standard stack: HIGH - All packages in catalog, 55+ key imports documented with integration patterns
-- Architecture patterns: HIGH - 9 patterns covering all success criteria, follows cluster.ts/jobs.ts density
-- Errors: HIGH - EventError with 7 variants, typed error handling, Set-based classification
-- Pitfalls: HIGH - 8 pitfalls covering transactional outbox, deduplication, replay safety
-- Code examples: HIGH - No hand-rolled patterns, Match over if, schema-first design
-
-**Quality pass refinements:**
-- All patterns reference codebase files by name (cluster.ts, jobs.ts, metrics.ts)
-- MetricsService.trackEvent matches MetricsService.trackJob pattern
-- EventError matches JobError Set-based classification
-- DurableDeferred pattern for transactional outbox acknowledgment
-- Activity.make for replay-safe handler execution
-- VariantSchema union for single polymorphic event definition
-- Resilience.runEvent helper follows Resilience.run pattern
-
-**Research date:** 2026-01-31
-**Valid until:** 2026-02-28 (30 days - stable APIs)
-**Validation passes:**
-- @effect/cluster broadcaster API verified via DeepWiki 2026-01-31
-- @effect/workflow Activity.make verified via GitHub README 2026-01-31
-- effect PubSub API verified via official docs 2026-01-31
-- Transactional outbox pattern verified via microservices.io 2026-01-31
-- Idempotent consumer pattern verified via microservices.io 2026-01-31
+**Confidence:** HIGH — All packages in catalog, patterns validated against cluster.ts/jobs.ts density
+**Research date:** 2026-02-01 | **Valid until:** 2026-02-28

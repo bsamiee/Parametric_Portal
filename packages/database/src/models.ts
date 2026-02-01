@@ -171,20 +171,19 @@ class Job extends Model.Class<Job>('Job')({								// Background task. Belongs t
 }) {}
 
 // --- [JOBS: JOB_DLQ] ---------------------------------------------------------
-class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Dead-lettered job. Belongs to an App.
-	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
+class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Dead-lettered job. Belongs to an App. No updatedAt (append-mostly).
+	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract DLQ creation time — NO dlqAt COLUMN
 	id: Model.Generated(S.UUID),
-	originalJobId: S.UUID,												// Link to original job
+	originalJobId: S.UUID,												// Link to original job (NO FK — job may be purged before replay)
 	appId: S.UUID,														// Tenant scope
+	userId: Model.FieldOption(S.UUID),									// Audit trail (FK RESTRICT — users never hard-deleted)
+	requestId: Model.FieldOption(S.UUID),								// Correlation for cross-pod traces
 	type: S.String,														// Job type
 	payload: Model.JsonFromString(S.Unknown),							// Original payload
-	errorReason: S.String,												// Discriminant: 'MaxRetries' | 'Validation' | 'HandlerMissing' | 'RunnerUnavailable'
+	errorReason: S.String,												// Discriminant: MaxRetries | Validation | HandlerMissing | RunnerUnavailable | Timeout | Panic
 	attempts: S.Number,													// Total attempts before dead-letter
 	errorHistory: Model.JsonFromString(S.Array(S.Struct({ error: S.String, timestamp: S.Number }))),	// Error trail
-	dlqAt: Model.DateTimeInsertFromDate,								// When job was dead-lettered
-	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job was replayed (null if not replayed)
-	requestId: Model.FieldOption(S.UUID),								// Correlation for cross-pod traces
-	userId: Model.FieldOption(S.UUID),									// Audit trail
+	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job was replayed (null = pending)
 }) {}
 
 // --- [INFRA: KV_STORE] -------------------------------------------------------

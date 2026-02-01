@@ -7,7 +7,7 @@ import { FetchHttpClient, Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
 import { PgClient } from '@effect/sql-pg';
-import { Array as A, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, Exit, FiberMap, Function as F, Layer, Match, Metric, Number as N, Option, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, FiberMap, HashSet, Layer, Metric, Option, Predicate, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
@@ -21,18 +21,18 @@ const _CONFIG = {
 	circuit: { halfOpenAfter: Duration.seconds(30), threshold: 3 },	// Aligns with heartbeat interval; trip after 3 consecutive failures
 	cron: { skipIfOlderThan: Duration.minutes(5) },
 	entity: { concurrency: 1, mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
-	retry: {defect: { base: Duration.millis(100), factor: 2, maxAttempts: 5 }, transient: { base: Duration.millis(50), cap: Duration.seconds(5), maxAttempts: 3 },},
+	retry: { base: Duration.millis(50), cap: Duration.seconds(30), maxAttempts: { defect: 5, state: 3, transient: 3 } },
 	send: { bulkhead: 5, timeout: Duration.millis(100) },			// Bulkhead prevents mailbox overflow (capacity=100), timeout enforces SLA
 	singleton: {
-		graceMs: Duration.toMillis(Duration.seconds(60)),
+		grace: Duration.seconds(60),
 		heartbeatInterval: Duration.seconds(30),
 		keyPrefix: 'singleton-state:',
-		migrationSlaMs: 10_000,
+		migrationSla: Duration.seconds(10),
 		schemaVersion: 1,
-		stateRetry: Schedule.exponential(Duration.millis(50)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3))),
 		threshold: 2,												// 2x expected interval before staleness
 	},
 } as const;
+const _scheduleRetry = (max: number, cap = _CONFIG.retry.cap) => Schedule.exponential(_CONFIG.retry.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(max)), Schedule.upTo(cap));
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -54,49 +54,34 @@ class EntityState extends S.Class<EntityState>('EntityState')({
 	pendingSignal: S.optional(S.Struct({ name: S.String, token: S.String })),
 	status: EntityStatus,
 	updatedAt: S.Number,
-}) { // Factories accept timestamp for testability via Clock layer mocking
-	static readonly idle = (ts: number) => new EntityState({ status: 'idle', updatedAt: ts });
-	static readonly processing = (ts: number) => new EntityState({ status: 'processing', updatedAt: ts });
-	static readonly suspended = (signal: { name: string; token: string }, ts: number) => new EntityState({ pendingSignal: signal, status: 'suspended', updatedAt: ts });
+}) {
+	static readonly mk = (status: typeof EntityStatus.Type, signal?: { name: string; token: string }) => Clock.currentTimeMillis.pipe(Effect.map((ts) => new EntityState({ pendingSignal: signal, status, updatedAt: ts })));
+	static readonly transition = (ref: Ref.Ref<EntityState>, to: typeof EntityStatus.Type) => EntityState.mk(to).pipe(Effect.flatMap((s) => Ref.set(ref, s)));
 }
+const _metricOpt = (svc: Option.Option<MetricsService>, f: (m: MetricsService) => Metric.Metric.Counter<number>): Effect.Effect<void> => Option.match(svc, { onNone: () => Effect.void, onSome: (m) => Metric.increment(f(m)) });
 const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
-	const currentAddress = yield* Entity.CurrentAddress;
-	const stateRef = yield* Clock.currentTimeMillis.pipe(Effect.flatMap((ts) => Ref.make(EntityState.idle(ts))));
+	const addr = yield* Entity.CurrentAddress;
+	const stateRef = yield* EntityState.mk('idle').pipe(Effect.andThen(Ref.make));
 	const metrics = yield* Effect.serviceOption(MetricsService);
-	const trackActivation = Option.match(metrics, { onNone: () => Effect.void, onSome: (m) => Metric.increment(m.cluster.entityActivations) });
-	const trackDeactivation = Option.match(metrics, { onNone: () => Effect.void, onSome: (m) => Metric.increment(m.cluster.entityDeactivations) });
+	const trackActivation = _metricOpt(metrics, (m) => m.cluster.entityActivations);
+	const trackDeactivation = _metricOpt(metrics, (m) => m.cluster.entityDeactivations);
 	return {
-		process: (envelope) => Context.Request.withinCluster({	// withinCluster wraps ENTIRE handler: gen body + ensuring + catchAllCause
-			entityId: currentAddress.entityId,
-			entityType: currentAddress.entityType,
-			shardId: currentAddress.shardId,
-		})(
+		process: (envelope) => Context.Request.withinCluster({ entityId: addr.entityId, entityType: addr.entityType, shardId: addr.shardId })(
 			Effect.gen(function* () {
 				yield* trackActivation;
-				const ts = yield* Clock.currentTimeMillis;
-				yield* Ref.set(stateRef, EntityState.processing(ts));
-				yield* Effect.logDebug('Entity processing', { entityId: currentAddress.entityId, idempotencyKey: envelope.payload.idempotencyKey });
-				const completeTs = yield* Clock.currentTimeMillis;
-				yield* Ref.set(stateRef, new EntityState({ status: 'complete', updatedAt: completeTs }));
+				yield* EntityState.transition(stateRef, 'processing');
+				yield* Effect.logDebug('Entity processing', { entityId: addr.entityId, idempotencyKey: envelope.payload.idempotencyKey });
+				yield* EntityState.transition(stateRef, 'complete');
 			}).pipe(
-				Effect.ensuring(Effect.all([
-					Clock.currentTimeMillis.pipe(Effect.tap((ts) => Ref.update(stateRef, (s) => new EntityState({ ...s, updatedAt: ts })))),
-					trackDeactivation,
-				], { discard: true })),
-				Effect.catchAllCause((cause) => Effect.fail(new EntityProcessError({
-					cause,
-					message: Chunk.isNonEmpty(Cause.defects(cause)) ? 'Internal error' : Cause.pretty(cause),
-				}))),
+				Effect.ensuring(EntityState.transition(stateRef, 'idle').pipe(Effect.tap(() => trackDeactivation))),
+				Effect.catchAllCause((cause) => Effect.fail(new EntityProcessError({ cause, message: Chunk.isNonEmpty(Cause.defects(cause)) ? 'Internal error' : Cause.pretty(cause) }))),
 			),
 		),
 		status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse({ status: s.status, updatedAt: s.updatedAt }))),
 	};
-}), {
+}), {	// mailboxCapacity + maxIdleTime from ShardingConfig
 	concurrency: _CONFIG.entity.concurrency,
-	defectRetryPolicy: Schedule.exponential(_CONFIG.retry.defect.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(_CONFIG.retry.defect.maxAttempts)), Schedule.upTo(Duration.seconds(30))),
-	disableFatalDefects: false,
-	mailboxCapacity: _CONFIG.entity.mailboxCapacity,
-	maxIdleTime: _CONFIG.entity.maxIdleTime,
+	defectRetryPolicy: _scheduleRetry(_CONFIG.retry.maxAttempts.defect),
 	spanAttributes: { 'entity.service': 'cluster-infrastructure', 'entity.version': 'v1' },
 });
 
@@ -108,38 +93,21 @@ class ClusterError extends S.TaggedError<ClusterError>()('ClusterError', {
 	reason: S.Literal('AlreadyProcessingMessage', 'EntityNotAssignedToRunner', 'MailboxFull', 'MalformedMessage', 'PersistenceError', 'RpcClientError', 'RunnerNotRegistered', 'RunnerUnavailable', 'SendTimeout', 'SerializationError', 'Suspended'),
 	requestId: S.optional(S.String),
 	resumeToken: S.optional(S.String),
-}) {
-	static readonly fromAlreadyProcessing = (entityId: string, cause?: unknown) => new ClusterError({ cause, entityId, reason: 'AlreadyProcessingMessage' });
-	static readonly fromEntityNotAssigned = (entityId: string, cause?: unknown) => new ClusterError({ cause, entityId, reason: 'EntityNotAssignedToRunner' });
-	static readonly fromMailboxFull = (entityId: string, cause?: unknown) => new ClusterError({ cause, entityId, reason: 'MailboxFull' });
-	static readonly fromMalformedMessage = (cause?: unknown) => new ClusterError({ cause, reason: 'MalformedMessage' });
-	static readonly fromPersistence = (cause?: unknown) => new ClusterError({ cause, reason: 'PersistenceError' });
-	static readonly fromRpcClientError = (entityId: string, cause: unknown, requestId?: string) => new ClusterError({ cause, entityId, reason: 'RpcClientError', requestId });
-	static readonly fromRunnerNotRegistered = (cause?: unknown) => new ClusterError({ cause, reason: 'RunnerNotRegistered' });
-	static readonly fromRunnerUnavailable = (entityId: string, cause?: unknown) => new ClusterError({ cause, entityId, reason: 'RunnerUnavailable' });
-	static readonly fromSendTimeout = (entityId: string, cause?: unknown) => new ClusterError({ cause, entityId, reason: 'SendTimeout' });
-	static readonly fromSerializationError = (cause?: unknown) => new ClusterError({ cause, reason: 'SerializationError' });
-	static readonly fromSuspended = (entityId: string, resumeToken: string) => new ClusterError({ entityId, reason: 'Suspended', resumeToken });
-	// Transient reasons via Set membership — O(1) lookup, scales with more reasons
-	static readonly _transient: ReadonlySet<ClusterError['reason']> = new Set(['MailboxFull', 'SendTimeout']);
-	static readonly isTransient = (e: ClusterError): boolean => ClusterError._transient.has(e.reason);
+}) {	// Polymorphic factory: reason determines required fields, opts allows cause/requestId/resumeToken
+	static readonly from = (reason: ClusterError['reason'], entityId?: string, opts?: { cause?: unknown; requestId?: string; resumeToken?: string }) => new ClusterError({ cause: opts?.cause, entityId, reason, requestId: opts?.requestId, resumeToken: opts?.resumeToken });
+	static readonly _knownTags = HashSet.fromIterable(['AlreadyProcessingMessage', 'EntityNotAssignedToRunner', 'MailboxFull', 'MalformedMessage', 'PersistenceError', 'RpcClientError', 'RunnerNotRegistered', 'SerializationError', 'Suspended'] as const);
+	static readonly _globalErrors = HashSet.fromIterable(['PersistenceError', 'RunnerNotRegistered', 'SerializationError'] as const);
+	static readonly _transient = HashSet.fromIterable(['MailboxFull', 'RunnerUnavailable', 'SendTimeout'] as const);
+	static readonly isTransient = (e: ClusterError): boolean => HashSet.has(ClusterError._transient, e.reason);
 }
 class SingletonError extends Data.TaggedError('SingletonError')<{
 	readonly reason: 'StateLoadFailed' | 'StatePersistFailed' | 'SchemaDecodeFailed' | 'HeartbeatFailed' | 'LeaderHandoffFailed';
 	readonly cause?: unknown;
 	readonly singletonName: string;
 }> {
-	// Set-based retryable check — O(1) lookup, matches ClusterError._transient pattern
-	static readonly _retryable: ReadonlySet<SingletonError['reason']> = new Set(['StateLoadFailed', 'StatePersistFailed']);
-	static readonly isRetryable = (e: SingletonError): boolean => SingletonError._retryable.has(e.reason);
-	// Static factories — match ClusterError.from* pattern for consistency
-	static readonly fromStateLoad = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'StateLoadFailed', singletonName: name });
-	static readonly fromStatePersist = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'StatePersistFailed', singletonName: name });
-	static readonly fromSchemaDecode = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'SchemaDecodeFailed', singletonName: name });
-	static readonly fromHeartbeat = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'HeartbeatFailed', singletonName: name });
-	static readonly fromLeaderHandoff = (name: string, cause?: unknown) => new SingletonError({ cause, reason: 'LeaderHandoffFailed', singletonName: name });
-	// Direct factory — reason literal union provides type safety without Match overhead
-	static readonly from = ({ reason, name, cause }: { reason: SingletonError['reason']; name: string; cause?: unknown }) => new SingletonError({ cause, reason, singletonName: name });
+	static readonly from = (reason: SingletonError['reason'], name: string, cause?: unknown) => new SingletonError({ cause, reason, singletonName: name });
+	static readonly _retryable = HashSet.fromIterable(['StateLoadFailed', 'StatePersistFailed'] as const);
+	static readonly isRetryable = (e: SingletonError): boolean => HashSet.has(SingletonError._retryable, e.reason);
 }
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -162,7 +130,7 @@ const _storageLayers = (() => {	// Consolidated storage: dedicated PgClient for 
 	return Layer.mergeAll(
 		SqlRunnerStorage.layer.pipe(Layer.provide(runnerPgClient)),
 		SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
-		ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, preemptiveShutdown: true, shardsPerGroup: 100 }),
+		ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, entityMaxIdleTime: _CONFIG.entity.maxIdleTime, preemptiveShutdown: true, sendRetryInterval: _CONFIG.send.timeout, shardsPerGroup: 100 }),
 		Snowflake.layerGenerator,
 	);
 })();
@@ -179,16 +147,12 @@ const _healthLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Health mode
 		? RunnerHealth.layerK8s({ labelSelector, namespace }).pipe(Layer.provide(K8sHttpClient.layer), Layer.provide(NodeHttpClient.layerUndici), Layer.provide(NodeFileSystem.layer))
 		: RunnerHealth.layerNoop;
 }));
-const _transportBase = Layer.mergeAll(RpcSerialization.layerMsgPack, _healthLayer, _storageLayers);	// Shared transport base: serialization + health + storage (DRY across all transports)
-const _transports = {	// Transport dispatch table - protocol-specific layers only, base provided once
-	auto: SocketRunner.layerClientOnly.pipe(
-		Layer.provide(NodeClusterSocket.layerClientProtocol),
-		Layer.provide(_transportBase),
-		Layer.catchAll((e) => Layer.effectDiscard(Effect.logWarning('Socket transport unavailable, using HTTP', { error: String(e) })).pipe(
-			Layer.provideMerge(HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase))),
-		)),
-	),
-	http: HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase)),
+const _transportBase = Layer.mergeAll(RpcSerialization.layerMsgPack, _healthLayer, _storageLayers);
+const _httpLayer = HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase));
+const _transports = {
+	auto: SocketRunner.layerClientOnly.pipe(Layer.provide(NodeClusterSocket.layerClientProtocol), Layer.provide(_transportBase),
+		Layer.catchAll((e) => Effect.logWarning('Socket unavailable, using HTTP', { error: String(e) }).pipe(Effect.as(_httpLayer), Layer.unwrapEffect))),
+	http: _httpLayer,
 	socket: SocketRunner.layerClientOnly.pipe(Layer.provide(NodeClusterSocket.layerClientProtocol), Layer.provide(_transportBase)),
 	websocket: HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault), Layer.provide(NodeSocket.layerWebSocketConstructor), Layer.provide(FetchHttpClient.layer), Layer.provide(_transportBase)),
 } as const;
@@ -210,20 +174,15 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 		const sharding = yield* Sharding.Sharding;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'cluster' });
 		const getClient = yield* sharding.makeClient(ClusterEntity);
-		const _mapClusterError = (entityId: string) => (e: unknown): ClusterError =>	// Error mapping: @effect/cluster errors → ClusterError via Match
-			Match.value(e).pipe(
-				Match.when({ _tag: 'AlreadyProcessingMessage' }, (err) => ClusterError.fromAlreadyProcessing(entityId, err)),
-				Match.when({ _tag: 'MailboxFull' }, (err) => ClusterError.fromMailboxFull(entityId, err)),
-				Match.when({ _tag: 'PersistenceError' }, (err) => ClusterError.fromPersistence(err)),
-				Match.when(Socket.isSocketError, (err) => ClusterError.fromRunnerUnavailable(entityId, err)),
-				Match.orElse((err) => ClusterError.fromRunnerUnavailable(entityId, err)),
-			);
+		const _inferReason = (e: unknown): ClusterError['reason'] => Socket.isSocketError(e) ? 'RunnerUnavailable'
+			: Predicate.hasProperty(e, '_tag') && typeof e._tag === 'string' && HashSet.has(ClusterError._knownTags, e._tag as ClusterError['reason']) ? e._tag as ClusterError['reason'] : 'RunnerUnavailable';
+		const _mapClusterError = (entityId: string) => (e: unknown): ClusterError =>
+			((r) => ClusterError.from(r, HashSet.has(ClusterError._globalErrors, r) ? undefined : entityId, { cause: e }))(_inferReason(e));
+		const _resilienceMap = { BulkheadError: 'MailboxFull', CircuitError: 'RunnerUnavailable', TimeoutError: 'SendTimeout' } as const satisfies Record<string, ClusterError['reason']>;
 		const send = (entityId: string, payload: ProcessPayload): Effect.Effect<void, ClusterError, MetricsService> => {
 			const circuitName = `cluster.shard.${sharding.getShardId(EntityId.make(entityId), 'default')}`;
-			const mapResilienceError = (e: Resilience.Error<ClusterError>): ClusterError =>	// Map Resilience wrapper errors → ClusterError (type guards, not _tag dispatch)
-				Resilience.is(e, 'TimeoutError') ? ClusterError.fromSendTimeout(entityId, e) :
-				Resilience.is(e, 'CircuitError') ? ClusterError.fromRunnerUnavailable(entityId, e) :
-				Resilience.is(e, 'BulkheadError') ? ClusterError.fromMailboxFull(entityId, e) : e;
+			const mapResilienceError = (e: Resilience.Error<ClusterError>): ClusterError =>
+				e._tag in _resilienceMap ? ClusterError.from(_resilienceMap[e._tag as keyof typeof _resilienceMap], entityId, { cause: e }) : e as ClusterError;
 			const resilientSend = Resilience.run(circuitName, getClient(entityId)['process'](payload).pipe(Effect.asVoid, Effect.mapError(_mapClusterError(entityId))), {
 				bulkhead: _CONFIG.send.bulkhead,
 				circuit: circuitName,
@@ -233,7 +192,7 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 			}).pipe(Effect.mapError(mapResilienceError));
 			return MetricsService.trackCluster(resilientSend, { entityType: 'Cluster', operation: 'send' });
 		};
-		const isLocal = (entityId: string): Effect.Effect<boolean> => Telemetry.span(Effect.sync(() => sharding.hasShardId(sharding.getShardId(EntityId.make(entityId), 'default'))), 'cluster.isLocal', { 'entity.id': entityId });
+		const isLocal = Effect.fn('cluster.isLocal')((entityId: string) => Effect.sync(() => sharding.hasShardId(sharding.getShardId(EntityId.make(entityId), 'default'))));	// L1: Effect.fn for auto-tracing
 		const generateId: Effect.Effect<Snowflake.Snowflake> = sharding.getSnowflake;
 		yield* Effect.logInfo('ClusterService initialized');
 		return { generateId, isLocal, send };
@@ -250,17 +209,25 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 		run: (stateRef: Ref.Ref<S.Schema.Type<StateSchema>>) => Effect.Effect<void, E, R>,
 		options?: {
 			readonly shardGroup?: string;
-			readonly state?: { readonly schema: StateSchema; readonly initial: S.Schema.Type<StateSchema> };
+			readonly state?: {
+				readonly schema: StateSchema;
+				readonly initial: S.Schema.Type<StateSchema>;
+				readonly version?: number;
+				readonly migrate?: (oldState: unknown, oldVersion: number) => S.Schema.Type<StateSchema>;
+			};
 			readonly onBecomeLeader?: Effect.Effect<void, never, R>;
 			readonly onLoseLeadership?: Effect.Effect<void, never, R>;
 		},) => {
-		const stateKey = `${_CONFIG.singleton.keyPrefix}${name}`;
+		const _versionedKey = (n: string, v: number) => `${_CONFIG.singleton.keyPrefix}${n}:v${v}`;
+		const stateVersion = options?.state?.version ?? 1;
+		const stateKey = _versionedKey(name, stateVersion);
 		return Singleton.make(
 			name,
 			Effect.gen(function* () {
 				const sharding = yield* Sharding.Sharding;
 				yield* Effect.annotateLogsScoped({ 'service.name': `singleton.${name}` });
 				const fibers = yield* FiberMap.make<string>();
+				const leaderTs = yield* Clock.currentTimeMillis;
 				yield* options?.onBecomeLeader ?? Effect.void;
 				yield* Effect.addFinalizer(() => options?.onLoseLeadership ?? Effect.void);
 				const metrics = yield* MetricsService;
@@ -272,31 +239,52 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 					? Effect.gen(function* () {
 							const db = yield* DatabaseService;
 							const schema = stateOpts.schema as unknown as S.Schema<S.Schema.Type<StateSchema>, S.Schema.Encoded<StateSchema>, never>;
-							const loaded = yield* db.kvStore.getJson(stateKey, schema).pipe(
+							const loadState = db.kvStore.getJson(stateKey, schema).pipe(
 								Effect.tap(() => Metric.increment(taggedOps)),
-								Effect.retry(_CONFIG.singleton.stateRetry),
-								Effect.map(Option.getOrElse(F.constant(stateOpts.initial))),
+								Effect.flatMap((opt) => Option.isSome(opt) ? Effect.succeed(opt.value) : stateVersion > 1
+									? Effect.iterate({ found: Option.none<unknown>(), v: stateVersion - 1 }, {
+										body: ({ v }) => db.kvStore.getJson(_versionedKey(name, v), S.Unknown).pipe(Effect.map((found) => ({ found, v: v - 1 }))),
+										while: ({ found, v }) => Option.isNone(found) && v >= 1,
+									}).pipe(Effect.flatMap(({ found }) => Option.match(found, {
+										onNone: () => Effect.succeed(stateOpts.initial),
+										onSome: (value) => stateOpts.migrate ? ((fn) => Effect.sync(() => fn(value, stateVersion - 1)))(stateOpts.migrate) : Effect.succeed(stateOpts.initial),
+									})))
+									: Effect.succeed(stateOpts.initial)),
+							);
+							const loaded = yield* loadState.pipe(
+								Effect.retry(_scheduleRetry(_CONFIG.retry.maxAttempts.state)),
 								Effect.catchAllCause((cause) => Metric.increment(taggedErr).pipe(Effect.zipRight(Effect.logWarning('State load failed, using initial', { cause })), Effect.as(stateOpts.initial))),
 							);
 							const ref = yield* Ref.make(loaded);
 							yield* Effect.addFinalizer(() => Ref.get(ref).pipe(
 								Effect.flatMap((state) => db.kvStore.setJson(stateKey, state, schema)),
-								Effect.retry(_CONFIG.singleton.stateRetry),
+								Effect.retry(_scheduleRetry(_CONFIG.retry.maxAttempts.state)),
 								Effect.tap(() => Metric.increment(taggedOps)),
-								Effect.catchAllCause((cause) => Metric.increment(taggedErr).pipe(Effect.zipRight(Effect.logError('State persist failed', { cause })))),
+								Effect.catchAllCause((cause) => Metric.increment(taggedErr).pipe(
+									Effect.zipRight(Effect.logError('State persist failed - potential data loss', { cause, singleton: name })),
+									Effect.zipRight(Effect.die(SingletonError.from('StatePersistFailed', name, cause))),	// Propagate as defect for monitoring
+								)),
 							));
 							return ref;
 						})
 					: Ref.make(undefined as unknown as S.Schema.Type<StateSchema>));
-				const awaitShutdown = sharding.isShutdown.pipe(Effect.repeat(Schedule.recurUntil<boolean>(F.identity)), Effect.tap(() => Effect.logInfo(`Singleton ${name} detected shutdown`)));	// recurUntil(identity) = repeat until shutdown === true
+				const awaitShutdown = sharding.isShutdown.pipe(Effect.repeat(Schedule.spaced(Duration.millis(100)).pipe(Schedule.whileOutput((shutdown) => !shutdown))), Effect.tap(() => Effect.logInfo(`Singleton ${name} detected shutdown`)));
+				const workStartTs = yield* Clock.currentTimeMillis;
+				const migrationDuration = Duration.millis(workStartTs - leaderTs);
+				yield* Metric.set(Metric.taggedWithLabels(metrics.singleton.migrationDuration, stateLabels), Duration.toSeconds(migrationDuration));
+				yield* Effect.when(
+					Metric.increment(Metric.taggedWithLabels(metrics.singleton.migrationSlaExceeded, stateLabels)).pipe(Effect.tap(() => Effect.logWarning('Migration SLA exceeded', { migration: Duration.format(migrationDuration), singleton: name, sla: Duration.format(_CONFIG.singleton.migrationSla) }))),
+					() => Duration.greaterThan(migrationDuration, _CONFIG.singleton.migrationSla),
+				);
 				yield* FiberMap.run(fibers, 'main-work')(Context.Request.withinCluster({ isLeader: true })(
 					MetricsService.trackEffect(Telemetry.span(run(stateRef), `singleton.${name}`, { metrics: false }), {
 						duration: metrics.singleton.duration, errors: metrics.errors, labels: MetricsService.label({ singleton: name }),
 					}).pipe(Effect.andThen(Clock.currentTimeMillis), Effect.tap((ts) => Effect.all([Metric.set(metrics.singleton.lastExecution, ts), Metric.increment(metrics.singleton.executions)], { discard: true }))),
 				));
-				yield* Effect.raceFirst(Effect.never, awaitShutdown).pipe(
-					Effect.exit,
-					Effect.flatMap((exit) => Effect.if(Exit.isInterrupted(exit), { onFalse: () => Effect.logWarning(`Singleton ${name} exited unexpectedly`), onTrue: () => Effect.logInfo(`Singleton ${name} interrupted gracefully`) })),
+				yield* awaitShutdown.pipe(
+					Effect.tap(() => Effect.logInfo(`Singleton ${name} interrupted gracefully`)),
+					Effect.catchAllCause((cause) => Cause.isInterrupted(cause) ? Effect.void :
+						Effect.logError(`Singleton ${name} exited unexpectedly`, { cause }).pipe(Effect.andThen(Effect.failCause(cause)))),
 				);
 			}),
 			{ shardGroup: options?.shardGroup },
@@ -335,21 +323,21 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 			healthy: Number(m.runnersHealthy.value) > 0 && Number(m.singletons.value) > 0,
 			metrics: { entities: Number(m.entities.value), runners: Number(m.runners.value), runnersHealthy: Number(m.runnersHealthy.value), shards: Number(m.shards.value), singletons: Number(m.singletons.value) },
 		}))), 'cluster.checkClusterHealth'),
-		singleton: (config: ReadonlyArray<{ readonly name: string; readonly expectedIntervalMs: number }>) =>
+		singleton: (config: ReadonlyArray<{ readonly name: string; readonly expectedInterval: Duration.DurationInput }>) =>
 			Telemetry.span(Effect.gen(function* () {
 				const metrics = yield* MetricsService;
 				const nowDt = DateTime.unsafeMake(yield* Clock.currentTimeMillis);
-				const results = yield* Effect.forEach(config, ({ name, expectedIntervalMs }) => {
+				const results = yield* Effect.forEach(config, ({ name, expectedInterval }) => {
 					const labels = MetricsService.label({ singleton: name });
+					const maxStale = Duration.times(Duration.decode(expectedInterval), _CONFIG.singleton.threshold);
 					return Metric.value(Metric.taggedWithLabels(metrics.singleton.lastExecution, labels)).pipe(
 						Effect.map(({ value }: { readonly value: number }) => {
 							const valueDt = DateTime.unsafeMake(value);
 							const elapsed = DateTime.distanceDuration(nowDt, valueDt);
-							const elapsedMs = Duration.toMillis(elapsed);
 							return {
-								healthy: N.between({ maximum: expectedIntervalMs * _CONFIG.singleton.threshold, minimum: 0 })(elapsedMs),
+								healthy: Duration.between(elapsed, { maximum: maxStale, minimum: Duration.zero }),
 								lastExecution: value > 0 ? DateTime.formatIso(valueDt) : 'never', name,
-								staleFormatted: value > 0 ? Duration.format(elapsed) : 'N/A', staleMs: elapsedMs,
+								staleFormatted: value > 0 ? Duration.format(elapsed) : 'N/A', staleMs: Duration.toMillis(elapsed),
 							};
 						}),
 					);
@@ -358,12 +346,16 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 				return { healthy: A.isEmptyArray(unhealthy), healthyCount: healthy.length, singletons: results, unhealthyCount: unhealthy.length };
 			}), 'cluster.checkSingletonHealth'),
 	};
-	static readonly cronInfo = (cron: Cron.Cron, opts?: { readonly nextCount?: number }) =>	// Cron schedule info
-		Clock.currentTimeMillis.pipe(Effect.map((now) => {
-			const date = new Date(now);
+	static readonly cronInfo = (cron: Cron.Cron, opts?: { readonly nextCount?: number }) =>
+		Effect.sync(() => {
+			const date = new Date();
 			const seq = Cron.sequence(cron, date);
-			return { matchesNow: Cron.match(cron, date), nextRuns: A.makeBy(opts?.nextCount ?? 5, () => seq.next().value) };
-		}));
+			const n = opts?.nextCount ?? 5;
+			const nextRuns = A.unfold({ count: 0, seq }, ({ count, seq }) =>
+				count >= n ? Option.none() : ((r) => r.done ? Option.none() : Option.some([r.value, { count: count + 1, seq }] as const))(seq.next()),
+			);
+			return { matchesNow: Cron.match(cron, date), nextRuns };
+		});
 }
 
 // --- [NAMESPACE] -------------------------------------------------------------

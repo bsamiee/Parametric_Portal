@@ -83,7 +83,7 @@ const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.f
 	metadata:         { col: 'metadata',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.JsonFromString]      },
 	searchVector:     { col: 'search_vector',    sql: 'TSVECTOR',    ts: 'S.Unknown',         mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
 	embedding:        { col: 'embedding',        sql: 'VECTOR',      ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	// Job-specific fields
+	// Job-specific fields (jobs table: active queue)
 	priority:         { col: 'priority',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	payload:          { col: 'payload',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WrapMeta.JsonFromString]                             },
 	attempts:         { col: 'attempts',         sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -96,6 +96,11 @@ const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.f
 	lockedUntil:      { col: 'locked_until',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
 	waitMs:           { col: 'wait_ms',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
 	durationMs:       { col: 'duration_ms',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
+	// Job DLQ fields (job_dlq table: dead-letter archive)
+	originalJobId:    { col: 'original_job_id',  sql: 'UUID',        ts: 'S.UUID',            mark: 'fk',        gen: false,    null: false, ref: false,      wrap: false                                                  },
+	errorReason:      { col: 'error_reason',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	errorHistory:     { col: 'error_history',    sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WrapMeta.JsonFromString]                             },
+	replayedAt:       { col: 'replayed_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
 	// KV store fields (cluster infrastructure state)
 	kvKey:            { col: 'key',              sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
 	kvValue:          { col: 'value',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -138,6 +143,9 @@ const _Tables = {
 		fk: 		[[_Registry.entityType, _Registry.entityId], _Fk.CASCADE] as const},
 	jobs: {
 		fields: 	[_Registry.id, _Registry.appId, _Registry.userId, _Registry.requestId, _Registry.type, _Registry.payload, _Registry.priority, _Registry.status, _Registry.attempts, _Registry.maxAttempts, _Registry.scheduledAt, _Registry.startedAt, _Registry.completedAt, _Registry.lastError, _Registry.lockedBy, _Registry.lockedUntil, _Registry.waitMs, _Registry.durationMs, _Registry.updatedAt],
+		fk: 		[[_Registry.userId, _Fk.RESTRICT]] as const},
+	jobDlq: {
+		fields: 	[_Registry.id, _Registry.originalJobId, _Registry.appId, _Registry.userId, _Registry.requestId, _Registry.type, _Registry.payload, _Registry.errorReason, _Registry.attempts, _Registry.errorHistory, _Registry.replayedAt],
 		fk: 		[[_Registry.userId, _Fk.RESTRICT]] as const},
 	kvStore: {
 		fields: 	[_Registry.id, _Registry.kvKey, _Registry.kvValue, _Registry.expiresAt, _Registry.updatedAt],

@@ -25,12 +25,12 @@ Progress: [#######---] 68%
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-cluster-foundation | 3 | 50min | 17min |
-| 02-context-integration | 2 | 8min | 4min |
-| 03-singleton-scheduling | 3 | 22min | 7min |
-| 04-job-processing | 3 | 22min | 7min |
+| Phase                   | Plans | Total | Avg/Plan |
+| ----------------------- | ----- | ----- | -------- |
+| 01-cluster-foundation   | 3     | 50min | 17min    |
+| 02-context-integration  | 2     | 8min  | 4min     |
+| 03-singleton-scheduling | 3     | 22min | 7min     |
+| 04-job-processing       | 3     | 22min | 7min     |
 
 **Recent Trend:**
 - Last 5 plans: 03-03 (6min), 04-01 (6min), 04-02 (12min), 04-03 (4min)

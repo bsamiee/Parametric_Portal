@@ -4,12 +4,30 @@
  * Purpose: Store jobs that exhausted retries or encountered terminal errors.
  * Supports debugging, replay, and observability of job failures.
  *
- * Key features:
- * - UUIDv7 primary key (uuid_extract_timestamp for creation time)
- * - Tenant isolation via app_id with RLS
- * - Error history as JSONB array for debugging
- * - Partial indexes on pending (replayed_at IS NULL) for efficient queries
- * - Purge function for replayed entries older than N days
+ * PG18.1 + EXTENSIONS LEVERAGED:
+ * ┌───────────────────────────────────────────────────────────────────────────────┐
+ * │ uuidv7()              │ Time-ordered IDs (k-sortable, embeds creation time)   │
+ * │ uuid_extract_timestamp│ Extract DLQ time from id (NO separate dlq_at needed)  │
+ * │ BRIN on id            │ Ultra-compact for time-range scans on DLQ entries     │
+ * │ Partial indexes       │ Only index pending (replayed_at IS NULL) entries      │
+ * │ Covering (INCLUDE)    │ Index-only scans for common query patterns            │
+ * │ JSONB + GIN           │ Error history search for debugging                    │
+ * │ RLS                   │ Tenant isolation via app.current_tenant GUC           │
+ * └───────────────────────────────────────────────────────────────────────────────┘
+ *
+ * DESIGN DECISIONS:
+ * - NO updated_at: DLQ entries are append-mostly; only replayed_at mutates
+ * - NO FK to jobs: Original job may be purged before DLQ entry is replayed
+ * - user_id FK RESTRICT: Users never hard-deleted (soft-delete only)
+ * - Separate table from jobs: Different lifecycle, access patterns, purge semantics
+ *
+ * ERROR_REASON DISCRIMINANTS:
+ * - MaxRetries: Job exhausted configured retry attempts
+ * - Validation: Payload failed schema validation
+ * - HandlerMissing: No registered handler for job type
+ * - RunnerUnavailable: Worker pool unavailable or shutting down
+ * - Timeout: Job exceeded execution time limit
+ * - Panic: Unrecoverable runtime error (defect, not failure)
  */
 import { SqlClient } from '@effect/sql';
 import { Effect } from 'effect';
@@ -27,29 +45,45 @@ export default Effect.gen(function* () {
 			id UUID PRIMARY KEY DEFAULT uuidv7(),
 			original_job_id UUID NOT NULL,
 			app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+			user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+			request_id UUID,
 			type TEXT NOT NULL,
 			payload JSONB NOT NULL,
 			error_reason TEXT NOT NULL,
 			attempts INTEGER NOT NULL,
 			error_history JSONB NOT NULL,
-			dlq_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			replayed_at TIMESTAMPTZ,
-			request_id UUID,
-			user_id UUID,
-			CONSTRAINT job_dlq_error_history_array CHECK (jsonb_typeof(error_history) = 'array')
+			CONSTRAINT job_dlq_error_reason_valid CHECK (error_reason IN ('MaxRetries', 'Validation', 'HandlerMissing', 'RunnerUnavailable', 'Timeout', 'Panic')),
+			CONSTRAINT job_dlq_error_history_array CHECK (jsonb_typeof(error_history) = 'array'),
+			CONSTRAINT job_dlq_attempts_positive CHECK (attempts > 0)
 		)
 	`;
-    yield* sql`COMMENT ON TABLE job_dlq IS 'Dead-lettered jobs — use uuid_extract_timestamp(id) for DLQ time'`;
-    yield* sql`COMMENT ON COLUMN job_dlq.error_reason IS 'Failure classification: MaxRetries, Validation, HandlerMissing, RunnerUnavailable'`;
-    yield* sql`COMMENT ON COLUMN job_dlq.replayed_at IS 'NULL = pending replay; set when job resubmitted'`;
-    // --- Indexes -------------------------------------------------------------
-    yield* sql`CREATE INDEX idx_job_dlq_type ON job_dlq(type) WHERE replayed_at IS NULL`;
-    yield* sql`CREATE INDEX idx_job_dlq_dlq_at ON job_dlq(dlq_at) WHERE replayed_at IS NULL`;
-    yield* sql`CREATE INDEX idx_job_dlq_request ON job_dlq(request_id) WHERE request_id IS NOT NULL`;
+    yield* sql`COMMENT ON TABLE job_dlq IS 'Dead-lettered jobs — use uuid_extract_timestamp(id) for DLQ creation time; NO updated_at (append-mostly)'`;
+    yield* sql`COMMENT ON COLUMN job_dlq.original_job_id IS 'Reference to original job — NO FK constraint (job may be purged before replay)'`;
+    yield* sql`COMMENT ON COLUMN job_dlq.error_reason IS 'Failure classification discriminant for typed error handling'`;
+    yield* sql`COMMENT ON COLUMN job_dlq.error_history IS 'Array of {error: string, timestamp: number} entries from all attempts'`;
+    yield* sql`COMMENT ON COLUMN job_dlq.replayed_at IS 'NULL = pending replay; set when job resubmitted to queue'`;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // INDEXES: Optimized for pending queries, time-range scans, debugging
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BRIN on id: UUIDv7 is time-ordered, efficient for "DLQ entries in last N days"
+    yield* sql`CREATE INDEX idx_job_dlq_id_brin ON job_dlq USING BRIN (id)`;
+    // Pending entries by type: "Show all pending MaxRetries failures for email-send"
+    yield* sql`CREATE INDEX idx_job_dlq_pending_type ON job_dlq(type, error_reason) INCLUDE (app_id, attempts) WHERE replayed_at IS NULL`;
+    // Pending entries by app: "Show all pending DLQ entries for tenant X"
+    yield* sql`CREATE INDEX idx_job_dlq_pending_app ON job_dlq(app_id, id DESC) INCLUDE (type, error_reason, attempts) WHERE replayed_at IS NULL`;
+    // Original job lookup: "What happened to job X?" (debugging)
+    yield* sql`CREATE INDEX idx_job_dlq_original ON job_dlq(original_job_id) INCLUDE (error_reason, attempts, replayed_at)`;
+    // Request correlation: "All DLQ entries from HTTP request Y"
+    yield* sql`CREATE INDEX idx_job_dlq_request ON job_dlq(request_id) INCLUDE (type, error_reason) WHERE request_id IS NOT NULL`;
+    // Error history search: GIN for @> containment queries on error messages
+    yield* sql`CREATE INDEX idx_job_dlq_errors ON job_dlq USING GIN (error_history)`;
+    // FK enforcement indexes
     yield* sql`CREATE INDEX idx_job_dlq_app_id_fk ON job_dlq(app_id)`;
-    // --- Trigger for updated_at ----------------------------------------------
-    yield* sql`CREATE TRIGGER job_dlq_updated_at BEFORE UPDATE ON job_dlq FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
-    // --- Purge function ------------------------------------------------------
+    yield* sql`CREATE INDEX idx_job_dlq_user_id_fk ON job_dlq(user_id) WHERE user_id IS NOT NULL`;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PURGE: Hard-delete replayed entries older than N days
+    // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
 		CREATE OR REPLACE FUNCTION purge_job_dlq(p_older_than_days INT DEFAULT 30)
 		RETURNS INT
@@ -64,7 +98,7 @@ export default Effect.gen(function* () {
 			SELECT COUNT(*)::int FROM purged
 		$$
 	`;
-    yield* sql`COMMENT ON FUNCTION purge_job_dlq IS 'Hard-delete replayed job_dlq entries older than N days'`;
+    yield* sql`COMMENT ON FUNCTION purge_job_dlq IS 'Hard-delete replayed job_dlq entries older than N days — keeps pending entries indefinitely'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // RLS: Row-Level Security for tenant isolation
     // ═══════════════════════════════════════════════════════════════════════════

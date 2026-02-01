@@ -18,7 +18,6 @@ Typed domain events publish reliably with at-least-once delivery and automatic d
 **Out of scope:**
 - Workflows/sagas (Phase 6)
 - WebSocket/SSE delivery (Phase 7)
-
 </domain>
 
 <decisions>
@@ -135,7 +134,6 @@ Typed domain events publish reliably with at-least-once delivery and automatic d
 - Delivery metadata visibility
 - Subscription health cleanup strategy
 - Best professional reference pattern for dense/polymorphic design
-
 </decisions>
 
 <specifics>
@@ -167,78 +165,34 @@ Typed domain events publish reliably with at-least-once delivery and automatic d
 - middleware.ts — population patterns
 - audit.ts — DLQ/replay patterns
 - resilience.ts — rate limiting refactor target
-
 </specifics>
 
-<research_requirements>
-## Research Quality Requirements
+<prerequisite>
+## Prerequisite: Full Runner Layer Migration
 
-**CRITICAL: Match quality of prior research files:**
-- `.planning/phases/03-singleton-scheduling/03-RESEARCH.md`
-- `.planning/phases/04-job-processing/04-RESEARCH.md`
+**Issue:** Current cluster.ts uses `SocketRunner.layerClientOnly` / `HttpRunner.layerClient` which are client-only layers for sending messages. The API server hosts entities (ClusterEntity, JobEntity) which requires full runner layers that provide `CurrentAddress` at entity activation time.
 
-**Research MUST read these codebase files before writing findings:**
+**Current State:**
+- `_transports.auto` uses `SocketRunner.layerClientOnly`
+- `_transports.http` uses `HttpRunner.layerClient`
+- Entity.toLayer handlers yield `Entity.CurrentAddress` — not available with client-only layers
+- main.ts Layer.launch produces Effect with unsatisfied `Sharding | CurrentAddress | ShardingConfig` requirements
 
-| File | Why Read It |
-|------|-------------|
-| `packages/server/src/infra/cluster.ts` | Broadcaster API, transport config, Entity patterns, ClusterService structure |
-| `packages/server/src/infra/jobs.ts` | Phase 4 patterns to match — Entity dispatch, FiberMap, Ref state |
-| `packages/server/src/context.ts` | Request context, withinCluster, ClusterState |
-| `packages/server/src/middleware.ts` | Population patterns, middleware composition |
-| `packages/server/src/utils/resilience.ts` | Current rate limiting — refactor target |
-| `packages/server/src/observe/metrics.ts` | MetricsService.trackEffect pattern |
-| `packages/server/src/observe/telemetry.ts` | Telemetry.span pattern (NOT Effect.fn) |
-| `packages/database/src/models.ts` | Model.Class patterns, existing schemas |
-| `packages/database/src/repos.ts` | Repo patterns, SQL composition |
-| `packages/database/migrations/0002_*.ts` | DLQ schema to extend |
+**Required Fix (do as part of Phase 5 Plan 01):**
+1. Import `NodeSocketServer` from `@effect/platform-node`
+2. Change `SocketRunner.layerClientOnly` → `SocketRunner.layer`
+3. Add `NodeSocketServer.layer({ port: configurable })` as dependency
+4. Update `HttpRunner.layerClient` → `HttpRunner.layer` equivalently
+5. Use `Layer.provideMerge` instead of `Layer.provide` to expose Sharding/ShardingConfig
+6. Update main.ts to include ClusterService.Layer in ServicesLayer
 
-**Code style requirements (non-negotiable):**
-
-| Requirement | Example |
-|-------------|---------|
-| No loose types | `type X = typeof XSchema.Type` — derive from schema |
-| No imperative code | `Match.type`/`Match.value` — never `if/else` chains |
-| Dense imports | Group 10+ related imports per package with integration patterns |
-| Single polymorphic shapes | One VariantSchema, one emit function, one DLQ table |
-| Existing patterns | Reference cluster.ts/jobs.ts patterns exactly |
-| Static factories | `static readonly from = Match.type<...>().pipe(...)` |
-| Set-based classification | `static readonly _terminal: ReadonlySet<...>` for O(1) lookup |
-
-**Key imports table format (follow 03/04-RESEARCH.md):**
-
-```markdown
-**effect** (N key imports):
-| Import | Purpose | Integration Pattern |
-|--------|---------|---------------------|
-| `Match.type` | Exhaustive union matching | `Match.type<T>().pipe(Match.when(...), Match.exhaustive)` |
-```
-
-**Don't hand-roll table format:**
-
-| Problem | Don't Build | Use Instead | Why |
-|---------|-------------|-------------|-----|
-| [problem] | [naive approach] | [Effect/cluster API] | [edge cases handled] |
-
-**Architecture section requirements:**
-- Show delta from existing files (e.g., "Add to cluster.ts")
-- Reference existing patterns by line/function name
-- Provide complete code blocks matching codebase style
-
-**Codebase integration patterns to extract:**
-- `MetricsService.trackEffect` (from metrics.ts)
-- `Telemetry.span(..., { metrics: false })` (from telemetry.ts)
-- `Context.Request.withinCluster` (from context.ts)
-- `Effect.annotateLogsScoped` (from cluster.ts)
-- `_CONFIG` flat structure (from cluster.ts)
-- `const + namespace` merge pattern (from cluster.ts/jobs.ts)
-
-</research_requirements>
+**Reference:** `.planning/phases/04-job-processing/04-RESEARCH.md` section 10 (Runner Layers)
+</prerequisite>
 
 <deferred>
 ## Deferred Ideas
 
 None — discussion stayed within phase scope
-
 </deferred>
 
 ---

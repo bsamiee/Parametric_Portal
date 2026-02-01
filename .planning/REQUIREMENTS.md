@@ -7,16 +7,16 @@
 
 Implementation must adhere to these constraints across all deliverables:
 
-| Standard | Rule | Rationale |
-|----------|------|-----------|
-| **Density** | <225 LOC per file | Forces algorithmic thinking, prevents helper spam |
-| **Export** | Single `const` + `namespace` merge | `export { X }` pattern, one public surface per file |
-| **Polymorphic** | One function handles all arities | No `get`/`getMany`, `emit`/`emitBatch` — use overloads or union inputs |
-| **Types** | Branded, schema-derived, or constrained | No `any`, no loose `string` where `TenantId` applies |
-| **Functional** | No imperative control flow | No `if`/`else` chains — use `Match.type`, ternary, dispatch tables |
-| **Private** | Prefix internal symbols with `_` | `_ref`, `_default`, `_boundaries` — not exported |
-| **Effect-only** | 100% Effect ecosystem | No mixing async/await, no hand-rolled primitives |
-| **Extend** | Augment existing patterns | No parallel implementations — extend Context, Middleware, etc. |
+| Standard        | Rule                                    | Rationale                                                              |
+| --------------- | --------------------------------------- | ---------------------------------------------------------------------- |
+| **Density**     | <225 LOC per file                       | Forces algorithmic thinking, prevents helper spam                      |
+| **Export**      | Single `const` + `namespace` merge      | `export { X }` pattern, one public surface per file                    |
+| **Polymorphic** | One function handles all arities        | No `get`/`getMany`, `emit`/`emitBatch` — use overloads or union inputs |
+| **Types**       | Branded, schema-derived, or constrained | No `any`, no loose `string` where `TenantId` applies                   |
+| **Functional**  | No imperative control flow              | No `if`/`else` chains — use `Match.type`, ternary, dispatch tables     |
+| **Private**     | Prefix internal symbols with `_`        | `_ref`, `_default`, `_boundaries` — not exported                       |
+| **Effect-only** | 100% Effect ecosystem                   | No mixing async/await, no hand-rolled primitives                       |
+| **Extend**      | Augment existing patterns               | No parallel implementations — extend Context, Middleware, etc.         |
 
 ---
 
@@ -185,19 +185,19 @@ Deferred to future milestone. Tracked for planning awareness.
 
 Explicitly excluded from this milestone.
 
-| Feature | Reason |
-|---------|--------|
-| Per-tenant billing integration | Requires billing system integration, defer to quota milestone |
-| Multi-region routing | Requires geo-routing infrastructure not yet available |
-| Feature flags service | Cache-backed config is straightforward extension, not cluster-native |
-| Worker threads | Effect lacks native support; if needed, wrap later |
-| Custom consensus/Raft | Cluster provides Singleton; don't hand-roll leader election |
-| Redis pub/sub for cross-pod | Cluster messaging is typed, traced, persistent — use that |
-| Manual shard management | SqlRunnerStorage handles via advisory locks automatically |
-| Custom message deduplication | Use `Rpc.make({ primaryKey })` + SqlMessageStorage |
-| Manual trace propagation | Use `HttpTraceContext.toHeaders/fromHeaders` |
-| Custom state machines | Use `Machine.makeSerializable` from @effect/experimental |
-| Manual binary serialization | Use `MsgPack.duplexSchema` or `RpcSerialization.layerMsgPack` |
+| Feature                        | Reason                                                               |
+| ------------------------------ | -------------------------------------------------------------------- |
+| Per-tenant billing integration | Requires billing system integration, defer to quota milestone        |
+| Multi-region routing           | Requires geo-routing infrastructure not yet available                |
+| Feature flags service          | Cache-backed config is straightforward extension, not cluster-native |
+| Worker threads                 | Effect lacks native support; if needed, wrap later                   |
+| Custom consensus/Raft          | Cluster provides Singleton; don't hand-roll leader election          |
+| Redis pub/sub for cross-pod    | Cluster messaging is typed, traced, persistent — use that            |
+| Manual shard management        | SqlRunnerStorage handles via advisory locks automatically            |
+| Custom message deduplication   | Use `Rpc.make({ primaryKey })` + SqlMessageStorage                   |
+| Manual trace propagation       | Use `HttpTraceContext.toHeaders/fromHeaders`                         |
+| Custom state machines          | Use `Machine.makeSerializable` from @effect/experimental             |
+| Manual binary serialization    | Use `MsgPack.duplexSchema` or `RpcSerialization.layerMsgPack`        |
 
 ---
 
@@ -205,16 +205,16 @@ Explicitly excluded from this milestone.
 
 Deep-dive documentation informing implementation approach.
 
-| File | Covers | Key Patterns |
-|------|--------|--------------|
-| [CLUSTER.md](research/CLUSTER.md) | Entity, Sharding, SqlMessageStorage, SqlRunnerStorage, Singleton, ClusterCron, Snowflake | Entity.make, toLayer options, Sharding.send/broadcast |
-| [WORKFLOW.md](research/WORKFLOW.md) | Workflow, Activity, DurableClock, DurableDeferred, compensation | Workflow.make, withCompensation, idempotencyKey |
-| [RPC.md](research/RPC.md) | RpcGroup, RpcServer, RpcClient, RpcMiddleware, RpcSerialization | toHttpAppWebsocket, layerMsgPack, stream: true |
-| [EXPERIMENTAL.md](research/EXPERIMENTAL.md) | Machine, RateLimiter/Redis, PersistedCache, VariantSchema | Machine.makeSerializable, procedures.make |
-| [PLATFORM-REALTIME.md](research/PLATFORM-REALTIME.md) | Socket, MsgPack, Worker, Sharding.broadcaster | Socket.run, MsgPack.duplexSchema |
-| [PLATFORM-HTTP.md](research/PLATFORM-HTTP.md) | HttpApiBuilder, handleRaw, StreamingService.sse | Existing patterns, SSE delivery |
-| [INTEGRATION.md](research/INTEGRATION.md) | Context extension, file migration, Effect patterns | ClusterState, Effect.fn, Match, Schedule |
-| [SUMMARY.md](research/SUMMARY.md) | Synthesis, phase suggestions, don't-hand-roll consolidated | Architecture decisions, pitfalls |
+| File                                                  | Covers                                                                                   | Key Patterns                                          |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| [CLUSTER.md](research/CLUSTER.md)                     | Entity, Sharding, SqlMessageStorage, SqlRunnerStorage, Singleton, ClusterCron, Snowflake | Entity.make, toLayer options, Sharding.send/broadcast |
+| [WORKFLOW.md](research/WORKFLOW.md)                   | Workflow, Activity, DurableClock, DurableDeferred, compensation                          | Workflow.make, withCompensation, idempotencyKey       |
+| [RPC.md](research/RPC.md)                             | RpcGroup, RpcServer, RpcClient, RpcMiddleware, RpcSerialization                          | toHttpAppWebsocket, layerMsgPack, stream: true        |
+| [EXPERIMENTAL.md](research/EXPERIMENTAL.md)           | Machine, RateLimiter/Redis, PersistedCache, VariantSchema                                | Machine.makeSerializable, procedures.make             |
+| [PLATFORM-REALTIME.md](research/PLATFORM-REALTIME.md) | Socket, MsgPack, Worker, Sharding.broadcaster                                            | Socket.run, MsgPack.duplexSchema                      |
+| [PLATFORM-HTTP.md](research/PLATFORM-HTTP.md)         | HttpApiBuilder, handleRaw, StreamingService.sse                                          | Existing patterns, SSE delivery                       |
+| [INTEGRATION.md](research/INTEGRATION.md)             | Context extension, file migration, Effect patterns                                       | ClusterState, Effect.fn, Match, Schedule              |
+| [SUMMARY.md](research/SUMMARY.md)                     | Synthesis, phase suggestions, don't-hand-roll consolidated                               | Architecture decisions, pitfalls                      |
 
 ---
 
@@ -222,27 +222,27 @@ Deep-dive documentation informing implementation approach.
 
 Maps requirements to phases. Updated during roadmap creation.
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| CLUS-01 | Phase 1: Cluster Foundation | Pending |
-| CLUS-02 | Phase 1: Cluster Foundation | Pending |
-| CLUS-03 | Phase 3: Singleton & Scheduling | Pending |
-| CLUS-04 | Phase 2: Context Integration | Pending |
-| EVNT-01 | Phase 5: EventBus & Reliability | Pending |
-| EVNT-02 | Phase 5: EventBus & Reliability | Pending |
-| EVNT-03 | Phase 6: Workflows & State Machines | Pending |
-| EVNT-04 | Phase 5: EventBus & Reliability | Pending |
-| EVNT-05 | Phase 6: Workflows & State Machines | Pending |
-| EVNT-06 | Phase 6: Workflows & State Machines | Pending |
-| JOBS-01 | Phase 4: Job Processing | Complete |
-| JOBS-02 | Phase 7: Real-Time Delivery | Pending |
-| STRM-01 | Phase 7: Real-Time Delivery | Pending |
-| STRM-02 | Phase 7: Real-Time Delivery | Pending |
-| WS-01 | Phase 7: Real-Time Delivery | Pending |
-| WS-02 | Phase 7: Real-Time Delivery | Pending |
-| WS-03 | Phase 7: Real-Time Delivery | Pending |
-| HLTH-01 | Phase 8: Health & Observability | Pending |
-| HLTH-02 | Phase 8: Health & Observability | Pending |
+| Requirement | Phase                               | Status   |
+| ----------- | ----------------------------------- | -------- |
+| CLUS-01     | Phase 1: Cluster Foundation         | Pending  |
+| CLUS-02     | Phase 1: Cluster Foundation         | Pending  |
+| CLUS-03     | Phase 3: Singleton & Scheduling     | Pending  |
+| CLUS-04     | Phase 2: Context Integration        | Pending  |
+| EVNT-01     | Phase 5: EventBus & Reliability     | Pending  |
+| EVNT-02     | Phase 5: EventBus & Reliability     | Pending  |
+| EVNT-03     | Phase 6: Workflows & State Machines | Pending  |
+| EVNT-04     | Phase 5: EventBus & Reliability     | Pending  |
+| EVNT-05     | Phase 6: Workflows & State Machines | Pending  |
+| EVNT-06     | Phase 6: Workflows & State Machines | Pending  |
+| JOBS-01     | Phase 4: Job Processing             | Complete |
+| JOBS-02     | Phase 7: Real-Time Delivery         | Pending  |
+| STRM-01     | Phase 7: Real-Time Delivery         | Pending  |
+| STRM-02     | Phase 7: Real-Time Delivery         | Pending  |
+| WS-01       | Phase 7: Real-Time Delivery         | Pending  |
+| WS-02       | Phase 7: Real-Time Delivery         | Pending  |
+| WS-03       | Phase 7: Real-Time Delivery         | Pending  |
+| HLTH-01     | Phase 8: Health & Observability     | Pending  |
+| HLTH-02     | Phase 8: Health & Observability     | Pending  |
 
 **Coverage:**
 - v1 requirements: 19 total

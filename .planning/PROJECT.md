@@ -97,15 +97,15 @@ HealthService (observe/health.ts) — aggregated dependency checks
 
 ## Key Decisions
 
-| Decision | Rationale | Outcome |
-|----------|-----------|---------|
-| @effect/cluster as foundation | Native distributed coordination vs DIY DB locks | ✓ Confirmed |
-| Extend Context.Request with cluster state | Consistent access pattern, per-request context | ✓ Confirmed |
-| Gut + replace jobs.ts | Poll-based queue incompatible with Entity model | ✓ Confirmed |
-| Keep cache.ts rate limiting | DurableRateLimiter is workflow-context only | ✓ Confirmed |
-| Keep streaming.ts for SSE | Add Entity routing for cross-pod, keep local delivery | ✓ Confirmed |
-| EventBus owns pub/sub | StreamingService becomes pure delivery, single source of truth | ✓ Confirmed |
-| <225 LOC constraint | Enforces algorithmic density, prevents helper spam | ✓ Confirmed |
+| Decision                                  | Rationale                                                      | Outcome     |
+| ----------------------------------------- | -------------------------------------------------------------- | ----------- |
+| @effect/cluster as foundation             | Native distributed coordination vs DIY DB locks                | ✓ Confirmed |
+| Extend Context.Request with cluster state | Consistent access pattern, per-request context                 | ✓ Confirmed |
+| Gut + replace jobs.ts                     | Poll-based queue incompatible with Entity model                | ✓ Confirmed |
+| Keep cache.ts rate limiting               | DurableRateLimiter is workflow-context only                    | ✓ Confirmed |
+| Keep streaming.ts for SSE                 | Add Entity routing for cross-pod, keep local delivery          | ✓ Confirmed |
+| EventBus owns pub/sub                     | StreamingService becomes pure delivery, single source of truth | ✓ Confirmed |
+| <225 LOC constraint                       | Enforces algorithmic density, prevents helper spam             | ✓ Confirmed |
 
 ---
 *Last updated: 2026-01-28 after requirements definition*

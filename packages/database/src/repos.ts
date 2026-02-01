@@ -200,16 +200,17 @@ const makeJobRepo = Effect.gen(function* () {
 const makeJobDlqRepo = Effect.gen(function* () {
 	const r = yield* repo(JobDlq, 'job_dlq', {
 		purge: 'purge_job_dlq',
+		resolve: { byOriginalJob: 'originalJobId' },
 	});
 	return {
 		...r,
-		get: (id: string) => r.one([{ field: 'id', value: id }]),
-		insert: r.insert,
-		listPending: (opts?: { type?: string; limit?: number; cursor?: string }) => r.page([
-			{ field: 'replayed_at', op: 'null' },
-			...(opts?.type ? [{ field: 'type', value: opts.type }] : []),
-		], { cursor: opts?.cursor, limit: opts?.limit ?? 100 }),
-		markReplayed: (id: string) => r.set(id, { replayed_at: Update.now }),
+		byErrorReason: (errorReason: string, opts?: { limit?: number; cursor?: string }) => r.page([{ field: 'error_reason', value: errorReason }], { cursor: opts?.cursor, limit: opts?.limit ?? 100 }),
+		byOriginalJob: (originalJobId: string) => r.by('byOriginalJob', originalJobId),
+		byRequest: (requestId: string) => r.find([{ field: 'request_id', value: requestId }]),
+		countPending: (type?: string) => r.count(type ? [{ field: 'type', value: type }] : []),
+		listPending: (opts?: { type?: string; limit?: number; cursor?: string }) => r.page(opts?.type ? [{ field: 'type', value: opts.type }] : [], { cursor: opts?.cursor, limit: opts?.limit ?? 100 }),
+		markReplayed: (id: string) => r.drop(id),		// drop() sets replayedAt = NOW() (mark:soft)
+		unmarkReplayed: (id: string) => r.lift(id),		// lift() sets replayedAt = NULL (undo replay)
 	};
 });
 

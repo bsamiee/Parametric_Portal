@@ -1,6 +1,7 @@
 # Phase 4: Job Processing - Research
 
 **Researched:** 2026-01-30
+**Implemented:** 2026-01-30
 **Domain:** @effect/cluster Entity-based job dispatch, priority routing, deduplication, dead-letter handling
 **Confidence:** HIGH
 
@@ -40,22 +41,28 @@ packages/database/src/
 
 const JobPriority = S.Literal('critical', 'high', 'normal', 'low');
 const JobStatus = S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled');
-
 class JobPayload extends S.Class<JobPayload>('JobPayload')({
-  batchId: S.optional(S.String),
-  dedupeKey: S.optional(S.String),
-  duration: S.optional(S.Literal('short', 'long'), { default: () => 'short' as const }),
-  maxAttempts: S.optional(S.Number, { default: () => 3 }),
-  payload: S.Unknown,
-  priority: S.optional(JobPriority, { default: () => 'normal' as const }),
-  type: S.String,
+	batchId: S.optional(S.String),
+	dedupeKey: S.optional(S.String),
+	duration: S.optionalWith(S.Literal('short', 'long'), { default: () => 'short' }),
+	maxAttempts: S.optionalWith(S.Number, { default: () => 3 }),
+	payload: S.Unknown,
+	priority: S.optionalWith(JobPriority, { default: () => 'normal' }),
+	type: S.String,
 }) {}
-
 class JobStatusResponse extends S.Class<JobStatusResponse>('JobStatusResponse')({
-  attempts: S.Number,
-  history: S.Array(S.Struct({ error: S.optional(S.String), status: JobStatus, timestamp: S.Number })),
-  result: S.optional(S.Unknown),
-  status: JobStatus,
+	attempts: S.Number,
+	history: S.Array(S.Struct({ error: S.optional(S.String), status: JobStatus, timestamp: S.Number })),
+	result: S.optional(S.Unknown),
+	status: JobStatus,
+}) {}
+class JobStatusEvent extends S.Class<JobStatusEvent>('JobStatusEvent')({
+	appId: S.String,
+	error: S.optional(S.String),
+	id: S.String, // UUIDv7 - timestamp extractable via uuid_extract_timestamp()
+	jobId: S.String,
+	status: JobStatus,
+	type: S.String,
 }) {}
 
 // --- [ERRORS] ----------------------------------------------------------------
@@ -635,23 +642,74 @@ const processWithDeadline = (job: Job) =>
 |----------|-----------|-------------------|
 | `Effect.interruptible` | `(effect) => Effect` | Allow cancellation at checkpoints |
 | `Effect.uninterruptible` | `(effect) => Effect` | **Critical sections**: state commits, finalizers |
-| `Effect.onInterrupt` | `(effect, cleanup)` | Cleanup on cancellation (release locks, notify) |
+| `Effect.uninterruptibleMask` | `(restore => effect) => Effect` | Fine-grained: atomic with interruptible subsections |
+| `Effect.onInterrupt` | `(effect, cleanup)` | **Cancel-only cleanup**: DLQ insert, lock release (NOT on success/failure) |
+| `Effect.ensuring` | `(effect, finalizer)` | **All paths cleanup**: logging, metrics (runs on success, failure, AND interrupt) |
 | `Effect.disconnect` | `(effect) => Effect` | Isolate effect from parent interruption |
 
-**Cancellation-Safe Pattern:**
+### Cancellation Pattern (Comprehensive)
+
 ```typescript
-const processJob = (jobId: string) => Effect.gen(function* () {
-  yield* Ref.update(state, JobState.processing(ts));
-  yield* Effect.interruptible(processPayload);  // Cancellable work
-  yield* Effect.uninterruptible(            // Critical: commit result
-    Ref.update(state, JobState.completed(ts))
-  );
+const processJob = (jobId: string, payload: JobPayload) => Effect.gen(function* () {
+  const ts = yield* Clock.currentTimeMillis;
+  yield* Ref.update(stateRef, JobState.processing(ts));      // State transition
+  yield* Effect.interruptible(executeHandler(payload));      // [CANCELLABLE] Main work
+  yield* Effect.uninterruptible(Effect.gen(function* () {    // [CRITICAL] Commit result
+    const completeTs = yield* Clock.currentTimeMillis;
+    yield* Ref.update(stateRef, JobState.completed(completeTs));
+    yield* Metric.increment(metrics.jobs.completions);
+  }));
 }).pipe(
-  Effect.onInterrupt(() =>
-    db.jobDlq.insert({ reason: 'Cancelled', jobId })
-  )
+  Effect.onInterrupt(() => Effect.gen(function* () {         // [INTERRUPT-ONLY] Cleanup
+    const ts = yield* Clock.currentTimeMillis;
+    yield* Ref.update(stateRef, JobState.cancelled(ts));
+    yield* db.jobDlq.insert({ jobId, reason: 'Cancelled' });
+    yield* Metric.increment(metrics.jobs.cancellations);
+  })),
+  Effect.ensuring(Effect.logDebug('Job finalized', { jobId })), // [ALL PATHS] Logging
 );
+
+// --- [CANCEL HANDLER] ---
+cancel: (envelope) => Effect.gen(function* () {
+  const { jobId } = envelope.payload;
+  const fiberOpt = yield* FiberMap.get(runningJobs, jobId);
+  yield* Option.match(fiberOpt, {
+    onNone: () => Ref.get(jobStates).pipe(
+      Effect.map(HashMap.get(jobId)),
+      Effect.flatMap(Option.match({
+        onNone: () => Effect.fail(JobError.fromNotFound(jobId)),
+        onSome: (state) => Match.value(state.status).pipe(
+          Match.when('cancelled', () => Effect.fail(JobError.fromCancelled(jobId))),
+          Match.when('complete', () => Effect.fail(JobError.fromCancelled(jobId))),
+          Match.when('failed', () => Effect.fail(JobError.fromCancelled(jobId))),
+          Match.orElse(() => Effect.fail(JobError.fromNotFound(jobId))),
+        ),
+      })),
+    ),
+    onSome: (_fiber) => FiberMap.remove(runningJobs, jobId).pipe(Effect.asVoid),
+    // FiberMap.remove handles both interrupt AND removal atomically
+  });
+}),
 ```
+
+### Cancellation Edge Cases
+
+| Scenario | Handling |
+|----------|----------|
+| Job already complete | `FiberMap.get` returns `None`; check `jobStates` for terminal status; return `JobError.fromCancelled` |
+| Job not started (queued) | Fiber not yet in FiberMap; reject with `NotFound` or allow "pre-cancel" |
+| Partial DB write | `Effect.uninterruptible` defers interrupt; `onInterrupt` inserts DLQ for audit |
+| Double cancel | First `FiberMap.remove` succeeds; second returns `None`; idempotent success |
+| Client disconnects | @effect/cluster does NOT propagate disconnect as interrupt; client must send explicit `cancel` RPC |
+
+### Key API Clarifications
+
+| Aspect | `onInterrupt` | `ensuring` |
+|--------|---------------|------------|
+| Runs on success | No | Yes |
+| Runs on failure | No | Yes |
+| Runs on interrupt | Yes | Yes |
+| Use case | Cancel-specific (DLQ, locks) | Universal (logging, metrics) |
 
 ### Effect Resource Management
 
