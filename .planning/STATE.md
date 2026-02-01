@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-01-28)
 ## Current Position
 
 Phase: 5 of 8 (EventBus & Reliability)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-02-01 - Completed 05-01-PLAN.md
+Last activity: 2026-02-01 - Completed 05-03-PLAN.md
 
-Progress: [########--] 75%
+Progress: [########--] 80%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
+- Total plans completed: 13
 - Average duration: 8 min
 - Total execution time: 1.7 hours
 
@@ -31,10 +31,10 @@ Progress: [########--] 75%
 | 02-context-integration  | 2     | 8min  | 4min     |
 | 03-singleton-scheduling | 3     | 22min | 7min     |
 | 04-job-processing       | 3     | 22min | 7min     |
-| 05-eventbus-reliability | 1     | 2min  | 2min     |
+| 05-eventbus-reliability | 2     | 4min  | 2min     |
 
 **Recent Trend:**
-- Last 5 plans: 04-01 (6min), 04-02 (12min), 04-03 (4min), 05-01 (2min)
+- Last 5 plans: 04-02 (12min), 04-03 (4min), 05-01 (2min), 05-03 (2min)
 - Trend: Consistent execution pace
 
 *Updated after each plan completion*
@@ -101,6 +101,9 @@ Recent decisions affecting current work:
 - [05-01]: Unified DLQ with source discriminator (job|event) rather than separate tables
 - [05-01]: Model.FieldOption creates required Option field in insert schema — pass Option.none() explicitly
 - [05-01]: Page options use `asc: boolean` not `order: 'asc'`
+- [05-03]: DevTools uses @effect/experimental DevTools.layer() (complete layer with WebSocketConstructor)
+- [05-03]: WebSocket availability check with 1s timeout before tracer activation
+- [05-03]: Both channel() and broadcast() deprecated (both are single-pod only)
 
 ### Pending Todos
 
@@ -160,5 +163,5 @@ From research and revision feedback - must address during execution:
 ## Session Continuity
 
 Last session: 2026-02-01
-Stopped at: Completed 05-01-PLAN.md
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
