@@ -11,12 +11,12 @@ import { SearchRepo } from '@parametric-portal/database/search';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { MfaService } from '@parametric-portal/server/domain/mfa';
-import { OAuthService } from '@parametric-portal/server/domain/oauth';
+import { Auth } from '@parametric-portal/server/domain/auth';
 import { SearchService } from '@parametric-portal/server/domain/search';
-import { SessionService } from '@parametric-portal/server/domain/session';
 import { StorageService } from '@parametric-portal/server/domain/storage';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
+import { EventBus } from '@parametric-portal/server/infra/events';
+import { Purge } from '@parametric-portal/server/infra/handlers/purge';
 import { JobService } from '@parametric-portal/server/infra/jobs';
 import { StorageAdapter } from '@parametric-portal/server/infra/storage';
 import { AuditService } from '@parametric-portal/server/observe/audit';
@@ -25,8 +25,10 @@ import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
+import { WebSocketService } from '@parametric-portal/server/platform/websocket';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { ReplayGuardService } from '@parametric-portal/server/security/totp-replay';
+import { Resilience } from '@parametric-portal/server/utils/resilience';
 import { Config, Effect, Layer } from 'effect';
 import { AuditLive } from './routes/audit.ts';
 import { AuthLive } from './routes/auth.ts';
@@ -37,13 +39,14 @@ import { StorageLive } from './routes/storage.ts';
 import { TelemetryRouteLive } from './routes/telemetry.ts';
 import { TransferLive } from './routes/transfer.ts';
 import { UsersLive } from './routes/users.ts';
+import { WebSocketLive } from './routes/websocket.ts';
 
 // --- [CONFIG] ----------------------------------------------------------------
 
-const serverConfig = Effect.runSync(Config.all({
-	corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((s) => s.split(',').map((o) => o.trim()).filter(Boolean) as ReadonlyArray<string>)),
+const ServerConfig = Config.all({
+	corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((origins) => origins.split(',').map((origin) => origin.trim()).filter(Boolean) as ReadonlyArray<string>)),
 	port: Config.number('PORT').pipe(Config.withDefault(4000)),
-}));
+});
 
 // --- [PLATFORM_LAYER] --------------------------------------------------------
 // External resources: database client, S3, filesystem, telemetry collector.
@@ -52,12 +55,15 @@ const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer,
 
 // --- [SERVICES_LAYER] --------------------------------------------------------
 // All application services in dependency order. Single provideMerge chain.
+// Crons: domain services own their schedules (PollingService.Crons, Purge.Crons, SearchService.EmbeddingCron)
 
-const ServicesLayer = Layer.mergeAll(SessionService.Default, StorageService.Default, SearchService.Default, JobService.Default, PollingService.Default).pipe(
-	Layer.provideMerge(Layer.mergeAll(MfaService.Default, OAuthService.Default)),
+const ServicesLayer = Layer.mergeAll(Auth.Service.Default, StorageService.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebSocketService.Default).pipe(
+	Layer.provideMerge(Layer.mergeAll(PollingService.Crons, Purge.Crons, SearchService.EmbeddingCron)),
+	Layer.provideMerge(Purge.Handlers),
 	Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
 	Layer.provideMerge(ReplayGuardService.Default),
-	Layer.provideMerge(CacheService.Layer),
+	Layer.provideMerge(CacheService.LayerWithPersistence),
+	Layer.provideMerge(Resilience.Layer),
 	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default, ClusterService.Layer)),
 	Layer.provideMerge(PlatformLayer),
 );
@@ -65,18 +71,19 @@ const ServicesLayer = Layer.mergeAll(SessionService.Default, StorageService.Defa
 // --- [HTTP_LAYER] ------------------------------------------------------------
 // Route handlers, auth middleware, API composition.
 
-const SessionAuthLayer = Layer.unwrapEffect(SessionService.pipe(Effect.map((session) => Middleware.Auth.makeLayer((hash) => session.lookup(hash))))).pipe(Layer.provide(ServicesLayer));
-const RouteLayer = Layer.mergeAll(AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive).pipe(Layer.provide(ServicesLayer));
+const SessionAuthLayer = Layer.unwrapEffect(Auth.Service.pipe(Effect.map((auth) => Middleware.Auth.makeLayer((hash) => auth.sessionLookup(hash))))).pipe(Layer.provide(ServicesLayer));
+const RouteLayer = Layer.mergeAll(AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive, WebSocketLive).pipe(Layer.provide(ServicesLayer));
 const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer));
 
 // --- [SERVER_LAYER] ----------------------------------------------------------
 // HTTP server with middleware pipeline: context → trace → security → metrics → logging.
 
 const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
-	const db = yield* DatabaseService;
-	return HttpApiBuilder.serve((app) => app.pipe(
+	const database = yield* Effect.orDie(DatabaseService);
+	const serverConfig = yield* Effect.orDie(ServerConfig);
+	return HttpApiBuilder.serve((application) => application.pipe(
 		Middleware.xForwardedHeaders,
-		Middleware.makeRequestContext(Middleware.makeAppLookup(db)),
+		Middleware.makeRequestContext(Middleware.makeAppLookup(database)),
 		Middleware.trace,
 		Middleware.security(),
 		Middleware.serverTiming,

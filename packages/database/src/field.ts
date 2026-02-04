@@ -1,16 +1,9 @@
 /**
  * Layered field definition system for @effect/sql models.
- * Enables: (1) Type-safe repo generation (2) SQL DDL generation (3) Model.Class generation.
- *
- * Architecture:
- *   - _Fk: FK action constants (RESTRICT, CASCADE, etc.)
- *   - _WrapMeta: Effect SQL wrapper behaviors (Generated, Sensitive, FieldOption, etc.)
- *   - _Registry: Field definitions with col/sql/ts/mark/gen/null/ref/wrap
- *   - _Tables: Composed from resolved Registry entries (not strings)
- *   - Type-level bi-directional lookups via ts-toolbelt O.SelectKeys/O.Invert
+ * Type-safe repo generation, SQL DDL generation, Model.Class generation.
  */
 /** biome-ignore-all assist/source/useSortedKeys: <needed> */
-import { Schema as S } from 'effect';
+import { Array as A, Match, Schema as S } from 'effect';
 import type { Object as O, String as Str } from 'ts-toolbelt';
 import type { Simplify } from 'type-fest';
 
@@ -21,9 +14,9 @@ type _RawEntry = Readonly<{ col: string; sql: string; ts: string; mark: string |
 
 // --- [METADATA_TABLES] -------------------------------------------------------
 
-const _Fk = {RESTRICT: 'RESTRICT', CASCADE: 'CASCADE', SETNULL:'SET NULL', SETDEFAULT:'SET DEFAULT', NOACTION:'NO ACTION',} as const;
-const _SqlCast = { INET: 'inet', JSONB: 'jsonb', UUID: 'uuid' } as const; /** SQL type → PostgreSQL cast string (types requiring explicit cast for comparisons) */
-const _WrapMeta = (<const T extends Record<string, _RawMeta>>(t: T) => Object.fromEntries((Object.keys(t) as (keyof T & string)[]).map(k => [k, { ...t[k], name: k }])) as { [K in keyof T]: T[K] & { readonly name: K } })({
+const _FK = {RESTRICT: 'RESTRICT', CASCADE: 'CASCADE', SETNULL:'SET NULL', SETDEFAULT:'SET DEFAULT', NOACTION:'NO ACTION',} as const;
+const _SQL_CAST = { INET: 'inet', JSONB: 'jsonb', UUID: 'uuid' } as const; /** SQL type → PostgreSQL cast string (types requiring explicit cast for comparisons) */
+const _WRAP_META = (<const T extends Record<string, _RawMeta>>(table: T) => Object.fromEntries((Object.keys(table) as (keyof T & string)[]).map(key => [key, { ...table[key], name: key }])) as { [K in keyof T]: T[K] & { readonly name: K } })({
 	Generated:               { cat: 'generated', sel: true,  ins: false, upd: true,  json: true,  auto: false,    store: false   },
 	GeneratedByApp:          { cat: 'generated', sel: true,  ins: true,  upd: true,  json: true,  auto: false,    store: false   },
 	Sensitive:               { cat: 'sensitive', sel: true,  ins: true,  upd: true,  json: false, auto: false,    store: false   },
@@ -37,34 +30,38 @@ const _WrapMeta = (<const T extends Record<string, _RawMeta>>(t: T) => Object.fr
 	JsonFromString:          { cat: 'json',      sel: true,  ins: true,  upd: true,  json: true,  auto: false,    store: 'string'},
 	BooleanFromNumber:       { cat: 'utility',   sel: true,  ins: true,  upd: true,  json: true,  auto: false,    store: 'number'},
 });
-const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.fromEntries((Object.keys(t) as (keyof T & string)[]).map(k => [k, { ...t[k], field: k }])) as { [K in keyof T]: T[K] & { readonly field: K } })({
-	id:               { col: 'id',               sql: 'UUID',        ts: 'S.UUID',            mark: 'pk',        gen: 'uuidv7', null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
+const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Object.fromEntries((Object.keys(table) as (keyof T & string)[]).map(key => [key, { ...table[key], field: key }])) as { [K in keyof T]: T[K] & { readonly field: K } })({
+	id:               { col: 'id',               sql: 'UUID',        ts: 'S.UUID',            mark: 'pk',        gen: 'uuidv7', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	appId:            { col: 'app_id',           sql: 'UUID',        ts: 'S.UUID',            mark: 'scope',     gen: false,    null: false, ref: 'apps',     wrap: false                                                  },
 	userId:           { col: 'user_id',          sql: 'UUID',        ts: 'S.UUID',            mark: 'scope',     gen: false,    null: true,  ref: 'users',    wrap: false                                                  },
-	sessionId:        { col: 'session_id',       sql: 'UUID',        ts: 'S.UUID',            mark: 'fk',        gen: false,    null: true,  ref: 'sessions', wrap: [_WrapMeta.FieldOption]                                },
+	sessionId:        { col: 'session_id',       sql: 'UUID',        ts: 'S.UUID',            mark: 'fk',        gen: false,    null: true,  ref: 'sessions', wrap: [_WRAP_META.FieldOption]                                },
 	subjectId:        { col: 'subject_id',       sql: 'UUID',        ts: 'S.UUID',            mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	requestId:        { col: 'request_id',       sql: 'UUID',        ts: 'S.UUID',            mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
+	requestId:        { col: 'request_id',       sql: 'UUID',        ts: 'S.UUID',            mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	externalId:       { col: 'external_id',      sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	deletedAt:        { col: 'deleted_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	updatedAt:        { col: 'updated_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'time',      gen: false,    null: false, ref: false,      wrap: [_WrapMeta.DateTimeUpdateFromDate]                     },
+	deletedAt:        { col: 'deleted_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	updatedAt:        { col: 'updated_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'time',      gen: false,    null: false, ref: false,      wrap: [_WRAP_META.DateTimeUpdateFromDate]                     },
 	expiresAt:        { col: 'expires_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'exp',       gen: false,    null: true,  ref: false,      wrap: false                                                  },
-	verifiedAt:       { col: 'verified_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	enabledAt:        { col: 'enabled_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	lastUsedAt:       { col: 'last_used_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	hash:             { col: 'hash',             sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: [_WrapMeta.Sensitive]                                  },
-	prefix:           { col: 'prefix',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
-	encrypted:        { col: 'encrypted',        sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WrapMeta.Sensitive]                                  },
-	accessEncrypted:  { col: 'access_encrypted', sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WrapMeta.Sensitive]                                  },
-	refreshEncrypted: { col: 'refresh_encrypted',sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Sensitive]           },
-	backupHashes:     { col: 'backup_hashes',    sql: 'TEXT[]',      ts: 'S.Array(S.String)', mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WrapMeta.Sensitive]                                  },
-	size:             { col: 'size',             sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
-	remaining:        { col: 'remaining',        sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
-	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.JsonFromString]      },
-	changes:          { col: 'changes',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.JsonFromString]      },
-	ipAddress:        { col: 'ip_address',       sql: 'INET',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	userAgent:        { col: 'user_agent',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
+	accessExpiresAt:  { col: 'access_expires_at',sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	refreshExpiresAt: { col: 'refresh_expires_at',sql: 'TIMESTAMPTZ',ts: 'S.DateFromSelf',    mark: 'exp',       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	verifiedAt:       { col: 'verified_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	enabledAt:        { col: 'enabled_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	lastUsedAt:       { col: 'last_used_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	hash:             { col: 'hash',             sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
+	refreshHash:      { col: 'refresh_hash',     sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
+	prefix:           { col: 'prefix',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
+	encrypted:        { col: 'encrypted',        sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
+	accessEncrypted:  { col: 'access_encrypted', sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
+	refreshEncrypted: { col: 'refresh_encrypted',sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Sensitive]           },
+	backupHashes:     { col: 'backup_hashes',    sql: 'TEXT[]',      ts: 'S.Array(S.String)', mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
+	size:             { col: 'size',             sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
+	remaining:        { col: 'remaining',        sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
+	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
+	oldData:          { col: 'old_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
+	newData:          { col: 'new_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
+	ipAddress:        { col: 'ip_address',       sql: 'INET',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	userAgent:        { col: 'user_agent',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	name:             { col: 'name',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	storageRef:       { col: 'storage_ref',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
+	storageRef:       { col: 'storage_ref',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	namespace:        { col: 'namespace',        sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	email:            { col: 'email',            sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	role:             { col: 'role',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -74,86 +71,79 @@ const _Registry = (<const T extends Record<string, _RawEntry>>(t: T) => Object.f
 	operation:        { col: 'operation',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	subject:          { col: 'subject',          sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	provider:         { col: 'provider',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	scope:            { col: 'scope',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
+	scope:            { col: 'scope',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	entityType:       { col: 'entity_type',      sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	entityId:         { col: 'entity_id',        sql: 'UUID',        ts: 'S.UUID',            mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	scopeId:          { col: 'scope_id',         sql: 'UUID',        ts: 'S.UUID',            mark: 'scope',     gen: false,    null: true,  ref: 'apps',     wrap: [_WrapMeta.FieldOption]                                },
+	scopeId:          { col: 'scope_id',         sql: 'UUID',        ts: 'S.UUID',            mark: 'scope',     gen: false,    null: true,  ref: 'apps',     wrap: [_WRAP_META.FieldOption]                                },
 	displayText:      { col: 'display_text',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	contentText:      { col: 'content_text',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	metadata:         { col: 'metadata',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.JsonFromString]      },
-	searchVector:     { col: 'search_vector',    sql: 'TSVECTOR',    ts: 'S.Unknown',         mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WrapMeta.Generated]                                  },
+	contentText:      { col: 'content_text',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	metadata:         { col: 'metadata',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
+	searchVector:     { col: 'search_vector',    sql: 'TSVECTOR',    ts: 'S.Unknown',         mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	embedding:        { col: 'embedding',        sql: 'VECTOR',      ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	// Job-specific fields (jobs table: active queue)
+	// Job-related fields (job_dlq uses subset; active queue removed)
 	priority:         { col: 'priority',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	payload:          { col: 'payload',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WrapMeta.JsonFromString]                             },
+	payload:          { col: 'payload',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WRAP_META.JsonFromString]                             },
 	attempts:         { col: 'attempts',         sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	maxAttempts:      { col: 'max_attempts',     sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	scheduledAt:      { col: 'scheduled_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	startedAt:        { col: 'started_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
-	completedAt:      { col: 'completed_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
-	lastError:        { col: 'last_error',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	lockedBy:         { col: 'locked_by',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	lockedUntil:      { col: 'locked_until',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
-	waitMs:           { col: 'wait_ms',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
-	durationMs:       { col: 'duration_ms',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WrapMeta.FieldOption, _WrapMeta.Generated]           },
+	startedAt:        { col: 'started_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
+	completedAt:      { col: 'completed_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
+	lastError:        { col: 'last_error',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	lockedBy:         { col: 'locked_by',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	lockedUntil:      { col: 'locked_until',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	waitMs:           { col: 'wait_ms',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
+	durationMs:       { col: 'duration_ms',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	// Job DLQ fields (job_dlq table: dead-letter archive)
 	originalJobId:    { col: 'original_job_id',  sql: 'UUID',        ts: 'S.UUID',            mark: 'fk',        gen: false,    null: false, ref: false,      wrap: false                                                  },
 	errorReason:      { col: 'error_reason',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	errorHistory:     { col: 'error_history',    sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WrapMeta.JsonFromString]                             },
-	replayedAt:       { col: 'replayed_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WrapMeta.FieldOption]                                },
+	errorHistory:     { col: 'error_history',    sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WRAP_META.JsonFromString]                             },
+	replayedAt:       { col: 'replayed_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	// KV store fields (cluster infrastructure state)
 	kvKey:            { col: 'key',              sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
 	kvValue:          { col: 'value',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 });
-const _Tables = {
+const _TABLES = {
 	apps: {
-		fields: 	[_Registry.id, _Registry.name, _Registry.namespace, _Registry.settings, _Registry.updatedAt]},
+		fields: 	[_REGISTRY.id, _REGISTRY.name, _REGISTRY.namespace, _REGISTRY.settings, _REGISTRY.updatedAt]},
 	users: {
-		fields: 	[_Registry.id, _Registry.appId, _Registry.email, _Registry.role, _Registry.status, _Registry.deletedAt, _Registry.updatedAt]},
+		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.role, _REGISTRY.status, _REGISTRY.deletedAt, _REGISTRY.updatedAt]},
 	sessions: {
-		fields: 	[_Registry.id, _Registry.userId, _Registry.hash, _Registry.expiresAt, _Registry.deletedAt, _Registry.verifiedAt, _Registry.ipAddress, _Registry.userAgent, _Registry.updatedAt, _Registry.prefix],
-		required: 	[_Registry.userId, _Registry.expiresAt]},
+		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.hash, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt, _REGISTRY.deletedAt, _REGISTRY.verifiedAt, _REGISTRY.ipAddress, _REGISTRY.userAgent, _REGISTRY.updatedAt, _REGISTRY.prefix],
+		required: 	[_REGISTRY.appId, _REGISTRY.userId, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt]},
 	apiKeys: {
-		fields: 	[_Registry.id, _Registry.userId, _Registry.name, _Registry.hash, _Registry.encrypted, _Registry.expiresAt, _Registry.deletedAt, _Registry.lastUsedAt, _Registry.updatedAt, _Registry.prefix],
-		required: 	[_Registry.userId]},
+		fields: 	[_REGISTRY.id, _REGISTRY.userId, _REGISTRY.name, _REGISTRY.hash, _REGISTRY.encrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.lastUsedAt, _REGISTRY.updatedAt, _REGISTRY.prefix],
+		required: 	[_REGISTRY.userId]},
 	oauthAccounts: {
-		fields: 	[_Registry.id, _Registry.userId, _Registry.provider, _Registry.externalId, _Registry.accessEncrypted, _Registry.refreshEncrypted, _Registry.expiresAt, _Registry.deletedAt, _Registry.scope, _Registry.updatedAt],
-		required: 	[_Registry.userId],
-		unique: 	[[_Registry.provider, _Registry.externalId]]},
-	refreshTokens: {
-		fields: 	[_Registry.id, _Registry.userId, _Registry.sessionId, _Registry.hash, _Registry.expiresAt, _Registry.deletedAt, _Registry.prefix],
-		required: 	[_Registry.userId, _Registry.expiresAt],
-		fk: 		[[_Registry.sessionId, _Fk.CASCADE]] as const},
+		fields: 	[_REGISTRY.id, _REGISTRY.userId, _REGISTRY.provider, _REGISTRY.externalId, _REGISTRY.accessEncrypted, _REGISTRY.refreshEncrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.scope, _REGISTRY.updatedAt],
+		required: 	[_REGISTRY.userId],
+		unique: 	[[_REGISTRY.provider, _REGISTRY.externalId]]},
 	assets: {
-		fields: 	[_Registry.id, _Registry.appId, _Registry.userId, _Registry.type, _Registry.content, _Registry.status, _Registry.deletedAt, _Registry.updatedAt, _Registry.size, _Registry.hash, _Registry.name, _Registry.storageRef],
-		nullable:	[_Registry.hash, _Registry.name, _Registry.storageRef],	// Override: hash/name/storageRef are optional metadata in assets
-		fk: 		[[_Registry.userId, _Fk.SETNULL]] as const},
+		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.type, _REGISTRY.content, _REGISTRY.status, _REGISTRY.deletedAt, _REGISTRY.updatedAt, _REGISTRY.size, _REGISTRY.hash, _REGISTRY.name, _REGISTRY.storageRef],
+		nullable:	[_REGISTRY.hash, _REGISTRY.name, _REGISTRY.storageRef],	// Override: hash/name/storageRef are optional metadata in assets
+		fk: 		[[_REGISTRY.userId, _FK.SETNULL]] as const},
 	auditLogs: {
-		fields: 	[_Registry.id, _Registry.appId, _Registry.userId, _Registry.requestId, _Registry.operation, _Registry.subject, _Registry.subjectId, _Registry.changes, _Registry.ipAddress, _Registry.userAgent]},
+		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.operation, _REGISTRY.subject, _REGISTRY.subjectId, _REGISTRY.oldData, _REGISTRY.newData, _REGISTRY.ipAddress, _REGISTRY.userAgent]},
 	mfaSecrets: {
-		fields: 	[_Registry.id, _Registry.userId, _Registry.encrypted, _Registry.backupHashes, _Registry.enabledAt, _Registry.deletedAt, _Registry.updatedAt, _Registry.remaining],
-		required: 	[_Registry.userId],
-		unique:		[[_Registry.userId]]},
+		fields: 	[_REGISTRY.id, _REGISTRY.userId, _REGISTRY.encrypted, _REGISTRY.backupHashes, _REGISTRY.enabledAt, _REGISTRY.deletedAt, _REGISTRY.updatedAt, _REGISTRY.remaining],
+		required: 	[_REGISTRY.userId],
+		unique:		[[_REGISTRY.userId]]},
 	searchDocuments: {
-		fields: 	[_Registry.entityType, _Registry.entityId, _Registry.scopeId, _Registry.displayText, _Registry.contentText, _Registry.metadata, _Registry.hash, _Registry.searchVector, _Registry.updatedAt],
-		pk: 		[_Registry.entityType, _Registry.entityId]},
+		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.displayText, _REGISTRY.contentText, _REGISTRY.metadata, _REGISTRY.hash, _REGISTRY.searchVector, _REGISTRY.updatedAt],
+		pk: 		[_REGISTRY.entityType, _REGISTRY.entityId]},
 	searchEmbeddings: {
-		fields: 	[_Registry.entityType, _Registry.entityId, _Registry.scopeId, _Registry.embedding, _Registry.hash, _Registry.updatedAt],
-		pk: 		[_Registry.entityType, _Registry.entityId],
-		fk: 		[[_Registry.entityType, _Registry.entityId], _Fk.CASCADE] as const},
-	jobs: {
-		fields: 	[_Registry.id, _Registry.appId, _Registry.userId, _Registry.requestId, _Registry.type, _Registry.payload, _Registry.priority, _Registry.status, _Registry.attempts, _Registry.maxAttempts, _Registry.scheduledAt, _Registry.startedAt, _Registry.completedAt, _Registry.lastError, _Registry.lockedBy, _Registry.lockedUntil, _Registry.waitMs, _Registry.durationMs, _Registry.updatedAt],
-		fk: 		[[_Registry.userId, _Fk.RESTRICT]] as const},
+		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.embedding, _REGISTRY.hash, _REGISTRY.updatedAt],
+		pk: 		[_REGISTRY.entityType, _REGISTRY.entityId],
+		fk: 		[[_REGISTRY.entityType, _REGISTRY.entityId], _FK.CASCADE] as const},
 	jobDlq: {
-		fields: 	[_Registry.id, _Registry.originalJobId, _Registry.appId, _Registry.userId, _Registry.requestId, _Registry.type, _Registry.payload, _Registry.errorReason, _Registry.attempts, _Registry.errorHistory, _Registry.replayedAt],
-		fk: 		[[_Registry.userId, _Fk.RESTRICT]] as const},
+		fields: 	[_REGISTRY.id, _REGISTRY.originalJobId, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.type, _REGISTRY.payload, _REGISTRY.errorReason, _REGISTRY.attempts, _REGISTRY.errorHistory, _REGISTRY.replayedAt],
+		fk: 		[[_REGISTRY.userId, _FK.RESTRICT]] as const},
 	kvStore: {
-		fields: 	[_Registry.id, _Registry.kvKey, _Registry.kvValue, _Registry.expiresAt, _Registry.updatedAt],
-		unique: 	[[_Registry.kvKey]]},
+		fields: 	[_REGISTRY.id, _REGISTRY.kvKey, _REGISTRY.kvValue, _REGISTRY.expiresAt, _REGISTRY.updatedAt],
+		unique: 	[[_REGISTRY.kvKey]]},
 } as const;
 
 // --- [DERIVED_TYPES] ---------------------------------------------------------
-type _Reg = typeof _Registry; type _Fks = typeof _Fk; type _Metas = typeof _WrapMeta; type _Tbls = typeof _Tables;
+type _Reg = typeof _REGISTRY; type _Fks = typeof _FK; type _Metas = typeof _WRAP_META; type _Tbls = typeof _TABLES;
 // Tier 1: Key unions (from consts)
 type _FkAction = _Fks[keyof _Fks]; type _WrapName = keyof _Metas; type _Field = keyof _Reg; type _Table = keyof _Tbls;
 // Tier 2: Entry lookups (parameterized)
@@ -214,7 +204,7 @@ const _addCap = (index: _CacheIndex, key: string | false | undefined, field: _Fi
 	key && (index.entries[key] ??= []).push(resolved);
 };
 const _indexField = (index: _CacheIndex, field: _Field): void => {
-	const meta = _Registry[field];
+	const meta = _REGISTRY[field];
 	const resolved = { ...meta, field } as _Resolved<typeof field>;
 	const wraps = meta.wrap || undefined;
 	const wrapAuto = (w: _RawMeta) => w.auto;
@@ -243,10 +233,10 @@ const _indexField = (index: _CacheIndex, field: _Field): void => {
 };
 const _indexWrapCategories = (index: _CacheIndex): _CacheIndex => ({
 	...index,
-	wrapByCat: Object.groupBy(Object.keys(_WrapMeta) as _WrapName[], (name) => _WrapMeta[name].cat) as Record<string, _WrapName[]>,
+	wrapByCat: Object.groupBy(Object.keys(_WRAP_META) as _WrapName[], (name) => _WRAP_META[name].cat) as Record<string, _WrapName[]>,
 })
-const _buildTableIndex = (keys: readonly _Field[], tableNames: readonly _Table[]) => Object.fromEntries(keys.map(f => [f, tableNames.filter(t => _Tables[t].fields.some(e => e.field === f))])) as { [F in _Field]: _Table[] };
-const _finalizeCache = (index: _CacheIndex, keys: readonly _Field[], tableNames: readonly _Table[]) => Object.freeze({
+const _buildTableIndex = (keys: readonly _Field[], tableNames: readonly _Table[]) => Object.fromEntries(keys.map(field => [field, tableNames.filter(table => _TABLES[table].fields.some(entry => entry.field === field))])) as { [F in _Field]: _Table[] };
+const _finalizeCache = (index: _CacheIndex, keys: readonly _Field[], tableNames: readonly _Table[]) => ({
 	...(index.byField as { [FieldKey in _Field]: _Resolved<FieldKey> }),
 	...(index.byCol as { [ColKey in _Col]: _Resolved<_ColToField[ColKey]> }),
 	keys,
@@ -260,10 +250,10 @@ const _finalizeCache = (index: _CacheIndex, keys: readonly _Field[], tableNames:
 	tableByField: _buildTableIndex(keys, tableNames),
 });
 const _buildCache = () => {
-	const keys = Object.keys(_Registry) as _Field[];
-	const tableNames = Object.keys(_Tables) as _Table[];
+	const keys = Object.keys(_REGISTRY) as _Field[];
+	const tableNames = Object.keys(_TABLES) as _Table[];
 	const index: _CacheIndex = { byField: {}, byCol: {}, cols: [], marks: [], wraps: [], query: {}, entries: {}, wrapByCat: {} };
-	keys.forEach(field => { _indexField(index, field); });
+	A.map(keys, (field) => _indexField(index, field));
 	return _finalizeCache(_indexWrapCategories(index), keys, tableNames);
 };
 const _cache = _buildCache();	// Field Cache
@@ -271,18 +261,23 @@ const _cache = _buildCache();	// Field Cache
 // --- [INTERNAL] --------------------------------------------------------------
 
 const _pick = (cap: _CapKey, cols: Record<string, unknown>): _Resolved | undefined =>						/** Find first entry matching cap whose field OR col exists in cols object */
-	(_cache.entries[cap] as readonly _Resolved[] | undefined)?.find(e => e.field in cols || e.col in cols);
+	(_cache.entries[cap] as readonly _Resolved[] | undefined)?.find(entry => entry.field in cols || entry.col in cols);
 const _has = (cap: _CapKey, field: string): boolean =>														/** Check if field belongs to capability set (type-safe membership test) */
 	(_cache.query[cap] as readonly string[] | undefined)?.includes(field) ?? false;
 const _resolve = (fieldOrCol: string): _Resolved | undefined => {											/** Resolve field or column name to entry (unified lookup via spread cache keys) */
 	const val = (_cache as Record<string, unknown>)[fieldOrCol];
-	return val && typeof val === 'object' && 'field' in val ? val as _Resolved : undefined;
+	const isResolved = val && typeof val === 'object' && 'field' in val;
+	return isResolved ? val as _Resolved : undefined;
 };
 const _predMeta = (fieldOrCol: string): { cast: string | undefined; wrap: 'casefold' | undefined } => {		/** Derive predicate metadata from field registry (cast + wrap for SQL predicates) */
 	const entry = _resolve(fieldOrCol);
-	return entry
-		? { cast: _SqlCast[entry.sql as keyof typeof _SqlCast], wrap: entry.sql === 'CITEXT' ? 'casefold' : undefined }
-		: { cast: undefined, wrap: undefined };
+	return Match.value(entry).pipe(
+		Match.when(Match.undefined, () => ({ cast: undefined, wrap: undefined })),
+		Match.orElse((resolved) => ({
+			cast: _SQL_CAST[resolved.sql as keyof typeof _SQL_CAST],
+			wrap: resolved.sql === 'CITEXT' ? 'casefold' as const : undefined,
+		})),
+	);
 };
 const _isSqlType = (fieldOrCol: string, sqlType: _Sql): boolean => _resolve(fieldOrCol)?.sql === sqlType;	/** Check if field has specific SQL type */
 const _isGen = (fieldOrCol: string, gen: _Gen): boolean => _resolve(fieldOrCol)?.gen === gen;				/** Check if field has specific generation type */
@@ -290,7 +285,13 @@ function _get<F extends _Field>(key: F): _Resolved<F>;
 function _get<C extends _Col>(key: C): _Resolved<_ColToField[C]>;
 function _get<T extends _Table>(key: T, layer: 'table'): _Tbl<T>;
 function _get<W extends _WrapName>(key: W, layer: 'wrap'): _Meta<W>;
-function _get(key: string, layer?: 'table' | 'wrap') {return layer === 'table' ? _Tables[key as _Table] : layer === 'wrap' ? _WrapMeta[key as _WrapName] : _cache[key as _Field];}
+function _get(key: string, layer?: 'table' | 'wrap') {
+	return Match.value(layer).pipe(
+		Match.when('table', () => _TABLES[key as _Table]),
+		Match.when('wrap', () => _WRAP_META[key as _WrapName]),
+		Match.orElse(() => _cache[key as _Field]),
+	);
+}
 function _from(mark: _Mark, cols: Record<string, unknown>): _Col | false;
 function _from<MarkKey extends _Mark>(marks: readonly MarkKey[], cols: Record<string, unknown>): { [Key in MarkKey]?: _Col };
 function _from(fields: readonly string[]): (row: Record<string, unknown>) => unknown;
@@ -298,10 +299,10 @@ function _from(fields: readonly string[], cols: Record<string, S.Schema.AnyNoCon
 function _from(fields: readonly string[], cols: Record<string, unknown>, mode: 'any' | 'all'): boolean;
 function _from(input: _Mark | readonly string[], cols?: Record<string, unknown>, mode?: 'any' | 'all'): unknown {
 	return typeof input === 'string'
-		? ((field: _Field | undefined) => field ? _Registry[field].col : false)((_cache.query[`mark:${input}`] as _Field[] | undefined)?.find(fieldName => fieldName in (cols ?? {})))
+		? ((field: _Field | undefined) => field ? _REGISTRY[field].col : false)((_cache.query[`mark:${input}`] as _Field[] | undefined)?.find(fieldName => fieldName in (cols ?? {})))
 		: ((arr: readonly string[], first: string | undefined) =>
 			arr.length > 0 && cols && !mode && _cache.marks.includes(arr[0] as _Mark)
-				? Object.fromEntries((arr as readonly _Mark[]).flatMap(mark => ((field: _Field | undefined) => field ? [[mark, _Registry[field].col]] : [])((_cache.query[`mark:${mark}`] as _Field[] | undefined)?.find(fieldName => fieldName in cols))))
+				? Object.fromEntries((arr as readonly _Mark[]).flatMap(mark => ((field: _Field | undefined) => field ? [[mark, _REGISTRY[field].col]] : [])((_cache.query[`mark:${mark}`] as _Field[] | undefined)?.find(fieldName => fieldName in cols))))
 				: cols ? mode ? arr[mode === 'all' ? 'every' : 'some']((fieldName: string) => fieldName in cols)
 				: ((schemas: Record<string, S.Schema.AnyNoContext>) =>
 					arr.length === 1 && first !== undefined ? schemas[first] : S.Struct(schemas))(Object.fromEntries(arr.map(fieldName =>
@@ -321,29 +322,33 @@ function _lens(input: _CapKey | Partial<_Entry>): _Lens {
 				? keys[0] === 'wrap' && Array.isArray(input.wrap) ? `wrap:${input.wrap.map(w => w.name).join(',')}` : `${keys[0]}:${input[keys[0] as keyof _Entry]}`
 				: null;
 			return (fastKey ? (_cache.query as Record<string, _Field[] | undefined>)[fastKey] : undefined)
-				?? _cache.keys.filter(f => Object.entries(input).every(([k, v]) => _Registry[f][k as keyof _Entry] === v));
+				?? _cache.keys.filter(field => Object.entries(input).every(([key, v]) => _REGISTRY[field][key as keyof _Entry] === v));
 		})();
-	const resolved = fields.map(f => _cache[f]);
+	const resolved = fields.map(field => _cache[field]);
 	return {
-		fields, cols: resolved.map(e => e.col),
-		marks: [...new Set(resolved.map(e => e.mark).filter((m): m is _Mark => m !== false))],
-		wraps: [...new Set(resolved.map(e => e.wrap).filter((w): w is _Wrap => w !== false))],
+		fields, cols: resolved.map(entry => entry.col),
+		marks: [...new Set(resolved.map(entry => entry.mark).filter((m): m is _Mark => m !== false))],
+		wraps: [...new Set(resolved.map(entry => entry.wrap).filter((w): w is _Wrap => w !== false))],
 		first: resolved[0],
 		in: (cols: Record<string, unknown>): _LensIn => {
-			const present = fields.filter(f => f in cols);
+			const present = fields.filter(field => field in cols);
 			const first = present[0];
-			return { fields: present, cols: present.map(f => _Registry[f].col), first: first ? { field: first, col: _Registry[first].col } : undefined };
+			return { fields: present, cols: present.map(field => _REGISTRY[field].col), first: first === undefined ? undefined : { field: first, col: _REGISTRY[first].col } };
 		},
 	};
 }
 const _dispatch = <D extends _DispatchDim, R>(dim: D, targets: _Field | readonly _Field[], handlers: _DimHandlers<D, R>): R[] =>
-	(typeof targets === 'string' ? [targets] : targets).map(name =>
-		((entry: _Entry, value: _Entry[D]) =>
-			value === false ? handlers.none(entry, name)
-			: dim === 'wrap' ? ((wrapMeta: _Meta) => (handlers as _DimHandlers<'wrap', R>)[wrapMeta.cat](entry, wrapMeta, name))((value as _Wrap)[0])
-			: ((handler: ((e: _Entry, f: _Field) => R) | undefined) => handler ? handler(entry, name) : handlers.none(entry, name))((handlers as unknown as Record<string, (e: _Entry, f: _Field) => R>)[value as string])
-		)(_Registry[name], _Registry[name][dim])
-	);
+	(typeof targets === 'string' ? [targets] : targets).map((name) => {
+		const entry = _REGISTRY[name];
+		const value = entry[dim];
+		const isFalse = value === false;
+		const isWrap = dim === 'wrap';
+		return isFalse
+			? handlers.none(entry, name)
+			: isWrap
+				? ((wrapMeta: _Meta) => (handlers as _DimHandlers<'wrap', R>)[wrapMeta.cat](entry, wrapMeta, name))((value as _Wrap)[0])
+				: ((handler: ((e: _Entry, f: _Field) => R) | undefined) => handler ? handler(entry, name) : handlers.none(entry, name))((handlers as unknown as Record<string, (e: _Entry, f: _Field) => R>)[value as string]);
+	});
 
 // --- [FIELD_OBJECT] ----------------------------------------------------------
 
@@ -353,7 +358,7 @@ const Field = Object.assign(_get, _cache.query, {
 	resolve: _resolve, predMeta: _predMeta, isSqlType: _isSqlType, isGen: _isGen,
 	byCol: _cache as { readonly [ColKey in _Col]: _Resolved<_ColToField[ColKey]> },
 	keys: _cache.keys, cols: _cache.cols, marks: _cache.marks, wrapByCat: _cache.wrapByCat,
-	tables: _Tables, tableNames: _cache.tableNames, tableByField: _cache.tableByField, fk: _Fk, sqlCast: _SqlCast,
+	tables: _TABLES, tableNames: _cache.tableNames, tableByField: _cache.tableByField, fk: _FK, sqlCast: _SQL_CAST,
 });
 
 // --- [FIELD_NAMESPACE] -------------------------------------------------------

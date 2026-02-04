@@ -1,17 +1,6 @@
 /**
- * @effect/sql Model classes with 6 auto-derived variants: select, insert, update, json, jsonCreate, jsonUpdate.
- * Model.json is the canonical API shape—field modifiers control which variants include each field.
- *
- * Model.Generated(S)        → DB-generated (select/update/json only, excluded from insert)
- * Model.GeneratedByApp(S)   → App-generated (all DB variants, optional in json variants)
- * Model.Sensitive(S)        → Internal-only (excluded from all json variants—passwords, tokens, secrets)
- * Model.FieldOption(F)      → Optional (nullable in DB, optional+nullable in json)
- * Model.FieldExcept(...V)   → Exclude from specified variants (e.g., 'json', 'jsonCreate', 'jsonUpdate')
- * Model.FieldOnly(...V)     → Include in only specified variants (inverse of FieldExcept)
- * Model.Field({...})        → Custom per-variant schemas (full control over each variant's shape)
- * Model.JsonFromString(S)   → JSON column (auto parse/stringify between string storage and typed object)
- * Model.DateTimeInsert*     → Creation timestamp (auto-generates on insert only)
- * Model.DateTimeUpdate*     → Modification timestamp (auto-generates on insert AND update)
+ * Define @effect/sql Model classes with auto-derived variants.
+ * Field modifiers: Generated, Sensitive, FieldOption, JsonFromString, DateTimeUpdate.
  */
 /** biome-ignore-all assist/source/useSortedKeys: <Maintain registry organization> */
 import { Model } from '@effect/sql';
@@ -35,16 +24,19 @@ class User extends Model.Class<User>('User')({							// The principal identity. 
 }) {}
 
 // --- [AUTH: SESSION] ---------------------------------------------------------
-class Session extends Model.Class<Session>('Session')({					// Active login. Belongs to a User.
+class Session extends Model.Class<Session>('Session')({					// Active login. Belongs to a User, scoped to an App.
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
 	id: Model.Generated(S.UUID),
+	appId: S.UUID,															// Internal: FK — tenant binding
 	userId: S.UUID,														// Internal: FK
-	expiresAt: S.DateFromSelf,
+	accessExpiresAt: S.DateFromSelf,
+	refreshExpiresAt: S.DateFromSelf,
 	verifiedAt: Model.FieldOption(S.DateFromSelf),
 	ipAddress: Model.FieldOption(S.String),
 	userAgent: Model.FieldOption(S.String),
 	prefix: Model.Generated(S.String),
 	hash: Model.Sensitive(S.String),									// Sensitive: never in json
+	refreshHash: Model.Sensitive(S.String),								// Sensitive: never in json
 	deletedAt: Model.FieldOption(S.DateFromSelf),						// Internal: soft delete
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
@@ -65,17 +57,6 @@ class OauthAccount extends Model.Class<OauthAccount>('OauthAccount')({ 	// Exter
 }) {}
 
 // --- [AUTH: REFRESH_TOKEN] ---------------------------------------------------
-class RefreshToken extends Model.Class<RefreshToken>('RefreshToken')({ 	// Token rotation. Belongs to a User, optionally linked to Session.
-	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
-	id: Model.Generated(S.UUID),
-	userId: S.UUID,														// Internal: FK
-	sessionId: Model.FieldOption(S.UUID),								// Internal: FK
-	expiresAt: S.DateFromSelf,
-	prefix: Model.Generated(S.String),
-	hash: Model.Sensitive(S.String),									// Sensitive: never in json
-	deletedAt: Model.FieldOption(S.DateFromSelf),						// Internal: soft delete
-}) {}
-
 // --- [AUTH: MFA_SECRET] ------------------------------------------------------
 class MfaSecret extends Model.Class<MfaSecret>('MfaSecret')({ 			// TOTP second factor. Belongs to a User (one per user).
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
@@ -134,40 +115,18 @@ class Asset extends Model.Class<Asset>('Asset')({ 						// User-created content.
 // --- [AUDIT: AUDIT_LOG] ------------------------------------------------------
 class AuditLog extends Model.Class<AuditLog>('AuditLog')({ 				// Append-only operation history. Belongs to an App. No updatedAt (immutable).
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
+	// PG18.1: Use RETURNING OLD/NEW to capture before/after in single DML statement
 	id: Model.Generated(S.UUID),
 	appId: S.UUID,
 	userId: Model.FieldOption(S.UUID),									// Public: who did it
 	requestId: Model.FieldOption(S.UUID),								// Public: correlation
-	operation: S.String,
+	operation: S.String,												// Constrained: create|update|delete|restore|login|logout|verify|revoke
 	subject: S.String,
 	subjectId: S.UUID,
-	changes: Model.FieldOption(Model.JsonFromString(S.Unknown)),
+	oldData: Model.FieldOption(Model.JsonFromString(S.Unknown)),		// PG18.1: Pre-modification state via RETURNING OLD.*
+	newData: Model.FieldOption(Model.JsonFromString(S.Unknown)),		// PG18.1: Post-modification state via RETURNING NEW.*
 	ipAddress: Model.FieldOption(S.String),
 	userAgent: Model.FieldOption(S.String),
-}) {}
-
-// --- [JOBS: JOB] -------------------------------------------------------------
-class Job extends Model.Class<Job>('Job')({								// Background task. Belongs to an App.
-	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
-	id: Model.Generated(S.UUID),
-	appId: S.UUID,
-	userId: Model.FieldOption(S.UUID),									// Public: who enqueued (attribution)
-	requestId: Model.FieldOption(S.UUID),								// Public: correlation (same as audit_logs)
-	type: S.String,
-	payload: Model.JsonFromString(S.Unknown),
-	priority: S.String,
-	status: S.String,
-	attempts: S.Number,
-	maxAttempts: S.Number,
-	scheduledAt: S.DateFromSelf,
-	startedAt: Model.FieldOption(Model.Generated(S.DateFromSelf)),		// Trigger-derived: set on status → 'processing'
-	completedAt: Model.FieldOption(Model.Generated(S.DateFromSelf)),	// Trigger-derived: set on status → 'completed'|'dead'
-	lastError: Model.FieldOption(S.String),
-	lockedBy: Model.FieldOption(S.String),
-	lockedUntil: Model.FieldOption(S.DateFromSelf),
-	waitMs: Model.FieldOption(Model.Generated(S.Number)),				// VIRTUAL: queue latency (started_at - scheduled_at)
-	durationMs: Model.FieldOption(Model.Generated(S.Number)),			// VIRTUAL: execution time (completed_at - started_at)
-	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
 
 // --- [JOBS: JOB_DLQ] ---------------------------------------------------------
@@ -185,18 +144,6 @@ class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Unified dead-letter 
 	attempts: S.Number,													// Total attempts before dead-letter
 	errorHistory: Model.JsonFromString(S.Array(S.Struct({ error: S.String, timestamp: S.Number }))),	// Error trail
 	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job/event was replayed (null = pending)
-}) {}
-
-// --- [EVENTS: EVENT_OUTBOX] --------------------------------------------------
-class EventOutbox extends Model.Class<EventOutbox>('EventOutbox')({		// Transactional outbox for domain events. Belongs to an App.
-	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — NO created_at COLUMN
-	id: Model.Generated(S.UUID),
-	appId: S.UUID,														// Tenant scope
-	eventId: S.UUID,													// Unique event identifier (for deduplication)
-	eventType: S.String,												// Event type: 'user.created', 'order.placed' (dot-notation)
-	payload: Model.JsonFromString(S.Unknown),							// Full event envelope
-	status: S.String,													// 'pending' | 'published' | 'failed'
-	publishedAt: Model.FieldOption(S.DateFromSelf),						// When event was broadcast
 }) {}
 
 // --- [INFRA: KV_STORE] -------------------------------------------------------
@@ -235,4 +182,4 @@ class SearchEmbedding extends Model.Class<SearchEmbedding>('SearchEmbedding')({
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ApiKey, App, Asset, AuditLog, EventOutbox, Job, JobDlq, KvStore, MfaSecret, OauthAccount, RefreshToken, SearchDocument, SearchEmbedding, Session, User };
+export { ApiKey, App, Asset, AuditLog, JobDlq, KvStore, MfaSecret, OauthAccount, SearchDocument, SearchEmbedding, Session, User };

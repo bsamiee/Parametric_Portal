@@ -35,8 +35,7 @@ const syncVariables = <T>(
     root: HTMLElement,
     state: T,
     prefix: string,
-    selector: ((s: T) => Record<string, string>) | undefined,
-): void => {
+    selector: ((s: T) => Record<string, string>) | undefined,): void => {
     selector &&
         Object.entries(selector(state)).forEach(([k, v]) => {
             root.style.setProperty(`--${prefix}-${k}`, v);
@@ -58,8 +57,7 @@ const syncClassNames = <T>(root: HTMLElement, state: T, classNames: ((s: T) => C
 
 const useCssSync = <T extends object>(
     store: Pick<StoreApi<T>, 'getState' | 'subscribe'>,
-    config: CssSyncConfig<T>,
-): void => {
+    config: CssSyncConfig<T>,): void => {
     const { classNames, prefix = B.defaults.prefix, root = B.defaults.root, selector } = config;
     const validatedPrefix = useMemo(() => validatePrefix(prefix), [prefix]);
     const rootStable = useCallback(root, [root]);

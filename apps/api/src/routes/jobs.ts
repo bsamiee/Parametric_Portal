@@ -1,9 +1,6 @@
 /**
  * Job status SSE streaming endpoint.
- * Provides real-time job status updates via Server-Sent Events.
- *
- * [PATTERN] Uses JobService (infra) directly without domain wrapper.
- * JobService is a hybrid that owns both orchestration and events - see jobs.ts header for rationale.
+ * Real-time status updates via Server-Sent Events, MFA-gated subscription.
  */
 import { HttpApiBuilder } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
@@ -13,7 +10,7 @@ import { JobService } from '@parametric-portal/server/infra/jobs';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Middleware } from '@parametric-portal/server/middleware';
-import { Effect } from 'effect';
+import { Effect, } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -24,16 +21,12 @@ const handleSubscribe = Effect.fn('jobs.subscribe')(
 			const ctx = yield* Context.Request.current;
 			const appId = ctx.tenantId;
 			return yield* StreamingService.sse({
-				filter: (event) => event.appId === appId,
+				filter: (event) => event.tenantId === appId,
 				name: 'jobs.status',
 				serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),
 				source: jobs.onStatusChange(),
 			});
-		}).pipe(
-			Effect.mapError((err) =>
-				'_tag' in err && err._tag === 'Forbidden' ? err : HttpError.Internal.of('SSE failed', err),
-			),
-		),
+		}).pipe(Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('SSE failed', error))),),
 );
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -41,9 +34,7 @@ const handleSubscribe = Effect.fn('jobs.subscribe')(
 const JobsLive = HttpApiBuilder.group(ParametricApi, 'jobs', (handlers) =>
 	Effect.gen(function* () {
 		const jobs = yield* JobService;
-		return handlers.handleRaw('subscribe', () =>
-			CacheService.rateLimit('api', handleSubscribe(jobs)),
-		);
+		return handlers.handleRaw('subscribe', () => CacheService.rateLimit('api', handleSubscribe(jobs)),);
 	}),
 );
 

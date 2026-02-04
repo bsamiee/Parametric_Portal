@@ -1,11 +1,6 @@
 /**
- * Define HTTP API contract shared between server and client.
- * Enables type-safe HttpApiClient derivation; domain modules use structural typing.
- *
- * Schema Strategy:
- * - Entity responses: Use Model.json directly (models define their own API shape)
- * - HTTP concerns: Pagination, query params, auth responses (not entity models)
- * - Inline schemas: Single-use response shapes defined at endpoint
+ * HTTP API: Contract definition shared between server and client.
+ * Type-safe HttpApiClient derivation, OpenAPI generation, endpoint groups.
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
 import { ApiKey, AuditLog, User } from '@parametric-portal/database/models';
@@ -20,7 +15,7 @@ import { Middleware } from './middleware.ts';
 // These are HTTP-layer concerns, NOT entity models. They define API contract shapes.
 
 const AuthResponse = S.Struct({		/** Auth token response - returned by OAuth callback, refresh */
-	accessToken: S.String.annotations({ description: 'JWT access token for API authentication' }),
+	accessToken: S.String.annotations({ description: 'Opaque access token for API authentication' }),
 	expiresAt: S.DateTimeUtc.annotations({ description: 'Token expiration timestamp (UTC)' }),
 	mfaPending: S.Boolean.annotations({ description: 'True if MFA verification is required before full access' }),
 }).annotations({ description: 'Authentication response containing access token and session info', title: 'AuthResponse' });
@@ -35,6 +30,7 @@ const Query = S.Struct({			/** Pagination query params - cursor-based with optio
 	after: S.optional(HttpApiSchema.param('after', S.DateFromString)),
 	before: S.optional(HttpApiSchema.param('before', S.DateFromString)),
 	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
+	includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)),
 	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
 	operation: S.optional(HttpApiSchema.param('operation', S.String)),
 });
@@ -54,7 +50,18 @@ const TransferResult = S.Struct({	/** Transfer operation result */
 	name: S.optional(S.String),
 });
 /** Auditable resource types */
-const AuditSubject = S.Literal('ApiKey', 'App', 'Asset', 'MfaSecret', 'OauthAccount', 'RefreshToken', 'Session', 'User');
+const AuditSubject = S.Literal('ApiKey', 'App', 'Asset', 'MfaSecret', 'OauthAccount', 'Session', 'User');
+/** RFC 6902 JSON Patch operation schema for computed diffs */
+const PatchOperation = S.Struct({
+	from: S.optional(S.String),
+	op: S.Literal('add', 'remove', 'replace', 'move', 'copy', 'test'),
+	path: S.String,
+	value: S.optional(S.Unknown),
+});
+/** Audit log entry with optional computed diff (when includeDiff=true) */
+const AuditLogWithDiff = S.extend(AuditLog.json, S.Struct({
+	diff: S.NullOr(S.Struct({ ops: S.Array(PatchOperation) })),
+}));
 /** Searchable entity types */
 const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
 
@@ -291,7 +298,7 @@ const _AuditGroup = HttpApiGroup.make('audit')
 			.middleware(Middleware.Auth)
 			.setPath(S.Struct({ subject: AuditSubject, subjectId: S.UUID }))
 			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(AuditLog.json))					// Model.json: canonical API shape
+			.addSuccess(KeysetResponse(AuditLogWithDiff))				// Extended with optional diff
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
@@ -302,7 +309,7 @@ const _AuditGroup = HttpApiGroup.make('audit')
 			.middleware(Middleware.Auth)
 			.setPath(S.Struct({ userId: S.UUID }))
 			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(AuditLog.json))					// Model.json: canonical API shape
+			.addSuccess(KeysetResponse(AuditLogWithDiff))				// Extended with optional diff
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
@@ -312,7 +319,7 @@ const _AuditGroup = HttpApiGroup.make('audit')
 		HttpApiEndpoint.get('getMine', '/me')
 			.middleware(Middleware.Auth)
 			.setUrlParams(Query)
-			.addSuccess(KeysetResponse(AuditLog.json))					// Model.json: canonical API shape
+			.addSuccess(KeysetResponse(AuditLogWithDiff))				// Extended with optional diff
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
@@ -376,6 +383,17 @@ const _SearchGroup = HttpApiGroup.make('search')
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit)
 			.annotate(OpenApi.Description, 'Refresh search index (admin only)'),
+	)
+	.add(
+		HttpApiEndpoint.post('refreshEmbeddings', '/refresh/embeddings')
+			.middleware(Middleware.Auth)
+			.setPayload(S.Struct({ includeGlobal: S.optional(S.Boolean) }))
+			.addSuccess(S.Struct({ count: S.Int }))
+			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.annotate(OpenApi.Description, 'Refresh search embeddings (admin only)'),
 	);
 const _JobsGroup = HttpApiGroup.make('jobs')
 	.prefix('/jobs')
@@ -388,6 +406,18 @@ const _JobsGroup = HttpApiGroup.make('jobs')
 			.addError(HttpError.Internal)
 			.addError(HttpError.RateLimit)
 			.annotate(OpenApi.Description, 'Subscribe to job status updates via SSE'),
+	);
+const _WebSocketGroup = HttpApiGroup.make('websocket')
+	.prefix('/ws')
+	.add(
+		HttpApiEndpoint.get('connect', '/')
+			.middleware(Middleware.Auth)
+			.addSuccess(S.Void)
+			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.RateLimit)
+			.annotate(OpenApi.Description, 'Upgrade to WebSocket for realtime events'),
 	);
 const _StorageSignOp = S.Literal('get', 'put');
 const _StorageSignRequest = S.Struct({
@@ -469,6 +499,7 @@ const ParametricApi = HttpApi.make('ParametricApi')
 	.add(_AuthGroup)
 	.add(_HealthGroup.annotate(OpenApi.Exclude, true))
 	.add(_JobsGroup)
+	.add(_WebSocketGroup)
 	.add(_SearchGroup)
 	.add(_StorageGroup)
 	.add(_TelemetryGroup.annotate(OpenApi.Exclude, true))

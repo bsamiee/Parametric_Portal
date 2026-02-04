@@ -5,11 +5,12 @@ import { Data, Duration, Effect, Layer, Option, Schema as S, Stream } from 'effe
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type EntityType = 'app' | 'asset' | 'auditLog' | 'user';
+const EntityTypeSchema = S.Literal('app', 'asset', 'auditLog', 'user');
+type EntityType = typeof EntityTypeSchema.Type;
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const Tuning = (() => {
+const _CONFIG = (() => {
 	const snippet = { delimiter: ' ... ', maxFragments: 3, maxWords: 50, minWords: 20, startSel: '<mark>', stopSel: '</mark>' } as const;
 	return {
 		channels: { refresh: 'search_refresh' },
@@ -46,35 +47,35 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 	effect: Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const pg = yield* PgClient.PgClient;
-		/** Build scope and entity type filter fragments. Alias defaults to 'd' for documents table; null for no alias. */
-		const buildFilters = (params: { readonly entityTypes: readonly EntityType[]; readonly includeGlobal: boolean; readonly scopeId: string | null }, alias: string | null = 'd') => {
-			const col = (name: string) => alias === null ? sql`${sql(name)}` : sql`${sql(alias)}.${sql(name)}`;
-			const entityFilter = params.entityTypes.length ? sql`AND ${col('entity_type')} IN ${sql.in(params.entityTypes)}` : sql``;
-			const scopeMatch = params.scopeId ? sql`${col('scope_id')} = ${params.scopeId}::uuid` : sql`${col('scope_id')} IS NULL`;
-			const scopeFilter = params.includeGlobal && params.scopeId ? sql`AND (${scopeMatch} OR ${col('scope_id')} IS NULL)` : sql`AND ${scopeMatch}`;
+		/** Build scope and entity type filter fragments. Alias defaults to 'documents' for documents table; null for no alias. */
+		const buildFilters = (parameters: { readonly entityTypes: readonly EntityType[]; readonly includeGlobal: boolean; readonly scopeId: string | null }, alias: string | null = 'documents') => {
+			const column = (name: string) => alias === null ? sql`${sql(name)}` : sql`${sql(alias)}.${sql(name)}`;
+			const entityFilter = parameters.entityTypes.length ? sql`AND ${column('entity_type')} IN ${sql.in(parameters.entityTypes)}` : sql``;
+			const scopeMatch = parameters.scopeId ? sql`${column('scope_id')} = ${parameters.scopeId}::uuid` : sql`${column('scope_id')} IS NULL`;
+			const scopeFilter = parameters.includeGlobal && parameters.scopeId ? sql`AND (${scopeMatch} OR ${column('scope_id')} IS NULL)` : sql`AND ${scopeMatch}`;
 			return { entityFilter, scopeFilter, scopeMatch };
 		};
-		const buildRankedCtes = (params: { readonly embeddingJson?: string | undefined; readonly entityTypes: readonly EntityType[]; readonly includeGlobal: boolean; readonly scopeId: string | null; readonly term: string }) => {
-			const hasEmbedding = params.embeddingJson !== undefined;
-			const { entityFilter, scopeFilter } = buildFilters(params);
-		const term = sql`casefold(unaccent(${params.term}))`; 	// PG 18.1: casefold() for Unicode case folding (e.g., ß → ss), unaccent() for diacritics
-			const query = sql`websearch_to_tsquery(${Tuning.regconfig}::regconfig, unaccent(${params.term}))`;
+		const buildRankedCtes = (parameters: { readonly embeddingJson?: string | undefined; readonly entityTypes: readonly EntityType[]; readonly includeGlobal: boolean; readonly scopeId: string | null; readonly term: string }) => {
+			const hasEmbedding = parameters.embeddingJson !== undefined;
+			const { entityFilter, scopeFilter } = buildFilters(parameters);
+		const term = sql`casefold(unaccent(${parameters.term}))`; 	// PG 18.1: casefold() for Unicode case folding (e.g., ß → ss), unaccent() for diacritics
+			const query = sql`websearch_to_tsquery(${_CONFIG.regconfig}::regconfig, unaccent(${parameters.term}))`;
 			const semanticParts = { 							// Dispatch table for semantic CTE (hasEmbedding ? with : without)
 				cte: hasEmbedding
 					? sql`,
 					semantic_candidates AS (
-						SELECT d.entity_type, d.entity_id,
-							${1} - (e.embedding <=> (${params.embeddingJson})::vector) AS semantic_score
-						FROM ${sql(Tuning.tables.embeddings)} e
-						JOIN ${sql(Tuning.tables.documents)} d
-							ON d.entity_type = e.entity_type
-							AND d.entity_id = e.entity_id
-							AND d.hash = e.hash
+						SELECT documents.entity_type, documents.entity_id,
+							${1} - (embeddings.embedding <=> (${parameters.embeddingJson})::vector) AS semantic_score
+						FROM ${sql(_CONFIG.tables.embeddings)} embeddings
+						JOIN ${sql(_CONFIG.tables.documents)} documents
+							ON documents.entity_type = embeddings.entity_type
+							AND documents.entity_id = embeddings.entity_id
+							AND documents.hash = embeddings.hash
 						WHERE true
 							${scopeFilter}
 							${entityFilter}
-						ORDER BY e.embedding <=> (${params.embeddingJson})::vector
-						LIMIT ${Tuning.limits.candidate}
+						ORDER BY embeddings.embedding <=> (${parameters.embeddingJson})::vector
+						LIMIT ${_CONFIG.limits.candidate}
 					),
 					semantic_ranked AS (
 						SELECT entity_type, entity_id,
@@ -88,37 +89,37 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 			} as const;
 			const ctes = sql`
 					fts_candidates AS (
-						SELECT d.entity_type, d.entity_id,
-							ts_rank_cd(d.search_vector, ${query}, ${Tuning.rank.normalization}) AS fts_score
-						FROM ${sql(Tuning.tables.documents)} d
-						WHERE d.search_vector @@ ${query}
+						SELECT documents.entity_type, documents.entity_id,
+							ts_rank_cd(documents.search_vector, ${query}, ${_CONFIG.rank.normalization}) AS fts_score
+						FROM ${sql(_CONFIG.tables.documents)} documents
+						WHERE documents.search_vector @@ ${query}
 							${scopeFilter}
 							${entityFilter}
-						ORDER BY fts_score DESC NULLS LAST, d.entity_id DESC
-						LIMIT ${Tuning.limits.candidate}
+						ORDER BY fts_score DESC NULLS LAST, documents.entity_id DESC
+						LIMIT ${_CONFIG.limits.candidate}
 					),
 					trgm_candidates AS (
-						SELECT d.entity_type, d.entity_id,
-						similarity(d.display_text, unaccent(${params.term})) AS trgm_score
-					FROM ${sql(Tuning.tables.documents)} d
-					WHERE d.display_text % unaccent(${params.term})
-						AND similarity(d.display_text, unaccent(${params.term})) >= ${Tuning.trigram.threshold}
+						SELECT documents.entity_type, documents.entity_id,
+						similarity(documents.display_text, unaccent(${parameters.term})) AS trgm_score
+					FROM ${sql(_CONFIG.tables.documents)} documents
+					WHERE documents.display_text % unaccent(${parameters.term})
+						AND similarity(documents.display_text, unaccent(${parameters.term})) >= ${_CONFIG.trigram.threshold}
 							${scopeFilter}
 							${entityFilter}
-						ORDER BY trgm_score DESC NULLS LAST, d.entity_id DESC
-						LIMIT ${Tuning.limits.candidate}
+						ORDER BY trgm_score DESC NULLS LAST, documents.entity_id DESC
+						LIMIT ${_CONFIG.limits.candidate}
 					),
 					fuzzy_candidates AS (
-						SELECT d.entity_type, d.entity_id, f.distance AS fuzzy_distance
-						FROM ${sql(Tuning.tables.documents)} d
+						SELECT documents.entity_type, documents.entity_id, fuzzy.distance AS fuzzy_distance
+						FROM ${sql(_CONFIG.tables.documents)} documents
 						CROSS JOIN LATERAL (
-							SELECT levenshtein_less_equal(casefold(unaccent(d.display_text)), ${term}, ${Tuning.fuzzy.maxDistance}) AS distance
-						) f
-						WHERE char_length(${term}) >= ${Tuning.fuzzy.minTermLength}
+							SELECT levenshtein_less_equal(casefold(unaccent(documents.display_text)), ${term}, ${_CONFIG.fuzzy.maxDistance}) AS distance
+						) fuzzy
+						WHERE char_length(${term}) >= ${_CONFIG.fuzzy.minTermLength}
 							${scopeFilter}
 							${entityFilter}
-						ORDER BY f.distance ASC NULLS LAST, d.entity_id DESC
-						LIMIT ${Tuning.limits.candidate}
+						ORDER BY fuzzy.distance ASC NULLS LAST, documents.entity_id DESC
+						LIMIT ${_CONFIG.limits.candidate}
 					),
 					fts_ranked AS (
 						SELECT entity_type, entity_id,
@@ -144,10 +145,10 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 					),
 					scored AS (
 						SELECT entity_type, entity_id,
-							COALESCE(SUM(1.0 / (${Tuning.rrf.k} + rnk)) FILTER (WHERE source = 'fts'), 0) * ${Tuning.rrf.weights.fts} +
-							COALESCE(SUM(1.0 / (${Tuning.rrf.k} + rnk)) FILTER (WHERE source = 'trgm'), 0) * ${Tuning.rrf.weights.trgm} +
-							COALESCE(SUM(1.0 / (${Tuning.rrf.k} + rnk)) FILTER (WHERE source = 'fuzzy'), 0) * ${Tuning.rrf.weights.fuzzy} +
-							COALESCE(SUM(1.0 / (${Tuning.rrf.k} + rnk)) FILTER (WHERE source = 'semantic'), 0) * ${Tuning.rrf.weights.semantic}
+							COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fts'), 0) * ${_CONFIG.rrf.weights.fts} +
+							COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'trgm'), 0) * ${_CONFIG.rrf.weights.trgm} +
+							COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'fuzzy'), 0) * ${_CONFIG.rrf.weights.fuzzy} +
+							COALESCE(SUM(1.0 / (${_CONFIG.rrf.k} + rnk)) FILTER (WHERE source = 'semantic'), 0) * ${_CONFIG.rrf.weights.semantic}
 							AS rank
 						FROM ranked
 						GROUP BY entity_type, entity_id
@@ -156,18 +157,18 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 			return { ctes, query };
 		};
 		const executeSearch = SqlSchema.findAll({ 		// PG 18.1: LEFT JOIN from totals ensures we always get total_count + facets even with 0 paged results
-			execute: (params) => {
-				const hasCursor = params.cursorRank !== undefined && params.cursorId !== undefined;
+			execute: (parameters) => {
+				const hasCursor = parameters.cursorRank !== undefined && parameters.cursorId !== undefined;
 				const cursorFilter = hasCursor
-					? sql`WHERE (p.rank, p.entity_id) < (${params.cursorRank}, ${params.cursorId}::uuid)`
+					? sql`WHERE (paged.rank, paged.entity_id) < (${parameters.cursorRank}, ${parameters.cursorId}::uuid)`
 					: sql``;
-				const { ctes, query } = buildRankedCtes(params);
-				const limitWithLookahead = params.limit + 1;
-				const snippetExpr = params.includeSnippets
-					? sql`ts_headline(${Tuning.regconfig}::regconfig, coalesce(d.display_text, '') || ${Tuning.text.snippetJoiner} || coalesce(d.content_text, '') || ${Tuning.text.snippetJoiner} || coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(d.metadata)), ''), ${query}, ${Tuning.snippet.opts})`
+				const { ctes, query } = buildRankedCtes(parameters);
+				const limitWithLookahead = parameters.limit + 1;
+				const snippetExpr = parameters.includeSnippets
+					? sql`ts_headline(${_CONFIG.regconfig}::regconfig, coalesce(documents.display_text, '') || ${_CONFIG.text.snippetJoiner} || coalesce(documents.content_text, '') || ${_CONFIG.text.snippetJoiner} || coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(documents.metadata)), ''), ${query}, ${_CONFIG.snippet.opts})`
 					: sql`NULL`;
-				const facetsExpr = params.includeFacets
-					? sql`(SELECT jsonb_object_agg(entity_type, cnt) FROM (SELECT entity_type, COUNT(*)::int AS cnt FROM scored GROUP BY entity_type) f)`
+				const facetsExpr = parameters.includeFacets
+					? sql`(SELECT jsonb_object_agg(entity_type, cnt) FROM (SELECT entity_type, COUNT(*)::int AS cnt FROM scored GROUP BY entity_type) facet)`
 					: sql`NULL::jsonb`;
 				return sql`
 					WITH
@@ -178,79 +179,79 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 							${facetsExpr} AS facets
 					),
 					paged AS (
-						SELECT s.entity_type, s.entity_id, d.display_text, d.metadata, s.rank,
+						SELECT scored.entity_type, scored.entity_id, documents.display_text, documents.metadata, scored.rank,
 							${snippetExpr} AS snippet
-						FROM scored s
-						JOIN ${sql(Tuning.tables.documents)} d
-							ON d.entity_type = s.entity_type AND d.entity_id = s.entity_id
-						ORDER BY s.rank DESC, s.entity_id DESC
+						FROM scored scored
+						JOIN ${sql(_CONFIG.tables.documents)} documents
+							ON documents.entity_type = scored.entity_type AND documents.entity_id = scored.entity_id
+						ORDER BY scored.rank DESC, scored.entity_id DESC
 					),
 					filtered AS (
-						SELECT * FROM paged p
+						SELECT * FROM paged paged
 						${cursorFilter}
 						LIMIT ${limitWithLookahead}
 					)
-					SELECT f.entity_type, f.entity_id, f.display_text, f.metadata, f.rank, f.snippet,
-						t.total_count, t.facets
-					FROM totals t
-					LEFT JOIN filtered f ON true
-					ORDER BY f.rank DESC NULLS LAST, f.entity_id DESC NULLS LAST
+					SELECT filtered.entity_type, filtered.entity_id, filtered.display_text, filtered.metadata, filtered.rank, filtered.snippet,
+						totals.total_count, totals.facets
+					FROM totals totals
+					LEFT JOIN filtered filtered ON true
+					ORDER BY filtered.rank DESC NULLS LAST, filtered.entity_id DESC NULLS LAST
 				`;
 			},
 			Request: S.Struct({
 				cursorId: S.optional(S.UUID),
 				cursorRank: S.optional(S.Number),
 				embeddingJson: S.optional(S.String),
-				entityTypes: S.Array(S.Literal('app', 'asset', 'auditLog', 'user')),
+				entityTypes: S.Array(EntityTypeSchema),
 				includeFacets: S.Boolean,
 				includeGlobal: S.Boolean,
 				includeSnippets: S.Boolean,
-				limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(Tuning.limits.maxLimit)),
+				limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.maxLimit)),
 				scopeId: S.NullOr(S.UUID),
-				term: S.String.pipe(S.minLength(Tuning.limits.termMin), S.maxLength(Tuning.limits.termMax)),
+				term: S.String.pipe(S.minLength(_CONFIG.limits.termMin), S.maxLength(_CONFIG.limits.termMax)),
 			}),
-			Result: S.Struct({ displayText: S.NullOr(S.String), entityId: S.NullOr(S.UUID), entityType: S.NullOr(S.Literal('app', 'asset', 'auditLog', 'user')), facets: S.NullOr(S.Record({ key: S.Literal('app', 'asset', 'auditLog', 'user'), value: S.Int })), metadata: S.NullOr(S.Unknown), rank: S.NullOr(S.Number), snippet: S.NullOr(S.String), totalCount: S.Int }),
+			Result: S.Struct({ displayText: S.NullOr(S.String), entityId: S.NullOr(S.UUID), entityType: S.NullOr(EntityTypeSchema), facets: S.NullOr(S.Record({ key: EntityTypeSchema, value: S.Int })), metadata: S.NullOr(S.Unknown), rank: S.NullOr(S.Number), snippet: S.NullOr(S.String), totalCount: S.Int }),
 		});
 		const executeSuggestions = SqlSchema.findAll({
-			execute: (params) => sql`SELECT term, frequency::int FROM get_search_suggestions(${params.prefix}, ${params.scopeId}::uuid, ${params.includeGlobal}, ${params.limit})`,
-			Request: S.Struct({ includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(Tuning.limits.suggestLimitMax)), prefix: S.String.pipe(S.minLength(Tuning.limits.termMin), S.maxLength(Tuning.limits.termMax)), scopeId: S.NullOr(S.UUID) }),
+			execute: (parameters) => sql`SELECT term, frequency::int FROM get_search_suggestions(${parameters.prefix}, ${parameters.scopeId}::uuid, ${parameters.includeGlobal}, ${parameters.limit})`,
+			Request: S.Struct({ includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.suggestLimitMax)), prefix: S.String.pipe(S.minLength(_CONFIG.limits.termMin), S.maxLength(_CONFIG.limits.termMax)), scopeId: S.NullOr(S.UUID) }),
 			Result: S.Struct({ frequency: S.Int, term: S.String }),
 		});
 		const executeEmbeddingSources = SqlSchema.findAll({
-			execute: (params) => {
-				const { entityFilter, scopeFilter } = buildFilters(params, null);
+			execute: (parameters) => {
+				const { entityFilter, scopeFilter } = buildFilters(parameters, null);
 				return sql`
 					SELECT entity_type, entity_id, scope_id, display_text, content_text, metadata, hash, updated_at
-					FROM ${sql(Tuning.tables.embeddingSources)}
+					FROM ${sql(_CONFIG.tables.embeddingSources)}
 					WHERE true ${scopeFilter} ${entityFilter}
 					ORDER BY updated_at DESC
-					LIMIT ${params.limit}
+					LIMIT ${parameters.limit}
 				`;
 			},
-			Request: S.Struct({ entityTypes: S.Array(S.Literal('app', 'asset', 'auditLog', 'user')), includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(Tuning.limits.embeddingBatch)), scopeId: S.NullOr(S.UUID) }),
-			Result: S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), hash: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
+			Request: S.Struct({ entityTypes: S.Array(EntityTypeSchema), includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.embeddingBatch)), scopeId: S.NullOr(S.UUID) }),
+			Result: S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, entityId: S.UUID, entityType: EntityTypeSchema, hash: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
 		});
-		const executeUpsertEmbedding = SqlSchema.single({ 	// PG 18.1: RETURNING WITH (OLD AS o, NEW AS n) returns both old and new row values, OLD.entity_type IS NULL means a fresh insert occurred
-			execute: (params) => sql`
-				INSERT INTO ${sql(Tuning.tables.embeddings)} (entity_type, entity_id, scope_id, embedding, hash)
-				VALUES (${params.entityType}, ${params.entityId}, ${params.scopeId}, (${params.embeddingJson})::vector, ${params.hash})
+		const executeUpsertEmbedding = SqlSchema.single({ 	// PG 18.1: RETURNING WITH (OLD AS old, NEW AS new) returns both old and new row values, OLD.entity_type IS NULL means a fresh insert occurred
+			execute: (parameters) => sql`
+				INSERT INTO ${sql(_CONFIG.tables.embeddings)} (entity_type, entity_id, scope_id, embedding, hash)
+				VALUES (${parameters.entityType}, ${parameters.entityId}, ${parameters.scopeId}, (${parameters.embeddingJson})::vector, ${parameters.hash})
 				ON CONFLICT (entity_type, entity_id) DO UPDATE SET
 					embedding = EXCLUDED.embedding,
 					scope_id = EXCLUDED.scope_id,
 					hash = EXCLUDED.hash
-				RETURNING WITH (OLD AS o, NEW AS n)
-					n.entity_type, n.entity_id,
-					(o.entity_type IS NULL)::boolean AS is_new
+				RETURNING WITH (OLD AS old, NEW AS new)
+					new.entity_type, new.entity_id,
+					(old.entity_type IS NULL)::boolean AS is_new
 			`,
-			Request: S.Struct({ embeddingJson: S.String, entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), hash: S.String, scopeId: S.NullOr(S.UUID) }),
-			Result: S.Struct({ entityId: S.UUID, entityType: S.Literal('app', 'asset', 'auditLog', 'user'), isNew: S.Boolean }),
+			Request: S.Struct({ embeddingJson: S.String, entityId: S.UUID, entityType: EntityTypeSchema, hash: S.String, scopeId: S.NullOr(S.UUID) }),
+			Result: S.Struct({ entityId: S.UUID, entityType: EntityTypeSchema, isNew: S.Boolean }),
 		});
 		return {
 			embeddingSources: Effect.fn('SearchRepo.embeddingSources')((options: { readonly entityTypes?: readonly EntityType[]; readonly includeGlobal?: boolean; readonly limit?: number; readonly scopeId?: string | null }) =>
 				executeEmbeddingSources({
 					entityTypes: options.entityTypes ?? [],
 					includeGlobal: options.includeGlobal ?? false,
-					limit: Math.min(Math.max(options.limit ?? Tuning.limits.embeddingBatch, 1), Tuning.limits.embeddingBatch),
+					limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.embeddingBatch, 1), _CONFIG.limits.embeddingBatch),
 					scopeId: options.scopeId ?? null,
 				}).pipe(
 					Effect.mapError((cause) => new SearchError({ cause, operation: 'embeddingSources' })),
@@ -258,15 +259,15 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 				),
 			),
 			onRefresh: () =>
-				pg.listen(Tuning.channels.refresh).pipe(
+				pg.listen(_CONFIG.channels.refresh).pipe(
 					Stream.mapEffect((payload) => S.decodeUnknown(S.parseJson(S.Struct({ event: S.String, timestamp: S.Number })))(payload)),
 					Stream.mapError((cause) => new SearchError({ cause, operation: 'listen' })),
 				),
 			refresh: (() => {
 				const executeRefresh = SqlSchema.void({ 	// SqlSchema.void provides request validation and type safety
-					execute: (params) =>
-						sql`SELECT refresh_search_documents(${params.scopeId}::uuid, ${params.includeGlobal})`.pipe(
-							Effect.timeout(Duration.minutes(Tuning.refresh.timeoutMinutes)),
+					execute: (parameters) =>
+						sql`SELECT refresh_search_documents(${parameters.scopeId}::uuid, ${parameters.includeGlobal})`.pipe(
+							Effect.timeout(Duration.minutes(_CONFIG.refresh.timeoutMinutes)),
 							Effect.andThen(sql`SELECT notify_search_refresh()`),
 						),
 					Request: S.Struct({ includeGlobal: S.Boolean, scopeId: S.NullOr(S.UUID) }),
@@ -280,8 +281,8 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 			})(),
 			search: Effect.fn('SearchRepo.search')((options: { readonly embedding?: readonly number[]; readonly entityTypes?: readonly EntityType[]; readonly includeFacets?: boolean; readonly includeGlobal?: boolean; readonly includeSnippets?: boolean; readonly scopeId: string | null; readonly term: string }, pagination: { cursor?: string; limit?: number } = {}) =>
 				Effect.gen(function* () {
-					const cursorValue = Option.filter(yield* Page.decode(pagination.cursor, S.Number), (c) => S.is(S.UUID)(c.id));
-					const limit = Math.min(Math.max(pagination.limit ?? Tuning.limits.defaultLimit, 1), Tuning.limits.maxLimit);
+					const cursorValue = Option.filter(yield* Page.decode(pagination.cursor, S.Number), (cursor) => S.is(S.UUID)(cursor.id));
+					const limit = Math.min(Math.max(pagination.limit ?? _CONFIG.limits.defaultLimit, 1), _CONFIG.limits.maxLimit);
 					const rows = yield* executeSearch({
 						entityTypes: options.entityTypes ?? [],
 						includeFacets: options.includeFacets ?? false,
@@ -296,14 +297,14 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 					// LEFT JOIN guarantees at least 1 row; filter out totals-only row (entityId is null)
 					const totalCount = rows[0]?.totalCount ?? 0;
 					const facets = options.includeFacets ? rows[0]?.facets ?? null : null;
-					const { items } = Page.strip(rows.filter((r): r is typeof r & { entityId: string; entityType: EntityType; displayText: string; rank: number } => r.entityId !== null));
+					const { items } = Page.strip(rows.filter((row): row is typeof row & { entityId: string; entityType: EntityType; displayText: string; rank: number } => row.entityId !== null));
 					return { ...Page.keyset(items, totalCount, limit, (item) => ({ id: item.entityId, v: item.rank }), S.Number, Option.isSome(cursorValue)), facets };
 				}).pipe(Effect.withSpan('search.query', { attributes: { term: options.term } })),
 			),
 			suggest: Effect.fn('SearchRepo.suggest')((options: { readonly includeGlobal?: boolean; readonly limit?: number; readonly prefix: string; readonly scopeId: string | null }) =>
 				executeSuggestions({
 					includeGlobal: options.includeGlobal ?? false,
-					limit: Math.min(Math.max(options.limit ?? Tuning.limits.suggestLimitDefault, 1), Tuning.limits.suggestLimitMax),
+					limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.suggestLimitDefault, 1), _CONFIG.limits.suggestLimitMax),
 					prefix: options.prefix,
 					scopeId: options.scopeId,
 				}).pipe(
@@ -312,7 +313,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 				),
 			),
 			upsertEmbedding: Effect.fn('SearchRepo.upsertEmbedding')((input: { readonly hash: string; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: EntityType; readonly scopeId: string | null }) =>
-				S.decode(S.Array(S.Number).pipe(S.itemsCount(Tuning.embedding.dimensions)))(input.embedding).pipe(
+				S.decode(S.Array(S.Number).pipe(S.itemsCount(_CONFIG.embedding.dimensions)))(input.embedding).pipe(
 					Effect.andThen((embedding) => executeUpsertEmbedding({ embeddingJson: JSON.stringify(embedding), entityId: input.entityId, entityType: input.entityType, hash: input.hash, scopeId: input.scopeId })),
 					Effect.mapError((cause) => new SearchError({ cause, operation: 'upsertEmbedding' })),
 					Effect.withSpan('search.upsertEmbedding'),

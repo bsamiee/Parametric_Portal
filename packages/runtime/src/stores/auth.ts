@@ -3,7 +3,7 @@
  * Uses DateTime.Utc consistently for all temporal values.
  */
 import type { DateTime } from 'effect';
-import { createStore } from '../store/factory';
+import { createStore } from './factory';
 
 // --- [TYPES] -----------------------------------------------------------------
 

@@ -1,25 +1,27 @@
 /**
  * Unified request context: tenant isolation, session state, rate limiting, circuit breaker.
- * Single FiberRef + Effect.Tag replaces scattered context mechanisms.
- *
- * Cookie handling: minimal typed wrapper over @effect/platform HttpServerResponse.
- * - 3 operations: get (read), set (write), clear (delete)
- * - Type-safe keys via CookieKey union
- * - Encryption handled at domain layer (oauth.ts), not here
+ * FiberRef+Effect.Tag composition, cookie handling, cluster state propagation.
  */
 import type { ShardId, Snowflake } from '@effect/cluster';
 import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
-import type { Cookie, CookiesError } from '@effect/platform/Cookies';
-import { SqlClient } from '@effect/sql';
+import type { Cookie } from '@effect/platform/Cookies';
+import type { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
-import { Data, Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, pipe, Record, Schedule, Schema as S } from 'effect';
+import { Client } from '@parametric-portal/database/client';
+import { Config, Data, Effect, FiberId, FiberRef, type Duration, Layer, Option, Order, pipe, Record, Schedule, Schema as S } from 'effect';
+import { HttpError } from './errors.ts';
 import * as D from 'effect/Duration';
 import { constant, dual } from 'effect/Function';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type _UserRoleValue = S.Schema.Type<typeof _UserRoleSchema>;
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _Id = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
+const _ID = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
 const _clusterDefault: Context.Request.ClusterState = { entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null };
+const _UserRoleRank = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 } as const satisfies Record<_UserRoleValue, number>;
 const _ref = FiberRef.unsafeMake<Context.Request.Data>({
 	circuit: Option.none(),
 	cluster: Option.none(),
@@ -27,24 +29,20 @@ const _ref = FiberRef.unsafeMake<Context.Request.Data>({
 	rateLimit: Option.none(),
 	requestId: crypto.randomUUID(),
 	session: Option.none(),
-	tenantId: _Id.default,
+	tenantId: _ID.default,
 	userAgent: Option.none(),
 });
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-const UserRole = (() => {	// UserRole: IIFE encapsulates rank/order internals
-	const schema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
-	type Value = S.Schema.Type<typeof schema>;
-	const rank: Record<Value, number> = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 };
-	const order = Order.mapInput(Order.number, (role: Value) => rank[role]);
-	return {
-		hasAtLeast: (role: string, min: Value): boolean => role in rank && Order.greaterThanOrEqualTo(order)(role as Value, min),
-		Order: order,
-		schema,
-	} as const;
-})();
+const _UserRoleSchema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
+const _UserRoleOrder = Order.mapInput(Order.number, (role: _UserRoleValue) => _UserRoleRank[role]);
+const UserRole = {
+	hasAtLeast: (role: string, min: _UserRoleValue): boolean => role in _UserRoleRank && Order.greaterThanOrEqualTo(_UserRoleOrder)(role as _UserRoleValue, min),
+	Order: _UserRoleOrder,
+	schema: _UserRoleSchema,
+} as const;
 // Branded types for serialization boundaries
 const RunnerId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('RunnerId'));
 const ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
@@ -82,14 +80,14 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 // --- [REQUEST] ---------------------------------------------------------------
 
 class Request extends Effect.Tag('server/RequestContext')<Request, Context.Request.Data>() {
-	static readonly Id = _Id;
+	static readonly Id = _ID;
 	static readonly current = FiberRef.get(_ref);
-	static override readonly tenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
-	static override readonly session = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.die('No session - route must be protected by SessionAuth middleware'), onSome: Effect.succeed })));
+	static readonly currentTenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
+	static readonly sessionOrFail = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed })));
 	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(_ref, (ctx) => ({ ...ctx, ...partial }));
 	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (ctx) => ({ ...ctx, ...partial }));
 	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId }));
-	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`.pipe(Effect.andThen(Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId })))))),);
+	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> => Client.tenant.with(tenantId, Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId })));
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({
 		circuit: Option.none(),
 		cluster: Option.none(),
@@ -97,22 +95,25 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		rateLimit: Option.none(),
 		requestId,
 		session: Option.none(),
-		tenantId: _Id.system,
+		tenantId: _ID.system,
 		userAgent: Option.none(),
 	});
 	static readonly SystemLayer = Layer.succeed(Request, Request.system());
 	static readonly cookie = (() => {	// Cookie: IIFE encapsulates secure flag and config
-		const secure = (process.env['API_BASE_URL'] ?? '').startsWith('https://');
-		const cfg = {
-			oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: D.minutes(10), path: '/api/auth/oauth', sameSite: 'lax', secure } },
-			refresh: { name: 'refreshToken', options: { httpOnly: true, maxAge: D.days(30), path: '/api/auth', sameSite: 'lax', secure } },
+		const secure = Config.string('API_BASE_URL').pipe(
+			Config.withDefault('http://localhost:4000'),
+			Config.map((url) => url.startsWith('https://')),
+		);
+		const configuration = {
+			oauth: { name: 'oauthState', options: { httpOnly: true, maxAge: D.minutes(10), path: '/api/auth/oauth', sameSite: 'lax' } },
+			refresh: { name: 'refreshToken', options: { httpOnly: true, maxAge: D.days(30), path: '/api/auth', sameSite: 'lax' } },
 		} as const satisfies Record<string, { readonly name: string; readonly options: Cookie['options'] }>;
 		return {
-			clear: (key: keyof typeof cfg) => (res: HttpServerResponse.HttpServerResponse) => HttpServerResponse.expireCookie(res, cfg[key].name, cfg[key].options),
-			get: <E>(key: keyof typeof cfg, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> => Effect.fromNullable(req.cookies[cfg[key].name]).pipe(Effect.mapError(onNone)),
-			keys: Object.keys(cfg) as ReadonlyArray<keyof typeof cfg>,
+			clear: (key: keyof typeof configuration) => (res: HttpServerResponse.HttpServerResponse) => secure.pipe(Effect.map((s) => HttpServerResponse.expireCookie(res, configuration[key].name, { ...configuration[key].options, secure: s }))),
+			get: <E>(key: keyof typeof configuration, req: HttpServerRequest.HttpServerRequest, onNone: () => E): Effect.Effect<string, E> => Effect.fromNullable(req.cookies[configuration[key].name]).pipe(Effect.mapError(onNone)),
+			keys: Object.keys(configuration) as ReadonlyArray<keyof typeof configuration>,
 			read: <A, I extends Readonly<Record<string, string | undefined>>, R>(schema: S.Schema<A, I, R>) => HttpServerRequest.schemaCookies(schema),
-			set: (key: keyof typeof cfg, value: string) => (res: HttpServerResponse.HttpServerResponse): Effect.Effect<HttpServerResponse.HttpServerResponse, CookiesError> => HttpServerResponse.setCookie(res, cfg[key].name, value, cfg[key].options),
+			set: (key: keyof typeof configuration, value: string) => (res: HttpServerResponse.HttpServerResponse) => secure.pipe(Effect.flatMap((s) => HttpServerResponse.setCookie(res, configuration[key].name, value, { ...configuration[key].options, secure: s }))),
 		} as const;
 	})();
 	static readonly toSerializable = Request.current.pipe(Effect.map(Serializable.fromData));
@@ -183,6 +184,7 @@ namespace Context {
 	export namespace Request {
 		export type Id = (typeof Request.Id)[keyof typeof Request.Id];
 		export interface Session {
+			readonly appId: string;
 			readonly id: string;
 			readonly mfaEnabled: boolean;
 			readonly userId: string;

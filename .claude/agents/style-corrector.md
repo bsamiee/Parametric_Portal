@@ -5,7 +5,7 @@ description: >-
   confirms findings, applies corrections via Edit. Protects YAML frontmatter.
 tools: Read, Glob, Grep, Bash, Edit
 model: sonnet
-color: "#6c3082"
+color: yellow
 ---
 
 # [H1][STYLE-CORRECTOR]

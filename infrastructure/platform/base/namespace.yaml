@@ -1,8 +1,0 @@
-# --- NAMESPACE ----------------------------------------------------------------
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: parametric-portal
-  labels:
-    app.kubernetes.io/name: parametric-portal
-    app.kubernetes.io/managed-by: kustomize

@@ -38,6 +38,16 @@
       "import": "./src/observe/telemetry.ts",
       "default": "./src/observe/telemetry.ts"
     },
+    "./infra/cluster": {
+      "types": "./src/infra/cluster.ts",
+      "import": "./src/infra/cluster.ts",
+      "default": "./src/infra/cluster.ts"
+    },
+    "./infra/events": {
+      "types": "./src/infra/events.ts",
+      "import": "./src/infra/events.ts",
+      "default": "./src/infra/events.ts"
+    },
     "./infra/storage": {
       "types": "./src/infra/storage.ts",
       "import": "./src/infra/storage.ts",
@@ -68,30 +78,20 @@
       "import": "./src/observe/audit.ts",
       "default": "./src/observe/audit.ts"
     },
-    "./domain/mfa": {
-      "types": "./src/domain/mfa.ts",
-      "import": "./src/domain/mfa.ts",
-      "default": "./src/domain/mfa.ts"
+    "./domain/auth": {
+      "types": "./src/domain/auth.ts",
+      "import": "./src/domain/auth.ts",
+      "default": "./src/domain/auth.ts"
     },
     "./domain/search": {
       "types": "./src/domain/search.ts",
       "import": "./src/domain/search.ts",
       "default": "./src/domain/search.ts"
     },
-    "./domain/session": {
-      "types": "./src/domain/session.ts",
-      "import": "./src/domain/session.ts",
-      "default": "./src/domain/session.ts"
-    },
     "./domain/storage": {
       "types": "./src/domain/storage.ts",
       "import": "./src/domain/storage.ts",
       "default": "./src/domain/storage.ts"
-    },
-    "./domain/oauth": {
-      "types": "./src/domain/oauth.ts",
-      "import": "./src/domain/oauth.ts",
-      "default": "./src/domain/oauth.ts"
     },
     "./utils/circuit": {
       "types": "./src/utils/circuit.ts",

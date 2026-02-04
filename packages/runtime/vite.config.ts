@@ -11,19 +11,14 @@ import { createConfig } from '../../vite.factory';
 const config = Effect.runSync(
     createConfig({
         entry: {
+            browser: './src/browser.ts',
             'css-sync': './src/css-sync.ts',
-            'hooks/browser': './src/hooks/browser.ts',
-            'hooks/effect': './src/hooks/effect.ts',
-            'hooks/file-upload': './src/hooks/file-upload.ts',
-            'hooks/suspense': './src/hooks/suspense.ts',
+            effect: './src/effect.ts',
             messaging: './src/messaging.ts',
             runtime: './src/runtime.ts',
-            'services/browser': './src/services/browser.ts',
-            'services/file': './src/services/file.ts',
-            'services/telemetry': './src/services/telemetry.ts',
-            'store/factory': './src/store/factory.ts',
-            'store/storage': './src/store/storage.ts',
             'stores/auth': './src/stores/auth.ts',
+            'stores/factory': './src/stores/factory.ts',
+            'stores/storage': './src/stores/storage.ts',
             url: './src/url.ts',
         },
         external: [

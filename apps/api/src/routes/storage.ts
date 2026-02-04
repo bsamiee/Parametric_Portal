@@ -25,7 +25,7 @@ const handleSign = Effect.fn('storage.sign')((
 		const expires = Duration.seconds(payload.expiresInSeconds);
 		const expiresAt = DateTime.addDuration(DateTime.unsafeNow(), expires);
 		const input: StorageService.SignInputGetPut = { expires, key: payload.key, op: payload.op };
-		const url = yield* storage.sign(input).pipe(Effect.mapError((err) => HttpError.Internal.of('Failed to generate presigned URL', err)),);
+		const url = yield* storage.sign(input).pipe(Effect.mapError((error) => HttpError.Internal.of('Failed to generate presigned URL', error)),);
 		yield* Effect.all([
 			MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: `sign-${payload.op}` })),
 			audit.log('Storage.sign', { details: { expiresInSeconds: payload.expiresInSeconds, key: payload.key, op: payload.op }, subjectId: payload.key }),
@@ -36,16 +36,14 @@ const handleSign = Effect.fn('storage.sign')((
 const handleExists = Effect.fn('storage.exists')((storage: typeof StorageService.Service, key: string) =>
 	storage.exists(key).pipe(
 		Effect.map((exists) => ({ exists, key })),
-		Effect.mapError((err) => HttpError.Internal.of('Failed to check object existence', err)),
+		Effect.mapError((error) => HttpError.Internal.of('Failed to check object existence', error)),
 	),
 );
 const handleRemove = Effect.fn('storage.remove')((storage: typeof StorageService.Service, audit: typeof AuditService.Service, key: string) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const metrics = yield* MetricsService;
-		yield* storage.remove(key).pipe(
-			Effect.mapError((err) => HttpError.Internal.of('Failed to delete object', err)),
-		);
+		yield* storage.remove(key).pipe(Effect.mapError((error) => HttpError.Internal.of('Failed to delete object', error)),);
 		yield* Effect.all([
 			MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'delete' })),
 			audit.log('Storage.delete', { details: { key }, subjectId: key }),
@@ -59,11 +57,11 @@ const handleUpload = Effect.fn('storage.upload')((
 	payload: { readonly file: Multipart.PersistedFile; readonly key?: string; readonly contentType?: string },) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
-		const [metrics, fs] = yield* Effect.all([MetricsService, FileSystem.FileSystem]);
+		const [metrics, fileSystem] = yield* Effect.all([MetricsService, FileSystem.FileSystem]);
 		const key = payload.key ?? payload.file.name;
 		const contentType = payload.contentType ?? payload.file.contentType;
-		const body = yield* fs.readFile(payload.file.path).pipe(Effect.mapError((err) => HttpError.Internal.of('Failed to read uploaded file', err)),);
-		const result = yield* storage.put({ body, contentType, key }).pipe(Effect.mapError((err) => HttpError.Internal.of('Failed to store object', err)),);
+		const body = yield* fileSystem.readFile(payload.file.path).pipe(Effect.mapError((error) => HttpError.Internal.of('Failed to read uploaded file', error)),);
+		const result = yield* storage.put({ body, contentType, key }).pipe(Effect.mapError((error) => HttpError.Internal.of('Failed to store object', error)),);
 		yield* Effect.all([
 			MetricsService.inc(metrics.storage.operations, MetricsService.label({ op: 'upload' })),
 			MetricsService.inc(metrics.storage.multipart.uploads, MetricsService.label({})),

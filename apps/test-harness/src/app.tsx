@@ -17,7 +17,7 @@ import { Breadcrumbs } from '@parametric-portal/components-next/navigation/bread
 import { Drawer } from '@parametric-portal/components-next/overlays/drawer';
 import { ColorPicker } from '@parametric-portal/components-next/pickers/color-picker';
 import { DatePicker } from '@parametric-portal/components-next/pickers/date-picker';
-import { useEffectMutate } from '@parametric-portal/runtime/hooks/effect';
+import { RuntimeEffect } from '@parametric-portal/runtime/effect';
 import { Runtime } from '@parametric-portal/runtime/runtime';
 import { AsyncState } from '@parametric-portal/types/async';
 import { Duration, Effect, Layer } from 'effect';
@@ -72,8 +72,8 @@ const Section: FC<{ readonly children: ReactNode; readonly title: string }> = ({
 // --- [DEMOS] -----------------------------------------------------------------
 
 const AsyncButtonDemo: FC = () => {
-    const success = useEffectMutate(() => simulateAsync(1500, false));
-    const failure = useEffectMutate(() => simulateAsync(1500, true));
+    const success = RuntimeEffect.mutate((_: undefined) => simulateAsync(1500, false));
+    const failure = RuntimeEffect.mutate((_: undefined) => simulateAsync(1500, true));
     return (
         <>
             <Button
@@ -98,7 +98,7 @@ const AsyncButtonDemo: FC = () => {
     );
 };
 const FieldDemo: FC = () => {
-    const asyncMutate = useEffectMutate(() => simulateAsync(1500, false));
+    const asyncMutate = RuntimeEffect.mutate((_: undefined) => simulateAsync(1500, false));
     return (
         <>
             <Field color='primary' label='Username' placeholder='Enter username...' size='md' type='text' />
@@ -1008,8 +1008,8 @@ const DrawerDemo: FC = () => (
     </>
 );
 const ToastDemo: FC = () => {
-    const asyncSuccess = useEffectMutate(() => simulateAsync(1500, false));
-    const asyncFailure = useEffectMutate(() => simulateAsync(1500, true));
+    const asyncSuccess = RuntimeEffect.mutate((_: undefined) => simulateAsync(1500, false));
+    const asyncFailure = RuntimeEffect.mutate((_: undefined) => simulateAsync(1500, true));
     return (
         <>
             {/* Type Variants */}

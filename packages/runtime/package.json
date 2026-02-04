@@ -3,35 +3,20 @@
   "version": "2.0.0",
   "type": "module",
   "exports": {
+    "./browser": {
+      "types": "./src/browser.ts",
+      "import": "./src/browser.ts",
+      "default": "./src/browser.ts"
+    },
     "./css-sync": {
       "types": "./src/css-sync.ts",
       "import": "./src/css-sync.ts",
       "default": "./src/css-sync.ts"
     },
-    "./hooks/browser": {
-      "types": "./src/hooks/browser.ts",
-      "import": "./src/hooks/browser.ts",
-      "default": "./src/hooks/browser.ts"
-    },
-    "./hooks/effect": {
-      "types": "./src/hooks/effect.ts",
-      "import": "./src/hooks/effect.ts",
-      "default": "./src/hooks/effect.ts"
-    },
-    "./hooks/file-upload": {
-      "types": "./src/hooks/file-upload.ts",
-      "import": "./src/hooks/file-upload.ts",
-      "default": "./src/hooks/file-upload.ts"
-    },
-    "./services/file": {
-      "types": "./src/services/file.ts",
-      "import": "./src/services/file.ts",
-      "default": "./src/services/file.ts"
-    },
-    "./hooks/suspense": {
-      "types": "./src/hooks/suspense.ts",
-      "import": "./src/hooks/suspense.ts",
-      "default": "./src/hooks/suspense.ts"
+    "./effect": {
+      "types": "./src/effect.ts",
+      "import": "./src/effect.ts",
+      "default": "./src/effect.ts"
     },
     "./messaging": {
       "types": "./src/messaging.ts",
@@ -43,30 +28,20 @@
       "import": "./src/runtime.ts",
       "default": "./src/runtime.ts"
     },
-    "./services/browser": {
-      "types": "./src/services/browser.ts",
-      "import": "./src/services/browser.ts",
-      "default": "./src/services/browser.ts"
-    },
-    "./services/telemetry": {
-      "types": "./src/services/telemetry.ts",
-      "import": "./src/services/telemetry.ts",
-      "default": "./src/services/telemetry.ts"
-    },
-    "./store/factory": {
-      "types": "./src/store/factory.ts",
-      "import": "./src/store/factory.ts",
-      "default": "./src/store/factory.ts"
-    },
-    "./store/storage": {
-      "types": "./src/store/storage.ts",
-      "import": "./src/store/storage.ts",
-      "default": "./src/store/storage.ts"
-    },
     "./stores/auth": {
       "types": "./src/stores/auth.ts",
       "import": "./src/stores/auth.ts",
       "default": "./src/stores/auth.ts"
+    },
+    "./stores/factory": {
+      "types": "./src/stores/factory.ts",
+      "import": "./src/stores/factory.ts",
+      "default": "./src/stores/factory.ts"
+    },
+    "./stores/storage": {
+      "types": "./src/stores/storage.ts",
+      "import": "./src/stores/storage.ts",
+      "default": "./src/stores/storage.ts"
     },
     "./url": {
       "types": "./src/url.ts",

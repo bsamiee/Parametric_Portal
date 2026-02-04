@@ -5,7 +5,7 @@ description: >-
   compliance issues. Read-only operation returns severity-ranked findings.
 tools: Read, Glob, Grep, Bash
 model: sonnet
-color: "#8e68ad"
+color: cyan
 ---
 
 # [H1][STYLE-ANALYZER]

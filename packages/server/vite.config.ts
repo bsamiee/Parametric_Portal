@@ -14,12 +14,12 @@ export default defineConfig(
                 api: './src/api.ts',
                 context: './src/context.ts',
                 // Domain modules
-                'domain/mfa': './src/domain/mfa.ts',
-                'domain/oauth': './src/domain/oauth.ts',
+                'domain/auth': './src/domain/auth.ts',
                 'domain/search': './src/domain/search.ts',
-                'domain/session': './src/domain/session.ts',
                 'domain/storage': './src/domain/storage.ts',
                 errors: './src/errors.ts',
+                'infra/cluster': './src/infra/cluster.ts',
+                'infra/events': './src/infra/events.ts',
                 'infra/handlers/purge-assets': './src/infra/handlers/purge-assets.ts',
                 // Infrastructure modules
                 'infra/jobs': './src/infra/jobs.ts',

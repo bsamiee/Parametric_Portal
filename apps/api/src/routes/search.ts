@@ -15,8 +15,8 @@ import { Effect, Option } from 'effect';
 const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 	Effect.gen(function* () {
 		const search = yield* SearchService;
-		const repos = yield* DatabaseService;
-		const requireRole = Middleware.makeRequireRole((id) => repos.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((u) => ({ role: u.role })))));
+		const repositories = yield* DatabaseService;
+		const requireRole = Middleware.makeRequireRole((id) => repositories.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((user) => ({ role: user.role })))));
 		return handlers
 			.handle('search', ({ urlParams }) =>
 				CacheService.rateLimit('api',
@@ -30,7 +30,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						},
 						{ cursor: urlParams.cursor, limit: urlParams.limit },
 					).pipe(
-						Effect.mapError((err) => HttpError.Internal.of('Search failed', err)),
+						Effect.mapError((error) => HttpError.Internal.of('Search failed', error)),
 						Effect.withSpan('search.query', { kind: 'server' }),
 					),
 				),
@@ -42,7 +42,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						limit: urlParams.limit,
 						prefix: urlParams.prefix,
 					}).pipe(
-						Effect.mapError((err) => HttpError.Internal.of('Suggest failed', err)),
+						Effect.mapError((error) => HttpError.Internal.of('Suggest failed', error)),
 						Effect.withSpan('search.suggest', { kind: 'server' }),
 					),
 				),
@@ -52,10 +52,18 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 					requireRole('admin').pipe(
 						Effect.andThen(search.refresh(payload.includeGlobal)),
 						Effect.as({ status: 'ok' as const }),
-						Effect.mapError((err) =>
-							'_tag' in err && err._tag === 'Forbidden' ? err : HttpError.Internal.of('Refresh failed', err)
-						),
+						Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Refresh failed', error))),
 						Effect.withSpan('search.refresh', { kind: 'server' }),
+					),
+				),
+			)
+			.handle('refreshEmbeddings', ({ payload }) =>
+				CacheService.rateLimit('api',
+					requireRole('admin').pipe(
+						Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal })),
+						Effect.map((result) => ({ count: result.count })),
+						Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Embedding refresh failed', error))),
+						Effect.withSpan('search.refreshEmbeddings', { kind: 'server' }),
 					),
 				),
 			);

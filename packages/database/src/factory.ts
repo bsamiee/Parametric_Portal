@@ -63,7 +63,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		// Get entries via Field.pick (cap → first entry in model cols)
 		const softEntry = Field.pick('mark:soft', cols);
 		const expEntry = Field.pick('mark:exp', cols);
-		const _insertCols = Object.keys(cols).filter(c => c !== pkCol && !(['uuidv7', 'virtual', 'stored'] as const).some(gen => Field.isGen(c, gen)));
+		const _insertCols = Object.keys(cols).filter(column => column !== pkCol && !(['uuidv7', 'virtual', 'stored'] as const).some(gen => Field.isGen(column, gen)));
 		// --- SQL fragments ---------------------------------------------------
 		const $active = softEntry ? sql` AND ${sql(softEntry.col)} IS NULL` : sql``;
 		const $fresh = Option.fromNullable(expEntry).pipe(
@@ -76,7 +76,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		);
 		const $touch = ((e) => e ? sql`, ${sql(e.col)} = NOW()` : sql``)(Field.pick('autoUpdate', cols));
 		const $scope = (scope?: Record<string, unknown>) =>
-			scope && !R.isEmptyRecord(scope) ? sql` AND ${sql.and(R.collect(scope, (c, v) => sql`${sql(c)} = ${v}`))}` : sql``;
+			scope && !R.isEmptyRecord(scope) ? sql` AND ${sql.and(R.collect(scope, (column, value) => sql`${sql(column)} = ${value}`))}` : sql``;
 
 		const $target = (target: string | [string, unknown]) => typeof target === 'string' ? sql`${sql(pkCol)} = ${target}${pkCast}` : sql`${sql(target[0])} = ${target[1]}`;
 		const $lock = (lock: false | 'update' | 'share' | 'nowait' | 'skip') => ({ false: sql``, nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[`${lock}`];
@@ -90,7 +90,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			gt: _cmp('>'),
 			gte: _cmp('>='),
 			hasKey: ({ col, value }: OpCtx) => sql`${col} ? ${value}`,
-			hasKeys: ({ col, values }: OpCtx) => A.isNonEmptyArray(values) ? sql`${col} ?& ARRAY[${sql.csv(values.map(k => sql`${k}`))}]::text[]` : sql`TRUE`,
+			hasKeys: ({ col, values }: OpCtx) => A.isNonEmptyArray(values) ? sql`${col} ?& ARRAY[${sql.csv(values.map(key => sql`${key}`))}]::text[]` : sql`TRUE`,
 			in: ({ col, values }: OpCtx) => A.isNonEmptyArray(values) ? sql`${col} IN ${sql.in(values)}` : sql`FALSE`,
 			lt: _cmp('<'),
 			lte: _cmp('<='),
@@ -112,43 +112,43 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			const isArr = Array.isArray(pred) && pred.length > 0 && !('field' in pred || 'raw' in pred || typeof pred[0] === 'string');
 			return sql.and((isArr ? pred as readonly Pred[] : [pred] as readonly Pred[]).map(_predToFragment));
 		};
-		/** Type guard for single target (pk string or [col, val] tuple) vs bulk predicate */
-		const _isSingleTarget = (i: string | Pred | readonly Pred[]): i is string | [string, unknown] => typeof i === 'string' || (Array.isArray(i) && i.length === 2 && typeof i[0] === 'string');
+		/** Type guard for single target (pk string or [column, value] tuple) vs bulk predicate */
+		const _isSingleTarget = (input: string | Pred | readonly Pred[]): input is string | [string, unknown] => typeof input === 'string' || (Array.isArray(input) && input.length === 2 && typeof input[0] === 'string');
 		/** Build predicates from filter object: after/before → UUIDv7 timestamp, arrays → IN, scalars → EQ */
 		const _uuidv7Col = Field.pick('gen:uuidv7', cols)?.col;
 		const preds = (filter: Record<string, unknown>): Pred[] =>
-			R.reduce(filter, [] as Pred[], (acc, val, key) =>
-				val === undefined || (Array.isArray(val) && !val.length) ? acc
-				: _uuidv7Col && (key === 'after' || key === 'before') ? [...acc, { field: _uuidv7Col, op: key === 'after' ? 'tsGte' : 'tsLte', value: val }]
-				: Array.isArray(val) ? [...acc, { field: key, op: 'in', values: val }]
-				: [...acc, { field: key, value: val }]
+			R.reduce(filter, [] as Pred[], (acc, value, key) =>
+				value === undefined || (Array.isArray(value) && !value.length) ? acc
+				: _uuidv7Col && (key === 'after' || key === 'before') ? [...acc, { field: _uuidv7Col, op: key === 'after' ? 'tsGte' : 'tsLte', value: value }]
+				: Array.isArray(value) ? [...acc, { field: key, op: 'in', values: value }]
+				: [...acc, { field: key, value: value }]
 			);
 		// --- Update entries with NOW/INC/JSONB support -----------------------
-		const _entryToFragment = (col: string, val: unknown): Statement.Fragment =>
-			val === NowOp ? sql`${sql(col)} = NOW()`
-			: val instanceof IncOp ? sql`${sql(col)} = ${sql(col)} + ${val.delta}`
-			: val instanceof JsonbDelOp ? sql`${sql(col)} = ${sql(col)} #- ${`{${val.path.join(',')}}`}::text[]`
-			: val instanceof JsonbSetOp ? sql`${sql(col)} = jsonb_set(${sql(col)}, ${`{${val.path.join(',')}}`}::text[], ${JSON.stringify(val.value)}::jsonb)`
-			: typeof val !== 'object' || val === null ? sql`${sql(col)} = ${val}`
-			: sql`${sql(col)} = ${pg.json(val)}`;
-		const $entries = (updates: Record<string, unknown>): Statement.Fragment[] => R.collect(updates, (col, val) => _entryToFragment(col, val));
+		const _entryToFragment = (column: string, value: unknown): Statement.Fragment =>
+			value === NowOp ? sql`${sql(column)} = NOW()`
+			: value instanceof IncOp ? sql`${sql(column)} = ${sql(column)} + ${value.delta}`
+			: value instanceof JsonbDelOp ? sql`${sql(column)} = ${sql(column)} #- ${`{${value.path.join(',')}}`}::text[]`
+			: value instanceof JsonbSetOp ? sql`${sql(column)} = jsonb_set(${sql(column)}, ${`{${value.path.join(',')}}`}::text[], ${JSON.stringify(value.value)}::jsonb)`
+			: typeof value !== 'object' || value === null ? sql`${sql(column)} = ${value}`
+			: sql`${sql(column)} = ${pg.json(value)}`;
+		const $entries = (updates: Record<string, unknown>): Statement.Fragment[] => R.collect(updates, (column, value) => _entryToFragment(column, value));
 		/** Build EXCLUDED column assignments for upsert */
-		const $excluded = (keys: string[], only?: string[]) => (only ?? Object.keys(cols).filter(col => col !== pkCol && !keys.includes(col))).map(col => sql`${sql(col)} = EXCLUDED.${sql(col)}`);
+		const $excluded = (keys: string[], only?: string[]) => (only ?? Object.keys(cols).filter(column => column !== pkCol && !keys.includes(column))).map(column => sql`${sql(column)} = EXCLUDED.${sql(column)}`);
 		// --- Upsert config ---------------------------------------------------
-		const upsertCfg = config.conflict && { keys: config.conflict.keys, updates: $excluded(config.conflict.keys, config.conflict.only) };
+		const upsertConfiguration = config.conflict && { keys: config.conflict.keys, updates: $excluded(config.conflict.keys, config.conflict.only) };
 		// --- Base repository + resolvers -------------------------------------
 		const base = yield* Model.makeRepository(model, { idColumn: pkCol, spanPrefix: table, tableName: table });
 		const resolvers = yield* Effect.all(R.map(config.resolve ?? {}, (spec, name) => {
 			const isMany = typeof spec === 'string' && spec.startsWith('many:');
 			const fields = isMany ? [(spec as string).slice(5)] : Array.isArray(spec) ? spec : [spec as string];
-			const $cf = fields.map(f => {
-				const wrap = Field.predMeta(f).wrap;
-				return wrap ? sql`${sql.literal(wrap)}(${sql(f)})` : sql`${sql(f)}`;
+			const $cf = fields.map(field => {
+				const wrap = Field.predMeta(field).wrap;
+				return wrap ? sql`${sql.literal(wrap)}(${sql(field)})` : sql`${sql(field)}`;
 			});
 			const ex = (keys: unknown[]) => {
 				const wh = fields.length === 1
 					? sql`${$cf[0]} IN ${sql.in(keys)}`
-					: sql.or((keys as Record<string, unknown>[]).map(rec => sql`(${sql.and(fields.map((col, idx) => sql`${$cf[idx]} = ${rec[col]}`))})`));
+					: sql.or((keys as Record<string, unknown>[]).map(rec => sql`(${sql.and(fields.map((column, index) => sql`${$cf[index]} = ${rec[column]}`))})`));
 				return sql`SELECT * FROM ${sql(table)} WHERE ${wh}${$active}${$fresh}`;
 			};
 			const schema = Field.from(fields, cols), extract = Field.from(fields);
@@ -162,26 +162,26 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 				NonNullable<C['resolve']>[K] extends `many:${string}` ? readonly S.Schema.Type<M>[] : Option.Option<S.Schema.Type<M>>,
 				SqlError | ParseError
 			>;
-		const find = (pred: Pred | readonly Pred[], opts: { asc?: boolean } = {}) => SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh} ${$order(opts.asc ?? false)}`, Request: S.Void, Result: model })(undefined);
-		const one = (pred: Pred | readonly Pred[], lock: false | 'update' | 'share' | 'nowait' | 'skip' = false) => SqlSchema.findOne({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}${$lock(lock)}`, Request: S.Void, Result: model })(undefined);
-		const page = (pred: Pred | readonly Pred[], opts: { limit?: number; cursor?: string; asc?: boolean } = {}) => {
-			const { limit = Page.bounds.default, cursor, asc = false } = opts;
+		const find = (predicate: Pred | readonly Pred[], options: { asc?: boolean } = {}) => SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh} ${$order(options.asc ?? false)}`, Request: S.Void, Result: model })(undefined);
+		const one = (predicate: Pred | readonly Pred[], lock: false | 'update' | 'share' | 'nowait' | 'skip' = false) => SqlSchema.findOne({ execute: () => sql`SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}${$lock(lock)}`, Request: S.Void, Result: model })(undefined);
+		const page = (predicate: Pred | readonly Pred[], options: { limit?: number; cursor?: string; asc?: boolean } = {}) => {
+			const { limit = Page.bounds.default, cursor, asc = false } = options;
 			return Page.decode(cursor).pipe(Effect.flatMap(decoded => {
 				const cursorFrag = decoded._tag === 'None' ? sql`` : sql`AND ${sql(pkCol)} ${asc ? sql`>` : sql`<`} ${decoded.value.id}${pkCast}`;
-				return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
+				return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
 					SELECT base.*, totals.total_count FROM base CROSS JOIN totals WHERE TRUE ${cursorFrag} ${$order(asc)} LIMIT ${limit + 1}`
 					.pipe(Effect.map(rows => { const { items, total } = Page.strip(rows as readonly { totalCount: number }[]); return Page.keyset(items as unknown as readonly S.Schema.Type<M>[], total, limit, item => ({ id: (item as Record<string, unknown>)[pkCol] as string }), Option.isSome(decoded)); }));
 			}));
 		};
-		const count = (pred: Pred | readonly Pred[]) => sql`SELECT COUNT(*)::int AS count FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map((rows): number => (rows[0] as { count: number }).count));
-		const exists = (pred: Pred | readonly Pred[]) => sql`SELECT EXISTS(SELECT 1 FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}) AS exists`.pipe(Effect.map((rows): boolean => (rows[0] as { exists: boolean }).exists));
-		const _aggToFragment = ([fn, col]: [string, unknown]) =>
-			fn === 'count' ? sql`COUNT(*)::int AS count`
-			: sql`${sql.literal(fn.toUpperCase())}(${sql(col as string)})${(fn === 'avg' || fn === 'sum') ? sql`::numeric` : sql``} AS ${sql.literal(fn)}`;
-		const agg = <T extends AggSpec>(pred: Pred | readonly Pred[], spec: T): Effect.Effect<AggResult<T>, SqlError | ParseError> => sql`SELECT ${sql.csv(Object.entries(spec).map(_aggToFragment))} FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}`.pipe(Effect.map(([row]) => row as AggResult<T>));
-		const pageOffset = (pred: Pred | readonly Pred[], opts: { limit?: number; offset?: number; asc?: boolean } = {}) => {
-			const { limit = Page.bounds.default, offset: start = 0, asc = false } = opts;
-			return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
+		const count = (predicate: Pred | readonly Pred[]) => sql`SELECT COUNT(*)::int AS count FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}`.pipe(Effect.map((rows): number => (rows[0] as { count: number }).count));
+		const exists = (predicate: Pred | readonly Pred[]) => sql`SELECT EXISTS(SELECT 1 FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}) AS exists`.pipe(Effect.map((rows): boolean => (rows[0] as { exists: boolean }).exists));
+		const _aggToFragment = ([functionName, column]: [string, unknown]) =>
+			functionName === 'count' ? sql`COUNT(*)::int AS count`
+			: sql`${sql.literal(functionName.toUpperCase())}(${sql(column as string)})${(functionName === 'avg' || functionName === 'sum') ? sql`::numeric` : sql``} AS ${sql.literal(functionName)}`;
+		const agg = <T extends AggSpec>(predicate: Pred | readonly Pred[], spec: T): Effect.Effect<AggResult<T>, SqlError | ParseError> => sql`SELECT ${sql.csv(Object.entries(spec).map(_aggToFragment))} FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}`.pipe(Effect.map(([row]) => row as AggResult<T>));
+		const pageOffset = (predicate: Pred | readonly Pred[], options: { limit?: number; offset?: number; asc?: boolean } = {}) => {
+			const { limit = Page.bounds.default, offset: start = 0, asc = false } = options;
+			return sql`WITH base AS (SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh}), totals AS (SELECT COUNT(*)::int AS total_count FROM base)
 				SELECT base.*, totals.total_count FROM base CROSS JOIN totals ${$order(asc)} LIMIT ${limit} OFFSET ${start}`
 				.pipe(Effect.map(rows => { const { items, total } = Page.strip(rows as readonly { totalCount: number }[]); return Page.offset(items as unknown as readonly S.Schema.Type<M>[], total, start, limit); }));
 		};
@@ -241,43 +241,43 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		// --- Purge method (fail with tagged error if not configured) ---------
 		const purge = (days = 30): Effect.Effect<number, RepoConfigError | SqlError | ParseError | Cause.NoSuchElementException> =>
 			config.purge
-				? ((fn) => SqlSchema.single({ execute: (num) => sql`SELECT ${sql.literal(fn)}(${num}) AS count`, Request: S.Number, Result: S.Struct({ count: S.Int }) })(days).pipe(Effect.map(row => row.count)))(config.purge)
+				? ((functionName) => SqlSchema.single({ execute: (num) => sql`SELECT ${sql.literal(functionName)}(${num}) AS count`, Request: S.Number, Result: S.Struct({ count: S.Int }) })(days).pipe(Effect.map(row => row.count)))(config.purge)
 				: Effect.fail(new RepoConfigError({ message: 'purge function not configured', operation: 'purge', table }));
 		// --- Upsert method (fail with tagged error if not configured) --------
 		/** Polymorphic upsert: single → T, batch → T[] (mirrors input shape). Fails with RepoOccError if OCC check fails. */
 		const upsert = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined, occ?: Date): Effect.Effect<S.Schema.Type<M> | readonly S.Schema.Type<M>[] | undefined, RepoConfigError | RepoOccError | SqlError | ParseError> =>
-			upsertCfg
+			upsertConfiguration
 				? _withData(
 					'upsert', data,
 					(isArr) => isArr ? [] as S.Schema.Type<M>[] : undefined,
 					(items, isArr) => items.length === 1
-						? SqlSchema.findOne({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(upsertCfg.keys)}) DO UPDATE SET ${sql.csv(upsertCfg.updates)}${$touch}${occ ? sql` WHERE ${sql(table)}.updated_at = ${occ}` : sql``} RETURNING *`, Request: model.insert, Result: model })(items[0])
+						? SqlSchema.findOne({ execute: (row) => sql`INSERT INTO ${sql(table)} ${sql.insert(row)} ON CONFLICT (${sql.csv(upsertConfiguration.keys)}) DO UPDATE SET ${sql.csv(upsertConfiguration.updates)}${$touch}${occ ? sql` WHERE ${sql(table)}.updated_at = ${occ}` : sql``} RETURNING *`, Request: model.insert, Result: model })(items[0])
 							.pipe(Effect.flatMap(opt => Option.match(opt, {
 								onNone: () => Effect.fail(occ ? new RepoOccError({ expected: occ, pk: String((items[0] as Record<string, unknown>)[pkCol]), table }) : new RepoConfigError({ message: 'unexpected empty result', operation: 'upsert', table })),
 								onSome: row => Effect.succeed((isArr ? [row] : row) as S.Schema.Type<M> | S.Schema.Type<M>[]),
 							})))
-						: SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ON CONFLICT (${sql.csv(upsertCfg.keys)}) DO UPDATE SET ${sql.csv(upsertCfg.updates)}${$touch} RETURNING *`, Request: S.Array(model.insert), Result: model })(items)
+						: SqlSchema.findAll({ execute: (rows) => sql`INSERT INTO ${sql(table)} ${sql.insert(rows)} ON CONFLICT (${sql.csv(upsertConfiguration.keys)}) DO UPDATE SET ${sql.csv(upsertConfiguration.updates)}${$touch} RETURNING *`, Request: S.Array(model.insert), Result: model })(items)
 							.pipe(Effect.map(rows => rows as S.Schema.Type<M>[]))
 				)
 				: Effect.fail(new RepoConfigError({ message: 'conflict keys not configured', operation: 'upsert', table }));
 		// --- Merge method (PG17+ MERGE with action tracking) -----------------
 		/** MERGE with action tracking: returns row + _action ('insert' | 'update'). Polymorphic single/batch. */
 		const merge = <T extends S.Schema.Type<typeof model.insert>>(data: T | readonly T[] | null | undefined): Effect.Effect<MergeResult<S.Schema.Type<M>> | readonly MergeResult<S.Schema.Type<M>>[] | undefined, RepoConfigError | SqlError | ParseError> =>
-			upsertCfg
+			upsertConfiguration
 				? _withData<Record<string, unknown>, SqlError | ParseError, MergeResult<S.Schema.Type<M>> | readonly MergeResult<S.Schema.Type<M>>[] | undefined>(
 					'merge', data as Record<string, unknown> | readonly Record<string, unknown>[] | null | undefined,
 					(isArr) => isArr ? [] as MergeResult<S.Schema.Type<M>>[] : undefined,
-					(items, isArr) => sql`MERGE INTO ${sql(table)} USING (VALUES ${sql.csv(items.map(item => sql`(${sql.csv(_insertCols.map(c => sql`${item[c]}`))})`))} ) AS source(${sql.csv(_insertCols.map(c => sql`${sql(c)}`))})
-						ON ${sql.and(upsertCfg.keys.map(k => sql`${sql(table)}.${sql(k)} = source.${sql(k)}`))}
-						WHEN MATCHED THEN UPDATE SET ${sql.csv(_insertCols.filter(c => !upsertCfg.keys.includes(c)).map(c => sql`${sql(c)} = source.${sql(c)}`))}${$touch}
-						WHEN NOT MATCHED THEN INSERT (${sql.csv(_insertCols.map(c => sql`${sql(c)}`))}) VALUES (${sql.csv(_insertCols.map(c => sql`source.${sql(c)}`))})
+					(items, isArr) => sql`MERGE INTO ${sql(table)} USING (VALUES ${sql.csv(items.map(item => sql`(${sql.csv(_insertCols.map(column => sql`${item[column]}`))})`))} ) AS source(${sql.csv(_insertCols.map(column => sql`${sql(column)}`))})
+						ON ${sql.and(upsertConfiguration.keys.map(key => sql`${sql(table)}.${sql(key)} = source.${sql(key)}`))}
+						WHEN MATCHED THEN UPDATE SET ${sql.csv(_insertCols.filter(column => !upsertConfiguration.keys.includes(column)).map(column => sql`${sql(column)} = source.${sql(column)}`))}${$touch}
+						WHEN NOT MATCHED THEN INSERT (${sql.csv(_insertCols.map(column => sql`${sql(column)}`))}) VALUES (${sql.csv(_insertCols.map(column => sql`source.${sql(column)}`))})
 						RETURNING *, (CASE WHEN xmax = 0 THEN 'insert' ELSE 'update' END) AS _action`
 						.pipe(Effect.map(results => isArr ? results as MergeResult<S.Schema.Type<M>>[] : results[0] as MergeResult<S.Schema.Type<M>>))
 				)
 				: Effect.fail(new RepoConfigError({ message: 'conflict keys not configured', operation: 'merge', table }));
 		// --- Stream method (cursor-based iteration with schema validation) ---
 		/** Stream rows via server-side cursor with schema validation. Memory-efficient for large datasets. */
-		const stream = (pred: Pred | readonly Pred[], opts: { asc?: boolean } = {}): Stream.Stream<S.Schema.Type<M>, SqlError | ParseError> => Stream.mapEffect(sql`SELECT * FROM ${sql(table)} WHERE ${$where(pred)}${$active}${$fresh} ${$order(opts.asc ?? false)}`.stream, S.decodeUnknown(model));
+		const stream = (predicate: Pred | readonly Pred[], options: { asc?: boolean } = {}): Stream.Stream<S.Schema.Type<M>, SqlError | ParseError> => Stream.mapEffect(sql`SELECT * FROM ${sql(table)} WHERE ${$where(predicate)}${$active}${$fresh} ${$order(options.asc ?? false)}`.stream, S.decodeUnknown(model));
 		// --- Custom function methods (fail with tagged error if not configured)
 		const fn = (name: string, params: Record<string, unknown>): Effect.Effect<number, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> =>
 			config.fn?.[name]
@@ -294,16 +294,13 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 				})(config.fnSet[name])
 				: Effect.fail(config.fnSet ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no set functions configured', operation: 'fnSet', table }));
 		// --- Transaction support ---------------------------------------------
-		/** Run effect within a transaction. Caller controls the transaction boundary. */
-		const withTransaction = sql.withTransaction;
+		const withTransaction = sql.withTransaction;						// Run effect within a transaction. Caller controls the transaction boundary.
 		// --- JSON field helpers (for string columns storing typed JSON) -------
 		const json = {
-			/** Decode JSON string field from Option<Row> to Option<A>. Compose with `by`: by(...).pipe(Effect.flatMap(json.decode(...))) */
-			decode: <A, I>(field: string, schema: S.Schema<A, I, never>) =>
+			decode: <A, I>(field: string, schema: S.Schema<A, I, never>) =>	// Decode JSON string field from Option<Row> to Option<A>. Compose with `by`: by(...).pipe(Effect.flatMap(json.decode(...)))
 				(opt: Option.Option<S.Schema.Type<M>>): Effect.Effect<Option.Option<A>, never, never> =>
 					opt._tag === 'None' ? Effect.succeed(Option.none<A>()) : S.decodeUnknown(S.parseJson(schema))((opt.value as Record<string, unknown>)[field]).pipe(Effect.option),
-			/** Encode typed value to JSON string. Compose with `upsert`: json.encode(...)(value).pipe(Effect.flatMap(v => upsert({...}))) */
-			encode: <A, I>(schema: S.Schema<A, I, never>) =>
+			encode: <A, I>(schema: S.Schema<A, I, never>) =>				// Encode typed value to JSON string. Compose with `upsert`: json.encode(...)(value).pipe(Effect.flatMap(v => upsert({...})))
 				(value: A): Effect.Effect<string, ParseError> => S.encode(S.parseJson(schema))(value),
 		};
 		return {

@@ -9,6 +9,7 @@ import type { StoreApi } from 'zustand';
 import { Runtime } from './runtime';
 
 // --- [TYPES] -----------------------------------------------------------------
+
 type MessageListenerOptions<T = unknown> = {
     // biome-ignore lint/suspicious/noExplicitAny: Schema generic escape
     readonly schema?: S.Schema<T, any>;
@@ -44,8 +45,7 @@ const validateData = <T>(
 const sendMessage = <T>(
     type: string,
     data: T,
-    options?: { schema?: S.Schema<T, unknown>; targetOrigin?: string },
-): Effect.Effect<void, AppError.Messaging> =>
+    options?: { schema?: S.Schema<T, unknown>; targetOrigin?: string },): Effect.Effect<void, AppError.Messaging> =>
     Effect.gen(function* () {
         const { schema, targetOrigin = B.defaults.targetOrigin } = options ?? {};
         const validated = schema
@@ -56,8 +56,7 @@ const sendMessage = <T>(
         yield* Effect.sync(() => window.parent?.postMessage(createPayload(type, validated), targetOrigin));
     });
 const createMessageStream = <T>(
-    options?: MessageListenerOptions<T>,
-): Stream.Stream<MessagePayload<T>, AppError.Messaging> =>
+    options?: MessageListenerOptions<T>,): Stream.Stream<MessagePayload<T>, AppError.Messaging> =>
     Stream.asyncScoped<MessagePayload<T>, AppError.Messaging>((emit) =>
         Effect.acquireRelease(
             Effect.sync(() => {
@@ -86,8 +85,7 @@ const createMessageStream = <T>(
 
 const useMessageListener = <T, R = never>(
     handler: (payload: MessagePayload<T>) => void,
-    options?: MessageListenerOptions<T>,
-): void => {
+    options?: MessageListenerOptions<T>,): void => {
     const runtime = Runtime.use<R, never>();
     const handlerRef = useRef(handler);
     handlerRef.current = handler;
@@ -105,8 +103,7 @@ const useMessageListener = <T, R = never>(
 };
 const useStoreSync = <T extends object, R = never>(
     store: { getState: () => T; subscribe: StoreApi<T>['subscribe'] },
-    config?: StoreSyncConfig<T>,
-): void => {
+    config?: StoreSyncConfig<T>,): void => {
     const runtime = Runtime.use<R, never>();
     const { keys, debounceMs = B.defaults.debounceMs } = config ?? {};
     useEffect(() => {

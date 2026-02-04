@@ -1,13 +1,13 @@
 /**
- * ClusterService facade for multi-pod coordination via @effect/cluster.
- * Entity sharding, shard ownership via advisory locks, distributed message routing.
+ * Multi-pod coordination facade via @effect/cluster.
+ * Entity sharding, advisory-lock shard ownership, distributed message routing.
  */
 import { ClusterCron, ClusterMetrics, Entity, EntityId, HttpRunner, K8sHttpClient, RunnerHealth, Sharding, ShardingConfig, Singleton, Snowflake, SocketRunner, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
-import { FetchHttpClient, Socket } from '@effect/platform';
+import { Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket, NodeSocketServer } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
 import { PgClient } from '@effect/sql-pg';
-import { Array as A, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, FiberMap, HashSet, Layer, Metric, Option, Predicate, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, FiberMap, HashSet, Layer, Match, Metric, Option, Predicate, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
@@ -33,7 +33,7 @@ const _CONFIG = {
 	},
 	socketServer: { port: 9000 },
 } as const;
-const _scheduleRetry = (max: number, cap = _CONFIG.retry.cap) => Schedule.exponential(_CONFIG.retry.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(max)), Schedule.upTo(cap));
+const _retrySchedule = (max: number) => Schedule.exponential(_CONFIG.retry.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(max)), Schedule.upTo(_CONFIG.retry.cap));
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -59,19 +59,18 @@ class EntityState extends S.Class<EntityState>('EntityState')({
 	static readonly mk = (status: typeof EntityStatus.Type, signal?: { name: string; token: string }) => Clock.currentTimeMillis.pipe(Effect.map((ts) => new EntityState({ pendingSignal: signal, status, updatedAt: ts })));
 	static readonly transition = (ref: Ref.Ref<EntityState>, to: typeof EntityStatus.Type) => EntityState.mk(to).pipe(Effect.flatMap((s) => Ref.set(ref, s)));
 }
-const _metricOpt = (svc: Option.Option<MetricsService>, f: (m: MetricsService) => Metric.Metric.Counter<number>): Effect.Effect<void> => Option.match(svc, { onNone: () => Effect.void, onSome: (m) => Metric.increment(f(m)) });
 const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
-	const addr = yield* Entity.CurrentAddress;
+	const address = yield* Entity.CurrentAddress;
 	const stateRef = yield* EntityState.mk('idle').pipe(Effect.andThen(Ref.make));
-	const metrics = yield* Effect.serviceOption(MetricsService);
-	const trackActivation = _metricOpt(metrics, (m) => m.cluster.entityActivations);
-	const trackDeactivation = _metricOpt(metrics, (m) => m.cluster.entityDeactivations);
+	const metricsOption = yield* Effect.serviceOption(MetricsService);
+	const trackActivation = Option.match(metricsOption, { onNone: () => Effect.void, onSome: (metrics) => Metric.increment(metrics.cluster.entityActivations) });
+	const trackDeactivation = Option.match(metricsOption, { onNone: () => Effect.void, onSome: (metrics) => Metric.increment(metrics.cluster.entityDeactivations) });
 	return {
-		process: (envelope) => Context.Request.withinCluster({ entityId: addr.entityId, entityType: addr.entityType, shardId: addr.shardId })(
+		process: (envelope) => Context.Request.withinCluster({ entityId: address.entityId, entityType: address.entityType, shardId: address.shardId })(
 			Effect.gen(function* () {
 				yield* trackActivation;
 				yield* EntityState.transition(stateRef, 'processing');
-				yield* Effect.logDebug('Entity processing', { entityId: addr.entityId, idempotencyKey: envelope.payload.idempotencyKey });
+				yield* Effect.logDebug('Entity processing', { entityId: address.entityId, idempotencyKey: envelope.payload.idempotencyKey });
 				yield* EntityState.transition(stateRef, 'complete');
 			}).pipe(
 				Effect.ensuring(EntityState.transition(stateRef, 'idle').pipe(Effect.tap(() => trackDeactivation))),
@@ -82,126 +81,147 @@ const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
 	};
 }), {	// mailboxCapacity + maxIdleTime from ShardingConfig
 	concurrency: _CONFIG.entity.concurrency,
-	defectRetryPolicy: _scheduleRetry(_CONFIG.retry.maxAttempts.defect),
+	defectRetryPolicy: _retrySchedule(_CONFIG.retry.maxAttempts.defect),
 	spanAttributes: { 'entity.service': 'cluster-infrastructure', 'entity.version': 'v1' },
 });
 
 // --- [ERRORS] ----------------------------------------------------------------
 
+const _ClusterReasons = {
+	AlreadyProcessingMessage:  { retryable: false, terminal: true  },
+	EntityNotAssignedToRunner: { retryable: false, terminal: true  },
+	MailboxFull:               { retryable: true,  terminal: false },
+	MalformedMessage:          { retryable: false, terminal: true  },
+	PersistenceError:          { retryable: false, terminal: true  },
+	RpcClientError:            { retryable: false, terminal: true  },
+	RunnerNotRegistered:       { retryable: false, terminal: true  },
+	RunnerUnavailable:         { retryable: true,  terminal: false },
+	SendTimeout:               { retryable: true,  terminal: false },
+	SerializationError:        { retryable: false, terminal: true  },
+	Suspended:                 { retryable: false, terminal: true  },
+} as const;
+type _ClusterReason = keyof typeof _ClusterReasons;
 class ClusterError extends S.TaggedError<ClusterError>()('ClusterError', {
 	cause: S.optional(S.Unknown),
 	entityId: S.optional(S.String),
-	reason: S.Literal('AlreadyProcessingMessage', 'EntityNotAssignedToRunner', 'MailboxFull', 'MalformedMessage', 'PersistenceError', 'RpcClientError', 'RunnerNotRegistered', 'RunnerUnavailable', 'SendTimeout', 'SerializationError', 'Suspended'),
+	reason: S.Literal(...Object.keys(_ClusterReasons) as [_ClusterReason, ..._ClusterReason[]]),
 	requestId: S.optional(S.String),
 	resumeToken: S.optional(S.String),
-}) {	// Polymorphic factory: reason determines required fields, opts allows cause/requestId/resumeToken
+}) {
 	static readonly from = (reason: ClusterError['reason'], entityId?: string, opts?: { cause?: unknown; requestId?: string; resumeToken?: string }) => new ClusterError({ cause: opts?.cause, entityId, reason, requestId: opts?.requestId, resumeToken: opts?.resumeToken });
-	static readonly _knownTags = HashSet.fromIterable(['AlreadyProcessingMessage', 'EntityNotAssignedToRunner', 'MailboxFull', 'MalformedMessage', 'PersistenceError', 'RpcClientError', 'RunnerNotRegistered', 'SerializationError', 'Suspended'] as const);
-	static readonly _globalErrors = HashSet.fromIterable(['PersistenceError', 'RunnerNotRegistered', 'SerializationError'] as const);
-	static readonly _transient = HashSet.fromIterable(['MailboxFull', 'RunnerUnavailable', 'SendTimeout'] as const);
-	static readonly isTransient = (e: ClusterError): boolean => HashSet.has(ClusterError._transient, e.reason);
+	static readonly _knownTags = HashSet.fromIterable(Object.keys(_ClusterReasons).filter((k): k is _ClusterReason => !_ClusterReasons[k as _ClusterReason].retryable));
+	get isRetryable(): boolean { return _ClusterReasons[this.reason].retryable; }
+	get isTerminal(): boolean { return _ClusterReasons[this.reason].terminal; }
 }
+const _SingletonReasons = {
+	HeartbeatFailed:     { retryable: false, terminal: true  },
+	LeaderHandoffFailed: { retryable: false, terminal: true  },
+	SchemaDecodeFailed:  { retryable: false, terminal: true  },
+	StateLoadFailed:     { retryable: true,  terminal: false },
+	StatePersistFailed:  { retryable: true,  terminal: false },
+} as const;
+type _SingletonReason = keyof typeof _SingletonReasons;
 class SingletonError extends Data.TaggedError('SingletonError')<{
-	readonly reason: 'StateLoadFailed' | 'StatePersistFailed' | 'SchemaDecodeFailed' | 'HeartbeatFailed' | 'LeaderHandoffFailed';
+	readonly reason: _SingletonReason;
 	readonly cause?: unknown;
 	readonly singletonName: string;
 }> {
-	static readonly from = (reason: SingletonError['reason'], name: string, cause?: unknown) => new SingletonError({ cause, reason, singletonName: name });
-	static readonly _retryable = HashSet.fromIterable(['StateLoadFailed', 'StatePersistFailed'] as const);
-	static readonly isRetryable = (e: SingletonError): boolean => HashSet.has(SingletonError._retryable, e.reason);
+	static readonly from = (reason: _SingletonReason, name: string, cause?: unknown) => new SingletonError({ cause, reason, singletonName: name });
+	get isRetryable(): boolean { return _SingletonReasons[this.reason].retryable; }
+	get isTerminal(): boolean { return _SingletonReasons[this.reason].terminal; }
 }
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const _storageLayers = (() => {	// Consolidated storage: dedicated PgClient for RunnerStorage (prevents advisory lock loss from connection recycling)
-	const runnerPgClient = PgClient.layerConfig({
-		applicationName: Config.succeed('cluster-runner-storage'),
-		connectionTTL: Config.succeed(Duration.hours(24)),
-		connectTimeout: Config.succeed(Duration.seconds(10)),
-		database: Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
-		host: Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
-		idleTimeout: Config.succeed(Duration.hours(24)),
-		maxConnections: Config.succeed(1),
-		minConnections: Config.succeed(1),
-		password: Config.redacted('POSTGRES_PASSWORD'),
-		port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
-		spanAttributes: Config.succeed({ 'db.system': 'postgresql', 'service.name': 'cluster-runner-storage' }),
-		username: Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
-	});
-	return Layer.mergeAll(
-		SqlRunnerStorage.layer.pipe(Layer.provide(runnerPgClient)),
-		SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
-		ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, entityMaxIdleTime: _CONFIG.entity.maxIdleTime, preemptiveShutdown: true, sendRetryInterval: _CONFIG.send.timeout, shardsPerGroup: 100 }),
-		Snowflake.layerGenerator,
-	);
-})();
-const _healthLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Health mode: K8s in production, noop otherwise (consolidated config read)
-	const [env, mode, namespace, labelSelector] = yield* Effect.all([
-		Config.string('NODE_ENV').pipe(Config.withDefault('development')),
-		Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto')),
-		Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default')),
-		Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal')),
-	]);
-	const useK8s = mode === 'k8s' || (mode === 'auto' && env === 'production');
-	yield* Effect.logDebug('Cluster health mode selected', { mode, useK8s });
-	return useK8s
+const _runnerPgLayer = PgClient.layerConfig({
+	applicationName: Config.succeed('cluster-runner-storage'),
+	connectionTTL: Config.succeed(Duration.hours(24)),
+	connectTimeout: Config.succeed(Duration.seconds(10)),
+	database: Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
+	host: Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
+	idleTimeout: Config.succeed(Duration.hours(24)),
+	maxConnections: Config.succeed(1),
+	minConnections: Config.succeed(1),
+	password: Config.redacted('POSTGRES_PASSWORD'),
+	port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
+	spanAttributes: Config.succeed({ 'db.system': 'postgresql', 'service.name': 'cluster-runner-storage' }),
+	username: Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
+});
+const _storageLayers = Layer.mergeAll(
+	SqlRunnerStorage.layer.pipe(Layer.provide(_runnerPgLayer)),
+	SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
+	ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, entityMaxIdleTime: _CONFIG.entity.maxIdleTime, preemptiveShutdown: true, sendRetryInterval: _CONFIG.send.timeout, shardsPerGroup: 100 }),
+	Snowflake.layerGenerator,
+);
+const _healthConfig = Config.all({
+	env: Config.string('NODE_ENV').pipe(Config.withDefault('development')),
+	labelSelector: Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal')),
+	mode: Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto')),
+	namespace: Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default')),
+});
+const _healthLayer = Layer.unwrapEffect(_healthConfig.pipe(
+	Effect.tap(({ env, mode }) => Effect.logDebug('Cluster health mode selected', { mode, useK8s: mode === 'k8s' || (mode === 'auto' && env === 'production') })),
+	Effect.map(({ env, labelSelector, mode, namespace }) => (mode === 'k8s' || (mode === 'auto' && env === 'production'))
 		? RunnerHealth.layerK8s({ labelSelector, namespace }).pipe(Layer.provide(K8sHttpClient.layer), Layer.provide(NodeHttpClient.layerUndici), Layer.provide(NodeFileSystem.layer))
-		: RunnerHealth.layerNoop;
-}));
+		: RunnerHealth.layerNoop)));
 const _transportBase = Layer.mergeAll(RpcSerialization.layerMsgPack, _healthLayer, _storageLayers);
-// Client-only HTTP layer for fallback (no local entity hosting, only message passing)
-// Uses provideMerge to expose ShardingConfig, maintaining type compatibility with socket layer
-const _httpClientLayer = HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(FetchHttpClient.layer), Layer.provideMerge(_transportBase));
-// Full socket runner layer for entity hosting
+const _httpClientLayer = HttpRunner.layerClient.pipe(Layer.provide(HttpRunner.layerClientProtocolHttpDefault), Layer.provide(NodeHttpClient.layerUndici), Layer.provideMerge(_transportBase));
 const _socketLayer = SocketRunner.layer.pipe(
 	Layer.provide(NodeSocketServer.layer({ port: _CONFIG.socketServer.port })),
 	Layer.provide(NodeClusterSocket.layerClientProtocol),
 	Layer.provideMerge(_transportBase));
-const _transports = {
-	auto: _socketLayer.pipe(
-		Layer.catchAll((e) => Effect.logWarning('Socket unavailable, using HTTP client-only (no local entity hosting)', { error: String(e) }).pipe(Effect.as(_httpClientLayer), Layer.unwrapEffect))),
-	http: _httpClientLayer,
-	socket: _socketLayer,
-	websocket: HttpRunner.layerWebsocketClientOnly.pipe(
-		Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault),
-		Layer.provide(NodeSocket.layerWebSocketConstructor),
-		Layer.provide(FetchHttpClient.layer),
-		Layer.provideMerge(_transportBase)),
-} as const;
-const _transportLayer = Layer.unwrapEffect(Effect.gen(function* () {	// Polymorphic transport selection via config
-	const mode = yield* Config.string('CLUSTER_TRANSPORT').pipe(
-		Config.withDefault<keyof typeof _transports>('auto'),
-		Config.map((m): keyof typeof _transports => (m in _transports ? (m as keyof typeof _transports) : 'auto')),
-	);
-	yield* Effect.logInfo('Cluster transport selected', { mode });
-	return _transports[mode];
-}));
-const _clusterLayer = ClusterEntityLive.pipe(Layer.provideMerge(_transportLayer));	// Entity layer with transport wiring, provideMerge exposes Sharding+ShardingConfig
+const _websocketLayer = HttpRunner.layerWebsocketClientOnly.pipe(
+	Layer.provide(HttpRunner.layerClientProtocolWebsocketDefault),
+	Layer.provide(NodeSocket.layerWebSocketConstructor),
+	Layer.provide(NodeHttpClient.layerUndici),
+	Layer.provideMerge(_transportBase));
+const _transportLayer = Layer.unwrapEffect(Config.string('CLUSTER_TRANSPORT').pipe(Config.withDefault('auto'), Effect.tap((m) => Effect.logInfo('Cluster transport selected', { mode: m })), Effect.map((mode) => Match.value(mode).pipe(
+	Match.when('http', () => _httpClientLayer),
+	Match.when('socket', () => _socketLayer),
+	Match.when('websocket', () => _websocketLayer),
+	Match.orElse(() => _socketLayer.pipe(Layer.catchAll((e) => Effect.logWarning('Socket unavailable, using HTTP client-only', { error: String(e) }).pipe(Effect.as(_httpClientLayer), Layer.unwrapEffect)))),
+))));
+const _clusterLayer = ClusterEntityLive.pipe(Layer.provideMerge(_transportLayer));
+
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, type: 'singleton' | 'cron') =>
+	Effect.flatMap(MetricsService, (metrics) => Context.Request.withinCluster({ isLeader: true })(
+		MetricsService.trackEffect(Telemetry.span(effect, `${type}.${name}`, { metrics: false }), {
+			duration: metrics.singleton.duration, errors: metrics.errors,
+			labels: MetricsService.label({ singleton: name, ...(type === 'cron' && { type: 'cron' }) }),
+		}).pipe(Effect.andThen(Clock.currentTimeMillis), Effect.tap((ts) => Effect.all([Metric.set(metrics.singleton.lastExecution, ts), Metric.increment(metrics.singleton.executions)], { discard: true }))),
+	));
+const _readMetric = <A extends number | bigint>(m: Metric.Metric.Gauge<A>) => Metric.value(m).pipe(Effect.map(({ value }) => Number(value)));
 
 // --- [SERVICE] ---------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
-	dependencies: [_clusterLayer],
+	dependencies: [_clusterLayer, Resilience.Layer],
 	effect: Effect.gen(function* () {
 		const sharding = yield* Sharding.Sharding;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'cluster' });
 		const getClient = yield* sharding.makeClient(ClusterEntity);
-		const _inferReason = (e: unknown): ClusterError['reason'] => Socket.isSocketError(e) ? 'RunnerUnavailable'
-			: Predicate.hasProperty(e, '_tag') && typeof e._tag === 'string' && HashSet.has(ClusterError._knownTags, e._tag as ClusterError['reason']) ? e._tag as ClusterError['reason'] : 'RunnerUnavailable';
-		const _mapClusterError = (entityId: string) => (e: unknown): ClusterError =>
-			((r) => ClusterError.from(r, HashSet.has(ClusterError._globalErrors, r) ? undefined : entityId, { cause: e }))(_inferReason(e));
-		const _resilienceMap = { BulkheadError: 'MailboxFull', CircuitError: 'RunnerUnavailable', TimeoutError: 'SendTimeout' } as const satisfies Record<string, ClusterError['reason']>;
-		const send = (entityId: string, payload: ProcessPayload): Effect.Effect<void, ClusterError, MetricsService> => {
+		const send = (entityId: string, payload: ProcessPayload): Effect.Effect<void, ClusterError, MetricsService | Resilience.State> => {
 			const circuitName = `cluster.shard.${sharding.getShardId(EntityId.make(entityId), 'default')}`;
-			const mapResilienceError = (e: Resilience.Error<ClusterError>): ClusterError =>
-				e._tag in _resilienceMap ? ClusterError.from(_resilienceMap[e._tag as keyof typeof _resilienceMap], entityId, { cause: e }) : e as ClusterError;
-			const resilientSend = Resilience.run(circuitName, getClient(entityId)['process'](payload).pipe(Effect.asVoid, Effect.mapError(_mapClusterError(entityId))), {
+			const inferReason = (e: unknown): ClusterError['reason'] => Socket.isSocketError(e) ? 'RunnerUnavailable'
+				: Predicate.hasProperty(e, '_tag') && typeof e._tag === 'string' && HashSet.has(ClusterError._knownTags, e._tag as ClusterError['reason']) ? e._tag as ClusterError['reason'] : 'RunnerUnavailable';
+			const resilientSend = Resilience.run(circuitName, getClient(entityId)['process'](payload).pipe(
+				Effect.asVoid,
+				Effect.mapError((e): ClusterError => {
+					const reason = inferReason(e);
+					return ClusterError.from(reason, _ClusterReasons[reason].terminal ? undefined : entityId, { cause: e });
+				}),
+			), {
 				bulkhead: _CONFIG.send.bulkhead,
 				circuit: circuitName,
 				retry: false,
 				threshold: _CONFIG.circuit.threshold,
 				timeout: _CONFIG.send.timeout,
-			}).pipe(Effect.mapError(mapResilienceError));
+			}).pipe(Effect.mapError((e): ClusterError => {
+				const resilienceMap = { BulkheadError: 'MailboxFull', CircuitError: 'RunnerUnavailable', TimeoutError: 'SendTimeout' } as const;
+				return e._tag in resilienceMap ? ClusterError.from(resilienceMap[e._tag as keyof typeof resilienceMap], entityId, { cause: e }) : e as ClusterError;
+			}));
 			return MetricsService.trackCluster(resilientSend, { entityType: 'Cluster', operation: 'send' });
 		};
 		const isLocal = Effect.fn('cluster.isLocal')((entityId: string) => Effect.sync(() => sharding.hasShardId(sharding.getShardId(EntityId.make(entityId), 'default'))));	// L1: Effect.fn for auto-tracing
@@ -264,13 +284,13 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 									: Effect.succeed(stateOpts.initial)),
 							);
 							const loaded = yield* loadState.pipe(
-								Effect.retry(_scheduleRetry(_CONFIG.retry.maxAttempts.state)),
+								Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
 								Effect.catchAllCause((cause) => Metric.increment(taggedErr).pipe(Effect.zipRight(Effect.logWarning('State load failed, using initial', { cause })), Effect.as(stateOpts.initial))),
 							);
 							const ref = yield* Ref.make(loaded);
 							yield* Effect.addFinalizer(() => Ref.get(ref).pipe(
 								Effect.flatMap((state) => db.kvStore.setJson(stateKey, state, schema)),
-								Effect.retry(_scheduleRetry(_CONFIG.retry.maxAttempts.state)),
+								Effect.retry(_retrySchedule(_CONFIG.retry.maxAttempts.state)),
 								Effect.tap(() => Metric.increment(taggedOps)),
 								Effect.catchAllCause((cause) => Metric.increment(taggedErr).pipe(
 									Effect.zipRight(Effect.logError('State persist failed - potential data loss', { cause, singleton: name })),
@@ -313,27 +333,19 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 		ClusterCron.make({
 			calculateNextRunFromPrevious: config.calculateNextRunFromPrevious ?? false,
 			cron: config.cron,
-			execute: Effect.gen(function* () {
-				yield* Effect.annotateLogsScoped({ 'service.name': `cron.${config.name}` });
-				const metrics = yield* MetricsService;
-				yield* Context.Request.withinCluster({ isLeader: true })(
-					MetricsService.trackEffect(Telemetry.span(config.execute, `cron.${config.name}`, { metrics: false }), {
-						duration: metrics.singleton.duration, errors: metrics.errors, labels: MetricsService.label({ singleton: config.name, type: 'cron' }),
-					}).pipe(Effect.andThen(Clock.currentTimeMillis), Effect.tap((ts) => Effect.all([Metric.set(metrics.singleton.lastExecution, ts), Metric.increment(metrics.singleton.executions)], { discard: true }))),
-				);
-			}),
+			execute: Effect.annotateLogsScoped({ 'service.name': `cron.${config.name}` }).pipe(Effect.zipRight(_trackLeaderExecution(config.name, config.execute, 'cron'))),
 			name: config.name,
 			shardGroup: config.shardGroup,
 			skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
 		}).pipe(Layer.provide(_clusterLayer), Layer.provide(MetricsService.Default));
-	static readonly checkHealth = {	// Health check utilities
+	static readonly checkHealth = {
 		cluster: () => Telemetry.span(Effect.all({
-			entities: Metric.value(ClusterMetrics.entities), runners: Metric.value(ClusterMetrics.runners),
-			runnersHealthy: Metric.value(ClusterMetrics.runnersHealthy), shards: Metric.value(ClusterMetrics.shards), singletons: Metric.value(ClusterMetrics.singletons),
+			entities: _readMetric(ClusterMetrics.entities), runners: _readMetric(ClusterMetrics.runners),
+			runnersHealthy: _readMetric(ClusterMetrics.runnersHealthy), shards: _readMetric(ClusterMetrics.shards), singletons: _readMetric(ClusterMetrics.singletons),
 		}).pipe(Effect.map((m) => ({
-			degraded: Number(m.runnersHealthy.value) < Number(m.runners.value),
-			healthy: Number(m.runnersHealthy.value) > 0 && Number(m.singletons.value) > 0,
-			metrics: { entities: Number(m.entities.value), runners: Number(m.runners.value), runnersHealthy: Number(m.runnersHealthy.value), shards: Number(m.shards.value), singletons: Number(m.singletons.value) },
+			degraded: m.runnersHealthy < m.runners,
+			healthy: m.runnersHealthy > 0 && m.singletons > 0,
+			metrics: m,
 		}))), 'cluster.checkClusterHealth'),
 		singleton: (config: ReadonlyArray<{ readonly name: string; readonly expectedInterval: Duration.DurationInput }>) =>
 			Telemetry.span(Effect.gen(function* () {
@@ -364,7 +376,7 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 			const seq = Cron.sequence(cron, date);
 			const n = opts?.nextCount ?? 5;
 			const nextRuns = A.unfold({ count: 0, seq }, ({ count, seq }) =>
-				count >= n ? Option.none() : ((r) => r.done ? Option.none() : Option.some([r.value, { count: count + 1, seq }] as const))(seq.next()),
+				count >= n ? Option.none() : ((r) => r.done ? Option.none() : Option.some([r.value, { count: count + 1, seq }] as const))(seq.next()), // NOSONAR S3358
 			);
 			return { matchesNow: Cron.match(cron, date), nextRuns };
 		});

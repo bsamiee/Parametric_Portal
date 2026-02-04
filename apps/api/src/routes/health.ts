@@ -19,15 +19,21 @@ const _liveness = pipe(
 	Effect.withSpan('health.liveness'),
 );
 const _readiness = (polling: PollingService) => pipe(
-	Effect.all({ alerts: polling.getHealth(), cache: CacheService.health(), db: Client.healthDeep() }),
-	Effect.let('critical', ({ alerts }) => alerts.filter((a) => a.severity === 'critical')),
-	Effect.tap(({ alerts, cache, critical, db }) => Effect.all([
+	Effect.all({
+		alerts: polling.getHealth(),
+		cache: CacheService.health(),
+		db: Client.healthDeep(),
+		vectorConfig: Client.vector.getConfig().pipe(Effect.map((cfg) => cfg.length > 0), Effect.orElseSucceed(() => false)),
+	}),
+	Effect.let('critical', ({ alerts }) => alerts.filter((alert) => alert.severity === 'critical')),
+	Effect.tap(({ alerts, cache, critical, db, vectorConfig }) => Effect.all([
 		Effect.annotateCurrentSpan('health.db.healthy', db.healthy),
 		Effect.annotateCurrentSpan('health.db.latencyMs', db.latencyMs),
 		Effect.annotateCurrentSpan('health.cache.connected', cache.connected),
 		Effect.annotateCurrentSpan('health.cache.latencyMs', cache.latencyMs),
 		Effect.annotateCurrentSpan('health.alerts.total', alerts.length),
 		Effect.annotateCurrentSpan('health.alerts.critical', critical.length),
+		Effect.annotateCurrentSpan('health.vectorConfig', vectorConfig),
 	], { discard: true })),
 	Effect.filterOrFail(
 		({ cache, critical, db }) => db.healthy && cache.connected && critical.length === 0,
@@ -40,7 +46,7 @@ const _readiness = (polling: PollingService) => pipe(
 			30000,
 		),
 	),
-	Effect.map(({ alerts, cache, critical, db }) => ({
+	Effect.map(({ alerts, cache, critical, db, vectorConfig }) => ({
 		checks: {
 			cache: { connected: cache.connected, latencyMs: cache.latencyMs },
 			database: { healthy: db.healthy, latencyMs: db.latencyMs },
@@ -48,6 +54,7 @@ const _readiness = (polling: PollingService) => pipe(
 				onFalse: () => B.match(alerts.length > 0, { onFalse: () => 'healthy' as const, onTrue: () => 'degraded' as const }),
 				onTrue: () => 'alerted' as const,
 			}),
+			vector: { configured: vectorConfig },
 		},
 		status: 'ok' as const,
 	})),

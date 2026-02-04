@@ -3,7 +3,7 @@
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
-import { Array as A, Chunk, Clock, Effect, Either, Option, Schema as S, Stream } from 'effect';
+import { Array as A, Chunk, Clock, Effect, Either, Match, MutableRef, Option, Schema as S, Stream, Tuple } from 'effect';
 import type JSZip from 'jszip';
 import { PassThrough, Readable } from 'node:stream';
 import { Crypto } from '../security/crypto.ts';
@@ -15,7 +15,7 @@ const _drivers = {
 	papa:  () => Effect.promise(() => import('papaparse')),
 	sax:   () => Effect.promise(() => import('sax')),
 	yaml:  () => Effect.promise(() => import('yaml')),
-	zip:   () => Effect.promise(async () => (await import('jszip')).default),
+	zip:   () => Effect.promise(() => import('jszip').then((module) => module.default)),
 } as const;
 
 // --- [TYPES] -----------------------------------------------------------------
@@ -92,14 +92,40 @@ const _tree = (codec: Codec.Of<'tree'>, input: Codec.Input, assetType: string): 
 		Stream.async<_Row, Fatal>((emit) => {
 			const parser = sax.parser(true, { trim: true });
 			const tags = new Set<string>(codec.nodes);
-			let current: { content: string; type: string } | null = null;
-			let idx = 0;
-			parser.onopentag = (tag) => Option.liftPredicate(tag, (t) => tags.has(t.name.toLowerCase())).pipe(Option.map((t) => { const attr = t.attributes['type']; current = { content: '', type: (typeof attr === 'string' ? attr : attr?.value) ?? assetType }; return current; }));
-			// biome-ignore lint/style/noParameterAssign: SAX streaming parser requires mutable accumulator
-			parser.ontext = (text: string) => Option.fromNullable(current).pipe(Option.map((c) => { c.content += text; return c; }));
-			// biome-ignore lint/style/noParameterAssign: SAX streaming parser requires mutable accumulator
-			parser.oncdata = (text: string) => Option.fromNullable(current).pipe(Option.map((c) => { c.content += text; return c; }));
-			parser.onclosetag = (name: string) => Option.fromNullable(current).pipe(Option.filter(() => tags.has(name.toLowerCase())), Option.map((c) => { idx += 1; emit.single(c.type ? Either.right({ ...c, ordinal: idx }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal: idx }))); current = null; return c; }));
+			const current = MutableRef.make<Option.Option<{ content: string; type: string }>>(Option.none());
+			const idx = MutableRef.make(0);
+			const _setCurrent = (value: Option.Option<{ content: string; type: string }>) => MutableRef.set(current, value);
+			parser.onopentag = (tag) => Option.liftPredicate(tag, (t) => tags.has(t.name.toLowerCase())).pipe(Option.map((t) => {
+				const attr = t.attributes['type'];
+				const next = { content: '', type: (typeof attr === 'string' ? attr : attr?.value) ?? assetType };
+				_setCurrent(Option.some(next));
+				return next;
+			}));
+			parser.ontext = (text: string) => Option.match(MutableRef.get(current), {
+				onNone: () => Option.none(),
+				onSome: (c) => {
+					const next = { ...c, content: `${c.content}${text}` };
+					_setCurrent(Option.some(next));
+					return Option.some(next);
+				},
+			});
+			parser.oncdata = (text: string) => Option.match(MutableRef.get(current), {
+				onNone: () => Option.none(),
+				onSome: (c) => {
+					const next = { ...c, content: `${c.content}${text}` };
+					_setCurrent(Option.some(next));
+					return Option.some(next);
+				},
+			});
+			parser.onclosetag = (name: string) => Option.match(MutableRef.get(current), {
+				onNone: () => Option.none(),
+				onSome: (c) => Option.liftPredicate(name, (n) => tags.has(n.toLowerCase())).pipe(Option.map(() => {
+					const ordinal = MutableRef.incrementAndGet(idx);
+					emit.single(c.type ? Either.right({ ...c, ordinal }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal })));
+					_setCurrent(Option.none());
+					return c;
+				})),
+			});
 			parser.onerror = (err: Error) => void emit.fail(_parserError(err));
 			parser.onend = () => void emit.end();
 			parser.write(codec.content(input)).close();
@@ -165,8 +191,7 @@ const _zip = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string)
 				),
 		});
 	}));
-const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string): _Stream =>
-	codec.lib === 'exceljs' ? _xlsx(codec, input, assetType) : _zip(codec, input, assetType);
+const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string): _Stream => codec.lib === 'exceljs' ? _xlsx(codec, input, assetType) : _zip(codec, input, assetType);
 
 // --- [IMPORT] ----------------------------------------------------------------
 
@@ -179,9 +204,9 @@ const import_ = (input: Codec.Input | readonly Codec.Input[], opts: {
 	return Stream.fromIterable(inputs).pipe(
 		Stream.flatMap((item): Stream.Stream<_Row, Fatal> => {
 			const codec = Codec(opts.format ?? Codec.detect(item));
-			const result = opts.mode === 'file'
+			const result: _Stream = opts.mode === 'file'
 				? Stream.make(Either.right({ content: codec.content(item), ordinal: 1, type: assetType }))
-				: Codec.dispatch(codec.ext, item, {
+				: Codec.dispatch<_Stream>(codec.ext, item, {
 						archive: (detected, raw) => _archive(detected, raw, assetType),
 						delimited: (detected, raw) => _delimited(detected, raw, assetType),
 						none: (detected, raw) => Stream.make(Either.right({ content: detected.content(raw), ordinal: 1, type: assetType === 'unknown' ? detected.ext : assetType })),
@@ -214,28 +239,27 @@ const _binary = {
 	xlsx: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
 		const ts = yield* Clock.currentTimeMillis;
 		const excel = yield* _drivers.excel();
-		const chunks: Buffer[] = [];
+		const chunks = MutableRef.make<readonly Buffer[]>([]);
 		const pt = new PassThrough();
-		pt.on('data', (buf: Buffer) => chunks.push(buf));
+		pt.on('data', (buf: Buffer) => MutableRef.update(chunks, A.append(buf)));
 		const wb = new excel.stream.xlsx.WorkbookWriter({ stream: pt, useSharedStrings: false, useStyles: false });
 		const sheet = wb.addWorksheet('Assets');
 		sheet.columns = [{ header: 'Type', key: 'type', width: 20 }, { header: 'Id', key: 'id', width: 40 }, { header: 'Content', key: 'content', width: 60 }, { header: 'UpdatedAt', key: 'updatedAt', width: 24 }];
-		const count = yield* Stream.runFold(stream, 0, (rowCount, asset) => { sheet.addRow(_serializeExport(asset)).commit(); return rowCount + 1; });
+		const count = yield* Stream.runFoldEffect(stream, 0, (rowCount, asset) =>
+			Effect.sync(() => { sheet.addRow(_serializeExport(asset)).commit(); }).pipe(Effect.as(rowCount + 1)));
 		sheet.commit();
 		yield* Effect.promise(() => wb.commit());
-		return { count, data: Buffer.concat(chunks).toString('base64'), name: name ?? `export-${ts}.xlsx` };
+		return { count, data: Buffer.concat(MutableRef.get(chunks)).toString('base64'), name: name ?? `export-${ts}.xlsx` };
 	}),
 	zip: <E, R>(stream: _Out<E, R>, name?: string): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> => Effect.gen(function* () {
 		const ts = yield* Clock.currentTimeMillis;
 		const ZipClass = yield* _drivers.zip();
 		const zip = new ZipClass();
-		const entries: Metadata[] = [];
-		const count = yield* Stream.runFoldEffect(stream, 0, (entryCount, asset) =>
+		const [count, entries] = yield* Stream.runFoldEffect(stream, Tuple.make(0, [] as readonly Metadata[]), ([entryCount, acc], asset) =>
 			(asset.hash == null ? Crypto.hash(asset.content).pipe(Effect.orDie) : Effect.succeed(asset.hash)).pipe(Effect.map((hash) => {
 				const entryName = asset.name ?? `${String(entryCount).padStart(5, '0')}_${hash.slice(0, 8)}.txt`;
 				zip.file(entryName, asset.content, { compression: 'DEFLATE' });
-				entries.push(Metadata.from(asset.content, { hash, name: entryName, type: asset.type }));
-				return entryCount + 1;
+				return Tuple.make(entryCount + 1, A.append(acc, Metadata.from(asset.content, { hash, name: entryName, type: asset.type })));
 			})),
 		);
 		zip.file('manifest.json', JSON.stringify({ entries, version: 1 }, null, 2));
@@ -243,8 +267,25 @@ const _binary = {
 		return { count, data, name: name ?? `export-${ts}.zip` };
 	}),
 } as const;
-const exportText = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _text): Stream.Stream<Uint8Array, E, R> => Stream.map(_text[fmt](stream), new TextEncoder().encode);
-const exportBinary = <E, R>(stream: _Out<E, R>, fmt: keyof typeof _binary, opts?: { readonly name?: string }) => _binary[fmt](stream, opts?.name);
+const _formats = {
+	csv: { kind: 'text' },
+	ndjson: { kind: 'text' },
+	xlsx: { kind: 'binary' },
+	xml: { kind: 'text' },
+	yaml: { kind: 'text' },
+	zip: { kind: 'binary' },
+} as const satisfies Record<keyof typeof _text | keyof typeof _binary, { readonly kind: 'binary' | 'text' }>;
+type _BinaryFormat = keyof typeof _binary;
+type _TextFormat = keyof typeof _text;
+function export_<E, R>(stream: _Out<E, R>, fmt: _TextFormat): Stream.Stream<Uint8Array, E, R>;
+function export_<E, R>(stream: _Out<E, R>, fmt: _BinaryFormat, opts?: { readonly name?: string }): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R>;
+function export_<E, R>(stream: _Out<E, R>, fmt: keyof typeof _formats, opts?: { readonly name?: string }): Stream.Stream<Uint8Array, E, R> | Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> {
+	return Match.value(fmt).pipe(
+		Match.when((f): f is _TextFormat => _formats[f].kind === 'text', (f) => Stream.map(_text[f](stream), new TextEncoder().encode)),
+		Match.when((f): f is _BinaryFormat => _formats[f].kind === 'binary', (f) => _binary[f](stream, opts?.name)),
+		Match.exhaustive,
+	);
+}
 
 // --- [PARTITION] -------------------------------------------------------------
 
@@ -257,12 +298,8 @@ const partition = <T extends _Asset>(rows: readonly Either.Either<T, Parse>[]) =
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Transfer = {
-	exportBinary,
-	exportText,
-	formats: {
-		binary: { xlsx: 'xlsx', zip: 'zip' } as const,
-		text: { csv: 'csv', ndjson: 'ndjson', xml: 'xml', yaml: 'yaml' } as const,
-	},
+	export: export_,
+	formats: _formats,
 	import: import_,
 	limits,
 	partition,
@@ -277,10 +314,11 @@ const TransferError = {
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Transfer {
-	export type BinaryFormat = keyof typeof Transfer.formats.binary;
-	export type BinaryResult = Effect.Effect.Success<ReturnType<typeof Transfer.exportBinary>>;
+	export type BinaryFormat = _BinaryFormat;
+	export type BinaryResult = Effect.Effect.Success<ReturnType<(typeof _binary)[BinaryFormat]>>;
+	export type Format = keyof typeof Transfer.formats;
 	export type ImportOpts = NonNullable<Parameters<typeof Transfer.import>[1]>;
-	export type TextFormat = keyof typeof Transfer.formats.text;
+	export type TextFormat = _TextFormat;
 }
 namespace TransferError {
 	export type Any = Fatal | Import | Parse;

@@ -1,7 +1,6 @@
 /**
  * Unified cryptographic service with HKDF tenant key derivation.
- * Flat API: Crypto.hash, Crypto.compare, Crypto.pair (no nested token object).
- * Uses Effect.Encoding directly - no hand-rolled encoding.
+ * Flat API (hash, compare, pair), Effect.Encoding, timing-safe comparison.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { type Hex64, Uuidv7 } from '@parametric-portal/types/types';
@@ -13,7 +12,7 @@ import { Telemetry } from '../observe/telemetry.ts';
 
 const _encoder = new TextEncoder();
 const _decoder = new TextDecoder();
-const _config = {
+const _CONFIG = {
 	cache: { capacity: 1000, ttl: Duration.hours(24) },
 	hkdf: { hash: 'SHA-256', info: 'parametric-tenant-key-v1', salt: new Uint8Array(32) },
 	iv: 12,
@@ -36,34 +35,35 @@ class CryptoError extends Data.TaggedError('CryptoError')<{
 class Service extends Effect.Service<Service>()('server/CryptoService', {
 	effect: Effect.gen(function* () {
 		const masterKey = yield* Config.redacted('ENCRYPTION_KEY').pipe(
-			Effect.flatMap((r) =>
-				Encoding.decodeBase64(Redacted.value(r)).pipe(
+			Effect.flatMap((redacted) =>
+				Encoding.decodeBase64(Redacted.value(redacted)).pipe(
 					Either.match({
-						onLeft: () => Effect.die(new Error('Invalid ENCRYPTION_KEY base64')),
-						onRight: (bytes) => Effect.promise(() =>
-							crypto.subtle.importKey('raw', new Uint8Array(bytes), 'HKDF', false, ['deriveKey']),
-						),
+						onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
+						onRight: (bytes) => Effect.tryPromise({
+							catch: (error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'key', tenantId: Context.Request.Id.system }),
+							try: () => crypto.subtle.importKey('raw', new Uint8Array(bytes), 'HKDF', false, ['deriveKey']),
+						}),
 					}),
 				),
 			),
 		);
 		const tenantKeyCache = yield* Cache.make({
-			capacity: _config.cache.capacity,
+			capacity: _CONFIG.cache.capacity,
 			lookup: (tenantId: string) => Effect.promise(() =>
 				crypto.subtle.deriveKey(
 					{
-						hash: _config.hkdf.hash,
-						info: _encoder.encode(`${_config.hkdf.info}:${tenantId}`),
+						hash: _CONFIG.hkdf.hash,
+						info: _encoder.encode(`${_CONFIG.hkdf.info}:${tenantId}`),
 						name: 'HKDF',
-						salt: _config.hkdf.salt,
+						salt: _CONFIG.hkdf.salt,
 					},
 					masterKey,
-					{ length: _config.key.length, name: _config.key.name },
+					{ length: _CONFIG.key.length, name: _CONFIG.key.name },
 					false,
 					['encrypt', 'decrypt'],
 				),
 			),
-			timeToLive: _config.cache.ttl,
+			timeToLive: _CONFIG.cache.ttl,
 		});
 		const deriveKey = (tenantId: string) => tenantKeyCache.get(tenantId);
 		yield* Effect.logInfo('CryptoService initialized with HKDF tenant key derivation');
@@ -81,35 +81,35 @@ const compare = (a: string, b: string): Effect.Effect<boolean> =>
 	});
 const decrypt = (bytes: Uint8Array): Effect.Effect<string, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
-		const tenantId = yield* Context.Request.tenantId;
+		const tenantId = yield* Context.Request.currentTenantId;
 		yield* Effect.filterOrFail(
 			Effect.succeed(bytes),
-			(b) => b.length >= _config.minBytes && b[0] !== undefined && N.between({ maximum: _config.version.max, minimum: _config.version.min })(b[0]),
+			(b) => b.length >= _CONFIG.minBytes && b[0] !== undefined && N.between({ maximum: _CONFIG.version.max, minimum: _CONFIG.version.min })(b[0]),
 			() => new CryptoError({ code: 'INVALID_FORMAT', op: 'decrypt', tenantId }),
 		);
-		const iv = bytes.slice(1, 1 + _config.iv);
-		const cipher = bytes.slice(1 + _config.iv);
-		const svc = yield* Service;
-		const key = yield* svc.deriveKey(tenantId).pipe(Effect.mapError((e) => new CryptoError({ cause: e, code: 'KEY_FAILED', op: 'decrypt', tenantId })),);
+		const iv = bytes.slice(1, 1 + _CONFIG.iv);
+		const cipher = bytes.slice(1 + _CONFIG.iv);
+		const service = yield* Service;
+		const key = yield* service.deriveKey(tenantId).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'decrypt', tenantId })),);
 		const plaintext = yield* Effect.tryPromise({
-			catch: (e) => new CryptoError({ cause: e, code: 'OP_FAILED', op: 'decrypt', tenantId }),
+			catch: (error) => new CryptoError({ cause: error, code: 'OP_FAILED', op: 'decrypt', tenantId }),
 			try: () => crypto.subtle.decrypt({ iv, name: 'AES-GCM' }, key, cipher),
 		});
 		return _decoder.decode(plaintext);
 	}), 'crypto.decrypt');
 const encrypt = (plaintext: string): Effect.Effect<Uint8Array, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
-		const tenantId = yield* Context.Request.tenantId;
-		const svc = yield* Service;
-		const key = yield* svc.deriveKey(tenantId).pipe(Effect.mapError((e) => new CryptoError({ cause: e, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
-		const iv = crypto.getRandomValues(new Uint8Array(_config.iv));
+		const tenantId = yield* Context.Request.currentTenantId;
+		const service = yield* Service;
+		const key = yield* service.deriveKey(tenantId).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
+		const iv = crypto.getRandomValues(new Uint8Array(_CONFIG.iv));
 		const ciphertext = yield* Effect.tryPromise({
-			catch: (e) => new CryptoError({ cause: e, code: 'OP_FAILED', op: 'encrypt', tenantId }),
+			catch: (error) => new CryptoError({ cause: error, code: 'OP_FAILED', op: 'encrypt', tenantId }),
 			try: () => crypto.subtle.encrypt({ iv, name: 'AES-GCM' }, key, _encoder.encode(plaintext)),
 		});
 		const ciphertextBytes = new Uint8Array(ciphertext);
 		const result = new Uint8Array(1 + iv.length + ciphertextBytes.length);
-		result[0] = _config.version.current;
+		result[0] = _CONFIG.version.current;
 		result.set(iv, 1);
 		result.set(ciphertextBytes, 1 + iv.length);
 		return result;

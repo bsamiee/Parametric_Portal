@@ -3,10 +3,10 @@
  * Requires color and size props. Supports SubmenuTrigger for nested menus.
  */
 import { FloatingNode, useFloatingNodeId, useMergeRefs } from '@floating-ui/react';
-import { useClipboard } from '@parametric-portal/runtime/hooks/browser';
-import { readCssMs, readCssPx } from '@parametric-portal/runtime/runtime';
+import { Browser } from '@parametric-portal/runtime/browser';
+import { readCssMs, readCssPx, Runtime } from '@parametric-portal/runtime/runtime';
 import { AsyncState } from '@parametric-portal/types/async';
-import { Match } from 'effect';
+import { Effect, Match } from 'effect';
 import { ChevronRight, Clipboard, Copy, Trash2 } from 'lucide-react';
 import { createContext, createElement, type FC, type ReactElement, type ReactNode, type Ref, useCallback, useContext, useMemo, useRef } from 'react';
 import {
@@ -209,7 +209,7 @@ const MenuItem: FC<MenuItemProps> = ({
 	Toast.useTrigger(asyncState, toast);
 	const dialogResult = useDialog(confirm);
 	const menuCtx = useContext(MenuContext);
-	const clipboard = useClipboard();
+	const runtime = Runtime.use();
 	const slot = Slot.bind(asyncState);
 	const preset = Match.value({ copy, delete: deletePreset, paste }).pipe(
 		Match.when(({ copy: c }) => Boolean(c), () => _B.presets.copy),
@@ -240,12 +240,12 @@ const MenuItem: FC<MenuItemProps> = ({
 	const mergedRef = useMergeRefs([ref, itemRef, tooltipProps.ref as Ref<HTMLDivElement>]);
 	const handleAction = useCallback(() => {
 		const executeAction = (): void => {
-			copy && clipboard.copy(typeof copy === 'string' ? copy : (textValue ?? ''));
-			paste && clipboard.paste();
+			copy && runtime.runFork(Effect.gen(function* () { const svc = yield* Browser.Service; yield* svc.copy(typeof copy === 'string' ? copy : (textValue ?? '')); }));
+			paste && runtime.runFork(Effect.gen(function* () { const svc = yield* Browser.Service; yield* svc.paste; }));
 			racProps.id !== undefined && onAction?.(racProps.id);
 		};
 		confirm ? dialogResult.open(executeAction) : executeAction();
-	}, [confirm, dialogResult, copy, paste, clipboard, textValue, onAction, racProps.id]);
+	}, [confirm, dialogResult, copy, paste, runtime, textValue, onAction, racProps.id]);
 	const isRenderFn = typeof children === 'function';
 	const itemContent = (
 		<RACMenuItem
