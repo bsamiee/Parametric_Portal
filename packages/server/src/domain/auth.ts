@@ -226,7 +226,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				const salt = Encoding.encodeHex(randomBytes(_CONFIG.salt.length));
 				const backupHashes = yield* Effect.all(backupCodes.map((code) => Crypto.hash(`${salt}${code.toUpperCase()}`).pipe(Effect.map((hash) => `${salt}$${hash}`))), { concurrency: 'unbounded' });
 				yield* Effect.suspend(() => db.mfaSecrets.upsert({ backupHashes, encrypted, userId })).pipe(Effect.asVoid, Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('MFA upsert failed', error))));
-				yield* mfaEnabledCache.invalidate(new _MfaStatusKey({ tenantId: requestContext.tenantId, userId }));
+				yield* mfaEnabledCache.invalidate(new _MfaStatusKey({ tenantId: requestContext.tenantId, userId })).pipe(Effect.ignore);
 				yield* Effect.all([
 					MetricsService.inc(metrics.mfa.enrollments, MetricsService.label({ tenant: requestContext.tenantId }), 1),
 					audit.log('MfaSecret.enroll', { details: { backupCodesGenerated: _CONFIG.backup.count }, subjectId: userId }),
@@ -239,7 +239,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				const option = yield* db.mfaSecrets.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('MFA status check failed', error)));
 				yield* Option.isNone(option) ? Effect.fail(HttpError.NotFound.of('mfa')) : Effect.void;
 				yield* db.mfaSecrets.softDelete(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('MFA soft delete failed', error)));
-				yield* mfaEnabledCache.invalidate(new _MfaStatusKey({ tenantId: requestContext.tenantId, userId }));
+				yield* mfaEnabledCache.invalidate(new _MfaStatusKey({ tenantId: requestContext.tenantId, userId })).pipe(Effect.ignore);
 				yield* Effect.all([
 					MetricsService.inc(metrics.mfa.disabled, MetricsService.label({ tenant: requestContext.tenantId }), 1),
 					audit.log('MfaSecret.disable', { subjectId: userId }),

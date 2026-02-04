@@ -9,7 +9,11 @@ import { HttpError } from '@parametric-portal/server/errors';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Effect, Option } from 'effect';
+import { Array as A, Effect, Option } from 'effect';
+
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _ENTITY_TYPES = ['user', 'app', 'asset', 'auditLog'] as const;
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -18,6 +22,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 		const search = yield* SearchService;
 		const repositories = yield* DatabaseService;
 		const requireRole = Middleware.makeRequireRole((id) => repositories.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((user) => ({ role: user.role })))));
+		const isEntityType = (v: string): v is typeof _ENTITY_TYPES[number] => (_ENTITY_TYPES as readonly string[]).includes(v);
 		return handlers
 			.handle('search', ({ urlParams }) =>
 				CacheService.rateLimit('api',
@@ -31,6 +36,14 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						},
 						{ cursor: urlParams.cursor, limit: urlParams.limit },
 					).pipe(
+						Effect.map((result) => ({
+							cursor: result.cursor,
+							facets: result.facets ? { app: result.facets['app'] ?? 0, asset: result.facets['asset'] ?? 0, auditLog: result.facets['auditLog'] ?? 0, user: result.facets['user'] ?? 0 } : null,
+							hasNext: result.hasNext,
+							hasPrev: result.hasPrev,
+							items: A.filterMap(result.items, (item) => isEntityType(item.entityType) ? Option.some({ displayText: item.displayText, entityId: item.entityId, entityType: item.entityType, metadata: item.metadata, rank: item.rank, snippet: item.snippet }) : Option.none()),
+							total: result.total,
+						})),
 						Effect.mapError((error) => HttpError.Internal.of('Search failed', error)),
 						Telemetry.span('search.query', { kind: 'server' }),
 					),

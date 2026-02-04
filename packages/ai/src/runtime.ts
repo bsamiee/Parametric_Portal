@@ -139,19 +139,9 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     onSuccess: () => MetricsService.inc(metrics.ai.requests, labels, _CONFIG.metrics.unit),
                 }),
             );
-        function embed(
-            input: string,
-        ): Effect.Effect<readonly number[], AiError.AiError | AiRuntimeError, Resilience.State>;
-        function embed(
-            input: readonly string[],
-        ): Effect.Effect<readonly (readonly number[])[], AiError.AiError | AiRuntimeError, Resilience.State>;
-        function embed(
-            input: string | readonly string[],
-        ): Effect.Effect<
-            readonly number[] | readonly (readonly number[])[],
-            AiError.AiError | AiRuntimeError,
-            Resilience.State
-        > {
+        function embed(input: string,): Effect.Effect<readonly number[], AiError.AiError | AiRuntimeError, Resilience.State>;
+        function embed(input: readonly string[],): Effect.Effect<readonly (readonly number[])[], AiError.AiError | AiRuntimeError, Resilience.State>;
+        function embed(input: string | readonly string[],): Effect.Effect<readonly number[] | readonly (readonly number[])[],AiError.AiError | AiRuntimeError,Resilience.State> {
             return Effect.gen(function* () {
                 const ctx = yield* Context.Request.current;
                 const appSettings = yield* settingsFor(ctx.tenantId);

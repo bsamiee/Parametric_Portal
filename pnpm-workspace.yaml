@@ -109,6 +109,7 @@ catalog:
   react-error-boundary: 6.1.0
   react-stately: 3.44.0
   rfc6902: 5.1.2
+  rollup: 4.57.1
   rollup-plugin-visualizer: 6.0.5
   sax: 1.4.4
   sharp: 0.34.5
