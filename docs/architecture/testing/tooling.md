@@ -74,27 +74,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 [IMPORTANT] Dual-app bootstrap: API (4000) + Icons (3001) started via Nx dev.
 
 ---
-## [4][MUTATION]
->**Dictum:** *Mutation testing validates test quality via fault injection.*
-
-<br>
-
-| [INDEX] | [PACKAGE]                      | [VERSION] | [INTEGRATION]                             |
-| :-----: | ------------------------------ | --------- | ----------------------------------------- |
-|   [1]   | @stryker-mutator/core          | 9.4.0     | Mutation runner, incremental caching      |
-|   [2]   | @stryker-mutator/vitest-runner | 9.4.0     | Vitest integration, root config reference |
-
-<br>
-
-**Configuration:** `stryker.config.js`
-- Thresholds: break=80, high=90, low=70
-- Incremental file: `.nx/cache/stryker-incremental.json`
-- Reports: `reports/stryker/mutation-report.{html,json}`
-
-[CRITICAL] Mutation score below 80% fails CI build.
-
----
-## [5][MOCKING]
+## [4][MOCKING]
 >**Dictum:** *Mock utilities enable isolated unit testing.*
 
 <br>
@@ -115,7 +95,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 **Setup:** `test-utils/setup.ts` imports fake-indexeddb in Node, clears storage.
 
 ---
-## [6][VISUAL_REGRESSION]
+## [5][VISUAL_REGRESSION]
 >**Dictum:** *Visual and accessibility testing validates UI correctness.*
 
 <br>
@@ -136,7 +116,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 |   [1]   | @testing-library/react | 16.3.1    | Component rendering, queries |
 
 ---
-## [7][UTILITY]
+## [6][UTILITY]
 >**Dictum:** *Supporting packages enable test infrastructure.*
 
 <br>
@@ -147,7 +127,7 @@ All versions managed via `pnpm-workspace.yaml` catalog. Reference: `"pkg": "cata
 |   [2]   | effect    | 3.19.13   | Monadic composition, Effect/Option/Either |
 
 ---
-## [8][CATALOG_REFERENCE]
+## [7][CATALOG_REFERENCE]
 >**Dictum:** *Centralized versions prevent drift.*
 
 <br>
@@ -159,8 +139,6 @@ catalog:
   '@effect/vitest': 0.27.0
   '@fast-check/vitest': 0.2.4
   '@playwright/test': 1.57.0
-  '@stryker-mutator/core': 9.4.0
-  '@stryker-mutator/vitest-runner': 9.4.0
   '@testing-library/react': 16.3.1
   '@vitest/browser-playwright': 4.0.16
   '@vitest/coverage-v8': 4.0.16
@@ -184,12 +162,12 @@ catalog:
 - [NEVER] Pin versions directly in package.json.
 
 ---
-## [9][QUALITY_TOOLS]
+## [8][QUALITY_TOOLS]
 >**Dictum:** *Static analysis prevents dead code and enforces monorepo hygiene.*
 
 <br>
 
-### [9.1][DEAD_CODE_DETECTION]
+### [8.1][DEAD_CODE_DETECTION]
 
 | [INDEX] | [PACKAGE] | [VERSION] | [INTEGRATION]                       |
 | :-----: | --------- | --------- | ----------------------------------- |
@@ -209,7 +187,7 @@ catalog:
 [IMPORTANT] Run `pnpm knip` before major refactors to identify cleanup targets.
 
 ---
-### [9.2][MONOREPO_LINTING]
+### [8.2][MONOREPO_LINTING]
 
 | [INDEX] | [PACKAGE] | [VERSION] | [INTEGRATION]                       |
 | :-----: | --------- | --------- | ----------------------------------- |
@@ -228,7 +206,7 @@ catalog:
 - `pnpm sherif:fix` — Auto-fix violations
 
 ---
-### [9.3][NX_PLUGINS]
+### [8.3][NX_PLUGINS]
 
 | [INDEX] | [PACKAGE]              | [VERSION] | [INTEGRATION]                       |
 | :-----: | ---------------------- | --------- | ----------------------------------- |
@@ -248,7 +226,7 @@ catalog:
 [IMPORTANT] Plugins provide automatic task inference—no manual target configuration required.
 
 ---
-## [10][REFERENCES]
+## [9][REFERENCES]
 >**Dictum:** *Cross-references enable navigation.*
 
 <br>

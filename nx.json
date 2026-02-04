@@ -31,15 +31,6 @@
             "{projectRoot}/**/*.json",
             "{workspaceRoot}/biome.json"
         ],
-        "mutation": [
-            "{projectRoot}/src/**/*.ts",
-            "!{projectRoot}/src/**/*.d.ts",
-            "!{projectRoot}/src/**/*.spec.ts",
-            "!{projectRoot}/src/**/*.bench.ts",
-            "{projectRoot}/tests/**/*",
-            "{workspaceRoot}/stryker.config.js",
-            "{workspaceRoot}/vitest.config.ts"
-        ],
         "production": [
             "default",
             "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
@@ -53,7 +44,6 @@
             "{workspaceRoot}/vite.factory.ts",
             "{workspaceRoot}/vitest.config.ts",
             "{workspaceRoot}/playwright.config.ts",
-            "{workspaceRoot}/stryker.config.js",
             "{workspaceRoot}/biome.json",
             "{workspaceRoot}/package.json",
             "{workspaceRoot}/pnpm-lock.yaml",
@@ -298,16 +288,6 @@
                 "command": "for dir in infrastructure/projects/*/overlays/prod; do [[ \"$dir\" == *\"_template\"* ]] && continue; echo \"[INFO] Diff for $(basename $(dirname $(dirname \"$dir\")))...\"; kubectl diff -k \"$dir\" || true; done",
                 "cwd": "{workspaceRoot}"
             }
-        },
-        "mutate": {
-            "cache": true,
-            "dependsOn": ["build"],
-            "executor": "nx:run-commands",
-            "inputs": ["mutation", "^production"],
-            "options": {
-                "command": "stryker run --incremental --testRunner vitest --coverageAnalysis perTest --reporters html,json,clear-text,progress --concurrency 4 --ignorePatterns 'dist,coverage,.nx,.vite,*.log,html,docs,test-results,stryker-tmp,**/*.png,**/*.jpg,**/*.svg,**/*.ico' --mutate 'packages/*/src/**/*.ts' --mutate '!packages/*/src/**/*.d.ts' --mutate '!packages/*/src/**/*.spec.ts' --mutate '!packages/*/src/**/*.bench.ts'"
-            },
-            "outputs": ["{workspaceRoot}/reports/stryker", "{workspaceRoot}/.nx/cache/stryker-incremental.json"]
         },
         "pwa:icons": {
             "cache": false,

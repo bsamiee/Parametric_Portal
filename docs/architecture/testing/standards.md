@@ -351,40 +351,7 @@ trace: {
 [IMPORTANT] Use `e2e-ci` target for Atomizer parallel sharding in CI.
 
 ---
-## [7][MUTATION_TESTING]
->**Dictum:** *Mutation score validates test quality via fault injection.*
-
-<br>
-
-### [7.1][THRESHOLDS]
-
-| [INDEX] | [THRESHOLD] | [VALUE] | [ACTION]          |
-| :-----: | ----------- | ------- | ----------------- |
-|   [1]   | break       | 80%     | CI fails below    |
-|   [2]   | high        | 90%     | Green badge       |
-|   [3]   | low         | 70%     | Warning threshold |
-
-### [7.2][INCREMENTAL]
-
-Cache path: `.nx/cache/stryker-incremental.json`
-
-Run incrementally to test only changed files:
-
-```bash
-pnpm exec nx run-many -t mutate
-```
-
-### [7.3][SURVIVOR_ANALYSIS]
-
-When mutations survive (not killed by tests):
-1. Identify untested branch in mutation report
-2. Add targeted test case or property
-3. Prioritize boundary conditions and error paths
-
-[CRITICAL] Mutation score below 80% fails CI build.
-
----
-## [8][ANTI-PATTERNS]
+## [7][ANTI-PATTERNS]
 >**Dictum:** *Prohibited patterns increase maintenance and reduce reliability.*
 
 <br>
@@ -403,7 +370,7 @@ When mutations survive (not killed by tests):
 |  [10]   | `try/catch` in tests        | Effect error channel            |
 
 ---
-## [9][REFERENCES]
+## [8][REFERENCES]
 >**Dictum:** *Cross-references enable navigation.*
 
 <br>

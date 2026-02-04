@@ -367,7 +367,6 @@ const config: {
                     '**/test-results/**',
                     '**/playwright-report/**',
                     '**/playwright/.cache/**',
-                    '**/stryker-tmp/**',
                     '**/reports/**',
                     // Python artifacts
                     '**/__pycache__/**',

@@ -54,8 +54,6 @@ playwright-report/
 playwright/.cache/
 .pytest_cache/
 .hypothesis/
-reports/stryker/
-stryker-tmp/
 **/__screenshots__/
 .vitest-attachments
 

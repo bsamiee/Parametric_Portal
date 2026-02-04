@@ -50,8 +50,6 @@ catalog:
   '@react-aria/live-announcer': 3.4.4
   '@rollup/plugin-typescript': 12.3.0
   '@sonar/scan': 4.3.4
-  '@stryker-mutator/core': 9.4.0
-  '@stryker-mutator/vitest-runner': 9.4.0
   '@swc-node/register': 1.11.1
   '@swc/core': 1.15.10
   '@tailwindcss/vite': 4.1.18

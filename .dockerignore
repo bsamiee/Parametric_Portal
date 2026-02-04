@@ -12,7 +12,6 @@ coverage
 .nx/cache
 .vite
 .vite-inspect
-stryker-tmp
 
 # --- VERSION CONTROL ----------------------------------------------------------
 .git

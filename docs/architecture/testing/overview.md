@@ -3,7 +3,7 @@
 
 <br>
 
-Property-based unit testing via Vitest, E2E automation via Playwright, mutation testing via Stryker.
+Property-based unit testing via Vitest, E2E automation via Playwright.
 
 ---
 ## [1][STACK]
@@ -16,8 +16,7 @@ Property-based unit testing via Vitest, E2E automation via Playwright, mutation 
 |   [1]   | Unit Testing   | Vitest                     | 4.0.16    | Vite-native, inline projects, V8 cov   |
 |   [2]   | Browser        | @vitest/browser-playwright | 4.0.16    | Real browser isolation for runtime pkg |
 |   [3]   | E2E            | @playwright/test           | 1.57.0    | Chromium automation, trace capture     |
-|   [4]   | Mutation       | @stryker-mutator/core      | 9.4.0     | Mutation score enforcement (80%)       |
-|   [5]   | Property-Based | fast-check                 | 4.5.2     | Arbitrary generators, shrinking        |
+|   [4]   | Property-Based | fast-check                 | 4.5.2     | Arbitrary generators, shrinking        |
 |   [6]   | Effect Testing | @effect/vitest             | 0.27.0    | Effect matchers, equality testers      |
 |   [7]   | Mocking        | msw                        | 2.12.4    | Request interception, network mocks    |
 |   [8]   | Accessibility  | @axe-core/playwright       | 4.11.0    | WCAG validation in E2E                 |
@@ -32,7 +31,6 @@ Property-based unit testing via Vitest, E2E automation via Playwright, mutation 
 |   [2]   | Branches   |     30%     | V8 coverage minimum     |
 |   [3]   | Functions  |     30%     | V8 coverage minimum     |
 |   [4]   | Statements |     30%     | V8 coverage minimum     |
-|   [5]   | Mutation   |     80%     | Stryker break threshold |
 
 ---
 ## [2][TOPOLOGY]
@@ -44,7 +42,6 @@ Property-based unit testing via Vitest, E2E automation via Playwright, mutation 
 /
 ├── vitest.config.ts              # Root config with inline projects
 ├── playwright.config.ts          # E2E config with dual-app bootstrap
-├── stryker.config.js             # Mutation testing thresholds
 ├── packages/
 │   ├── test-utils/               # Shared test infrastructure
 │   │   └── src/
@@ -141,8 +138,7 @@ E2E tests leverage Claude agents for automated test lifecycle:
 |   [1]   | `pnpm exec nx test`             | Run all unit tests                 |
 |   [2]   | `pnpm exec nx test @scope/pkg`  | Run package-specific tests         |
 |   [3]   | `pnpm exec nx e2e`              | Run E2E tests (starts web servers) |
-|   [4]   | `pnpm exec nx mutate`           | Run mutation testing               |
-|   [5]   | `pnpm exec nx run-many -t test` | Parallel test across affected      |
+|   [4]   | `pnpm exec nx run-many -t test` | Parallel test across affected      |
 
 <br>
 
@@ -175,7 +171,6 @@ E2E tests leverage Claude agents for automated test lifecycle:
 |   [2]   | `test-results/`            | Vitest JSON, JUnit output |
 |   [3]   | `test-results/e2e/`        | Playwright artifacts      |
 |   [4]   | `test-results/e2e-report/` | Playwright HTML report    |
-|   [5]   | `reports/stryker/`         | Mutation testing reports  |
 
 ---
 ## [6][REFERENCES]

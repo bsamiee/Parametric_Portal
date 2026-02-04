@@ -54,8 +54,6 @@
         "@radix-ui/react-slot": "catalog:",
         "@rollup/plugin-typescript": "catalog:",
         "@sonar/scan": "catalog:",
-        "@stryker-mutator/core": "catalog:",
-        "@stryker-mutator/vitest-runner": "catalog:",
         "@swc-node/register": "catalog:",
         "@swc/core": "catalog:",
         "@tailwindcss/vite": "catalog:",
