@@ -145,9 +145,7 @@ function is(err: unknown, reason?: CircuitError['reason']): boolean {
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
 const Circuit = {
-	clear: () => _CircuitState.pipe(Effect.flatMap(({ lastAccess, registry }) =>
-		Effect.all([Ref.set(registry, HashMap.empty()), Ref.set(lastAccess, HashMap.empty())], { discard: true }),
-	)),
+	clear: () => _CircuitState.pipe(Effect.flatMap(({ lastAccess, registry }) => Effect.all([Ref.set(registry, HashMap.empty()), Ref.set(lastAccess, HashMap.empty())], { discard: true }),)),
 	current,
 	Error: CircuitError,
 	gc: (maxIdleMs = _CONFIG.defaults.gcIdleMs) => _CircuitState.pipe(

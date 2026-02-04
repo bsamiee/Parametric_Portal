@@ -19,17 +19,18 @@ import { Crypto } from './security/crypto.ts';
 
 const _CONFIG = {
 	cors: {
-		allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-App-Id', 'X-Requested-With'],
+		allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-App-Id', 'X-Request-Id', 'X-Requested-With', 'Traceparent', 'Tracestate', 'Baggage'],
 		allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
 		allowedOrigins: ['*'],
 		credentials: true,
+		exposedHeaders: ['X-Request-Id', 'X-Circuit-State', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Server-Timing', 'Traceparent', 'Tracestate', 'Baggage', 'Content-Disposition'],
 		maxAge: 86400,
 	},
 	proxy: {
 		cidrs: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10'],
 	},
 	security: {
-		base: {'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',} satisfies Record<string, string>,
+		base: {'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',} satisfies Record<string, string>,
 		hsts: { includeSubDomains: true, maxAge: 31536000 },
 	},
 } as const;
@@ -149,6 +150,7 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			})),
 		);
 		const ctx: Context.Request.Data = {
+			appNamespace: namespaceOpt,
 			circuit: Option.none(),
 			cluster,
 			ipAddress: _extractClientIp(proxy, req.headers, req.remoteAddress),
@@ -158,19 +160,8 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			tenantId,
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
-		const logAnnotations = { 'request.id': requestId, 'tenant.id': tenantId, ...Option.match(namespaceOpt, { onNone: () => ({}), onSome: (ns) => ({ 'app.namespace': ns }) }) };
-		yield* pipe(	// Annotate span with runner ID for cross-pod trace correlation
-			Option.flatMapNullable(cluster, (c) => c.runnerId),
-			Option.match({ onNone: () => Effect.void, onSome: (id) => Effect.annotateCurrentSpan('cluster.runner_id', id) }),
-		);
 		const runApp = app.pipe(
 			Effect.provideService(Context.Request, ctx),
-			Effect.tap(Effect.all([
-				Effect.annotateCurrentSpan('tenant.id', tenantId),
-				Effect.annotateCurrentSpan('request.id', requestId),
-				...A.map(A.fromOption(namespaceOpt), (namespace) => Effect.annotateCurrentSpan('app.namespace', namespace)),
-			], { discard: true })),
-			Effect.annotateLogs(logAnnotations),
 			Effect.flatMap((response) => Effect.gen(function* () {
 				const context = yield* Context.Request.current;
 				const circuitHeader = context.circuit.pipe(Option.map((circuit) => circuit.state));

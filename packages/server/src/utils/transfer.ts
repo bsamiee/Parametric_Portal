@@ -20,7 +20,7 @@ const _drivers = {
 
 // --- [TYPES] -----------------------------------------------------------------
 
-type _Asset = { readonly content: string; readonly hash?: string; readonly type: string; readonly name?: string; readonly ordinal: number };
+type _Asset = { readonly content: string; readonly hash?: string; readonly type: string; readonly name?: string; readonly mime?: string; readonly ordinal: number };
 type _Row = Either.Either<_Asset, TransferError.Parse>;
 type _Stream = Stream.Stream<_Row, TransferError.Fatal>;
 
@@ -45,7 +45,7 @@ class Import extends S.TaggedError<Import>()('Import', {
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const limits = { batchSize: 500, compressionRatio: 100, entryBytes: 5 * 1024 * 1024, maxItems: 10_000, totalBytes: 50 * 1024 * 1024 } as const satisfies Codec.Limits;
+const limits = { batchSize: 500, compressionRatio: 100, entryBytes: 1 * 1024 * 1024, maxItems: 10_000, totalBytes: 50 * 1024 * 1024 } as const satisfies Codec.Limits;
 const _parserError = (err: unknown): Fatal => {
 	const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : String(err);
 	return new Fatal({ code: 'PARSER_ERROR', detail: msg });
@@ -60,7 +60,12 @@ const _parseRecord = (line: string, ordinal: number, assetType: string, parse: (
 			const parsed = obj as Record<string, unknown>;
 			const parsedType = (parsed['type'] as string) ?? assetType;
 			const content = String(parsed['content'] ?? line);
-			return parsedType ? Either.right<_Asset>({ content, ordinal, type: parsedType }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal }));
+			const hash = typeof parsed['hash'] === 'string' ? parsed['hash'] : undefined;
+			const name = typeof parsed['name'] === 'string' ? parsed['name'] : undefined;
+			const mime = typeof parsed['mime'] === 'string' ? parsed['mime'] : undefined;
+			return parsedType
+				? Either.right<_Asset>({ content, ordinal, type: parsedType, ...(hash && { hash }), ...(name && { name }), ...(mime && { mime }) })
+				: Either.left(new Parse({ code: 'MISSING_TYPE', ordinal }));
 		}),
 	);
 const _delimited = (codec: Codec.Of<'delimited'>, input: Codec.Input, assetType: string): _Stream =>
@@ -71,7 +76,12 @@ const _delimited = (codec: Codec.Of<'delimited'>, input: Codec.Input, assetType:
 				Stream.zipWithIndex,
 				Stream.map(([data, idx]) => {
 					const ordinal = idx + 1, parsedType = data['type'] ?? assetType;
-					return parsedType ? Either.right({ content: data['content'] ?? '', ordinal, type: parsedType }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal }));
+					const hash = data['hash'];
+					const name = data['name'];
+					const mime = data['mime'];
+					return parsedType
+						? Either.right({ content: data['content'] ?? '', ordinal, type: parsedType, ...(hash && { hash }), ...(name && { name }), ...(mime && { mime }) })
+						: Either.left(new Parse({ code: 'MISSING_TYPE', ordinal }));
 				}),
 			)
 	)(Papa.parse<Record<string, string>>(codec.content(input), { delimiter: codec.sep, header: true, skipEmptyLines: 'greedy', transformHeader: (header) => header.trim().toLowerCase().replaceAll('_', '') })))));
@@ -141,7 +151,7 @@ const _xlsx = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string
 			Stream.zipWithIndex,
 			Stream.map(([row, idx]) => {
 				const parsedType = String(row.values?.[1] ?? assetType);
-				return parsedType ? Either.right({ content: String(row.values?.[2] ?? ''), ordinal: idx + 2, type: parsedType }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal: idx + 2 }));
+				return parsedType ? Either.right({ content: String(row.values?.[3] ?? ''), ordinal: idx + 2, type: parsedType }) : Either.left(new Parse({ code: 'MISSING_TYPE', ordinal: idx + 2 }));
 			}),
 		);
 	})));
@@ -149,12 +159,13 @@ const _zipNoManifest = (zip: JSZip, assetType: string): _Stream =>
 	Stream.fromIterable(Object.values(zip.files).filter((file) => !file.dir)).pipe(
 		Stream.zipWithIndex,
 		Stream.map(([file, idx]) => ({ file, name: file.name, ordinal: idx + 1 })),
-		Stream.mapEffect(({ file, name, ordinal }) =>
-			Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', ordinal }), try: () => file.async('text') }).pipe(
-				Effect.map((content) => Either.right({ content, ordinal, type: Codec(name.split('.').pop() ?? assetType).ext })),
+		Stream.mapEffect(({ file, name, ordinal }) => {
+			const detected = Codec(name.split('.').pop() ?? assetType);
+			return Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', ordinal }), try: () => file.async('arraybuffer') }).pipe(
+				Effect.map((raw) => Either.right({ content: detected.content(raw), mime: detected.mime, name, ordinal, type: detected.ext })),
 				Effect.catchAll((err) => Effect.succeed(Either.left(err))),
-			),
-		),
+			);
+		}),
 	);
 const _zipWithManifest = (zip: JSZip, manifest: { entries: readonly Metadata[]; version: 1 }, buf: Buffer): _Stream =>
 	Stream.fromIterable(manifest.entries).pipe(
@@ -164,7 +175,7 @@ const _zipWithManifest = (zip: JSZip, manifest: { entries: readonly Metadata[]; 
 		Stream.mapAccumEffect(0, (size, { entry, name, ordinal }): Effect.Effect<readonly [number, _Row], Fatal> => Effect.gen(function* () {
 			const zipFile = zip.file(name);
 			yield* zipFile == null || zipFile.dir || !_validPath(name) ? Effect.fail(new Parse({ code: 'INVALID_PATH', detail: name, ordinal })) : Effect.void;
-			yield* entry.size > limits.entryBytes ? Effect.fail(new Parse({ code: 'TOO_LARGE', detail: name, ordinal })) : Effect.void;
+			yield* entry.size > limits.totalBytes ? Effect.fail(new Fatal({ code: 'ARCHIVE_LIMIT' })) : entry.codec.binary || entry.size <= limits.entryBytes ? Effect.void : Effect.fail(new Parse({ code: 'TOO_LARGE', detail: name, ordinal }));
 			const raw = yield* Effect.tryPromise({ catch: () => new Parse({ code: 'DECOMPRESS', detail: name, ordinal }), try: () => (zipFile as JSZip.JSZipObject).async('arraybuffer') });
 			const cur = size + raw.byteLength;
 			yield* cur > limits.totalBytes ? Effect.fail(new Fatal({ code: 'ARCHIVE_LIMIT' })) : Effect.void;
@@ -172,7 +183,7 @@ const _zipWithManifest = (zip: JSZip, manifest: { entries: readonly Metadata[]; 
 			const content = entry.codec.content(raw);
 			yield* entry.hash ? Crypto.hash(content).pipe(Effect.orDie, Effect.flatMap((h) => h === entry.hash ? Effect.void : Effect.fail(new Parse({ code: 'HASH_MISMATCH', detail: name, ordinal })))) : Effect.void;
 			yield* entry.type == null ? Effect.fail(new Parse({ code: 'MISSING_TYPE', detail: name, ordinal })) : Effect.void;
-			const row: _Row = Either.right({ content, name, ordinal, type: entry.type as string, ...(entry.hash && { hash: entry.hash }) });
+			const row: _Row = Either.right({ content, mime: entry.mime, name, ordinal, type: entry.type as string, ...(entry.hash && { hash: entry.hash }) });
 			return [cur, row] as const;
 		}).pipe(Effect.catchTag('Parse', (err): Effect.Effect<readonly [number, _Row]> => Effect.succeed([size, Either.left(err)] as const)))),
 	);
@@ -207,11 +218,18 @@ const import_ = (input: Codec.Input | readonly Codec.Input[], opts: {
 			const result: _Stream = opts.mode === 'file'
 				? Stream.make(Either.right({ content: codec.content(item), ordinal: 1, type: assetType }))
 				: Codec.dispatch<_Stream>(codec.ext, item, {
-						archive: (detected, raw) => _archive(detected, raw, assetType),
-						delimited: (detected, raw) => _delimited(detected, raw, assetType),
-						none: (detected, raw) => Stream.make(Either.right({ content: detected.content(raw), ordinal: 1, type: assetType === 'unknown' ? detected.ext : assetType })),
-						stream: (detected, raw) => _streamed(detected, raw, assetType),
-						tree: (detected, raw) => _tree(detected, raw, assetType),
+						archive: 	(detected, raw) => _archive(detected, raw, assetType),
+						delimited: 	(detected, raw) => _delimited(detected, raw, assetType),
+						none: 		(detected, raw) => {
+							const content = detected.content(raw);
+							const type = assetType === 'unknown' ? detected.ext : assetType;
+							const tooLarge = !detected.binary && Codec.size(content) > limits.entryBytes;
+							return Stream.make(tooLarge
+								? Either.left(new Parse({ code: 'TOO_LARGE', ordinal: 1 }))
+								: Either.right({ content, mime: detected.mime, ordinal: 1, type }));
+						},
+						stream: 	(detected, raw) => _streamed(detected, raw, assetType),
+						tree: 		(detected, raw) => _tree(detected, raw, assetType),
 					});
 			return opts.format
 				? result : Stream.fromEffect(Effect.logDebug('Transfer: auto-detected', { format: codec.ext })).pipe(Stream.flatMap(() => result));
@@ -245,8 +263,7 @@ const _binary = {
 		const wb = new excel.stream.xlsx.WorkbookWriter({ stream: pt, useSharedStrings: false, useStyles: false });
 		const sheet = wb.addWorksheet('Assets');
 		sheet.columns = [{ header: 'Type', key: 'type', width: 20 }, { header: 'Id', key: 'id', width: 40 }, { header: 'Content', key: 'content', width: 60 }, { header: 'UpdatedAt', key: 'updatedAt', width: 24 }];
-		const count = yield* Stream.runFoldEffect(stream, 0, (rowCount, asset) =>
-			Effect.sync(() => { sheet.addRow(_serializeExport(asset)).commit(); }).pipe(Effect.as(rowCount + 1)));
+		const count = yield* Stream.runFoldEffect(stream, 0, (rowCount, asset) => Effect.sync(() => { sheet.addRow(_serializeExport(asset)).commit(); }).pipe(Effect.as(rowCount + 1)));
 		sheet.commit();
 		yield* Effect.promise(() => wb.commit());
 		return { count, data: Buffer.concat(MutableRef.get(chunks)).toString('base64'), name: name ?? `export-${ts}.xlsx` };
@@ -268,12 +285,12 @@ const _binary = {
 	}),
 } as const;
 const _formats = {
-	csv: { kind: 'text' },
+	csv: 	{ kind: 'text' },
 	ndjson: { kind: 'text' },
-	xlsx: { kind: 'binary' },
-	xml: { kind: 'text' },
-	yaml: { kind: 'text' },
-	zip: { kind: 'binary' },
+	xlsx: 	{ kind: 'binary' },
+	xml: 	{ kind: 'text' },
+	yaml: 	{ kind: 'text' },
+	zip: 	{ kind: 'binary' },
 } as const satisfies Record<keyof typeof _text | keyof typeof _binary, { readonly kind: 'binary' | 'text' }>;
 type _BinaryFormat = keyof typeof _binary;
 type _TextFormat = keyof typeof _text;
@@ -281,7 +298,7 @@ function export_<E, R>(stream: _Out<E, R>, fmt: _TextFormat): Stream.Stream<Uint
 function export_<E, R>(stream: _Out<E, R>, fmt: _BinaryFormat, opts?: { readonly name?: string }): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R>;
 function export_<E, R>(stream: _Out<E, R>, fmt: keyof typeof _formats, opts?: { readonly name?: string }): Stream.Stream<Uint8Array, E, R> | Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> {
 	return Match.value(fmt).pipe(
-		Match.when((f): f is _TextFormat => _formats[f].kind === 'text', (f) => Stream.map(_text[f](stream), new TextEncoder().encode)),
+		Match.when((f): f is _TextFormat => _formats[f].kind === 'text', (f) => Stream.map(_text[f](stream), (s) => new TextEncoder().encode(s))),
 		Match.when((f): f is _BinaryFormat => _formats[f].kind === 'binary', (f) => _binary[f](stream, opts?.name)),
 		Match.exhaustive,
 	);

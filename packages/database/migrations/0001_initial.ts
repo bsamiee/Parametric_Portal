@@ -1,10 +1,9 @@
 /**
- * PG18.1 + EXTENSIONS LEVERAGED (Release: Sept 25, 2025):
+ * PG18.1 + EXTENSIONS LEVERAGED (Release date: 2025-11-13):
  * ┌───────────────────────────────────────────────────────────────────────────────┐
  * │ uuidv7()              │ NATIVE time-ordered IDs (no extension, k-sortable)    │
  * │ uuid_extract_timestamp│ Extract creation time from UUIDv7 (NO created_at)     │
  * │ RETURNING OLD/NEW     │ Capture before/after values in single DML statement   │
- * │ citext                │ Case-insensitive text columns (extension)             │
  * │ btree_gist            │ GiST for scalars — required for WITHOUT OVERLAPS      │
  * │ NULLS NOT DISTINCT    │ Proper NULL handling in unique constraints            │
  * │ Covering (INCLUDE)    │ Index-only scans eliminate heap fetches               │
@@ -15,10 +14,9 @@
  * │ STORED generated      │ Precomputed columns (assets.size only — others VIRTUAL│
  * │ VIRTUAL generated     │ Computed on read (prefix columns)                     │
  * │ Immutability          │ DB-enforced append-only audit_logs via trigger        │
- * │ json_strip_nulls(,t)  │ PG18.1: Optional 2nd arg removes null array elements  │
  * └───────────────────────────────────────────────────────────────────────────────┘
- * EXTENSIONS REQUIRED (CREATE EXTENSION IF NOT EXISTS):
- * - citext (case-insensitive columns: apps.namespace, users.email)
+ * EXTENSIONS + COLLATION REQUIRED (CREATE EXTENSION IF NOT EXISTS):
+ * - ICU case-insensitive collation (TEXT + nondeterministic ICU collation for apps.namespace, users.email)
  * - btree_gist (GiST index support for scalar types — temporal constraints)
  * - pg_trgm (trigram similarity for fuzzy search)
  * - fuzzystrmatch (levenshtein/soundex fuzzy matchers)
@@ -75,9 +73,8 @@ import { Effect } from 'effect';
 export default Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     // ═══════════════════════════════════════════════════════════════════════════
-    // EXTENSIONS: citext + btree_gist + pg_trgm + fuzzystrmatch + unaccent + vector + pg_stat_statements + pgaudit
+    // EXTENSIONS: btree_gist + pg_trgm + fuzzystrmatch + unaccent + vector + pg_stat_statements + pgaudit
     // ═══════════════════════════════════════════════════════════════════════════
-    yield* sql`CREATE EXTENSION IF NOT EXISTS citext`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS btree_gist`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS fuzzystrmatch`;
@@ -85,7 +82,6 @@ export default Effect.gen(function* () {
     yield* sql`CREATE EXTENSION IF NOT EXISTS vector`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS pg_stat_statements`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS pgaudit`;
-    yield* sql`COMMENT ON EXTENSION citext IS 'citext: case-insensitive text columns'`;
     yield* sql`COMMENT ON EXTENSION btree_gist IS 'btree_gist: GiST support for scalar types — required for temporal constraints (WITHOUT OVERLAPS)'`;
     yield* sql`COMMENT ON EXTENSION pg_trgm IS 'pg_trgm: trigram similarity for fuzzy search'`;
     yield* sql`COMMENT ON EXTENSION fuzzystrmatch IS 'fuzzystrmatch: levenshtein/soundex matchers for fuzzy search'`;
@@ -93,17 +89,26 @@ export default Effect.gen(function* () {
     yield* sql`COMMENT ON EXTENSION vector IS 'pgvector 0.8+: vector similarity search with HNSW iterative scan support'`;
     yield* sql`COMMENT ON EXTENSION pg_stat_statements IS 'pg_stat_statements: SQL statement performance statistics'`;
     yield* sql`COMMENT ON EXTENSION pgaudit IS 'pgaudit: compliance audit logging for SOC2/HIPAA/PCI-DSS'`;
+    yield* sql`CREATE COLLATION IF NOT EXISTS case_insensitive (provider = icu, locale = 'und-u-ks-level2', deterministic = false)`;
+    yield* sql`COMMENT ON COLLATION case_insensitive IS 'ICU nondeterministic collation for case-insensitive TEXT (Unicode-aware)'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // ASYNC I/O CONFIGURATION GUIDANCE (PG18.1)
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
-        COMMENT ON DATABASE CURRENT_DATABASE IS
-        'PG18.1 Async I/O Configuration (set in postgresql.conf):
-        - io_method: worker (default, recommended) or io_uring (Linux 5.1+, requires --with-liburing)
-        - io_workers: 3 (default), tune to 25% of CPU cores for cloud workloads
-        - effective_io_concurrency: 16 (PG18 default, increase to 32-64 for cloud storage)
-        - io_combine_limit: 128 (default, increase for sequential scans)
-        Note: io_method and io_workers require server restart to change.'
+        DO $$
+        BEGIN
+            EXECUTE format(
+                'COMMENT ON DATABASE %I IS %L',
+                current_database(),
+                'PG18.1 Async I/O Configuration (set in postgresql.conf):
+                - io_method: worker (default, recommended) or io_uring (Linux 5.1+, requires --with-liburing)
+                - io_workers: 3 (default), tune to 25% of CPU cores for cloud workloads
+                - effective_io_concurrency: 16 (PG18 default, increase to 32-64 for cloud storage)
+                - io_combine_limit: 128 (default, increase for sequential scans)
+                Note: io_method and io_workers require server restart to change.'
+            );
+        END;
+        $$;
     `;
     // ═══════════════════════════════════════════════════════════════════════════
     // UTILITY: Trigger functions for updated_at and immutability enforcement
@@ -163,7 +168,7 @@ export default Effect.gen(function* () {
         CREATE TABLE apps (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             name TEXT NOT NULL,
-            namespace CITEXT NOT NULL,
+            namespace TEXT COLLATE case_insensitive NOT NULL,
             settings JSONB,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT apps_name_not_empty CHECK (length(trim(name)) > 0),
@@ -183,7 +188,7 @@ export default Effect.gen(function* () {
         CREATE TABLE users (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
-            email CITEXT NOT NULL,
+            email TEXT COLLATE case_insensitive NOT NULL,
             role TEXT NOT NULL,
             status TEXT NOT NULL,
             deleted_at TIMESTAMPTZ,
@@ -195,7 +200,7 @@ export default Effect.gen(function* () {
     `;
     yield* sql`COMMENT ON TABLE users IS 'User accounts — NEVER hard-delete; use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN users.deleted_at IS 'Soft-delete timestamp — NULL means active; set enables email re-registration'`;
-    yield* sql`COMMENT ON COLUMN users.email IS 'Format validated at app layer; CITEXT enforces case-insensitive uniqueness among active users'`;
+    yield* sql`COMMENT ON COLUMN users.email IS 'Format validated at app layer; ICU nondeterministic collation enforces case-insensitive uniqueness among active users'`;
     yield* sql`COMMENT ON COLUMN users.role_order IS 'VIRTUAL generated — permission hierarchy (owner=4, admin=3, member=2, viewer=1, guest=0)'`;
     yield* sql`CREATE UNIQUE INDEX idx_users_app_email_active ON users(app_id, email) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_email ON users(app_id, email) INCLUDE (id, role) WHERE deleted_at IS NULL`;
@@ -302,7 +307,7 @@ export default Effect.gen(function* () {
             type TEXT NOT NULL,
             content TEXT NOT NULL,
             status TEXT NOT NULL,
-            hash TEXT,
+            hash TEXT NOT NULL,
             name TEXT,
             storage_ref TEXT,
             deleted_at TIMESTAMPTZ,
@@ -414,13 +419,53 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_mfa_user ON mfa_secrets(user_id) INCLUDE (enabled_at) WHERE deleted_at IS NULL`;
     yield* sql`CREATE TRIGGER mfa_secrets_updated_at BEFORE UPDATE ON mfa_secrets FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
+    // JOBS: Durable job registry with snowflake job_id
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql`
+        CREATE TABLE jobs (
+            job_id TEXT PRIMARY KEY,
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            payload JSONB NOT NULL,
+            result JSONB,
+            progress JSONB,
+            history JSONB NOT NULL,
+            attempts INTEGER NOT NULL,
+            max_attempts INTEGER NOT NULL,
+            scheduled_at TIMESTAMPTZ,
+            batch_id TEXT,
+            dedupe_key TEXT,
+            last_error TEXT,
+            completed_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT jobs_type_not_empty CHECK (length(trim(type)) > 0),
+            CONSTRAINT jobs_status_not_empty CHECK (length(trim(status)) > 0),
+            CONSTRAINT jobs_priority_not_empty CHECK (length(trim(priority)) > 0),
+            CONSTRAINT jobs_attempts_non_negative CHECK (attempts >= 0),
+            CONSTRAINT jobs_max_attempts_positive CHECK (max_attempts > 0),
+            CONSTRAINT jobs_history_array CHECK (jsonb_typeof(history) = 'array')
+        )
+    `;
+    yield* sql`COMMENT ON TABLE jobs IS 'Durable job registry — snowflake job_id, status/progress/history, tenant-scoped'`;
+    yield* sql`COMMENT ON COLUMN jobs.job_id IS 'Snowflake job identifier (18-19 digit string)'`;
+    yield* sql`COMMENT ON COLUMN jobs.history IS 'Array of {status, timestamp, error?} state transitions'`;
+    yield* sql`CREATE INDEX idx_jobs_app_status ON jobs(app_id, status) INCLUDE (type, priority, attempts)`;
+    yield* sql`CREATE INDEX idx_jobs_app_type ON jobs(app_id, type) INCLUDE (status, priority)`;
+    yield* sql`CREATE INDEX idx_jobs_app_updated ON jobs(app_id, updated_at DESC) INCLUDE (status, type)`;
+    yield* sql`CREATE INDEX idx_jobs_dedupe ON jobs(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_jobs_batch ON jobs(batch_id) WHERE batch_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_jobs_app_id_fk ON jobs(app_id)`;
+    yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    // ═══════════════════════════════════════════════════════════════════════════
     // JOB_DLQ: Dead-letter queue for failed jobs and events
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
         CREATE TABLE job_dlq (
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             source TEXT NOT NULL DEFAULT 'job',
-            original_job_id UUID NOT NULL,
+            original_job_id TEXT NOT NULL,
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
             user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
             request_id UUID,
@@ -441,7 +486,7 @@ export default Effect.gen(function* () {
     `;
     yield* sql`COMMENT ON TABLE job_dlq IS 'Unified dead-letter queue for jobs and events — use uuid_extract_timestamp(id) for DLQ creation time; NO updated_at (append-mostly)'`;
     yield* sql`COMMENT ON COLUMN job_dlq.source IS 'Discriminant: job = background job, event = domain event from EventBus'`;
-    yield* sql`COMMENT ON COLUMN job_dlq.original_job_id IS 'Reference to original job/event — NO FK constraint (source may be purged before replay)'`;
+    yield* sql`COMMENT ON COLUMN job_dlq.original_job_id IS 'Reference to original job/event — snowflake string, NO FK constraint (source may be purged before replay)'`;
     yield* sql`COMMENT ON COLUMN job_dlq.error_reason IS 'Failure classification discriminant for typed error handling — valid values depend on source'`;
     yield* sql`COMMENT ON COLUMN job_dlq.error_history IS 'Array of {error: string, timestamp: number} entries from all attempts'`;
     yield* sql`COMMENT ON COLUMN job_dlq.replayed_at IS 'NULL = pending replay; set when job/event resubmitted to queue'`;
@@ -800,7 +845,7 @@ export default Effect.gen(function* () {
             content_text TEXT,
             metadata JSONB,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            hash TEXT GENERATED ALWAYS AS (
+            document_hash TEXT GENERATED ALWAYS AS (
                 md5(coalesce(display_text, '') || ' ' || coalesce(content_text, '') || ' ' || coalesce(metadata::text, ''))
             ) STORED,
             search_vector TSVECTOR GENERATED ALWAYS AS (
@@ -817,8 +862,10 @@ export default Effect.gen(function* () {
             entity_type TEXT NOT NULL,
             entity_id UUID NOT NULL,
             scope_id UUID,
-            embedding VECTOR(1536) NOT NULL,
-            hash TEXT,
+            model TEXT NOT NULL,
+            dimensions INTEGER NOT NULL,
+            embedding VECTOR(3072) NOT NULL,
+            hash TEXT NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT search_embeddings_pk PRIMARY KEY (entity_type, entity_id),
             CONSTRAINT search_embeddings_fk FOREIGN KEY (entity_type, entity_id)
@@ -826,31 +873,12 @@ export default Effect.gen(function* () {
         )
     `;
     yield* sql`COMMENT ON TABLE search_embeddings IS 'Vector embeddings — use entity_id (UUIDv7) for creation time; configure hnsw.iterative_scan for filtered queries'`;
-    yield* sql`COMMENT ON COLUMN search_embeddings.embedding IS 'Fixed 1536-dim embeddings; enable hnsw.iterative_scan=relaxed_order for WHERE-filtered vector search'`;
+    yield* sql`COMMENT ON COLUMN search_embeddings.embedding IS 'Max-dimension vectors (3072); actual dimensions stored in dimensions, model in model'`;
     yield* sql`CREATE INDEX idx_search_documents_vector ON search_documents USING GIN (search_vector)`;
     yield* sql`CREATE INDEX idx_search_documents_scope ON search_documents (scope_id, entity_type)`;
     yield* sql`CREATE INDEX idx_search_documents_trgm ON search_documents USING GIN (display_text gin_trgm_ops)`;
-    yield* sql`CREATE INDEX idx_search_embeddings_scope ON search_embeddings (scope_id, entity_type)`;
+    yield* sql`CREATE INDEX idx_search_embeddings_scope ON search_embeddings (scope_id, entity_type, model, dimensions)`;
     yield* sql`CREATE INDEX idx_search_embeddings_embedding ON search_embeddings USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`;
-    yield* sql`
-        CREATE OR REPLACE VIEW search_embedding_sources AS
-        SELECT
-            d.entity_type,
-            d.entity_id,
-            d.scope_id,
-            d.display_text,
-            d.content_text,
-            d.metadata,
-            d.hash,
-            d.updated_at
-        FROM search_documents d
-        LEFT JOIN search_embeddings e
-            ON e.entity_type = d.entity_type
-            AND e.entity_id = d.entity_id
-            AND e.hash = d.hash
-        WHERE e.entity_id IS NULL
-    `;
-    yield* sql`COMMENT ON VIEW search_embedding_sources IS 'Source for embedding refresh; yields documents missing current embeddings'`;
     yield* sql`CREATE TRIGGER search_documents_updated_at BEFORE UPDATE ON search_documents FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     yield* sql`CREATE TRIGGER search_embeddings_updated_at BEFORE UPDATE ON search_embeddings FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     yield* sql.unsafe(String.raw`
@@ -1094,6 +1122,7 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE mfa_secrets ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE assets ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE jobs ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE job_dlq ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings ENABLE ROW LEVEL SECURITY`;
@@ -1111,6 +1140,8 @@ export default Effect.gen(function* () {
     yield* sql`CREATE POLICY assets_tenant_isolation ON assets USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: audit_logs (scoped by app_id)
     yield* sql`CREATE POLICY audit_logs_tenant_isolation ON audit_logs USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    // RLS Policies: jobs (scoped by app_id)
+    yield* sql`CREATE POLICY jobs_tenant_isolation ON jobs USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: job_dlq (scoped by app_id)
     yield* sql`CREATE POLICY job_dlq_tenant_isolation ON job_dlq USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: search_documents (scoped by scope_id = app_id, or global if NULL)
@@ -1125,11 +1156,13 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE mfa_secrets FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE assets FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE jobs FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE job_dlq FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings FORCE ROW LEVEL SECURITY`;
     yield* sql`COMMENT ON POLICY users_tenant_isolation ON users IS 'RLS: Isolate users by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY assets_tenant_isolation ON assets IS 'RLS: Isolate assets by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY audit_logs_tenant_isolation ON audit_logs IS 'RLS: Isolate audit_logs by app_id matching current_setting(app.current_tenant)'`;
+    yield* sql`COMMENT ON POLICY jobs_tenant_isolation ON jobs IS 'RLS: Isolate jobs by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY job_dlq_tenant_isolation ON job_dlq IS 'RLS: Isolate job_dlq by app_id matching current_setting(app.current_tenant)'`;
 });

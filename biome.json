@@ -173,7 +173,10 @@
                 "packages/types/src/**/*.ts",
                 "packages/runtime/src/**/*.ts",
                 "packages/components-next/src/**/*.ts",
-                "packages/components-next/src/**/*.tsx"
+                "packages/components-next/src/**/*.tsx",
+                "tests/**/*.ts",
+                "tests/**/*.spec.ts",
+                "tests/**/*.test.ts"
             ],
             "formatter": { "enabled": false },
             "assist": { "actions": { "source": { "organizeImports": "off" } } }

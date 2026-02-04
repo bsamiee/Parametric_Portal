@@ -76,6 +76,7 @@ const DeliverActivity = Activity.make({
 	execute: Effect.gen(function* () {
 		const { endpoint, payload } = yield* DeliverActivityInput;
 		const baseClient = yield* HttpClient.HttpClient;
+		const requestId = (yield* Context.Request.current).requestId;
 		const deliveryId = payload.id;
 		const signature = yield* Crypto.hmac(endpoint.secret, JSON.stringify(payload)).pipe(Effect.mapError(() => WebhookError.from('SignatureError', deliveryId)),);
 		const request = HttpClientRequest.post(endpoint.url).pipe(
@@ -83,6 +84,7 @@ const DeliverActivity = Activity.make({
 			HttpClientRequest.setHeaders({
 				'Content-Type': 'application/json',
 				'X-Delivery-Id': deliveryId,
+				'x-request-id': requestId,
 				[_CONFIG.signature.header]: _CONFIG.signature.format(signature),
 			}),
 		);
@@ -150,36 +152,38 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 		const database = yield* DatabaseService;
 		const eventBus = yield* EventBus;
 		const metrics = yield* MetricsService;
-		const _deliverSingle = (endpoint: WebhookEndpoint, payload: WebhookPayload) => {	// Internal single-payload delivery with metrics/telemetry
+		const _deliverSingle = (tenantId: string, endpoint: WebhookEndpoint, payload: WebhookPayload) => {	// Internal single-payload delivery with metrics/telemetry
 			const labels = MetricsService.label({ endpoint: new URL(endpoint.url).host, operation: 'webhook.deliver' });
-			return WebhookWorkflow.execute({ endpoint, payload }).pipe(
-				Effect.tap((result) => eventBus.emit(new EventBus.Event({
+			return Context.Request.within(tenantId, WebhookWorkflow.execute({ endpoint, payload }).pipe(
+				Effect.tap((result) => eventBus.emit({
 					aggregateId: payload.id,
-					eventId: crypto.randomUUID() as typeof EventBus.Event.Type['eventId'],
 					payload: { _tag: 'webhook', action: 'delivered', durationMs: result.durationMs, endpoint: endpoint.url, statusCode: result.statusCode },
-					tenantId: 'system',
-				}))),
-				Effect.tapError((error) => eventBus.emit(new EventBus.Event({
+					tenantId,
+				}).pipe(Effect.ignore)),
+				Effect.tapError((error) => eventBus.emit({
 					aggregateId: payload.id,
-					eventId: crypto.randomUUID() as typeof EventBus.Event.Type['eventId'],
 					payload: { _tag: 'webhook', action: 'failed', endpoint: endpoint.url, reason: 'reason' in error ? error.reason : String(error) },
-					tenantId: 'system',
-				}))),
+					tenantId,
+				}).pipe(Effect.ignore)),
 				Effect.tapError(() => Metric.increment(Metric.taggedWithLabels(metrics.events.deadLettered, labels))),
 				(eff) => MetricsService.trackEffect(eff, { duration: metrics.events.deliveryLatency, errors: metrics.errors, labels }),
 				Telemetry.span('webhook.deliver', { 'webhook.type': payload.type, 'webhook.url': endpoint.url }),
-			);
+			));
 		};
-		const deliver = <T extends WebhookPayload | readonly WebhookPayload[]>(endpoint: WebhookEndpoint, payloads: T) => {	// Public polymorphic API for batch/single delivery
-			const items = Array.isArray(payloads) ? Chunk.fromIterable(payloads as readonly WebhookPayload[]) : Chunk.of(payloads as WebhookPayload);
-			const isBatch = Chunk.size(items) > 1;
-			const results = Stream.fromIterable(items).pipe(
-				Stream.mapEffect((payload) => _deliverSingle(endpoint, payload).pipe(Effect.either), { concurrency: _CONFIG.concurrency.batch }),
-				Stream.runCollect,
-				Effect.map(Chunk.toReadonlyArray),
-			);
+		function deliver(endpoint: WebhookEndpoint, payload: WebhookPayload): Effect.Effect<WebhookService.DeliveryOutcome | undefined>;
+		function deliver(endpoint: WebhookEndpoint, payloads: readonly WebhookPayload[]): Effect.Effect<readonly WebhookService.DeliveryOutcome[]>;
+		function deliver(endpoint: WebhookEndpoint, payloads: WebhookPayload | readonly WebhookPayload[]) {
+			const isBatch = Array.isArray(payloads);
+			const items = isBatch ? Chunk.fromIterable(payloads) : Chunk.of(payloads);
+			const results = Context.Request.currentTenantId.pipe(Effect.flatMap((tenantId) =>
+				Stream.fromIterable(items).pipe(
+					Stream.mapEffect((payload) => _deliverSingle(tenantId, endpoint, payload).pipe(Effect.either), { concurrency: _CONFIG.concurrency.batch }),
+					Stream.runCollect,
+					Effect.map(Chunk.toReadonlyArray),
+				),
+			));
 			return isBatch ? results : results.pipe(Effect.map((r) => r[0]));
-		};
+		}
 		yield* Effect.forkScoped(	// EventWebhookBridge: Subscribe to domain events and trigger configured webhooks
 			eventBus.onEvent().pipe(
 				Stream.mapEffect((envelope) => database.apps.one([{ field: 'id', value: envelope.event.tenantId }]).pipe(
@@ -197,7 +201,7 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 							});
 							yield* Effect.forEach(
 								matching,
-								(webhook) => _deliverSingle(webhook.endpoint, payload).pipe(Effect.ignore),
+								(webhook) => _deliverSingle(envelope.event.tenantId, webhook.endpoint, payload).pipe(Effect.ignore),
 								{ concurrency: 'unbounded', discard: true },
 							);
 						}),

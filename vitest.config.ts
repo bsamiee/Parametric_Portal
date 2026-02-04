@@ -13,7 +13,7 @@ const Dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const B = Object.freeze({
+const _CONFIG = {
     browser: {
         expect: {
             toMatchScreenshot: {
@@ -75,8 +75,13 @@ const B = Object.freeze({
             '**/test/**',
             '**/tests/**',
         ],
-        coverageInclude: ['packages/runtime/src/**/*.{ts,tsx}', 'packages/test-utils/src/**/*.{ts,tsx}'],
-        testExclude: ['**/*.e2e.{test,spec}.{ts,tsx}', '**/node_modules/**', '**/dist/**'],
+        coverageInclude: [
+            'packages/runtime/src/**/*.{ts,tsx}',
+            'packages/server/src/**/*.{ts,tsx}',
+            'packages/test-utils/src/**/*.{ts,tsx}',
+            'packages/types/src/**/*.{ts,tsx}',
+        ],
+        testExclude: ['**/*.e2e.{test,spec}.{ts,tsx}', '**/node_modules/**', '**/dist/**', 'tests/e2e/**'],
         testInclude: ['tests/**/*.{test,spec}.{ts,tsx}', 'src/**/*.{test,spec}.{ts,tsx}'],
     },
     reporters: {
@@ -85,46 +90,46 @@ const B = Object.freeze({
             ? ['dot', 'json', 'junit', 'github-actions', 'blob']
             : ['default', 'json', 'junit']) as readonly string[],
     },
-    setupFiles: ['@parametric-portal/test-utils/setup'],
+    setupFiles: [],
     snapshot: { format: { printBasicPrototype: false } },
     timeouts: { hook: 10_000, slow: 5_000, test: 10_000 },
-} as const);
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 
 export default defineConfig({
-    cacheDir: B.cacheDir,
-    optimizeDeps: { include: [...B.optimizeDeps] },
+    cacheDir: _CONFIG.cacheDir,
+    optimizeDeps: { include: [..._CONFIG.optimizeDeps] },
     test: {
         allowOnly: process.env.CI !== 'true',
-        benchmark: { exclude: ['**/node_modules/**', '**/dist/**'], include: [...B.patterns.benchInclude] },
-        chaiConfig: { ...B.output.chaiConfig },
+        benchmark: { exclude: ['**/node_modules/**', '**/dist/**'], include: [..._CONFIG.patterns.benchInclude] },
+        chaiConfig: { ..._CONFIG.output.chaiConfig },
         clearMocks: true,
         coverage: {
             clean: true,
             cleanOnRerun: true,
             enabled: false,
-            exclude: [...B.patterns.coverageExclude],
-            include: [...B.patterns.coverageInclude],
+            exclude: [..._CONFIG.patterns.coverageExclude],
+            include: [..._CONFIG.patterns.coverageInclude],
             provider: 'v8',
-            reporter: [...B.reporters.coverage],
+            reporter: [..._CONFIG.reporters.coverage],
             reportOnFailure: true,
             reportsDirectory: path.resolve(Dirname, 'coverage'),
             skipFull: false,
             // Thresholds disabled for fast-moving early development - re-enable when stabilized
         },
-        deps: { ...B.deps },
-        diff: { ...B.output.diff },
-        exclude: [...B.patterns.testExclude],
-        fakeTimers: { ...B.fakeTimers, toFake: [...B.fakeTimers.toFake] },
+        deps: { ..._CONFIG.deps },
+        diff: { ..._CONFIG.output.diff },
+        exclude: [..._CONFIG.patterns.testExclude],
+        fakeTimers: { ..._CONFIG.fakeTimers, toFake: [..._CONFIG.fakeTimers.toFake] },
         fileParallelism: true,
         globals: true,
-        hookTimeout: B.timeouts.hook,
-        include: [...B.patterns.testInclude],
+        hookTimeout: _CONFIG.timeouts.hook,
+        include: [..._CONFIG.patterns.testInclude],
         isolate: true,
         mockReset: true,
         onConsoleLog: (log, type) => !log.includes('Download the React DevTools') && type !== 'stderr',
-        outputFile: { ...B.output.outputFile },
+        outputFile: { ..._CONFIG.output.outputFile },
         passWithNoTests: false,
         pool: 'threads',
         printConsoleTrace: true,
@@ -133,29 +138,41 @@ export default defineConfig({
                 extends: true,
                 test: {
                     environment: 'node',
+                    exclude: ['tests/e2e/**'],
+                    include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+                    name: 'root-tests',
+                    root: Dirname,
+                    setupFiles: [path.resolve(Dirname, 'tests/setup.ts')],
+                },
+            },
+            {
+                extends: true,
+                test: {
+                    environment: 'node',
                     exclude: ['packages/runtime/**'],
                     include: ['packages/*/tests/**/*.spec.ts'],
                     name: 'packages-node',
                     root: Dirname,
+                    setupFiles: [path.resolve(Dirname, 'tests/setup.ts')],
                 },
             },
             {
                 test: {
                     browser: {
                         enabled: true,
-                        expect: B.browser.expect,
-                        headless: B.browser.headless,
+                        expect: _CONFIG.browser.expect,
+                        headless: _CONFIG.browser.headless,
                         instances: [{ browser: 'chromium' }],
-                        provider: B.browser.provider,
-                        screenshotDirectory: B.browser.screenshotDirectory,
+                        provider: _CONFIG.browser.provider,
+                        screenshotDirectory: _CONFIG.browser.screenshotDirectory,
                         screenshotFailures: true,
-                        trace: B.browser.trace,
-                        viewport: B.browser.viewport,
+                        trace: _CONFIG.browser.trace,
+                        viewport: _CONFIG.browser.viewport,
                     },
                     include: ['packages/runtime/tests/**/*.spec.ts'],
                     name: 'runtime-browser',
                     root: Dirname,
-                    setupFiles: [path.resolve(Dirname, 'packages/test-utils/src/setup.ts')],
+                    setupFiles: [path.resolve(Dirname, 'tests/setup.ts')],
                 },
             },
             {
@@ -165,17 +182,18 @@ export default defineConfig({
                     include: ['apps/*/tests/**/*.spec.ts'],
                     name: 'apps',
                     root: Dirname,
+                    setupFiles: [..._CONFIG.setupFiles],
                 },
             },
         ],
-        reporters: [...B.reporters.test],
+        reporters: [..._CONFIG.reporters.test],
         restoreMocks: true,
         retry: process.env.CI ? 2 : 0,
         sequence: { concurrent: false, hooks: 'stack', shuffle: false },
-        setupFiles: [...B.setupFiles],
-        slowTestThreshold: B.timeouts.slow,
-        snapshotFormat: { ...B.snapshot.format },
-        testTimeout: B.timeouts.test,
+        setupFiles: [],
+        slowTestThreshold: _CONFIG.timeouts.slow,
+        snapshotFormat: { ..._CONFIG.snapshot.format },
+        testTimeout: _CONFIG.timeouts.test,
         typecheck: {
             checker: 'tsc',
             enabled: false,
@@ -188,4 +206,4 @@ export default defineConfig({
     },
 });
 
-export { B as VITEST_TUNING };
+export { _CONFIG as VITEST_TUNING };

@@ -79,7 +79,6 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@fast-check/vitest": "catalog:",
-    "@parametric-portal/test-utils": "workspace:*",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@vitest/browser-playwright": "catalog:",

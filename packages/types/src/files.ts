@@ -137,6 +137,10 @@ const _cache = (() => {		// [DESIGN] Entry IS config. Codec('csv').sep works via
 	const byMime = Object.fromEntries(keys.map((ext) => [byExt[ext].mime, byExt[ext]])) as { [M in _Mime]: _Resolved<_MimeToExt[M]> };
 	return Object.freeze({ ...byExt, ...byMime, keys });
 })();
+const _resolve = (format: string): _Resolved<_CanonExt> | undefined => {
+	const found = _cache[format as _CanonExt];
+	return typeof found === 'object' && found !== null && 'ext' in found ? (found as _Resolved<_CanonExt>) : undefined;
+};
 const _detect = (input: _Input): _CanonExt => _order.find((ext) => _cache[ext].is(input)) ?? 'txt';
 const _size = (input: _Input): number => typeof input === 'string' ? Buffer.byteLength(input) : input.byteLength;
 
@@ -203,6 +207,7 @@ class Metadata extends S.Class<Metadata>('Metadata')({
 const Codec = Object.assign(_codec, _query, {
 	detect: _detect,
 	dispatch: _dispatch,
+	resolve: _resolve,
 	size: _size,
 	entries: Object.fromEntries((Object.keys(_query) as _CapAll[]).map((cap) => [cap, _query[cap].map((key) => _cache[key])])) as unknown as { readonly [C in _CapAll]: readonly _Resolved<_Query[C]>[] },
 	Manifest: S.Struct({ entries: S.Array(Metadata), version: S.Literal(1) }),

@@ -7,6 +7,21 @@
       "types": "./src/registry.ts",
       "import": "./src/registry.ts",
       "default": "./src/registry.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime.ts",
+      "import": "./src/runtime.ts",
+      "default": "./src/runtime.ts"
+    },
+    "./search": {
+      "types": "./src/search.ts",
+      "import": "./src/search.ts",
+      "default": "./src/search.ts"
+    },
+    "./mcp": {
+      "types": "./src/mcp.ts",
+      "import": "./src/mcp.ts",
+      "default": "./src/mcp.ts"
     }
   },
   "scripts": {
@@ -22,6 +37,8 @@
     "@effect/ai-google": "catalog:",
     "@effect/ai-openai": "catalog:",
     "@effect/platform": "catalog:",
+    "@parametric-portal/database": "workspace:*",
+    "@parametric-portal/server": "workspace:*",
     "@parametric-portal/types": "workspace:*",
     "effect": "catalog:"
   },

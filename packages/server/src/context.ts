@@ -13,16 +13,12 @@ import { HttpError } from './errors.ts';
 import * as D from 'effect/Duration';
 import { constant, dual } from 'effect/Function';
 
-// --- [TYPES] -----------------------------------------------------------------
-
-type _UserRoleValue = S.Schema.Type<typeof _UserRoleSchema>;
-
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _ID = { default: '00000000-0000-7000-8000-000000000001', job: '00000000-0000-7000-8000-000000000002', system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff' } as const;
 const _clusterDefault: Context.Request.ClusterState = { entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null };
-const _UserRoleRank = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 } as const satisfies Record<_UserRoleValue, number>;
 const _ref = FiberRef.unsafeMake<Context.Request.Data>({
+	appNamespace: Option.none(),
 	circuit: Option.none(),
 	cluster: Option.none(),
 	ipAddress: Option.none(),
@@ -36,10 +32,15 @@ const _ref = FiberRef.unsafeMake<Context.Request.Data>({
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-const _UserRoleSchema = S.Literal('guest', 'viewer', 'member', 'admin', 'owner');
-const _UserRoleOrder = Order.mapInput(Order.number, (role: _UserRoleValue) => _UserRoleRank[role]);
+const _UserRoleSchema = S.String;
+const _UserRoleRank = { admin: 3, guest: 0, member: 2, owner: 4, viewer: 1 } as const;
+type _UserRoleName = keyof typeof _UserRoleRank;
+const _UserRoleOrder = Order.mapInput(Order.number, (role: _UserRoleName) => _UserRoleRank[role]);
 const UserRole = {
-	hasAtLeast: (role: string, min: _UserRoleValue): boolean => role in _UserRoleRank && Order.greaterThanOrEqualTo(_UserRoleOrder)(role as _UserRoleValue, min),
+	hasAtLeast: (role: string, min: string): boolean =>
+		role in _UserRoleRank && min in _UserRoleRank
+			? Order.greaterThanOrEqualTo(_UserRoleOrder)(role as _UserRoleName, min as _UserRoleName)
+			: false,
 	Order: _UserRoleOrder,
 	schema: _UserRoleSchema,
 } as const;
@@ -54,6 +55,7 @@ class ClusterContextRequired extends Data.TaggedError('ClusterContextRequired')<
 // --- [SERIALIZABLE] ----------------------------------------------------------
 
 class Serializable extends S.Class<Serializable>('server/Context.Serializable')({	// Schema-backed serializable context for distributed tracing propagation.
+	appNamespace: S.optional(S.String),
 	ipAddress: S.optional(S.String),
 	requestId: S.String,
 	// Cluster fields for cross-pod trace correlation (S.optional = backward compatible)
@@ -66,6 +68,7 @@ class Serializable extends S.Class<Serializable>('server/Context.Serializable')(
 	private static readonly makeShardIdString = (shardId: ShardId.ShardId): typeof ShardIdString.Type => S.decodeSync(ShardIdString)(shardId.toString());
 	static readonly fromData = (ctx: Context.Request.Data): Serializable =>
 		new Serializable({
+			appNamespace: Option.getOrUndefined(ctx.appNamespace),
 			ipAddress: Option.getOrUndefined(ctx.ipAddress),
 			requestId: ctx.requestId,
 			tenantId: ctx.tenantId,
@@ -84,11 +87,55 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 	static readonly current = FiberRef.get(_ref);
 	static readonly currentTenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
 	static readonly sessionOrFail = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed })));
-	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(_ref, (ctx) => ({ ...ctx, ...partial }));
-	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (ctx) => ({ ...ctx, ...partial }));
-	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId }));
-	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> => Client.tenant.with(tenantId, Effect.locallyWith(effect, _ref, (current) => ({ ...current, ...ctx, tenantId })));
+	static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>	// Observability attributes for tracing spans. Includes all context fields formatted for OTEL.
+		Record.getSomes({
+			'app.namespace': ctx.appNamespace,
+			'circuit.name': Option.map(ctx.circuit, (c) => c.name),
+			'circuit.state': Option.map(ctx.circuit, (c) => c.state),
+			'client.ip': ctx.ipAddress,
+			'client.ua': Option.map(ctx.userAgent, (ua) => (ua.length > 120 ? `${ua.slice(0, 117)}...` : ua)),
+			'cluster.entity_id': Option.flatMapNullable(ctx.cluster, (c) => c.entityId),
+			'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (c) => c.entityType),
+			'cluster.is_leader': Option.map(ctx.cluster, (c) => String(c.isLeader)),
+			'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (c) => c.runnerId),
+			'cluster.shard_id': pipe(ctx.cluster, Option.flatMapNullable((c) => c.shardId), Option.map((s) => s.toString())),
+			'fiber.id': Option.some(FiberId.threadName(fiberId)),
+			'ratelimit.delay_ms': Option.map(ctx.rateLimit, (rl) => String(D.toMillis(rl.delay))),
+			'ratelimit.limit': Option.map(ctx.rateLimit, (rl) => String(rl.limit)),
+			'ratelimit.remaining': Option.map(ctx.rateLimit, (rl) => String(rl.remaining)),
+			'ratelimit.reset_after_ms': Option.map(ctx.rateLimit, (rl) => String(D.toMillis(rl.resetAfter))),
+			'request.id': Option.some(ctx.requestId),
+			'session.id': Option.map(ctx.session, (s) => s.id),
+			'session.mfa': Option.map(ctx.session, (s) => String(s.mfaEnabled)),
+			'tenant.id': Option.some(ctx.tenantId),
+			'user.id': Option.map(ctx.session, (s) => s.userId),
+		});
+	static readonly attrs = Effect.all([Request.current, Effect.fiberId], { concurrency: 'unbounded' }).pipe(
+		Effect.map(([ctx, fiberId]) => Request.toAttrs(ctx, fiberId)),
+	);
+	static readonly annotate = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+		Request.attrs.pipe(
+			Effect.flatMap((attrs) =>
+				Effect.optionFromOptional(Effect.currentSpan).pipe(
+					Effect.flatMap(Option.match({
+						onNone: () => effect.pipe(Effect.annotateLogs(attrs)),
+						onSome: () => Effect.annotateCurrentSpan(attrs).pipe(
+							Effect.andThen(effect.pipe(Effect.annotateLogs(attrs))),
+						),
+					})),
+				),
+			),
+		);
+	static readonly update = (partial: Partial<Context.Request.Data>) =>
+		FiberRef.update(_ref, (ctx) => ({ ...ctx, ...partial })).pipe(Effect.andThen(Request.annotate(Effect.void)));
+	static readonly locally = <A, E, R>(partial: Partial<Context.Request.Data>, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+		Effect.locallyWith(Request.annotate(effect), _ref, (ctx) => ({ ...ctx, ...partial }));
+	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> =>
+		Effect.locallyWith(Request.annotate(effect), _ref, (current) => ({ ...current, ...ctx, tenantId }));
+	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>
+		Client.tenant.with(tenantId, Effect.locallyWith(Request.annotate(effect), _ref, (current) => ({ ...current, ...ctx, tenantId })));
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({
+		appNamespace: Option.none(),
 		circuit: Option.none(),
 		cluster: Option.none(),
 		ipAddress: Option.none(),
@@ -126,31 +173,11 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		<A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>): Effect.Effect<A, E, R>;
 		(partial: Partial<Context.Request.ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 	} = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>) =>
-		Effect.locallyWith(effect, _ref, (ctx) => ({
+		Effect.locallyWith(Request.annotate(effect), _ref, (ctx) => ({
 			...ctx,
 			cluster: Option.some({ ...Option.getOrElse(ctx.cluster, constant(_clusterDefault)), ...partial }),
 		})),
 	);
-	static readonly toAttrs = (ctx: Context.Request.Data, fiberId: FiberId.FiberId): Record.ReadonlyRecord<string, string> =>	// Observability attributes for tracing spans. Includes all context fields formatted for OTEL.
-		Record.getSomes({
-			'circuit.name': Option.map(ctx.circuit, (c) => c.name),
-			'circuit.state': Option.map(ctx.circuit, (c) => c.state),
-			'client.ip': ctx.ipAddress,
-			'client.ua': Option.map(ctx.userAgent, (ua) => (ua.length > 120 ? `${ua.slice(0, 117)}...` : ua)),
-			'cluster.entity_id': Option.flatMapNullable(ctx.cluster, (c) => c.entityId),
-			'cluster.entity_type': Option.flatMapNullable(ctx.cluster, (c) => c.entityType),
-			'cluster.is_leader': Option.map(ctx.cluster, (c) => String(c.isLeader)),
-			'cluster.runner_id': Option.flatMapNullable(ctx.cluster, (c) => c.runnerId),
-			'cluster.shard_id': pipe(ctx.cluster, Option.flatMapNullable((c) => c.shardId), Option.map((s) => s.toString())),
-			'fiber.id': Option.some(FiberId.threadName(fiberId)),
-			'ratelimit.limit': Option.map(ctx.rateLimit, (rl) => String(rl.limit)),
-			'ratelimit.remaining': Option.map(ctx.rateLimit, (rl) => String(rl.remaining)),
-			'request.id': Option.some(ctx.requestId),
-			'session.id': Option.map(ctx.session, (s) => s.id),
-			'session.mfa': Option.map(ctx.session, (s) => String(s.mfaEnabled)),
-			'tenant.id': Option.some(ctx.tenantId),
-			'user.id': Option.map(ctx.session, (s) => s.userId),
-		});
 	static readonly config = {
 		csrf: { expectedValue: 'XMLHttpRequest', header: 'x-requested-with' },
 		durations: { pkce: D.minutes(10), refresh: D.days(30), session: D.days(7) },
@@ -201,6 +228,7 @@ namespace Context {
 			readonly state: string;
 		}
 		export interface Data {
+			readonly appNamespace: Option.Option<string>;
 			readonly circuit: Option.Option<Circuit>;
 			readonly cluster: Option.Option<ClusterState>;
 			readonly ipAddress: Option.Option<string>;

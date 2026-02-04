@@ -90,21 +90,27 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					], { discard: true })),
 				);
 			}).pipe(Telemetry.span('audit.log'));
-		const replayDeadLetters = Telemetry.span(
-			Effect.gen(function* () {
-				const pending = yield* database.jobDlq.listPending({ limit: 100, type: 'audit.*' });
-				const results = yield* Effect.forEach(pending.items, (dlq) =>
-					S.decodeUnknown(S.Record({ key: S.String, value: S.Unknown }))(dlq.payload).pipe(
-						Effect.flatMap((entry) => database.audit.log(entry as Parameters<typeof database.audit.log>[0])),
-						Effect.tap(() => database.jobDlq.markReplayed(dlq.id)),
-						Effect.as({ id: dlq.id, success: true as const }),
-						Effect.catchAll((error) => Effect.logWarning('Audit DLQ replay failed', { dlqId: dlq.id, error: String(error) }).pipe(Effect.as({ id: dlq.id, success: false as const }))),
-					), { concurrency: _CONFIG.deadLetter.concurrency });
-				const [failures, successes] = A.partition(results, (r) => r.success);
-				yield* Effect.when(Effect.logInfo('Audit dead-letter replay completed', { failed: failures.length, replayed: successes.length }), () => results.length > 0);
-				return { failed: failures.length, replayed: successes.length, skipped: pending.items.length === 0 };
-			}),
-			'audit.replayDeadLetters',
+		const replayDeadLetters = Effect.sync(Context.Request.system).pipe(
+			Effect.flatMap((ctx) => Context.Request.within(
+				Context.Request.Id.system,
+				Telemetry.span(
+					Effect.gen(function* () {
+						const pending = yield* database.jobDlq.listPending({ limit: 100, type: 'audit.*' });
+						const results = yield* Effect.forEach(pending.items, (dlq) =>
+							S.decodeUnknown(S.Record({ key: S.String, value: S.Unknown }))(dlq.payload).pipe(
+								Effect.flatMap((entry) => database.audit.log(entry as Parameters<typeof database.audit.log>[0])),
+								Effect.tap(() => database.jobDlq.markReplayed(dlq.id)),
+								Effect.as({ id: dlq.id, success: true as const }),
+								Effect.catchAll((error) => Effect.logWarning('Audit DLQ replay failed', { dlqId: dlq.id, error: String(error) }).pipe(Effect.as({ id: dlq.id, success: false as const }))),
+							), { concurrency: _CONFIG.deadLetter.concurrency });
+						const [failures, successes] = A.partition(results, (r) => r.success);
+						yield* Effect.when(Effect.logInfo('Audit dead-letter replay completed', { failed: failures.length, replayed: successes.length }), () => results.length > 0);
+						return { failed: failures.length, replayed: successes.length, skipped: pending.items.length === 0 };
+					}),
+					'audit.replayDeadLetters',
+				),
+				ctx,
+			)),
 		);
 		yield* Effect.logInfo('AuditService initialized');
 		return { log, replayDeadLetters };

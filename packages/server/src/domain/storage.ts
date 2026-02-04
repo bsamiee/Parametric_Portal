@@ -76,8 +76,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 					], { discard: true })),
 					Telemetry.span('storageDomain.putStream'),
 				);
-		const abortUpload = (key: string, uploadId: string) =>
-			_traced('abort-multipart', storage.abortUpload(key, uploadId), 'Storage.abort_multipart', { key, uploadId }, key);
+		const abortUpload = (key: string, uploadId: string) => _traced('abort-multipart', storage.abortUpload(key, uploadId), 'Storage.abort_multipart', { key, uploadId }, key);
 		return { abortUpload, copy, exists: storage.exists, get: storage.get, getStream: storage.getStream, list: storage.list, listStream: storage.listStream, listUploads: storage.listUploads, put, putStream, remove, sign: storage.sign };
 	}),
 }) {}

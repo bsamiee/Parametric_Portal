@@ -48,12 +48,11 @@ const _CONFIG = { maxRoomsPerSocket: 10 } as const;
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _emitWs = (eventBus: EventBus, tenantId: string, action: string, extra?: { data?: unknown; roomId?: string; userId?: string }) =>
-	Context.Request.withinSync(tenantId, eventBus.emit(new EventBus.Event({
-		aggregateId: extra?.roomId ?? tenantId,
-		eventId: crypto.randomUUID() as typeof EventBus.Event.Type['eventId'],
+	Context.Request.withinSync(tenantId, eventBus.emit({
+		aggregateId: extra?.roomId ? `${tenantId}:${extra.roomId}` : tenantId,
 		payload: { _tag: 'ws' as const, action, ...extra },
 		tenantId,
-	})));
+	}));
 
 // --- [SERVICE] ---------------------------------------------------------------
 
@@ -65,24 +64,22 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 		const metrics = yield* MetricsService;
 		const socketsRef = yield* Ref.make(HashMap.empty<string, { socket: Socket.Socket; state: Ref.Ref<typeof _SCHEMA.state.Type> }>());
 		const labels = MetricsService.label({ service: 'websocket' });
-		const _roomKey = (roomId: string) => `room:${roomId}`;
+		const _roomKey = (tenantId: string, roomId: string) => `room:${tenantId}:${roomId}`;
 		const _roomMembership = {
-			add: (roomId: string, socketId: string, tenantId: string) =>
-				Effect.tryPromise(() => cache._redis.sadd(_roomKey(roomId), `${tenantId}:${socketId}`)).pipe(Effect.ignore),
-			get: (roomId: string) =>
-				Effect.tryPromise(() => cache._redis.smembers(_roomKey(roomId))).pipe(
-					Effect.map((members) => HashSet.fromIterable(members.map((member) => member.split(':')[1] ?? member))),
+			add: (tenantId: string, roomId: string, socketId: string) => Effect.tryPromise(() => cache._redis.sadd(_roomKey(tenantId, roomId), socketId)).pipe(Effect.ignore),
+			get: (tenantId: string, roomId: string) =>
+				Effect.tryPromise(() => cache._redis.smembers(_roomKey(tenantId, roomId))).pipe(
+					Effect.map((members) => HashSet.fromIterable(members)),
 					Effect.orElseSucceed(() => HashSet.empty<string>()),
 				),
-			remove: (roomId: string, socketId: string, tenantId: string) =>
-				Effect.tryPromise(() => cache._redis.srem(_roomKey(roomId), `${tenantId}:${socketId}`)).pipe(Effect.ignore),
+			remove: (tenantId: string, roomId: string, socketId: string) => Effect.tryPromise(() => cache._redis.srem(_roomKey(tenantId, roomId), socketId)).pipe(Effect.ignore),
 		} as const;
-		const _localDeliverOnly = (roomId: string, data: unknown) => Effect.gen(function* () {
+		const _localDeliverOnly = (tenantId: string, roomId: string, data: unknown) => Effect.gen(function* () {
 			const sockets = yield* Ref.get(socketsRef);
 			const message = JSON.stringify({ data, roomId, type: 'room.message' });
 			yield* Effect.forEach(A.fromIterable(HashMap.values(sockets)), (entry) =>
 				Ref.get(entry.state).pipe(
-					Effect.flatMap((socket) => socket.rooms.includes(roomId)
+					Effect.flatMap((socket) => socket.tenantId === tenantId && socket.rooms.includes(roomId)
 						? entry.socket.writer.pipe(Effect.flatMap((writer) => writer(message)), Effect.ignore)
 						: Effect.void),
 				), { concurrency: 'unbounded', discard: true });
@@ -91,7 +88,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 			Stream.filter((entry) => S.is(_SCHEMA.payload)(entry.event.payload)),
 			Stream.mapEffect((entry) => {
 				const payload = entry.event.payload as typeof _SCHEMA.payload.Type;
-				return payload.action === 'room.message' && payload.roomId && payload.data ? _localDeliverOnly(payload.roomId, payload.data) : Effect.void;
+				return payload.action === 'room.message' && payload.roomId && payload.data ? _localDeliverOnly(entry.event.tenantId, payload.roomId, payload.data) : Effect.void;
 			}),
 			Stream.runDrain,
 		));
@@ -108,7 +105,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 				yield* Ref.update(socketsRef, HashMap.remove(socketId));
 				yield* MetricsService.gauge(metrics.stream.active, labels, -1);
 				const state = yield* Ref.get(stateRef);
-				yield* Effect.forEach(state.rooms, (rid) => _roomMembership.remove(rid, socketId, tenantId), { discard: true });
+				yield* Effect.forEach(state.rooms, (rid) => _roomMembership.remove(tenantId, rid, socketId), { discard: true });
 				yield* CacheService.presence.remove(tenantId, socketId).pipe(Effect.ignore);
 				yield* _emitWs(eventBus, tenantId, 'presence.offline', { userId }).pipe(Effect.ignore);
 			}));
@@ -131,19 +128,19 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 			return yield* socket.runRaw((data) => decode(data).pipe(Effect.flatMap(handle), Effect.catchAll((error) => send(errPayload(error)).pipe(Effect.ignore))));
 		});
 		const getPresence = (tenantId: string) => CacheService.presence.getAll(tenantId);
-		const getRoomMembers = (roomId: string) => _roomMembership.get(roomId);
+		const getRoomMembers = (tenantId: string, roomId: string) => _roomMembership.get(tenantId, roomId);
 		const joinRoom = (socketId: string, roomId: string, tenantId: string) => Ref.get(socketsRef).pipe(
 			Effect.flatMap((sockets) => Option.match(HashMap.get(sockets, socketId), {
 				onNone: () => Effect.fail(WsError.from('invalid_message', socketId)),
 				onSome: (entry) => Ref.get(entry.state).pipe(Effect.flatMap((state) =>
 					state.rooms.includes(roomId) ? Effect.void
 					: state.rooms.length >= _CONFIG.maxRoomsPerSocket ? Effect.fail(WsError.from('room_limit', socketId))
-					: Effect.all([Ref.update(entry.state, (current) => ({ ...current, rooms: [...current.rooms, roomId] })), _roomMembership.add(roomId, socketId, tenantId)], { discard: true }))),
+					: Effect.all([Ref.update(entry.state, (current) => ({ ...current, rooms: [...current.rooms, roomId] })), _roomMembership.add(tenantId, roomId, socketId)], { discard: true }))),
 			})));
 		const leaveRoom = (socketId: string, roomId: string, tenantId: string) => Ref.get(socketsRef).pipe(
 			Effect.flatMap((sockets) => Option.match(HashMap.get(sockets, socketId), {
 				onNone: () => Effect.void,
-				onSome: (entry) => Effect.all([Ref.update(entry.state, (state) => ({ ...state, rooms: A.filter(state.rooms, (id) => id !== roomId) })), _roomMembership.remove(roomId, socketId, tenantId)], { discard: true }),
+				onSome: (entry) => Effect.all([Ref.update(entry.state, (state) => ({ ...state, rooms: A.filter(state.rooms, (id) => id !== roomId) })), _roomMembership.remove(tenantId, roomId, socketId)], { discard: true }),
 			})));
 		const broadcast = (roomId: string, data: unknown, tenantId: string) => _emitWs(eventBus, tenantId, 'room.message', { data, roomId });
 		yield* Effect.logInfo('WebSocketService initialized');

@@ -4,7 +4,6 @@
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
 import { ApiKey, AuditLog, User } from '@parametric-portal/database/models';
-import { Codec } from '@parametric-portal/types/files';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { Context } from './context.ts';
@@ -38,14 +37,14 @@ const TransferQuery = S.Struct({	/** Transfer operation query params */
 	after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
 	before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
 	dryRun: S.optionalWith(HttpApiSchema.param('dryRun', S.BooleanFromString), { as: 'Option' }),
-	format: S.optionalWith(HttpApiSchema.param('format', Codec.Transfer), { default: () => 'ndjson' as const }),
+	format: S.optionalWith(HttpApiSchema.param('format', S.String), { default: () => 'ndjson' }),
 	typeSlug: S.optionalWith(HttpApiSchema.param('type', S.NonEmptyTrimmedString), { as: 'Option' }),
 });
 const TransferResult = S.Struct({	/** Transfer operation result */
 	count: S.optional(S.Int),
 	data: S.optional(S.String),
 	failed: S.optional(S.Array(S.Struct({ error: S.String, ordinal: S.NullOr(S.Int) }))),
-	format: S.optional(Codec.Transfer),
+	format: S.optional(S.String),
 	imported: S.optional(S.Int),
 	name: S.optional(S.String),
 });

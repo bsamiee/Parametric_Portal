@@ -3,26 +3,23 @@
  * Entity sharding, advisory-lock shard ownership, distributed message routing.
  */
 import { ClusterCron, ClusterMetrics, Entity, EntityId, HttpRunner, K8sHttpClient, RunnerHealth, Sharding, ShardingConfig, Singleton, Snowflake, SocketRunner, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
-import { Socket } from '@effect/platform';
 import { NodeClusterSocket, NodeFileSystem, NodeHttpClient, NodeSocket, NodeSocketServer } from '@effect/platform-node';
 import { Rpc, RpcSerialization } from '@effect/rpc';
 import { PgClient } from '@effect/sql-pg';
-import { Array as A, Cause, Chunk, Clock, Config, Cron, Data, DateTime, Duration, Effect, FiberMap, HashSet, Layer, Match, Metric, Option, Predicate, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Cause, Clock, Config, Cron, Data, DateTime, Duration, Effect, FiberMap, HashSet, Layer, Match, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
-import { Resilience } from '../utils/resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-	circuit: { halfOpenAfter: Duration.seconds(30), threshold: 3 },	// Aligns with heartbeat interval; trip after 3 consecutive failures
 	cron: { skipIfOlderThan: Duration.minutes(5) },
 	entity: { concurrency: 1, mailboxCapacity: 100, maxIdleTime: Duration.minutes(5) },
 	retry: { base: Duration.millis(50), cap: Duration.seconds(30), maxAttempts: { defect: 5, state: 3, transient: 3 } },
-	send: { bulkhead: 5, timeout: Duration.millis(100) },			// Bulkhead prevents mailbox overflow (capacity=100), timeout enforces SLA
+	send: { retryInterval: Duration.millis(50) },
 	singleton: {
 		grace: Duration.seconds(60),
 		heartbeatInterval: Duration.seconds(30),
@@ -37,47 +34,20 @@ const _retrySchedule = (max: number) => Schedule.exponential(_CONFIG.retry.base)
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const IdempotencyKey = S.String.pipe(S.minLength(1), S.maxLength(255), S.pattern(/^[a-zA-Z0-9:_-]+$/), S.brand('IdempotencyKey'));
 const SnowflakeId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId'));
 const EntityStatus = S.Literal('idle', 'processing', 'suspended', 'complete', 'failed');
-class ProcessPayload extends S.Class<ProcessPayload>('ProcessPayload')({ data: S.Unknown, entityId: SnowflakeId, idempotencyKey: S.optional(IdempotencyKey) }) {}
 class StatusPayload extends S.Class<StatusPayload>('StatusPayload')({ entityId: SnowflakeId }) {}
 class StatusResponse extends S.Class<StatusResponse>('StatusResponse')({ status: EntityStatus, updatedAt: S.Number }) {}
-class EntityProcessError extends S.TaggedError<EntityProcessError>()('EntityProcessError', { cause: S.optional(S.Unknown), message: S.String }) {}
-const ClusterEntity = Entity.make('Cluster', [	// primaryKey: idempotencyKey required for determinism (Date.now() violates replay safety per research)
-	Rpc.make('process', { error: EntityProcessError, payload: ProcessPayload.fields, primaryKey: (p) => p.idempotencyKey ?? p.entityId, success: S.Void }),
+const ClusterEntity = Entity.make('Cluster', [
 	Rpc.make('status', { payload: StatusPayload.fields, success: StatusResponse }),
 ]);
 
 // --- [ENTITY] ----------------------------------------------------------------
 
-class EntityState extends S.Class<EntityState>('EntityState')({
-	pendingSignal: S.optional(S.Struct({ name: S.String, token: S.String })),
-	status: EntityStatus,
-	updatedAt: S.Number,
-}) {
-	static readonly mk = (status: typeof EntityStatus.Type, signal?: { name: string; token: string }) => Clock.currentTimeMillis.pipe(Effect.map((ts) => new EntityState({ pendingSignal: signal, status, updatedAt: ts })));
-	static readonly transition = (ref: Ref.Ref<EntityState>, to: typeof EntityStatus.Type) => EntityState.mk(to).pipe(Effect.flatMap((s) => Ref.set(ref, s)));
-}
 const ClusterEntityLive = ClusterEntity.toLayer(Effect.gen(function* () {
-	const address = yield* Entity.CurrentAddress;
-	const stateRef = yield* EntityState.mk('idle').pipe(Effect.andThen(Ref.make));
-	const metricsOption = yield* Effect.serviceOption(MetricsService);
-	const trackActivation = Option.match(metricsOption, { onNone: () => Effect.void, onSome: (metrics) => Metric.increment(metrics.cluster.entityActivations) });
-	const trackDeactivation = Option.match(metricsOption, { onNone: () => Effect.void, onSome: (metrics) => Metric.increment(metrics.cluster.entityDeactivations) });
+	yield* Effect.void;
 	return {
-		process: (envelope) => Context.Request.withinCluster({ entityId: address.entityId, entityType: address.entityType, shardId: address.shardId })(
-			Effect.gen(function* () {
-				yield* trackActivation;
-				yield* EntityState.transition(stateRef, 'processing');
-				yield* Effect.logDebug('Entity processing', { entityId: address.entityId, idempotencyKey: envelope.payload.idempotencyKey });
-				yield* EntityState.transition(stateRef, 'complete');
-			}).pipe(
-				Effect.ensuring(EntityState.transition(stateRef, 'idle').pipe(Effect.tap(() => trackDeactivation))),
-				Effect.catchAllCause((cause) => Effect.fail(new EntityProcessError({ cause, message: Chunk.isNonEmpty(Cause.defects(cause)) ? 'Internal error' : Cause.pretty(cause) }))),
-			),
-		),
-		status: () => Ref.get(stateRef).pipe(Effect.map((s) => new StatusResponse({ status: s.status, updatedAt: s.updatedAt }))),
+		status: () => Clock.currentTimeMillis.pipe(Effect.map((ts) => new StatusResponse({ status: 'idle', updatedAt: ts }))),
 	};
 }), {	// mailboxCapacity + maxIdleTime from ShardingConfig
 	concurrency: _CONFIG.entity.concurrency,
@@ -150,7 +120,7 @@ const _runnerPgLayer = PgClient.layerConfig({
 const _storageLayers = Layer.mergeAll(
 	SqlRunnerStorage.layer.pipe(Layer.provide(_runnerPgLayer)),
 	SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
-	ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, entityMaxIdleTime: _CONFIG.entity.maxIdleTime, preemptiveShutdown: true, sendRetryInterval: _CONFIG.send.timeout, shardsPerGroup: 100 }),
+	ShardingConfig.layer({ entityMailboxCapacity: _CONFIG.entity.mailboxCapacity, entityMaxIdleTime: _CONFIG.entity.maxIdleTime, preemptiveShutdown: true, sendRetryInterval: _CONFIG.send.retryInterval, shardsPerGroup: 100 }),
 	Snowflake.layerGenerator,
 );
 const _healthConfig = Config.all({
@@ -186,54 +156,37 @@ const _clusterLayer = ClusterEntityLive.pipe(Layer.provideMerge(_transportLayer)
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, type: 'singleton' | 'cron') =>
-	Effect.flatMap(MetricsService, (metrics) => Context.Request.withinCluster({ isLeader: true })(
-		MetricsService.trackEffect(Telemetry.span(effect, `${type}.${name}`, { metrics: false }), {
-			duration: metrics.singleton.duration, errors: metrics.errors,
-			labels: MetricsService.label({ singleton: name, ...(type === 'cron' && { type: 'cron' }) }),
-		}).pipe(Effect.andThen(Clock.currentTimeMillis), Effect.tap((ts) => Effect.all([Metric.set(metrics.singleton.lastExecution, ts), Metric.increment(metrics.singleton.executions)], { discard: true }))),
+	Effect.flatMap(MetricsService, (metrics) => Effect.sync(Context.Request.system).pipe(
+		Effect.flatMap((ctx) => Context.Request.within(
+			Context.Request.Id.system,
+			Context.Request.withinCluster({ isLeader: true })(
+				MetricsService.trackEffect(Telemetry.span(effect, `${type}.${name}`, { metrics: false }), {
+					duration: metrics.singleton.duration, errors: metrics.errors,
+					labels: MetricsService.label({ singleton: name, ...(type === 'cron' && { type: 'cron' }) }),
+				}).pipe(Effect.andThen(Clock.currentTimeMillis), Effect.tap((ts) => Effect.all([Metric.set(metrics.singleton.lastExecution, ts), Metric.increment(metrics.singleton.executions)], { discard: true }))),
+			),
+			ctx,
+		)),
 	));
 const _readMetric = <A extends number | bigint>(m: Metric.Metric.Gauge<A>) => Metric.value(m).pipe(Effect.map(({ value }) => Number(value)));
 
 // --- [SERVICE] ---------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
-	dependencies: [_clusterLayer, Resilience.Layer],
+	dependencies: [_clusterLayer],
 	effect: Effect.gen(function* () {
 		const sharding = yield* Sharding.Sharding;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'cluster' });
-		const getClient = yield* sharding.makeClient(ClusterEntity);
-		const send = (entityId: string, payload: ProcessPayload): Effect.Effect<void, ClusterError, MetricsService | Resilience.State> => {
-			const circuitName = `cluster.shard.${sharding.getShardId(EntityId.make(entityId), 'default')}`;
-			const inferReason = (e: unknown): ClusterError['reason'] => Socket.isSocketError(e) ? 'RunnerUnavailable'
-				: Predicate.hasProperty(e, '_tag') && typeof e._tag === 'string' && HashSet.has(ClusterError._knownTags, e._tag as ClusterError['reason']) ? e._tag as ClusterError['reason'] : 'RunnerUnavailable';
-			const resilientSend = Resilience.run(circuitName, getClient(entityId)['process'](payload).pipe(
-				Effect.asVoid,
-				Effect.mapError((e): ClusterError => {
-					const reason = inferReason(e);
-					return ClusterError.from(reason, _ClusterReasons[reason].terminal ? undefined : entityId, { cause: e });
-				}),
-			), {
-				bulkhead: _CONFIG.send.bulkhead,
-				circuit: circuitName,
-				retry: false,
-				threshold: _CONFIG.circuit.threshold,
-				timeout: _CONFIG.send.timeout,
-			}).pipe(Effect.mapError((e): ClusterError => {
-				const resilienceMap = { BulkheadError: 'MailboxFull', CircuitError: 'RunnerUnavailable', TimeoutError: 'SendTimeout' } as const;
-				return e._tag in resilienceMap ? ClusterError.from(resilienceMap[e._tag as keyof typeof resilienceMap], entityId, { cause: e }) : e as ClusterError;
-			}));
-			return MetricsService.trackCluster(resilientSend, { entityType: 'Cluster', operation: 'send' });
-		};
 		const isLocal = Effect.fn('cluster.isLocal')((entityId: string) => Effect.sync(() => sharding.hasShardId(sharding.getShardId(EntityId.make(entityId), 'default'))));	// L1: Effect.fn for auto-tracing
 		const generateId: Effect.Effect<Snowflake.Snowflake> = sharding.getSnowflake;
 		yield* Effect.logInfo('ClusterService initialized');
-		return { generateId, isLocal, send };
+		return { generateId, isLocal };
 	}),
 }) {
 	static readonly Config = _CONFIG;
 	static readonly Error = { Cluster: ClusterError, Singleton: SingletonError };
 	static readonly Layer = _clusterLayer;
-	static readonly Payload = { Process: ProcessPayload, Status: StatusPayload } as const;
+	static readonly Payload = { Status: StatusPayload } as const;
 	static readonly Response = { Status: StatusResponse } as const;
 	// --- Singleton Factory: state persistence, lifecycle hooks, graceful shutdown ---
 	static readonly singleton = <E, R, StateSchema extends S.Schema.Any = never>(
@@ -303,16 +256,21 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 				const awaitShutdown = sharding.isShutdown.pipe(Effect.repeat(Schedule.spaced(Duration.millis(100)).pipe(Schedule.whileOutput((shutdown) => !shutdown))), Effect.tap(() => Effect.logInfo(`Singleton ${name} detected shutdown`)));
 				const workStartTs = yield* Clock.currentTimeMillis;
 				const migrationDuration = Duration.millis(workStartTs - leaderTs);
-				yield* Metric.set(Metric.taggedWithLabels(metrics.singleton.migrationDuration, stateLabels), Duration.toSeconds(migrationDuration));
-				yield* Effect.when(
-					Metric.increment(Metric.taggedWithLabels(metrics.singleton.migrationSlaExceeded, stateLabels)).pipe(Effect.tap(() => Effect.logWarning('Migration SLA exceeded', { migration: Duration.format(migrationDuration), singleton: name, sla: Duration.format(_CONFIG.singleton.migrationSla) }))),
-					() => Duration.greaterThan(migrationDuration, _CONFIG.singleton.migrationSla),
-				);
-				yield* FiberMap.run(fibers, 'main-work')(Context.Request.withinCluster({ isLeader: true })(
+			yield* Metric.set(Metric.taggedWithLabels(metrics.singleton.migrationDuration, stateLabels), Duration.toSeconds(migrationDuration));
+			yield* Effect.when(
+				Metric.increment(Metric.taggedWithLabels(metrics.singleton.migrationSlaExceeded, stateLabels)).pipe(Effect.tap(() => Effect.logWarning('Migration SLA exceeded', { migration: Duration.format(migrationDuration), singleton: name, sla: Duration.format(_CONFIG.singleton.migrationSla) }))),
+				() => Duration.greaterThan(migrationDuration, _CONFIG.singleton.migrationSla),
+			);
+			const systemContext = yield* Effect.sync(Context.Request.system);
+			yield* FiberMap.run(fibers, 'main-work')(Context.Request.within(
+				Context.Request.Id.system,
+				Context.Request.withinCluster({ isLeader: true })(
 					MetricsService.trackEffect(Telemetry.span(run(stateRef), `singleton.${name}`, { metrics: false }), {
 						duration: metrics.singleton.duration, errors: metrics.errors, labels: MetricsService.label({ singleton: name }),
 					}).pipe(Effect.andThen(Clock.currentTimeMillis), Effect.tap((ts) => Effect.all([Metric.set(metrics.singleton.lastExecution, ts), Metric.increment(metrics.singleton.executions)], { discard: true }))),
-				));
+				),
+				systemContext,
+			));
 				yield* awaitShutdown.pipe(
 					Effect.tap(() => Effect.logInfo(`Singleton ${name} interrupted gracefully`)),
 					Effect.catchAllCause((cause) => Cause.isInterrupted(cause) ? Effect.void :
@@ -388,10 +346,8 @@ namespace ClusterService {
 	export type Entity = typeof ClusterEntity;
 	export type Error = InstanceType<typeof ClusterError>;
 	export type ErrorReason = Error['reason'];
-	export type IdempotencyKey = typeof IdempotencyKey.Type;
 	export type SnowflakeId = typeof SnowflakeId.Type;
 	export type Status = typeof EntityStatus.Type;
-	export type ProcessPayload = InstanceType<typeof ClusterService.Payload.Process>;
 	export type StatusPayload = InstanceType<typeof ClusterService.Payload.Status>;
 	export type StatusResponse = InstanceType<typeof ClusterService.Response.Status>;
 	export type SingletonError = InstanceType<typeof SingletonError>;

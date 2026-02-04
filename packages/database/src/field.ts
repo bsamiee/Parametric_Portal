@@ -55,17 +55,18 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	backupHashes:     { col: 'backup_hashes',    sql: 'TEXT[]',      ts: 'S.Array(S.String)', mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
 	size:             { col: 'size',             sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	remaining:        { col: 'remaining',        sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
-	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
-	oldData:          { col: 'old_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
-	newData:          { col: 'new_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
+	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	oldData:          { col: 'old_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	newData:          { col: 'new_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	ipAddress:        { col: 'ip_address',       sql: 'INET',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	userAgent:        { col: 'user_agent',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	name:             { col: 'name',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	storageRef:       { col: 'storage_ref',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
-	namespace:        { col: 'namespace',        sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	email:            { col: 'email',            sql: 'CITEXT',      ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	namespace:        { col: 'namespace',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	email:            { col: 'email',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	role:             { col: 'role',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	status:           { col: 'status',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	roleOrder:        { col: 'role_order',       sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	type:             { col: 'type',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	content:          { col: 'content',          sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	operation:        { col: 'operation',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -77,15 +78,24 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	scopeId:          { col: 'scope_id',         sql: 'UUID',        ts: 'S.UUID',            mark: 'scope',     gen: false,    null: true,  ref: 'apps',     wrap: [_WRAP_META.FieldOption]                                },
 	displayText:      { col: 'display_text',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	contentText:      { col: 'content_text',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
-	metadata:         { col: 'metadata',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.JsonFromString]      },
+	metadata:         { col: 'metadata',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	documentHash:     { col: 'document_hash',    sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	searchVector:     { col: 'search_vector',    sql: 'TSVECTOR',    ts: 'S.Unknown',         mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
+	model:            { col: 'model',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	dimensions:       { col: 'dimensions',       sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	embedding:        { col: 'embedding',        sql: 'VECTOR',      ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	// Job-related fields (job_dlq uses subset; active queue removed)
+	// Job fields (jobs + job_dlq)
+	jobId:            { col: 'job_id',           sql: 'TEXT',        ts: 'S.String',          mark: 'pk',        gen: false,    null: false, ref: false,      wrap: false                                                  },
+	batchId:          { col: 'batch_id',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	dedupeKey:        { col: 'dedupe_key',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	priority:         { col: 'priority',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	payload:          { col: 'payload',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WRAP_META.JsonFromString]                             },
+	payload:          { col: 'payload',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	progress:         { col: 'progress',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	history:          { col: 'history',          sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	result:           { col: 'result',           sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	attempts:         { col: 'attempts',         sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	maxAttempts:      { col: 'max_attempts',     sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	scheduledAt:      { col: 'scheduled_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	scheduledAt:      { col: 'scheduled_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	startedAt:        { col: 'started_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	completedAt:      { col: 'completed_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	lastError:        { col: 'last_error',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
@@ -94,9 +104,10 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	waitMs:           { col: 'wait_ms',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	durationMs:       { col: 'duration_ms',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	// Job DLQ fields (job_dlq table: dead-letter archive)
-	originalJobId:    { col: 'original_job_id',  sql: 'UUID',        ts: 'S.UUID',            mark: 'fk',        gen: false,    null: false, ref: false,      wrap: false                                                  },
+	source:           { col: 'source',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	originalJobId:    { col: 'original_job_id',  sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	errorReason:      { col: 'error_reason',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	errorHistory:     { col: 'error_history',    sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: [_WRAP_META.JsonFromString]                             },
+	errorHistory:     { col: 'error_history',    sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	replayedAt:       { col: 'replayed_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	// KV store fields (cluster infrastructure state)
 	kvKey:            { col: 'key',              sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -106,7 +117,7 @@ const _TABLES = {
 	apps: {
 		fields: 	[_REGISTRY.id, _REGISTRY.name, _REGISTRY.namespace, _REGISTRY.settings, _REGISTRY.updatedAt]},
 	users: {
-		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.role, _REGISTRY.status, _REGISTRY.deletedAt, _REGISTRY.updatedAt]},
+		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.role, _REGISTRY.status, _REGISTRY.roleOrder, _REGISTRY.deletedAt, _REGISTRY.updatedAt]},
 	sessions: {
 		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.hash, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt, _REGISTRY.deletedAt, _REGISTRY.verifiedAt, _REGISTRY.ipAddress, _REGISTRY.userAgent, _REGISTRY.updatedAt, _REGISTRY.prefix],
 		required: 	[_REGISTRY.appId, _REGISTRY.userId, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt]},
@@ -128,14 +139,17 @@ const _TABLES = {
 		required: 	[_REGISTRY.userId],
 		unique:		[[_REGISTRY.userId]]},
 	searchDocuments: {
-		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.displayText, _REGISTRY.contentText, _REGISTRY.metadata, _REGISTRY.hash, _REGISTRY.searchVector, _REGISTRY.updatedAt],
+		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.displayText, _REGISTRY.contentText, _REGISTRY.metadata, _REGISTRY.documentHash, _REGISTRY.searchVector, _REGISTRY.updatedAt],
 		pk: 		[_REGISTRY.entityType, _REGISTRY.entityId]},
 	searchEmbeddings: {
-		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.embedding, _REGISTRY.hash, _REGISTRY.updatedAt],
+		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.model, _REGISTRY.dimensions, _REGISTRY.embedding, _REGISTRY.hash, _REGISTRY.updatedAt],
 		pk: 		[_REGISTRY.entityType, _REGISTRY.entityId],
 		fk: 		[[_REGISTRY.entityType, _REGISTRY.entityId], _FK.CASCADE] as const},
+	jobs: {
+		fields: 	[_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.result, _REGISTRY.progress, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts, _REGISTRY.scheduledAt, _REGISTRY.batchId, _REGISTRY.dedupeKey, _REGISTRY.lastError, _REGISTRY.completedAt, _REGISTRY.updatedAt],
+		required: 	[_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts]},
 	jobDlq: {
-		fields: 	[_REGISTRY.id, _REGISTRY.originalJobId, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.type, _REGISTRY.payload, _REGISTRY.errorReason, _REGISTRY.attempts, _REGISTRY.errorHistory, _REGISTRY.replayedAt],
+		fields: 	[_REGISTRY.id, _REGISTRY.source, _REGISTRY.originalJobId, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.type, _REGISTRY.payload, _REGISTRY.errorReason, _REGISTRY.attempts, _REGISTRY.errorHistory, _REGISTRY.replayedAt],
 		fk: 		[[_REGISTRY.userId, _FK.RESTRICT]] as const},
 	kvStore: {
 		fields: 	[_REGISTRY.id, _REGISTRY.kvKey, _REGISTRY.kvValue, _REGISTRY.expiresAt, _REGISTRY.updatedAt],
@@ -269,13 +283,13 @@ const _resolve = (fieldOrCol: string): _Resolved | undefined => {											/** 
 	const isResolved = val && typeof val === 'object' && 'field' in val;
 	return isResolved ? val as _Resolved : undefined;
 };
-const _predMeta = (fieldOrCol: string): { cast: string | undefined; wrap: 'casefold' | undefined } => {		/** Derive predicate metadata from field registry (cast + wrap for SQL predicates) */
+const _predMeta = (fieldOrCol: string): { cast: typeof _SQL_CAST[keyof typeof _SQL_CAST] | undefined; wrap: 'casefold' | undefined } => {		/** Derive predicate metadata from field registry (cast + wrap for SQL predicates) */
 	const entry = _resolve(fieldOrCol);
 	return Match.value(entry).pipe(
 		Match.when(Match.undefined, () => ({ cast: undefined, wrap: undefined })),
 		Match.orElse((resolved) => ({
 			cast: _SQL_CAST[resolved.sql as keyof typeof _SQL_CAST],
-			wrap: resolved.sql === 'CITEXT' ? 'casefold' as const : undefined,
+			wrap: undefined,
 		})),
 	);
 };

@@ -18,6 +18,7 @@ import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { type DateTime, Effect, Option } from 'effect';
@@ -43,12 +44,12 @@ const oauthErr = (provider: Context.OAuthProvider) => (reason: string) => HttpEr
 const handleOAuthStart = Effect.fn('auth.oauth.start')((auth: Auth.Service, provider: Context.OAuthProvider) =>
 	auth.oauthStart(provider).pipe(
 		Effect.flatMap((result) =>
-			result._tag !== 'Initiate'
-				? Effect.fail(HttpError.OAuth.of(provider, 'Unexpected response type'))
-				: HttpServerResponse.json({ url: result.authUrl }).pipe(
+			result._tag === 'Initiate'
+				? HttpServerResponse.json({ url: result.authUrl }).pipe(
 					Effect.flatMap(Context.Request.cookie.set('oauth', result.cookie)),
 					Effect.mapError(() => HttpError.OAuth.of(provider, 'Response build failed')),
-				),
+				)
+				: Effect.fail(HttpError.OAuth.of(provider, 'Unexpected response type')),
 		),
 	),
 );
@@ -96,7 +97,7 @@ const handleMe = (repositories: DatabaseService.Type, audit: typeof AuditService
 		);
 		yield* audit.log('User.read', { subjectId: userId });
 		return user;
-	}).pipe(Effect.withSpan('auth.me', { kind: 'server' }));
+	}).pipe(Telemetry.span('auth.me', { kind: 'server' }));
 
 // --- [MFA_HANDLERS] ----------------------------------------------------------
 
@@ -106,7 +107,7 @@ const handleMfaStatus = (auth: Auth.Service, audit: typeof AuditService.Service)
 		const status = yield* auth.mfaStatus(userId);
 		yield* audit.log('MfaSecret.status', { subjectId: userId });
 		return status;
-	}).pipe(Effect.withSpan('auth.mfa.status', { kind: 'server' }));
+	}).pipe(Telemetry.span('auth.mfa.status', { kind: 'server' }));
 const handleMfaEnroll = (auth: Auth.Service, repositories: DatabaseService.Type) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const session = yield* Context.Request.sessionOrFail;
@@ -125,7 +126,7 @@ const handleMfaDisable = (auth: Auth.Service) =>
 		const { userId } = yield* Context.Request.sessionOrFail;
 		yield* auth.mfaDisable(userId);
 		return { success: true as const };
-	}).pipe(Effect.withSpan('auth.mfa.disable', { kind: 'server' }));
+	}).pipe(Telemetry.span('auth.mfa.disable', { kind: 'server' }));
 const handleMfaRecover = (auth: Auth.Service, code: string) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const session = yield* Context.Request.sessionOrFail;
@@ -141,7 +142,7 @@ const handleListApiKeys = (repositories: DatabaseService.Type, audit: typeof Aud
 		const keys = yield* repositories.apiKeys.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('API key list failed', error)));
 		yield* audit.log('ApiKey.list', { details: { count: keys.length }, subjectId: userId });
 		return { data: keys };
-	}).pipe(Effect.withSpan('auth.apiKeys.list', { kind: 'server' }));
+	}).pipe(Telemetry.span('auth.apiKeys.list', { kind: 'server' }));
 const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
 	(repositories: DatabaseService.Type, audit: typeof AuditService.Service, input: { expiresAt?: Date; name: string }) =>
 		Effect.gen(function* () {

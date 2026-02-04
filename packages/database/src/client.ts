@@ -87,7 +87,23 @@ const Client = (<const T>(t: T) => t)({
 	monitoring: {			/** PG18.1 pg_stat_io observability functions. */
 		cacheHitRatio: Effect.fn('db.cacheHitRatio')(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ cacheHitRatio: number; hits: bigint; ioContext: string; ioObject: string; reads: bigint }>`SELECT * FROM get_io_cache_hit_ratio()`;
+			return yield* sql<{ backendType: string; cacheHitRatio: number; hits: bigint; ioContext: string; ioObject: string; reads: bigint; writes: bigint }>`
+				SELECT
+					backend_type,
+					object AS io_object,
+					context AS io_context,
+					SUM(hits) AS hits,
+					SUM(reads) AS reads,
+					SUM(writes) AS writes,
+					CASE
+						WHEN SUM(hits) + SUM(reads) > 0
+							THEN (SUM(hits)::double precision / (SUM(hits) + SUM(reads)) * 100)
+						ELSE 0
+					END AS cache_hit_ratio
+				FROM pg_stat_io
+				WHERE object = 'relation' AND context = 'normal'
+				GROUP BY backend_type, object, context
+			`;
 		}),
 		ioConfig: Effect.fn('db.ioConfig')(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -95,10 +111,30 @@ const Client = (<const T>(t: T) => t)({
 		}),
 		ioStats: Effect.fn('db.ioStats')(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ backendType: string; blksExtended: bigint; blksHit: bigint; blksRead: bigint; blksWritten: bigint; ioContext: string; ioObject: string; statsReset: Date | null }>`SELECT * FROM get_io_stats_by_backend()`;
+			return yield* sql<{ backendType: string; evictions: bigint; extends: bigint; extendTime: number | null; fsyncTime: number | null; fsyncs: bigint; hits: bigint; ioContext: string; ioObject: string; readTime: number | null; reads: bigint; reuses: bigint; statsReset: Date | null; writeTime: number | null; writebackTime: number | null; writebacks: bigint; writes: bigint }>`
+				SELECT
+					backend_type,
+					object AS io_object,
+					context AS io_context,
+					reads,
+					read_time,
+					writes,
+					write_time,
+					writebacks,
+					writeback_time,
+					extends,
+					extend_time,
+					hits,
+					evictions,
+					reuses,
+					fsyncs,
+					fsync_time,
+					stats_reset
+				FROM pg_stat_io
+			`;
 		}),
 	},
-	notify: (channel: string, payload?: string) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* payload ? sql`SELECT pg_notify(${channel}, ${payload})` : sql`NOTIFY ${sql.literal(channel)}`; }),
+	notify: (channel: string, payload?: string) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* payload ? sql`SELECT pg_notify(${channel}, ${payload})` : sql`NOTIFY ${sql(channel)}`; }),
 	statements: Effect.fn('db.listStatStatements')((limit: number = _CONFIG.stats.limit) =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -109,7 +145,7 @@ const Client = (<const T>(t: T) => t)({
 		set: _setTenant,	/** Set tenant context for current transaction. RLS policies read this via current_setting(). */
 		with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () { /** Execute effect within tenant context. Wraps in transaction with SET LOCAL. */
 			const sql = yield* SqlClient.SqlClient;
-			return yield* sql.withTransaction(_setTenant(appId).pipe(Effect.andThen(effect)));
+			return yield* sql.withTransaction(_setTenant(appId).pipe(Effect.andThen(effect), Effect.provideService(SqlClient.SqlClient, sql)));
 		}),
 	},
 	vector: {				/** pgvector 0.8+ HNSW configuration for filtered vector queries. */

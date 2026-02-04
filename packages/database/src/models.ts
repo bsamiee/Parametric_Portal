@@ -1,6 +1,6 @@
 /**
  * Define @effect/sql Model classes with auto-derived variants.
- * Field modifiers: Generated, Sensitive, FieldOption, JsonFromString, DateTimeUpdate.
+ * Field modifiers: Generated, Sensitive, FieldOption, DateTimeUpdate.
  */
 /** biome-ignore-all assist/source/useSortedKeys: <Maintain registry organization> */
 import { Model } from '@effect/sql';
@@ -91,7 +91,7 @@ class App extends Model.Class<App>('App')({ 							// Tenant namespace. Top-leve
 	id: Model.Generated(S.UUID),
 	name: S.String,
 	namespace: S.String,
-	settings: Model.FieldOption(Model.JsonFromString(S.Unknown)),
+	settings: Model.FieldOption(S.Unknown),
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
 
@@ -123,10 +123,31 @@ class AuditLog extends Model.Class<AuditLog>('AuditLog')({ 				// Append-only op
 	operation: S.String,												// Constrained: create|update|delete|restore|login|logout|verify|revoke
 	subject: S.String,
 	subjectId: S.UUID,
-	oldData: Model.FieldOption(Model.JsonFromString(S.Unknown)),		// PG18.1: Pre-modification state via RETURNING OLD.*
-	newData: Model.FieldOption(Model.JsonFromString(S.Unknown)),		// PG18.1: Post-modification state via RETURNING NEW.*
+	oldData: Model.FieldOption(S.Unknown),								// PG18.1: Pre-modification state via RETURNING OLD.*
+	newData: Model.FieldOption(S.Unknown),								// PG18.1: Post-modification state via RETURNING NEW.*
 	ipAddress: Model.FieldOption(S.String),
 	userAgent: Model.FieldOption(S.String),
+}) {}
+
+// --- [JOBS: JOB] -------------------------------------------------------------
+class Job extends Model.Class<Job>('Job')({								// Durable job registry. Belongs to an App.
+	jobId: S.String,
+	appId: S.UUID,
+	type: S.String,
+	status: S.String,
+	priority: S.String,
+	payload: S.Unknown,
+	result: Model.FieldOption(S.Unknown),
+	progress: Model.FieldOption(S.Struct({ message: S.String, pct: S.Number })),
+	history: S.Array(S.Struct({ error: S.optional(S.String), status: S.String, timestamp: S.Number })),
+	attempts: S.Number,
+	maxAttempts: S.Number,
+	scheduledAt: Model.FieldOption(S.DateFromSelf),
+	batchId: Model.FieldOption(S.String),
+	dedupeKey: Model.FieldOption(S.String),
+	lastError: Model.FieldOption(S.String),
+	completedAt: Model.FieldOption(S.DateFromSelf),
+	updatedAt: Model.DateTimeUpdateFromDate,
 }) {}
 
 // --- [JOBS: JOB_DLQ] ---------------------------------------------------------
@@ -134,15 +155,15 @@ class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Unified dead-letter 
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract DLQ creation time — NO dlqAt COLUMN
 	id: Model.Generated(S.UUID),
 	source: S.String,													// Discriminant: 'job' | 'event' — identifies origin type
-	originalJobId: S.UUID,												// Link to original job/event (NO FK — source may be purged before replay)
+	originalJobId: S.String,											// Link to original job/event (NO FK — source may be purged before replay)
 	appId: S.UUID,														// Tenant scope
 	userId: Model.FieldOption(S.UUID),									// Audit trail (FK RESTRICT — users never hard-deleted)
 	requestId: Model.FieldOption(S.UUID),								// Correlation for cross-pod traces
 	type: S.String,														// Job type or event type
-	payload: Model.JsonFromString(S.Unknown),							// Original payload
+	payload: S.Unknown,													// Original payload
 	errorReason: S.String,												// Job: MaxRetries | Validation | HandlerMissing | RunnerUnavailable | Timeout | Panic; Event: DeliveryFailed | DeserializationFailed | DuplicateEvent | HandlerMissing | HandlerTimeout
 	attempts: S.Number,													// Total attempts before dead-letter
-	errorHistory: Model.JsonFromString(S.Array(S.Struct({ error: S.String, timestamp: S.Number }))),	// Error trail
+	errorHistory: S.Array(S.Struct({ error: S.String, timestamp: S.Number })),	// Error trail
 	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job/event was replayed (null = pending)
 }) {}
 
@@ -164,8 +185,8 @@ class SearchDocument extends Model.Class<SearchDocument>('SearchDocument')({
 	scopeId: Model.FieldOption(S.UUID),
 	displayText: S.String,
 	contentText: Model.FieldOption(S.String),
-	metadata: Model.FieldOption(Model.JsonFromString(S.Unknown)),
-	hash: Model.FieldOption(S.String),
+	metadata: Model.FieldOption(S.Unknown),
+	documentHash: Model.Generated(S.String),
 	searchVector: Model.Generated(S.Unknown),
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
@@ -175,11 +196,13 @@ class SearchEmbedding extends Model.Class<SearchEmbedding>('SearchEmbedding')({
 	entityType: S.String,
 	entityId: S.UUID,
 	scopeId: Model.FieldOption(S.UUID),
+	model: S.String,
+	dimensions: S.Number,
 	embedding: S.Unknown,
-	hash: Model.FieldOption(S.String),
+	hash: S.String,
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
 
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ApiKey, App, Asset, AuditLog, JobDlq, KvStore, MfaSecret, OauthAccount, SearchDocument, SearchEmbedding, Session, User };
+export { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, SearchDocument, SearchEmbedding, Session, User };

@@ -83,11 +83,6 @@
       "import": "./src/domain/auth.ts",
       "default": "./src/domain/auth.ts"
     },
-    "./domain/search": {
-      "types": "./src/domain/search.ts",
-      "import": "./src/domain/search.ts",
-      "default": "./src/domain/search.ts"
-    },
     "./domain/storage": {
       "types": "./src/domain/storage.ts",
       "import": "./src/domain/storage.ts",

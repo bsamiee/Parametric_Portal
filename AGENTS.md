@@ -25,10 +25,10 @@ Condensed, no-bloat instructions for Codex agents. Treat this as a quick checkli
 - Import official objects from external libs; do not re-define or re-wrap library primitives.
 
 ## Algorithmic/parametric rules
-- One frozen base constant `B` per file; derive all values from `B`.
-- No numeric literals in logic except `B`; show explicit arithmetic.
+- One base constant `_CONFIG` per file; derive all values from `_CONFIG`.
+- No numeric literals in logic except `_CONFIG`; show explicit arithmetic.
 - Expose tuning at call-sites via params; normalize `T | ReadonlyArray<T>` with `Array.isArray()`.
-- Prefer dense constants over constant spam; fold related values into `B`.
+- Prefer dense constants over constant spam; fold related values into `_CONFIG`.
 
 ## Effect patterns
 - Use `pipe`, `Effect.map`, `Effect.flatMap`, `Effect.andThen`, `Effect.tap`, `Effect.gen`, `Effect.fn` for composition.

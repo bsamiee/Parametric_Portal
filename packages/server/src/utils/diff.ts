@@ -5,27 +5,16 @@
 import { applyPatch, createPatch, type Operation } from 'rfc6902';
 import { Array as A, Data, Effect, Option, pipe } from 'effect';
 
-// --- [TYPES] -----------------------------------------------------------------
-
-type AuditEntry = {
-	readonly oldData: Option.Option<unknown>;
-	readonly newData: Option.Option<unknown>;
-};
-type AuditEntryWithDiff<T extends AuditEntry> = T & { readonly diff: Option.Option<Diff.Patch> };
-
 // --- [ERRORS] ----------------------------------------------------------------
 
 class PatchError extends Data.TaggedError('PatchError')<{ readonly operations: readonly { readonly message: string }[] }> {}
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-/** Create RFC 6902 patch from before/after states. Returns null if no changes. */
 const create = <T>(before: T, after: T): Diff.Patch | null => {
 	const ops = createPatch(before, after);
 	return ops.length > 0 ? { ops } : null;
 };
-
-/** Apply RFC 6902 patch to target object. Fails with PatchError on invalid ops. */
 const apply = <T extends object>(target: T, patch: Diff.Patch): Effect.Effect<T, PatchError> => {
 	const clone = structuredClone(target);
 	const results = applyPatch(clone, [...patch.ops]);
@@ -34,42 +23,28 @@ const apply = <T extends object>(target: T, patch: Diff.Patch): Effect.Effect<T,
 		? Effect.fail(new PatchError({ operations: failed.map((error) => ({ message: error.message })) }))
 		: Effect.succeed(clone);
 };
-
-/** Compute diff from audit entry's oldData/newData snapshots. Pure function, no Effect. */
 const fromSnapshots = (oldData: Option.Option<unknown>, newData: Option.Option<unknown>): Option.Option<Diff.Patch> =>
 	pipe(
 		Option.all({ newData, oldData }),
 		Option.flatMap(({ oldData: before, newData: after }) => Option.fromNullable(create(before, after))),
 	);
-
-/** Enrich single audit entry with computed diff. */
-const enrichEntry = <T extends AuditEntry>(entry: T): AuditEntryWithDiff<T> => ({
+const enrichEntry = <T extends Diff.Entry>(entry: T): T & { readonly diff: Option.Option<Diff.Patch> } => ({
 	...entry,
 	diff: fromSnapshots(entry.oldData, entry.newData),
 });
-
-/** Enrich array of audit entries with computed diffs. */
-const enrichEntries = <T extends AuditEntry>(entries: readonly T[]): readonly AuditEntryWithDiff<T>[] =>
-	A.map(entries, enrichEntry);
+const enrichEntries = <T extends Diff.Entry>(entries: readonly T[]): readonly (T & { readonly diff: Option.Option<Diff.Patch> })[] => A.map(entries, enrichEntry);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const Diff = {
-	apply,
-	create,
-	enrichEntries,
-	enrichEntry,
-	fromSnapshots,
-	PatchError,
-} as const;
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
+const Diff = { apply, create, enrichEntries, enrichEntry, fromSnapshots, PatchError } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Diff {
+	export type Entry = { readonly oldData: Option.Option<unknown>; readonly newData: Option.Option<unknown> };
 	export type Patch = { readonly ops: readonly Operation[] };
 	export type PatchError = InstanceType<typeof Diff.PatchError>;
-	export type WithDiff<T extends AuditEntry> = AuditEntryWithDiff<T>;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

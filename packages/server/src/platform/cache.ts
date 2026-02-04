@@ -24,10 +24,10 @@ const _CONFIG = {
 	presence: { ttlSeconds: 120 },
 	pubsub: { channel: 'cache:invalidate' },
 	rateLimit: {
-		api: 	  { algorithm: 'token-bucket', limit: 100, onExceeded: 'fail', 	recovery: undefined, 	  tokens: 1, window: Duration.minutes(1)  },
-		auth: 	  { algorithm: 'fixed-window', limit: 5, onExceeded: 'fail', 	recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
-		mfa: 	  { algorithm: 'fixed-window', limit: 5, onExceeded: 'fail', 	recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
-		mutation: { algorithm: 'token-bucket', limit: 100, onExceeded: 'delay', recovery: undefined, 	  tokens: 5, window: Duration.minutes(1)  },
+		api: 	  { algorithm: 'token-bucket', failMode: 'open', limit: 100, onExceeded: 'fail', 	recovery: undefined, 	  tokens: 1, window: Duration.minutes(1)  },
+		auth: 	  { algorithm: 'fixed-window', failMode: 'closed', limit: 5, onExceeded: 'fail', 	recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
+		mfa: 	  { algorithm: 'fixed-window', failMode: 'closed', limit: 5, onExceeded: 'fail', 	recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
+		mutation: { algorithm: 'token-bucket', failMode: 'open', limit: 100, onExceeded: 'delay', recovery: undefined, 	  tokens: 5, window: Duration.minutes(1)  },
 	},
 	redis: { connectTimeout: 5000, enableReadyCheck: true, host: 'localhost', lazyConnect: false, maxRetriesPerRequest: 3, port: 6379, prefix: 'persist:' },
 } as const;
@@ -90,7 +90,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			readonly timeToLive?: Duration.DurationInput;
 			readonly inMemoryCapacity?: number;
 			readonly inMemoryTTL?: Duration.DurationInput;
-		}): Effect.Effect<PersistedCache.PersistedCache<K>, never, CacheService | S.SerializableWithResult.Context<K> | R | Persistence.ResultPersistence | Scope.Scope>;
+		}): Effect.Effect<PersistedCache.PersistedCache<K>, never, CacheService | S.SerializableWithResult.Context<K> | R | Persistence.ResultPersistence | Scope.Scope>; // NOSONAR S3358
 		<K extends Persistence.ResultPersistence.KeyAny, A, R>(options: {
 			readonly storeId: string;
 			readonly lookup: (key: K) => Effect.Effect<Option.Option<A>, S.WithResult.Failure<K>, R>;
@@ -121,24 +121,12 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			const _svc = yield* CacheService;
 			const { _reactivity, _redis } = _svc;
 			const lookup = (key: K): Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R> =>
-				Match.value(options).pipe(
-					Match.when((opts): opts is {
-						readonly storeId: string;
-						readonly lookup: (key: K) => Effect.Effect<Option.Option<A>, S.WithResult.Failure<K>, R>;
-						readonly map: (value: A) => S.WithResult.Success<K> extends Option.Option<infer B> ? B : never;
-						readonly onSome?: (value: A) => Effect.Effect<void, never, R>;
-						readonly timeToLive?: Duration.DurationInput;
-						readonly inMemoryCapacity?: number;
-						readonly inMemoryTTL?: Duration.DurationInput;
-					} => 'map' in opts, (opts) =>
-						opts.lookup(key).pipe(
-							Effect.tap(Option.match({ onNone: () => Effect.void, onSome: opts.onSome ?? (() => Effect.void) })),
-							Effect.map(Option.map(opts.map)),
-							Effect.map((mapped) => unsafeCoerce<unknown, S.WithResult.Success<K>>(mapped)),
-						),
-					),
-					Match.orElse((opts) => opts.lookup(key)),
-				);
+				'map' in options
+					? (options as { lookup: (key: K) => Effect.Effect<Option.Option<A>, S.WithResult.Failure<K>, R>; map: (value: A) => unknown; onSome?: (value: A) => Effect.Effect<void, never, R> }).lookup(key).pipe(
+						Effect.tap((opt) => Option.isSome(opt) ? ((options as { onSome?: (value: A) => Effect.Effect<void, never, R> }).onSome ?? Effect.succeed)(opt.value) : Effect.void),
+						Effect.map((opt) => unsafeCoerce<Option.Option<unknown>, S.WithResult.Success<K>>(Option.map(opt, (options as { map: (value: A) => unknown }).map))),
+					)
+					: (options as { lookup: (key: K) => Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R> }).lookup(key);
 			const cache = yield* PersistedCache.make({
 				inMemoryCapacity: options.inMemoryCapacity ?? _CONFIG.defaults.inMemoryCapacity,
 				inMemoryTTL: options.inMemoryTTL ?? _CONFIG.defaults.inMemoryTTL,
@@ -157,7 +145,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 				const id = `${options.storeId}:${PrimaryKey.value(key)}`;
 				return registrations.has(id) || registrations.set(id, _reactivity.unsafeRegister([id], makeInvalidator(id, key)));
 			});
-			yield* Effect.addFinalizer(() => Effect.sync(() => { registrations.forEach((cleanup) => { cleanup(); }); registrations.clear(); }));
+			yield* Effect.addFinalizer(() => Effect.forEach(registrations.values(), Effect.sync, { discard: true }).pipe(Effect.andThen(Effect.sync(registrations.clear.bind(registrations)))));
 			return {
 				get: (key) => register(key).pipe(Effect.andThen(cache.get(key))),
 				invalidate: (key) => register(key).pipe(Effect.andThen(CacheService.invalidate(options.storeId, PrimaryKey.value(key))), Effect.provideService(CacheService, _svc)),
@@ -255,22 +243,32 @@ const _rateLimit = <A, E, R>(preset: CacheService.RateLimitPreset, handler: Effe
 			const labels = MetricsService.label({ preset });
 			return limiter.consume({ algorithm: config.algorithm, key: `${preset}:${tenantId}:${userId}:${ip}`, limit: config.limit, onExceeded: config.onExceeded, tokens: config.tokens, window: config.window }).pipe(
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.rateLimit.checkDuration, labels)),
-				Effect.catchAll((error) => error instanceof RateLimitExceeded
-					? Effect.all([
-						Context.Request.update({ rateLimit: Option.some({ delay: Duration.zero, limit: error.limit, remaining: error.remaining, resetAfter: error.retryAfter }) }),
-						MetricsService.inc(metrics.rateLimit.rejections, labels),
-						Context.Request.withinSync(ctx.tenantId, audit.log('rate_limited', { details: { limit: error.limit, preset, remaining: error.remaining, resetAfterMs: Duration.toMillis(error.retryAfter) } })).pipe(
-							Effect.catchAll(() => Effect.void),
-						),
-					], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.RateLimit.of(Duration.toMillis(error.retryAfter), {
-						limit: error.limit, remaining: error.remaining, resetAfterMs: Duration.toMillis(error.retryAfter),
-						...(config.recovery ? { recoveryAction: config.recovery } : {}),
-					}))))
-					: Effect.all([
-						Effect.logWarning('Rate limit store unavailable (fail-open)', { error: String(error), preset }),
-						MetricsService.inc(metrics.rateLimit.storeFailures, labels),
-					], { discard: true }).pipe(Effect.as({ delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window })),
-				),
+				Effect.catchAll((error) => Match.value(error).pipe(
+					Match.when((e): e is RateLimitExceeded => e instanceof RateLimitExceeded, (e) =>
+						Effect.all([
+							Context.Request.update({ rateLimit: Option.some({ delay: Duration.zero, limit: e.limit, remaining: e.remaining, resetAfter: e.retryAfter }) }),
+							MetricsService.inc(metrics.rateLimit.rejections, labels),
+							Context.Request.withinSync(ctx.tenantId, audit.log('rate_limited', { details: { limit: e.limit, preset, remaining: e.remaining, resetAfterMs: Duration.toMillis(e.retryAfter) } })).pipe(Effect.ignore),
+						], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.RateLimit.of(Duration.toMillis(e.retryAfter), {
+							limit: e.limit, remaining: e.remaining, resetAfterMs: Duration.toMillis(e.retryAfter),
+							...(config.recovery ? { recoveryAction: config.recovery } : {}),
+						})))),
+					),
+					Match.orElse((e) => ({
+						closed: Effect.all([
+							Effect.logWarning('Rate limit store unavailable (fail-closed)', { error: String(e), preset }),
+							MetricsService.inc(metrics.rateLimit.storeFailures, labels),
+							Context.Request.update({ rateLimit: Option.some({ delay: Duration.zero, limit: config.limit, remaining: 0, resetAfter: config.window }) }),
+						], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.RateLimit.of(Duration.toMillis(config.window), {
+							limit: config.limit, remaining: 0, resetAfterMs: Duration.toMillis(config.window),
+							...(config.recovery ? { recoveryAction: config.recovery } : {}),
+						})))),
+						open: Effect.all([
+							Effect.logWarning('Rate limit store unavailable (fail-open)', { error: String(e), preset }),
+							MetricsService.inc(metrics.rateLimit.storeFailures, labels),
+						], { discard: true }).pipe(Effect.as({ delay: Duration.zero, limit: config.limit, remaining: config.limit, resetAfter: config.window })),
+					})[config.failMode]),
+				)),
 				Effect.tap((result) => Context.Request.update({ rateLimit: Option.some(result) })), // NOSONAR S3358
 				Effect.andThen(handler),
 			);

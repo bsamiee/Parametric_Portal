@@ -2,12 +2,13 @@
  * Search API route handlers with tenant context and admin authorization.
  */
 import { HttpApiBuilder } from '@effect/platform';
+import { SearchService } from '@parametric-portal/ai/search';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
-import { SearchService } from '@parametric-portal/server/domain/search';
 import { HttpError } from '@parametric-portal/server/errors';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Middleware } from '@parametric-portal/server/middleware';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Effect, Option } from 'effect';
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -31,7 +32,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						{ cursor: urlParams.cursor, limit: urlParams.limit },
 					).pipe(
 						Effect.mapError((error) => HttpError.Internal.of('Search failed', error)),
-						Effect.withSpan('search.query', { kind: 'server' }),
+						Telemetry.span('search.query', { kind: 'server' }),
 					),
 				),
 			)
@@ -43,7 +44,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						prefix: urlParams.prefix,
 					}).pipe(
 						Effect.mapError((error) => HttpError.Internal.of('Suggest failed', error)),
-						Effect.withSpan('search.suggest', { kind: 'server' }),
+						Telemetry.span('search.suggest', { kind: 'server' }),
 					),
 				),
 			)
@@ -53,7 +54,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						Effect.andThen(search.refresh(payload.includeGlobal)),
 						Effect.as({ status: 'ok' as const }),
 						Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Refresh failed', error))),
-						Effect.withSpan('search.refresh', { kind: 'server' }),
+						Telemetry.span('search.refresh', { kind: 'server' }),
 					),
 				),
 			)
@@ -63,7 +64,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal })),
 						Effect.map((result) => ({ count: result.count })),
 						Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Embedding refresh failed', error))),
-						Effect.withSpan('search.refreshEmbeddings', { kind: 'server' }),
+						Telemetry.span('search.refreshEmbeddings', { kind: 'server' }),
 					),
 				),
 			);

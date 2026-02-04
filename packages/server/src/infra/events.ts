@@ -29,6 +29,15 @@ const _ErrorProps = {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _EventErrorReason = S.Literal(...Object.keys(_ErrorProps) as [keyof typeof _ErrorProps, ...(keyof typeof _ErrorProps)[]]);
+const _SnowflakeId = S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId'));
+const _EventInput = S.Struct({
+	aggregateId: S.String,
+	causationId: S.optional(S.UUID),
+	correlationId: S.optional(S.UUID),
+	eventId: S.optional(_SnowflakeId),
+	payload: S.Unknown,
+	tenantId: S.optional(S.String),
+});
 class EventError extends S.TaggedError<EventError>()('EventError', {
 	cause: S.optional(S.Unknown),
 	eventId: S.optional(S.String),
@@ -42,7 +51,7 @@ class DomainEvent extends S.Class<DomainEvent>('DomainEvent')({
 	aggregateId: S.String,
 	causationId: S.optional(S.UUID),
 	correlationId: S.optional(S.UUID),
-	eventId: S.UUID.pipe(S.brand('EventId')),
+	eventId: _SnowflakeId,
 	payload: S.Unknown,
 	tenantId: S.String,
 }) {
@@ -57,11 +66,6 @@ class EventEnvelope extends S.Class<EventEnvelope>('EventEnvelope')({
 	event: DomainEvent,
 }) {}
 
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _encode = (envelope: EventEnvelope) => S.encode(S.parseJson(EventEnvelope))(envelope).pipe(Effect.map((json) => new TextEncoder().encode(json)));
-const _decode = (entry: EventJournal.Entry) => Effect.sync(() => new TextDecoder().decode(entry.payload)).pipe(Effect.flatMap(S.decode(S.parseJson(EventEnvelope))));
-
 // --- [SERVICE] ---------------------------------------------------------------
 
 class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
@@ -73,10 +77,14 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 		yield* Effect.annotateLogsScoped({ 'service.name': 'eventbus' });
 		const changesQueue = yield* journal.changes;
 		const broadcastStream: Stream.Stream<EventEnvelope, never, never> = Stream.fromQueue(changesQueue).pipe(
-			Stream.mapEffect(_decode),
+			Stream.mapEffect((entry) =>
+				Effect.sync(() => new TextDecoder().decode(entry.payload)).pipe(
+					Effect.flatMap(S.decode(S.parseJson(EventEnvelope))),
+				),
+			),
 			Stream.catchAll(() => Stream.empty),
 		);
-		const emit = (input: DomainEvent | Chunk.Chunk<DomainEvent>) => {
+		const emit = (input: typeof _EventInput.Type | Chunk.Chunk<typeof _EventInput.Type>) => {
 			const items = Chunk.isChunk(input) ? input : Chunk.of(input);
 			return Telemetry.span(
 				Effect.all([Context.Request.current, sharding.getSnowflake]).pipe(
@@ -85,13 +93,16 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 							Chunk.map(items, (event): EventEnvelope => new EventEnvelope({
 								emittedAt: DateTime.unsafeMake(Snowflake.timestamp(sf)),
 								event: new DomainEvent({
-									...event,
+									aggregateId: event.aggregateId,
+									causationId: event.causationId,
 									correlationId: event.correlationId ?? ctx.requestId,
-									eventId: event.eventId ?? (String(sf) as typeof event.eventId),
+									eventId: event.eventId ?? (String(sf) as typeof DomainEvent.Type['eventId']),
+									payload: event.payload,
 									tenantId: event.tenantId ?? ctx.tenantId,
 								}),
 							})),
-							(envelope) => _encode(envelope).pipe(
+							(envelope) => S.encode(S.parseJson(EventEnvelope))(envelope).pipe(
+								Effect.map((json) => new TextEncoder().encode(json)),
 								Effect.flatMap((payload) => journal.write({
 									effect: () => Metric.increment(metrics.events.emitted),
 									event: envelope.event.eventType,

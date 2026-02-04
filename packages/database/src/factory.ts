@@ -22,17 +22,18 @@ class RepoOccError extends Data.TaggedError('RepoOccError')<{ table: string; pk:
 type AggResult<T extends AggSpec> = { [K in keyof T]: T[K] extends true ? number : T[K] extends string ? number : never };
 type AggSpec = { sum?: string; avg?: string; min?: string; max?: string; count?: true };
 type MergeResult<T> = T & { readonly _action: 'insert' | 'update' };
+type SqlCast = typeof Field.sqlCast[keyof typeof Field.sqlCast];
 type Config<M extends Model.AnyNoContext> = {
-	pk?: { column: string; cast?: string };
+	pk?: { column: string; cast?: SqlCast };
 	resolve?: Record<string, keyof M['fields'] & string | (keyof M['fields'] & string)[] | `many:${keyof M['fields'] & string}`>;
 	conflict?: { keys: (keyof M['fields'] & string)[]; only?: (keyof M['fields'] & string)[] };
 	purge?: string;
-	fn?: Record<string, { args: (string | { field: string; cast: string })[]; params: S.Schema.AnyNoContext }>;
-	fnSet?: Record<string, { args: (string | { field: string; cast: string })[]; params: S.Schema.AnyNoContext }>;
+	fn?: Record<string, { args: (string | { field: string; cast: SqlCast })[]; params: S.Schema.AnyNoContext }>;
+	fnSet?: Record<string, { args: (string | { field: string; cast: SqlCast })[]; params: S.Schema.AnyNoContext }>;
 };
 type Pred =
 	| [string, unknown]
-	| { field: string; value?: unknown; values?: unknown[]; op?: 'eq' | 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'null' | 'notNull' | 'contains' | 'containedBy' | 'hasKey' | 'hasKeys' | 'tsGte' | 'tsLte'; cast?: string; wrap?: string }
+	| { field: string; value?: unknown; values?: unknown[]; op?: 'eq' | 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'null' | 'notNull' | 'contains' | 'containedBy' | 'hasKey' | 'hasKeys' | 'tsGte' | 'tsLte'; cast?: SqlCast; wrap?: 'casefold' }
 	| { raw: Statement.Fragment };
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -81,7 +82,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		const $target = (target: string | [string, unknown]) => typeof target === 'string' ? sql`${sql(pkCol)} = ${target}${pkCast}` : sql`${sql(target[0])} = ${target[1]}`;
 		const $lock = (lock: false | 'update' | 'share' | 'nowait' | 'skip') => ({ false: sql``, nowait: sql` FOR UPDATE NOWAIT`, share: sql` FOR SHARE`, skip: sql` FOR UPDATE SKIP LOCKED`, update: sql` FOR UPDATE` })[`${lock}`];
 		const $order = (asc: boolean) => asc ? sql`ORDER BY ${sql(pkCol)} ASC` : sql`ORDER BY ${sql(pkCol)} DESC`;
-		type OpCtx = { col: Statement.Fragment; value: unknown; values: unknown[]; $cast: string | undefined };
+		type OpCtx = { col: Statement.Fragment; value: unknown; values: unknown[]; $cast: SqlCast | undefined };
 		const _cmp = (op: string) => ({ col, value, $cast }: OpCtx) => sql`${col} ${sql.literal(op)} ${value}${$cast ? sql`::${sql.literal($cast)}` : sql``}`;
 		const _ops = {
 			containedBy: ({ col, value }: OpCtx) => sql`${col} <@ ${value}::jsonb`,
@@ -128,7 +129,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 			value === NowOp ? sql`${sql(column)} = NOW()`
 			: value instanceof IncOp ? sql`${sql(column)} = ${sql(column)} + ${value.delta}`
 			: value instanceof JsonbDelOp ? sql`${sql(column)} = ${sql(column)} #- ${`{${value.path.join(',')}}`}::text[]`
-			: value instanceof JsonbSetOp ? sql`${sql(column)} = jsonb_set(${sql(column)}, ${`{${value.path.join(',')}}`}::text[], ${JSON.stringify(value.value)}::jsonb)`
+			: value instanceof JsonbSetOp ? sql`${sql(column)} = jsonb_set(${sql(column)}, ${`{${value.path.join(',')}}`}::text[], ${pg.json(value.value)}::jsonb)`
 			: typeof value !== 'object' || value === null ? sql`${sql(column)} = ${value}`
 			: sql`${sql(column)} = ${pg.json(value)}`;
 		const $entries = (updates: Record<string, unknown>): Statement.Fragment[] => R.collect(updates, (column, value) => _entryToFragment(column, value));
@@ -241,7 +242,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		// --- Purge method (fail with tagged error if not configured) ---------
 		const purge = (days = 30): Effect.Effect<number, RepoConfigError | SqlError | ParseError | Cause.NoSuchElementException> =>
 			config.purge
-				? ((functionName) => SqlSchema.single({ execute: (num) => sql`SELECT ${sql.literal(functionName)}(${num}) AS count`, Request: S.Number, Result: S.Struct({ count: S.Int }) })(days).pipe(Effect.map(row => row.count)))(config.purge)
+			? ((functionName) => SqlSchema.single({ execute: (num) => sql`SELECT ${sql.literal(functionName)}(${num}) AS count`, Request: S.Number, Result: S.Struct({ count: S.Int }) })(days).pipe(Effect.map(row => row.count)))(config.purge)
 				: Effect.fail(new RepoConfigError({ message: 'purge function not configured', operation: 'purge', table }));
 		// --- Upsert method (fail with tagged error if not configured) --------
 		/** Polymorphic upsert: single → T, batch → T[] (mirrors input shape). Fails with RepoOccError if OCC check fails. */

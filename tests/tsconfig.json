@@ -1,0 +1,15 @@
+{
+    "compilerOptions": {
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
+        "noEmit": true,
+        "rootDir": "..",
+        "tsBuildInfoFile": "../.nx/cache/tsbuildinfo/tests.tsbuildinfo",
+        "types": ["node", "vitest/globals"]
+    },
+    "exclude": ["node_modules"],
+    "extends": "../tsconfig.base.json",
+    "include": ["**/*", "setup.ts"]
+}

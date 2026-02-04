@@ -6,7 +6,7 @@ import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Schema as S } from 'effect';
 import { Client } from './client.ts';
 import { repo, Update } from './factory.ts';
-import { ApiKey, App, Asset, AuditLog, JobDlq, KvStore, MfaSecret, OauthAccount, Session, User } from './models.ts';
+import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, Session, User } from './models.ts';
 
 // --- [USER_REPO] -------------------------------------------------------------
 
@@ -150,6 +150,15 @@ const makeMfaSecretRepo = Effect.gen(function* () {
 	};
 });
 
+// --- [JOB_REPO] --------------------------------------------------------------
+
+const makeJobRepo = Effect.gen(function* () {
+	const repository = yield* repo(Job, 'jobs', { pk: { column: 'job_id' } });
+	return {
+		...repository,
+	};
+});
+
 // --- [JOB_DLQ_REPO] ----------------------------------------------------------
 
 const makeJobDlqRepo = Effect.gen(function* () {
@@ -208,11 +217,11 @@ const _purgeEventJournal = (olderThanDays: number) => Effect.gen(function* () {
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, jobDlq, kvStore] = yield* Effect.all([
+		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, jobs, jobDlq, kvStore] = yield* Effect.all([
 			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobDlqRepo, makeKvStoreRepo,
+			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo,
 		]);
-		return { apiKeys, apps, assets, audit, eventJournal: { purge: _purgeEventJournal }, jobDlq, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, sessions, users, withTransaction: sqlClient.withTransaction };
+		return { apiKeys, apps, assets, audit, eventJournal: { purge: _purgeEventJournal }, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, sessions, users, withTransaction: sqlClient.withTransaction };
 	}),
 }) {}
 

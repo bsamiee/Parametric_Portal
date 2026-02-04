@@ -10,6 +10,8 @@ export default defineConfig(
         createConfig({
             entry: {
                 registry: './src/registry.ts',
+                runtime: './src/runtime.ts',
+                search: './src/search.ts',
             },
             external: [
                 '@effect/ai',
@@ -17,6 +19,8 @@ export default defineConfig(
                 '@effect/ai-google',
                 '@effect/ai-openai',
                 '@effect/platform',
+                '@parametric-portal/database',
+                '@parametric-portal/server',
                 '@parametric-portal/types',
                 'effect',
             ],

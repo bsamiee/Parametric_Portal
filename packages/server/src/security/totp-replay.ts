@@ -33,9 +33,7 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 		return {
 			checkAndMark: (userId: string, timeStep: number, code: string) => {
 				const key = `${_CONFIG.keyPrefix}${userId}:${timeStep}:${code}`;
-				return CacheService.setNX(key, '1', _CONFIG.ttl).pipe(
-					Effect.map((result) => ({ alreadyUsed: result.alreadyExists, backend: 'redis' as const })),
-				);
+				return CacheService.setNX(key, '1', _CONFIG.ttl).pipe(Effect.map((result) => ({ alreadyUsed: result.alreadyExists, backend: 'redis' as const })),);
 			},
 			checkLockout: (userId: string) =>
 				Effect.gen(function* () {

@@ -36,6 +36,13 @@ const errorTag = (err: unknown): string => Match.value(err).pipe(
 
 class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', {
 	effect: Effect.succeed({
+		ai: {
+			duration: Metric.timerWithBoundaries('ai_duration_seconds', _CONFIG.boundaries.transfer),
+			embeddings: Metric.counter('ai_embeddings_total'),
+			errors: Metric.frequency('ai_errors_total'),
+			requests: Metric.counter('ai_requests_total'),
+			tokens: Metric.counter('ai_tokens_total'),
+		},
 		audit: {failures: Metric.counter('audit_failures_total'), writes: Metric.counter('audit_writes_total'),},
 		auth: {
 			apiKeys: Metric.counter('auth_api_keys_total'), logins: Metric.counter('auth_logins_total'), logouts: Metric.counter('auth_logouts_total'),
@@ -230,12 +237,11 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 				operation: config.operation,
 			});
 			return effect.pipe(
-				Effect.tap(() => Match.value(config.operation).pipe(
-					Match.when('send', () => Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesSent, labels))),
-					Match.when('receive', () => Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesReceived, labels))),
-					Match.when('broadcast', () => Effect.void),
-					Match.exhaustive,
-				)),
+				Effect.tap(() => ({
+					broadcast: Effect.void,
+					receive: Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesReceived, labels)),
+					send: Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesSent, labels)),
+				})[config.operation]),
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.cluster.messageLatency, labels)),
 				Effect.tapError((e) => {
 					const errorLabels = MetricsService.label({
@@ -260,13 +266,12 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 				priority: config.priority,
 			});
 			return effect.pipe(
-				Effect.tap(() => Match.value(config.operation).pipe(
-					Match.when('submit', () => Metric.increment(Metric.taggedWithLabels(metrics.jobs.enqueued, labels))),
-					Match.when('cancel', () => Metric.increment(Metric.taggedWithLabels(metrics.jobs.cancellations, labels))),
-					Match.when('process', () => Effect.void),
-					Match.when('replay', () => Effect.void),
-					Match.exhaustive,
-				)),
+				Effect.tap(() => ({
+					cancel: Metric.increment(Metric.taggedWithLabels(metrics.jobs.cancellations, labels)),
+					process: Effect.void,
+					replay: Effect.void,
+					submit: Metric.increment(Metric.taggedWithLabels(metrics.jobs.enqueued, labels)),
+				})[config.operation]),
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.processingSeconds, labels)),
 				Effect.tapError((e) => {
 					const errorLabels = MetricsService.label({

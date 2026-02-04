@@ -5,6 +5,8 @@
 import { createServer } from 'node:http';
 import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
+import { AiRuntime } from '@parametric-portal/ai/runtime';
+import { SearchService } from '@parametric-portal/ai/search';
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SearchRepo } from '@parametric-portal/database/search';
@@ -12,7 +14,6 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Auth } from '@parametric-portal/server/domain/auth';
-import { SearchService } from '@parametric-portal/server/domain/search';
 import { StorageService } from '@parametric-portal/server/domain/storage';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { EventBus } from '@parametric-portal/server/infra/events';
@@ -57,7 +58,7 @@ const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer,
 // All application services in dependency order. Single provideMerge chain.
 // Crons: domain services own their schedules (PollingService.Crons, Purge.Crons, SearchService.EmbeddingCron)
 
-const ServicesLayer = Layer.mergeAll(Auth.Service.Default, StorageService.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebSocketService.Default).pipe(
+const ServicesLayer = Layer.mergeAll(Auth.Service.Default, StorageService.Default, AiRuntime.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebSocketService.Default).pipe(
 	Layer.provideMerge(Layer.mergeAll(PollingService.Crons, Purge.Crons, SearchService.EmbeddingCron)),
 	Layer.provideMerge(Purge.Handlers),
 	Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),

@@ -20,29 +20,26 @@ type PurgeRepo = 'apiKeys' | 'assets' | 'eventJournal' | 'jobDlq' | 'kvStore' | 
 
 const _CONFIG = {
 	jobs: {
-		'purge-api-keys': 		{ cron: '0 3 * * 0', days: 365, repo: 'apiKeys' as const },
-		'purge-assets': 		{ cron: '0 */6 * * *', days: 30, repo: 'assets' as const },
-		'purge-event-journal': 	{ cron: '0 2 * * *', days: 30, repo: 'eventJournal' as const },
-		'purge-job-dlq': 		{ cron: '0 2 * * *', days: 30, repo: 'jobDlq' as const },
-		'purge-kv-store': 		{ cron: '0 0 * * 0', days: 90, repo: 'kvStore' as const },
-		'purge-mfa-secrets': 	{ cron: '0 4 * * 0', days: 90, repo: 'mfaSecrets' as const },
-		'purge-oauth-accounts': { cron: '0 5 * * 0', days: 90, repo: 'oauthAccounts' as const },
-		'purge-sessions': 		{ cron: '0 1 * * *', days: 30, repo: 'sessions' as const },
+		'purge-api-keys': 		{ cron: '0 3 * * 0', 	days: 365, 	repo: 'apiKeys' as const },
+		'purge-assets': 		{ cron: '0 */6 * * *', 	days: 30, 	repo: 'assets' as const },
+		'purge-event-journal': 	{ cron: '0 2 * * *', 	days: 30, 	repo: 'eventJournal' as const },
+		'purge-job-dlq': 		{ cron: '0 2 * * *', 	days: 30, 	repo: 'jobDlq' as const },
+		'purge-kv-store': 		{ cron: '0 0 * * 0', 	days: 90, 	repo: 'kvStore' as const },
+		'purge-mfa-secrets': 	{ cron: '0 4 * * 0', 	days: 90, 	repo: 'mfaSecrets' as const },
+		'purge-oauth-accounts': { cron: '0 5 * * 0', 	days: 90, 	repo: 'oauthAccounts' as const },
+		'purge-sessions': 		{ cron: '0 1 * * *', 	days: 30, 	repo: 'sessions' as const },
 	},
 	s3: { batchSize: 100, concurrency: 2 },
 } as const satisfies { jobs: Record<string, { cron: string; days: number; repo: PurgeRepo }>; s3: { batchSize: number; concurrency: number } };
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _sumResults = (results: ReadonlyArray<{ deleted: number; failed: number }>) =>
-	results.reduce((acc, r) => ({ deleted: acc.deleted + r.deleted, failed: acc.failed + r.failed }), { deleted: 0, failed: 0 });
-
+const _sumResults = (results: ReadonlyArray<{ deleted: number; failed: number }>) => results.reduce((acc, r) => ({ deleted: acc.deleted + r.deleted, failed: acc.failed + r.failed }), { deleted: 0, failed: 0 });
 const _deleteBatch = (storage: typeof StorageService.Service, batch: ReadonlyArray<string>) =>
 	storage.remove(batch).pipe(
 		Effect.as({ deleted: batch.length, failed: 0 }),
 		Effect.catchAll((err) => Effect.logWarning('S3 batch delete failed', { error: String(err), keys: batch.length }).pipe(Effect.as({ deleted: 0, failed: batch.length }))),
 	);
-
 const _purgeAssets = (db: DatabaseService.Type, storage: typeof StorageService.Service, days: number) =>
 	db.assets.findStaleForPurge(days).pipe(
 		Effect.flatMap(A.match({
@@ -57,13 +54,11 @@ const _purgeAssets = (db: DatabaseService.Type, storage: typeof StorageService.S
 			},
 		})),
 	);
-
 const _purgeSimple = (db: DatabaseService.Type, repo: Exclude<PurgeRepo, 'assets'>, days: number) =>
 	(db[repo].purge(days) as Effect.Effect<number, unknown>).pipe(
 		Effect.orElse(() => Effect.succeed(0)),
 		Effect.map((dbPurged) => ({ dbPurged })),
 	);
-
 const _handler = (name: PurgeJobName, db: DatabaseService.Type, storage: typeof StorageService.Service, audit: typeof AuditService.Service) => {
 	const cfg = _CONFIG.jobs[name];
 	return (_payload: unknown) =>
@@ -83,9 +78,7 @@ const _handler = (name: PurgeJobName, db: DatabaseService.Type, storage: typeof 
 			Telemetry.span(`jobs.${name}`),
 		);
 };
-
-const _enqueue = (name: PurgeJobName) => (jobs: typeof JobService.Service) =>
-	Context.Request.withinSync(Context.Request.Id.system, jobs.submit(name, null), Context.Request.system());
+const _enqueue = (name: PurgeJobName) => (jobs: typeof JobService.Service) => Context.Request.withinSync(Context.Request.Id.system, jobs.submit(name, null), Context.Request.system());
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -98,7 +91,6 @@ const _Crons = Layer.mergeAll(
 		}),
 	) as [Layer.Layer<never>, ...Layer.Layer<never>[]]),
 );
-
 const _Handlers = Layer.effectDiscard(Effect.gen(function* () {
 	const [jobs, db, storage, audit] = yield* Effect.all([JobService, DatabaseService, StorageService, AuditService]);
 	yield* Effect.forEach(R.keys(_CONFIG.jobs), (name) =>

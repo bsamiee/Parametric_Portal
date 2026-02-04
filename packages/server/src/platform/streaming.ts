@@ -5,13 +5,12 @@
 /** biome-ignore-all assist/source/useSortedKeys: <_formats table organization lock> */
 import { Headers, HttpServerResponse, MsgPack, Multipart, Ndjson } from '@effect/platform';
 import { Sse } from '@effect/experimental';
-import { Chunk, Duration, Effect, type HashSet, Mailbox, Match, type Metric, type MetricLabel, Option, pipe, Predicate, type PubSub, Schedule, Stream, Subscribable, SubscriptionRef } from 'effect';
-import type { Scope } from 'effect/Scope';
-import type { DurationInput } from 'effect/Duration';
+import { Chunk, Duration, Effect, type HashSet, Mailbox, Match, type Metric, type MetricLabel, Option, pipe, Predicate, type PubSub, Schedule, type Scope, Stream, Subscribable, SubscriptionRef } from 'effect';
 import { Context } from '../context.ts';
 import { ClusterService } from '../infra/cluster.ts';
 import { EventBus } from '../infra/events.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
 import { Resilience } from '../utils/resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -29,6 +28,7 @@ const _formats = {
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
+const _labels = (direction: string, format: string, name: string, tenantId: string) => MetricsService.label({ direction, format, stream: name, tenant: tenantId });
 const _inc = (labels: HashSet.HashSet<MetricLabel.MetricLabel>, selector: (metrics: MetricsService) => Metric.Metric.Counter<number>, count = 1) => Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({ onNone: () => Effect.void, onSome: (metrics) => MetricsService.inc(selector(metrics), labels, count) }));
 const _gauge = (labels: HashSet.HashSet<MetricLabel.MetricLabel>, selector: (metrics: MetricsService) => Metric.Metric.Gauge<number>, delta: number) => Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({ onNone: () => Effect.void, onSome: (metrics) => MetricsService.gauge(selector(metrics), labels, delta) }));
 const _heartbeat = (seconds: number) => Stream.tick(Duration.seconds(seconds)).pipe(Stream.map(() => ': heartbeat\n\n'), Stream.encodeText);
@@ -38,7 +38,6 @@ const _withMetrics = <A, E>(labels: HashSet.HashSet<MetricLabel.MetricLabel>, na
 		Stream.onEnd(_gauge(labels, (metrics) => metrics.stream.active, -1)),
 		Stream.tapError((error) => _inc(labels, (metrics) => metrics.stream.errors).pipe(Effect.tap(() => Effect.logWarning('Stream error', { error, format, stream: name })))),
 	);
-const _labels = (direction: string, format: string, name: string, tenantId: string) => MetricsService.label({ direction, format, stream: name, tenant: tenantId });
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -71,18 +70,18 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				Stream.tap(() => _inc(labels, (metrics) => metrics.stream.elements)),
 			);
 			return HttpServerResponse.stream(body, { contentType: 'text/event-stream', headers: Headers.fromInput({ 'Cache-Control': 'no-cache', Connection: 'keep-alive' }) });
-		});
+		}).pipe(Telemetry.span('streaming.sse', { 'stream.format': 'sse', 'stream.name': config.name, metrics: false }));
 	static readonly ingest = <E>(config: {	// Pull-based ingestion from ReadableStream or AsyncIterable with format decoding, circuit breaker, retry
 		readonly format?: StreamingService.Ingest;
 		readonly headers?: Record<string, string>;
 		readonly limits?: Multipart.withLimits.Options;
 		readonly name: string;
 		readonly source: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>;
-		readonly throttle?: { readonly units: number; readonly duration: DurationInput; readonly burst?: number };
-		readonly debounce?: DurationInput;
-		readonly retry?: { readonly times: number; readonly base: DurationInput };}): Effect.Effect<Stream.Stream<unknown, E | Error | Multipart.MultipartError | MsgPack.MsgPackError, never>, Resilience.Error<never>, StreamingService | Resilience.State> =>
-		Resilience.run(`streaming.ingest.${config.name}`, Effect.gen(function* () {
-			const format = config.format ?? 'binary';
+		readonly throttle?: { readonly units: number; readonly duration: Duration.DurationInput; readonly burst?: number };
+		readonly debounce?: Duration.DurationInput;
+		readonly retry?: { readonly times: number; readonly base: Duration.DurationInput };}): Effect.Effect<Stream.Stream<unknown, E | Error | Multipart.MultipartError | MsgPack.MsgPackError, never>, Resilience.Error<never>, StreamingService | Resilience.State> => {
+		const format = config.format ?? 'binary';
+		return Resilience.run(`streaming.ingest.${config.name}`, Effect.gen(function* () {
 			const formatConfig = _formats[format];
 			const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
 			const labels = _labels('ingest', format, config.name, tenantId);
@@ -110,7 +109,10 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				_withMetrics(labels, config.name, format),
 				Stream.tap(metricTap),
 			);
-		}), { circuit: config.name, retry: false, timeout: false });
+		}), { circuit: config.name, retry: false, timeout: false }).pipe(
+			Telemetry.span('streaming.ingest', { 'stream.format': format, 'stream.name': config.name, metrics: false }),
+		);
+	};
 	static readonly emit = <A, E>(config: {	// Emit stream as HTTP response with format encoding, dedupe, batching, throttle
 		readonly filename?: string;
 		readonly format: StreamingService.Emit;
@@ -118,9 +120,9 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		readonly serialize?: (item: A) => string;
 		readonly sseSerialize?: (item: A) => Sse.EventEncoded;
 		readonly stream: Stream.Stream<A, E, never>;
-		readonly throttle?: { readonly units: number; readonly duration: DurationInput; readonly burst?: number };
-		readonly debounce?: DurationInput;
-		readonly batch?: { readonly size: number; readonly duration: DurationInput };
+		readonly throttle?: { readonly units: number; readonly duration: Duration.DurationInput; readonly burst?: number };
+		readonly debounce?: Duration.DurationInput;
+		readonly batch?: { readonly size: number; readonly duration: Duration.DurationInput };
 		readonly dedupe?: boolean | ((current: A, previous: A) => boolean);}): Effect.Effect<HttpServerResponse.HttpServerResponse, never, StreamingService> =>
 		Effect.gen(function* () {
 			const formatConfig = _formats[config.format];
@@ -153,12 +155,12 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 			const filename = (config.filename ?? `${config.name}.${formatConfig.extension}`).replaceAll('"', String.raw`\"`);
 			const headers = config.format === 'sse' ? { 'Cache-Control': 'no-cache', Connection: 'keep-alive' } : { 'Content-Disposition': `attachment; filename="${filename}"` };
 			return HttpServerResponse.stream(encoded.pipe(Stream.buffer({ capacity: formatConfig.capacity, strategy: formatConfig.strategy }), _withMetrics(labels, config.name, config.format), Stream.tap((chunk) => _inc(labels, (metrics) => metrics.stream.bytes, chunk.length)), Stream.ensuring(Effect.logDebug('Stream closed', { direction: 'emit', format: config.format, stream: config.name, tenant: tenantId }))), { contentType: formatConfig.contentType, headers: Headers.fromInput(headers) });
-		});
+		}).pipe(Telemetry.span('streaming.emit', { 'stream.format': config.format, 'stream.name': config.name, metrics: false }));
 	static readonly mailbox = <A, E = never>(config?: {	// Unified mailbox: writable (push) or from-stream/pubsub/subscribable (pull)
 		readonly from?: Stream.Stream<A, E, never> | PubSub.PubSub<A> | Subscribable.Subscribable<A, E, never>;
 		readonly name?: string;
 		readonly capacity?: number;
-		readonly strategy?: 'suspend' | 'dropping' | 'sliding';}): Effect.Effect<Mailbox.Mailbox<A, E> | Mailbox.ReadonlyMailbox<A, E>, never, Scope> =>
+		readonly strategy?: 'suspend' | 'dropping' | 'sliding';}): Effect.Effect<Mailbox.Mailbox<A, E> | Mailbox.ReadonlyMailbox<A, E>, never, Scope.Scope> =>
 		Effect.gen(function* () {
 			const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
 			const labels = _labels('mailbox', 'push', config?.name ?? 'anonymous', tenantId);
@@ -174,7 +176,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 			return mailbox;
 		});
 	static readonly state = <A>(initial: A, config?: {	// Reactive state with SubscriptionRef - get/set/update + changes stream
-		readonly name?: string }): Effect.Effect<StreamingService.State<A>, never, Scope> =>
+		readonly name?: string }): Effect.Effect<StreamingService.State<A>, never, Scope.Scope> =>
 		Effect.gen(function* () {
 			const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
 			const labels = _labels('state', 'ref', config?.name ?? 'anonymous', tenantId);
@@ -191,14 +193,13 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		});
 	static readonly toEventBus = <A>(	// Bridge stream to EventBus - maps stream elements to domain events
 		stream: Stream.Stream<A>,
-		mapToEvent: (a: A) => { aggregateId: string; eventType: string; payload: unknown; tenantId: string },
-	) =>
+		mapToEvent: (a: A) => { aggregateId: string; causationId?: string; correlationId?: string; eventId?: ClusterService.SnowflakeId; payload: unknown; tenantId: string },) =>
 		Effect.gen(function* () {
 			const eventBus = yield* EventBus;
 			yield* stream.pipe(
 				Stream.mapEffect((item) => {
 					const envelope = mapToEvent(item);
-					return eventBus.emit(new EventBus.Event({ ...envelope, eventId: crypto.randomUUID() as typeof EventBus.Event.Type['eventId'] }));
+					return eventBus.emit(envelope);
 				}),
 				Stream.runDrain,
 			);

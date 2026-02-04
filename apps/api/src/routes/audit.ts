@@ -8,6 +8,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Diff } from '@parametric-portal/server/utils/diff';
 import { Array as A, Effect, Option, pipe } from 'effect';
@@ -48,19 +49,19 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 				CacheService.rateLimit('api', adminLookup(Context.Request.currentTenantId.pipe(
 					Effect.flatMap((tenantId) => repositories.audit.bySubject(tenantId, subject, subjectId, parameters.limit, parameters.cursor, parameters)),
 					Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-				)).pipe(Effect.withSpan('audit.getByEntity', { kind: 'server' }))))
+				)).pipe(Telemetry.span('audit.getByEntity', { kind: 'server' }))))
 			.handle('getByUser', ({ path: { userId }, urlParams: parameters }) =>
 				CacheService.rateLimit('api', adminLookup(Context.Request.currentTenantId.pipe(
 					Effect.flatMap((tenantId) => repositories.audit.byUser(tenantId, userId, parameters.limit, parameters.cursor, parameters)),
 					Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-				)).pipe(Effect.withSpan('audit.getByUser', { kind: 'server' }))))
+				)).pipe(Telemetry.span('audit.getByUser', { kind: 'server' }))))
 			.handle('getMine', ({ urlParams: parameters }) =>
 				CacheService.rateLimit('api', Middleware.requireMfaVerified.pipe(
 					Effect.andThen(Effect.all([Context.Request.current, Context.Request.sessionOrFail])),
 					Effect.flatMap(([context, session]) => repositories.audit.byUser(context.tenantId, session.userId, parameters.limit, parameters.cursor, parameters)),
 					Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
 					Effect.mapError((error) => error instanceof HttpError.Auth ? error : HttpError.Internal.of('Audit lookup failed', error) as HttpError.Auth | HttpError.Internal),
-					Effect.withSpan('audit.getMine', { kind: 'server' }),
+					Telemetry.span('audit.getMine', { kind: 'server' }),
 				)));
 	}),
 );

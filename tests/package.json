@@ -1,0 +1,21 @@
+{
+    "name": "@parametric-portal/tests",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "vitest run --config ../vitest.config.ts --project root-tests",
+        "test:coverage": "vitest run --config ../vitest.config.ts --project root-tests --coverage"
+    },
+    "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@fast-check/vitest": "catalog:",
+        "@parametric-portal/server": "workspace:*",
+        "@parametric-portal/types": "workspace:*",
+        "@playwright/test": "catalog:",
+        "effect": "catalog:",
+        "fast-check": "catalog:",
+        "jszip": "catalog:",
+        "vitest": "catalog:"
+    }
+}

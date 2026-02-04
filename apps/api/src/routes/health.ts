@@ -9,6 +9,7 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { PollingService } from '@parametric-portal/server/observe/polling';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Boolean as B, Effect, Match, pipe } from 'effect';
 
@@ -16,7 +17,7 @@ import { Boolean as B, Effect, Match, pipe } from 'effect';
 
 const _liveness = pipe(
 	Effect.succeed({ status: 'ok' as const }),
-	Effect.withSpan('health.liveness'),
+	Telemetry.span('health.liveness'),
 );
 const _readiness = (polling: PollingService) => pipe(
 	Effect.all({
@@ -58,7 +59,7 @@ const _readiness = (polling: PollingService) => pipe(
 		},
 		status: 'ok' as const,
 	})),
-	Effect.withSpan('health.readiness'),
+	Telemetry.span('health.readiness'),
 );
 
 // --- [LAYERS] ----------------------------------------------------------------

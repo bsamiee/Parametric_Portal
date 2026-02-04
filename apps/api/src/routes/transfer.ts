@@ -28,7 +28,20 @@ const handleExport = Effect.fn('transfer.export')((repositories: DatabaseService
 		const [metrics, context] = yield* Effect.all([MetricsService, Context.Request.current]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;
-		const codec = Codec(parameters.format);
+		const format = parameters.format;
+		const codec = yield* pipe(
+			Option.fromNullable(Codec.resolve(format)),
+			Option.match({
+				onNone: () => Effect.fail(HttpError.Validation.of('format', `Unsupported format: ${format}`)),
+				onSome: Effect.succeed,
+			}),
+		);
+		const exportFormat = yield* Effect.filterOrFail(
+			Effect.succeed(codec.ext),
+			(ext): ext is Transfer.Format => Object.hasOwn(Transfer.formats, ext),
+			() => HttpError.Validation.of('format', `Unsupported export format: ${format}`),
+		);
+		const isBinaryFormat = (value: Transfer.Format): value is Transfer.BinaryFormat => Transfer.formats[value].kind === 'binary';
 		const baseStream = Stream.fromIterableEffect(repositories.assets.byFilter(session.userId, appId, {
 			...(Option.isSome(parameters.after) && { after: parameters.after.value }),
 			...(Option.isSome(parameters.before) && { before: parameters.before.value }),
@@ -61,8 +74,8 @@ const handleExport = Effect.fn('transfer.export')((repositories: DatabaseService
 		);
 		const auditExport = (name: string, count?: number) =>
 			audit.log('Asset.export', { details: { count: count ?? null, format: codec.ext, name, userId: session.userId }, subjectId: appId });
-		return yield* codec.binary
-			? Transfer.export(binaryStream, codec.ext).pipe(
+		return yield* isBinaryFormat(exportFormat)
+			? Transfer.export(binaryStream, exportFormat).pipe(
 				Effect.tap((result: Transfer.BinaryResult) => Effect.all([
 					Effect.annotateCurrentSpan('transfer.format', codec.ext),
 					Effect.annotateCurrentSpan('transfer.rows', result.count),
@@ -77,7 +90,7 @@ const handleExport = Effect.fn('transfer.export')((repositories: DatabaseService
 			: (() => {
 				const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
 				const tracked = MetricsService.trackStream(textStream, metrics.transfer.rows, { app: appId, outcome: 'exported' });
-				const body = Transfer.export(tracked, codec.ext as Transfer.TextFormat).pipe(
+				const body = Transfer.export(tracked, exportFormat as Transfer.TextFormat).pipe(
 					Stream.tapError((err) => Effect.all([
 						Effect.logError(`${codec.ext.toUpperCase()} export stream error`, { error: String(err) }),
 						Metric.update(Metric.taggedWithLabels(metrics.errors, MetricsService.label({ app: appId, operation: 'export' })), 'StreamError'),
@@ -100,7 +113,14 @@ const handleImport = Effect.fn('transfer.import')((repositories: DatabaseService
 		const [metrics, context] = yield* Effect.all([MetricsService, Context.Request.current]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;
-		const codec = Codec(parameters.format);
+		const format = parameters.format;
+		const codec = yield* pipe(
+			Option.fromNullable(Codec.resolve(format)),
+			Option.match({
+				onNone: () => Effect.fail(HttpError.Validation.of('format', `Unsupported format: ${format}`)),
+				onSome: Effect.succeed,
+			}),
+		);
 		const dryRun = Option.getOrElse(parameters.dryRun, F.constant(false));
 		const body = yield* HttpServerRequest.HttpServerRequest.pipe(
 			Effect.flatMap((req) => req.arrayBuffer),
@@ -116,7 +136,19 @@ const handleImport = Effect.fn('transfer.import')((repositories: DatabaseService
 			Effect.catchTag('Fatal', (err) => Effect.fail(HttpError.Validation.of('body', err.detail ?? err.code))),
 			Telemetry.span('transfer.parse'),
 		);
-		const { failures, items } = Transfer.partition(parsed);
+		const { failures: rawFailures, items: rawItems } = Transfer.partition(parsed);
+		const maxContentBytes = Transfer.limits.entryBytes;
+		const sizeFailures = codec.binary
+			? []
+			: pipe(
+				rawItems,
+				A.filter((item) => Codec.size(item.content) > maxContentBytes),
+				A.map((item) => new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal })),
+			);
+		const items = codec.binary
+			? rawItems
+			: pipe(rawItems, A.filter((item) => Codec.size(item.content) <= maxContentBytes));
+		const failures = A.appendAll(rawFailures, sizeFailures);
 		yield* Effect.all([
 			Effect.annotateCurrentSpan('transfer.format', codec.ext),
 			Effect.annotateCurrentSpan('transfer.rows.valid', items.length),
@@ -135,12 +167,22 @@ const handleImport = Effect.fn('transfer.import')((repositories: DatabaseService
 		const prepareItem = (item: typeof items[number]) =>	// Prepare items: binary → S3 upload + metadata JSON, text → direct DB content
 			codec.binary
 				? Effect.gen(function* () {
-					const rawBuffer = codec.buf(item.content);
+					const byMime = pipe(
+						Option.fromNullable(item.mime),
+						Option.flatMap((mime) => Option.fromNullable(Codec.resolve(mime))),
+					);
+					const byName = pipe(
+						Option.fromNullable(item.name),
+						Option.flatMap((name) => Option.fromNullable(name.split('.').pop())),
+						Option.flatMap((ext) => Option.fromNullable(Codec.resolve(ext))),
+					);
+					const itemCodec = pipe(byMime, Option.orElse(() => byName), Option.getOrElse(() => codec));
+					const rawBuffer = itemCodec.buf(item.content);
 					const computedHash = yield* (item.hash === undefined ? Crypto.hash(item.content) : Effect.succeed(item.hash)).pipe(Effect.mapError(toHashError));
-					const storageKey = `assets/${appId}/${computedHash}.${codec.ext}`;
-					const originalName = item.name ?? `${computedHash.slice(0, 8)}.${codec.ext}`;
-					yield* storage.put({ body: rawBuffer, contentType: codec.mime, key: storageKey, metadata: { type: item.type } });
-					const metadata = JSON.stringify({ hash: computedHash, mime: codec.mime, originalName, size: rawBuffer.byteLength, storageRef: storageKey });
+					const storageKey = `assets/${appId}/${computedHash}.${itemCodec.ext}`;
+					const originalName = item.name ?? `${computedHash.slice(0, 8)}.${itemCodec.ext}`;
+					yield* storage.put({ body: rawBuffer, contentType: itemCodec.mime, key: storageKey, metadata: { type: item.type } });
+					const metadata = JSON.stringify({ hash: computedHash, mime: itemCodec.mime, originalName, size: rawBuffer.byteLength, storageRef: storageKey });
 					return {
 						appId, content: metadata, deletedAt: Option.none(), hash: pipe(computedHash, Option.some),
 						name: pipe(originalName, Option.some), status: 'active' as const, storageRef: pipe(storageKey, Option.some),
