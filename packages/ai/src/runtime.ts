@@ -6,7 +6,7 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Resilience } from '@parametric-portal/server/utils/resilience';
-import { Data, Duration, Effect, Match, Metric, Option, PrimaryKey, Schema as S, Stream } from 'effect';
+import { Data, Duration, Effect, Match, Option, PrimaryKey, Schema as S, Stream } from 'effect';
 import { AiRegistry } from './registry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -229,6 +229,22 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         const generateObject = <A, I extends Record<string, unknown>, R, Tools extends Record<string, Tool.Any> = {}>(
             options: LanguageModel.GenerateObjectOptions<Tools, A, I, R>,
         ) => runLanguage(_CONFIG.labels.operations.generateObject, options, LanguageModel.generateObject);
+        const recordStreamTextPreStartError = (error: unknown) =>
+            Context.Request.currentTenantId.pipe(
+                Effect.flatMap((tenantId) => {
+                    const labels = MetricsService.label({
+                        operation: _CONFIG.labels.operations.streamText,
+                        tenant: tenantId,
+                    });
+                    return Effect.all(
+                        [
+                            MetricsService.inc(metrics.ai.requests, labels, _CONFIG.metrics.unit),
+                            MetricsService.trackError(metrics.ai.errors, labels, error),
+                        ],
+                        { discard: true },
+                    );
+                }),
+            );
         const streamText = <Tools extends Record<string, Tool.Any> = {}>(
             options: LanguageModel.GenerateTextOptions<Tools>,
         ) =>
@@ -267,26 +283,25 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                             },
                         );
                     const onError = (error: unknown) =>
-                        Metric.update(
-                            Metric.taggedWithLabels(metrics.ai.errors, labels),
-                            MetricsService.errorTag(error),
-                        );
+                        MetricsService.trackError(metrics.ai.errors, labels, error);
                     const withStart = Stream.onStart(base, onStart);
                     const withFinish = Stream.mapEffect(withStart, (part) => onFinish(part).pipe(Effect.as(part)),);
                     const withError = Stream.tapError(withFinish, onError);
                     const withMetrics = MetricsService.trackStream(withError, metrics.stream.elements, labelPairs);
                     return Stream.withSpan(withMetrics, _CONFIG.labels.operations.streamText, { attributes: spanAttrs, kind: 'client' });
-                }).pipe((eff) => Resilience.run(_CONFIG.labels.operations.streamText, eff)),
+                }).pipe(
+                    Effect.tapError(recordStreamTextPreStartError),
+                    (eff) => Resilience.run(_CONFIG.labels.operations.streamText, eff),
+                ),
             ).pipe(Stream.mapError(wrapError(_CONFIG.labels.operations.streamText)));
         const chat = (options?: { readonly prompt?: Parameters<typeof Chat.fromPrompt>[0] }) =>
             Effect.gen(function* () {
                 const appSettings = yield* settings();
-                const base = Match.value(options?.prompt).pipe(
-                    Match.when(
-                        (prompt): prompt is Parameters<typeof Chat.fromPrompt>[0] => prompt !== undefined,
-                        (prompt) => Chat.fromPrompt(prompt),
-                    ),
-                    Match.orElse(() => Chat.empty),
+                const base = Option.fromNullable(options?.prompt).pipe(
+                    Option.match({
+                        onNone: () => Chat.empty,
+                        onSome: (prompt) => Chat.fromPrompt(prompt),
+                    }),
                 );
                 return yield* base.pipe(Effect.provide(AiRegistry.layers(appSettings).language));
             });

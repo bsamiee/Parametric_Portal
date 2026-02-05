@@ -7,6 +7,7 @@ const _CONFIG = {transport: { http: 'http', httpRouter: 'http-router', stdio: 's
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
+// biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Mcp = (() => {
     type Transport =
         | { readonly _tag: typeof _CONFIG.transport.stdio; readonly options: Parameters<typeof McpServer.layerStdio>[0] }
@@ -25,9 +26,9 @@ const Mcp = (() => {
     } as const;
     const transportLayer = (input: Transport) =>
         Match.value(input).pipe(
-            Match.when({ _tag: _CONFIG.transport.stdio }, ({ options }) => McpServer.layerStdio(options)),
-            Match.when({ _tag: _CONFIG.transport.http }, ({ options }) => McpServer.layerHttp(options)),
-            Match.when({ _tag: _CONFIG.transport.httpRouter }, ({ options }) => McpServer.layerHttpRouter(options)),
+            Match.tag(_CONFIG.transport.stdio, ({ options }) => McpServer.layerStdio(options)),
+            Match.tag(_CONFIG.transport.http, ({ options }) => McpServer.layerHttp(options)),
+            Match.tag(_CONFIG.transport.httpRouter, ({ options }) => McpServer.layerHttpRouter(options)),
             Match.exhaustive,
         );
     const layer = (input: {
@@ -45,6 +46,12 @@ const Mcp = (() => {
     };
     return { layer, transport } as const;
 })();
+
+// --- [NAMESPACE] -------------------------------------------------------------
+
+namespace Mcp {
+    export type Transport = Parameters<typeof Mcp.layer>[0]['transport'];
+}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

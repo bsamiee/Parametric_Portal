@@ -198,6 +198,11 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			Metric.trackErrorWith(Metric.taggedWithLabels(config.errors, config.labels), errorTag),
 			Metric.trackDefectWith(Metric.taggedWithLabels(config.errors, config.labels), errorTag),
 		);
+	static readonly trackError = (
+		errors: Metric.Metric.Frequency<string>,
+		labels: HashSet.HashSet<MetricLabel.MetricLabel>,
+		error: unknown,): Effect.Effect<void> =>
+		Metric.update(Metric.taggedWithLabels(errors, labels), errorTag(error));
 	static readonly trackStream = <A, E, R>(			// Tracks stream element count by incrementing counter for each element.
 		stream: Stream.Stream<A, E, R>,
 		counter: Metric.Metric.Counter<number>,

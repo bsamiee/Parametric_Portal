@@ -18,6 +18,21 @@ const _CONFIG = {
     users: { anonymous: 'anonymous', system: 'system' },
 } as const;
 
+// --- [PURE_FUNCTIONS] --------------------------------------------------------
+
+const _sourceText = (src: { readonly contentText: string | null; readonly displayText: string; readonly metadata: unknown }) =>
+    A.filter(
+        [
+            src.displayText,
+            src.contentText ?? undefined,
+            Option.fromNullable(src.metadata).pipe(
+                Option.map((m) => JSON.stringify(m)),
+                Option.getOrUndefined,
+            ),
+        ],
+        (value): value is string => value !== undefined && value !== '',
+    ).join(_CONFIG.text.joiner);
+
 // --- [CLASSES] ---------------------------------------------------------------
 
 class AiSearchError extends Data.TaggedError('AiSearchError')<{
@@ -150,22 +165,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     model,
                     scopeId,
                 });
-                const sourceText = (src: {
-                    readonly contentText: string | null;
-                    readonly displayText: string;
-                    readonly metadata: unknown;}) =>
-                    A.filter(
-                        [
-                            src.displayText,
-                            src.contentText ?? undefined,
-                            Option.fromNullable(src.metadata).pipe(
-                                Option.map((m) => JSON.stringify(m)),
-                                Option.getOrUndefined,
-                            ),
-                        ],
-                        (value): value is string => value !== undefined && value !== '',
-                    ).join(_CONFIG.text.joiner);
-                const texts = A.map(sources, sourceText);
+                const texts = A.map(sources, _sourceText);
                 const embeddings = yield* ai.embed(texts);
                 yield* Match.value(embeddings.length === sources.length).pipe(
                     Match.when(true, () => Effect.void),

@@ -152,7 +152,7 @@ const AiRegistry = (() => {
         Match.value(settings.provider).pipe(
             Match.when('anthropic', () => AnthropicTokenizer.layer),
             Match.when('openai', () => OpenAiTokenizer.layer({ model: settings.model })),
-            Match.when('gemini', () => undefined),
+            Match.when('gemini', () => Layer.empty),
             Match.exhaustive,
         );
     // --- [PURE_FUNCTIONS] ----------------------------------------------------
@@ -186,11 +186,14 @@ const AiRegistry = (() => {
             Effect.map((settings) => Option.getOrElse(Option.fromNullable(settings.ai), () => _CONFIG.defaults)),
             Effect.flatMap(decodeSettings),
         );
-    const layers = (settings: S.Schema.Type<typeof SettingsSchema>) => ({
-        embedding: embeddingLayer(settings.embedding),
-        language: languageLayer(settings.language),
-        tokenizer: tokenizerLayer(settings.language),
-    });
+    const layers = (settings: S.Schema.Type<typeof SettingsSchema>) => {
+        const embedding = normalizeEmbedding(settings.embedding);
+        return {
+            embedding: embeddingLayer(embedding),
+            language: languageLayer(settings.language),
+            tokenizer: tokenizerLayer(settings.language),
+        } as const;
+    };
     return {
         decodeAppSettings,
         layers,
