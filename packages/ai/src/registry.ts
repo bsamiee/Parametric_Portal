@@ -1,6 +1,6 @@
-import { AnthropicClient, AnthropicLanguageModel } from '@effect/ai-anthropic';
+import { AnthropicClient, AnthropicLanguageModel, AnthropicTokenizer } from '@effect/ai-anthropic';
 import { GoogleClient, GoogleLanguageModel } from '@effect/ai-google';
-import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel } from '@effect/ai-openai';
+import { OpenAiClient, OpenAiEmbeddingModel, OpenAiLanguageModel, OpenAiTokenizer } from '@effect/ai-openai';
 import { FetchHttpClient } from '@effect/platform';
 import { Config, Duration, Effect, Layer, Match, Option, Redacted, Schema as S } from 'effect';
 import { pipe } from 'effect/Function';
@@ -148,6 +148,13 @@ const AiRegistry = (() => {
             ),
             Match.exhaustive,
         );
+    const tokenizerLayer = (settings: S.Schema.Type<typeof SettingsSchema>['language']) =>
+        Match.value(settings.provider).pipe(
+            Match.when('anthropic', () => AnthropicTokenizer.layer),
+            Match.when('openai', () => OpenAiTokenizer.layer({ model: settings.model })),
+            Match.when('gemini', () => undefined),
+            Match.exhaustive,
+        );
     // --- [PURE_FUNCTIONS] ----------------------------------------------------
     const resolveEmbeddingDimensions = (model: string, dimensions?: number): number =>
         pipe(
@@ -180,8 +187,9 @@ const AiRegistry = (() => {
             Effect.flatMap(decodeSettings),
         );
     const layers = (settings: S.Schema.Type<typeof SettingsSchema>) => ({
-        embedding: embeddingLayer(normalizeEmbedding(settings.embedding)),
+        embedding: embeddingLayer(settings.embedding),
         language: languageLayer(settings.language),
+        tokenizer: tokenizerLayer(settings.language),
     });
     return {
         decodeAppSettings,

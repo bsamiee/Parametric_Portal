@@ -18,26 +18,6 @@ const _CONFIG = {
     users: { anonymous: 'anonymous', system: 'system' },
 } as const;
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
-
-function _sourceText(src: {
-    readonly contentText: string | null;
-    readonly displayText: string;
-    readonly metadata: unknown;
-}) {
-    return A.filter(
-        [
-            src.displayText,
-            src.contentText ?? undefined,
-            Option.fromNullable(src.metadata).pipe(
-                Option.map((m) => JSON.stringify(m)),
-                Option.getOrUndefined,
-            ),
-        ],
-        (value): value is string => value !== undefined && value !== '',
-    ).join(_CONFIG.text.joiner);
-}
-
 // --- [CLASSES] ---------------------------------------------------------------
 
 class AiSearchError extends Data.TaggedError('AiSearchError')<{
@@ -61,6 +41,14 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 Option.map((session) => session.userId),
                 Option.getOrElse(constant(fallback)),
             );
+        const requestContext = (fallback: string) =>
+            Context.Request.current.pipe(
+                Effect.map((ctx) => ({
+                    ctx,
+                    scopeId: ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId,
+                    subjectId: userId(ctx, fallback),
+                })),
+            );
         const query = (
             options: {
                 readonly entityTypes?: readonly string[];
@@ -69,12 +57,9 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 readonly includeSnippets?: boolean;
                 readonly term: string;
             },
-            pagination?: { readonly cursor?: string; readonly limit?: number },
-        ) =>
+            pagination?: { readonly cursor?: string; readonly limit?: number },) =>
             Effect.gen(function* () {
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = userId(ctx, _CONFIG.users.anonymous);
+                const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
                 const appSettings = yield* ai.settings();
                 const { dimensions, model } = appSettings.embedding;
                 const embedding = yield* ai.embed(options.term).pipe(
@@ -121,12 +106,9 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
         const suggest = (options: {
             readonly includeGlobal?: boolean;
             readonly limit?: number;
-            readonly prefix: string;
-        }) =>
+            readonly prefix: string;}) =>
             Effect.gen(function* () {
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = userId(ctx, _CONFIG.users.anonymous);
+                const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.anonymous);
                 const result = yield* searchRepo.suggest({ ...options, scopeId });
                 yield* Effect.all(
                     [
@@ -142,9 +124,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
             }).pipe(Telemetry.span('search.suggest', { 'search.prefix': options.prefix }));
         const refresh = (includeGlobal = false) =>
             Effect.gen(function* () {
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = userId(ctx, _CONFIG.users.system);
+                const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
                 yield* searchRepo.refresh(scopeId, includeGlobal);
                 yield* Effect.all(
                     [
@@ -157,12 +137,9 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
         const refreshEmbeddings = (options?: {
             readonly entityTypes?: readonly string[];
             readonly includeGlobal?: boolean;
-            readonly limit?: number;
-        }) =>
+            readonly limit?: number;}) =>
             Effect.gen(function* () {
-                const ctx = yield* Context.Request.current;
-                const scopeId = ctx.tenantId === Context.Request.Id.system ? null : ctx.tenantId;
-                const subjectId = userId(ctx, _CONFIG.users.system);
+                const { ctx, scopeId, subjectId } = yield* requestContext(_CONFIG.users.system);
                 const appSettings = yield* ai.settings();
                 const { dimensions, model } = appSettings.embedding;
                 const sources = yield* searchRepo.embeddingSources({
@@ -173,7 +150,22 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     model,
                     scopeId,
                 });
-                const texts = A.map(sources, _sourceText);
+                const sourceText = (src: {
+                    readonly contentText: string | null;
+                    readonly displayText: string;
+                    readonly metadata: unknown;}) =>
+                    A.filter(
+                        [
+                            src.displayText,
+                            src.contentText ?? undefined,
+                            Option.fromNullable(src.metadata).pipe(
+                                Option.map((m) => JSON.stringify(m)),
+                                Option.getOrUndefined,
+                            ),
+                        ],
+                        (value): value is string => value !== undefined && value !== '',
+                    ).join(_CONFIG.text.joiner);
+                const texts = A.map(sources, sourceText);
                 const embeddings = yield* ai.embed(texts);
                 yield* Match.value(embeddings.length === sources.length).pipe(
                     Match.when(true, () => Effect.void),
@@ -214,9 +206,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     { discard: true },
                 );
                 return { count: sources.length };
-            }).pipe(
-                Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),
-            );
+            }).pipe(Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),);
         return { query, refresh, refreshEmbeddings, suggest };
     }),
 }) {

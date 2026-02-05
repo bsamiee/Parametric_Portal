@@ -3,14 +3,14 @@ import { Transfer, TransferError } from '@parametric-portal/server/utils/transfe
 import { Array as A, Chunk, Effect, Either, FastCheck as fc, Stream } from 'effect';
 import { expect } from 'vitest';
 
+// --- [TYPES] -----------------------------------------------------------------
+
+type Asset = { content: string; id: string; ordinal: number; type: string; updatedAt: number };
+
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _safe = fc.string({ maxLength: 32, minLength: 1 }).filter((v) => /^[a-zA-Z][a-zA-Z0-9]*$/.test(v));
 const _item = fc.record({ content: _safe, id: fc.uuid(), type: _safe, updatedAt: fc.integer({ max: 1_700_604_800_000, min: 1_700_000_000_000 }) });
-
-// --- [TYPES] -----------------------------------------------------------------
-
-type Asset = { content: string; id: string; ordinal: number; type: string; updatedAt: number };
 
 // --- [ALGEBRAIC: CODEC ROUNDTRIPS] -------------------------------------------
 
