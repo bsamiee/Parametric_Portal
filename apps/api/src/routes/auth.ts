@@ -21,7 +21,8 @@ import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { type DateTime, Effect, Option } from 'effect';
+import { Resilience } from '@parametric-portal/server/utils/resilience';
+import { type DateTime, Duration, Effect, Option } from 'effect';
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
@@ -41,8 +42,11 @@ const oauthErr = (provider: Context.OAuthProvider) => (reason: string) => HttpEr
 
 // --- [OAUTH_HANDLERS] --------------------------------------------------------
 
-const handleOAuthStart = Effect.fn('auth.oauth.start')((auth: Auth.Service, provider: Context.OAuthProvider) =>
-	auth.oauthStart(provider).pipe(
+const handleOAuthStart = (auth: Auth.Service, provider: Context.OAuthProvider) =>
+	Resilience.run('oauth.start', auth.oauthStart(provider), { circuit: 'oauth', timeout: Duration.seconds(15) }).pipe(
+		Effect.catchTag('CircuitError', (error) => Effect.fail(HttpError.OAuth.of(provider, 'Service temporarily unavailable', error))),
+		Effect.catchTag('TimeoutError', (error) => Effect.fail(HttpError.OAuth.of(provider, 'Request timed out', error))),
+		Effect.catchTag('BulkheadError', (error) => Effect.fail(HttpError.OAuth.of(provider, 'Service at capacity', error))),
 		Effect.flatMap((result) =>
 			result._tag === 'Initiate'
 				? HttpServerResponse.json({ url: result.authUrl }).pipe(
@@ -51,22 +55,26 @@ const handleOAuthStart = Effect.fn('auth.oauth.start')((auth: Auth.Service, prov
 				)
 				: Effect.fail(HttpError.OAuth.of(provider, 'Unexpected response type')),
 		),
-	),
-);
-const handleOAuthCallback = Effect.fn('auth.oauth.callback')(
-	(auth: Auth.Service, provider: Context.OAuthProvider, code: string, state: string) =>
-		Effect.gen(function* () {
-			const error = oauthErr(provider);
-			const request = yield* HttpServerRequest.HttpServerRequest;
-			const stateCookie = yield* Context.Request.cookie.get('oauth', request, () => error('Missing OAuth state cookie'));
-			const result = yield* auth.oauthCallback(provider, code, state, stateCookie);
-			return yield* authResponse(result.accessToken, result.expiresAt, result.refreshToken, result.mfaPending, true).pipe(Effect.mapError(() => error('Response build failed')));
-		}),
-);
+		Telemetry.span('auth.oauth.start', { kind: 'server', metrics: false, 'oauth.provider': provider }),
+	);
+const handleOAuthCallback = (auth: Auth.Service, provider: Context.OAuthProvider, code: string, state: string) =>
+	Effect.gen(function* () {
+		const error = oauthErr(provider);
+		const request = yield* HttpServerRequest.HttpServerRequest;
+		const stateCookie = yield* Context.Request.cookie.get('oauth', request, () => error('Missing OAuth state cookie'));
+		const result = yield* Resilience.run('oauth.callback', auth.oauthCallback(provider, code, state, stateCookie), { circuit: 'oauth', timeout: Duration.seconds(15) }).pipe(
+			Effect.catchTag('CircuitError', (circuitError) => Effect.fail(HttpError.OAuth.of(provider, 'Service temporarily unavailable', circuitError))),
+			Effect.catchTag('TimeoutError', (timeoutError) => Effect.fail(HttpError.OAuth.of(provider, 'Request timed out', timeoutError))),
+			Effect.catchTag('BulkheadError', (bulkheadError) => Effect.fail(HttpError.OAuth.of(provider, 'Service at capacity', bulkheadError))),
+		);
+		return yield* authResponse(result.accessToken, result.expiresAt, result.refreshToken, result.mfaPending, true).pipe(Effect.mapError(() => error('Response build failed')));
+	}).pipe(
+		Telemetry.span('auth.oauth.callback', { kind: 'server', metrics: false, 'oauth.provider': provider }),
+	);
 
 // --- [SESSION_HANDLERS] ------------------------------------------------------
 
-const handleRefresh = Effect.fn('auth.refresh')((auth: Auth.Service, audit: typeof AuditService.Service) =>
+const handleRefresh = (auth: Auth.Service, audit: typeof AuditService.Service) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
@@ -76,17 +84,15 @@ const handleRefresh = Effect.fn('auth.refresh')((auth: Auth.Service, audit: type
 		const { accessToken, expiresAt, mfaPending, refreshToken, userId } = yield* auth.refresh(hashIn);
 		yield* audit.log('Auth.refresh', { subjectId: userId });
 		return yield* authResponse(accessToken, expiresAt, refreshToken, mfaPending).pipe(Effect.mapError((error) => HttpError.Auth.of('Response build failed', error)));
-	}),
-);
-const handleLogout = Effect.fn('auth.logout')((auth: Auth.Service) =>
+	}).pipe(Telemetry.span('auth.refresh', { kind: 'server', metrics: false }));
+const handleLogout = (auth: Auth.Service) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
 		const session = yield* Context.Request.sessionOrFail;
 		yield* auth.revoke(session.id, session.userId, 'logout');
 		return yield* logoutResponse().pipe(Effect.mapError((error) => HttpError.Internal.of('Response build failed', error)));
-	}),
-);
+	}).pipe(Telemetry.span('auth.logout', { kind: 'server', metrics: false }));
 const handleMe = (repositories: DatabaseService.Type, audit: typeof AuditService.Service) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
@@ -97,7 +103,7 @@ const handleMe = (repositories: DatabaseService.Type, audit: typeof AuditService
 		);
 		yield* audit.log('User.read', { subjectId: userId });
 		return user;
-	}).pipe(Telemetry.span('auth.me', { kind: 'server' }));
+		}).pipe(Telemetry.span('auth.me', { kind: 'server', metrics: false }));
 
 // --- [MFA_HANDLERS] ----------------------------------------------------------
 
@@ -107,31 +113,31 @@ const handleMfaStatus = (auth: Auth.Service, audit: typeof AuditService.Service)
 		const status = yield* auth.mfaStatus(userId);
 		yield* audit.log('MfaSecret.status', { subjectId: userId });
 		return status;
-	}).pipe(Telemetry.span('auth.mfa.status', { kind: 'server' }));
+		}).pipe(Telemetry.span('auth.mfa.status', { kind: 'server', metrics: false }));
 const handleMfaEnroll = (auth: Auth.Service, repositories: DatabaseService.Type) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const session = yield* Context.Request.sessionOrFail;
 		const userOption = yield* repositories.users.one([{ field: 'id', value: session.userId }]).pipe(Effect.mapError((error) => HttpError.Internal.of('User lookup failed', error)));
 		const user = yield* Option.match(userOption, { onNone: () => Effect.fail(HttpError.NotFound.of('user', session.userId)), onSome: (u) => Effect.succeed(u) });
 		return yield* auth.mfaEnroll(user.id, user.email);
-	}));
+	}).pipe(Telemetry.span('auth.mfa.enroll', { kind: 'server', metrics: false })));
 const handleMfaVerify = (auth: Auth.Service, code: string) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const session = yield* Context.Request.sessionOrFail;
 		return yield* auth.mfaVerify(session.id, code);
-	}));
+	}).pipe(Telemetry.span('auth.mfa.verify', { kind: 'server', metrics: false })));
 const handleMfaDisable = (auth: Auth.Service) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const { userId } = yield* Context.Request.sessionOrFail;
 		yield* auth.mfaDisable(userId);
 		return { success: true as const };
-	}).pipe(Telemetry.span('auth.mfa.disable', { kind: 'server' }));
+	}).pipe(Telemetry.span('auth.mfa.disable', { kind: 'server', metrics: false }));
 const handleMfaRecover = (auth: Auth.Service, code: string) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
 		const session = yield* Context.Request.sessionOrFail;
 		return yield* auth.mfaRecover(session.id, code.toUpperCase());
-	}));
+	}).pipe(Telemetry.span('auth.mfa.recover', { kind: 'server', metrics: false })));
 
 // --- [APIKEY_HANDLERS] -------------------------------------------------------
 
@@ -142,28 +148,26 @@ const handleListApiKeys = (repositories: DatabaseService.Type, audit: typeof Aud
 		const keys = yield* repositories.apiKeys.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('API key list failed', error)));
 		yield* audit.log('ApiKey.list', { details: { count: keys.length }, subjectId: userId });
 		return { data: keys };
-	}).pipe(Telemetry.span('auth.apiKeys.list', { kind: 'server' }));
-const handleCreateApiKey = Effect.fn('auth.apiKeys.create')(
-	(repositories: DatabaseService.Type, audit: typeof AuditService.Service, input: { expiresAt?: Date; name: string }) =>
-		Effect.gen(function* () {
-			const request = yield* HttpServerRequest.HttpServerRequest;
-			yield* verifyCsrf(request);
-			yield* Middleware.requireMfaVerified;
-			const pair = yield* Crypto.pair.pipe(Effect.mapError((error) => HttpError.Internal.of('Key generation failed', error)));
-			const [{ userId }, metrics] = yield* Effect.all([Context.Request.sessionOrFail, MetricsService]);
-			const encrypted = yield* Crypto.encrypt(pair.token).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Key encryption failed', error))),);
-			const key = yield* repositories.apiKeys.insert({
-				deletedAt: Option.none(), encrypted: Buffer.from(encrypted), expiresAt: Option.fromNullable(input.expiresAt), hash: pair.hash,
-				lastUsedAt: Option.none(), name: input.name, updatedAt: undefined, userId,
-			}).pipe(Effect.mapError((error) => HttpError.Internal.of('API key insert failed', error)));
-			yield* Effect.all([
-				MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'create' })),
-				audit.log('ApiKey.create', { details: { name: key.name }, subjectId: key.id }),
-			], { discard: true });
-			return { ...key, apiKey: pair.token };
-		}),
-);
-const handleDeleteApiKey = Effect.fn('auth.apiKeys.delete')((repositories: DatabaseService.Type, audit: typeof AuditService.Service, id: string) =>
+		}).pipe(Telemetry.span('auth.apiKeys.list', { kind: 'server', metrics: false }));
+const handleCreateApiKey = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, input: { expiresAt?: Date; name: string }) =>
+	Effect.gen(function* () {
+		const request = yield* HttpServerRequest.HttpServerRequest;
+		yield* verifyCsrf(request);
+		yield* Middleware.requireMfaVerified;
+		const pair = yield* Crypto.pair.pipe(Effect.mapError((error) => HttpError.Internal.of('Key generation failed', error)));
+		const [{ userId }, metrics] = yield* Effect.all([Context.Request.sessionOrFail, MetricsService]);
+		const encrypted = yield* Crypto.encrypt(pair.token).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Key encryption failed', error))),);
+		const key = yield* repositories.apiKeys.insert({
+			deletedAt: Option.none(), encrypted: Buffer.from(encrypted), expiresAt: Option.fromNullable(input.expiresAt), hash: pair.hash,
+			lastUsedAt: Option.none(), name: input.name, updatedAt: undefined, userId,
+		}).pipe(Effect.mapError((error) => HttpError.Internal.of('API key insert failed', error)));
+		yield* Effect.all([
+			MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'create' })),
+			audit.log('ApiKey.create', { details: { name: key.name }, subjectId: key.id }),
+		], { discard: true });
+		return { ...key, apiKey: pair.token };
+	}).pipe(Telemetry.span('auth.apiKeys.create', { kind: 'server', metrics: false }));
+const handleDeleteApiKey = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, id: string) =>
 	Effect.gen(function* () {
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
@@ -177,8 +181,7 @@ const handleDeleteApiKey = Effect.fn('auth.apiKeys.delete')((repositories: Datab
 			MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'delete' })),
 		], { discard: true });
 		return { success: true } as const;
-	}),
-);
+	}).pipe(Telemetry.span('auth.apiKeys.delete', { kind: 'server', metrics: false }));
 
 // --- [LAYER] -----------------------------------------------------------------
 

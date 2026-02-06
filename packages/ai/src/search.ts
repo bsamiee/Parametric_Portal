@@ -78,27 +78,28 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 const appSettings = yield* ai.settings();
                 const { dimensions, model } = appSettings.embedding;
                 const embedding = yield* ai.embed(options.term).pipe(
-                    Effect.map(Option.some),
-                    Effect.catchAll((error) =>
+                    Effect.tapError((error) =>
                         Effect.logWarning('Search embedding failed', {
                             error: String(error),
                             tenantId: ctx.tenantId,
-                        }).pipe(Effect.as(Option.none())),
+                        }),
                     ),
+                    Effect.option,
                 );
                 const result = yield* searchRepo.search(
                     {
                         ...options,
                         scopeId,
-                        ...(Option.isSome(embedding)
-                            ? {
-                                  embedding: {
-                                      dimensions,
-                                      model,
-                                      vector: embedding.value,
-                                  },
-                              }
-                            : {}),
+                        ...Option.match(embedding, {
+                            onNone: () => ({}),
+                            onSome: (vector) => ({
+                                embedding: {
+                                    dimensions,
+                                    model,
+                                    vector,
+                                },
+                            }),
+                        }),
                     },
                     pagination,
                 );

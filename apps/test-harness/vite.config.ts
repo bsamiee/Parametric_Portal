@@ -5,7 +5,7 @@
  */
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { devtoolsPlugin } from '@parametric-portal/devtools/vite-plugin';
+import { Devtools } from '@parametric-portal/devtools/devtools';
 import { defineTheme, type ThemeConfig } from '@parametric-portal/theme/theme';
 import { Effect } from 'effect';
 import { defineConfig } from 'vite';
@@ -14,6 +14,7 @@ import { createConfig } from '../../vite.factory.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const APP_ROOT = dirname(fileURLToPath(import.meta.url));
+const _devtoolsPlugin = Devtools.vite;
 const B = Object.freeze({
     app: { name: 'TestHarness', port: 3002 },
     theme: {
@@ -1857,7 +1858,7 @@ export default defineConfig({
     ...baseConfig,
     plugins: [
         defineTheme(B.theme as unknown as ThemeConfig, ['src/main.css']),
-        ...devtoolsPlugin({ app: B.app.name }),
+        ..._devtoolsPlugin({ app: B.app.name }),
         ...(baseConfig.plugins ?? []),
     ],
 });

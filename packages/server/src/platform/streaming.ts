@@ -161,9 +161,9 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		readonly name?: string;
 		readonly capacity?: number;
 		readonly strategy?: 'suspend' | 'dropping' | 'sliding';}): Effect.Effect<Mailbox.Mailbox<A, E> | Mailbox.ReadonlyMailbox<A, E>, never, Scope.Scope> =>
-		Effect.gen(function* () {
-			const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
-			const labels = _labels('mailbox', 'push', config?.name ?? 'anonymous', tenantId);
+			Effect.gen(function* () {
+				const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
+				const labels = _labels('mailbox', 'push', config?.name ?? 'anonymous', tenantId);
 			const bufferCapacity = config?.capacity ?? _CONFIG.capacity << 1, strategy = config?.strategy;
 			const mailbox = yield* Match.value(config?.from).pipe(
 				Match.when(Match.undefined, () => Mailbox.make<A, E>({ capacity: bufferCapacity, strategy })),
@@ -171,14 +171,14 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				Match.when((source): source is PubSub.PubSub<A> => source != null && 'subscribe' in source, (hub) => Mailbox.fromStream(Stream.fromPubSub(hub), { capacity: bufferCapacity, strategy })),
 				Match.orElse((stream) => Mailbox.fromStream(stream, { capacity: bufferCapacity, strategy })),
 			);
-			yield* _gauge(labels, (metrics) => metrics.stream.active, 1);
-			yield* Effect.addFinalizer(() => _gauge(labels, (metrics) => metrics.stream.active, -1));
-			return mailbox;
-		});
+				yield* _gauge(labels, (metrics) => metrics.stream.active, 1);
+				yield* Effect.addFinalizer(() => _gauge(labels, (metrics) => metrics.stream.active, -1));
+				return mailbox;
+			}).pipe(Telemetry.span('streaming.mailbox', { 'stream.name': config?.name ?? 'anonymous', metrics: false }));
 	static readonly state = <A>(initial: A, config?: {	// Reactive state with SubscriptionRef - get/set/update + changes stream
 		readonly name?: string }): Effect.Effect<StreamingService.State<A>, never, Scope.Scope> =>
-		Effect.gen(function* () {
-			const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
+			Effect.gen(function* () {
+				const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
 			const labels = _labels('state', 'ref', config?.name ?? 'anonymous', tenantId);
 			const ref = yield* SubscriptionRef.make(initial);
 			yield* _gauge(labels, (metrics) => metrics.stream.active, 1);
@@ -187,23 +187,23 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 				get: SubscriptionRef.get(ref),
 				set: (value: A) => SubscriptionRef.set(ref, value).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
 				update: (updater: (current: A) => A) => SubscriptionRef.update(ref, updater).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
-				modify: <B>(modifier: (current: A) => readonly [B, A]) => SubscriptionRef.modify(ref, modifier).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
-				changes: _withMetrics<A, never>(labels, config?.name ?? 'anonymous', 'ref')(ref.changes),
-			};
-		});
+					modify: <B>(modifier: (current: A) => readonly [B, A]) => SubscriptionRef.modify(ref, modifier).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
+					changes: _withMetrics<A, never>(labels, config?.name ?? 'anonymous', 'ref')(ref.changes),
+				};
+			}).pipe(Telemetry.span('streaming.state', { 'stream.name': config?.name ?? 'anonymous', metrics: false }));
 	static readonly toEventBus = <A>(	// Bridge stream to EventBus - maps stream elements to domain events
 		stream: Stream.Stream<A>,
-		mapToEvent: (a: A) => { aggregateId: string; causationId?: string; correlationId?: string; eventId?: ClusterService.SnowflakeId; payload: unknown; tenantId: string },) =>
-		Effect.gen(function* () {
-			const eventBus = yield* EventBus;
-			yield* stream.pipe(
-				Stream.mapEffect((item) => {
-					const envelope = mapToEvent(item);
-					return eventBus.emit(envelope);
-				}),
-				Stream.runDrain,
-			);
-		});
+		mapToEvent: (a: A) => EventBus.Input,) =>
+			Effect.gen(function* () {
+				const eventBus = yield* EventBus;
+				yield* stream.pipe(
+					Stream.mapEffect((item) => {
+						const envelope = mapToEvent(item);
+						return eventBus.emit(envelope);
+					}),
+					Stream.runDrain,
+				);
+			}).pipe(Telemetry.span('streaming.toEventBus', { metrics: false }));
 }
 
 // --- [NAMESPACE] -------------------------------------------------------------

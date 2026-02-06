@@ -9,34 +9,33 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/observe/audit';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Effect, Option } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const handleUpdateRole = Effect.fn('users.updateRole')(
-    (repositories: DatabaseService.Type, audit: typeof AuditService.Service, requireRole: Middleware.RequireRoleCheck, targetUserId: string, newRole: Context.UserRole) =>
-        Effect.gen(function* () {
-            yield* Middleware.requireMfaVerified;
-            yield* requireRole('admin');
-            const user = yield* repositories.users.one([{ field: 'id', value: targetUserId }]).pipe(
-                Effect.mapError((error) => HttpError.Internal.of('User lookup failed', error)),
-                Effect.flatMap(Option.match({
-                    onNone: () => Effect.fail(HttpError.NotFound.of('user', targetUserId)),
-                    onSome: (user) => Effect.succeed(user),
-                })),
-            );
-            const updatedUser = yield* repositories.users.update({ ...user, role: newRole, updatedAt: undefined }).pipe(
-                Effect.mapError((error) => HttpError.Internal.of('Role update failed', error)),
-            );
-            yield* audit.log('User.update', {
-                after: { email: updatedUser.email, role: updatedUser.role },
-                before: { email: user.email, role: user.role },
-                subjectId: targetUserId,
-            });
-            return updatedUser;
-        }),
-);
+const handleUpdateRole = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, requireRole: Middleware.RequireRoleCheck, targetUserId: string, newRole: Context.UserRole) =>
+	Effect.gen(function* () {
+		yield* Middleware.requireMfaVerified;
+		yield* requireRole('admin');
+		const user = yield* repositories.users.one([{ field: 'id', value: targetUserId }]).pipe(
+			Effect.mapError((error) => HttpError.Internal.of('User lookup failed', error)),
+			Effect.flatMap(Option.match({
+				onNone: () => Effect.fail(HttpError.NotFound.of('user', targetUserId)),
+				onSome: (user) => Effect.succeed(user),
+			})),
+		);
+		const updatedUser = yield* repositories.users.update({ ...user, role: newRole, updatedAt: undefined }).pipe(
+			Effect.mapError((error) => HttpError.Internal.of('Role update failed', error)),
+		);
+		yield* audit.log('User.update', {
+			after: { email: updatedUser.email, role: updatedUser.role },
+			before: { email: user.email, role: user.role },
+			subjectId: targetUserId,
+		});
+		return updatedUser;
+	}).pipe(Telemetry.span('users.updateRole', { kind: 'server', metrics: false }));
 
 // --- [LAYERS] ----------------------------------------------------------------
 

@@ -13,6 +13,7 @@ import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
 import { MetricsService } from './observe/metrics.ts';
+import { Telemetry } from './observe/telemetry.ts';
 import { Crypto } from './security/crypto.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -22,30 +23,26 @@ const _CONFIG = {
 		allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-App-Id', 'X-Request-Id', 'X-Requested-With', 'Traceparent', 'Tracestate', 'Baggage'],
 		allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
 		allowedOrigins: ['*'],
-		credentials: true,
-		exposedHeaders: ['X-Request-Id', 'X-Circuit-State', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Server-Timing', 'Traceparent', 'Tracestate', 'Baggage', 'Content-Disposition'],
+		credentials: false,
+		exposedHeaders: ['X-Request-Id', 'X-Circuit-State', 'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'Retry-After', 'Server-Timing', 'Traceparent', 'Tracestate', 'Baggage', 'Content-Disposition'],
 		maxAge: 86400,
 	},
 	proxy: {
 		cidrs: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10'],
+		hopsDefault: 1,
 	},
 	security: {
 		base: {'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',} satisfies Record<string, string>,
 		hsts: { includeSubDomains: true, maxAge: 31536000 },
 	},
 } as const;
-const _PROXY_CONFIG = Config.all({
-	enabled: Config.string('TRUST_PROXY').pipe(Config.withDefault('false'), Config.map((v) => v === 'true' || v === '1')),
-	hops: Config.integer('PROXY_HOPS').pipe(Config.withDefault(1)),
-});
-const _trustedCidrs = A.filterMap(_CONFIG.proxy.cidrs, Option.liftThrowable(ipaddr.parseCIDR));
-const _mapSessionError = (error: unknown): HttpError.Auth | HttpError.Internal => Match.value(error).pipe(
+const _mapLookupError = (fallback: string) => (error: unknown): HttpError.Auth | HttpError.Internal => Match.value(error).pipe(
 	Match.when(Cause.isNoSuchElementException, () => HttpError.Auth.of('Missing session')),
 	Match.when((e: unknown): e is HttpError.Auth => e instanceof HttpError.Auth, (e) => e),
-	Match.orElse((e: unknown) => HttpError.Internal.of('Session lookup failed', e)),
+	Match.orElse((e: unknown) => HttpError.Internal.of(fallback, e)),
 );
 const requireMfaVerified = Context.Request.sessionOrFail.pipe(
-	Effect.mapError(_mapSessionError),
+	Effect.mapError(_mapLookupError('Session lookup failed')),
 	Effect.filterOrFail((session) => !session.mfaEnabled || Option.isSome(session.verifiedAt), () => HttpError.Forbidden.of('MFA verification required')),
 	Effect.asVoid,
 );
@@ -53,10 +50,11 @@ const requireMfaVerified = Context.Request.sessionOrFail.pipe(
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
 const _extractClientIp = (proxy: { readonly enabled: boolean; readonly hops: number }, headers: Headers.Headers, directIp: Option.Option<string>): Option.Option<string> => {
+	const trustedCidrs = A.filterMap(_CONFIG.proxy.cidrs, Option.liftThrowable(ipaddr.parseCIDR));
 	const isTrustedProxy = proxy.enabled && pipe(
 		directIp,
 		Option.flatMap(Option.liftThrowable(ipaddr.process)),
-		Option.map((addr) => ipaddr.subnetMatch(addr, { trusted: _trustedCidrs }, 'untrusted') === 'trusted'),
+		Option.map((addr) => ipaddr.subnetMatch(addr, { trusted: trustedCidrs }, 'untrusted') === 'trusted'),
 		Option.getOrElse(() => false),
 	);
 	return isTrustedProxy
@@ -67,52 +65,74 @@ const _extractClientIp = (proxy: { readonly enabled: boolean; readonly hops: num
 			])
 		: directIp;
 };
-const trace = HttpMiddleware.make((app) => Effect.gen(function* () {
-	const req = yield* HttpServerRequest.HttpServerRequest;
-	const parent = HttpTraceContext.fromHeaders(req.headers);
-	const response = yield* (Option.isSome(parent) ? Effect.withParentSpan(app, parent.value) : Effect.withSpan(app, 'http.request', { attributes: { 'http.method': req.method, 'http.target': req.url } }));
-	yield* Effect.annotateCurrentSpan('http.status_code', response.status);
-	return Option.match(yield* Effect.optionFromOptional(Effect.currentSpan), { onNone: () => response, onSome: (span) => HttpServerResponse.setHeaders(response, HttpTraceContext.toHeaders(span)) });
-}));
+const trace = HttpMiddleware.make((app) => HttpServerRequest.HttpServerRequest.pipe(
+	Effect.flatMap((req) => pipe(
+		Telemetry.span(app, 'http.request', { kind: 'server', metrics: false, 'http.method': req.method, 'http.target': req.url }),
+		Effect.tap((res) => Effect.annotateCurrentSpan('http.status_code', res.status)),
+		Effect.flatMap((response) => Effect.map(Effect.optionFromOptional(Effect.currentSpan), (span) => ({ response, span }))),
+		(traced) => Option.match(HttpTraceContext.fromHeaders(req.headers), { onNone: () => traced, onSome: (parent) => Effect.withParentSpan(traced, parent) }),
+	)),
+	Effect.map(({ response, span }) => Option.match(span, { onNone: () => response, onSome: (s) => HttpServerResponse.setHeaders(response, HttpTraceContext.toHeaders(s)) })),
+));
 const security = (hsts: typeof _CONFIG.security.hsts | false = _CONFIG.security.hsts) =>
 	HttpMiddleware.make((app) => app.pipe(Effect.map((res) =>
 		HttpServerResponse.setHeaders(res, hsts
 			? { ..._CONFIG.security.base, 'strict-transport-security': `max-age=${hsts.maxAge}${hsts.includeSubDomains ? '; includeSubDomains' : ''}` }
 			: _CONFIG.security.base))));
-const serverTiming = HttpMiddleware.make((app) =>
-	Effect.timed(app).pipe(Effect.map(([duration, response]) =>
-		HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`))));
+const serverTiming = HttpMiddleware.make((app) => Effect.timed(app).pipe(Effect.map(([duration, response]) => HttpServerResponse.setHeader(response, 'server-timing', `total;dur=${Duration.toMillis(duration)}`))));
 
 // --- [AUTH_MIDDLEWARE] -------------------------------------------------------
 
 class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAuth', {
 	failure: HttpError.Auth,
-	security: { bearer: HttpApiSecurity.bearer },
+	security: {
+		bearer: HttpApiSecurity.bearer,
+		apiKey: HttpApiSecurity.apiKey({ key: 'X-API-Key', in: 'header' }),
+	},
 }) {
-	static readonly makeLayer = (lookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>>) =>
-		Layer.effect(this, Effect.gen(function* () {
-			const metrics = yield* MetricsService;
-			const audit = yield* AuditService;
-	return SessionAuth.of({
-		bearer: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
-			Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token))),
-			Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
-			Effect.flatMap(lookup), // NOSONAR S3358
-			Effect.flatMap(Option.match({
-				onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
-				onSome: (session) => Context.Request.update({ session: Option.some(session) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))), // NOSONAR S3358
-			})),
-		),
-	});
-		}));
+	static readonly makeLayer = (
+		sessionLookup: (hash: Hex64) => Effect.Effect<Option.Option<Context.Request.Session>>,
+		apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string; readonly expiresAt: Option.Option<Date> }>>,
+	) =>
+		Layer.effect(this, Effect.map(Effect.all([MetricsService, AuditService]), ([metrics, audit]) => SessionAuth.of({
+			bearer: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
+				Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token))),
+				Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
+				Effect.flatMap(sessionLookup), // NOSONAR S3358
+				Effect.flatMap(Option.match({
+					onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
+					onSome: (session) => Context.Request.update({ session: Option.some(session) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))), // NOSONAR S3358
+				})),
+			),
+			apiKey: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
+				Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token))),
+				Effect.tap(() => Metric.increment(metrics.auth.apiKey.lookups)),
+				Effect.flatMap(apiKeyLookup),
+				Effect.flatMap(Option.match({
+					onNone: () => Effect.all([
+						Metric.increment(metrics.auth.apiKey.misses),
+						audit.log('auth_failure', { details: { reason: 'invalid_api_key' } }),
+					], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid API key')))),
+					onSome: (key) => {
+						const expired = Option.match(key.expiresAt, { onNone: () => false, onSome: (expiry) => expiry < new Date() });
+						return expired
+							? Effect.fail(HttpError.Auth.of('API key expired'))
+							: Context.Request.update({ session: Option.some({
+								appId: '',
+								id: key.id,
+								mfaEnabled: false,
+								userId: key.userId,
+								verifiedAt: Option.none(),
+							}) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.apiKey.hits)));
+					},
+				})),
+			),
+		})));
 }
 const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: Context.UserRole) => Context.Request.sessionOrFail.pipe(
-	Effect.mapError(_mapSessionError),
+	Effect.mapError(_mapLookupError('Session lookup failed')),
 	Effect.flatMap(({ userId }) => findById(userId)),
-	Effect.mapError((error) => Match.value(error).pipe(
-		Match.when((e: unknown): e is HttpError.Auth => e instanceof HttpError.Auth, (e) => e),
-		Match.orElse((e) => HttpError.Internal.of('User lookup failed', e)),
-	)),
+	Effect.mapError(_mapLookupError('User lookup failed')),
 	Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
 	Effect.filterOrFail((user) => Context.UserRole.hasAtLeast(user.role, min), () => HttpError.Forbidden.of('Insufficient permissions')),
 	Effect.asVoid,
@@ -126,26 +146,21 @@ const makeAppLookup =
 const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown>) =>
 	HttpMiddleware.make((app) => Effect.gen(function* () {
 		const req = yield* HttpServerRequest.HttpServerRequest;
-		const proxy = yield* Effect.orDie(_PROXY_CONFIG);
+		const proxy = yield* Effect.orDie(Config.all({
+			enabled: Config.string('TRUST_PROXY').pipe(Config.withDefault('false'), Config.map((v) => v === 'true' || v === '1')),
+			hops: Config.integer('PROXY_HOPS').pipe(Config.withDefault(_CONFIG.proxy.hopsDefault)),
+		}));
 		const requestId = Option.getOrElse(Headers.get(req.headers, 'x-request-id'), crypto.randomUUID);
 		const namespaceOpt = Headers.get(req.headers, 'x-app-id');
-		const found = yield* Option.match(namespaceOpt, {
-			onNone: () => Effect.succeed(Option.none<{ readonly id: string; readonly namespace: string }>()),
-			onSome: (namespace) => findByNamespace(namespace).pipe(Effect.orElseSucceed(Option.none)),
-		});
-		const tenantId = Option.match(namespaceOpt, {							// Tenant resolution: no header → default app, header + found → app id, header + not found → unspecified (prevents cross-tenant data mixing)
-			onNone: () => Context.Request.Id.default,
-			onSome: () => Option.getOrElse(Option.map(found, (item) => item.id), () => Context.Request.Id.unspecified), // NOSONAR S3358
-		});
-		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(	// Cluster context: graceful degradation via serviceOption (avoids startup failures)
+		const tenantId = yield* pipe(namespaceOpt, Option.match({	// No header → default, found → app id, not found → unspecified (prevents cross-tenant mixing)
+			onNone: () => Effect.succeed(Context.Request.Id.default),
+			onSome: (ns) => findByNamespace(ns).pipe(Effect.map(Option.match({ onNone: () => Context.Request.Id.unspecified, onSome: (a) => a.id })), Effect.catchAll(() => Effect.succeed(Context.Request.Id.unspecified))), // NOSONAR S3358
+		}));
+		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(		// Graceful degradation via serviceOption (avoids startup failures)
 			Effect.flatMap(Option.match({
 				onNone: () => Effect.succeedNone,
-				onSome: (sharding) => Effect.map(sharding.getSnowflake, (sf): Option.Option<Context.Request.ClusterState> => Option.some({ // NOSONAR S3358
-					entityId: null,
-					entityType: null,
-					isLeader: false,
-					runnerId: Context.Request.makeRunnerId(sf),
-					shardId: null,
+				onSome: (s) => Effect.map(s.getSnowflake, (sf): Option.Option<Context.Request.ClusterState> => Option.some({ // NOSONAR S3358
+					entityId: null, entityType: null, isLeader: false, runnerId: Context.Request.makeRunnerId(sf), shardId: null,
 				})),
 			})),
 		);
@@ -160,25 +175,17 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			tenantId,
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
-		const runApp = app.pipe(
-			Effect.provideService(Context.Request, ctx),
-			Effect.flatMap((response) => Effect.gen(function* () {
-				const context = yield* Context.Request.current;
-				const circuitHeader = context.circuit.pipe(Option.map((circuit) => circuit.state));
-				return HttpServerResponse.setHeaders(response, Option.match(circuitHeader, {
-					onNone: () => ({ 'x-request-id': requestId }),
-					onSome: (state) => ({ 'x-request-id': requestId, 'x-circuit-state': state }),
-				}));
-			})),
-		);
-		const withTenantDb = Effect.orDie(Client.tenant.with(tenantId, runApp));
-		// FiberRef (fiber-local context) + Tag (DI) — both required for complete context scoping
-		return yield* Context.Request.within(tenantId, withTenantDb, ctx);
+		const response = yield* app.pipe(Effect.provideService(Context.Request, ctx));
+		const { circuit } = yield* Context.Request.current;
+		const circuitState = pipe(circuit, Option.map((c) => c.state), Option.getOrUndefined);
+		return yield* Context.Request.within(tenantId, Effect.orDie(Client.tenant.with(tenantId, Effect.succeed( // FiberRef + Tag — both required for complete context scoping
+			HttpServerResponse.setHeaders(response, { 'x-request-id': requestId, ...circuitState && { 'x-circuit-state': circuitState } }),
+		))), ctx);
 	}));
-const cors = (origins?: ReadonlyArray<string>) => {
-	const list = (origins ?? _CONFIG.cors.allowedOrigins).map((origin) => origin.trim()).filter(Boolean);
-	return HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials });
-};
+const cors = (origins?: ReadonlyArray<string>) => pipe(
+	(origins ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean),
+	(list) => HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials }),
+);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
@@ -204,6 +211,7 @@ const Middleware = {
 
 namespace Middleware {
 	export type SessionLookup = Parameters<typeof SessionAuth.makeLayer>[0];
+	export type ApiKeyLookup = Parameters<typeof SessionAuth.makeLayer>[1];
 	export type RoleLookup = Parameters<typeof makeRequireRole>[0];
 	export type RequireRoleCheck = ReturnType<typeof makeRequireRole>;
 	export type RequestContextLookup = Parameters<typeof makeRequestContext>[0];

@@ -15,12 +15,11 @@ export default defineConfig(
                 context: './src/context.ts',
                 // Domain modules
                 'domain/auth': './src/domain/auth.ts',
-                'domain/search': './src/domain/search.ts',
                 'domain/storage': './src/domain/storage.ts',
                 errors: './src/errors.ts',
                 'infra/cluster': './src/infra/cluster.ts',
                 'infra/events': './src/infra/events.ts',
-                'infra/handlers/purge-assets': './src/infra/handlers/purge-assets.ts',
+                'infra/handlers/purge': './src/infra/handlers/purge.ts',
                 // Infrastructure modules
                 'infra/jobs': './src/infra/jobs.ts',
                 'infra/storage': './src/infra/storage.ts',

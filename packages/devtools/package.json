@@ -3,76 +3,12 @@
   "version": "2.0.0",
   "type": "module",
   "exports": {
-    "./bootstrap": {
-      "types": "./src/bootstrap.tsx",
-      "import": "./src/bootstrap.tsx",
-      "default": "./src/bootstrap.tsx"
+    "./devtools": {
+      "types": "./src/devtools.ts",
+      "import": "./src/devtools.ts",
+      "default": "./src/devtools.ts"
     },
-    "./boundary": {
-      "types": "./src/boundary.tsx",
-      "import": "./src/boundary.tsx",
-      "default": "./src/boundary.tsx"
-    },
-    "./console": {
-      "types": "./src/console.ts",
-      "import": "./src/console.ts",
-      "default": "./src/console.ts"
-    },
-    "./env": {
-      "types": "./src/env.ts",
-      "import": "./src/env.ts",
-      "default": "./src/env.ts"
-    },
-    "./experimental": {
-      "types": "./src/experimental.ts",
-      "import": "./src/experimental.ts",
-      "default": "./src/experimental.ts"
-    },
-    "./handlers": {
-      "types": "./src/handlers.ts",
-      "import": "./src/handlers.ts",
-      "default": "./src/handlers.ts"
-    },
-    "./hooks": {
-      "types": "./src/hooks.ts",
-      "import": "./src/hooks.ts",
-      "default": "./src/hooks.ts"
-    },
-    "./logger": {
-      "types": "./src/logger.ts",
-      "import": "./src/logger.ts",
-      "default": "./src/logger.ts"
-    },
-    "./overlay": {
-      "types": "./src/overlay.tsx",
-      "import": "./src/overlay.tsx",
-      "default": "./src/overlay.tsx"
-    },
-    "./performance": {
-      "types": "./src/performance.ts",
-      "import": "./src/performance.ts",
-      "default": "./src/performance.ts"
-    },
-    "./session": {
-      "types": "./src/session.tsx",
-      "import": "./src/session.tsx",
-      "default": "./src/session.tsx"
-    },
-    "./trace": {
-      "types": "./src/trace.ts",
-      "import": "./src/trace.ts",
-      "default": "./src/trace.ts"
-    },
-    "./types": {
-      "types": "./src/types.ts",
-      "import": "./src/types.ts",
-      "default": "./src/types.ts"
-    },
-    "./vite-plugin": {
-      "types": "./src/vite-plugin.ts",
-      "import": "./src/vite-plugin.ts",
-      "default": "./src/vite-plugin.ts"
-    }
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "vite build",

@@ -10,6 +10,7 @@ import { Array as A, Data, Duration, Effect, type FiberRefs, HashMap, Match, Met
 import { constant } from 'effect/Function';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
+import { Telemetry } from '../observe/telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -109,13 +110,14 @@ const make = (name: string, config: {
 					return Effect.tryPromise({ catch: mapError, try: (signal) => policy.execute(runner, signal) });
 				};
 				const _circuitContext = () => Option.some({ name, state: MutableRef.get(stateTracker).current });
-				const execute = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, E | CircuitError, R> =>
-					Ref.update(lastAccess, HashMap.set(name, Date.now())).pipe(
-						Effect.zipRight(Context.Request.update({ circuit: _circuitContext() })),
-						Effect.zipRight(Effect.all([Effect.runtime<R>(), Effect.getFiberRefs])),
-						Effect.flatMap(([runtime, fiberRefs]) => _runViaPolicy<A, E, R>(runtime, fiberRefs, eff, unsafeCoerce)),
-						Effect.tap(() => Context.Request.update({ circuit: _circuitContext() })),
-					);
+					const execute = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, E | CircuitError, R> =>
+						Ref.update(lastAccess, HashMap.set(name, Date.now())).pipe(
+							Effect.zipRight(Context.Request.update({ circuit: _circuitContext() })),
+							Effect.zipRight(Effect.all([Effect.runtime<R>(), Effect.getFiberRefs])),
+							Effect.flatMap(([runtime, fiberRefs]) => _runViaPolicy<A, E, R>(runtime, fiberRefs, eff, unsafeCoerce)),
+							Effect.tap(() => Context.Request.update({ circuit: _circuitContext() })),
+							Telemetry.span('circuit.execute', { 'circuit.name': name, metrics: false }),
+						);
 				const instance: Circuit.Instance = {
 					dispose: () => { A.map(disposables, (disposable) => disposable.dispose()); (config.persist ?? true) && Effect.runFork(Ref.update(registry, HashMap.remove(name))); },
 					execute,

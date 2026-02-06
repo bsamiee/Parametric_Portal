@@ -15,6 +15,7 @@ const _CONFIG = {
 		jobs: 		[0.01, 0.1, 1, 10, 100, 1000] as const,						// Background processing
 		oauth: 		[0.1, 0.5, 1, 2, 5, 10, 30] as const,						// OAuth token exchanges (external APIs)
 		rateLimit: 	[0.0001, 0.001, 0.01, 0.1, 1] as const,						// Fast checks
+		rpc: 		[0.001, 0.01, 0.05, 0.1, 0.5, 1, 5] as const,				// RPC execution
 		storage: 	[0.005, 0.025, 0.125, 0.625, 3.125, 15.625, 78.125, 390.625] as const,	// S3 operations (5x exponential)
 		transfer: 	[0.1, 0.5, 2.5, 12.5, 62.5, 312.5] as const,				// Data transfers (5x exponential)
 	},
@@ -45,6 +46,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		},
 		audit: {failures: Metric.counter('audit_failures_total'), writes: Metric.counter('audit_writes_total'),},
 		auth: {
+			apiKey: { hits: Metric.counter('auth_api_key_hits_total'), lookups: Metric.counter('auth_api_key_lookups_total'), misses: Metric.counter('auth_api_key_misses_total') },
 			apiKeys: Metric.counter('auth_api_keys_total'), logins: Metric.counter('auth_logins_total'), logouts: Metric.counter('auth_logouts_total'),
 			refreshes: Metric.counter('auth_refreshes_total'), session: {hits: Metric.counter('auth_session_hits_total'), lookups: Metric.counter('auth_session_lookups_total'), misses: Metric.counter('auth_session_misses_total'),},
 		},
@@ -117,6 +119,15 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		resilience: {
 			bulkheadRejections: Metric.counter('resilience_bulkhead_rejections_total'), fallbacks: Metric.counter('resilience_fallbacks_total'),
 			hedges: Metric.counter('resilience_hedges_total'), retries: Metric.counter('resilience_retries_total'), timeouts: Metric.counter('resilience_timeouts_total'),
+		},
+		rpc: {
+			duration: Metric.timerWithBoundaries('rpc_duration_seconds', _CONFIG.boundaries.rpc),
+			errors: Metric.frequency('rpc_errors_total'),
+			requests: Metric.counter('rpc_requests_total'),
+		},
+		rtc: {
+			connections: Metric.counter('rtc_connections_total'),
+			events: Metric.counter('rtc_events_total'),
 		},
 		search: {
 			queries: Metric.counter('search_queries_total', { description: 'Total search queries' }),
