@@ -39,7 +39,7 @@ const handleConnect = (webSocket: typeof WebSocketService.Service) =>
 const WebSocketLive = HttpApiBuilder.group(ParametricApi, 'websocket', (handlers) =>
 	Effect.gen(function* () {
 		const webSocket = yield* WebSocketService;
-		return handlers.handleRaw('connect', () =>CacheService.rateLimit('api', handleConnect(webSocket)),);
+		return handlers.handleRaw('connect', () =>CacheService.rateLimit('realtime', handleConnect(webSocket)),);
 	}),
 );
 

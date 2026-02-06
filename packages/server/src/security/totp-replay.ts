@@ -64,7 +64,7 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 					const lockedUntil = pipe(
 						Option.liftPredicate((delta: number) => delta >= 0)(count - _CONFIG.lockout.maxAttempts),
 						Option.map((delta) => now + Math.min(_CONFIG.lockout.baseMs * (2 ** delta), _CONFIG.lockout.maxMs)),
-							Option.getOrElse(() => 0),
+						Option.getOrElse(() => 0),
 						);
 						yield* CacheService.kv.set(_CONFIG.lockoutKey(userId), { count, lastFailure: now, lockedUntil }, Duration.millis(_CONFIG.lockout.maxMs));
 						yield* Effect.when(_incMfa('lockout_triggered'), () => lockedUntil > 0 && prev.lockedUntil <= now);

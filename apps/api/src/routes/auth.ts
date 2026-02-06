@@ -27,6 +27,7 @@ import { type DateTime, Duration, Effect, Option } from 'effect';
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const requireOption = <A, E>(option: Option.Option<A>, onNone: () => E): Effect.Effect<A, E> => Option.match(option, { onNone: () => Effect.fail(onNone()), onSome: Effect.succeed });
+const requireInteractive = Middleware.requireInteractiveSession;
 const verifyCsrf = (request: HttpServerRequest.HttpServerRequest) =>
 	requireOption(
 		Option.filter(Headers.get(request.headers, Context.Request.config.csrf.header), (value) => value === Context.Request.config.csrf.expectedValue),
@@ -87,14 +88,16 @@ const handleRefresh = (auth: Auth.Service, audit: typeof AuditService.Service) =
 	}).pipe(Telemetry.span('auth.refresh', { kind: 'server', metrics: false }));
 const handleLogout = (auth: Auth.Service) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
 		const session = yield* Context.Request.sessionOrFail;
-		yield* auth.revoke(session.id, session.userId, 'logout');
+		yield* auth.revoke(session.id, 'logout');
 		return yield* logoutResponse().pipe(Effect.mapError((error) => HttpError.Internal.of('Response build failed', error)));
 	}).pipe(Telemetry.span('auth.logout', { kind: 'server', metrics: false }));
 const handleMe = (repositories: DatabaseService.Type, audit: typeof AuditService.Service) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		yield* Middleware.requireMfaVerified;
 		const { userId } = yield* Context.Request.sessionOrFail;
 		const user = yield* repositories.users.one([{ field: 'id', value: userId }]).pipe(
@@ -109,13 +112,15 @@ const handleMe = (repositories: DatabaseService.Type, audit: typeof AuditService
 
 const handleMfaStatus = (auth: Auth.Service, audit: typeof AuditService.Service) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		const { userId } = yield* Context.Request.sessionOrFail;
 		const status = yield* auth.mfaStatus(userId);
 		yield* audit.log('MfaSecret.status', { subjectId: userId });
 		return status;
-		}).pipe(Telemetry.span('auth.mfa.status', { kind: 'server', metrics: false }));
+			}).pipe(Telemetry.span('auth.mfa.status', { kind: 'server', metrics: false }));
 const handleMfaEnroll = (auth: Auth.Service, repositories: DatabaseService.Type) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
+		yield* requireInteractive;
 		const session = yield* Context.Request.sessionOrFail;
 		const userOption = yield* repositories.users.one([{ field: 'id', value: session.userId }]).pipe(Effect.mapError((error) => HttpError.Internal.of('User lookup failed', error)));
 		const user = yield* Option.match(userOption, { onNone: () => Effect.fail(HttpError.NotFound.of('user', session.userId)), onSome: (u) => Effect.succeed(u) });
@@ -123,11 +128,13 @@ const handleMfaEnroll = (auth: Auth.Service, repositories: DatabaseService.Type)
 	}).pipe(Telemetry.span('auth.mfa.enroll', { kind: 'server', metrics: false })));
 const handleMfaVerify = (auth: Auth.Service, code: string) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
+		yield* requireInteractive;
 		const session = yield* Context.Request.sessionOrFail;
 		return yield* auth.mfaVerify(session.id, code);
 	}).pipe(Telemetry.span('auth.mfa.verify', { kind: 'server', metrics: false })));
 const handleMfaDisable = (auth: Auth.Service) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		yield* Middleware.requireMfaVerified;
 		const { userId } = yield* Context.Request.sessionOrFail;
 		yield* auth.mfaDisable(userId);
@@ -135,6 +142,7 @@ const handleMfaDisable = (auth: Auth.Service) =>
 	}).pipe(Telemetry.span('auth.mfa.disable', { kind: 'server', metrics: false }));
 const handleMfaRecover = (auth: Auth.Service, code: string) =>
 	CacheService.rateLimit('mfa', Effect.gen(function* () {
+		yield* requireInteractive;
 		const session = yield* Context.Request.sessionOrFail;
 		return yield* auth.mfaRecover(session.id, code.toUpperCase());
 	}).pipe(Telemetry.span('auth.mfa.recover', { kind: 'server', metrics: false })));
@@ -143,6 +151,7 @@ const handleMfaRecover = (auth: Auth.Service, code: string) =>
 
 const handleListApiKeys = (repositories: DatabaseService.Type, audit: typeof AuditService.Service) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		yield* Middleware.requireMfaVerified;
 		const { userId } = yield* Context.Request.sessionOrFail;
 		const keys = yield* repositories.apiKeys.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('API key list failed', error)));
@@ -151,6 +160,7 @@ const handleListApiKeys = (repositories: DatabaseService.Type, audit: typeof Aud
 		}).pipe(Telemetry.span('auth.apiKeys.list', { kind: 'server', metrics: false }));
 const handleCreateApiKey = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, input: { expiresAt?: Date; name: string }) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
 		yield* Middleware.requireMfaVerified;
@@ -169,6 +179,7 @@ const handleCreateApiKey = (repositories: DatabaseService.Type, audit: typeof Au
 	}).pipe(Telemetry.span('auth.apiKeys.create', { kind: 'server', metrics: false }));
 const handleDeleteApiKey = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, id: string) =>
 	Effect.gen(function* () {
+		yield* requireInteractive;
 		const request = yield* HttpServerRequest.HttpServerRequest;
 		yield* verifyCsrf(request);
 		yield* Middleware.requireMfaVerified;

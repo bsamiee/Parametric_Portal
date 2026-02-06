@@ -12,10 +12,10 @@ import { AiRuntime } from './runtime.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-    cron: { embeddings: { concurrency: 5, name: 'refresh-embeddings', schedule: '0 3 * * *' } },
+    cron:   { embeddings: { concurrency: 5, name: 'refresh-embeddings', schedule: '0 3 * * *' } },
     labels: { embeddings: 'embeddings' },
-    text: { joiner: ' ' },
-    users: { anonymous: 'anonymous', system: 'system' },
+    text:   { joiner: ' ' },
+    users:  { anonymous: 'anonymous', system: 'system' },
 } as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -212,13 +212,11 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                     { discard: true },
                 );
                 return { count: sources.length };
-            }).pipe(
-                Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),
-            );
+            }).pipe(Telemetry.span('search.refreshEmbeddings', { 'search.includeGlobal': options?.includeGlobal ?? false }),);
         return { query, refresh, refreshEmbeddings, suggest };
     }),
 }) {
-    static readonly EmbeddingCron = ClusterService.cron({
+	static readonly EmbeddingCron = ClusterService.Schedule.cron({
         cron: Cron.unsafeParse(_CONFIG.cron.embeddings.schedule),
         execute: Effect.gen(function* () {
             const [database, search] = yield* Effect.all([DatabaseService, SearchService]);

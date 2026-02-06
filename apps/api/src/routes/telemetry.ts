@@ -56,14 +56,14 @@ const handleIngestTraces = (request: HttpServerRequest.HttpServerRequest) =>
 				Effect.map((decoded) => ({ body: JSON.stringify(decoded), contentType: _CONFIG.contentType.json })),
 			)),
 		);
-		yield* Resilience.run('telemetry.otlp',
+		yield* Resilience.run(_CONFIG.telemetry.circuit,
 			Effect.tryPromise({
 				catch: (error) => error instanceof Error ? error : new Error(String(error)),
 				try: (signal) => fetch(`${endpoint}${_CONFIG.paths.traces}`, { body: payload.body, headers: { ...extraHeaders, 'content-type': payload.contentType }, method: 'POST', signal })
 					.then((response) => response.ok ? undefined : Promise.reject(new Error(`OTLP collector HTTP ${response.status}`))),
 			}),
-			{ circuit: 'telemetry.otlp', retry: 'fast', timeout: Duration.seconds(5) },
-		);
+				{ circuit: _CONFIG.telemetry.circuit, retry: 'brief', timeout: Duration.seconds(5) },
+			);
 		return HttpServerResponse.empty({ status: _CONFIG.response.accepted });
 		}).pipe(
 			Effect.tapError((error) => Effect.logWarning('Telemetry proxy failed', { error: String(error) })),

@@ -65,8 +65,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 			const socketsRef = yield* Ref.make(HashMap.empty<string, { socket: Socket.Socket; rooms: Ref.Ref<HashSet.HashSet<string>>; tenantId: string; userId: string }>());
 			const labels = MetricsService.label({ service: 'websocket' });
 			const _eventLabels = (direction: 'error' | 'inbound' | 'outbound', messageType: string) => MetricsService.label({ direction, message_type: messageType, service: 'websocket' });
-			const _trackRtcEvent = (direction: 'error' | 'inbound' | 'outbound', messageType: string) =>
-				Metric.increment(Metric.taggedWithLabels(metrics.rtc.events, _eventLabels(direction, messageType)));
+			const _trackRtcEvent = (direction: 'error' | 'inbound' | 'outbound', messageType: string) => Metric.increment(Metric.taggedWithLabels(metrics.rtc.events, _eventLabels(direction, messageType)));
 			const _presence = {
 			getAll: (tenantId: string) =>
 				Effect.tryPromise(() => redis.hgetall(`presence:${tenantId}`)).pipe(
@@ -85,7 +84,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 					.exec()).pipe(Effect.ignore),
 		} as const;
 			const _emit = (tenantId: string, action: string, extra?: { data?: unknown; fromSocketId?: string; roomId?: string; targetSocketId?: string; userId?: string }) =>
-				Context.Request.withinSync(tenantId, eventBus.emit({
+				Context.Request.withinSync(tenantId, eventBus.publish({
 					aggregateId: extra?.roomId ? `${tenantId}:${extra.roomId}` : tenantId,
 					payload: { _tag: 'ws' as const, action, ...extra },
 					tenantId,
@@ -209,7 +208,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 							Match.tag('meta.get', () => cache.kv.get(_metaKey(socketId), S.Record({ key: S.String, value: S.Unknown })).pipe(
 								Effect.flatMap(Option.match({
 									onNone: () => sendOutbound({ _tag: 'meta.data', metadata: {} }).pipe(Effect.ignore),
-								onSome: (metadata) => sendOutbound({ _tag: 'meta.data', metadata }).pipe(Effect.ignore),
+									onSome: (metadata) => sendOutbound({ _tag: 'meta.data', metadata }).pipe(Effect.ignore),
 							})),
 						)),
 							Match.exhaustive,
@@ -253,13 +252,13 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 		};
 	}),
 }) {
-	static readonly _Config = _Config;
-	static readonly _PresencePayload = _PresencePayload;
-	static readonly _ErrorReason = S.Literal('send_failed', 'room_limit', 'not_in_room', 'invalid_message');
-	static readonly _InboundMsg = _InboundMsg;
-	static readonly _OutboundMsg = _OutboundMsg;
-	static readonly _encodeOutbound = _encodeOutbound;
-	static readonly _decodeInbound = _decodeInbound;
+	static readonly Config = _Config;
+	static readonly PresencePayload = _PresencePayload;
+	static readonly ErrorReason = S.Literal('send_failed', 'room_limit', 'not_in_room', 'invalid_message');
+	static readonly InboundMsg = _InboundMsg;
+	static readonly OutboundMsg = _OutboundMsg;
+	static readonly encodeOutbound = _encodeOutbound;
+	static readonly decodeInbound = _decodeInbound;
 	static readonly Error = WsError;
 }
 
@@ -268,7 +267,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 namespace WebSocketService {
 	export type Error = InstanceType<typeof WebSocketService.Error>;
 	export type ErrorReason = Error['reason'];
-	export type Message = typeof WebSocketService._InboundMsg.Type;
+	export type Message = typeof WebSocketService.InboundMsg.Type;
 	export type Target =
 		| { readonly _tag: 'room'; readonly roomId: string }
 		| { readonly _tag: 'direct'; readonly socketId: string }

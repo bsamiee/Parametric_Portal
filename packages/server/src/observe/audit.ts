@@ -116,7 +116,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 		return { log, replayDeadLetters };
 	}),
 }) {
-	static readonly ReplayLayer = ClusterService.singleton(	// Cluster-wide singleton for replay: prevents thundering herd across pods
+	static readonly ReplayLayer = ClusterService.Schedule.singleton(	// Cluster-wide singleton for replay: prevents thundering herd across pods
 		'audit-dlq-replay',
 		() => Effect.gen(function* () {
 			const audit = yield* AuditService;

@@ -15,12 +15,10 @@ const Mcp = (() => {
         readonly transport: Mcp.Transport;
         readonly toolkits?:
             | Parameters<typeof McpServer.toolkit>[0]
-            | ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]>
-            | undefined;
+            | ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]>;
         readonly layers?:
             | Layer.Layer<never, never, unknown>
-            | ReadonlyArray<Layer.Layer<never, never, unknown>>
-            | undefined;
+            | ReadonlyArray<Layer.Layer<never, never, unknown>>;
     }) => {
         const base = transportLayer(input.transport);
         const toolkitLayers: ReadonlyArray<Layer.Layer<never, never, unknown>> = Option.fromNullable(

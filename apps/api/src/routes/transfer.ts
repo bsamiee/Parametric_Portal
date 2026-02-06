@@ -15,10 +15,11 @@ import { AuditService } from '@parametric-portal/server/observe/audit';
 import { MetricsService } from '@parametric-portal/server/observe/metrics';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
+import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Crypto } from '@parametric-portal/server/security/crypto';
 import { Transfer, TransferError } from '@parametric-portal/server/utils/transfer';
 import { Codec } from '@parametric-portal/types/files';
-import { Array as A, Chunk, DateTime, Effect, Function as F, Metric, Option, pipe, Stream } from 'effect';
+import { Array as A, Chunk, DateTime, Effect, Function as F, Match, Metric, Option, pipe, Stream } from 'effect';
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
@@ -86,26 +87,59 @@ const handleExport = (repositories: DatabaseService.Type, audit: typeof AuditSer
 				Effect.tap((result: Transfer.BinaryResult) => auditExport(result.name, result.count)),
 				Effect.map((result: Transfer.BinaryResult) => ({ ...result, format: codec.ext })),
 				Telemetry.span(`transfer.serialize.${codec.ext}`),
-			)
-			: (() => {
-				const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
-				const tracked = MetricsService.trackStream(textStream, metrics.transfer.rows, { app: appId, outcome: 'exported' });
-				const body = Transfer.export(tracked, exportFormat as Transfer.TextFormat).pipe(
-					Stream.tapError((err) => Effect.all([
-						Effect.logError(`${codec.ext.toUpperCase()} export stream error`, { error: String(err) }),
-						Metric.update(Metric.taggedWithLabels(metrics.errors, MetricsService.label({ app: appId, operation: 'export' })), 'StreamError'),
-					], { discard: true })),
-				);
-				return HttpServerResponse.stream(body, { contentType: codec.mime }).pipe(
-					Effect.flatMap((res) => HttpServerResponse.setHeader(res, 'Content-Disposition', `attachment; filename="${filename}"`)),
-					Effect.tap(() => Effect.all([
-						Effect.annotateCurrentSpan('transfer.format', codec.ext),
-						MetricsService.inc(metrics.transfer.exports, MetricsService.label({ app: appId, format: codec.ext })),
-					], { discard: true })),
-					Effect.tap(() => auditExport(filename)),
-				);
-			})();
-	}).pipe(Telemetry.span('transfer.export', { kind: 'server', metrics: false }));
+				)
+				: (() => {
+					const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
+					const tracked = MetricsService.trackStream(textStream, metrics.transfer.rows, { app: appId, outcome: 'exported' });
+					const toExportRow = (asset: { readonly content: string; readonly id: string; readonly type: string; readonly updatedAt: number }) => ({
+						content: asset.content,
+						id: asset.id,
+						type: asset.type,
+						updatedAt: new Date(asset.updatedAt).toISOString(),
+					});
+					const csvEscape = (value: string) => `"${value.replaceAll('"', '""')}"`;
+					const csvHeader = 'type,id,content,updatedAt';
+					const csvRow = (row: ReturnType<typeof toExportRow>) => [row.type, row.id, row.content, row.updatedAt].map((value) => csvEscape(String(value))).join(',');
+					const streamResponse = Match.value(exportFormat).pipe(
+						Match.when('csv', () => StreamingService.emit({
+							filename,
+							format: 'csv',
+							name: 'transfer.export.csv',
+							serialize: (line) => line,
+							stream: tracked.pipe(
+								Stream.map(toExportRow),
+								Stream.zipWithIndex,
+								Stream.map(([row, index]) => index === 0 ? `${csvHeader}\n${csvRow(row)}` : csvRow(row)),
+							),
+						})),
+						Match.when('ndjson', () => StreamingService.emit({
+							filename,
+							format: 'ndjson',
+							name: 'transfer.export.ndjson',
+							serialize: (row) => JSON.stringify(row),
+							stream: tracked.pipe(Stream.map(toExportRow)),
+						})),
+						Match.orElse(() => {
+							const body = Transfer.export(tracked, exportFormat as Transfer.TextFormat).pipe(
+								Stream.tapError((err) => Effect.all([
+									Effect.logError(`${codec.ext.toUpperCase()} export stream error`, { error: String(err) }),
+									Metric.update(Metric.taggedWithLabels(metrics.errors, MetricsService.label({ app: appId, operation: 'export' })), 'StreamError'),
+								], { discard: true })),
+							);
+							return HttpServerResponse.stream(body, { contentType: codec.mime }).pipe(
+								Effect.flatMap((res) => HttpServerResponse.setHeader(res, 'Content-Disposition', `attachment; filename="${filename}"`)),
+							);
+						}),
+					);
+					return streamResponse.pipe(
+						Effect.tap(() => Effect.all([
+							Effect.annotateCurrentSpan('transfer.format', codec.ext),
+							MetricsService.inc(metrics.transfer.exports, MetricsService.label({ app: appId, format: codec.ext })),
+						], { discard: true })),
+						Effect.tap(() => auditExport(filename)),
+					);
+				})();
+		}).pipe(Telemetry.span('transfer.export', { kind: 'server', metrics: false }));
 const handleImport = (repositories: DatabaseService.Type, search: typeof SearchRepo.Service, audit: typeof AuditService.Service, storage: typeof StorageService.Service, parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
@@ -135,18 +169,42 @@ const handleImport = (repositories: DatabaseService.Type, search: typeof SearchR
 			Effect.catchTag('Fatal', (err) => Effect.fail(HttpError.Validation.of('body', err.detail ?? err.code))),
 			Telemetry.span('transfer.parse'),
 		);
-		const { failures: rawFailures, items: rawItems } = Transfer.partition(parsed);
-		const maxContentBytes = Transfer.limits.entryBytes;
-		const sizeFailures = codec.binary
-			? []
-			: pipe(
-				rawItems,
-				A.filter((item) => Codec.size(item.content) > maxContentBytes),
-				A.map((item) => new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal })),
+			const { failures: rawFailures, items: rawItems } = Transfer.partition(parsed);
+			const maxContentBytes = Transfer.limits.entryBytes;
+			const resolveBinaryCodec = (item: typeof rawItems[number]) => pipe(
+				Option.fromNullable(item.mime),
+				Option.flatMap((mime) => Option.fromNullable(Codec.resolve(mime))),
+				Option.orElse(() => pipe(
+					Option.fromNullable(item.name),
+					Option.flatMap((name) => Option.fromNullable(name.split('.').pop())),
+					Option.flatMap((ext) => Option.fromNullable(Codec.resolve(ext))),
+				)),
+				Option.getOrElse(() => codec),
 			);
-		const items = codec.binary
-			? rawItems
-			: pipe(rawItems, A.filter((item) => Codec.size(item.content) <= maxContentBytes));
+			const binaryValidation = codec.binary
+				? pipe(
+					rawItems,
+					A.map((item) => ({
+						item,
+						parseError: Option.match(Option.liftThrowable(() => resolveBinaryCodec(item).buf(item.content).byteLength)(), {
+							onNone: () => Option.some(new TransferError.Parse({ code: 'INVALID_RECORD', detail: 'Invalid binary entry content', ordinal: item.ordinal })),
+							onSome: (sizeBytes) => sizeBytes > maxContentBytes
+								? Option.some(new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal }))
+								: Option.none(),
+						}),
+					})),
+				)
+				: [];
+			const sizeFailures = codec.binary
+				? A.filterMap(binaryValidation, ({ parseError }) => parseError)
+				: pipe(
+					rawItems,
+					A.filter((item) => Codec.size(item.content) > maxContentBytes),
+					A.map((item) => new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal })),
+				);
+			const items = codec.binary
+				? A.filterMap(binaryValidation, ({ item, parseError }) => Option.match(parseError, { onNone: () => Option.some(item), onSome: () => Option.none() }))
+				: pipe(rawItems, A.filter((item) => Codec.size(item.content) <= maxContentBytes));
 		const failures = A.appendAll(rawFailures, sizeFailures);
 		yield* Effect.all([
 			Effect.annotateCurrentSpan('transfer.format', codec.ext),

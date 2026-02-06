@@ -5,7 +5,7 @@
 /** biome-ignore-all assist/source/useSortedKeys: <_formats table organization lock> */
 import { Headers, HttpServerResponse, MsgPack, Multipart, Ndjson } from '@effect/platform';
 import { Sse } from '@effect/experimental';
-import { Chunk, Duration, Effect, type HashSet, Mailbox, Match, type Metric, type MetricLabel, Option, pipe, Predicate, type PubSub, Schedule, type Scope, Stream, Subscribable, SubscriptionRef } from 'effect';
+import { Chunk, Duration, Effect, type HashSet, Mailbox, Match, type Metric, type MetricLabel, Option, pipe, Predicate, type PubSub, type Scope, Stream, Subscribable, SubscriptionRef } from 'effect';
 import { Context } from '../context.ts';
 import { ClusterService } from '../infra/cluster.ts';
 import { EventBus } from '../infra/events.ts';
@@ -42,7 +42,7 @@ const _withMetrics = <A, E>(labels: HashSet.HashSet<MetricLabel.MetricLabel>, na
 // --- [SERVICES] --------------------------------------------------------------
 
 class StreamingService extends Effect.Service<StreamingService>()('server/StreamingService', {
-	dependencies: [ClusterService.Layer, Resilience.Layer],
+	dependencies: [ClusterService.Layers.runner, Resilience.Layer],
 	succeed: {},
 }) {
 	static readonly sse = <A, E>(config: {					// SSE response - handles 90% case with minimal config. Built-in heartbeat, error→SSE, tenant metrics.
@@ -104,7 +104,7 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 			const metricTap = (item: unknown) => format === 'binary' ? _inc(labels, (metrics) => metrics.stream.bytes, (item as Uint8Array).length) : _inc(labels, (metrics) => metrics.stream.elements);
 			const retry = config.retry;
 			return decoded.pipe(
-				(stream) => retry ? Stream.retry(stream, Schedule.exponential(retry.base).pipe(Schedule.intersect(Schedule.recurs(retry.times)))) : stream,
+				(stream) => retry ? Stream.retry(stream, Resilience.schedule({ base: retry.base, maxAttempts: retry.times })) : stream,
 				Stream.buffer({ capacity: formatConfig.capacity, strategy: formatConfig.strategy }),
 				_withMetrics(labels, config.name, format),
 				Stream.tap(metricTap),
@@ -179,27 +179,27 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 		readonly name?: string }): Effect.Effect<StreamingService.State<A>, never, Scope.Scope> =>
 			Effect.gen(function* () {
 				const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
-			const labels = _labels('state', 'ref', config?.name ?? 'anonymous', tenantId);
-			const ref = yield* SubscriptionRef.make(initial);
-			yield* _gauge(labels, (metrics) => metrics.stream.active, 1);
-			yield* Effect.addFinalizer(() => _gauge(labels, (metrics) => metrics.stream.active, -1));
-			return {
-				get: SubscriptionRef.get(ref),
-				set: (value: A) => SubscriptionRef.set(ref, value).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
-				update: (updater: (current: A) => A) => SubscriptionRef.update(ref, updater).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
-					modify: <B>(modifier: (current: A) => readonly [B, A]) => SubscriptionRef.modify(ref, modifier).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
-					changes: _withMetrics<A, never>(labels, config?.name ?? 'anonymous', 'ref')(ref.changes),
-				};
+				const labels = _labels('state', 'ref', config?.name ?? 'anonymous', tenantId);
+				const ref = yield* SubscriptionRef.make(initial);
+				yield* _gauge(labels, (metrics) => metrics.stream.active, 1);
+				yield* Effect.addFinalizer(() => _gauge(labels, (metrics) => metrics.stream.active, -1));
+				return {
+					get: SubscriptionRef.get(ref),
+					set: (value: A) => SubscriptionRef.set(ref, value).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
+					update: (updater: (current: A) => A) => SubscriptionRef.update(ref, updater).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
+						modify: <B>(modifier: (current: A) => readonly [B, A]) => SubscriptionRef.modify(ref, modifier).pipe(Effect.tap(_inc(labels, (metrics) => metrics.stream.elements))),
+						changes: _withMetrics<A, never>(labels, config?.name ?? 'anonymous', 'ref')(ref.changes),
+					};
 			}).pipe(Telemetry.span('streaming.state', { 'stream.name': config?.name ?? 'anonymous', metrics: false }));
 	static readonly toEventBus = <A>(	// Bridge stream to EventBus - maps stream elements to domain events
 		stream: Stream.Stream<A>,
-		mapToEvent: (a: A) => EventBus.Input,) =>
+		mapToEvent: (a: A) => EventBus.Types.Input,) =>
 			Effect.gen(function* () {
 				const eventBus = yield* EventBus;
 				yield* stream.pipe(
 					Stream.mapEffect((item) => {
 						const envelope = mapToEvent(item);
-						return eventBus.emit(envelope);
+						return eventBus.publish(envelope);
 					}),
 					Stream.runDrain,
 				);

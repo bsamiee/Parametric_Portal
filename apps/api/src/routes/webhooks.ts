@@ -24,29 +24,33 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 		return handlers
 				.handle('list', () => CacheService.rateLimit('api', requireAdmin.pipe(
 					Effect.andThen(Context.Request.currentTenantId),
-					Effect.flatMap((tenantId) => webhooks.manage.list(tenantId).pipe(
+						Effect.flatMap((tenantId) => webhooks.list(tenantId).pipe(
 						Effect.map((items) => items.map((item) => ({ active: item.active, eventTypes: item.eventTypes, timeout: item.endpoint.timeout, url: item.endpoint.url }))),
 					)),
 					Telemetry.span('webhooks.list', { kind: 'server', metrics: false }),
 				)))
-				.handle('register', ({ payload }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
-					Effect.andThen(Context.Request.currentTenantId),
-					Effect.flatMap((tenantId) => webhooks.manage.register(tenantId, {
-						active: payload.active,
-					endpoint: new WebhookService.Endpoint({ secret: payload.secret, timeout: payload.timeout, url: payload.url }),
-					eventTypes: payload.eventTypes,
-					})),
-					Effect.tap(() => audit.log('Webhook.register', { details: { url: payload.url } })),
-					Effect.as({ success: true as const }),
-					Telemetry.span('webhooks.register', { kind: 'server', metrics: false, 'webhook.url': payload.url }),
-				)))
-				.handle('remove', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
-					Effect.andThen(Context.Request.currentTenantId),
-					Effect.flatMap((tenantId) => webhooks.manage.remove(tenantId, decodeURIComponent(path.url))),
-					Effect.tap(() => audit.log('Webhook.remove', { details: { url: path.url } })),
-					Effect.as({ success: true as const }),
-					Telemetry.span('webhooks.remove', { kind: 'server', metrics: false, 'webhook.url': decodeURIComponent(path.url) }),
-				)))
+					.handle('register', ({ payload }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
+						Effect.andThen(Context.Request.currentTenantId),
+							Effect.flatMap((tenantId) => webhooks.register(tenantId, {
+							active: payload.active,
+						endpoint: new WebhookService.Endpoint({ secret: payload.secret, timeout: payload.timeout, url: payload.url }),
+						eventTypes: payload.eventTypes,
+						}).pipe(
+							Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook registration failed', error))),
+						)),
+						Effect.tap(() => audit.log('Webhook.register', { details: { url: payload.url } })),
+						Effect.as({ success: true as const }),
+						Telemetry.span('webhooks.register', { kind: 'server', metrics: false, 'webhook.url': payload.url }),
+					)))
+					.handle('remove', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
+						Effect.andThen(Context.Request.currentTenantId),
+							Effect.flatMap((tenantId) => webhooks.remove(tenantId, decodeURIComponent(path.url)).pipe(
+							Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook remove failed', error))),
+						)),
+						Effect.tap(() => audit.log('Webhook.remove', { details: { url: path.url } })),
+						Effect.as({ success: true as const }),
+						Telemetry.span('webhooks.remove', { kind: 'server', metrics: false, 'webhook.url': decodeURIComponent(path.url) }),
+					)))
 				.handle('test', ({ payload }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
 					Effect.andThen(Context.Request.currentTenantId),
 					Effect.flatMap((tenantId) => webhooks.test(tenantId, new WebhookService.Endpoint({ secret: payload.secret, timeout: payload.timeout, url: payload.url })).pipe(
@@ -61,11 +65,11 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 					Effect.as({ success: true as const }),
 					Telemetry.span('webhooks.retry', { kind: 'server', metrics: false, 'webhook.delivery_id': path.id }),
 				)))
-				.handle('status', () => CacheService.rateLimit('api', requireAdmin.pipe(
-					Effect.andThen(Context.Request.currentTenantId),
-					Effect.flatMap((tenantId) => webhooks.status(tenantId)),
-					Telemetry.span('webhooks.status', { kind: 'server', metrics: false }),
-				)));
+					.handle('status', ({ urlParams }) => CacheService.rateLimit('api', requireAdmin.pipe(
+						Effect.andThen(Context.Request.currentTenantId),
+						Effect.flatMap((tenantId) => webhooks.status(tenantId, urlParams.url)),
+						Telemetry.span('webhooks.status', { kind: 'server', metrics: false }),
+					)));
 	}),
 );
 

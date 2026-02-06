@@ -1,5 +1,5 @@
 import { DevTools } from '@effect/experimental';
-import { Context, Effect, Layer, List, Logger, Match, MutableRef } from 'effect';
+import { Context, Effect, Layer, List, Logger, MutableRef, PubSub, Ref, Stream } from 'effect';
 import { Domain } from './domain.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -13,18 +13,39 @@ const _SessionConfig =
 class SessionService extends Effect.Service<SessionService>()('devtools/SessionService', {
     effect: Effect.gen(function* () {
         const config = yield* _SessionConfig;
-        const logs: Array<ReturnType<typeof Domain.makeLogEntry>> = [];
+        const { cleanups, entries, logs } = yield* Effect.all({
+            cleanups: Ref.make<ReadonlyArray<() => void>>([]),
+            entries: PubSub.unbounded<typeof Domain.Schema.LogEntry.Type>(),
+            logs: Ref.make<ReadonlyArray<typeof Domain.Schema.LogEntry.Type>>([]),
+        });
         const renderer = MutableRef.make<(error: Error, context?: Readonly<Record<string, unknown>>) => void>(() => {});
-        const append = (entry: ReturnType<typeof Domain.makeLogEntry>) => {
-            logs.push(entry);
-            const overflow = logs.length - config.maxLogs;
-            overflow > 0 ? logs.splice(0, overflow) : undefined;
-        };
+        const append = (logEntry: typeof Domain.Schema.LogEntry.Type) =>
+            Ref.update(logs, (items) => {
+                const next = [...items, logEntry];
+                return next.slice(Math.max(0, next.length - config.maxLogs));
+            }).pipe(Effect.andThen(PubSub.publish(entries, logEntry)), Effect.asVoid);
+        const entry = (
+            level: typeof Domain.Schema.LogLevel.Type,
+            message: string,
+            fiberId: string,
+            annotations?: Readonly<Record<string, unknown>>,
+            spans?: Readonly<Record<string, number>>,
+        ) =>
+            append({
+                annotations: annotations ?? {},
+                context: config.context,
+                fiberId,
+                level,
+                message,
+                spans: spans ?? {},
+                timestamp: new Date(),
+            });
+        const feature = (condition: boolean, setup: () => () => void) =>
+            condition
+                ? Effect.sync(setup).pipe(Effect.tap((cleanup) => Ref.update(cleanups, (items) => [cleanup, ...items])))
+                : Effect.void;
         const layer = Layer.mergeAll(
-            Match.value(config.experimental && _IS_BROWSER).pipe(
-                Match.when(true, () => DevTools.layer(config.wsUrl)),
-                Match.orElse(() => Layer.empty),
-            ),
+            config.experimental && _IS_BROWSER ? DevTools.layer(config.wsUrl) : Layer.empty,
             Logger.replace(
                 Logger.defaultLogger,
                 Logger.map(
@@ -37,9 +58,10 @@ class SessionService extends Effect.Service<SessionService>()('devtools/SessionS
                                     Date.now() - span.startTime,
                                 ]),
                             );
-                            append(
-                                Domain.makeLogEntry({
+                            Effect.runFork(
+                                append({
                                     annotations: Object.fromEntries(annotations),
+                                    context: config.context,
                                     fiberId: String(fiberId),
                                     level: Domain.mapEffectLevel(logLevel.label),
                                     message: Domain.stringifyMessage(message),
@@ -54,16 +76,7 @@ class SessionService extends Effect.Service<SessionService>()('devtools/SessionS
             ),
             Logger.minimumLogLevel(Domain.parseLogLevel(config.logLevel)),
         );
-        const cleanups: Array<() => void> = [];
-        const install = (enabled: boolean, register: () => () => void) =>
-            Match.value(enabled).pipe(
-                Match.when(true, () => {
-                    cleanups.push(register());
-                    return undefined;
-                }),
-                Match.orElse(() => undefined),
-            );
-        install(config.console && _IS_BROWSER, () => {
+        yield* feature(config.console && _IS_BROWSER, () => {
             const methods = Object.keys(Domain._CONFIG.levels.fromConsole) as ReadonlyArray<
                 keyof typeof Domain._CONFIG.levels.fromConsole
             >;
@@ -78,15 +91,13 @@ class SessionService extends Effect.Service<SessionService>()('devtools/SessionS
             methods.forEach((method) => {
                 original[method] = browserConsole[method].bind(browserConsole);
                 browserConsole[method] = (...args: ReadonlyArray<unknown>): void => {
-                    append(
-                        Domain.makeLogEntry({
-                            annotations: { source: 'console' },
-                            fiberId: 'console',
-                            level: Domain.mapConsoleMethod(method),
-                            message: args.map((arg) => Domain.stringifyMessage(arg)).join(' '),
-                            spans: {},
-                            timestamp: new Date(),
-                        }),
+                    Effect.runFork(
+                        entry(
+                            Domain.mapConsoleMethod(method),
+                            args.map((arg) => Domain.stringifyMessage(arg)).join(' '),
+                            'console',
+                            { source: 'console' },
+                        ),
                     );
                     original[method]?.(...args);
                 };
@@ -94,30 +105,32 @@ class SessionService extends Effect.Service<SessionService>()('devtools/SessionS
             return () => {
                 methods.forEach((method) => {
                     const restore = original[method];
-                    restore !== undefined ? Object.assign(browserConsole, { [method]: restore }) : undefined;
+                    restore === undefined ? undefined : Object.assign(browserConsole, { [method]: restore });
                 });
             };
         });
-        install(_IS_BROWSER, () => {
+        yield* feature(_IS_BROWSER, () => {
             const onError = globalThis.onerror;
             const onUnhandled = globalThis.onunhandledrejection;
             globalThis.onerror = (message, source, lineno, colno, error): boolean => {
-                const resolved = Match.value(error).pipe(
-                    Match.when(
-                        (failure): failure is Error => failure instanceof Error,
-                        (failure) => failure,
+                const resolved = error instanceof Error ? error : Domain.toError(message);
+                Effect.runFork(
+                    Effect.logError('Global error', { colno, lineno, source, ...config.context }).pipe(
+                        Effect.provide(layer),
                     ),
-                    Match.orElse(() => Domain.toError(message)),
                 );
-                Effect.runFork(Effect.logError('Global error', { colno, lineno, source }).pipe(Effect.provide(layer)));
+                Effect.runFork(entry('Error', resolved.message, 'browser', { colno, lineno, phase: 'global', source }));
                 MutableRef.get(renderer)(resolved, { colno, lineno, phase: 'global', source });
                 return false;
             };
             globalThis.onunhandledrejection = (event: PromiseRejectionEvent): void => {
                 const resolved = Domain.toError(event.reason);
                 Effect.runFork(
-                    Effect.logError('Unhandled rejection', { reason: resolved }).pipe(Effect.provide(layer)),
+                    Effect.logError('Unhandled rejection', { reason: resolved, ...config.context }).pipe(
+                        Effect.provide(layer),
+                    ),
                 );
+                Effect.runFork(entry('Error', resolved.message, 'browser', { phase: 'unhandled-rejection' }));
                 MutableRef.get(renderer)(resolved, { phase: 'unhandled-rejection' });
             };
             return () => {
@@ -125,40 +138,32 @@ class SessionService extends Effect.Service<SessionService>()('devtools/SessionS
                 globalThis.onunhandledrejection = onUnhandled;
             };
         });
-        install(
+        yield* feature(
             config.perf &&
                 _IS_BROWSER &&
                 typeof PerformanceObserver !== 'undefined' &&
                 PerformanceObserver.supportedEntryTypes !== undefined,
             () => {
                 const callback = (list: PerformanceObserverEntryList): void => {
-                    list.getEntries().forEach((entry) => {
-                        const level = Match.value(entry.entryType).pipe(
-                            Match.when('longtask', () => 'Warning' as const),
-                            Match.orElse(() => 'Debug' as const),
-                        );
-                        const message = Match.value(entry.entryType).pipe(
-                            Match.when(
-                                'longtask',
-                                () =>
-                                    `[PERF] ${entry.entryType}: ${Domain.formatDuration(entry.duration)} (>${Domain._CONFIG.performance.longTaskThresholdMs}ms)`,
-                            ),
-                            Match.orElse(() => `[PERF] ${entry.entryType}: ${Domain.formatDuration(entry.duration)}`),
-                        );
-                        append(
-                            Domain.makeLogEntry({
-                                annotations: { entryType: entry.entryType, name: entry.name },
-                                fiberId: 'performance',
+                    list.getEntries().forEach((perfEntry) => {
+                        const isLongTask = perfEntry.entryType === 'longtask';
+                        const level = isLongTask ? ('Warning' as const) : ('Debug' as const);
+                        const message = `[PERF] ${perfEntry.entryType}: ${Domain.formatDuration(perfEntry.duration)}${isLongTask ? ` (>${Domain._CONFIG.performance.longTaskThresholdMs}ms)` : ''}`;
+                        Effect.runFork(
+                            entry(
                                 level,
                                 message,
-                                spans: { duration: entry.duration },
-                                timestamp: new Date(),
-                            }),
+                                'performance',
+                                { entryType: perfEntry.entryType, name: perfEntry.name },
+                                { duration: perfEntry.duration },
+                            ),
                         );
                         Effect.runFork(
-                            Effect.logDebug(message, { entryType: entry.entryType, name: entry.name }).pipe(
-                                Effect.provide(layer),
-                            ),
+                            Effect.logDebug(message, {
+                                entryType: perfEntry.entryType,
+                                name: perfEntry.name,
+                                ...config.context,
+                            }).pipe(Effect.provide(layer)),
                         );
                     });
                 };
@@ -176,47 +181,53 @@ class SessionService extends Effect.Service<SessionService>()('devtools/SessionS
                 };
             },
         );
-        const log = {
-            logDebug: (message: string) => Effect.logDebug(message),
-            logError: (message: string) => Effect.logError(message),
-            logFatal: (message: string) => Effect.logFatal(message),
-            logInfo: (message: string) => Effect.logInfo(message),
-            logWarning: (message: string) => Effect.logWarning(message),
-        } as const;
         const emit =
-            (method: keyof typeof log) =>
+            (logFn: (message: string) => Effect.Effect<void>) =>
             (message: string, context?: Readonly<Record<string, unknown>>): void => {
-                Effect.runFork(log[method](message).pipe(Effect.annotateLogs(context ?? {}), Effect.provide(layer)));
+                Effect.runFork(
+                    logFn(message).pipe(
+                        Effect.annotateLogs({ ...config.context, ...(context ?? {}) }),
+                        Effect.provide(layer),
+                    ),
+                );
             };
         return {
             app: config.app,
+            context: config.context,
             debug: {
-                error: emit('logError'),
-                info: emit('logInfo'),
-                log: emit('logDebug'),
-                warn: emit('logWarning'),
+                error: emit(Effect.logError),
+                info: emit(Effect.logInfo),
+                log: emit(Effect.logDebug),
+                warn: emit(Effect.logWarning),
             },
             dispose: (): void => {
-                cleanups.forEach((cleanup) => {
-                    cleanup();
-                });
-                logs.splice(0, logs.length);
+                Effect.runFork(
+                    Ref.get(cleanups).pipe(
+                        Effect.flatMap((items) =>
+                            Effect.forEach(items, (cleanup) => Effect.sync(cleanup), { discard: true }),
+                        ),
+                        Effect.andThen(Ref.set(logs, [])),
+                        Effect.andThen(PubSub.shutdown(entries)),
+                    ),
+                );
             },
             fatal: (error: Error, context?: Readonly<Record<string, unknown>>): void => {
-                emit('logFatal')(error.message, { cause: error, ...(context ?? {}) });
+                emit(Effect.logFatal)(error.message, { cause: error, ...(context ?? {}) });
                 MutableRef.get(renderer)(error, context);
             },
             layer,
             logs,
-            setRenderer: (next: (error: Error, context?: Readonly<Record<string, unknown>>) => void) => {
+            setRenderer: (next: (error: Error, context?: Readonly<Record<string, unknown>>) => void): void => {
                 MutableRef.set(renderer, next);
             },
+            snapshotLogs: (): ReadonlyArray<typeof Domain.Schema.LogEntry.Type> => Effect.runSync(Ref.get(logs)),
             startTime: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+            stream: Stream.fromPubSub(entries),
         };
     }),
 }) {}
 
-// --- [FUNCTIONS] -------------------------------------------------------------
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
 
 const _make = (config: unknown) =>
     Domain.normalizeSession(config).pipe(
@@ -231,13 +242,19 @@ const _make = (config: unknown) =>
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
+// biome-ignore lint/correctness/noUnusedVariables: <Needed>
 const Client = {
     make: _make,
     Service: SessionService,
     session: (config: unknown) => Effect.runSync(_make(config)),
 } as const;
 
+// --- [NAMESPACE] -------------------------------------------------------------
+
+namespace Client {
+    export type Session = Effect.Effect.Success<ReturnType<typeof _make>>;
+}
+
 // --- [EXPORT] ----------------------------------------------------------------
 
 export { Client };
-export type ClientSession = Effect.Effect.Success<ReturnType<typeof _make>>;

@@ -15,6 +15,7 @@ import { HttpError } from '../errors.ts';
 import { AuditService } from '../observe/audit.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
+import { Resilience } from '../utils/resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -78,7 +79,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 		const reactivity = yield* Reactivity.make;
 		const invalidationChannel = `${redisOpts.keyPrefix}${_INVALIDATION_CHANNEL}`;
 		yield* Effect.tryPromise(() => subscriber.subscribe(invalidationChannel)).pipe(
-			Effect.retry(Schedule.exponential(Duration.millis(100)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3)))),
+			Effect.retry(Resilience.schedule('default')),
 			Effect.catchAll((error) => Effect.logWarning('Redis pub/sub unavailable', { error: String(error) })),
 		);
 		const decodeInvalidation = S.decode(S.parseJson(S.Struct({ key: S.String, storeId: S.String })));
@@ -109,12 +110,13 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 	}),
 }) {
 	// --- [PRIVATE] - Internal helpers and presets -----------------------------
-	static readonly _rateLimits = {
-		api:      { algorithm: 'token-bucket', failMode: 'open',   limit: 100, onExceeded: 'fail',  recovery: undefined,      tokens: 1, window: Duration.minutes(1)  },
-		auth:     { algorithm: 'fixed-window', failMode: 'closed', limit: 5,   onExceeded: 'fail',  recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
-		mfa:      { algorithm: 'fixed-window', failMode: 'closed', limit: 5,   onExceeded: 'fail',  recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
-		mutation: { algorithm: 'token-bucket', failMode: 'open',   limit: 100, onExceeded: 'delay', recovery: undefined,      tokens: 5, window: Duration.minutes(1)  },
-	} as const;
+		static readonly _rateLimits = {
+			api:      { algorithm: 'token-bucket', failMode: 'open',   limit: 100, onExceeded: 'fail',  recovery: undefined,      tokens: 1, window: Duration.minutes(1)  },
+			auth:     { algorithm: 'fixed-window', failMode: 'closed', limit: 5,   onExceeded: 'fail',  recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
+			mfa:      { algorithm: 'fixed-window', failMode: 'closed', limit: 5,   onExceeded: 'fail',  recovery: 'email-verify', tokens: 1, window: Duration.minutes(15) },
+			mutation: { algorithm: 'token-bucket', failMode: 'open',   limit: 100, onExceeded: 'delay', recovery: undefined,      tokens: 5, window: Duration.minutes(1)  },
+			realtime: { algorithm: 'token-bucket', failMode: 'open',   limit: 300, onExceeded: 'fail',  recovery: undefined,      tokens: 1, window: Duration.minutes(1)  },
+		} as const;
 	// --- [PERSISTENCE_LAYER] - ResultPersistence backed by Redis -------------
 	static readonly Persistence: Layer.Layer<Persistence.ResultPersistence, never, CacheService> = Layer.unwrapScoped(
 		CacheService.pipe(Effect.map((service) => PersistenceRedis.layerResult(service._redisOpts))),
@@ -183,11 +185,18 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			});
 			const registered = new Map<string, { cleanup: () => void; expiresAt: number }>();
 			const ttlMs = Duration.toMillis(inMemoryTTL);
-			const pruneOnce = Clock.currentTimeMillis.pipe(Effect.tap((now) => Effect.sync(() => {
-				[...registered.entries()]
-					.filter(([, entry]) => entry.expiresAt <= now)
-					.forEach(([id, entry]) => { entry.cleanup(); registered.delete(id); });
-			})));
+			const pruneSingleEntry = ([id, entry]: [string, { cleanup: () => void; expiresAt: number }], now: number) =>
+				Effect.when(
+					Effect.sync(() => { entry.cleanup(); registered.delete(id); }),
+					() => entry.expiresAt <= now
+				);
+			const pruneOnce = Clock.currentTimeMillis.pipe(Effect.tap((now) =>
+				Effect.forEach(
+					[...registered.entries()],
+					(entry) => pruneSingleEntry(entry, now),
+					{ discard: true }
+				)
+			));
 			yield* Effect.forkScoped(pruneOnce.pipe(Effect.repeat(Schedule.spaced(inMemoryTTL))));
 			const ensureRegistered = (key: K, primary: string) => {
 				const id = `${options.storeId}:${primary}`;
@@ -198,10 +207,13 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 					registered.set(id, { cleanup: existing?.cleanup ?? _reactivity.unsafeRegister([id], newCleanup), expiresAt: now + ttlMs });
 				});
 			};
-			yield* Effect.addFinalizer(() => Effect.sync(() => {
-				[...registered.values()].forEach((entry) => { entry.cleanup(); });
-				registered.clear();
-			}));
+			yield* Effect.addFinalizer(() =>
+				Effect.forEach(
+					[...registered.values()],
+					(entry) => Effect.sync(entry.cleanup),
+					{ discard: true }
+				).pipe(Effect.andThen(Effect.sync(() => { registered.clear(); })))
+			);
 			return {
 				get: (key) => {
 					const primary = PrimaryKey.value(key);
