@@ -1,4 +1,4 @@
-import { McpServer } from '@effect/ai';
+import { McpServer, Toolkit } from '@effect/ai';
 import { Array as A, Layer, Match, Option } from 'effect';
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
@@ -11,28 +11,37 @@ const Mcp = (() => {
             Match.tag('http-router', ({ options }) => McpServer.layerHttpRouter(options)),
             Match.exhaustive,
         )(input);
-
     const layer = (input: {
         readonly transport: Mcp.Transport;
-        readonly toolkits?: ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]> | undefined;
-        readonly layers?: ReadonlyArray<Layer.Layer<never, never, unknown>> | undefined;
+        readonly toolkits?:
+            | Parameters<typeof McpServer.toolkit>[0]
+            | ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]>
+            | undefined;
+        readonly layers?:
+            | Layer.Layer<never, never, unknown>
+            | ReadonlyArray<Layer.Layer<never, never, unknown>>
+            | undefined;
     }) => {
         const base = transportLayer(input.transport);
-        const toolkitLayers = Option.fromNullable(input.toolkits).pipe(
-            Option.map((toolkits) => toolkits.map((tk) => McpServer.toolkit(tk))),
-            Option.getOrElse(() => []),
+        const toolkitLayers: ReadonlyArray<Layer.Layer<never, never, unknown>> = Option.fromNullable(
+            input.toolkits,
+        ).pipe(
+            Option.map((toolkits) => (Array.isArray(toolkits) ? toolkits : [toolkits])),
+            Option.filter(A.isNonEmptyReadonlyArray),
+            Option.map((toolkits) => [McpServer.toolkit(Toolkit.merge(...toolkits))]),
+            Option.getOrElse((): ReadonlyArray<Layer.Layer<never, never, unknown>> => []),
         );
-        const extraLayers = Option.fromNullable(input.layers).pipe(Option.getOrElse(() => []));
-        const layers = A.appendAll(toolkitLayers, extraLayers);
-        return Match.value(layers).pipe(
-            Match.when(A.isNonEmptyReadonlyArray, (rest) =>
-                Layer.mergeAll(
-                    base,
-                    ...(rest as [Layer.Layer<never, never, unknown>, ...Layer.Layer<never, never, unknown>[]]),
-                ),
-            ),
-            Match.orElse(() => base),
+        const extraLayers: ReadonlyArray<Layer.Layer<never, never, unknown>> = Option.fromNullable(
+            input.layers,
+        ).pipe(
+            Option.map((layers) => (Array.isArray(layers) ? layers : [layers])),
+            Option.getOrElse((): ReadonlyArray<Layer.Layer<never, never, unknown>> => []),
         );
+        const layers: ReadonlyArray<Layer.Layer<never, never, unknown>> = A.appendAll(
+            toolkitLayers,
+            extraLayers,
+        );
+        return A.reduce(layers, base, (acc, layer) => Layer.merge(acc, layer));
     };
     return { layer } as const;
 })();

@@ -22,7 +22,7 @@ import { Array as A, Chunk, DateTime, Effect, Function as F, Metric, Option, pip
 
 // --- [EFFECT_PIPELINE] -------------------------------------------------------
 
-const handleExport = Effect.fn('transfer.export')((repositories: DatabaseService.Type, audit: typeof AuditService.Service, storage: typeof StorageService.Service, parameters: typeof TransferQuery.Type) =>
+const handleExport = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, storage: typeof StorageService.Service, parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const [metrics, context] = yield* Effect.all([MetricsService, Context.Request.current]);
@@ -105,9 +105,8 @@ const handleExport = Effect.fn('transfer.export')((repositories: DatabaseService
 					Effect.tap(() => auditExport(filename)),
 				);
 			})();
-	}),
-);
-const handleImport = Effect.fn('transfer.import')((repositories: DatabaseService.Type, search: typeof SearchRepo.Service, audit: typeof AuditService.Service, storage: typeof StorageService.Service, parameters: typeof TransferQuery.Type) =>
+	}).pipe(Telemetry.span('transfer.export', { kind: 'server', metrics: false }));
+const handleImport = (repositories: DatabaseService.Type, search: typeof SearchRepo.Service, audit: typeof AuditService.Service, storage: typeof StorageService.Service, parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.requireMfaVerified;
 		const [metrics, context] = yield* Effect.all([MetricsService, Context.Request.current]);
@@ -210,7 +209,7 @@ const handleImport = Effect.fn('transfer.import')((repositories: DatabaseService
 		const initial: BatchResult = { assets: [], dbFailures: [] };
 		const { assets, dbFailures } = dryRun
 			? initial
-			: yield* Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), initial, (accumulator, chunk) => processBatch(accumulator, Chunk.toArray(chunk))).pipe(
+			: yield* repositories.withTransaction(Stream.runFoldEffect(Stream.grouped(Stream.fromIterable(items), Transfer.limits.batchSize), initial, (accumulator, chunk) => processBatch(accumulator, Chunk.toArray(chunk)))).pipe(
 					Effect.tap(({ assets: inserted, dbFailures: failed }) => Effect.all([
 						Effect.annotateCurrentSpan('transfer.inserted', inserted.length),
 						Effect.annotateCurrentSpan('transfer.db_failures', failed.length),
@@ -234,8 +233,7 @@ const handleImport = Effect.fn('transfer.import')((repositories: DatabaseService
 			failed: A.appendAll(failures.map((err) => ({ error: err.detail ?? err.code, ordinal: err.ordinal ?? null })), dbFailures.flatMap((err) => err.rows.map((ordinal) => ({ error: 'Database insert failed' as const, ordinal })))),
 			imported: dryRun ? items.length : assets.length,
 		};
-	}),
-);
+	}).pipe(Telemetry.span('transfer.import', { kind: 'server', metrics: false }));
 
 // --- [LAYERS] ----------------------------------------------------------------
 

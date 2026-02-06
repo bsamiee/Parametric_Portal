@@ -70,9 +70,9 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				Effect.map((response) => ({ etag: response.ETag ?? '', key: input.key, size: body.length })),
 			);
 		}));
-		const put: StorageAdapter.Put = ((input: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]) =>
-			_batchOp(input, { batch: 'put.batch', single: 'put' }, _put, (items) =>
-				Effect.forEach(items, _put, { concurrency: _CONFIG.batch.concurrency })).pipe(Telemetry.span('storage.put'))) as StorageAdapter.Put;
+			const put: StorageAdapter.Put = ((input: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]) =>
+				_batchOp(input, { batch: 'put.batch', single: 'put' }, _put, (items) =>
+					Effect.forEach(items, _put, { concurrency: _CONFIG.batch.concurrency })).pipe(Telemetry.span('storage.put', { metrics: false }))) as StorageAdapter.Put;
 		// --- [GET] ---------------------------------------------------------------
 		const _get = (key: string) => Effect.gen(function* () {
 			const fk = yield* _path(key);
@@ -84,9 +84,9 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 			const body = _concatBytes(Chunk.toReadonlyArray(chunks));
 			return { body, contentType: response.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(response.ETag), key, metadata: response.Metadata ?? {}, size: body.length };
 		});
-		const get: StorageAdapter.Get = ((input: string | readonly string[]) =>
-			_batchOp(input, { batch: 'get.batch', single: 'get' }, _get, (items) =>
-				Effect.forEach(items, (key) => _get(key).pipe(Effect.either, Effect.map((either) => [key, either] as const)), { concurrency: _CONFIG.batch.concurrency }).pipe(Effect.map((entries) => new Map(entries)))).pipe(Telemetry.span('storage.get'))) as StorageAdapter.Get;
+			const get: StorageAdapter.Get = ((input: string | readonly string[]) =>
+				_batchOp(input, { batch: 'get.batch', single: 'get' }, _get, (items) =>
+					Effect.forEach(items, (key) => _get(key).pipe(Effect.either, Effect.map((either) => [key, either] as const)), { concurrency: _CONFIG.batch.concurrency }).pipe(Effect.map((entries) => new Map(entries)))).pipe(Telemetry.span('storage.get', { metrics: false }))) as StorageAdapter.Get;
 		// --- [COPY] --------------------------------------------------------------
 		const _copy = (input: StorageAdapter.CopyInput) => Effect.all([_path(input.sourceKey), _path(input.destKey)]).pipe(
 			Effect.flatMap(([s, d]) => s3.copyObject({
@@ -97,9 +97,9 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				MetadataDirective: Option.fromNullable(input.metadata).pipe(Option.match({ onNone: () => 'COPY' as const, onSome: () => 'REPLACE' as const })),
 			}).pipe(Effect.map((response) => ({ destKey: input.destKey, etag: response.CopyObjectResult?.ETag ?? '', sourceKey: input.sourceKey })))),
 		);
-		const copy: StorageAdapter.Copy = ((input: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]) =>
-			_batchOp(input, { batch: 'copy.batch', single: 'copy' }, _copy, (items) =>
-				Effect.forEach(items, _copy, { concurrency: _CONFIG.batch.concurrency })).pipe(Telemetry.span('storage.copy'))) as StorageAdapter.Copy;
+			const copy: StorageAdapter.Copy = ((input: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]) =>
+				_batchOp(input, { batch: 'copy.batch', single: 'copy' }, _copy, (items) =>
+					Effect.forEach(items, _copy, { concurrency: _CONFIG.batch.concurrency })).pipe(Telemetry.span('storage.copy', { metrics: false }))) as StorageAdapter.Copy;
 		// --- [EXISTS] ------------------------------------------------------------
 		const _exists = (key: string) => _path(key).pipe(
 			Effect.flatMap((fk) => s3.headObject({ Bucket: bucket, Key: fk })),
@@ -109,9 +109,9 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				SdkError: () => Effect.succeed(false),
 			}),
 		);
-		const exists: StorageAdapter.Exists = ((input: string | readonly string[]) =>
-			_batchOp(input, { batch: 'head.batch', single: 'head' }, _exists, (items) =>
-				Effect.forEach(items, (key) => _exists(key).pipe(Effect.map((v) => [key, v] as const)), { concurrency: _CONFIG.batch.concurrency }).pipe(Effect.map((entries) => new Map(entries)))).pipe(Telemetry.span('storage.exists'))) as StorageAdapter.Exists;
+			const exists: StorageAdapter.Exists = ((input: string | readonly string[]) =>
+				_batchOp(input, { batch: 'head.batch', single: 'head' }, _exists, (items) =>
+					Effect.forEach(items, (key) => _exists(key).pipe(Effect.map((v) => [key, v] as const)), { concurrency: _CONFIG.batch.concurrency }).pipe(Effect.map((entries) => new Map(entries)))).pipe(Telemetry.span('storage.exists', { metrics: false }))) as StorageAdapter.Exists;
 		// --- [REMOVE] ------------------------------------------------------------
 		const remove: StorageAdapter.Remove = ((input: string | readonly string[]) => track('delete', Effect.gen(function* () {
 			const keys = A.ensure(input);
@@ -119,7 +119,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 			const objects = fullPaths.map((f) => ({ Key: f }));
 			const batches = A.chunksOf(objects, _CONFIG.batch.deleteLimit);
 			yield* Effect.forEach(batches, (b) => s3.deleteObjects({ Bucket: bucket, Delete: { Objects: b } }), { concurrency: _CONFIG.batch.concurrency });
-		})).pipe(Telemetry.span('storage.remove'))) as StorageAdapter.Remove;
+			})).pipe(Telemetry.span('storage.remove', { metrics: false }))) as StorageAdapter.Remove;
 		// --- [LIST] --------------------------------------------------------------
 		const list = (o?: { prefix?: string; maxKeys?: number; continuationToken?: string }) =>
 			track('list', Effect.gen(function* () {
@@ -133,7 +133,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 					size: x.Size ?? 0,
 				}));
 				return { continuationToken: response.NextContinuationToken, isTruncated: response.IsTruncated ?? false, items };
-			})).pipe(Telemetry.span('storage.list'));
+				})).pipe(Telemetry.span('storage.list', { metrics: false }));
 		const listStream = (o?: { prefix?: string }) =>
 			Stream.paginateEffect(undefined as string | undefined, (token) =>
 				list({ continuationToken: token, prefix: o?.prefix }).pipe(
@@ -157,7 +157,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				Match.when({ op: 'get' }, (v) => _path(v.key).pipe(Effect.flatMap((key) => s3.getObject({ Bucket: bucket, Key: key }, { expiresIn, presigned: true })))),
 				Match.when({ op: 'put' }, (v) => _path(v.key).pipe(Effect.flatMap((key) => s3.putObject({ Bucket: bucket, Key: key }, { expiresIn, presigned: true })))),
 				Match.exhaustive,
-			)).pipe(Telemetry.span('storage.sign'));
+				)).pipe(Telemetry.span('storage.sign', { metrics: false }));
 		}
 		// --- [STREAM] ------------------------------------------------------------
 		const getStream = (key: string) =>
@@ -169,7 +169,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 					onSome: (iterable) => Stream.fromAsyncIterable(iterable, (error) => error as Error),
 				});
 				return { contentType: response.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(response.ETag), size: response.ContentLength ?? 0, stream };
-			})).pipe(Telemetry.span('storage.getStream'));
+				})).pipe(Telemetry.span('storage.getStream', { metrics: false }));
 		const putStream = (input: { key: string; stream: Stream.Stream<Uint8Array, unknown>; contentType?: string; metadata?: Record<string, string>; partSizeBytes?: number }) =>
 			track('put-stream', Effect.scoped(Effect.gen(function* () {
 				const fk = yield* _path(input.key);
@@ -271,9 +271,9 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 						return { etag, key: input.key, totalSize: finalState.totalSize };
 					})),
 				);
-			}))).pipe(Telemetry.span('storage.putStream'));
-		const abortUpload = (key: string, uploadId: string) =>
-			track('abort-multipart', _path(key).pipe(Effect.flatMap((fk) => s3.abortMultipartUpload({ Bucket: bucket, Key: fk, UploadId: uploadId })))).pipe(Telemetry.span('storage.abortUpload'));
+				}))).pipe(Telemetry.span('storage.putStream', { metrics: false }));
+			const abortUpload = (key: string, uploadId: string) =>
+				track('abort-multipart', _path(key).pipe(Effect.flatMap((fk) => s3.abortMultipartUpload({ Bucket: bucket, Key: fk, UploadId: uploadId })))).pipe(Telemetry.span('storage.abortUpload', { metrics: false }));
 		const listUploads = (o?: { prefix?: string }) =>
 			track('list-multipart', Effect.gen(function* () {
 				const p = yield* _path(o?.prefix ?? '');
@@ -285,7 +285,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 					uploadId: u.UploadId ?? '',
 				}));
 				return { uploads };
-			})).pipe(Telemetry.span('storage.listUploads'));
+				})).pipe(Telemetry.span('storage.listUploads', { metrics: false }));
 		yield* Effect.logInfo('StorageAdapter initialized', { bucket });
 		return { abortUpload, copy, exists, get, getStream, list, listStream, listUploads, put, putStream, remove, sign };
 	}),

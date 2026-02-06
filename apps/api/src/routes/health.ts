@@ -17,11 +17,11 @@ import { Boolean as B, Effect, Match, pipe } from 'effect';
 
 const _liveness = pipe(
 	Effect.succeed({ status: 'ok' as const }),
-	Telemetry.span('health.liveness'),
+	Telemetry.span('health.liveness', { kind: 'server', metrics: false }),
 );
 const _readiness = (polling: PollingService) => pipe(
 	Effect.all({
-		alerts: polling.getHealth(),
+		alerts: polling.refresh().pipe(Effect.andThen(polling.getHealth())),
 		cache: CacheService.health(),
 		db: Client.healthDeep(),
 		vectorConfig: Client.vector.getConfig().pipe(Effect.map((cfg) => cfg.length > 0), Effect.orElseSucceed(() => false)),
@@ -55,11 +55,12 @@ const _readiness = (polling: PollingService) => pipe(
 				onFalse: () => B.match(alerts.length > 0, { onFalse: () => 'healthy' as const, onTrue: () => 'degraded' as const }),
 				onTrue: () => 'alerted' as const,
 			}),
+			polling: { criticalAlerts: critical.length, totalAlerts: alerts.length },
 			vector: { configured: vectorConfig },
 		},
 		status: 'ok' as const,
 	})),
-	Telemetry.span('health.readiness'),
+	Telemetry.span('health.readiness', { kind: 'server', metrics: false }),
 );
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -68,7 +69,18 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 	Effect.andThen(PollingService, (polling) => handlers
 		.handle('liveness', () => _liveness)
 		.handle('readiness', () => _readiness(polling))
-		.handle('clusterHealth', () => ClusterService.checkHealth.cluster().pipe(Effect.map((cluster) => ({ cluster })))),
+		.handle('clusterHealth', () => ClusterService.checkHealth.cluster().pipe(
+			Effect.map((cluster) => ({ cluster })),
+			Telemetry.span('health.clusterHealth', { kind: 'server', metrics: false }),
+		))
+		.handle('metrics', () => polling.refresh().pipe(
+			Effect.andThen(polling.snapshot),
+			Effect.map((entries) => entries.map((entry) => {
+				const labels = Object.entries(entry.labels).map(([key, value]) => `${key}="${value}"`).join(',');
+				return labels ? `${entry.name}{${labels}} ${entry.value}` : `${entry.name} ${entry.value}`;
+			}).join('\n')),
+			Telemetry.span('health.metrics', { kind: 'server', metrics: false }),
+		)),
 	),
 );
 

@@ -14,19 +14,8 @@ import { AiRegistry } from './registry.ts';
 const _CONFIG = {
     cache: { settings: { capacity: 256, storeId: 'ai:settings', ttlMinutes: 5 } },
     labels: {
-        operations: {
-            embed: 'ai.embed',
-            generateObject: 'ai.generateObject',
-            generateText: 'ai.generateText',
-            settings: 'ai.settings',
-        },
-        tokenKinds: {
-            cached: 'cached',
-            input: 'input',
-            output: 'output',
-            reasoning: 'reasoning',
-            total: 'total',
-        },
+        operations: {embed: 'ai.embed', generateObject: 'ai.generateObject', generateText: 'ai.generateText', settings: 'ai.settings',},
+        tokenKinds: {cached: 'cached', input: 'input',output: 'output', reasoning: 'reasoning', total: 'total',},
     },
     metrics: { unit: 1 },
     telemetry: { operations: { chat: 'chat', embeddings: 'embeddings' } },
@@ -38,11 +27,7 @@ class AiSettingsKey extends S.TaggedRequest<AiSettingsKey>()('AiSettingsKey', {
     failure: S.Unknown,
     payload: { tenantId: S.String },
     success: AiRegistry.schema,
-}) {
-    [PrimaryKey.symbol]() {
-        return `ai:settings:${this.tenantId}`;
-    }
-}
+}) {[PrimaryKey.symbol]() {return `ai:settings:${this.tenantId}`;}}
 
 // --- [CLASSES] ---------------------------------------------------------------
 
@@ -59,8 +44,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         const wrapError = (operation: string) => (cause: unknown) =>
             Match.value(cause).pipe(
                 Match.when(AiError.isAiError, (error: AiError.AiError) => error),
-                Match.orElse((error) =>
-                    error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation }),
+                Match.orElse((error) => error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation }),
                 ),
             );
         const annotate = (attributes: AiTelemetry.GenAITelemetryAttributeOptions) =>
@@ -72,11 +56,12 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     }),
                 ),
             );
+        const _settingsError = wrapError(_CONFIG.labels.operations.settings);
         const settingsCache = yield* CacheService.cache<AiSettingsKey, never>({
             inMemoryCapacity: _CONFIG.cache.settings.capacity,
             lookup: (key) =>
                 db.apps.one([{ field: 'id', value: key.tenantId }]).pipe(
-                    Effect.mapError(wrapError(_CONFIG.labels.operations.settings)),
+                    Effect.mapError(_settingsError),
                     Effect.flatMap(
                         Option.match({
                             onNone: () =>
@@ -87,9 +72,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                                     }),
                                 ),
                             onSome: (app) =>
-                                AiRegistry.decodeAppSettings(app.settings ?? {}).pipe(
-                                    Effect.mapError(wrapError(_CONFIG.labels.operations.settings)),
-                                ),
+                                AiRegistry.decodeAppSettings(app.settings ?? {}).pipe(Effect.mapError(_settingsError),),
                         }),
                     ),
                 ),
@@ -99,33 +82,31 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         const settingsFor = (tenantId: string) =>
             settingsCache
                 .get(new AiSettingsKey({ tenantId }))
-                .pipe(Effect.mapError(wrapError(_CONFIG.labels.operations.settings)));
-        const settings = () => Context.Request.current.pipe(Effect.flatMap((ctx) => settingsFor(ctx.tenantId)));
-        const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) => {
-            const tokenLabels = (kind: string) => MetricsService.label({ ...labels, kind });
-            const inc = (kind: string, value: number | undefined) =>
-                Option.fromNullable(value).pipe(
-                    Option.match({
-                        onNone: () => Effect.void,
-                        onSome: (tokens) => MetricsService.inc(metrics.ai.tokens, tokenLabels(kind), tokens),
-                    }),
-                );
-            return Effect.all(
+                .pipe(Effect.mapError(_settingsError));
+        const settings = () => Effect.flatMap(Context.Request.current, (ctx) => settingsFor(ctx.tenantId));
+        const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) =>
+            Effect.forEach(
                 [
-                    inc(_CONFIG.labels.tokenKinds.input, usage.inputTokens),
-                    inc(_CONFIG.labels.tokenKinds.output, usage.outputTokens),
-                    inc(_CONFIG.labels.tokenKinds.total, usage.totalTokens),
-                    inc(_CONFIG.labels.tokenKinds.reasoning, usage.reasoningTokens),
-                    inc(_CONFIG.labels.tokenKinds.cached, usage.cachedInputTokens),
+                    [_CONFIG.labels.tokenKinds.input, usage.inputTokens] as const,
+                    [_CONFIG.labels.tokenKinds.output, usage.outputTokens] as const,
+                    [_CONFIG.labels.tokenKinds.total, usage.totalTokens] as const,
+                    [_CONFIG.labels.tokenKinds.reasoning, usage.reasoningTokens] as const,
+                    [_CONFIG.labels.tokenKinds.cached, usage.cachedInputTokens] as const,
                 ],
+                ([kind, value]) =>
+                    Option.fromNullable(value).pipe(
+                        Option.match({
+                            onNone: () => Effect.void,
+                            onSome: (tokens) =>
+                                MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens),
+                        }),
+                    ),
                 { discard: true },
             );
-        };
         const track = <A, E, R>(
             operation: string,
             labels: ReturnType<typeof MetricsService.label>,
-            effect: Effect.Effect<A, E, R>,
-        ) =>
+            effect: Effect.Effect<A, E, R>,) =>
             effect.pipe(
                 (eff) => Resilience.run(operation, eff),
                 (eff) =>
@@ -161,11 +142,13 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 });
                 const run = <A>(
                     effect: Effect.Effect<A, unknown, EmbeddingModel.EmbeddingModel>,
-                    count: (value: A) => number,
-                ) =>
+                    count: (value: A) => number,) =>
                     track(_CONFIG.labels.operations.embed, labels, effect.pipe(Effect.provide(layers.embedding))).pipe(
                         Effect.tap((value: A) => MetricsService.inc(metrics.ai.embeddings, labels, count(value))),
-                        Effect.tap(() => requestAnnotations),
+                        Effect.tapBoth({
+                            onFailure: () => requestAnnotations,
+                            onSuccess: () => requestAnnotations,
+                        }),
                         Telemetry.span(_CONFIG.labels.operations.embed, { kind: 'client', metrics: false }),
                     );
                 return yield* Match.value(input).pipe(
@@ -173,9 +156,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                         (value: string | readonly string[]): value is readonly string[] => Array.isArray(value),
                         (items) =>
                             run(
-                                Effect.flatMap(EmbeddingModel.EmbeddingModel, (embedding) =>
-                                    embedding.embedMany(items),
-                                ),
+                                Effect.flatMap(EmbeddingModel.EmbeddingModel, (embedding) => embedding.embedMany(items),),
                                 (values) => values.length,
                             ),
                     ),
@@ -191,8 +172,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         const runLanguage = <A extends { readonly usage: Response.Usage }, Options, R>(
             operation: string,
             options: Options,
-            run: (opts: Options) => Effect.Effect<A, AiError.AiError, R>,
-        ) =>
+            run: (opts: Options) => Effect.Effect<A, AiError.AiError, R>,) =>
             Effect.gen(function* () {
                 const ctx = yield* Context.Request.current;
                 const appSettings = yield* settingsFor(ctx.tenantId);

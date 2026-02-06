@@ -46,23 +46,23 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 		);
 		return handlers
 			.handle('getByEntity', ({ path: { subject, subjectId }, urlParams: parameters }) =>
-				CacheService.rateLimit('api', adminLookup(Context.Request.currentTenantId.pipe(
-					Effect.flatMap((tenantId) => repositories.audit.bySubject(tenantId, subject, subjectId, parameters.limit, parameters.cursor, parameters)),
-					Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-				)).pipe(Telemetry.span('audit.getByEntity', { kind: 'server' }))))
-			.handle('getByUser', ({ path: { userId }, urlParams: parameters }) =>
-				CacheService.rateLimit('api', adminLookup(Context.Request.currentTenantId.pipe(
-					Effect.flatMap((tenantId) => repositories.audit.byUser(tenantId, userId, parameters.limit, parameters.cursor, parameters)),
-					Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-				)).pipe(Telemetry.span('audit.getByUser', { kind: 'server' }))))
-			.handle('getMine', ({ urlParams: parameters }) =>
-				CacheService.rateLimit('api', Middleware.requireMfaVerified.pipe(
-					Effect.andThen(Effect.all([Context.Request.current, Context.Request.sessionOrFail])),
-					Effect.flatMap(([context, session]) => repositories.audit.byUser(context.tenantId, session.userId, parameters.limit, parameters.cursor, parameters)),
-					Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
-					Effect.mapError((error) => error instanceof HttpError.Auth ? error : HttpError.Internal.of('Audit lookup failed', error) as HttpError.Auth | HttpError.Internal),
-					Telemetry.span('audit.getMine', { kind: 'server' }),
-				)));
+					CacheService.rateLimit('api', adminLookup(Context.Request.currentTenantId.pipe(
+						Effect.flatMap((tenantId) => repositories.audit.bySubject(tenantId, subject, subjectId, parameters.limit, parameters.cursor, parameters)),
+						Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
+					)).pipe(Telemetry.span('audit.getByEntity', { kind: 'server', metrics: false }))))
+				.handle('getByUser', ({ path: { userId }, urlParams: parameters }) =>
+					CacheService.rateLimit('api', adminLookup(Context.Request.currentTenantId.pipe(
+						Effect.flatMap((tenantId) => repositories.audit.byUser(tenantId, userId, parameters.limit, parameters.cursor, parameters)),
+						Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
+					)).pipe(Telemetry.span('audit.getByUser', { kind: 'server', metrics: false }))))
+				.handle('getMine', ({ urlParams: parameters }) =>
+					CacheService.rateLimit('api', Middleware.requireMfaVerified.pipe(
+						Effect.andThen(Effect.all([Context.Request.current, Context.Request.sessionOrFail])),
+						Effect.flatMap(([context, session]) => repositories.audit.byUser(context.tenantId, session.userId, parameters.limit, parameters.cursor, parameters)),
+						Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
+						Effect.mapError((error) => error instanceof HttpError.Auth ? error : HttpError.Internal.of('Audit lookup failed', error) as HttpError.Auth | HttpError.Internal),
+						Telemetry.span('audit.getMine', { kind: 'server', metrics: false }),
+					)));
 	}),
 );
 

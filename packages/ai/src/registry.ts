@@ -36,51 +36,37 @@ const AiRegistry = (() => {
     const SettingsSchema = S.Struct({
         embedding: S.optionalWith(
             S.Struct({
-                cacheCapacity: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.cacheCapacity }),
+                cacheCapacity:   S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.cacheCapacity }),
                 cacheTtlMinutes: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.cacheTtlMinutes }),
-                dimensions: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.dimensions }),
-                maxBatchSize: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.maxBatchSize }),
-                mode: S.optionalWith(S.Literal('batched', 'data-loader'), {
-                    default: () => _CONFIG.defaults.embedding.mode,
-                }),
-                model: S.optionalWith(S.String, { default: () => _CONFIG.defaults.embedding.model }),
-                provider: S.optionalWith(S.Literal('openai'), { default: () => _CONFIG.defaults.embedding.provider }),
-                windowMs: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.windowMs }),
+                dimensions:      S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.dimensions }),
+                maxBatchSize:    S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.maxBatchSize }),
+                mode:            S.optionalWith(S.Literal('batched', 'data-loader'), {default: () => _CONFIG.defaults.embedding.mode,}),
+                model:           S.optionalWith(S.String, { default: () => _CONFIG.defaults.embedding.model }),
+                provider:        S.optionalWith(S.Literal('openai'), { default: () => _CONFIG.defaults.embedding.provider }),
+                windowMs:        S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.windowMs }),
             }),
             { default: () => _CONFIG.defaults.embedding },
         ),
         language: S.optionalWith(
             S.Struct({
-                maxTokens: S.optionalWith(S.Int, { default: () => _CONFIG.defaults.language.maxTokens }),
-                model: S.optionalWith(S.String, { default: () => _CONFIG.defaults.language.model }),
-                provider: S.optionalWith(S.Literal('anthropic', 'gemini', 'openai'), {
-                    default: () => _CONFIG.defaults.language.provider,
-                }),
-                temperature: S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.temperature }),
-                topK: S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topK }),
-                topP: S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topP }),
+                maxTokens:       S.optionalWith(S.Int, { default: () => _CONFIG.defaults.language.maxTokens }),
+                model:           S.optionalWith(S.String, { default: () => _CONFIG.defaults.language.model }),
+                provider:        S.optionalWith(S.Literal('anthropic', 'gemini', 'openai'), {default: () => _CONFIG.defaults.language.provider,}),
+                temperature:     S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.temperature }),
+                topK:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topK }),
+                topP:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topP }),
             }),
             { default: () => _CONFIG.defaults.language },
         ),
     });
-    const AppSettingsSchema = S.Struct({ ai: S.optional(SettingsSchema) });
+    const AppSettingsSchema =    S.Struct({ ai: S.optional(SettingsSchema) });
     // --- [DISPATCH_TABLES] ---------------------------------------------------
     const httpLayer = FetchHttpClient.layer;
-    const apiKeyConfig = (envKey: string, apiKey?: string) =>
-        apiKey === undefined ? Config.redacted(envKey) : Config.succeed(Redacted.make(apiKey));
+    const apiKeyConfig = (envKey: string, apiKey?: string) => apiKey === undefined ? Config.redacted(envKey) : Config.succeed(Redacted.make(apiKey));
     const clientLayers = {
-        anthropic: (apiKey?: string) =>
-            AnthropicClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.anthropic, apiKey) }).pipe(
-                Layer.provide(httpLayer),
-            ),
-        gemini: (apiKey?: string) =>
-            GoogleClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.gemini, apiKey) }).pipe(
-                Layer.provide(httpLayer),
-            ),
-        openai: (apiKey?: string) =>
-            OpenAiClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.openai, apiKey) }).pipe(
-                Layer.provide(httpLayer),
-            ),
+        anthropic: (apiKey?: string) => AnthropicClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.anthropic, apiKey) }).pipe(Layer.provide(httpLayer),),
+        gemini: (apiKey?: string) => GoogleClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.gemini, apiKey) }).pipe(Layer.provide(httpLayer),),
+        openai: (apiKey?: string) => OpenAiClient.layerConfig({ apiKey: apiKeyConfig(_CONFIG.envKeys.openai, apiKey) }).pipe(Layer.provide(httpLayer),),
     } as const;
     const languageLayer = (settings: S.Schema.Type<typeof SettingsSchema>['language']) =>
         Match.value(settings.provider).pipe(
@@ -88,9 +74,9 @@ const AiRegistry = (() => {
                 AnthropicLanguageModel.layerWithTokenizer({
                     config: {
                         max_tokens: settings.maxTokens,
-                        ...(settings.temperature !== undefined && { temperature: settings.temperature }),
-                        ...(settings.topK !== undefined && { top_k: settings.topK }),
-                        ...(settings.topP !== undefined && { top_p: settings.topP }),
+                        temperature: settings.temperature,
+                        top_k: settings.topK,
+                        top_p: settings.topP,
                     },
                     model: settings.model,
                 }).pipe(Layer.provide(clientLayers.anthropic())),
@@ -100,9 +86,9 @@ const AiRegistry = (() => {
                     config: {
                         generationConfig: {
                             maxOutputTokens: settings.maxTokens,
-                            ...(settings.temperature !== undefined && { temperature: settings.temperature }),
-                            ...(settings.topK !== undefined && { topK: settings.topK }),
-                            ...(settings.topP !== undefined && { topP: settings.topP }),
+                            temperature: settings.temperature,
+                            topK: settings.topK,
+                            topP: settings.topP,
                         },
                         toolConfig: {},
                     },
@@ -113,8 +99,8 @@ const AiRegistry = (() => {
                 OpenAiLanguageModel.layerWithTokenizer({
                     config: {
                         max_output_tokens: settings.maxTokens,
-                        ...(settings.temperature !== undefined && { temperature: settings.temperature }),
-                        ...(settings.topP !== undefined && { top_p: settings.topP }),
+                        temperature: settings.temperature,
+                        top_p: settings.topP,
                     },
                     model: settings.model,
                 }).pipe(Layer.provide(clientLayers.openai())),
@@ -155,9 +141,7 @@ const AiRegistry = (() => {
             Option.orElse(() =>
                 pipe(
                     model,
-                    Option.liftPredicate((key): key is keyof typeof _CONFIG.embeddingDimensions =>
-                        Object.hasOwn(_CONFIG.embeddingDimensions, key),
-                    ),
+                    Option.liftPredicate((key): key is keyof typeof _CONFIG.embeddingDimensions => Object.hasOwn(_CONFIG.embeddingDimensions, key),),
                     Option.map((key) => _CONFIG.embeddingDimensions[key]),
                 ),
             ),
@@ -176,7 +160,7 @@ const AiRegistry = (() => {
         );
     const decodeAppSettings = (raw: unknown) =>
         S.decodeUnknown(AppSettingsSchema)(raw).pipe(
-            Effect.map((settings) => Option.getOrElse(Option.fromNullable(settings.ai), () => _CONFIG.defaults)),
+            Effect.map((settings) => settings.ai ?? _CONFIG.defaults),
             Effect.flatMap(decodeSettings),
         );
     const layers = (settings: S.Schema.Type<typeof SettingsSchema>) => ({

@@ -1,26 +1,21 @@
 /**
- * Test harness entry point using @parametric-portal/devtools session factory.
- * All logging, error handling, and bootstrap logic delegated to devtools package.
+ * Test harness entry point using the unified @parametric-portal/devtools surface.
  */
-import { createMain, initWhenReady } from '@parametric-portal/devtools/bootstrap';
-import { createDevSession } from '@parametric-portal/devtools/session';
+import { Devtools } from '@parametric-portal/devtools/devtools';
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-const session = createDevSession({
+const session = Devtools.session({
     app: 'test-harness',
     env: import.meta.env,
 });
-const { init } = createMain({
+const { init } = Devtools.bootstrap.create({
     appModule: () => import('./app.tsx'),
     appName: 'test-harness',
     appVersion: '0.0.1',
     cssModule: () => import('./main.css'),
     isDev: import.meta.env.DEV,
-    loggerLayer: session.layer,
-    onError: session.renderDebug,
-    onFatal: session.fatal,
-    startTime: session.startTime,
+    session,
 });
-initWhenReady(init, session.layer);
+Devtools.bootstrap.whenReady(init);
 import.meta.hot?.dispose(session.dispose);

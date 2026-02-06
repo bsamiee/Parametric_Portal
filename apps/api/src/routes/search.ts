@@ -36,51 +36,51 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 						},
 						{ cursor: urlParams.cursor, limit: urlParams.limit },
 					).pipe(
-						Effect.map((result) => ({
+							Effect.map((result) => ({
 							cursor: result.cursor,
 							facets: result.facets ? { app: result.facets['app'] ?? 0, asset: result.facets['asset'] ?? 0, auditLog: result.facets['auditLog'] ?? 0, user: result.facets['user'] ?? 0 } : null,
 							hasNext: result.hasNext,
 							hasPrev: result.hasPrev,
 							items: A.filterMap(result.items, (item) => isEntityType(item.entityType) ? Option.some({ displayText: item.displayText, entityId: item.entityId, entityType: item.entityType, metadata: item.metadata, rank: item.rank, snippet: item.snippet }) : Option.none()),
 							total: result.total,
-						})),
-						Effect.mapError((error) => HttpError.Internal.of('Search failed', error)),
-						Telemetry.span('search.query', { kind: 'server' }),
+							})),
+							Effect.mapError((error) => HttpError.Internal.of('Search failed', error)),
+							Telemetry.span('search.query', { kind: 'server', metrics: false }),
+						),
 					),
-				),
-			)
+				)
 			.handle('suggest', ({ urlParams }) =>
 				CacheService.rateLimit('api',
 					search.suggest({
 						includeGlobal: urlParams.includeGlobal,
 						limit: urlParams.limit,
 						prefix: urlParams.prefix,
-					}).pipe(
-						Effect.mapError((error) => HttpError.Internal.of('Suggest failed', error)),
-						Telemetry.span('search.suggest', { kind: 'server' }),
+						}).pipe(
+							Effect.mapError((error) => HttpError.Internal.of('Suggest failed', error)),
+							Telemetry.span('search.suggest', { kind: 'server', metrics: false }),
+						),
 					),
-				),
-			)
+				)
 			.handle('refresh', ({ payload }) =>
 				CacheService.rateLimit('api',
 					requireRole('admin').pipe(
-						Effect.andThen(search.refresh(payload.includeGlobal)),
-						Effect.as({ status: 'ok' as const }),
-						Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Refresh failed', error))),
-						Telemetry.span('search.refresh', { kind: 'server' }),
+							Effect.andThen(search.refresh(payload.includeGlobal)),
+							Effect.as({ status: 'ok' as const }),
+							Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Refresh failed', error))),
+							Telemetry.span('search.refresh', { kind: 'server', metrics: false }),
+						),
 					),
-				),
-			)
+				)
 			.handle('refreshEmbeddings', ({ payload }) =>
 				CacheService.rateLimit('api',
 					requireRole('admin').pipe(
-						Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal })),
-						Effect.map((result) => ({ count: result.count })),
-						Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Embedding refresh failed', error))),
-						Telemetry.span('search.refreshEmbeddings', { kind: 'server' }),
+							Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal })),
+							Effect.map((result) => ({ count: result.count })),
+							Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Embedding refresh failed', error))),
+							Telemetry.span('search.refreshEmbeddings', { kind: 'server', metrics: false }),
+						),
 					),
-				),
-			);
+				);
 	}),
 );
 

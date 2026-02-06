@@ -78,7 +78,7 @@ const compare = (a: string, b: string): Effect.Effect<boolean> =>
 		const bufA = _encoder.encode(a);
 		const bufB = _encoder.encode(b);
 		return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
-	});
+	}).pipe(Telemetry.span('crypto.compare', { metrics: false }));
 const decrypt = (bytes: Uint8Array): Effect.Effect<string, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.currentTenantId;
@@ -134,7 +134,15 @@ const pair = Effect.gen(function* () {
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Crypto = { compare, decrypt, encrypt, hash, hmac, pair, Service } as const;
+const Crypto = {
+	compare,
+	decrypt,
+	encrypt,
+	hash,
+	hmac,
+	pair,
+	Service
+} as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
