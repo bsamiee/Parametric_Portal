@@ -6,31 +6,32 @@ import { ClusterWorkflowEngine } from '@effect/cluster';
 import { Activity, Workflow, WorkflowEngine } from '@effect/workflow';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { SqlClient } from '@effect/sql';
-import { Cause, Clock, Config, Duration, Effect, HashMap, type Either, Layer, Match, Metric, Option, PrimaryKey, Ref, Schedule, Schema as S, Stream } from 'effect';
+import { Cause, Clock, Config, Duration, Effect, type Either, HashMap, Layer, Match, Metric, Option, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import type { JobDlq } from '@parametric-portal/database/models';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { CacheService } from '../platform/cache.ts';
 import { Telemetry } from '../observe/telemetry.ts';
+import { Resilience } from '../utils/resilience.ts';
 import { Crypto } from '../security/crypto.ts';
 import { EventBus } from './events.ts';
 import { ClusterService } from './cluster.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _DeliveryResult = S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number });
 const _ErrorReason = S.Literal('CircuitOpen', 'InvalidResponse', 'MaxRetries', 'NetworkError', 'SignatureError', 'Timeout');
-const _WebhookSettings = S.Struct({ webhooks: S.optionalWith(S.Array(S.Struct({
-	active: S.Boolean,
-	endpoint: S.suspend(() => WebhookEndpoint),
-	eventTypes: S.Array(S.String),
-})), { default: () => [] }) });
+const _DeliveryResult = S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number });
 const _DeliveryRecord = S.Struct({
 	deliveredAt: S.optional(S.Number), deliveryId: S.String, durationMs: S.optional(S.Number), endpointUrl: S.String,
 	error: S.optional(S.String), status: S.Literal('delivered', 'failed'), statusCode: S.optional(S.Number),
 	tenantId: S.String, timestamp: S.Number, type: S.String,
 });
+const _WebhookSettings = S.Struct({ webhooks: S.optionalWith(S.Array(S.Struct({
+	active: S.Boolean,
+	endpoint: S.suspend(() => WebhookEndpoint),
+	eventTypes: S.Array(S.String),
+})), { default: () => [] }) });
 const _CONFIG = {
 	concurrency: { batch: 10, perEndpoint: 5 },
 	retry: { base: Duration.millis(500), cap: Duration.seconds(30), maxAttempts: 5 },
@@ -96,7 +97,7 @@ const _WebhookWorkflow = Workflow.make({
 const _Engine = Layer.unwrapEffect(Config.string('NODE_ENV').pipe(
 	Config.withDefault('development'),
 	Effect.map((environment) => Match.value(environment).pipe(
-		Match.when('production', () => ClusterWorkflowEngine.layer.pipe(Layer.provide(ClusterService.LayerRunner))),
+		Match.when('production', () => ClusterWorkflowEngine.layer.pipe(Layer.provide(ClusterService.Layers.runner))),
 		Match.orElse(() => WorkflowEngine.layerMemory),
 	)),
 ));
@@ -115,7 +116,7 @@ const _httpDeliver = (endpoint: WebhookEndpoint, payload: WebhookPayload, delive
 			}),
 		);
 		const client = options?.retryTransient
-			? baseClient.pipe(HttpClient.filterStatusOk, HttpClient.retryTransient({ schedule: Schedule.exponential(_CONFIG.retry.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(_CONFIG.retry.maxAttempts)), Schedule.upTo(_CONFIG.retry.cap)) }), HttpClient.withTracerPropagation(true))
+			? baseClient.pipe(HttpClient.filterStatusOk, HttpClient.retryTransient({ schedule: Resilience.schedule({ base: _CONFIG.retry.base, cap: _CONFIG.retry.cap, maxAttempts: _CONFIG.retry.maxAttempts }) }), HttpClient.withTracerPropagation(true))
 			: baseClient.pipe(HttpClient.filterStatusOk, HttpClient.withTracerPropagation(true));
 		const [duration, response] = yield* Effect.timed(client.execute(request).pipe(
 			Effect.scoped,
@@ -125,6 +126,18 @@ const _httpDeliver = (endpoint: WebhookEndpoint, payload: WebhookPayload, delive
 		const deliveredAt = yield* Clock.currentTimeMillis;
 		return { deliveredAt, durationMs: Duration.toMillis(duration), statusCode: response.status };
 	});
+const _errorReason = (error: unknown) => Match.value(error).pipe(
+	Match.when((candidate: unknown): candidate is WebhookError => candidate instanceof WebhookError, (webhookError) => webhookError.reason),
+	Match.orElse(String),
+);
+const _dlqPayload = (entry: typeof JobDlq.Type) => Match.value(entry.payload).pipe(
+	Match.when(
+		(candidate: unknown): candidate is { readonly data: unknown; readonly endpoint?: string } => typeof candidate === 'object' && candidate !== null && 'data' in candidate,
+		(candidate) => ({ data: candidate.data, endpoint: Option.fromNullable(candidate.endpoint) }),
+	),
+	Match.orElse((payload) => ({ data: payload, endpoint: Option.none<string>() })),
+);
+const _normalizeDlqType = (type: string) => type.startsWith('webhook:') ? type.slice('webhook:'.length) : type;
 
 // --- [SERVICE] ---------------------------------------------------------------
 
@@ -171,102 +184,141 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 			storeId: 'webhook-settings',
 			timeToLive: Duration.minutes(5),
 		});
-		const _getThrottle = (hostname: string) => Ref.get(throttles).pipe(Effect.flatMap((map) =>
-			Option.match(HashMap.get(map, hostname), {
-				onNone: () => Effect.makeSemaphore(_CONFIG.concurrency.perEndpoint).pipe(Effect.tap((sem) => Ref.update(throttles, HashMap.set(hostname, sem)))),
-				onSome: Effect.succeed,
-			}),
-		));
-			const _statusKey = (tenantId: string, endpointUrl: string) => `webhook:delivery:${tenantId}:${new URL(endpointUrl).hostname}`;
-			const _recordDelivery = (tenantId: string, deliveryId: string, endpointUrl: string, type: string, result: { status: 'delivered'; deliveredAt: number; durationMs: number; statusCode: number } | { status: 'failed'; error: string }) =>
-				Clock.currentTimeMillis.pipe(
-					Effect.flatMap((timestamp) => cache.kv.set(_statusKey(tenantId, endpointUrl), { ...result, deliveryId, endpointUrl, tenantId, timestamp, type } satisfies typeof _DeliveryRecord.Type, Duration.days(7))),
-					Effect.ignore,
-				);
+			const _getThrottle = (hostname: string) => Ref.get(throttles).pipe(Effect.flatMap((map) =>
+				Option.match(HashMap.get(map, hostname), {
+					onNone: () => Effect.makeSemaphore(_CONFIG.concurrency.perEndpoint).pipe(Effect.tap((sem) => Ref.update(throttles, HashMap.set(hostname, sem)))),
+					onSome: Effect.succeed,
+				}),
+			));
+				const _legacyStatusKey = (tenantId: string, endpointUrl: string) => `webhook:delivery:${tenantId}:${new URL(endpointUrl).hostname}`;
+				const _statusKey = (tenantId: string, endpointUrl: string) => `webhook:delivery:${tenantId}:${encodeURIComponent(endpointUrl)}`;
+				const _recordDelivery = (tenantId: string, deliveryId: string, endpointUrl: string, type: string, result: { status: 'delivered'; deliveredAt: number; durationMs: number; statusCode: number } | { status: 'failed'; error: string }) =>
+					Clock.currentTimeMillis.pipe(
+						Effect.flatMap((timestamp) => Effect.all([
+							cache.kv.set(_statusKey(tenantId, endpointUrl), { ...result, deliveryId, endpointUrl, tenantId, timestamp, type } satisfies typeof _DeliveryRecord.Type, Duration.days(7)),
+							cache.kv.set(_legacyStatusKey(tenantId, endpointUrl), { ...result, deliveryId, endpointUrl, tenantId, timestamp, type } satisfies typeof _DeliveryRecord.Type, Duration.days(7)),
+						], { discard: true })),
+						Effect.ignore,
+					);
+			const _deliveryContext = (tenantId: string, endpoint: WebhookEndpoint, payload: WebhookPayload, operation: 'webhook.deliver' | 'webhook.test') => {
+				const endpointHost = new URL(endpoint.url).hostname;
+				return {
+					endpoint,
+					endpointHost,
+					labels: MetricsService.label({ endpoint_host: endpointHost, operation, tenant: tenantId }),
+					payload,
+					tenantId,
+				} as const;
+			};
 			const _updateSettings = (tenantId: string, transform: (webhooks: typeof _WebhookSettings.Type['webhooks']) => typeof _WebhookSettings.Type['webhooks']) =>
 				settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(
-				Effect.flatMap((settings) => Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, { webhooks: transform(settings.webhooks) })).pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
-					Effect.andThen(invalidateSettings(tenantId)),
-				)),
-				Effect.catchAll(() => Effect.void),
-			);
+					Effect.flatMap((settings) => Context.Request.withinSync(tenantId, database.apps.updateSettings(tenantId, { webhooks: transform(settings.webhooks) })).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.andThen(invalidateSettings(tenantId)),
+					)),
+					Effect.mapError((error) => WebhookError.from('NetworkError', undefined, { cause: error })),
+				);
 			const _deliverSingle = (tenantId: string, endpoint: WebhookEndpoint, payload: WebhookPayload) => {
-				const hostname = new URL(endpoint.url).hostname;
-				const labels = MetricsService.label({ endpoint_host: hostname, operation: 'webhook.deliver' });
-				return _getThrottle(hostname).pipe(
-					Effect.flatMap((semaphore) => semaphore.withPermits(1)(Context.Request.within(tenantId, _WebhookWorkflow.execute({ endpoint, payload }).pipe(
+				const context = _deliveryContext(tenantId, endpoint, payload, 'webhook.deliver');
+				const requestContext = Context.Request.system(crypto.randomUUID());
+				return _getThrottle(context.endpointHost).pipe(
+					Effect.flatMap((semaphore) => semaphore.withPermits(1)(Context.Request.within(context.tenantId, _WebhookWorkflow.execute({
+						endpoint: context.endpoint,
+						payload: context.payload,
+					}).pipe(
 						Effect.tap((result) => Effect.all([
-							eventBus.emit({ aggregateId: payload.id, payload: { _tag: 'webhook', action: 'delivered', durationMs: result.durationMs, endpoint: endpoint.url, statusCode: result.statusCode }, tenantId }).pipe(Effect.ignore),
-							_recordDelivery(tenantId, payload.id, endpoint.url, payload.type, { deliveredAt: result.deliveredAt, durationMs: result.durationMs, status: 'delivered', statusCode: result.statusCode }),
-					], { discard: true })),
-					Effect.tapError((error) => Effect.all([
-						eventBus.emit({ aggregateId: payload.id, payload: { _tag: 'webhook', action: 'failed', endpoint: endpoint.url, reason: 'reason' in error ? error.reason : String(error) }, tenantId }).pipe(Effect.ignore),
-						Metric.increment(Metric.taggedWithLabels(metrics.events.deadLettered, labels)),
-							_recordDelivery(tenantId, payload.id, endpoint.url, payload.type, { error: 'reason' in error ? error.reason : String(error), status: 'failed' }),
+							eventBus.publish({
+								aggregateId: context.payload.id,
+								payload: { _tag: 'webhook', action: 'delivered', durationMs: result.durationMs, endpoint: context.endpoint.url, statusCode: result.statusCode },
+								tenantId: context.tenantId,
+							}).pipe(Effect.ignore),
+							_recordDelivery(context.tenantId, context.payload.id, context.endpoint.url, context.payload.type, { deliveredAt: result.deliveredAt, durationMs: result.durationMs, status: 'delivered', statusCode: result.statusCode }),
 						], { discard: true })),
-						(effect) => MetricsService.trackEffect(effect, { duration: metrics.events.deliveryLatency, errors: metrics.errors, labels }),
-						Telemetry.span('webhook.deliver', { metrics: false, 'webhook.endpoint_host': hostname, 'webhook.type': payload.type, 'webhook.url': endpoint.url }),
-					)))),
+						Effect.tapError((error) => Effect.all([
+							eventBus.publish({
+								aggregateId: context.payload.id,
+								payload: { _tag: 'webhook', action: 'failed', endpoint: context.endpoint.url, reason: _errorReason(error) },
+								tenantId: context.tenantId,
+							}).pipe(Effect.ignore),
+							Metric.increment(Metric.taggedWithLabels(metrics.events.deadLettered, context.labels)),
+							_recordDelivery(context.tenantId, context.payload.id, context.endpoint.url, context.payload.type, { error: _errorReason(error), status: 'failed' }),
+						], { discard: true })),
+						(effect) => MetricsService.trackEffect(effect, { duration: metrics.events.deliveryLatency, errors: metrics.errors, labels: context.labels }),
+						Telemetry.span('webhook.deliver', { metrics: false, 'webhook.endpoint_host': context.endpointHost, 'webhook.type': context.payload.type, 'webhook.url': context.endpoint.url }),
+					), requestContext))),
 				);
 			};
-		const deliver = (endpoint: WebhookEndpoint, payloads: WebhookPayload | readonly WebhookPayload[]) =>
-			Context.Request.currentTenantId.pipe(Effect.flatMap((tenantId) =>
-				Effect.forEach(Array.isArray(payloads) ? payloads : [payloads], (payload) => _deliverSingle(tenantId, endpoint, payload).pipe(Effect.either), { concurrency: _CONFIG.concurrency.batch }),
-			));
-		const invalidateSettings = (tenantId: string) => settingsCache.invalidate(new _WebhookSettingsKey({ tenantId }));
-		const manage = {
-			list: (tenantId: string) => settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(
+			const deliver = (endpoint: WebhookEndpoint, payloads: WebhookPayload | readonly WebhookPayload[]) =>
+				Context.Request.currentTenantId.pipe(Effect.flatMap((tenantId) =>
+					Effect.forEach(Array.isArray(payloads) ? payloads : [payloads], (payload) => _deliverSingle(tenantId, endpoint, payload).pipe(Effect.either), { concurrency: _CONFIG.concurrency.batch }),
+				));
+			const invalidateSettings = (tenantId: string) => settingsCache.invalidate(new _WebhookSettingsKey({ tenantId }));
+			const list = (tenantId: string) => settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(
 				Effect.map((settings) => settings.webhooks),
 				Effect.catchAll(() => Effect.succeed([] as typeof _WebhookSettings.Type['webhooks'])),
-			),
-			register: (tenantId: string, input: { active: boolean; endpoint: WebhookEndpoint; eventTypes: readonly string[] }) =>
-				_updateSettings(tenantId, (webhooks) => [...webhooks, { active: input.active, endpoint: input.endpoint, eventTypes: [...input.eventTypes] }]),
-			remove: (tenantId: string, endpointUrl: string) =>
-				_updateSettings(tenantId, (webhooks) => webhooks.filter((webhook) => webhook.endpoint.url !== endpointUrl)),
-		} as const;
-		const retry = (dlqId: string) => database.jobDlq.one([{ field: 'id', value: dlqId }]).pipe(
-			Effect.provideService(SqlClient.SqlClient, sql),
-			Effect.flatMap(Option.match({
-				onNone: () => Effect.fail(WebhookError.from('NetworkError', dlqId)),
-				onSome: (entry: typeof JobDlq.Type) => Context.Request.currentTenantId.pipe(Effect.flatMap((tenantId) =>
-					settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(Effect.flatMap((settings) =>
-						Option.match(Option.fromNullable(settings.webhooks.find((webhook) => webhook.endpoint.url === (entry.payload as { endpoint?: string })?.endpoint)), {
-							onNone: () => Effect.fail(WebhookError.from('NetworkError', dlqId, { cause: 'Endpoint not found' })),
-							onSome: (reg) => Clock.currentTimeMillis.pipe(
-								Effect.flatMap((timestamp) => _deliverSingle(tenantId, reg.endpoint, new WebhookPayload({ data: entry.payload, id: crypto.randomUUID(), timestamp, type: entry.type }))),
-								Effect.andThen(database.jobDlq.markReplayed(dlqId).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
-							),
-						}),
+			);
+			const register = (tenantId: string, input: { active: boolean; endpoint: WebhookEndpoint; eventTypes: readonly string[] }) =>
+				_updateSettings(tenantId, (webhooks) => [...webhooks, { active: input.active, endpoint: input.endpoint, eventTypes: [...input.eventTypes] }]);
+			const remove = (tenantId: string, endpointUrl: string) =>
+				_updateSettings(tenantId, (webhooks) => webhooks.filter((webhook) => webhook.endpoint.url !== endpointUrl));
+			const retry = (dlqId: string) => database.jobDlq.one([{ field: 'id', value: dlqId }]).pipe(
+				Effect.provideService(SqlClient.SqlClient, sql),
+				Effect.flatMap(Option.match({
+					onNone: () => Effect.fail(WebhookError.from('NetworkError', dlqId)),
+					onSome: (entry: typeof JobDlq.Type) => {
+						const tenantId = entry.appId;
+						const retryPayload = _dlqPayload(entry);
+						return settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(Effect.flatMap((settings) =>
+							Option.match(Option.flatMap(retryPayload.endpoint, (endpointUrl) =>
+								Option.fromNullable(settings.webhooks.find((webhook) => webhook.endpoint.url === endpointUrl)),
+							), {
+								onNone: () => Effect.fail(WebhookError.from('NetworkError', dlqId, { cause: 'Endpoint not found' })),
+								onSome: (registration) => Clock.currentTimeMillis.pipe(
+									Effect.flatMap((timestamp) => _deliverSingle(tenantId, registration.endpoint, new WebhookPayload({
+										data: retryPayload.data,
+										id: crypto.randomUUID(),
+										timestamp,
+										type: _normalizeDlqType(entry.type),
+									}))),
+									Effect.andThen(database.jobDlq.markReplayed(dlqId).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+								),
+							}),
+						));
+					},
+				})),
+					Telemetry.span('webhook.retry', { 'dlq.id': dlqId, metrics: false }),
+			);
+				const status = (tenantId: string, endpointUrl?: string) => settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(
+					Effect.flatMap((settings) => Effect.forEach(
+						endpointUrl ? [endpointUrl] : settings.webhooks.map((webhook) => webhook.endpoint.url),
+						(url) => cache.kv.get(_statusKey(tenantId, url), _DeliveryRecord).pipe(
+							Effect.flatMap(Option.match({
+								onNone: () => cache.kv.get(_legacyStatusKey(tenantId, url), _DeliveryRecord),
+								onSome: (value) => Effect.succeed(Option.some(value)),
+							})),
+							Effect.map(Option.toArray),
+							Effect.catchAll(() => Effect.succeed([])),
+						),
+						{ concurrency: 'unbounded' },
 					)),
-				)),
-			})),
-				Telemetry.span('webhook.retry', { 'dlq.id': dlqId, metrics: false }),
-		);
-			const status = (tenantId: string, endpointUrl?: string) => settingsCache.get(new _WebhookSettingsKey({ tenantId })).pipe(
-				Effect.flatMap((settings) => Effect.forEach(
-					endpointUrl ? [endpointUrl] : settings.webhooks.map((webhook) => webhook.endpoint.url),
-					(url) => cache.kv.get(_statusKey(tenantId, url), _DeliveryRecord).pipe(Effect.map(Option.toArray), Effect.catchAll(() => Effect.succeed([]))),
-					{ concurrency: 'unbounded' },
-				)),
 				Effect.map((results) => results.flat()),
 				Effect.catchAll(() => Effect.succeed([])),
 			);
-		const test = (tenantId: string, endpoint: WebhookEndpoint) => Clock.currentTimeMillis.pipe(
-			Effect.flatMap((timestamp) => {
+			const test = (tenantId: string, endpoint: WebhookEndpoint) => Clock.currentTimeMillis.pipe(
+				Effect.flatMap((timestamp) => {
 					const deliveryId = crypto.randomUUID();
 					const payload = new WebhookPayload({ data: { test: true }, id: deliveryId, timestamp, type: 'webhook.test' });
-					const hostname = new URL(endpoint.url).hostname;
-					return Context.Request.within(tenantId, _httpDeliver(endpoint, payload, deliveryId).pipe(
-						Effect.tap((result) => _recordDelivery(tenantId, deliveryId, endpoint.url, payload.type, { deliveredAt: result.deliveredAt, durationMs: result.durationMs, status: 'delivered', statusCode: result.statusCode })),
-						Effect.tapError((error) => _recordDelivery(tenantId, deliveryId, endpoint.url, payload.type, { error: 'reason' in error ? error.reason : String(error), status: 'failed' })),
-						(effect) => MetricsService.trackEffect(effect, { duration: metrics.events.deliveryLatency, errors: metrics.errors, labels: MetricsService.label({ endpoint_host: hostname, operation: 'webhook.test' }) }),
-						Telemetry.span('webhook.test', { metrics: false, 'webhook.endpoint_host': hostname, 'webhook.url': endpoint.url }),
+					const context = _deliveryContext(tenantId, endpoint, payload, 'webhook.test');
+					return Context.Request.within(context.tenantId, _httpDeliver(context.endpoint, context.payload, deliveryId).pipe(
+						Effect.tap((result) => _recordDelivery(context.tenantId, deliveryId, context.endpoint.url, context.payload.type, { deliveredAt: result.deliveredAt, durationMs: result.durationMs, status: 'delivered', statusCode: result.statusCode })),
+						Effect.tapError((error) => _recordDelivery(context.tenantId, deliveryId, context.endpoint.url, context.payload.type, { error: _errorReason(error), status: 'failed' })),
+						(effect) => MetricsService.trackEffect(effect, { duration: metrics.events.deliveryLatency, errors: metrics.errors, labels: context.labels }),
+						Telemetry.span('webhook.test', { metrics: false, 'webhook.endpoint_host': context.endpointHost, 'webhook.url': context.endpoint.url }),
 					));
-				}),
-			);
+					}),
+				);
 		yield* Effect.forkScoped(eventBus.subscribe('app.settings.updated', S.Struct({ _tag: S.Literal('app'), action: S.Literal('settings.updated') }), (event) => invalidateSettings(event.tenantId).pipe(Effect.ignore)).pipe(Stream.catchAll(() => Stream.empty), Stream.runDrain),);
-		yield* Effect.forkScoped(eventBus.onEvent().pipe(
+		yield* Effect.forkScoped(eventBus.stream().pipe(
 			Stream.mapEffect((envelope) => settingsCache.get(new _WebhookSettingsKey({ tenantId: envelope.event.tenantId })).pipe(
 				Effect.flatMap((settings) => Clock.currentTimeMillis.pipe(Effect.flatMap((timestamp) => {
 					const matching = settings.webhooks.filter((webhook) => webhook.active && webhook.eventTypes.includes(envelope.event.eventType));
@@ -276,15 +328,15 @@ class WebhookService extends Effect.Service<WebhookService>()('server/Webhooks',
 				Effect.catchAll(() => Effect.void),
 			)),
 			Stream.runDrain,
-		));
-		yield* Effect.logInfo('WebhookService initialized');
-		return { deliver, invalidateSettings, manage, retry, status, test };
-	}),
-}) {
-	static readonly _Config = _CONFIG;
-	static readonly _DeliveryRecord = _DeliveryRecord;
-	static readonly _DeliveryResult = _DeliveryResult;
-	static readonly _httpDeliver = _httpDeliver;
+			));
+			yield* Effect.logInfo('WebhookService initialized');
+			return { deliver, invalidateSettings, list, register, remove, retry, status, test };
+		}),
+	}) {
+	static readonly Config = _CONFIG;
+	static readonly DeliveryRecord = _DeliveryRecord;
+	static readonly DeliveryResult = _DeliveryResult;
+	static readonly httpDeliver = _httpDeliver;
 	static readonly Endpoint = WebhookEndpoint;
 	static readonly Error = WebhookError;
 	static readonly Payload = WebhookPayload;

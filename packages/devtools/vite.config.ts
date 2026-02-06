@@ -19,8 +19,6 @@ export default defineConfig(
                 'react-dom/client',
                 'react-error-boundary',
                 'react/jsx-runtime',
-                'unplugin-auto-import',
-                'unplugin-auto-import/vite',
                 'vite',
             ],
             mode: 'library',

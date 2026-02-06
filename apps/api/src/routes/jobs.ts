@@ -36,7 +36,7 @@ const handleSubscribe = (jobs: typeof JobService.Service) =>
 const JobsLive = HttpApiBuilder.group(ParametricApi, 'jobs', (handlers) =>
 	Effect.gen(function* () {
 		const jobs = yield* JobService;
-		return handlers.handleRaw('subscribe', () => CacheService.rateLimit('api', handleSubscribe(jobs)),);
+		return handlers.handleRaw('subscribe', () => CacheService.rateLimit('realtime', handleSubscribe(jobs)),);
 	}),
 );
 

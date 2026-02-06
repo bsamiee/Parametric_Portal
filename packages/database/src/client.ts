@@ -52,7 +52,7 @@ const _setTenant = (appId: string) => Effect.gen(function* () {
 
 // --- [OBJECT] ----------------------------------------------------------------
 
-const Client = (<const T>(t: T) => t)({
+const Client = {
 	config: _CONFIG,
 	health: Effect.fn('db.checkHealth')(function* () {			// Quick health check: tests connection availability. Use for liveness probes. Does not test transaction capability.
 		const sql = yield* SqlClient.SqlClient;
@@ -162,7 +162,7 @@ const Client = (<const T>(t: T) => t)({
 			return yield* sql<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`;
 		}),
 	},
-});
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

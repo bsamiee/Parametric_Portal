@@ -3,6 +3,7 @@
  * Admin-gated CRUD for users, sessions, jobs, DLQ, events, apps.
  */
 import { HttpApiBuilder } from '@effect/platform';
+import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
@@ -31,17 +32,17 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 					)),
 					Telemetry.span('admin.listUsers', { kind: 'server', metrics: false }),
 				)))
-				.handle('listSessions', ({ urlParams }) => CacheService.rateLimit('api', requireAdmin.pipe(
-					Effect.andThen(
-						(urlParams.userId
-							? database.sessions.byUser(urlParams.userId)
-							: urlParams.ipAddress
-								? database.sessions.byIp(urlParams.ipAddress)
-								: database.sessions.find([])
-						).pipe(Effect.mapError((error) => HttpError.Internal.of('Session list failed', error))),
-					),
-					Telemetry.span('admin.listSessions', { kind: 'server', metrics: false }),
-				)))
+					.handle('listSessions', ({ urlParams }) => CacheService.rateLimit('api', requireAdmin.pipe(
+						Effect.andThen(database.sessions.page(
+							urlParams.userId
+								? [{ field: 'user_id', value: urlParams.userId }]
+								: urlParams.ipAddress
+									? [{ field: 'ip_address', value: urlParams.ipAddress }]
+									: [],
+							{ cursor: urlParams.cursor, limit: urlParams.limit },
+						).pipe(Effect.mapError((error) => HttpError.Internal.of('Session list failed', error)))),
+						Telemetry.span('admin.listSessions', { kind: 'server', metrics: false }),
+					)))
 				.handle('deleteSession', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
 					Effect.andThen(database.sessions.softDelete(path.id).pipe(
 						Effect.mapError((error) => Cause.isNoSuchElementException(error) ? HttpError.NotFound.of('session', path.id) : HttpError.Internal.of('Session delete failed', error)),
@@ -86,26 +87,42 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 					Effect.as({ success: true as const }),
 					Telemetry.span('admin.replayDlq', { kind: 'server', metrics: false }),
 				)))
-				.handleRaw('events', () => CacheService.rateLimit('api', requireAdmin.pipe(
-					Effect.andThen(Context.Request.currentTenantId),
-					Effect.flatMap((tenantId) => StreamingService.sse({
-						filter: (envelope) => envelope.event.tenantId === tenantId,
+					.handleRaw('events', () => CacheService.rateLimit('realtime', requireAdmin.pipe(
+						Effect.andThen(Context.Request.currentTenantId),
+						Effect.flatMap((tenantId) => StreamingService.sse({
+							filter: (envelope) => envelope.event.tenantId === tenantId,
 					name: 'admin.events',
 					serialize: (envelope) => ({
 						data: JSON.stringify(envelope.event),
-						event: 'domain',
-							id: envelope.event.eventId,
-						}),
-						source: eventBus.onEvent(),
+						event: 'domain', id: envelope.event.eventId,}),
+						source: eventBus.stream(),
 					})),
 					Telemetry.span('admin.events', { kind: 'server', metrics: false }),
 				)))
-				.handle('listApps', () => CacheService.rateLimit('api', requireAdmin.pipe(
-					Effect.andThen(database.apps.find([]).pipe(
-						Effect.mapError((error) => HttpError.Internal.of('App list failed', error)),
-					)),
-					Telemetry.span('admin.listApps', { kind: 'server', metrics: false }),
-				)));
+					.handle('listApps', () => CacheService.rateLimit('api', requireAdmin.pipe(
+						Effect.andThen(database.apps.find([]).pipe(
+							Effect.mapError((error) => HttpError.Internal.of('App list failed', error)),
+						)),
+						Telemetry.span('admin.listApps', { kind: 'server', metrics: false }),
+					)))
+					.handle('dbIoStats', () => CacheService.rateLimit('api', requireAdmin.pipe(
+						Effect.andThen(Client.monitoring.ioStats().pipe(
+							Effect.mapError((error) => HttpError.Internal.of('Database io stats failed', error)),
+						)),
+						Telemetry.span('admin.dbIoStats', { kind: 'server', metrics: false }),
+					)))
+					.handle('dbIoConfig', () => CacheService.rateLimit('api', requireAdmin.pipe(
+						Effect.andThen(Client.monitoring.ioConfig().pipe(
+							Effect.mapError((error) => HttpError.Internal.of('Database io config failed', error)),
+						)),
+						Telemetry.span('admin.dbIoConfig', { kind: 'server', metrics: false }),
+					)))
+					.handle('dbStatements', ({ urlParams }) => CacheService.rateLimit('api', requireAdmin.pipe(
+						Effect.andThen(database.listStatStatements(urlParams.limit).pipe(
+							Effect.mapError((error) => HttpError.Internal.of('Database statements failed', error)),
+						)),
+						Telemetry.span('admin.dbStatements', { kind: 'server', metrics: false }),
+					)));
 	}),
 );
 

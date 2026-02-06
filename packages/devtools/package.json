@@ -21,11 +21,11 @@
   },
   "dependencies": {
     "@effect/experimental": "catalog:",
+    "@effect/platform": "catalog:",
     "effect": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-error-boundary": "catalog:",
-    "unplugin-auto-import": "catalog:",
     "vite": "catalog:"
   },
   "devDependencies": {

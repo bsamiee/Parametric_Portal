@@ -46,6 +46,11 @@ const requireMfaVerified = Context.Request.sessionOrFail.pipe(
 	Effect.filterOrFail((session) => !session.mfaEnabled || Option.isSome(session.verifiedAt), () => HttpError.Forbidden.of('MFA verification required')),
 	Effect.asVoid,
 );
+const requireInteractiveSession = Context.Request.sessionOrFail.pipe(
+	Effect.mapError(_mapLookupError('Session lookup failed')),
+	Effect.filterOrFail((session) => session.kind === 'session', () => HttpError.Forbidden.of('Interactive session required')),
+	Effect.asVoid,
+);
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
@@ -95,36 +100,37 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 		apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string; readonly expiresAt: Option.Option<Date> }>>,
 	) =>
 		Layer.effect(this, Effect.map(Effect.all([MetricsService, AuditService]), ([metrics, audit]) => SessionAuth.of({
-			bearer: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
-				Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token))),
-				Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
-				Effect.flatMap(sessionLookup), // NOSONAR S3358
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
-					onSome: (session) => Context.Request.update({ session: Option.some(session) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))), // NOSONAR S3358
-				})),
-			),
-			apiKey: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
-				Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token))),
-				Effect.tap(() => Metric.increment(metrics.auth.apiKey.lookups)),
-				Effect.flatMap(apiKeyLookup),
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.all([
-						Metric.increment(metrics.auth.apiKey.misses),
-						audit.log('auth_failure', { details: { reason: 'invalid_api_key' } }),
-					], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid API key')))),
-					onSome: (key) => {
-						const expired = Option.match(key.expiresAt, { onNone: () => false, onSome: (expiry) => expiry < new Date() });
-						return expired
-							? Effect.fail(HttpError.Auth.of('API key expired'))
-							: Context.Request.update({ session: Option.some({
-								appId: '',
-								id: key.id,
-								mfaEnabled: false,
-								userId: key.userId,
-								verifiedAt: Option.none(),
-							}) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.apiKey.hits)));
-					},
+				bearer: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
+					Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token))),
+					Effect.tap(() => Metric.increment(metrics.auth.session.lookups)),
+					Effect.flatMap(sessionLookup), // NOSONAR S3358
+					Effect.flatMap(Option.match({
+						onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
+						onSome: (session) => Context.Request.update({ session: Option.some({ ...session, kind: 'session' }) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))), // NOSONAR S3358
+					})),
+				),
+				apiKey: (token: Redacted.Redacted<string>) => Context.Request.currentTenantId.pipe(
+					Effect.flatMap((tenantId) => Crypto.hmac(tenantId, Redacted.value(token)).pipe(Effect.map((hash) => ({ hash, tenantId })))),
+					Effect.tap(() => Metric.increment(metrics.auth.apiKey.lookups)),
+					Effect.flatMap(({ hash, tenantId }) => apiKeyLookup(hash).pipe(Effect.map(Option.map((key) => ({ key, tenantId }))))),
+					Effect.flatMap(Option.match({
+						onNone: () => Effect.all([
+							Metric.increment(metrics.auth.apiKey.misses),
+							audit.log('auth_failure', { details: { reason: 'invalid_api_key' } }),
+						], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid API key')))),
+						onSome: ({ key, tenantId }) => {
+							const expired = Option.match(key.expiresAt, { onNone: () => false, onSome: (expiry) => expiry < new Date() });
+							return expired
+								? Effect.fail(HttpError.Auth.of('API key expired'))
+								: Context.Request.update({ session: Option.some({
+									appId: tenantId,
+									id: key.id,
+									kind: 'apiKey',
+									mfaEnabled: false,
+									userId: key.userId,
+									verifiedAt: Option.none(),
+								}) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.apiKey.hits)));
+						},
 				})),
 			),
 		})));
@@ -175,12 +181,24 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			tenantId,
 			userAgent: Headers.get(req.headers, 'user-agent'),
 		};
-		const response = yield* app.pipe(Effect.provideService(Context.Request, ctx));
-		const { circuit } = yield* Context.Request.current;
-		const circuitState = pipe(circuit, Option.map((c) => c.state), Option.getOrUndefined);
-		return yield* Context.Request.within(tenantId, Effect.orDie(Client.tenant.with(tenantId, Effect.succeed( // FiberRef + Tag — both required for complete context scoping
-			HttpServerResponse.setHeaders(response, { 'x-request-id': requestId, ...circuitState && { 'x-circuit-state': circuitState } }),
-		))), ctx);
+		const { circuitState, response } = yield* Context.Request.within(
+			tenantId,
+			Effect.orDie(Client.tenant.with(tenantId, app.pipe(
+				Effect.provideService(Context.Request, ctx),
+				Effect.flatMap((response) => Context.Request.current.pipe(
+					Effect.map((requestContext) => ({
+						circuitState: pipe(requestContext.circuit, Option.map((c) => c.state), Option.getOrUndefined),
+						response,
+					})),
+				)),
+			))),
+			ctx,
+		);
+		const headers = Option.fromNullable(circuitState).pipe(Option.match({
+			onNone: () => ({ 'x-request-id': requestId }),
+			onSome: (state) => ({ 'x-circuit-state': state, 'x-request-id': requestId }),
+		}));
+		return HttpServerResponse.setHeaders(response, headers);
 	}));
 const cors = (origins?: ReadonlyArray<string>) => pipe(
 	(origins ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean),
@@ -200,6 +218,7 @@ const Middleware = {
 	// Auth
 	Auth: SessionAuth,
 	makeRequireRole,
+	requireInteractiveSession,
 	requireMfaVerified,
 	// Context
 	cors,

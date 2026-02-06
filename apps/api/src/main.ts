@@ -68,7 +68,7 @@ const ServicesLayer = Layer.mergeAll(Auth.Service.Default, StorageService.Defaul
 	Layer.provideMerge(ReplayGuardService.Default),
 	Layer.provideMerge(CacheService.Layer),
 	Layer.provideMerge(Resilience.Layer),
-	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default, ClusterService.Layer)),
+	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default, ClusterService.Layers.runner)),
 	Layer.provideMerge(PlatformLayer),
 );
 
@@ -123,7 +123,7 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
 // Entity handlers yield Entity.CurrentAddress internally, but Entity.toLayer uses Exclude<RX, CurrentAddress>
 // to remove it from layer requirements. TypeScript sometimes fails to compute this exclusion properly.
 // This type assertion is safe because CurrentAddress is only available within entity scope (not app level).
-// ShardingConfig is provided by ClusterService.Layer via _storageLayers.
+// ShardingConfig is provided by ClusterService.Layers.runner via _storageLayers.
 NodeRuntime.runMain((Effect.scoped(Layer.launch(ServerLayer)).pipe(
 	Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
 	Effect.ensuring(Effect.logInfo('Server shutdown complete')),

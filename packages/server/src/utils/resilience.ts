@@ -21,18 +21,23 @@ class BulkheadError extends Data.TaggedError('BulkheadError')<{ readonly operati
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _CONFIG = (() => {
-	const mkSchedules = <const T extends Record<string, Schedule.Schedule<unknown, unknown, never>>>(table: T) => ({ ...table, true: table['default'] });
-	return {
-		defaults: { bulkhead: 10, hedgeDelay: Duration.millis(100), threshold: 5, timeout: Duration.seconds(30) },
-		nonRetriable: new Set(['Auth', 'Conflict', 'Forbidden', 'Gone', 'NotFound', 'RateLimit', 'TimeoutError', 'Validation']) as ReadonlySet<string>,
-		schedules: mkSchedules({
-			default: Schedule.exponential(Duration.millis(100), 2).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3)), Schedule.upTo(Duration.seconds(10))),
-			fast: Schedule.exponential(Duration.millis(50), 1.5).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(2)), Schedule.upTo(Duration.seconds(2))),
-			slow: Schedule.exponential(Duration.millis(500), 2).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(5)), Schedule.upTo(Duration.seconds(30))),
-		}),
-	} as const;
-})();
+const _mkSchedule = (config: Resilience.ScheduleConfig): Schedule.Schedule<unknown, unknown, never> => {
+	const base = Schedule.exponential(config.base, config.factor ?? 2).pipe(
+		Schedule.jittered,
+		Schedule.intersect(Schedule.recurs(config.maxAttempts)),
+	);
+	return config.cap === undefined ? base : base.pipe(Schedule.upTo(config.cap));
+};
+const _CONFIG = {
+	defaults: { bulkhead: 10, hedgeDelay: Duration.millis(100), threshold: 5, timeout: Duration.seconds(30) },
+	nonRetriable: new Set(['Auth', 'Conflict', 'Forbidden', 'Gone', 'NotFound', 'RateLimit', 'TimeoutError', 'Validation']) as ReadonlySet<string>,
+	presets: {
+		brief: 		_mkSchedule({ base: Duration.millis(50), cap: Duration.seconds(2), maxAttempts: 2 }),
+		default: 	_mkSchedule({ base: Duration.millis(100), cap: Duration.seconds(10), maxAttempts: 3 }),
+		patient: 	_mkSchedule({ base: Duration.millis(500), cap: Duration.seconds(30), maxAttempts: 5 }),
+		persistent: _mkSchedule({ base: Duration.millis(100), cap: Duration.seconds(30), maxAttempts: 5 }),
+	},
+} as const;
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -49,7 +54,7 @@ class _ResilienceState extends Effect.Service<_ResilienceState>()('server/Resili
 const _run = <A, E, R>(operation: string, eff: Effect.Effect<A, E, R>, configuration: Resilience.Config<A, E, R> = {}): Effect.Effect<A, Resilience.Error<E>, R | Resilience.State> =>
 	_ResilienceState.pipe(Effect.flatMap(({ memoStore, semStore }) => {
 		const timeout = configuration.timeout === false ? undefined : (configuration.timeout ?? _CONFIG.defaults.timeout);
-		const schedule = Match.value(configuration.retry).pipe(Match.when(false, () => undefined), Match.when(Match.string, (key) => _CONFIG.schedules[key]), Match.when(true, () => _CONFIG.schedules.default), Match.when(undefined, () => _CONFIG.schedules.default), Match.orElse((s) => s));
+		const schedule = Match.value(configuration.retry).pipe(Match.when(false, () => undefined), Match.when(Match.string, (key: Resilience.SchedulePreset) => _CONFIG.presets[key]), Match.when(true, () => _CONFIG.presets.default), Match.when(undefined, () => _CONFIG.presets.default), Match.orElse((s) => s));
 		const circuitName = configuration.circuit === false ? undefined : (configuration.circuit ?? operation);
 		const threshold = configuration.threshold ?? _CONFIG.defaults.threshold;
 		const bulkhead = configuration.bulkhead === false ? undefined : configuration.bulkhead;
@@ -125,8 +130,10 @@ const Resilience: Resilience = Object.assign(
 		defaults: _CONFIG.defaults,
 		is: ((error: unknown, tag?: 'BulkheadError' | 'CircuitError' | 'TimeoutError') => Match.value(tag).pipe(Match.when('BulkheadError', () => error instanceof BulkheadError), Match.when('CircuitError', () => Circuit.is(error)), Match.when('TimeoutError', () => error instanceof TimeoutError), Match.orElse(() => error instanceof BulkheadError || Circuit.is(error) || error instanceof TimeoutError))) as Resilience['is'],
 		Layer: Layer.mergeAll(_ResilienceState.Default, Circuit.Layer),
+		presets: _CONFIG.presets,
 		run: _run,
-		schedules: _CONFIG.schedules,
+		schedule: ((presetOrConfig: Resilience.SchedulePreset | Resilience.ScheduleConfig) =>
+			typeof presetOrConfig === 'string' ? _CONFIG.presets[presetOrConfig] : _mkSchedule(presetOrConfig)) as Resilience['schedule'],
 		Timeout: TimeoutError,
 	},
 );
@@ -141,8 +148,9 @@ interface Resilience {
 	readonly defaults: typeof _CONFIG.defaults;
 	readonly is: { (error: unknown): error is Resilience.Error<unknown>; (error: unknown, tag: 'BulkheadError'): error is BulkheadError; (error: unknown, tag: 'CircuitError'): error is Circuit.Error; (error: unknown, tag: 'TimeoutError'): error is TimeoutError };
 	readonly Layer: Layer.Layer<Resilience.State>;
+	readonly presets: typeof _CONFIG.presets;
 	readonly run: <A, E, R>(operation: string, eff: Effect.Effect<A, E, R>, configuration?: Resilience.Config<A, E, R>) => Effect.Effect<A, Resilience.Error<E>, R | Resilience.State>;
-	readonly schedules: typeof _CONFIG.schedules;
+	readonly schedule: { (preset: Resilience.SchedulePreset): Schedule.Schedule<unknown, unknown, never>; (config: Resilience.ScheduleConfig): Schedule.Schedule<unknown, unknown, never> };
 	readonly Timeout: typeof TimeoutError;
 }
 namespace Resilience {
@@ -150,7 +158,9 @@ namespace Resilience {
 	export type BulkheadError = InstanceType<typeof BulkheadError>;
 	export type CircuitError = Circuit.Error;
 	export type Error<E> = E | TimeoutError | BulkheadError | CircuitError;
-	export type RetryMode = keyof typeof _CONFIG.schedules | boolean;
+	export type SchedulePreset = keyof typeof _CONFIG.presets;
+	export type ScheduleConfig = { readonly base: Duration.DurationInput; readonly cap?: Duration.DurationInput; readonly factor?: number; readonly maxAttempts: number };
+	export type RetryMode = SchedulePreset | boolean;
 	export type State = _ResilienceState | Circuit.State;
 	export type Config<A = unknown, E = unknown, R = unknown> = {
 		readonly bulkhead?: number | false;

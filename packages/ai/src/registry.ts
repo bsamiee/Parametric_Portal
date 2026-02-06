@@ -45,7 +45,7 @@ const AiRegistry = (() => {
                 provider:        S.optionalWith(S.Literal('openai'), { default: () => _CONFIG.defaults.embedding.provider }),
                 windowMs:        S.optionalWith(S.Int, { default: () => _CONFIG.defaults.embedding.windowMs }),
             }),
-            { default: () => _CONFIG.defaults.embedding },
+            { default: () =>    _CONFIG.defaults.embedding },
         ),
         language: S.optionalWith(
             S.Struct({
@@ -56,7 +56,7 @@ const AiRegistry = (() => {
                 topK:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topK }),
                 topP:            S.optionalWith(S.Number, { default: () => _CONFIG.defaults.language.topP }),
             }),
-            { default: () => _CONFIG.defaults.language },
+            { default: () =>    _CONFIG.defaults.language },
         ),
     });
     const AppSettingsSchema =    S.Struct({ ai: S.optional(SettingsSchema) });

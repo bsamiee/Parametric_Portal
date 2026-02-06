@@ -96,6 +96,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 			'ratelimit.remaining': 		Option.map(ctx.rateLimit, (rl) => String(rl.remaining)),
 				'ratelimit.reset_after_ms': Option.map(ctx.rateLimit, (rl) => String(D.toMillis(rl.resetAfter))),
 				'request.id': 				Option.some(ctx.requestId),
+				'session.kind': 			Option.map(ctx.session, (s) => s.kind),
 				'session.mfa': 				Option.map(ctx.session, (s) => String(s.mfaEnabled)),
 				'tenant.id': 				Option.some(ctx.tenantId),
 			});
@@ -196,7 +197,7 @@ namespace Context {
 	export type Serializable = InstanceType<typeof Serializable>;
 	export namespace Request {
 		export type Id = (typeof Request.Id)[keyof typeof Request.Id];
-		export interface Session {readonly appId: string; readonly id: string; readonly mfaEnabled: boolean; readonly userId: string; readonly verifiedAt: Option.Option<Date>;}
+			export interface Session {readonly appId: string; readonly id: string; readonly kind: 'apiKey' | 'session'; readonly mfaEnabled: boolean; readonly userId: string; readonly verifiedAt: Option.Option<Date>;}
 		export interface RateLimit {readonly delay: Duration.Duration; readonly limit: number; readonly remaining: number; readonly resetAfter: Duration.Duration;}
 		export interface Circuit {readonly name: string; readonly state: string;}
 		export interface Data {

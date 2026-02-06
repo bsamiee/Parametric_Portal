@@ -133,12 +133,20 @@ const _DeliveryRecord = S.Struct({
 	error: S.optional(S.String), status: S.Literal('delivered', 'failed'), statusCode: S.optional(S.Number),
 	tenantId: S.String, timestamp: S.Number, type: S.String,
 });
+const _WebhookStatusQuery = S.Struct({
+	url: S.optional(HttpApiSchema.param('url', S.String)),
+});
 
 // --- [ADMIN_SCHEMAS] ---------------------------------------------------------
 
 const _AdminSessionFilter = S.Struct({
+	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
 	ipAddress: S.optional(HttpApiSchema.param('ipAddress', S.String)),
+	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 50 }),
 	userId: S.optional(HttpApiSchema.param('userId', S.UUID)),
+});
+const _AdminStatementQuery = S.Struct({
+	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
 });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -177,6 +185,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 			.middleware(Middleware.Auth)
 			.addSuccess(_Success)
 			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'End session'),
 	)
@@ -193,6 +202,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 		HttpApiEndpoint.get('mfaStatus', '/mfa/status')
 			.middleware(Middleware.Auth)
 			.addSuccess(S.Struct({ enabled: S.optional(S.Boolean), enrolled: S.optional(S.Boolean), remainingBackupCodes: S.optional(S.Int) }))
+			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'Get MFA status'),
 	)
@@ -202,6 +212,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 			.addSuccess(S.Struct({ backupCodes: S.optional(S.Array(S.String)), qrDataUrl: S.optional(S.String), secret: S.optional(S.String) }))
 			.addError(HttpError.Auth)
 			.addError(HttpError.Conflict)
+			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Enroll in MFA')
@@ -213,6 +224,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 			.setPayload(S.Struct({ code: S.String.pipe(S.pattern(/^\d{6}$/)) }))
 			.addSuccess(_Success)
 			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'Verify MFA code')
 			.annotate(OpenApi.Description, 'Verifies TOTP code and enables MFA if not already enabled.'),
@@ -233,6 +245,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 			.setPayload(S.Struct({ code: S.NonEmptyTrimmedString }))
 			.addSuccess(S.Struct({ remainingCodes: S.Int, success: S.Literal(true) }))
 			.addError(HttpError.Auth)
+			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'Use MFA recovery code')
 			.annotate(OpenApi.Description, 'Validates backup code for account recovery when TOTP device is unavailable.'),
@@ -298,11 +311,11 @@ const _HealthGroup = HttpApiGroup.make('health')
 			.addError(HttpError.ServiceUnavailable)
 			.annotate(OpenApi.Exclude, true),
 	)
-	.add(
-		HttpApiEndpoint.get('metrics', '/metrics')
-			.addSuccess(S.String)
-			.annotate(OpenApi.Exclude, true),
-	);
+		.add(
+			HttpApiEndpoint.get('metrics', '/metrics')
+				.addSuccess(S.Void)
+				.annotate(OpenApi.Exclude, true),
+		);
 
 // Telemetry: unauthenticated OTLP ingest
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
@@ -512,11 +525,12 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Retry failed delivery'),
 	)
-	.add(
-		HttpApiEndpoint.get('status', '/status')
-			.addSuccess(S.Array(_DeliveryRecord))
-			.annotate(OpenApi.Summary, 'Delivery status'),
-	);
+		.add(
+			HttpApiEndpoint.get('status', '/status')
+				.setUrlParams(_WebhookStatusQuery)
+				.addSuccess(S.Array(_DeliveryRecord))
+				.annotate(OpenApi.Summary, 'Delivery status'),
+		);
 
 // Admin: group-level auth + common errors — excluded from OpenAPI
 const _AdminGroup = HttpApiGroup.make('admin')
@@ -531,12 +545,12 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addSuccess(KeysetResponse(User.json))
 			.annotate(OpenApi.Summary, 'List users'),
 	)
-	.add(
-		HttpApiEndpoint.get('listSessions', '/sessions')
-			.setUrlParams(_AdminSessionFilter)
-			.addSuccess(S.Array(Session.json))
-			.annotate(OpenApi.Summary, 'List sessions'),
-	)
+		.add(
+			HttpApiEndpoint.get('listSessions', '/sessions')
+				.setUrlParams(_AdminSessionFilter)
+				.addSuccess(KeysetResponse(Session.json))
+				.annotate(OpenApi.Summary, 'List sessions'),
+		)
 	.add(
 		HttpApiEndpoint.del('deleteSession', '/sessions/:id')
 			.setPath(S.Struct({ id: S.UUID }))
@@ -581,11 +595,27 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addSuccess(S.Void)
 			.annotate(OpenApi.Summary, 'SSE event stream'),
 	)
-	.add(
-		HttpApiEndpoint.get('listApps', '/apps')
-			.addSuccess(S.Array(App.json))
-			.annotate(OpenApi.Summary, 'List tenant apps'),
-	);
+		.add(
+			HttpApiEndpoint.get('listApps', '/apps')
+				.addSuccess(S.Array(App.json))
+				.annotate(OpenApi.Summary, 'List tenant apps'),
+		)
+		.add(
+			HttpApiEndpoint.get('dbIoStats', '/db/io-stats')
+				.addSuccess(S.Array(S.Unknown))
+				.annotate(OpenApi.Summary, 'Database IO statistics'),
+		)
+		.add(
+			HttpApiEndpoint.get('dbIoConfig', '/db/io-config')
+				.addSuccess(S.Array(S.Struct({ name: S.String, setting: S.String })))
+				.annotate(OpenApi.Summary, 'Database IO configuration'),
+		)
+		.add(
+			HttpApiEndpoint.get('dbStatements', '/db/statements')
+				.setUrlParams(_AdminStatementQuery)
+				.addSuccess(S.Array(S.Unknown))
+				.annotate(OpenApi.Summary, 'Database statement statistics'),
+		);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

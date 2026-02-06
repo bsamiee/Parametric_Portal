@@ -5,9 +5,10 @@
 import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SqlClient } from '@effect/sql';
-import { Array as A, Clock, Cron, Duration, Effect, Layer, Match, Metric, MetricState, Option, type Record, Ref, Schema as S } from 'effect';
+import { Array as A, Clock, Cron, Duration, Effect, Layer, Match, Metric, Option, pipe, Ref, Schema as S } from 'effect';
 import { Context } from '../context.ts';
 import { ClusterService } from '../infra/cluster.ts';
+import { EventBus } from '../infra/events.ts';
 import { MetricsService } from './metrics.ts';
 import { Telemetry } from './telemetry.ts';
 
@@ -28,35 +29,6 @@ const _AlertSchema = S.Struct({ current: S.Number, metric: S.String, severity: S
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-/** Transform MetricState to Prometheus-compatible snapshot entries. */
-const _stateToEntries = (state: MetricState.MetricState<unknown>, name: string, labels: Record<string, string>) =>
-	Match.value(state).pipe(
-		Match.when(MetricState.isCounterState, (counterState) => [{ labels, name, type: 'counter', value: Number(counterState.count) }]),
-		Match.when(MetricState.isGaugeState, (gaugeState) => [{ labels, name, type: 'gauge', value: Number(gaugeState.value) }]),
-		Match.when(MetricState.isHistogramState, (histogramState) => [
-			{ labels, name: `${name}_count`, type: 'histogram_count', value: histogramState.count },
-			{ labels, name: `${name}_sum`, type: 'histogram_sum', value: histogramState.sum },
-			{ labels, name: `${name}_min`, type: 'histogram_min', value: histogramState.min },
-			{ labels, name: `${name}_max`, type: 'histogram_max', value: histogramState.max },
-		]),
-		Match.when(MetricState.isSummaryState, (summaryState) => [
-			{ labels, name: `${name}_count`, type: 'summary_count', value: summaryState.count },
-			{ labels, name: `${name}_sum`, type: 'summary_sum', value: summaryState.sum },
-			...A.filterMap([...summaryState.quantiles], ([quantile, v]) => Option.map(v, (val) => ({ // NOSONAR S3358
-				labels: { ...labels, quantile: String(quantile) },
-				name,
-				type: 'summary_quantile' as const,
-				value: val,
-			}))),
-		]),
-		Match.when(MetricState.isFrequencyState, (frequencyState) => [...frequencyState.occurrences.entries()].map(([category, count]) => ({
-			labels: { ...labels, category },
-			name,
-			type: 'frequency',
-			value: count,
-		}))),
-			Match.orElse(() => []),
-		);
 const _loadAlerts = (database: DatabaseService) =>
 	database.kvStore.getJson(_CONFIG.kvKey, S.Array(_AlertSchema)).pipe(
 		Effect.map(Option.getOrElse(() => [] as const)),
@@ -74,6 +46,43 @@ const _updateAlerts = (
 	);
 	return [config.value >= config.critical && !wasAlreadyCritical, next] as const;
 };
+const _severity = (alerts: ReadonlyArray<typeof _AlertSchema.Type>, metric: string) => pipe(
+	alerts,
+	A.findFirst((alert) => alert.metric === metric),
+	Option.map((alert) => alert.severity),
+);
+const _isCritical = (severity: Option.Option<typeof _AlertSchema.Type['severity']>) => Option.match(severity, {
+	onNone: () => false,
+	onSome: (value) => value === 'critical',
+});
+const _emitTransitions = (
+	eventBus: EventBus,
+	metric: string,
+	current: ReadonlyArray<typeof _AlertSchema.Type>,
+	next: ReadonlyArray<typeof _AlertSchema.Type>,
+	value: number,
+	thresholds: { readonly critical: number; readonly warning: number },
+) => {
+	const currentSeverity = _severity(current, metric);
+	const nextSeverity = _severity(next, metric);
+	const criticalRaised = !_isCritical(currentSeverity) && _isCritical(nextSeverity);
+	const recovered = _isCritical(currentSeverity) && !_isCritical(nextSeverity);
+	const emit = (action: 'critical' | 'recovered') => eventBus.publish({
+		aggregateId: metric,
+		payload: {
+			_tag: 'polling.alert',
+			action,
+			current: value,
+			metric,
+			thresholds,
+		},
+		tenantId: Context.Request.Id.system,
+	}).pipe(Effect.ignore);
+	return Effect.all([
+		Effect.when(emit('critical'), () => criticalRaised),
+		Effect.when(emit('recovered'), () => recovered),
+	], { discard: true });
+};
 
 // --- [SERVICE] ---------------------------------------------------------------
 
@@ -82,6 +91,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 		const metrics = yield* MetricsService;
 		const database = yield* DatabaseService;
 		const sql = yield* SqlClient.SqlClient;
+		const eventBus = yield* EventBus;
 		// Load persisted alerts from kvStore (fallback to empty on missing/parse error)
 		const initial = yield* _loadAlerts(database);
 		const alerts = yield* Ref.make(initial);
@@ -107,6 +117,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 							});
 							yield* Ref.set(alerts, updated);
 							yield* persistAlerts(updated);
+							yield* _emitTransitions(eventBus, 'jobs_dlq_size', current, updated, value, _CONFIG.thresholds.dlqSize);
 							yield* Effect.when(Effect.logWarning('DLQ size critical', { threshold: _CONFIG.thresholds.dlqSize.critical, value }), () => shouldLog);
 							return value;
 						}).pipe(Effect.orElseSucceed(() => 0), Telemetry.span('polling.dlqSize', { metrics: false, 'polling.metric': 'jobs_dlq_size' })),
@@ -129,6 +140,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 							});
 							yield* Ref.set(alerts, updated);
 							yield* persistAlerts(updated);
+							yield* _emitTransitions(eventBus, 'jobs_queue_depth', current, updated, value, _CONFIG.thresholds.jobQueueDepth);
 							yield* Effect.when(Effect.logWarning('Job queue depth critical', { threshold: _CONFIG.thresholds.jobQueueDepth.critical, value }), () => shouldLog);
 							return value;
 					}).pipe(
@@ -154,6 +166,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 							});
 							yield* Ref.set(alerts, updated);
 							yield* persistAlerts(updated);
+							yield* _emitTransitions(eventBus, 'events_outbox_depth', current, updated, value, _CONFIG.thresholds.eventOutboxDepth);
 							yield* Effect.when(Effect.logWarning('Event outbox depth critical', { threshold: _CONFIG.thresholds.eventOutboxDepth.critical, value }), () => shouldLog);
 							return value;
 					}).pipe(
@@ -196,41 +209,37 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 				)),
 				Telemetry.span('polling.refresh', { metrics: false }),
 			);
-			const snapshot = Metric.snapshot.pipe(Effect.map((snap) =>
-				[...snap].flatMap((entry) =>
-					_stateToEntries(
-						entry.metricState,
-						entry.metricKey.name,
-						Object.fromEntries([...entry.metricKey.tags].map((tag) => [tag.key, tag.value])),
-					),
-				),
-			), Telemetry.span('polling.snapshot', { metrics: false }));
+			const snapshot = MetricsService.snapshotEntries.pipe(Telemetry.span('polling.snapshot', { metrics: false }));
+			const snapshotPrometheus = snapshot.pipe(
+				Effect.map(MetricsService.prometheus),
+				Telemetry.span('polling.snapshot.prometheus', { metrics: false }),
+			);
 			const getHealth = () => _loadAlerts(database).pipe(
 				Effect.tap((latest) => Ref.set(alerts, latest)),
 				Effect.orElse(() => Ref.get(alerts)),
 				Telemetry.span('polling.getHealth', { metrics: false }),
 			);
-			return { getHealth, pollDlqSize, pollEventOutboxDepth, pollIoStats, pollJobQueueDepth, refresh, snapshot };
+			return { getHealth, pollDlqSize, pollEventOutboxDepth, pollIoStats, pollJobQueueDepth, refresh, snapshot, snapshotPrometheus };
 		}),
 	}) {
 		/** Consolidated cron layer for all polling schedules */
 		static readonly Crons = Layer.mergeAll(
-			ClusterService.cron({
+			ClusterService.Schedule.cron({
 			cron: Cron.unsafeParse(_CONFIG.cron.dlqSize),
 			execute: PollingService.pipe(Effect.flatMap((p) => p.pollDlqSize)),
 			name: 'polling-dlq',
 		}),
-		ClusterService.cron({
+			ClusterService.Schedule.cron({
 				cron: Cron.unsafeParse(_CONFIG.cron.ioStats),
 				execute: PollingService.pipe(Effect.flatMap((p) => p.pollIoStats)),
 				name: 'polling-io-stats',
 			}),
-			ClusterService.cron({
+			ClusterService.Schedule.cron({
 				cron: Cron.unsafeParse(_CONFIG.cron.jobQueueDepth),
 				execute: PollingService.pipe(Effect.flatMap((p) => p.pollJobQueueDepth)),
 				name: 'polling-job-queue-depth',
 			}),
-			ClusterService.cron({
+			ClusterService.Schedule.cron({
 				cron: Cron.unsafeParse(_CONFIG.cron.eventOutboxDepth),
 				execute: PollingService.pipe(Effect.flatMap((p) => p.pollEventOutboxDepth)),
 				name: 'polling-event-outbox-depth',

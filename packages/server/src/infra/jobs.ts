@@ -8,6 +8,7 @@ import { SqlClient } from '@effect/sql';
 import { Chunk, Clock, DateTime, Duration, Effect, FiberMap, HashMap, Layer, Mailbox, Metric, Option, PubSub, Ref, Schedule, Schema as S, Stream } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import type { JobDlq } from '@parametric-portal/database/models';
+import { Resilience } from '../utils/resilience.ts';
 import { Context } from '../context.ts';
 import { CacheService } from '../platform/cache.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -137,8 +138,8 @@ const _CONFIG = {
 	},
 	statusHub: { capacity: 256 },
 } as const;
-const _retryBase = (cfg: { readonly base: Duration.Duration; readonly maxAttempts: number }) =>
-	Schedule.exponential(cfg.base).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(cfg.maxAttempts)), Schedule.upTo(_CONFIG.retry.cap));
+const _retryBase = (cfg: { readonly base: Duration.Duration; readonly maxAttempts: number }): Schedule.Schedule<[Duration.Duration, number], unknown, never> =>
+	Resilience.schedule({ base: cfg.base, cap: _CONFIG.retry.cap, maxAttempts: cfg.maxAttempts }) as Schedule.Schedule<[Duration.Duration, number], unknown, never>;
 
 // --- [CONTEXT] ---------------------------------------------------------------
 
@@ -174,99 +175,120 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 	yield* Effect.addFinalizer(() => FiberMap.join(runningJobs).pipe(Effect.ignore));
 	const progressMailboxes = yield* Ref.make(HashMap.empty<string, Mailbox.Mailbox<{ pct: number; message: string }>>());
 	const { cache, database, eventBus, metrics, sharding, sql } = yield* Effect.all({cache: CacheService, database: DatabaseService, eventBus: EventBus, metrics: MetricsService, sharding: Sharding.Sharding, sql: SqlClient.SqlClient,});
-	const _jobCache = {
-		readProgress: (jobId: string, tenantId: string) => cache.kv.get(`${_CONFIG.cache.keyPrefix}progress:${jobId}`, _SCHEMA.progress).pipe(
-			Effect.flatMap(Option.match({
-				onNone: () => Context.Request.withinSync(tenantId, database.jobs.one([{ field: 'job_id', value: jobId }])).pipe(
-					Effect.map(Option.flatMap((job) => job.progress)),
-					Effect.tap(Option.match({
-						onNone: () => Effect.void,
-						onSome: (progress) => cache.kv.set(`${_CONFIG.cache.keyPrefix}progress:${jobId}`, progress, _CONFIG.cache.ttl),
+		const _runtime = {
+			handlers: {
+				resolve: (jobId: string, type: string) => Ref.get(handlers).pipe(
+					Effect.flatMap((handlerMap) => Option.match(HashMap.get(handlerMap, type), {
+						onNone: () => Effect.fail(JobError.from(jobId, 'HandlerMissing', { type })),
+						onSome: Effect.succeed,
 					})),
-					Effect.provideService(SqlClient.SqlClient, sql),
 				),
-				onSome: (progress) => Effect.succeed(Option.some(progress)),
-			})),
-		),
-		readState: (jobId: string, tenantId: string) => cache.kv.get(`${_CONFIG.cache.keyPrefix}state:${jobId}`, JobState).pipe(
-			Effect.flatMap(Option.match({
-				onNone: () => Context.Request.withinSync(tenantId, database.jobs.one([{ field: 'job_id', value: jobId }])).pipe(
+			},
+			keys: {
+				progress: (jobId: string) => `${_CONFIG.cache.keyPrefix}progress:${jobId}`,
+				state: (jobId: string) => `${_CONFIG.cache.keyPrefix}state:${jobId}`,
+			},
+			progress: {
+				mailbox: {
+					cleanup: (jobId: string) => Ref.modify(progressMailboxes, (mailboxes) => [HashMap.get(mailboxes, jobId), HashMap.remove(mailboxes, jobId)] as const).pipe(
+						Effect.flatMap(Option.match({
+							onNone: () => Effect.void,
+							onSome: (mailbox) => mailbox.end.pipe(Effect.asVoid),
+						})),
+					),
+					get: (jobId: string) => Ref.get(progressMailboxes).pipe(
+						Effect.flatMap((mailboxes) => Option.match(HashMap.get(mailboxes, jobId), {
+							onNone: () => Mailbox.make<{ pct: number; message: string }>({ capacity: 16, strategy: 'sliding' }).pipe(
+								Effect.tap((mailbox) => Ref.update(progressMailboxes, HashMap.set(jobId, mailbox))),
+							),
+							onSome: Effect.succeed,
+						})),
+					),
+				},
+				read: (jobId: string, tenantId: string) => cache.kv.get(_runtime.keys.progress(jobId), _SCHEMA.progress).pipe(
 					Effect.flatMap(Option.match({
-						onNone: () => Effect.succeed(Option.none<JobState>()),
-						onSome: (job) => Effect.succeed(Option.some(JobState.fromRecord(job))),
+						onNone: () => Context.Request.withinSync(tenantId, database.jobs.one([{ field: 'job_id', value: jobId }])).pipe(
+							Effect.map(Option.flatMap((job) => job.progress)),
+							Effect.tap(Option.match({
+								onNone: () => Effect.void,
+								onSome: (progress) => cache.kv.set(_runtime.keys.progress(jobId), progress, _CONFIG.cache.ttl),
+							})),
+							Effect.provideService(SqlClient.SqlClient, sql),
+						),
+						onSome: (progress) => Effect.succeed(Option.some(progress)),
 					})),
-					Effect.tap(Option.match({
-						onNone: () => Effect.void,
-						onSome: (state) => cache.kv.set(`${_CONFIG.cache.keyPrefix}state:${jobId}`, state, _CONFIG.cache.ttl),
+				),
+				write: (jobId: string, tenantId: string, progress: typeof _SCHEMA.progress.Type) => Effect.all([
+					cache.kv.set(_runtime.keys.progress(jobId), progress, _CONFIG.cache.ttl),
+					Context.Request.withinSync(tenantId, database.jobs.set(jobId, { progress: Option.some(progress) })).pipe(
+						Effect.tapError((error) => Effect.logWarning('Job progress persist failed', { error: String(error), jobId })),
+						Effect.ignore,
+						Effect.provideService(SqlClient.SqlClient, sql),
+					),
+				], { discard: true }),
+			},
+			state: {
+				read: (jobId: string, tenantId: string) => cache.kv.get(_runtime.keys.state(jobId), JobState).pipe(
+					Effect.flatMap(Option.match({
+						onNone: () => Context.Request.withinSync(tenantId, database.jobs.one([{ field: 'job_id', value: jobId }])).pipe(
+							Effect.flatMap(Option.match({
+								onNone: () => Effect.succeed(Option.none<JobState>()),
+								onSome: (job) => Effect.succeed(Option.some(JobState.fromRecord(job))),
+							})),
+							Effect.tap(Option.match({
+								onNone: () => Effect.void,
+								onSome: (state) => cache.kv.set(_runtime.keys.state(jobId), state, _CONFIG.cache.ttl),
+							})),
+							Effect.provideService(SqlClient.SqlClient, sql),
+						),
+						onSome: (state) => Effect.succeed(Option.some(state)),
 					})),
-					Effect.provideService(SqlClient.SqlClient, sql),
 				),
-				onSome: (state) => Effect.succeed(Option.some(state)),
-			})),
-		),
-		writeProgress: (jobId: string, tenantId: string, progress: typeof _SCHEMA.progress.Type) =>
-			Effect.all([
-				cache.kv.set(`${_CONFIG.cache.keyPrefix}progress:${jobId}`, progress, _CONFIG.cache.ttl),
-				Context.Request.withinSync(tenantId, database.jobs.set(jobId, { progress: Option.some(progress) })).pipe(
-					Effect.tapError((error) => Effect.logWarning('Job progress persist failed', { error: String(error), jobId })),
-					Effect.ignore,
-					Effect.provideService(SqlClient.SqlClient, sql),
+				transition: (jobId: string, tenantId: string, status: typeof _SCHEMA.status.Type, timestamp: number, options?: { error?: string; result?: unknown }) =>
+					_runtime.state.read(jobId, tenantId).pipe(
+						Effect.map(Option.getOrElse(() => null)),
+						Effect.map((current) => JobState.transition(current, status, timestamp, options)),
+						Effect.tap((state) => _runtime.state.write(jobId, tenantId, state)),
+					),
+				write: (jobId: string, tenantId: string, state: JobState) => Effect.all([
+					cache.kv.set(_runtime.keys.state(jobId), state, _CONFIG.cache.ttl),
+					Context.Request.withinSync(tenantId, database.jobs.set(jobId, {
+						attempts: state.attempts,
+						completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((timestamp) => new Date(timestamp))),
+						history: state.history,
+						lastError: Option.fromNullable(state.lastError),
+						result: Option.fromNullable(state.result),
+						status: state.status,
+					})).pipe(
+						Effect.tapError((error) => Effect.logWarning('Job state persist failed', { error: String(error), jobId })),
+						Effect.ignore,
+						Effect.provideService(SqlClient.SqlClient, sql),
+					),
+				], { discard: true }),
+			},
+			status: {
+				publish: (jobId: string, type: string, status: typeof _SCHEMA.status.Type, tenantId: string, error?: string) => sharding.getSnowflake.pipe(
+					Effect.flatMap((snowflake) => PubSub.publish(statusHub, new JobStatusEvent({ error, id: String(snowflake), jobId, status, tenantId, type }))),
 				),
-			], { discard: true }),
-		writeState: (jobId: string, tenantId: string, state: JobState) =>
-			Effect.all([
-				cache.kv.set(`${_CONFIG.cache.keyPrefix}state:${jobId}`, state, _CONFIG.cache.ttl),
-				Context.Request.withinSync(tenantId, database.jobs.set(jobId, {
-					attempts: state.attempts,
-					completedAt: Option.fromNullable(state.completedAt).pipe(Option.map((ts) => new Date(ts))),
-					history: state.history,
-					lastError: Option.fromNullable(state.lastError),
-					result: Option.fromNullable(state.result),
-					status: state.status,
-				})).pipe(
-					Effect.tapError((error) => Effect.logWarning('Job state persist failed', { error: String(error), jobId })),
-					Effect.ignore,
-					Effect.provideService(SqlClient.SqlClient, sql),
-				),
-			], { discard: true }),
-	} as const;
-	const _transitionState = (jobId: string, tenantId: string, to: typeof _SCHEMA.status.Type, ts: number, opts?: { error?: string; result?: unknown }) =>
-		_jobCache.readState(jobId, tenantId).pipe(
-			Effect.map(Option.getOrElse(() => null)),
-			Effect.map((current) => JobState.transition(current, to, ts, opts)),
-			Effect.tap((state) => _jobCache.writeState(jobId, tenantId, state)),
-		);
-	const _progressMailbox = {
-		cleanup: (jobId: string) => Ref.modify(progressMailboxes, (mailboxes) => [HashMap.get(mailboxes, jobId), HashMap.remove(mailboxes, jobId)] as const).pipe(
-			Effect.flatMap(Option.match({
-				onNone: () => Effect.void,
-				onSome: (mailbox) => mailbox.end.pipe(Effect.asVoid),
-			})),
-		),
-		get: (jobId: string) => Ref.get(progressMailboxes).pipe(Effect.flatMap((mailboxes) => Option.match(HashMap.get(mailboxes, jobId), {
-			onNone: () => Mailbox.make<{ pct: number; message: string }>({ capacity: 16, strategy: 'sliding' }).pipe(Effect.tap((mailbox) => Ref.update(progressMailboxes, HashMap.set(jobId, mailbox))),),
-			onSome: Effect.succeed,
-		}))),
-	} as const;
-	const publishStatus = (jobId: string, type: string, status: typeof _SCHEMA.status.Type, tenantId: string, error?: string) => sharding.getSnowflake.pipe(Effect.flatMap((snowflake) => PubSub.publish(statusHub, new JobStatusEvent({ error, id: String(snowflake), jobId, status, tenantId, type }))));
-	const _resolveHandler = (jobId: string, type: string) => Ref.get(handlers).pipe(
-		Effect.flatMap((handlerMap) => Option.match(HashMap.get(handlerMap, type), {
-			onNone: () => Effect.fail(JobError.from(jobId, 'HandlerMissing', { type })),
-			onSome: Effect.succeed,
-		})),
-	);
-	const _executeHandler = (jobId: string, envelope: typeof JobPayload.Type, handler: (payload: unknown) => Effect.Effect<unknown, unknown, never>) => {
-		const tenantId = envelope.tenantId;
-		const retryWithStateTracking = _retryBase(_CONFIG.retry.job).pipe(
-			Schedule.resetAfter(_CONFIG.retry.job.resetAfter),
-			Schedule.whileInput((error: JobError) => !error.isTerminal),
-			Schedule.tapInput((error: JobError) => Clock.currentTimeMillis.pipe(
-				Effect.flatMap((retryTs) => Effect.all([
-					_transitionState(jobId, tenantId, 'processing', retryTs, { error: String(error.cause) }).pipe(Effect.asVoid, Effect.ignore),
-					Metric.increment(metrics.jobs.retries),
-				], { discard: true })),
-			)),
-			Schedule.tapOutput(([delay, attempt]) => Effect.all([
+			},
+		} as const;
+		const _executeHandler = (context: {
+			readonly envelope: typeof JobPayload.Type;
+			readonly handler: (payload: unknown) => Effect.Effect<unknown, unknown, never>;
+			readonly jobId: string;
+		}) => {
+			const { envelope, handler, jobId } = context;
+			const tenantId = envelope.tenantId;
+			const retryWithStateTracking = _retryBase(_CONFIG.retry.job).pipe(
+				Schedule.resetAfter(_CONFIG.retry.job.resetAfter),
+				Schedule.whileInput((error: JobError) => !error.isTerminal),
+				Schedule.tapInput((error: JobError) => Clock.currentTimeMillis.pipe(
+					Effect.flatMap((retryTs) => Effect.all([
+						_runtime.state.transition(jobId, tenantId, 'processing', retryTs, { error: String(error.cause) }).pipe(Effect.asVoid, Effect.ignore),
+						Metric.increment(metrics.jobs.retries),
+					], { discard: true })),
+				)),
+				Schedule.tapOutput(([delay, attempt]: [Duration.Duration, number]) => Effect.all([
 				Metric.update(Metric.taggedWithLabels(metrics.jobs.waitDuration, MetricsService.label({ job_type: envelope.type })), delay),
 				Effect.annotateCurrentSpan({ 'retry.attempt': attempt + 1, 'retry.delay_ms': Duration.toMillis(delay) }),
 			], { discard: true })),
@@ -275,99 +297,101 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 			handler(envelope.payload).pipe(Effect.mapError((error) => JobError.from(jobId, 'Processing', error))),
 			JobContext,
 			{
-				jobId,
-				priority: envelope.priority ?? 'normal',
-				reportProgress: (pct, message) => _progressMailbox.get(jobId).pipe(
-					Effect.flatMap((mailbox) => mailbox.offer({ message, pct })),
-					Effect.zipRight(_jobCache.writeProgress(jobId, tenantId, { message, pct })),
-					Effect.asVoid,
+					jobId,
+					priority: envelope.priority ?? 'normal',
+					reportProgress: (pct, message) => _runtime.progress.mailbox.get(jobId).pipe(
+						Effect.flatMap((mailbox) => mailbox.offer({ message, pct })),
+						Effect.zipRight(_runtime.progress.write(jobId, tenantId, { message, pct })),
+						Effect.asVoid,
+					),
+					tenantId,
+				},
+			).pipe(
+				Effect.catchTag('JobError', (error) => error.isTerminal ? _handleFailure({ envelope, error, jobId }) : Effect.fail(error)),
+				Effect.catchAll((error) => Effect.fail(JobError.from(jobId, 'Processing', error))),
+				Effect.retryOrElse(retryWithStateTracking, (lastError) =>
+					_handleFailure({ envelope, error: JobError.from(jobId, 'MaxRetries', lastError.cause), jobId }).pipe(
+						Effect.catchAll((nested) => Effect.fail(JobError.from(jobId, 'Processing', nested))),
+					),
 				),
-				tenantId,
-			},
-		).pipe(
-			Effect.catchTag('JobError', (error) => error.isTerminal ? handleFailure(jobId, envelope, error) : Effect.fail(error)),
-			Effect.catchAll((error) => Effect.fail(JobError.from(jobId, 'Processing', error))),
-			Effect.retryOrElse(retryWithStateTracking, (lastError) =>
-				handleFailure(jobId, envelope, JobError.from(jobId, 'MaxRetries', lastError.cause)).pipe(Effect.catchAll((nested) => Effect.fail(JobError.from(jobId, 'Processing', nested))),),
-			),
-			MetricsService.trackJob({ jobType: envelope.type, operation: 'process', priority: envelope.priority }),
-			Effect.ensuring(Effect.when(Entity.keepAlive(false), () => envelope.duration === 'long')),
-		);
-	};
-	const _handleCompletion = (jobId: string, envelope: typeof JobPayload.Type, startTs: number) =>
-		Clock.currentTimeMillis.pipe(
-			Effect.flatMap((completeTs) => _transitionState(jobId, envelope.tenantId, 'complete', completeTs).pipe(
-				Effect.tap((state) => Effect.all([
-					publishStatus(jobId, envelope.type, 'complete', envelope.tenantId),
-					eventBus.emit({
-						aggregateId: jobId,
-						payload: { _tag: 'job', action: 'completed', result: state.result, type: envelope.type },
-						tenantId: envelope.tenantId,
-					}),
-					Metric.increment(metrics.jobs.completions),
-					_progressMailbox.cleanup(jobId),
-					Effect.logDebug('Job completed', { 'job.elapsed': Duration.format(Duration.millis(completeTs - startTs)) }),
-				], { discard: true })),
-			)),
-		);
-	const handleFailure = (jobId: string, envelope: typeof JobPayload.Type, error: JobError) =>
-		Telemetry.span(
+				MetricsService.trackJob({ jobType: envelope.type, operation: 'process', priority: envelope.priority }),
+				Effect.ensuring(Effect.when(Entity.keepAlive(false), () => envelope.duration === 'long')),
+			);
+		};
+		const _handleCompletion = (context: { readonly envelope: typeof JobPayload.Type; readonly jobId: string; readonly startTs: number }) =>
 			Clock.currentTimeMillis.pipe(
-				Effect.flatMap((failTs) => _transitionState(jobId, envelope.tenantId, 'failed', failTs, { error: String(error.cause) })),
-				Effect.tap((state) => Effect.uninterruptible(Effect.all([
-					Context.Request.withinSync(envelope.tenantId, database.jobDlq.insert({
-						appId: envelope.tenantId,
-						attempts: state.attempts,
-						errorHistory: state.errorHistory,
-						errorReason: error.reason,
-						originalJobId: jobId,
-						payload: envelope.payload,
-						replayedAt: Option.none(),
-						requestId: Option.none(),
-						source: 'job',
-						type: envelope.type,
-						userId: Option.none(),
-					})).pipe(Effect.zipRight(Metric.increment(metrics.jobs.deadLettered))),
-					publishStatus(jobId, envelope.type, 'failed', envelope.tenantId, String(error.cause)),
-					eventBus.emit({
-						aggregateId: jobId,
-						payload: { _tag: 'job', action: 'failed', reason: error.reason, type: envelope.type },
-						tenantId: envelope.tenantId,
-					}),
-					Metric.increment(metrics.jobs.failures),
-					_progressMailbox.cleanup(jobId),
-				], { discard: true }))),
-				Effect.flatMap(() => Effect.fail(error)),
-			),
-			'job.handleFailure',
-			{ 'error.reason': error.reason, 'job.id': jobId, metrics: false },
-		);
-	const processJob = (jobId: string, envelope: typeof JobPayload.Type) => Telemetry.span(
-		Context.Request.within(envelope.tenantId, Context.Request.withinCluster({ entityId: currentAddress.entityId, entityType: currentAddress.entityType, shardId: currentAddress.shardId })(
-			Effect.gen(function* () {
-				const handler = yield* _resolveHandler(jobId, envelope.type);
-				const ts = yield* Clock.currentTimeMillis;
-				yield* _transitionState(jobId, envelope.tenantId, 'processing', ts);
-				yield* publishStatus(jobId, envelope.type, 'processing', envelope.tenantId);
-				yield* Effect.when(Entity.keepAlive(true), () => envelope.duration === 'long');
-				yield* _executeHandler(jobId, envelope, handler);
-				yield* _handleCompletion(jobId, envelope, ts);
-			}).pipe(
-				Effect.onInterrupt(() => Clock.currentTimeMillis.pipe(
-					Effect.flatMap((cancelTs) => Effect.all([
-						_transitionState(jobId, envelope.tenantId, 'cancelled', cancelTs).pipe(Effect.asVoid),
-						publishStatus(jobId, envelope.type, 'cancelled', envelope.tenantId),
-						eventBus.emit({
-							aggregateId: jobId,
-							payload: { _tag: 'job', action: 'cancelled', type: envelope.type },
-							tenantId: envelope.tenantId,
+				Effect.flatMap((completeTs) => _runtime.state.transition(context.jobId, context.envelope.tenantId, 'complete', completeTs).pipe(
+					Effect.tap((state) => Effect.all([
+						_runtime.status.publish(context.jobId, context.envelope.type, 'complete', context.envelope.tenantId),
+						eventBus.publish({
+							aggregateId: context.jobId,
+							payload: { _tag: 'job', action: 'completed', result: state.result, type: context.envelope.type },
+							tenantId: context.envelope.tenantId,
 						}),
-						Metric.increment(metrics.jobs.cancellations),
-						_progressMailbox.cleanup(jobId),
+						Metric.increment(metrics.jobs.completions),
+						_runtime.progress.mailbox.cleanup(context.jobId),
+						Effect.logDebug('Job completed', { 'job.elapsed': Duration.format(Duration.millis(completeTs - context.startTs)) }),
 					], { discard: true })),
-					Effect.catchAllCause(() => Effect.void),
 				)),
-			),
+			);
+		const _handleFailure = (context: { readonly envelope: typeof JobPayload.Type; readonly error: JobError; readonly jobId: string }) =>
+			Telemetry.span(
+				Clock.currentTimeMillis.pipe(
+					Effect.flatMap((failTs) => _runtime.state.transition(context.jobId, context.envelope.tenantId, 'failed', failTs, { error: String(context.error.cause) })),
+					Effect.tap((state) => Effect.uninterruptible(Effect.all([
+						Context.Request.withinSync(context.envelope.tenantId, database.jobDlq.insert({
+							appId: context.envelope.tenantId,
+							attempts: state.attempts,
+							errorHistory: state.errorHistory,
+							errorReason: context.error.reason,
+							originalJobId: context.jobId,
+							payload: context.envelope.payload,
+							replayedAt: Option.none(),
+							requestId: Option.none(),
+							source: 'job',
+							type: context.envelope.type,
+							userId: Option.none(),
+						})).pipe(Effect.zipRight(Metric.increment(metrics.jobs.deadLettered))),
+						_runtime.status.publish(context.jobId, context.envelope.type, 'failed', context.envelope.tenantId, String(context.error.cause)),
+						eventBus.publish({
+							aggregateId: context.jobId,
+							payload: { _tag: 'job', action: 'failed', reason: context.error.reason, type: context.envelope.type },
+							tenantId: context.envelope.tenantId,
+						}),
+						Metric.increment(metrics.jobs.failures),
+						_runtime.progress.mailbox.cleanup(context.jobId),
+					], { discard: true }))),
+					Effect.flatMap(() => Effect.fail(context.error)),
+				),
+				'job.handleFailure',
+				{ 'error.reason': context.error.reason, 'job.id': context.jobId, metrics: false },
+			);
+		const processJob = (jobId: string, envelope: typeof JobPayload.Type) => Telemetry.span(
+			Context.Request.within(envelope.tenantId, Context.Request.withinCluster({ entityId: currentAddress.entityId, entityType: currentAddress.entityType, shardId: currentAddress.shardId })(
+				Effect.gen(function* () {
+					const handler = yield* _runtime.handlers.resolve(jobId, envelope.type);
+					const ts = yield* Clock.currentTimeMillis;
+					yield* _runtime.state.transition(jobId, envelope.tenantId, 'processing', ts);
+					yield* _runtime.status.publish(jobId, envelope.type, 'processing', envelope.tenantId);
+					yield* Effect.when(Entity.keepAlive(true), () => envelope.duration === 'long');
+					yield* _executeHandler({ envelope, handler, jobId });
+					yield* _handleCompletion({ envelope, jobId, startTs: ts });
+				}).pipe(
+					Effect.onInterrupt(() => Clock.currentTimeMillis.pipe(
+						Effect.flatMap((cancelTs) => Effect.all([
+							_runtime.state.transition(jobId, envelope.tenantId, 'cancelled', cancelTs).pipe(Effect.asVoid),
+							_runtime.status.publish(jobId, envelope.type, 'cancelled', envelope.tenantId),
+							eventBus.publish({
+								aggregateId: jobId,
+								payload: { _tag: 'job', action: 'cancelled', type: envelope.type },
+								tenantId: envelope.tenantId,
+							}),
+							Metric.increment(metrics.jobs.cancellations),
+							_runtime.progress.mailbox.cleanup(jobId),
+						], { discard: true })),
+						Effect.catchAllCause(() => Effect.void),
+					)),
+				),
 		)),
 		'job.process',
 		{ 'job.id': jobId, 'job.type': envelope.type, metrics: false },
@@ -391,32 +415,33 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 		type: payload.type,
 		updatedAt: undefined,
 	});
-	return {
-		cancel: ({ payload: { jobId } }) => FiberMap.remove(runningJobs, jobId).pipe(
-			Effect.catchAll(() => _jobCache.readState(jobId, 'system').pipe(
-				Effect.flatMap(Option.match({
-					onNone: () => Effect.fail(JobError.from(jobId, 'NotFound')),
-					onSome: (state) => Effect.fail(JobError.from(jobId, JobState._statusProps[state.status].cancelError)),
-				})),
+		return {
+			cancel: ({ payload: { jobId, tenantId } }) => FiberMap.has(runningJobs, jobId).pipe(
+				Effect.flatMap((isRunning) => isRunning
+					? FiberMap.remove(runningJobs, jobId)
+					: _runtime.state.read(jobId, tenantId).pipe(Effect.flatMap(Option.match({
+						onNone: () => Effect.fail(JobError.from(jobId, 'NotFound')),
+						onSome: (state) => Effect.fail(JobError.from(jobId, JobState._statusProps[state.status].cancelError)),
+					}))),
+				),
 				Effect.catchAll((error) => Effect.fail(error instanceof JobError ? error : JobError.from(jobId, 'Processing', error))),
-			)),
-		),
-		progress: (envelope) => {
-			const jobId = envelope.payload.jobId;
-			const tenantId = envelope.payload.tenantId;
-			return Effect.all([_progressMailbox.get(jobId), _jobCache.readProgress(jobId, tenantId)]).pipe(
-				Effect.map(([mailbox, last]) => Stream.concat(
-					Option.match(last, { onNone: () => Stream.empty, onSome: (progress) => Stream.make(progress as typeof _SCHEMA.progress.Type) }),
-					Mailbox.toStream(mailbox),
-				).pipe(Stream.tap(() => Metric.increment(Metric.taggedWithLabels(metrics.stream.elements, MetricsService.label({ stream: 'job_progress' })))))),
-				Effect.catchAll(() => Effect.succeed(Stream.empty)),
-				Stream.unwrap,
-			);
-		},
-		status: (envelope) => _jobCache.readState(envelope.payload.jobId, envelope.payload.tenantId).pipe(
-			Effect.map(Option.match({ onNone: () => JobState.defaultResponse, onSome: (state) => state.toResponse() })),
-			Effect.catchAll(() => Effect.succeed(JobState.defaultResponse)),
-		),
+			),
+			progress: (envelope) => {
+				const jobId = envelope.payload.jobId;
+				const tenantId = envelope.payload.tenantId;
+				return Effect.all([_runtime.progress.mailbox.get(jobId), _runtime.progress.read(jobId, tenantId)]).pipe(
+					Effect.map(([mailbox, last]) => Stream.concat(
+						Option.match(last, { onNone: () => Stream.empty, onSome: (progress) => Stream.make(progress as typeof _SCHEMA.progress.Type) }),
+						Mailbox.toStream(mailbox),
+					).pipe(Stream.tap(() => Metric.increment(Metric.taggedWithLabels(metrics.stream.elements, MetricsService.label({ stream: 'job_progress' })))))),
+					Effect.catchAll(() => Effect.succeed(Stream.empty)),
+					Stream.unwrap,
+				);
+			},
+			status: (envelope) => _runtime.state.read(envelope.payload.jobId, envelope.payload.tenantId).pipe(
+				Effect.map(Option.match({ onNone: () => JobState.defaultResponse, onSome: (state) => state.toResponse() })),
+				Effect.catchAll(() => Effect.succeed(JobState.defaultResponse)),
+			),
 		submit: (envelope) => Effect.gen(function* () {
 			const jobId = yield* sharding.getSnowflake.pipe(Effect.map(String));
 			const queuedTs = yield* Clock.currentTimeMillis;
@@ -425,8 +450,8 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 				Effect.mapError((error) => JobError.from(jobId, 'Processing', error)),
 				Effect.provideService(SqlClient.SqlClient, sql),
 			);
-			yield* cache.kv.set(`${_CONFIG.cache.keyPrefix}state:${jobId}`, state, _CONFIG.cache.ttl);
-			yield* publishStatus(jobId, envelope.payload.type, 'queued', envelope.payload.tenantId);
+				yield* cache.kv.set(_runtime.keys.state(jobId), state, _CONFIG.cache.ttl);
+				yield* _runtime.status.publish(jobId, envelope.payload.type, 'queued', envelope.payload.tenantId);
 			yield* Metric.increment(metrics.jobs.enqueued);
 			yield* FiberMap.run(runningJobs, jobId)(processJob(jobId, envelope.payload).pipe(Effect.provideService(SqlClient.SqlClient, sql)));
 			return { duplicate: false, jobId };
@@ -444,7 +469,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 
 class JobService extends Effect.Service<JobService>()('server/Jobs', {
 	dependencies: [
-		JobEntityLive.pipe(Layer.provideMerge(Layer.mergeAll(ClusterService.Layer, _JobInternalLive, DatabaseService.Default))),
+			JobEntityLive.pipe(Layer.provideMerge(Layer.mergeAll(ClusterService.Layers.runner, _JobInternalLive, DatabaseService.Default))),
 		DatabaseService.Default,
 		EventBus.Default,
 		_JobInternalLive,

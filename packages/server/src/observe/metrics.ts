@@ -3,7 +3,7 @@
  * No custom types - uses Effect's official types directly.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Boolean as B, Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
+import { Array as A, Boolean as B, Effect, HashSet, Match, Metric, MetricLabel, MetricState, Option, Record as R, Stream } from 'effect';
 import { Context } from '../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -23,7 +23,29 @@ const _CONFIG = {
 		maxContent: 120,
 		truncateSuffix: '...',
 	},
+	prometheus: {
+		helpPrefix: 'effect_metric',
+		typeByEntry: {
+			counter: 'counter',
+			frequency: 'counter',
+			gauge: 'gauge',
+			histogram_count: 'counter',
+			histogram_max: 'gauge',
+			histogram_min: 'gauge',
+			histogram_sum: 'counter',
+			summary_count: 'counter',
+			summary_quantile: 'summary',
+			summary_sum: 'counter',
+		} as const,
+	},
 } as const;
+
+type _SnapshotEntry = {
+	readonly labels: Record<string, string>;
+	readonly name: string;
+	readonly type: string;
+	readonly value: number;
+};
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -32,6 +54,62 @@ const errorTag = (err: unknown): string => Match.value(err).pipe(
 	Match.when((e: unknown): e is Error => e instanceof Error, (e) => e.constructor.name),
 	Match.orElse(() => 'Unknown'),
 );
+const _stateToEntries = (state: MetricState.MetricState<unknown>, name: string, labels: Record<string, string>) =>
+	Match.value(state).pipe(
+		Match.when(MetricState.isCounterState, (counterState) => [{ labels, name, type: 'counter', value: Number(counterState.count) }]),
+		Match.when(MetricState.isGaugeState, (gaugeState) => [{ labels, name, type: 'gauge', value: Number(gaugeState.value) }]),
+		Match.when(MetricState.isHistogramState, (histogramState) => [
+			{ labels, name: `${name}_count`, type: 'histogram_count', value: histogramState.count },
+			{ labels, name: `${name}_sum`, type: 'histogram_sum', value: histogramState.sum },
+			{ labels, name: `${name}_min`, type: 'histogram_min', value: histogramState.min },
+			{ labels, name: `${name}_max`, type: 'histogram_max', value: histogramState.max },
+		]),
+		Match.when(MetricState.isSummaryState, (summaryState) => [
+			{ labels, name: `${name}_count`, type: 'summary_count', value: summaryState.count },
+			{ labels, name: `${name}_sum`, type: 'summary_sum', value: summaryState.sum },
+			...A.filterMap([...summaryState.quantiles], ([quantile, value]) => Option.map(value, (quantileValue) => ({
+				labels: { ...labels, quantile: String(quantile) },
+				name,
+				type: 'summary_quantile',
+				value: quantileValue,
+			}))),
+		]),
+		Match.when(MetricState.isFrequencyState, (frequencyState) => [...frequencyState.occurrences.entries()].map(([category, count]) => ({
+			labels: { ...labels, category },
+			name,
+			type: 'frequency',
+			value: count,
+		}))),
+		Match.orElse(() => []),
+	);
+const _escapePrometheusValue = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('"', '\\"');
+const _prometheusType = (entry: _SnapshotEntry) => Match.value(entry.type).pipe(
+	Match.when('counter', () => _CONFIG.prometheus.typeByEntry.counter),
+	Match.when('frequency', () => _CONFIG.prometheus.typeByEntry.frequency),
+	Match.when('gauge', () => _CONFIG.prometheus.typeByEntry.gauge),
+	Match.when('histogram_count', () => _CONFIG.prometheus.typeByEntry.histogram_count),
+	Match.when('histogram_max', () => _CONFIG.prometheus.typeByEntry.histogram_max),
+	Match.when('histogram_min', () => _CONFIG.prometheus.typeByEntry.histogram_min),
+	Match.when('histogram_sum', () => _CONFIG.prometheus.typeByEntry.histogram_sum),
+	Match.when('summary_count', () => _CONFIG.prometheus.typeByEntry.summary_count),
+	Match.when('summary_quantile', () => _CONFIG.prometheus.typeByEntry.summary_quantile),
+	Match.when('summary_sum', () => _CONFIG.prometheus.typeByEntry.summary_sum),
+	Match.orElse(() => 'gauge' as const),
+);
+const _prometheusLabels = (labels: Record<string, string>) => Object.entries(labels).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}="${_escapePrometheusValue(value)}"`).join(',');
+const _prometheusSample = (entry: _SnapshotEntry) => Match.value(_prometheusLabels(entry.labels)).pipe(
+	Match.when('', () => `${entry.name} ${entry.value}`),
+	Match.orElse((encoded) => `${entry.name}{${encoded}} ${entry.value}`),
+);
+const _prometheusDescriptors = (entries: ReadonlyArray<_SnapshotEntry>) =>
+	R.values(A.reduce(entries, {} as Record<string, { readonly help: string; readonly name: string; readonly type: string }>, (acc, entry) => ({
+		...acc,
+		[entry.name]: {
+			help: `${_CONFIG.prometheus.helpPrefix}_${entry.name}`,
+			name: entry.name,
+			type: _prometheusType(entry),
+		},
+	})));
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -181,6 +259,22 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 					// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars
 				)(value.normalize('NFKC').replaceAll(/[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\ufeff\u00ad]/g, '')))),	// NOSONAR S6324
 		);
+	// --- [PROMETHEUS] --------------------------------------------------------
+	static readonly snapshotEntries = Metric.snapshot.pipe(Effect.map((snapshot) =>
+		[...snapshot].flatMap((entry) =>
+			_stateToEntries(
+				entry.metricState,
+				entry.metricKey.name,
+				Object.fromEntries([...entry.metricKey.tags].map((tag) => [tag.key, tag.value])),
+			),
+		),
+	));
+	static readonly prometheus = (entries: ReadonlyArray<_SnapshotEntry>) => {
+		const valid = A.filter(entries, (entry) => Number.isFinite(entry.value));
+		const headers = A.flatMap(_prometheusDescriptors(valid), (descriptor) => [`# HELP ${descriptor.name} ${descriptor.help}`, `# TYPE ${descriptor.name} ${descriptor.type}`]);
+		const samples = A.map(valid, _prometheusSample);
+		return [...headers, ...samples, ''].join('\n');
+	};
 	// --- [INCREMENT] ---------------------------------------------------------
 	static readonly inc = (								// Increment counter with labels using official Metric.increment/incrementBy APIs.
 		counter: Metric.Metric.Counter<number>,
@@ -247,7 +341,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			readonly operation: 'send' | 'broadcast' | 'receive';
 			readonly entityType: string;
 		},): Effect.Effect<A, E, R | MetricsService> =>
-		Effect.flatMap(MetricsService, (metrics) => { // NOSONAR S3358
+		Effect.flatMap(MetricsService, (metrics) => {
 			const labels = MetricsService.label({
 				entity_type: config.entityType,
 				operation: config.operation,
@@ -259,10 +353,10 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 					send: Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesSent, labels)),
 				})[config.operation]),
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.cluster.messageLatency, labels)),
-				Effect.tapError((e) => {
+				Effect.tapError((error) => {
 					const errorLabels = MetricsService.label({
 						entity_type: config.entityType,
-						type: e.reason,  // ClusterError.reason: 'MailboxFull' | 'RunnerUnavailable' | etc.
+						type: error.reason,
 					});
 					return Metric.increment(Metric.taggedWithLabels(metrics.cluster.errors, errorLabels));
 				}),
@@ -289,10 +383,10 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 					submit: Metric.increment(Metric.taggedWithLabels(metrics.jobs.enqueued, labels)),
 				})[config.operation]),
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.processingSeconds, labels)),
-				Effect.tapError((e) => {
+				Effect.tapError((error) => {
 					const errorLabels = MetricsService.label({
 						job_type: config.jobType,
-						reason: e.reason,
+						reason: error.reason,
 					});
 					return Metric.increment(Metric.taggedWithLabels(metrics.jobs.failures, errorLabels));
 				}),

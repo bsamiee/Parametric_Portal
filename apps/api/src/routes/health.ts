@@ -3,7 +3,7 @@
  * Canonical health surface: database, cache (L1/L2), metrics polling, worker pool.
  * Traced for observability - health probe failures visible in distributed traces.
  */
-import { HttpApiBuilder } from '@effect/platform';
+import { HttpApiBuilder, HttpServerResponse } from '@effect/platform';
 import { Client } from '@parametric-portal/database/client';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
@@ -69,18 +69,15 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 	Effect.andThen(PollingService, (polling) => handlers
 		.handle('liveness', () => _liveness)
 		.handle('readiness', () => _readiness(polling))
-		.handle('clusterHealth', () => ClusterService.checkHealth.cluster().pipe(
+			.handle('clusterHealth', () => ClusterService.Health.cluster().pipe(
 			Effect.map((cluster) => ({ cluster })),
 			Telemetry.span('health.clusterHealth', { kind: 'server', metrics: false }),
 		))
-		.handle('metrics', () => polling.refresh().pipe(
-			Effect.andThen(polling.snapshot),
-			Effect.map((entries) => entries.map((entry) => {
-				const labels = Object.entries(entry.labels).map(([key, value]) => `${key}="${value}"`).join(',');
-				return labels ? `${entry.name}{${labels}} ${entry.value}` : `${entry.name} ${entry.value}`;
-			}).join('\n')),
-			Telemetry.span('health.metrics', { kind: 'server', metrics: false }),
-		)),
+			.handleRaw('metrics', () => polling.refresh().pipe(
+				Effect.andThen(polling.snapshotPrometheus),
+				Effect.map((body) => HttpServerResponse.text(body, { contentType: 'text/plain; version=0.0.4; charset=utf-8' })),
+				Telemetry.span('health.metrics', { kind: 'server', metrics: false }),
+			)),
 	),
 );
 

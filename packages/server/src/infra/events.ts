@@ -1,10 +1,10 @@
 /**
  * EventBus: Domain events via SqlEventJournal with cluster broadcast.
- * Architecture: Journal (durable) → Changes queue (reactive) → Subscribers (typed).
+ * Architecture: Journal (durable) -> Changes queue (reactive) -> Subscribers (typed).
  */
+import { Sharding, Snowflake } from '@effect/cluster';
 import { EventJournal } from '@effect/experimental';
 import { SqlEventJournal } from '@effect/sql';
-import { Sharding, Snowflake } from '@effect/cluster';
 import { Chunk, DateTime, Effect, Metric, PrimaryKey, Ref, Schema as S, Stream } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -19,10 +19,10 @@ class EventError extends S.TaggedError<EventError>()('EventError', {
 	reason: S.Literal('DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed'),
 }) {
 	static readonly _props = {
-		DeliveryFailed:        { retryable: true,  terminal: false },
-		DeserializationFailed: { retryable: false, terminal: true  },
-		DuplicateEvent:        { retryable: false, terminal: true  },
-		ValidationFailed:      { retryable: false, terminal: true  },
+		DeliveryFailed: 		{ retryable: true, 	terminal: false },
+		DeserializationFailed: 	{ retryable: false, terminal: true },
+		DuplicateEvent: 		{ retryable: false, terminal: true },
+		ValidationFailed: 		{ retryable: false, terminal: true },
 	} as const;
 	static readonly from = (eventId: string, reason: EventError['reason'], cause?: unknown) => new EventError({ cause, eventId, reason });
 	get isTerminal(): boolean { return EventError._props[this.reason].terminal; }
@@ -38,8 +38,8 @@ class DomainEvent extends S.Class<DomainEvent>('DomainEvent')({
 }) {
 	[PrimaryKey.symbol]() { return this.eventId; }
 	get eventType(): string {
-		const p = this.payload as { _tag?: string; action?: string } | undefined;
-		return p?._tag && p?.action ? `${p._tag}.${p.action}` : 'unknown';
+		const payload = this.payload as { _tag?: string; action?: string } | undefined;
+		return payload?._tag && payload?.action ? `${payload._tag}.${payload.action}` : 'unknown';
 	}
 }
 class EventEnvelope extends S.Class<EventEnvelope>('EventEnvelope')({
@@ -47,10 +47,19 @@ class EventEnvelope extends S.Class<EventEnvelope>('EventEnvelope')({
 	event: DomainEvent,
 }) {}
 
+// --- [CONSTANTS] -------------------------------------------------------------
+
+const _CODEC = {
+	decode: S.decode(S.parseJson(EventEnvelope)),
+	encode: S.encode(S.parseJson(EventEnvelope)),
+} as const;
+const _decoder = new TextDecoder();
+const _encoder = new TextEncoder();
+
 // --- [SERVICE] ---------------------------------------------------------------
 
 class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
-	dependencies: [SqlEventJournal.layer({ eventLogTable: 'effect_event_journal', remotesTable: 'effect_event_remotes' }), MetricsService.Default, ClusterService.LayerClient],
+	dependencies: [SqlEventJournal.layer({ eventLogTable: 'effect_event_journal', remotesTable: 'effect_event_remotes' }), MetricsService.Default, ClusterService.Layers.client],
 	scoped: Effect.gen(function* () {
 		const journal = yield* EventJournal.EventJournal;
 		const sharding = yield* Sharding.Sharding;
@@ -58,102 +67,108 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 		const subscriptions = yield* Ref.make(0);
 		yield* Effect.annotateLogsScoped({ 'service.name': 'eventbus' });
 		const changesQueue = yield* journal.changes;
-		const broadcastStream: Stream.Stream<EventEnvelope, never, never> = Stream.fromQueue(changesQueue).pipe(
-			Stream.mapEffect((entry) => Effect.sync(() => new TextDecoder().decode(entry.payload)).pipe(Effect.flatMap(S.decode(S.parseJson(EventEnvelope))),),),
-			Stream.catchAll(() => Stream.empty),
+		const broadcastStream = Stream.fromQueue(changesQueue).pipe(
+			Stream.mapEffect((entry) => Effect.sync(() => _decoder.decode(entry.payload)).pipe(
+				Effect.flatMap(_CODEC.decode),
+				Effect.tapError((error) => Effect.logWarning('Event envelope decode failed', { error: String(error) })),
+				Effect.option,
+			)),
+			Stream.filterMap((envelope) => envelope),
 		);
-		const writeEnvelope = (envelope: EventEnvelope) => Effect.gen(function* () {
-			const json = yield* S.encode(S.parseJson(EventEnvelope))(envelope);
-			const payload = new TextEncoder().encode(json);
-			return yield* journal.write({
-				effect: () => Metric.increment(metrics.events.emitted),
-				event: envelope.event.eventType,
-				payload,
-				primaryKey: envelope.event.eventId,
-			});
-		});
-			const emit = (input: EventBus.Input | Chunk.Chunk<EventBus.Input>) => {
-				const items = Chunk.isChunk(input) ? input : Chunk.of(input);
-				return Telemetry.span(
-					Effect.gen(function* () {
-						const [ctx, snowflake] = yield* Effect.all([Context.Request.current, sharding.getSnowflake]);
-					const envelopes = Chunk.map(items, (event): EventEnvelope => new EventEnvelope({
-						emittedAt: DateTime.unsafeMake(Snowflake.timestamp(snowflake)),
-						event: new DomainEvent({
-							aggregateId: event.aggregateId,
-							causationId: event.causationId,
-							correlationId: event.correlationId ?? ctx.requestId,
-							eventId: event.eventId ?? (String(snowflake) as typeof DomainEvent.Type['eventId']),
-							payload: event.payload,
-							tenantId: event.tenantId ?? ctx.tenantId,
-						}),
-					}));
-					return yield* Effect.forEach(envelopes, writeEnvelope);
-					}),
-					'eventbus.emit',
-					{ 'event.count': Chunk.size(items), metrics: false },
-				);
-			};
-			const subscribe = <T, I>(
-				eventType: string,
-				schema: S.Schema<T, I, never>,
-				handler: (event: DomainEvent, payload: T) => Effect.Effect<void, EventError>,
-				filter?: (event: DomainEvent) => boolean,) =>
-				Stream.unwrapScoped(
-					Ref.updateAndGet(subscriptions, (count) => count + 1).pipe(
-						Effect.tap((count) => Metric.set(metrics.events.subscriptions, count)),
-						Effect.as(
-							broadcastStream.pipe(
-								Stream.filter((env) => env.event.eventType === eventType && (filter?.(env.event) ?? true)),
-								Stream.mapEffect((env) => {
-									const labels = MetricsService.label({ event_type: eventType });
-									return S.validate(schema)(env.event.payload).pipe(
-										Effect.mapError((error) => EventError.from(env.event.eventId, 'ValidationFailed', error)),
-										Effect.flatMap((payload) => Telemetry.span(
-											handler(env.event, payload).pipe(
-												Effect.tap(() => Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels))),
-												Effect.tapError((error) => error.reason === 'DuplicateEvent'
-													? Metric.increment(Metric.taggedWithLabels(metrics.events.duplicatesSkipped, labels))
-													: Effect.void),
-											),
-											'eventbus.handle',
-											{ 'event.type': eventType, metrics: false },
-										)),
-									);
+		const publish = (input: EventBus.Types.Input | readonly EventBus.Types.Input[] | Chunk.Chunk<EventBus.Types.Input>) =>
+			Telemetry.span(
+				Effect.gen(function* () {
+					const requestContext = yield* Context.Request.current;
+					const items = Chunk.toReadonlyArray(
+						Chunk.isChunk(input)
+							? input
+							: Chunk.fromIterable(Array.isArray(input) ? input : [input] as const),
+					);
+					return yield* Effect.forEach(items, (item) => sharding.getSnowflake.pipe(
+						Effect.map((snowflake) => {
+							const eventId = item.eventId ?? (String(snowflake) as typeof DomainEvent.Type['eventId']);
+							return new EventEnvelope({
+								emittedAt: DateTime.unsafeMake(Snowflake.timestamp(snowflake)),
+								event: new DomainEvent({
+									aggregateId: item.aggregateId,
+									causationId: item.causationId,
+									correlationId: item.correlationId ?? requestContext.requestId,
+									eventId,
+									payload: item.payload,
+									tenantId: item.tenantId ?? requestContext.tenantId,
 								}),
-								Stream.ensuring(
-									Ref.updateAndGet(subscriptions, (count) => Math.max(0, count - 1)).pipe(
-										Effect.flatMap((count) => Metric.set(metrics.events.subscriptions, count)),
+							});
+						}),
+						Effect.flatMap((envelope) => _CODEC.encode(envelope).pipe(
+							Effect.map((json) => _encoder.encode(json)),
+							Effect.flatMap((payload) => journal.write({
+								effect: () => Metric.increment(metrics.events.emitted),
+								event: envelope.event.eventType,
+								payload,
+								primaryKey: envelope.event.eventId,
+							})),
+							Effect.as(envelope),
+						)),
+					), { concurrency: 'unbounded' });
+				}),
+				'eventbus.publish',
+				{ 'event.count': Chunk.size(Chunk.isChunk(input) ? input : Chunk.fromIterable(Array.isArray(input) ? input : [input])), metrics: false },
+			);
+		const subscribe = <T, I>(
+			eventType: string,
+			schema: S.Schema<T, I, never>,
+			handler: (event: DomainEvent, payload: T) => Effect.Effect<void, EventError>,
+			filter?: (event: DomainEvent) => boolean,) => Stream.unwrapScoped(
+			Ref.updateAndGet(subscriptions, (count) => count + 1).pipe(
+				Effect.tap((count) => Metric.set(metrics.events.subscriptions, count)),
+				Effect.as(
+					broadcastStream.pipe(
+						Stream.filter((envelope) => envelope.event.eventType === eventType && (filter?.(envelope.event) ?? true)),
+						Stream.mapEffect((envelope) => {
+							const labels = MetricsService.label({ event_type: eventType });
+							return S.validate(schema)(envelope.event.payload).pipe(
+								Effect.mapError((error) => EventError.from(envelope.event.eventId, 'ValidationFailed', error)),
+								Effect.flatMap((payload) => Telemetry.span(
+									handler(envelope.event, payload).pipe(
+										Effect.tap(() => Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels))),
+										Effect.tapError((error) => error.reason === 'DuplicateEvent'
+											? Metric.increment(Metric.taggedWithLabels(metrics.events.duplicatesSkipped, labels))
+											: Effect.void),
 									),
-								),
-							),
-						),
+									'eventbus.handle',
+									{ 'event.type': eventType, metrics: false },
+								)),
+							);
+						}),
+						Stream.ensuring(Ref.updateAndGet(subscriptions, (count) => Math.max(0, count - 1)).pipe(Effect.flatMap((count) => Metric.set(metrics.events.subscriptions, count)),),),
 					),
-				);
-		const onEvent = (): Stream.Stream<EventEnvelope, never, never> => broadcastStream;
+				),
+			),
+		);
+		const stream = (): Stream.Stream<EventEnvelope, never, never> => broadcastStream;
 		yield* Effect.logInfo('EventBus initialized with SqlEventJournal');
-		return { emit, onEvent, subscribe };
+		return { publish, stream, subscribe };
 	}),
 }) {
-	static readonly Error = EventError;
-	static readonly Event = DomainEvent;
-	static readonly Envelope = EventEnvelope;
+	static readonly Model = {
+		Envelope: EventEnvelope,
+		Error: EventError,
+		Event: DomainEvent,
+	} as const;
 }
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace EventBus {
-	export type Error = EventError;
-	export type Event = DomainEvent;
-	export type Envelope = EventEnvelope;
-	export type Input = {
-		readonly aggregateId: string;
-		readonly causationId?: string;
-		readonly correlationId?: string;
-		readonly eventId?: typeof DomainEvent.Type['eventId'];
-		readonly payload: unknown;
-		readonly tenantId?: string;
-	};
+	export namespace Types {
+		export type Error = InstanceType<typeof EventBus.Model.Error>;
+		export type Event = S.Schema.Type<typeof EventBus.Model.Event>;
+		export type Envelope = S.Schema.Type<typeof EventBus.Model.Envelope>;
+		export type Input = {
+			readonly aggregateId: string; readonly causationId?: string; readonly correlationId?: string;
+			readonly eventId?: Event['eventId']; readonly payload: unknown; readonly tenantId?: string;
+		};
+	}
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

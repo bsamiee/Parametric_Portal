@@ -290,18 +290,22 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 				Effect.mapError((error) => error instanceof _AuthError ? HttpError.Auth.of(error.reason, error) : HttpError.Auth.of('Token refresh failed', error)),
 				Telemetry.span('auth.refresh'),
 			);
-		const revoke = (sessionId: string, userId: string, reason: Extract<typeof _SCHEMA.req.Type, { _tag: 'Revoke' }>['reason']) =>
+		const revoke = (sessionId: string, reason: Extract<typeof _SCHEMA.req.Type, { _tag: 'Revoke' }>['reason']) =>
 			Context.Request.currentTenantId.pipe(
 				Effect.flatMap((tenantId) => _snap('session', tenantId, sessionId).load().pipe(
 					Effect.flatMap(restoreActor),
 					Effect.flatMap(({ actor }) => actor.send(Auth.Revoke({ reason })).pipe(Effect.tap(() => _snap('session', tenantId, sessionId).drop()))),
 				)),
 				Effect.catchAll((error) => {
-					const isSnapshotMissing = error instanceof _AuthError && error.reason === 'snapshot_missing';
-					return isSnapshotMissing
-						? db.sessions.softDeleteByUser(userId).pipe(Effect.ignore, Effect.as({ _tag: 'Revoke', revokedAt: DateTime.unsafeNow() } as const))
-						: Effect.fail(HttpError.Internal.of('Session revocation failed', error));
-				}),
+						const isSnapshotMissing = error instanceof _AuthError && error.reason === 'snapshot_missing';
+						return isSnapshotMissing
+							? db.sessions.softDelete(sessionId).pipe(
+								Effect.ignore,
+								Effect.orElseSucceed(() => undefined),
+								Effect.as({ _tag: 'Revoke', revokedAt: DateTime.unsafeNow() } as const),
+							)
+							: Effect.fail(HttpError.Internal.of('Session revocation failed', error));
+					}),
 				Telemetry.span('auth.revoke', { 'auth.reason': reason }),
 			);
 		const mfaVerify = (sessionId: string, code: string) =>
@@ -333,7 +337,7 @@ class AuthService extends Effect.Service<AuthService>()('server/Auth', {
 						onSome: (session) => session.appId === context.tenantId
 							? Clock.currentTimeMillis.pipe(Effect.flatMap((now) => now > session.accessExpiresAt.getTime()
 								? Effect.logWarning('Session expired', { accessExpiresAt: session.accessExpiresAt, sessionId: session.id }).pipe(Effect.as(Option.none()))
-								: mfaEnabledCache.get(new _MfaStatusKey({ tenantId: context.tenantId, userId: session.userId })).pipe(Effect.map((mfaEnabled) => Option.some({ appId: session.appId, id: session.id, mfaEnabled, userId: session.userId, verifiedAt: Option.fromNullable(session.verifiedAt) })))))
+									: mfaEnabledCache.get(new _MfaStatusKey({ tenantId: context.tenantId, userId: session.userId })).pipe(Effect.map((mfaEnabled) => Option.some({ appId: session.appId, id: session.id, kind: 'session' as const, mfaEnabled, userId: session.userId, verifiedAt: Option.fromNullable(session.verifiedAt) })))))
 							: Effect.logWarning('Session tenant mismatch', { expected: context.tenantId, got: session.appId }).pipe(Effect.as(Option.none())),
 					})),
 				)),
@@ -500,7 +504,7 @@ const _handleRefresh = (invalidateSessionToken: (tenantId: string, token: Redact
 	}));
 const _handleRevoke = (invalidateSessionToken: (tenantId: string, token: Redacted.Redacted<string>) => Effect.Effect<void>, currentState: _StateOf<'mfa'> | _StateOf<'active'>, request: _ReqOf<'Revoke'>) => _wrapOp('revoke', Effect.gen(function* () {
 		const [db, metrics, audit] = yield* Effect.all([DatabaseService, MetricsService, AuditService]);
-		yield* db.sessions.softDeleteByUser(currentState.userId);
+		yield* db.sessions.softDelete(currentState.sessionId);
 		const now = DateTime.unsafeNow();
 		yield* invalidateSessionToken(currentState.tenantId, currentState.tokens.session);
 		yield* Effect.all([
