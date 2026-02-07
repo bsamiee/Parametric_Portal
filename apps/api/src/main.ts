@@ -46,7 +46,7 @@ import { UsersLive } from './routes/users.ts';
 import { WebhooksLive } from './routes/webhooks.ts';
 import { WebSocketLive } from './routes/websocket.ts';
 
-// --- [CONFIG] ----------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
 const ServerConfig = Config.all({
 	corsOrigins: Config.string('CORS_ORIGINS').pipe(Config.withDefault('*'), Config.map((origins) => origins.split(',').map((origin) => origin.trim()).filter(Boolean) as ReadonlyArray<string>)),
