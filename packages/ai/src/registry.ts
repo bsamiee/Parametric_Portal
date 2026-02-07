@@ -60,7 +60,7 @@ const AiRegistry = (() => {
         ),
     });
     const AppSettingsSchema =    S.Struct({ ai: S.optional(SettingsSchema) });
-    // --- [DISPATCH_TABLES] ---------------------------------------------------
+    // --- [LAYERS] ------------------------------------------------------------
     const httpLayer = FetchHttpClient.layer;
     const apiKeyConfig = (envKey: string, apiKey?: string) => apiKey === undefined ? Config.redacted(envKey) : Config.succeed(Redacted.make(apiKey));
     const clientLayers = {
