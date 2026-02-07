@@ -88,7 +88,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					], { discard: true })),
 				);
 				}).pipe(Telemetry.span('audit.log', { metrics: false }));
-		const replayDlqEntry = (dlq: typeof JobDlq.Type) => Effect.gen(function* () {
+		const replayDlqEntry = (dlq: JobDlq) => Effect.gen(function* () {
 			const entry = yield* S.decodeUnknown(S.Record({ key: S.String, value: S.Unknown }))(dlq.payload);
 			yield* database.audit.log(entry as Parameters<typeof database.audit.log>[0]);
 			yield* database.jobDlq.markReplayed(dlq.id);

@@ -22,12 +22,16 @@ const _encoder = new TextEncoder();
 const _decoder = new TextDecoder();
 const _CONFIG = {
 	cache: { capacity: 1000, ttl: Duration.hours(24) },
-	hkdf: { hash: 'SHA-256', info: 'parametric-tenant-key-v1', salt: _encoder.encode('parametric-portal-hkdf-v1') },
+	hkdf: { hash: 'SHA-256', info: 'parametric-tenant-key-v1', legacySalt: new Uint8Array(32) },
 	iv: 12,
 	key: { length: 256, name: 'AES-GCM' } as const,
 	minBytes: 14,
 	version: { max: 255, min: 1 },
 } as const;
+const _hkdfSalt = (version: number): Uint8Array<ArrayBuffer> =>
+	version === 1
+		? new Uint8Array(_CONFIG.hkdf.legacySalt)
+		: _encoder.encode(`parametric-portal-hkdf-v${version}`);
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -67,14 +71,17 @@ class Service extends Effect.Service<Service>()('server/CryptoService', {
 				const separatorIndex = compositeKey.indexOf(':');
 				const version = Number(compositeKey.slice(0, separatorIndex));
 				const tenantId = compositeKey.slice(separatorIndex + 1);
-				const masterKey = yield* HashMap.get(keys, version).pipe(Effect.mapError(() => new CryptoError({ code: 'KEY_NOT_FOUND', op: 'key', tenantId })),);
+				const masterKey = yield* Option.match(HashMap.get(keys, version), {
+					onNone: () => Effect.fail(new CryptoError({ code: "KEY_NOT_FOUND", op: "key", tenantId })),
+					onSome: Effect.succeed,
+				});
 				return yield* Effect.promise(() =>
 					crypto.subtle.deriveKey(
 						{
 							hash: _CONFIG.hkdf.hash,
 							info: _encoder.encode(`${_CONFIG.hkdf.info}:${tenantId}`),
 							name: 'HKDF',
-							salt: _CONFIG.hkdf.salt,
+							salt: _hkdfSalt(version),
 						},
 						masterKey,
 						{ length: _CONFIG.key.length, name: _CONFIG.key.name },
@@ -123,7 +130,7 @@ const encrypt = (plaintext: string, additionalData?: BufferSource): Effect.Effec
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.currentTenantId;
 		const service = yield* Service;
-		const key = yield* service.deriveKey(tenantId).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
+		const key = yield* service.deriveKey(tenantId, service.currentVersion).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
 		const iv = crypto.getRandomValues(new Uint8Array(_CONFIG.iv));
 		const params: AesGcmParams = additionalData ? { additionalData, iv, name: 'AES-GCM' } : { iv, name: 'AES-GCM' };
 		const ciphertext = yield* Effect.tryPromise({

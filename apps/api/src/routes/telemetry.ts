@@ -18,7 +18,6 @@ import { Array as A, Config, Duration, Effect, Match, Option, pipe, Schema as S 
 const _CONFIG = {
 	contentType: { header: 'content-type', json: 'application/json', protobuf: { aliases: ['application/x-protobuf', 'application/protobuf'], primary: 'application/x-protobuf' } },
 	defaults: 	 { endpoint: Telemetry.config.defaults.endpoint, headers: Telemetry.config.defaults.headers },
-	index: 		 { first: 0 },
 	paths: 		 { traces: '/v1/traces' },
 	replace: 	 { grpc: ':4317', http: ':4318' },
 	response: 	 { accepted: 202 },
@@ -43,11 +42,8 @@ const handleIngestTraces = (request: HttpServerRequest.HttpServerRequest) =>
 	Effect.gen(function* () {
 		const endpoint = yield* CollectorEndpoint;
 		const extraHeaders = yield* CollectorHeaders;
-		const contentType = pipe(
-			Headers.get(request.headers, _CONFIG.contentType.header),
-			Option.map((value) => value.toLowerCase().split(';')),
-			Option.flatMap((parts) => A.get(parts, _CONFIG.index.first)),
-			Option.map((value) => value.trim()),
+		const contentType = Headers.get(request.headers, _CONFIG.contentType.header).pipe(
+			Option.map((header) => (header.split(';')[0] ?? '').trim().toLowerCase()),
 			Option.getOrElse(() => _CONFIG.contentType.json),
 		);
 		const payload = yield* Match.value(A.some(_CONFIG.contentType.protobuf.aliases, (value) => contentType.includes(value))).pipe(

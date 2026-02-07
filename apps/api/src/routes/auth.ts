@@ -161,7 +161,7 @@ const _handleApiKeyOperation = (operation: 'create' | 'rotate', repositories: Da
 		const record = yield* operation === 'create'
 			? repositories.apiKeys.insert({
 				deletedAt: Option.none(), encrypted: Buffer.from(encrypted), expiresAt: Option.fromNullable(input.expiresAt), hash: pair.hash,
-				lastUsedAt: Option.none(), name: input.name as string, updatedAt: undefined, userId,
+				lastUsedAt: Option.none(), name: input.name ?? '', updatedAt: undefined, userId,
 			}).pipe(Effect.mapError((error) => HttpError.Internal.of('API key insert failed', error)))
 			: Effect.gen(function* () {
 				const keyOption = yield* repositories.apiKeys.one([{ field: 'id', value: input.id as string }]).pipe(Effect.mapError((error) => HttpError.Internal.of('API key lookup failed', error)));
@@ -203,13 +203,17 @@ const handleLinkProvider = (repositories: DatabaseService.Type, audit: typeof Au
 		yield* _requireMutationContext;
 		const { userId } = yield* Context.Request.sessionOrFail;
 		const existing = yield* repositories.oauthAccounts.byUser(userId).pipe(Effect.mapError((error) => HttpError.Internal.of('OAuth account lookup failed', error)));
-		yield* existing.some((account) => account.provider === provider && Option.isNone(account.deletedAt))
-			? Effect.fail(HttpError.Conflict.of('oauth_account', `Provider ${provider} is already linked`))
-			: Effect.void;
+		yield* Effect.filterOrFail(
+			Effect.succeed(existing),
+			(accounts) => !accounts.some((account) => account.provider === provider && Option.isNone(account.deletedAt)),
+			() => HttpError.Conflict.of('oauth_account', `Provider ${provider} is already linked`),
+		);
 		const conflicting = yield* repositories.oauthAccounts.byExternal(provider, externalId).pipe(Effect.mapError((error) => HttpError.Internal.of('OAuth account conflict check failed', error)));
-		yield* Option.isSome(conflicting)
-			? Effect.fail(HttpError.Conflict.of('oauth_account', `External ID is already linked to another account`))
-			: Effect.void;
+		yield* Effect.filterOrFail(
+			Effect.succeed(conflicting),
+			Option.isNone,
+			() => HttpError.Conflict.of('oauth_account', `External ID is already linked to another account`),
+		);
 		yield* repositories.oauthAccounts.upsert({
 			accessEncrypted: new Uint8Array(0),
 			deletedAt: Option.none(),
@@ -234,9 +238,11 @@ const handleUnlinkProvider = (repositories: DatabaseService.Type, audit: typeof 
 			Option.fromNullable(activeAccounts.find((account) => account.provider === provider)),
 			() => HttpError.NotFound.of('oauth_account', provider),
 		);
-		yield* activeAccounts.length <= 1
-			? Effect.fail(HttpError.Conflict.of('oauth_account', 'Cannot unlink the last authentication method'))
-			: Effect.void;
+		yield* Effect.filterOrFail(
+			Effect.succeed(activeAccounts),
+			(accounts) => accounts.length > 1,
+			() => HttpError.Conflict.of('oauth_account', 'Cannot unlink the last authentication method'),
+		);
 		yield* repositories.oauthAccounts.softDelete(target.id).pipe(Effect.mapError((error) => HttpError.Internal.of('OAuth account unlink failed', error)));
 		yield* audit.log('OauthAccount.unlink', { details: { provider }, subjectId: userId });
 		return { success: true as const };

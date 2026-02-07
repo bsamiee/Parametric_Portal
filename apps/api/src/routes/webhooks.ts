@@ -34,19 +34,21 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 				}).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook registration failed', error))),)),
 				Effect.tap(() => audit.log('Webhook.register', { details: { url: payload.url } })),
 				Effect.as({ success: true as const }),
-				Telemetry.span('webhooks.register', { kind: 'server', metrics: false, 'webhook.url': payload.url }),
+				Telemetry.span('webhooks.register', { kind: 'server', metrics: false }),
 			)))
 			.handle('remove', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
 				Effect.andThen(Context.Request.currentTenantId),
-				Effect.flatMap((tenantId) => webhooks.remove(tenantId, decodeURIComponent(path.url)).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook remove failed', error))),)),
+				Effect.flatMap((tenantId) => Effect.try({ catch: () => HttpError.Internal.of('Invalid webhook URL encoding'), try: () => decodeURIComponent(path.url) }).pipe(
+				Effect.flatMap((decodedUrl) => webhooks.remove(tenantId, decodedUrl).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook remove failed', error))))),
+			)),
 				Effect.tap(() => audit.log('Webhook.remove', { details: { url: path.url } })),
 				Effect.as({ success: true as const }),
-				Telemetry.span('webhooks.remove', { kind: 'server', metrics: false, 'webhook.url': decodeURIComponent(path.url) }),
+				Telemetry.span('webhooks.remove', { kind: 'server', metrics: false }),
 			)))
 			.handle('test', ({ payload }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
 				Effect.andThen(Context.Request.currentTenantId),
 				Effect.flatMap((tenantId) => webhooks.test(tenantId, new WebhookService.Endpoint({ secret: payload.secret, timeout: payload.timeout, url: payload.url })).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook test delivery failed', error))),)),
-				Telemetry.span('webhooks.test', { kind: 'server', metrics: false, 'webhook.url': payload.url }),
+				Telemetry.span('webhooks.test', { kind: 'server', metrics: false }),
 			)))
 			.handle('retry', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
 				Effect.andThen(webhooks.retry(path.id).pipe(Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Webhook retry failed', error))),)),
