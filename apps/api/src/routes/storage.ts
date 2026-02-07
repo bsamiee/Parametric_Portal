@@ -32,7 +32,6 @@ const _requireTenantAsset = (database: typeof DatabaseService.Service, assetId: 
 			() => HttpError.NotFound.of('asset', assetId),
 		),
 	);
-
 const handleSign = (
 	adapter: typeof StorageAdapter.Service,
 	audit: typeof AuditService.Service,
