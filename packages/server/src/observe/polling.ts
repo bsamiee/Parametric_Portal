@@ -2,9 +2,7 @@
  * Scheduled metrics polling with unified poll+alert flow.
  * Alerts persisted to kvStore for durability across restarts.
  */
-import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { SqlClient } from '@effect/sql';
 import { Array as A, Clock, Cron, Duration, Effect, Layer, Match, Metric, Option, pipe, Ref, Schema as S } from 'effect';
 import { Context } from '../context.ts';
 import { ClusterService } from '../infra/cluster.ts';
@@ -29,6 +27,8 @@ const _AlertSchema = S.Struct({ current: S.Number, metric: S.String, severity: S
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
+const _withSystemContext = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+	Effect.sync(Context.Request.system).pipe(Effect.flatMap((ctx) => Context.Request.within(Context.Request.Id.system, effect, ctx)),);
 const _loadAlerts = (database: DatabaseService) =>
 	database.kvStore.getJson(_CONFIG.kvKey, S.Array(_AlertSchema)).pipe(
 		Effect.map(Option.getOrElse(() => [] as const)),
@@ -84,168 +84,144 @@ const _emitTransitions = (
 	], { discard: true });
 };
 
-// --- [SERVICE] ---------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
 class PollingService extends Effect.Service<PollingService>()('server/Polling', {
 	scoped: Effect.gen(function* () {
 		const metrics = yield* MetricsService;
 		const database = yield* DatabaseService;
-		const sql = yield* SqlClient.SqlClient;
 		const eventBus = yield* EventBus;
 		// Load persisted alerts from kvStore (fallback to empty on missing/parse error)
 		const initial = yield* _loadAlerts(database);
 		const alerts = yield* Ref.make(initial);
 		const lastRefreshAtMs = yield* Ref.make(Option.none<number>());
-			const persistAlerts = (updated: typeof initial) => database.kvStore.setJson(_CONFIG.kvKey, [...updated], S.Array(_AlertSchema)).pipe(Effect.ignoreLogged);
-			const checkShouldRefresh = (force: boolean, lastRefreshedAt: Option.Option<number>, now: number) =>
-				force || Option.match(lastRefreshedAt, {
-					onNone: () => true,
-					onSome: (ts) => now - ts >= Duration.toMillis(_CONFIG.refresh.minInterval),
+		const persistAlerts = (updated: typeof initial) => database.kvStore.setJson(_CONFIG.kvKey, [...updated], S.Array(_AlertSchema)).pipe(Effect.ignoreLogged);
+		const checkShouldRefresh = (force: boolean, lastRefreshedAt: Option.Option<number>, now: number) =>
+			force || Option.match(lastRefreshedAt, {
+				onNone: () => true,
+				onSome: (ts) => now - ts >= Duration.toMillis(_CONFIG.refresh.minInterval),
+			});
+		const pollDlqSize = _withSystemContext(
+			Effect.gen(function* () {
+				const value = yield* database.jobDlq.countPending();
+				yield* Metric.set(metrics.jobs.dlqSize, value);
+				const current = yield* Ref.get(alerts);
+				const [shouldLog, updated] = _updateAlerts(current, {
+					critical: _CONFIG.thresholds.dlqSize.critical,
+					metric: 'jobs_dlq_size',
+					value,
+					warning: _CONFIG.thresholds.dlqSize.warning,
 				});
-			const pollDlqSize = Effect.sync(Context.Request.system).pipe(
-				Effect.flatMap((ctx) => Context.Request.within(
-					Context.Request.Id.system,
-						Effect.gen(function* () {
-						const value = yield* database.jobDlq.countPending();
-						yield* Metric.set(metrics.jobs.dlqSize, value);
-							const current = yield* Ref.get(alerts);
-							const [shouldLog, updated] = _updateAlerts(current, {
-								critical: _CONFIG.thresholds.dlqSize.critical,
-								metric: 'jobs_dlq_size',
-								value,
-								warning: _CONFIG.thresholds.dlqSize.warning,
-							});
-							yield* Ref.set(alerts, updated);
-							yield* persistAlerts(updated);
-							yield* _emitTransitions(eventBus, 'jobs_dlq_size', current, updated, value, _CONFIG.thresholds.dlqSize);
-							yield* Effect.when(Effect.logWarning('DLQ size critical', { threshold: _CONFIG.thresholds.dlqSize.critical, value }), () => shouldLog);
-							return value;
-						}).pipe(Effect.orElseSucceed(() => 0), Telemetry.span('polling.dlqSize', { metrics: false, 'polling.metric': 'jobs_dlq_size' })),
-					ctx,
-				)),
-			);
-			const pollJobQueueDepth = Effect.sync(Context.Request.system).pipe(
-				Effect.flatMap((ctx) => Context.Request.within(
-					Context.Request.Id.system,
-					Effect.gen(function* () {
-						const result = yield* sql`SELECT COUNT(*)::int AS count FROM jobs WHERE status IN ('queued', 'processing')`;
-						const value = Number(result[0]?.['count'] ?? 0);
-						yield* Metric.set(metrics.jobs.queueDepth, value);
-							const current = yield* Ref.get(alerts);
-							const [shouldLog, updated] = _updateAlerts(current, {
-								critical: _CONFIG.thresholds.jobQueueDepth.critical,
-								metric: 'jobs_queue_depth',
-								value,
-								warning: _CONFIG.thresholds.jobQueueDepth.warning,
-							});
-							yield* Ref.set(alerts, updated);
-							yield* persistAlerts(updated);
-							yield* _emitTransitions(eventBus, 'jobs_queue_depth', current, updated, value, _CONFIG.thresholds.jobQueueDepth);
-							yield* Effect.when(Effect.logWarning('Job queue depth critical', { threshold: _CONFIG.thresholds.jobQueueDepth.critical, value }), () => shouldLog);
-							return value;
-					}).pipe(
-						Effect.orElseSucceed(() => 0),
-						Telemetry.span('polling.jobQueueDepth', { metrics: false, 'polling.metric': 'jobs_queue_depth' }),
-					),
-					ctx,
-				)),
-			);
-			const pollEventOutboxDepth = Effect.sync(Context.Request.system).pipe(
-				Effect.flatMap((ctx) => Context.Request.within(
-					Context.Request.Id.system,
-					Effect.gen(function* () {
-						const result = yield* sql`SELECT COUNT(*)::int AS count FROM effect_event_remotes`;
-						const value = Number(result[0]?.['count'] ?? 0);
-						yield* Metric.set(metrics.events.outboxDepth, value);
-							const current = yield* Ref.get(alerts);
-							const [shouldLog, updated] = _updateAlerts(current, {
-								critical: _CONFIG.thresholds.eventOutboxDepth.critical,
-								metric: 'events_outbox_depth',
-								value,
-								warning: _CONFIG.thresholds.eventOutboxDepth.warning,
-							});
-							yield* Ref.set(alerts, updated);
-							yield* persistAlerts(updated);
-							yield* _emitTransitions(eventBus, 'events_outbox_depth', current, updated, value, _CONFIG.thresholds.eventOutboxDepth);
-							yield* Effect.when(Effect.logWarning('Event outbox depth critical', { threshold: _CONFIG.thresholds.eventOutboxDepth.critical, value }), () => shouldLog);
-							return value;
-					}).pipe(
-						Effect.orElseSucceed(() => 0),
-						Telemetry.span('polling.eventOutboxDepth', { metrics: false, 'polling.metric': 'events_outbox_depth' }),
-					),
-					ctx,
-				)),
-			);
-			const pollIoStats = Effect.sync(Context.Request.system).pipe(
-				Effect.flatMap((ctx) => Context.Request.within(
-					Context.Request.Id.system,
-					Effect.gen(function* () {
-						const stats = yield* Client.monitoring.cacheHitRatio();
-					const totalReads = stats.reduce((sum, s) => sum + Number(s.reads), 0);
-					const totalHits = stats.reduce((sum, s) => sum + Number(s.hits), 0);
-					const totalWrites = stats.reduce((sum, s) => sum + Number(s.writes), 0);
-					const avgHitRatio = totalReads + totalHits > 0 ? (totalHits / (totalReads + totalHits)) * 100 : 0;
-					yield* Effect.all([
-						Metric.set(metrics.database.cacheHitRatio, avgHitRatio),
-						Metric.set(metrics.database.ioReads, totalReads),
-						Metric.set(metrics.database.ioWrites, totalWrites),
-					], { discard: true });
-					const shouldWarn = avgHitRatio > 0 && avgHitRatio < _CONFIG.thresholds.cacheHitRatio.warning;
-					yield* Effect.when(Effect.logWarning('Cache hit ratio below threshold', { avgHitRatio, threshold: _CONFIG.thresholds.cacheHitRatio.warning }), () => shouldWarn);
-					return { avgHitRatio, totalReads };
-				}).pipe(Effect.orElseSucceed(() => ({ avgHitRatio: 0, totalReads: 0 })), Telemetry.span('polling.ioStats', { metrics: false, 'polling.metric': 'pg_stat_io' })),
-				ctx,
-			)),
+				yield* Ref.set(alerts, updated);
+				yield* persistAlerts(updated);
+				yield* _emitTransitions(eventBus, 'jobs_dlq_size', current, updated, value, _CONFIG.thresholds.dlqSize);
+				yield* Effect.when(Effect.logWarning('DLQ size critical', { threshold: _CONFIG.thresholds.dlqSize.critical, value }), () => shouldLog);
+				return value;
+			}).pipe(Effect.orElseSucceed(() => 0), Telemetry.span('polling.dlqSize', { metrics: false, 'polling.metric': 'jobs_dlq_size' })),
 		);
-			const refresh = (force = false) => Effect.all([Clock.currentTimeMillis, Ref.get(lastRefreshAtMs)]).pipe(
-				Effect.flatMap(([now, lastRefreshedAt]) => Effect.when(
-					Effect.all([
-						pollDlqSize,
-						pollJobQueueDepth,
-						pollEventOutboxDepth,
-						pollIoStats,
-					], { discard: true }).pipe(Effect.andThen(Ref.set(lastRefreshAtMs, Option.some(now))),),
-					() => checkShouldRefresh(force, lastRefreshedAt, now),
-				)),
-				Telemetry.span('polling.refresh', { metrics: false }),
-			);
-			const snapshot = MetricsService.snapshotEntries.pipe(Telemetry.span('polling.snapshot', { metrics: false }));
-			const snapshotPrometheus = snapshot.pipe(
-				Effect.map(MetricsService.prometheus),
-				Telemetry.span('polling.snapshot.prometheus', { metrics: false }),
-			);
-			const getHealth = () => _loadAlerts(database).pipe(
-				Effect.tap((latest) => Ref.set(alerts, latest)),
-				Effect.orElse(() => Ref.get(alerts)),
-				Telemetry.span('polling.getHealth', { metrics: false }),
-			);
-			return { getHealth, pollDlqSize, pollEventOutboxDepth, pollIoStats, pollJobQueueDepth, refresh, snapshot, snapshotPrometheus };
-		}),
-	}) {
-		/** Consolidated cron layer for all polling schedules */
-		static readonly Crons = Layer.mergeAll(
-			ClusterService.Schedule.cron({
+		const pollJobQueueDepth = _withSystemContext(
+			Effect.gen(function* () {
+				const value = yield* database.jobs.countByStatuses('queued', 'processing');
+				yield* Metric.set(metrics.jobs.queueDepth, value);
+				const current = yield* Ref.get(alerts);
+				const [shouldLog, updated] = _updateAlerts(current, {
+					critical: _CONFIG.thresholds.jobQueueDepth.critical,
+					metric: 'jobs_queue_depth',
+					value,
+					warning: _CONFIG.thresholds.jobQueueDepth.warning,
+				});
+				yield* Ref.set(alerts, updated);
+				yield* persistAlerts(updated);
+				yield* _emitTransitions(eventBus, 'jobs_queue_depth', current, updated, value, _CONFIG.thresholds.jobQueueDepth);
+				yield* Effect.when(Effect.logWarning('Job queue depth critical', { threshold: _CONFIG.thresholds.jobQueueDepth.critical, value }), () => shouldLog);
+				return value;
+			}).pipe(
+				Effect.orElseSucceed(() => 0),
+				Telemetry.span('polling.jobQueueDepth', { metrics: false, 'polling.metric': 'jobs_queue_depth' }),
+			),
+		);
+		const pollEventOutboxDepth = _withSystemContext(
+			Effect.gen(function* () {
+				const value = yield* database.eventOutbox.count;
+				yield* Metric.set(metrics.events.outboxDepth, value);
+				const current = yield* Ref.get(alerts);
+				const [shouldLog, updated] = _updateAlerts(current, {
+					critical: _CONFIG.thresholds.eventOutboxDepth.critical,
+					metric: 'events_outbox_depth',
+					value,
+					warning: _CONFIG.thresholds.eventOutboxDepth.warning,
+				});
+				yield* Ref.set(alerts, updated);
+				yield* persistAlerts(updated);
+				yield* _emitTransitions(eventBus, 'events_outbox_depth', current, updated, value, _CONFIG.thresholds.eventOutboxDepth);
+				yield* Effect.when(Effect.logWarning('Event outbox depth critical', { threshold: _CONFIG.thresholds.eventOutboxDepth.critical, value }), () => shouldLog);
+				return value;
+			}).pipe(
+				Effect.orElseSucceed(() => 0),
+				Telemetry.span('polling.eventOutboxDepth', { metrics: false, 'polling.metric': 'events_outbox_depth' }),
+			),
+		);
+		const pollIoStats = _withSystemContext(
+			Effect.gen(function* () {
+				const stats = yield* database.monitoring.cacheHitRatio();
+				const totalReads = stats.reduce((sum, s) => sum + Number(s.reads), 0);
+				const totalHits = stats.reduce((sum, s) => sum + Number(s.hits), 0);
+				const totalWrites = stats.reduce((sum, s) => sum + Number(s.writes), 0);
+				const avgHitRatio = totalReads + totalHits > 0 ? (totalHits / (totalReads + totalHits)) * 100 : 0;
+				yield* Effect.all([
+					Metric.set(metrics.database.cacheHitRatio, avgHitRatio),
+					Metric.set(metrics.database.ioReads, totalReads),
+					Metric.set(metrics.database.ioWrites, totalWrites),
+				], { discard: true });
+				const shouldWarn = avgHitRatio > 0 && avgHitRatio < _CONFIG.thresholds.cacheHitRatio.warning;
+				yield* Effect.when(Effect.logWarning('Cache hit ratio below threshold', { avgHitRatio, threshold: _CONFIG.thresholds.cacheHitRatio.warning }), () => shouldWarn);
+				return { avgHitRatio, totalReads };
+			}).pipe(Effect.orElseSucceed(() => ({ avgHitRatio: 0, totalReads: 0 })), Telemetry.span('polling.ioStats', { metrics: false, 'polling.metric': 'pg_stat_io' })),
+		);
+		const refresh = (force = false) => Effect.all([Clock.currentTimeMillis, Ref.get(lastRefreshAtMs)]).pipe(
+			Effect.flatMap(([now, lastRefreshedAt]) => Effect.when(
+				Effect.all([
+					pollDlqSize,
+					pollJobQueueDepth,
+					pollEventOutboxDepth,
+					pollIoStats,
+				], { discard: true }).pipe(Effect.andThen(Ref.set(lastRefreshAtMs, Option.some(now))),),
+				() => checkShouldRefresh(force, lastRefreshedAt, now),
+			)),
+			Telemetry.span('polling.refresh', { metrics: false }),
+		);
+		const getHealth = () => _loadAlerts(database).pipe(
+			Effect.tap((latest) => Ref.set(alerts, latest)),
+			Effect.orElse(() => Ref.get(alerts)),
+			Telemetry.span('polling.getHealth', { metrics: false }),
+		);
+		return { getHealth, pollDlqSize, pollEventOutboxDepth, pollIoStats, pollJobQueueDepth, refresh };
+	}),
+}) {
+	/** Consolidated cron layer for all polling schedules */
+	static readonly Crons = Layer.mergeAll(
+		ClusterService.Schedule.cron({
 			cron: Cron.unsafeParse(_CONFIG.cron.dlqSize),
 			execute: PollingService.pipe(Effect.flatMap((p) => p.pollDlqSize)),
 			name: 'polling-dlq',
 		}),
-			ClusterService.Schedule.cron({
-				cron: Cron.unsafeParse(_CONFIG.cron.ioStats),
-				execute: PollingService.pipe(Effect.flatMap((p) => p.pollIoStats)),
-				name: 'polling-io-stats',
-			}),
-			ClusterService.Schedule.cron({
-				cron: Cron.unsafeParse(_CONFIG.cron.jobQueueDepth),
-				execute: PollingService.pipe(Effect.flatMap((p) => p.pollJobQueueDepth)),
-				name: 'polling-job-queue-depth',
-			}),
-			ClusterService.Schedule.cron({
-				cron: Cron.unsafeParse(_CONFIG.cron.eventOutboxDepth),
-				execute: PollingService.pipe(Effect.flatMap((p) => p.pollEventOutboxDepth)),
-				name: 'polling-event-outbox-depth',
-			}),
-		);
-	}
+		ClusterService.Schedule.cron({
+			cron: Cron.unsafeParse(_CONFIG.cron.ioStats),
+			execute: PollingService.pipe(Effect.flatMap((p) => p.pollIoStats)),
+			name: 'polling-io-stats',
+		}),
+		ClusterService.Schedule.cron({
+			cron: Cron.unsafeParse(_CONFIG.cron.jobQueueDepth),
+			execute: PollingService.pipe(Effect.flatMap((p) => p.pollJobQueueDepth)),
+			name: 'polling-job-queue-depth',
+		}),
+		ClusterService.Schedule.cron({
+			cron: Cron.unsafeParse(_CONFIG.cron.eventOutboxDepth),
+			execute: PollingService.pipe(Effect.flatMap((p) => p.pollEventOutboxDepth)),
+			name: 'polling-event-outbox-depth',
+		}),
+	);
+}
 
 // --- [NAMESPACE] -------------------------------------------------------------
 

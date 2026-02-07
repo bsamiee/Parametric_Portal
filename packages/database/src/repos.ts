@@ -6,7 +6,7 @@ import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Schema as S } from 'effect';
 import { Client } from './client.ts';
 import { repo, Update } from './factory.ts';
-import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, Session, User } from './models.ts';
+import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, Session, User, WebauthnCredential } from './models.ts';
 
 // --- [USER_REPO] -------------------------------------------------------------
 
@@ -150,12 +150,34 @@ const makeMfaSecretRepo = Effect.gen(function* () {
 	};
 });
 
+// --- [WEBAUTHN_CREDENTIAL_REPO] ----------------------------------------------
+
+const makeWebauthnCredentialRepo = Effect.gen(function* () {
+	const repository = yield* repo(WebauthnCredential, 'webauthn_credentials', {resolve: { byCredentialId: 'credentialId', byUser: 'many:userId' },});
+	return {
+		...repository,
+		byCredentialId: (credentialId: string) => repository.by('byCredentialId', credentialId),
+		byUser: (userId: string) => repository.by('byUser', userId),
+		softDelete: (id: string) => repository.drop(id),
+		touch: (id: string) => repository.set(id, { last_used_at: Update.now }),
+		updateCounter: (id: string, counter: number) => repository.set(id, { counter, last_used_at: Update.now }),
+	};
+});
+
 // --- [JOB_REPO] --------------------------------------------------------------
 
 const makeJobRepo = Effect.gen(function* () {
-	const repository = yield* repo(Job, 'jobs', { pk: { column: 'job_id' } });
+	const repository = yield* repo(Job, 'jobs', {
+		fnTyped: { count_jobs_by_status: { args: [], params: S.Struct({}), schema: S.Record({ key: S.String, value: S.Number }) } },
+		pk: { column: 'job_id' },
+	});
 	return {
 		...repository,
+		byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+		byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page(repository.preds({ after: options?.after, before: options?.before, status }), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+		countByStatus: repository.fnTyped('count_jobs_by_status', {}).pipe(Effect.map(result => result as Record<string, number>)),
+		countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
+		isDuplicate: (dedupeKey: string) => repository.exists([{ field: 'dedupe_key', value: dedupeKey }, { field: 'status', op: 'in', values: ['queued', 'processing'] }]),
 	};
 });
 
@@ -210,17 +232,22 @@ const _purgeEventJournal = (olderThanDays: number) => Effect.gen(function* () {
 	`;
 	return (result[0]?.['count'] as number) ?? 0;
 });
+const _countEventOutbox = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const result = yield* sql`SELECT COUNT(*)::int AS count FROM effect_event_remotes`;
+	return (result[0] as { count: number }).count;
+});
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, jobs, jobDlq, kvStore] = yield* Effect.all([
+		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, kvStore] = yield* Effect.all([
 			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo,
+			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo,
 		]);
-		return { apiKeys, apps, assets, audit, eventJournal: { purge: _purgeEventJournal }, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, oauthAccounts, sessions, users, withTransaction: sqlClient.withTransaction };
+		return { apiKeys, apps, assets, audit, eventJournal: { purge: _purgeEventJournal }, eventOutbox: { count: _countEventOutbox }, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, monitoring: Client.monitoring, oauthAccounts, sessions, users, webauthnCredentials, withTransaction: sqlClient.withTransaction };
 	}),
 }) {}
 

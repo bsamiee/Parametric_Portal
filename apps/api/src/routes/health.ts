@@ -3,7 +3,7 @@
  * Canonical health surface: database, cache (L1/L2), metrics polling, worker pool.
  * Traced for observability - health probe failures visible in distributed traces.
  */
-import { HttpApiBuilder, HttpServerResponse } from '@effect/platform';
+import { HttpApiBuilder } from '@effect/platform';
 import { Client } from '@parametric-portal/database/client';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
@@ -11,14 +11,18 @@ import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { PollingService } from '@parametric-portal/server/observe/polling';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { CacheService } from '@parametric-portal/server/platform/cache';
-import { Boolean as B, Effect, Match, pipe } from 'effect';
+import { Effect, Match, pipe } from 'effect';
 
-// --- [EFFECT_PIPELINE] -------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
+const _RATE_LIMIT_PRESET = 'health' as const;
 const _liveness = pipe(
 	Effect.succeed({ status: 'ok' as const }),
 	Telemetry.span('health.liveness', { kind: 'server', metrics: false }),
 );
+
+// --- [EFFECT_PIPELINE] -------------------------------------------------------
+
 const _readiness = (polling: PollingService) => pipe(
 	Effect.all({
 		alerts: polling.refresh().pipe(Effect.andThen(polling.getHealth())),
@@ -51,10 +55,7 @@ const _readiness = (polling: PollingService) => pipe(
 		checks: {
 			cache: { connected: cache.connected, latencyMs: cache.latencyMs },
 			database: { healthy: db.healthy, latencyMs: db.latencyMs },
-			metrics: B.match(critical.length > 0, {
-				onFalse: () => B.match(alerts.length > 0, { onFalse: () => 'healthy' as const, onTrue: () => 'degraded' as const }),
-				onTrue: () => 'alerted' as const,
-			}),
+			metrics: critical.length > 0 ? 'alerted' as const : alerts.length > 0 ? 'degraded' as const : 'healthy' as const,
 			polling: { criticalAlerts: critical.length, totalAlerts: alerts.length },
 			vector: { configured: vectorConfig },
 		},
@@ -67,17 +68,12 @@ const _readiness = (polling: PollingService) => pipe(
 
 const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 	Effect.andThen(PollingService, (polling) => handlers
-		.handle('liveness', () => _liveness)
-		.handle('readiness', () => _readiness(polling))
-			.handle('clusterHealth', () => ClusterService.Health.cluster().pipe(
+		.handle('liveness', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, _liveness))
+		.handle('readiness', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, _readiness(polling)))
+		.handle('clusterHealth', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, ClusterService.Health.cluster().pipe(
 			Effect.map((cluster) => ({ cluster })),
 			Telemetry.span('health.clusterHealth', { kind: 'server', metrics: false }),
-		))
-			.handleRaw('metrics', () => polling.refresh().pipe(
-				Effect.andThen(polling.snapshotPrometheus),
-				Effect.map((body) => HttpServerResponse.text(body, { contentType: 'text/plain; version=0.0.4; charset=utf-8' })),
-				Telemetry.span('health.metrics', { kind: 'server', metrics: false }),
-			)),
+		)))
 	),
 );
 

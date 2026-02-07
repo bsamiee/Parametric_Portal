@@ -3,7 +3,7 @@
  * No custom types - uses Effect's official types directly.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Array as A, Boolean as B, Effect, HashSet, Match, Metric, MetricLabel, MetricState, Option, Record as R, Stream } from 'effect';
+import { Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
 import { Context } from '../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -19,33 +19,11 @@ const _CONFIG = {
 		storage: 	[0.005, 0.025, 0.125, 0.625, 3.125, 15.625, 78.125, 390.625] as const,	// S3 operations (5x exponential)
 		transfer: 	[0.1, 0.5, 2.5, 12.5, 62.5, 312.5] as const,				// Data transfers (5x exponential)
 	},
-	labels: {			// Prometheus label value limit is 128 chars; we truncate at 120 to leave room for suffix
+	labels: {			// OTLP label value limit is 128 chars; we truncate at 120 to leave room for suffix
 		maxContent: 120,
 		truncateSuffix: '...',
 	},
-	prometheus: {
-		helpPrefix: 'effect_metric',
-		typeByEntry: {
-			counter: 'counter',
-			frequency: 'counter',
-			gauge: 'gauge',
-			histogram_count: 'counter',
-			histogram_max: 'gauge',
-			histogram_min: 'gauge',
-			histogram_sum: 'counter',
-			summary_count: 'counter',
-			summary_quantile: 'summary',
-			summary_sum: 'counter',
-		} as const,
-	},
 } as const;
-
-type _SnapshotEntry = {
-	readonly labels: Record<string, string>;
-	readonly name: string;
-	readonly type: string;
-	readonly value: number;
-};
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -54,73 +32,14 @@ const errorTag = (err: unknown): string => Match.value(err).pipe(
 	Match.when((e: unknown): e is Error => e instanceof Error, (e) => e.constructor.name),
 	Match.orElse(() => 'Unknown'),
 );
-const _stateToEntries = (state: MetricState.MetricState<unknown>, name: string, labels: Record<string, string>) =>
-	Match.value(state).pipe(
-		Match.when(MetricState.isCounterState, (counterState) => [{ labels, name, type: 'counter', value: Number(counterState.count) }]),
-		Match.when(MetricState.isGaugeState, (gaugeState) => [{ labels, name, type: 'gauge', value: Number(gaugeState.value) }]),
-		Match.when(MetricState.isHistogramState, (histogramState) => [
-			{ labels, name: `${name}_count`, type: 'histogram_count', value: histogramState.count },
-			{ labels, name: `${name}_sum`, type: 'histogram_sum', value: histogramState.sum },
-			{ labels, name: `${name}_min`, type: 'histogram_min', value: histogramState.min },
-			{ labels, name: `${name}_max`, type: 'histogram_max', value: histogramState.max },
-		]),
-		Match.when(MetricState.isSummaryState, (summaryState) => [
-			{ labels, name: `${name}_count`, type: 'summary_count', value: summaryState.count },
-			{ labels, name: `${name}_sum`, type: 'summary_sum', value: summaryState.sum },
-			...A.filterMap([...summaryState.quantiles], ([quantile, value]) => Option.map(value, (quantileValue) => ({
-				labels: { ...labels, quantile: String(quantile) },
-				name,
-				type: 'summary_quantile',
-				value: quantileValue,
-			}))),
-		]),
-		Match.when(MetricState.isFrequencyState, (frequencyState) => [...frequencyState.occurrences.entries()].map(([category, count]) => ({
-			labels: { ...labels, category },
-			name,
-			type: 'frequency',
-			value: count,
-		}))),
-		Match.orElse(() => []),
-	);
-const _escapePrometheusValue = (value: string) => value.replaceAll('\\', '\\\\').replaceAll('\n', '\\n').replaceAll('"', '\\"');
-const _prometheusType = (entry: _SnapshotEntry) => Match.value(entry.type).pipe(
-	Match.when('counter', () => _CONFIG.prometheus.typeByEntry.counter),
-	Match.when('frequency', () => _CONFIG.prometheus.typeByEntry.frequency),
-	Match.when('gauge', () => _CONFIG.prometheus.typeByEntry.gauge),
-	Match.when('histogram_count', () => _CONFIG.prometheus.typeByEntry.histogram_count),
-	Match.when('histogram_max', () => _CONFIG.prometheus.typeByEntry.histogram_max),
-	Match.when('histogram_min', () => _CONFIG.prometheus.typeByEntry.histogram_min),
-	Match.when('histogram_sum', () => _CONFIG.prometheus.typeByEntry.histogram_sum),
-	Match.when('summary_count', () => _CONFIG.prometheus.typeByEntry.summary_count),
-	Match.when('summary_quantile', () => _CONFIG.prometheus.typeByEntry.summary_quantile),
-	Match.when('summary_sum', () => _CONFIG.prometheus.typeByEntry.summary_sum),
-	Match.orElse(() => 'gauge' as const),
-);
-const _prometheusLabels = (labels: Record<string, string>) => Object.entries(labels).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}="${_escapePrometheusValue(value)}"`).join(',');
-const _prometheusSample = (entry: _SnapshotEntry) => Match.value(_prometheusLabels(entry.labels)).pipe(
-	Match.when('', () => `${entry.name} ${entry.value}`),
-	Match.orElse((encoded) => `${entry.name}{${encoded}} ${entry.value}`),
-);
-const _prometheusDescriptors = (entries: ReadonlyArray<_SnapshotEntry>) =>
-	R.values(A.reduce(entries, {} as Record<string, { readonly help: string; readonly name: string; readonly type: string }>, (acc, entry) => ({
-		...acc,
-		[entry.name]: {
-			help: `${_CONFIG.prometheus.helpPrefix}_${entry.name}`,
-			name: entry.name,
-			type: _prometheusType(entry),
-		},
-	})));
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', {
 	effect: Effect.succeed({
 		ai: {
-			duration: Metric.timerWithBoundaries('ai_duration_seconds', _CONFIG.boundaries.transfer),
-			embeddings: Metric.counter('ai_embeddings_total'),
-			errors: Metric.frequency('ai_errors_total'),
-			requests: Metric.counter('ai_requests_total'),
-			tokens: Metric.counter('ai_tokens_total'),
+			duration: Metric.timerWithBoundaries('ai_duration_seconds', _CONFIG.boundaries.transfer), embeddings: Metric.counter('ai_embeddings_total'),
+			errors: Metric.frequency('ai_errors_total'), requests: Metric.counter('ai_requests_total'), tokens: Metric.counter('ai_tokens_total'),
 		},
 		audit: {failures: Metric.counter('audit_failures_total'), writes: Metric.counter('audit_writes_total'),},
 		auth: {
@@ -154,26 +73,18 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			redeliveries: Metric.counter('cluster_redeliveries_total'),
 		},
 		database: {
-			cacheHitRatio: Metric.gauge('database_cache_hit_ratio_percent'),
-			ioReads: Metric.gauge('database_io_reads_total'),
-			ioWrites: Metric.gauge('database_io_writes_total'),
+			cacheHitRatio: Metric.gauge('database_cache_hit_ratio_percent'), ioReads: Metric.gauge('database_io_reads_total'), ioWrites: Metric.gauge('database_io_writes_total'),
 			vectorIndexScans: Metric.gauge('database_vector_index_scans_total'),
 		},
 		errors: Metric.frequency('errors_total'),
 		events: {
-			deadLettered: Metric.counter('events_dead_lettered_total'),
-			deliveryLatency: Metric.timerWithBoundaries('events_delivery_latency_seconds', _CONFIG.boundaries.cluster),
-			duplicatesSkipped: Metric.counter('events_duplicates_skipped_total'),
-			emitted: Metric.counter('events_emitted_total'),
-			outboxDepth: Metric.gauge('events_outbox_depth'),
-			processed: Metric.counter('events_processed_total'),
-			retries: Metric.counter('events_retries_total'),
-			subscriptions: Metric.gauge('events_subscriptions_active'),
+			deadLettered: Metric.counter('events_dead_lettered_total'), deliveryLatency: Metric.timerWithBoundaries('events_delivery_latency_seconds', _CONFIG.boundaries.cluster),
+			duplicatesSkipped: Metric.counter('events_duplicates_skipped_total'), emitted: Metric.counter('events_emitted_total'), outboxDepth: Metric.gauge('events_outbox_depth'),
+			processed: Metric.counter('events_processed_total'), retries: Metric.counter('events_retries_total'), subscriptions: Metric.gauge('events_subscriptions_active'),
 		},
 		fiber: { active: Metric.fiberActive, failures: Metric.fiberFailures, lifetimes: Metric.fiberLifetimes, started: Metric.fiberStarted, successes: Metric.fiberSuccesses },
 		http: {
-			active: Metric.gauge('http_requests_active'),
-			duration: Metric.timerWithBoundaries('http_request_duration_seconds', _CONFIG.boundaries.http),
+			active: Metric.gauge('http_requests_active'), duration: Metric.timerWithBoundaries('http_request_duration_seconds', _CONFIG.boundaries.http),
 			requests: Metric.counter('http_requests_total'),
 		},
 		jobs: {
@@ -198,15 +109,8 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			bulkheadRejections: Metric.counter('resilience_bulkhead_rejections_total'), fallbacks: Metric.counter('resilience_fallbacks_total'),
 			hedges: Metric.counter('resilience_hedges_total'), retries: Metric.counter('resilience_retries_total'), timeouts: Metric.counter('resilience_timeouts_total'),
 		},
-		rpc: {
-			duration: Metric.timerWithBoundaries('rpc_duration_seconds', _CONFIG.boundaries.rpc),
-			errors: Metric.frequency('rpc_errors_total'),
-			requests: Metric.counter('rpc_requests_total'),
-		},
-		rtc: {
-			connections: Metric.counter('rtc_connections_total'),
-			events: Metric.counter('rtc_events_total'),
-		},
+		rpc: {duration: Metric.timerWithBoundaries('rpc_duration_seconds', _CONFIG.boundaries.rpc), errors: Metric.frequency('rpc_errors_total'), requests: Metric.counter('rpc_requests_total'),},
+		rtc: {connections: Metric.counter('rtc_connections_total'), events: Metric.counter('rtc_events_total'),},
 		search: {
 			queries: Metric.counter('search_queries_total', { description: 'Total search queries' }),
 			refreshes: Metric.counter('search_refreshes_total', { description: 'Total index refreshes' }),
@@ -219,12 +123,9 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			stateErrors: Metric.counter('singleton_state_errors_total'), stateOperations: Metric.counter('singleton_state_operations_total'),
 		},
 		storage: {
-			bytes: Metric.counter('storage_bytes_total'),
-			duration: Metric.timerWithBoundaries('storage_operation_duration_seconds', _CONFIG.boundaries.storage),
-			errors: Metric.counter('storage_errors_total'),
+			bytes: Metric.counter('storage_bytes_total'), duration: Metric.timerWithBoundaries('storage_operation_duration_seconds', _CONFIG.boundaries.storage), errors: Metric.counter('storage_errors_total'),
 			multipart: {bytes: Metric.counter('storage_multipart_bytes_total'), parts: Metric.counter('storage_multipart_parts_total'), uploads: Metric.counter('storage_multipart_uploads_total'),},
-			operations: Metric.counter('storage_operations_total'),
-			stream: { duration: Metric.timerWithBoundaries('storage_stream_duration_seconds', _CONFIG.boundaries.storage) },
+			operations: Metric.counter('storage_operations_total'), stream: { duration: Metric.timerWithBoundaries('storage_stream_duration_seconds', _CONFIG.boundaries.storage) },
 		},
 		stream: {
 			active: Metric.gauge('stream_active'), bytes: Metric.counter('stream_bytes_total'), duration: Metric.timerWithBoundaries('stream_duration_seconds', [0.1, 1, 10, 60, 300]),
@@ -233,14 +134,6 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		transfer: {
 			duration: Metric.timerWithBoundaries('transfer_duration_seconds', _CONFIG.boundaries.transfer), exports: Metric.counter('transfer_exports_total'),
 			imports: Metric.counter('transfer_imports_total'), rows: Metric.counter('transfer_rows_total'),
-		},
-		workers: {
-			active: Metric.gauge('workers_active'),
-			completions: Metric.counter('workers_completions_total'),
-			crashes: Metric.counter('workers_crashes_total'),
-			duration: Metric.timerWithBoundaries('workers_duration_seconds', _CONFIG.boundaries.transfer),
-			queueDepth: Metric.gauge('workers_queue_depth'),
-			timeouts: Metric.counter('workers_timeouts_total'),
 		},
 	}),
 }) {
@@ -259,31 +152,14 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 					// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars
 				)(value.normalize('NFKC').replaceAll(/[\x00-\x1f\x7f\u200b-\u200f\u2028-\u202f\ufeff\u00ad]/g, '')))),	// NOSONAR S6324
 		);
-	// --- [PROMETHEUS] --------------------------------------------------------
-	static readonly snapshotEntries = Metric.snapshot.pipe(Effect.map((snapshot) =>
-		[...snapshot].flatMap((entry) =>
-			_stateToEntries(
-				entry.metricState,
-				entry.metricKey.name,
-				Object.fromEntries([...entry.metricKey.tags].map((tag) => [tag.key, tag.value])),
-			),
-		),
-	));
-	static readonly prometheus = (entries: ReadonlyArray<_SnapshotEntry>) => {
-		const valid = A.filter(entries, (entry) => Number.isFinite(entry.value));
-		const headers = A.flatMap(_prometheusDescriptors(valid), (descriptor) => [`# HELP ${descriptor.name} ${descriptor.help}`, `# TYPE ${descriptor.name} ${descriptor.type}`]);
-		const samples = A.map(valid, _prometheusSample);
-		return [...headers, ...samples, ''].join('\n');
-	};
 	// --- [INCREMENT] ---------------------------------------------------------
 	static readonly inc = (								// Increment counter with labels using official Metric.increment/incrementBy APIs.
 		counter: Metric.Metric.Counter<number>,
 		labels: HashSet.HashSet<MetricLabel.MetricLabel>,
 		value = 1,): Effect.Effect<void> =>
-		B.match(value === 1, {
-			onFalse: () => Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value),
-			onTrue: () => Metric.increment(Metric.taggedWithLabels(counter, labels)),
-		});
+		value === 1
+			? Metric.increment(Metric.taggedWithLabels(counter, labels))
+			: Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value);
 	// --- [GAUGE] -------------------------------------------------------------
 	static readonly gauge = (							// Update gauge with labels using official Metric.update API.
 		gauge: Metric.Metric.Gauge<number>,

@@ -30,6 +30,7 @@ type Config<M extends Model.AnyNoContext> = {
 	purge?: string;
 	fn?: Record<string, { args: (string | { field: string; cast: SqlCast })[]; params: S.Schema.AnyNoContext }>;
 	fnSet?: Record<string, { args: (string | { field: string; cast: SqlCast })[]; params: S.Schema.AnyNoContext }>;
+	fnTyped?: Record<string, { args: (string | { field: string; cast: SqlCast })[]; params: S.Schema.AnyNoContext; schema: S.Schema.AnyNoContext }>;
 };
 type Pred =
 	| [string, unknown]
@@ -294,6 +295,13 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 					return SqlSchema.findAll({ execute: () => sql`SELECT * FROM ${sql.literal(name)}(${args})`, Request: spec.params, Result: model })(params);
 				})(config.fnSet[name])
 				: Effect.fail(config.fnSet ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no set functions configured', operation: 'fnSet', table }));
+		const fnTyped = (name: string, params: Record<string, unknown>): Effect.Effect<unknown, RepoConfigError | RepoUnknownFnError | SqlError | ParseError | Cause.NoSuchElementException> =>
+			config.fnTyped?.[name]
+				? ((spec) => {
+					const args = sql.csv(spec.args.map(arg => typeof arg === 'string' ? sql`${params[arg]}` : sql`${params[arg.field]}::${sql.literal(arg.cast)}`));
+					return SqlSchema.single({ execute: () => sql`SELECT ${sql.literal(name)}(${args}) AS result`, Request: spec.params, Result: S.Struct({ result: spec.schema }) })(params).pipe(Effect.map(row => row.result));
+				})(config.fnTyped[name])
+				: Effect.fail(config.fnTyped ? new RepoUnknownFnError({ fn: name, table }) : new RepoConfigError({ message: 'no typed functions configured', operation: 'fnTyped', table }));
 		// --- Transaction support ---------------------------------------------
 		const withTransaction = sql.withTransaction;						// Run effect within a transaction. Caller controls the transaction boundary.
 		// --- JSON field helpers (for string columns storing typed JSON) -------
@@ -306,7 +314,7 @@ const repo = <M extends Model.AnyNoContext, const C extends Config<M>>(model: M,
 		};
 		return {
 			...base,
-			agg, by, count, drop, exists, find, fn, fnSet, json, lift, merge, one, page, pageOffset, pg,
+			agg, by, count, drop, exists, find, fn, fnSet, fnTyped, json, lift, merge, one, page, pageOffset, pg,
 			preds, purge, put, set, stream, upsert, withTransaction,
 		};
 	});

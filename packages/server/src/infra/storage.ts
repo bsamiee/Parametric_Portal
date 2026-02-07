@@ -26,18 +26,15 @@ const _ENV = Config.all({
 	region: 			Config.string('STORAGE_REGION').pipe(Config.withDefault('us-east-1')),
 	secretAccessKey: 	Config.redacted('STORAGE_SECRET_ACCESS_KEY'),
 });
+const _layer = Layer.unwrapEffect(_ENV.pipe(Effect.map((c) => S3.layer({
+	credentials: { accessKeyId: Redacted.value(c.accessKeyId), secretAccessKey: Redacted.value(c.secretAccessKey) },
+	endpoint: Option.getOrUndefined(c.endpoint), forcePathStyle: c.forcePathStyle, region: c.region,
+}))));
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
 
 const _path = (key: string) => Context.Request.currentTenantId.pipe(Effect.map((t) => t === Context.Request.Id.system ? `system/${key}` : `tenants/${t}/${key}`));
 const _concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => chunks.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
-
-// --- [LAYERS] ----------------------------------------------------------------
-
-const _layer = Layer.unwrapEffect(_ENV.pipe(Effect.map((c) => S3.layer({
-	credentials: { accessKeyId: Redacted.value(c.accessKeyId), secretAccessKey: Redacted.value(c.secretAccessKey) },
-	endpoint: Option.getOrUndefined(c.endpoint), forcePathStyle: c.forcePathStyle, region: c.region,
-}))));
 
 // --- [SERVICE] ---------------------------------------------------------------
 

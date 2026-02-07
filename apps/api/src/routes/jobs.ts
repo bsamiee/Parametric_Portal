@@ -27,7 +27,8 @@ const handleSubscribe = (jobs: typeof JobService.Service) =>
 			source: jobs.onStatusChange(),
 		});
 	}).pipe(
-		Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('SSE failed', error))),
+		Effect.catchTag('Forbidden', Effect.fail),
+		Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('SSE failed', error))),
 		Telemetry.span('jobs.subscribe', { kind: 'server', metrics: false }),
 	);
 

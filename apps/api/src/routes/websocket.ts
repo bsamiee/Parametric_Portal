@@ -30,7 +30,8 @@ const handleConnect = (webSocket: typeof WebSocketService.Service) =>
 		yield* webSocket.accept(socket, session.userId, tenantId);
 		return yield* Effect.fail(HttpError.Internal.of('WebSocket closed'));
 	}).pipe(
-		Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('WebSocket failed', error))),
+		Effect.catchTag('Forbidden', Effect.fail),
+		Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('WebSocket failed', error))),
 		Telemetry.span('websocket.connect', { kind: 'server', metrics: false }),
 	);
 

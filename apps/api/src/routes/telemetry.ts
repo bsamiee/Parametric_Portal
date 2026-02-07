@@ -6,7 +6,7 @@
  * This high-volume endpoint would generate excessive audit entries (one per trace batch).
  * Telemetry data is already observable via the OTLP collector itself.
  */
-import { Headers, HttpApiBuilder, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
+import { FetchHttpClient, Headers, HttpApiBuilder, HttpClient, HttpClientRequest, type HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
@@ -32,11 +32,12 @@ const CollectorHeaders = Config.string('OTEL_EXPORTER_OTLP_HEADERS').pipe(
 	Config.withDefault(_CONFIG.defaults.headers),
 	Config.map(Telemetry.parseHeaders),
 );
+
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OtlpPayload = S.Struct({ resourceSpans: S.Array(S.Unknown) });
 
-// --- [DISPATCH_TABLES] -------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
 const handleIngestTraces = (request: HttpServerRequest.HttpServerRequest) =>
 	Effect.gen(function* () {
@@ -56,12 +57,15 @@ const handleIngestTraces = (request: HttpServerRequest.HttpServerRequest) =>
 				Effect.map((decoded) => ({ body: JSON.stringify(decoded), contentType: _CONFIG.contentType.json })),
 			)),
 		);
+		const outbound = pipe(
+			HttpClientRequest.post(`${endpoint}${_CONFIG.paths.traces}`),
+			HttpClientRequest.setHeaders(extraHeaders),
+			payload.body instanceof Uint8Array
+				? HttpClientRequest.bodyUint8Array(payload.body, payload.contentType)
+				: HttpClientRequest.bodyText(payload.body, payload.contentType),
+		);
 		yield* Resilience.run(_CONFIG.telemetry.circuit,
-			Effect.tryPromise({
-				catch: (error) => error instanceof Error ? error : new Error(String(error)),
-				try: (signal) => fetch(`${endpoint}${_CONFIG.paths.traces}`, { body: payload.body, headers: { ...extraHeaders, 'content-type': payload.contentType }, method: 'POST', signal })
-					.then((response) => response.ok ? undefined : Promise.reject(new Error(`OTLP collector HTTP ${response.status}`))),
-			}),
+			Effect.flatMap(HttpClient.HttpClient, (client) => client.pipe(HttpClient.filterStatusOk).execute(outbound).pipe(Effect.scoped, Effect.asVoid)).pipe(Effect.provide(FetchHttpClient.layer)),
 				{ circuit: _CONFIG.telemetry.circuit, retry: 'brief', timeout: Duration.seconds(5) },
 			);
 		return HttpServerResponse.empty({ status: _CONFIG.response.accepted });

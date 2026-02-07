@@ -1,6 +1,26 @@
 /**
  * Stream file parsing and serialization for bulk import/export.
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
+ *
+ * TODO [M7]: Move CPU-bound parsing to @effect/platform Worker pool.
+ * CSV (PapaParse) and SAX (XML) parsing block the event loop during large files.
+ * The project has @effect/platform 0.94.2 + @effect/platform-node 0.104.1 with
+ * full Worker support (Worker.makePoolSerialized, NodeWorker.layer, NodeWorkerRunner).
+ *
+ * Implementation plan:
+ *   1. Define a Schema.TaggedRequest for each parser (delimited, tree, archive)
+ *      with Codec.Input serialized as ArrayBuffer (transferable).
+ *   2. Create a worker entry file that provides NodeWorkerRunner.layer +
+ *      WorkerRunner.layerSerialized with handlers for each request type.
+ *   3. In this module, replace direct parser calls with pool.executeEffect()
+ *      using Worker.makePoolSerialized + NodeWorker.layer as spawner.
+ *   4. The worker needs its own Crypto layer for _zipWithManifest hash verification.
+ *   5. Stream results serialize back via Worker's built-in Stream support.
+ *
+ * Blocked by: Schema serialization of Codec.Input (contains raw buffers that
+ * need Transferable handling), and the Crypto service dependency in the worker
+ * context. Consider Effect.fork to a dedicated fiber as a simpler first step
+ * if full Worker isolation is not yet needed.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
 import { Array as A, Chunk, Clock, Effect, Either, Match, MutableRef, Option, Schema as S, Stream, Tuple } from 'effect';
