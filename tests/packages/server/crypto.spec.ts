@@ -1,7 +1,7 @@
 import { it, layer } from '@effect/vitest';
 import { Context } from '@parametric-portal/server/context';
 import { Crypto } from '@parametric-portal/server/security/crypto';
-import { Array as A, ConfigProvider, Effect, FastCheck as fc, Layer, Logger, LogLevel } from 'effect';
+import { Array as A, ConfigProvider, Effect, FastCheck as fc, Layer, Logger, LogLevel, Redacted } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -45,7 +45,7 @@ layer(_testLayer)('Crypto', (it) => {
 		Crypto.decrypt(new Uint8Array([0, ...Array.from<number>({ length: 28 }).fill(0)])).pipe(Effect.flip),
 		Crypto.decrypt(new Uint8Array(CIPHER.minBytes - 1)).pipe(Effect.flip),
 		Crypto.decrypt(new Uint8Array([255, ...crypto.getRandomValues(new Uint8Array(28))])).pipe(Effect.flip),
-	]).pipe(Effect.map(([v0, minB, v255]) => expect([v0.code, minB.code, v255.code]).toEqual(['INVALID_FORMAT', 'INVALID_FORMAT', 'OP_FAILED']))));
+	]).pipe(Effect.map(([v0, minB, v255]) => expect([v0.code, minB.code, v255.code]).toEqual(['INVALID_FORMAT', 'INVALID_FORMAT', 'KEY_NOT_FOUND']))));
 
 	// P5: Tenant Isolation - different tenants produce different ciphertexts + cross-tenant decrypt fails
 	it.effect.prop('P5: tenant isolation', { t1: fc.uuid(), t2: fc.uuid(), x: _nonempty }, ({ t1, t2, x }) => {
@@ -89,7 +89,7 @@ it.effect.prop('P8: hmac laws', { k1: _nonempty, k2: _nonempty, msg: _nonempty }
 // P9: Pair - uniqueness + hash derivation correctness
 it.effect('P9: pair', () => Effect.gen(function* () {
 	const pairs = yield* Crypto.pair.pipe(Effect.replicate(100), Effect.all);
-	expect(new Set(pairs.map((p) => p.token)).size).toBe(100);
+	expect(new Set(pairs.map((p) => Redacted.value(p.token))).size).toBe(100);
 	const first = A.headNonEmpty(pairs as A.NonEmptyArray<typeof pairs[number]>);
-	expect(yield* Crypto.hash(first.token)).toBe(first.hash);
+	expect(yield* Crypto.hash(Redacted.value(first.token))).toBe(first.hash);
 }));

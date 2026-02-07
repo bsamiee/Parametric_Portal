@@ -3,7 +3,6 @@
  */
 import { HttpApiBuilder } from '@effect/platform';
 import { SearchService } from '@parametric-portal/ai/search';
-import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { HttpError } from '@parametric-portal/server/errors';
 import { CacheService } from '@parametric-portal/server/platform/cache';
@@ -20,8 +19,6 @@ const _ENTITY_TYPES = ['user', 'app', 'asset', 'auditLog'] as const;
 const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 	Effect.gen(function* () {
 		const search = yield* SearchService;
-		const repositories = yield* DatabaseService;
-		const requireRole = Middleware.makeRequireRole((id) => repositories.users.one([{ field: 'id', value: id }]).pipe(Effect.map(Option.map((user) => ({ role: user.role })))));
 		const isEntityType = (v: string): v is typeof _ENTITY_TYPES[number] => (_ENTITY_TYPES as readonly string[]).includes(v);
 		return handlers
 			.handle('search', ({ urlParams }) =>
@@ -63,20 +60,22 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 				)
 			.handle('refresh', ({ payload }) =>
 				CacheService.rateLimit('api',
-					requireRole('admin').pipe(
+					Middleware.requireRole('admin').pipe(
 							Effect.andThen(search.refresh(payload.includeGlobal)),
 							Effect.as({ status: 'ok' as const }),
-							Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Refresh failed', error))),
+							Effect.catchTag('Forbidden', Effect.fail),
+							Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Refresh failed', error))),
 							Telemetry.span('search.refresh', { kind: 'server', metrics: false }),
 						),
 					),
 				)
 			.handle('refreshEmbeddings', ({ payload }) =>
 				CacheService.rateLimit('api',
-					requireRole('admin').pipe(
+					Middleware.requireRole('admin').pipe(
 							Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal })),
 							Effect.map((result) => ({ count: result.count })),
-							Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('Embedding refresh failed', error))),
+							Effect.catchTag('Forbidden', Effect.fail),
+							Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Embedding refresh failed', error))),
 							Telemetry.span('search.refreshEmbeddings', { kind: 'server', metrics: false }),
 						),
 					),

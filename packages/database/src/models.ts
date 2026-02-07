@@ -1,12 +1,14 @@
 /**
- * Define @effect/sql Model classes with auto-derived variants.
- * Field modifiers: Generated, Sensitive, FieldOption, DateTimeUpdate.
+ * Define @effect/sql Model classes with VariantSchema integration.
+ * Model.Class IS VariantSchema — field modifiers (Generated, Sensitive, FieldOption,
+ * DateTimeUpdateFromDate) are VariantSchema.Field instances controlling behavior
+ * across select/insert/update/json/jsonCreate/jsonUpdate variants.
  */
 /** biome-ignore-all assist/source/useSortedKeys: <Maintain registry organization> */
 import { Model } from '@effect/sql';
 import { Schema as S } from 'effect';
 
-// --- [PRIMITIVES] ------------------------------------------------------------
+// --- [SCHEMA] ----------------------------------------------------------------
 
 const BufferSchema = S.Uint8ArrayFromSelf;
 
@@ -16,8 +18,8 @@ class User extends Model.Class<User>('User')({							// The principal identity. 
 	id: Model.Generated(S.UUID),
 	appId: S.UUID,
 	email: S.String,
-	role: S.String,
-	status: S.String,
+	role: S.Literal('owner', 'admin', 'member', 'viewer', 'guest'),
+	status: S.Literal('active', 'inactive', 'suspended'),
 	roleOrder: Model.Generated(S.Number),
 	deletedAt: Model.FieldOption(S.DateFromSelf),						// Internal: soft delete
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
@@ -56,7 +58,6 @@ class OauthAccount extends Model.Class<OauthAccount>('OauthAccount')({ 	// Exter
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
 
-// --- [AUTH: REFRESH_TOKEN] ---------------------------------------------------
 // --- [AUTH: MFA_SECRET] ------------------------------------------------------
 class MfaSecret extends Model.Class<MfaSecret>('MfaSecret')({ 			// TOTP second factor. Belongs to a User (one per user).
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
@@ -66,6 +67,23 @@ class MfaSecret extends Model.Class<MfaSecret>('MfaSecret')({ 			// TOTP second 
 	remaining: Model.Generated(S.Number),
 	encrypted: Model.Sensitive(BufferSchema),							// Sensitive: never in json
 	backupHashes: Model.Sensitive(S.Array(S.String)),					// Sensitive: never in json
+	deletedAt: Model.FieldOption(S.DateFromSelf),						// Internal: soft delete
+	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
+}) {}
+
+// --- [AUTH: WEBAUTHN_CREDENTIAL] ---------------------------------------------
+class WebauthnCredential extends Model.Class<WebauthnCredential>('WebauthnCredential')({	// FIDO2/passkey credential. Belongs to a User (many per user).
+	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract creation time from UUIDv7 — REPLACES created_at COLUMN
+	id: Model.Generated(S.UUID),
+	userId: S.UUID,														// Internal: FK
+	credentialId: S.String,												// Base64url-encoded credential ID from authenticator
+	publicKey: BufferSchema,											// COSE public key bytes
+	counter: S.Number,													// Signature counter for clone detection
+	deviceType: S.Literal('singleDevice', 'multiDevice'),												// Credential backup eligibility
+	backedUp: S.Boolean,												// Whether credential is currently backed up
+	transports: S.Array(S.String),										// Authenticator transport hints
+	name: S.String,														// User-assigned friendly name
+	lastUsedAt: Model.FieldOption(S.DateFromSelf),						// Last successful authentication
 	deletedAt: Model.FieldOption(S.DateFromSelf),						// Internal: soft delete
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
@@ -104,7 +122,7 @@ class Asset extends Model.Class<Asset>('Asset')({ 						// User-created content.
 	type: S.String,
 	content: S.String,
 	size: Model.Generated(S.Number),
-	status: S.String,
+	status: S.Literal('active', 'processing', 'failed', 'deleted'),
 	hash: Model.FieldOption(S.String),									// Public: content verification
 	name: Model.FieldOption(S.String),									// Public: original filename
 	storageRef: Model.FieldOption(S.String),							// Internal: S3 key when binary
@@ -120,7 +138,7 @@ class AuditLog extends Model.Class<AuditLog>('AuditLog')({ 				// Append-only op
 	appId: S.UUID,
 	userId: Model.FieldOption(S.UUID),									// Public: who did it
 	requestId: Model.FieldOption(S.UUID),								// Public: correlation
-	operation: S.String,												// Constrained: create|update|delete|restore|login|logout|verify|revoke
+	operation: S.String,												// Constrained by DB CHECK — see migration for full list of allowed operations
 	subject: S.String,
 	subjectId: S.UUID,
 	oldData: Model.FieldOption(S.Unknown),								// PG18.1: Pre-modification state via RETURNING OLD.*
@@ -134,12 +152,12 @@ class Job extends Model.Class<Job>('Job')({								// Durable job registry. Belo
 	jobId: S.String,
 	appId: S.UUID,
 	type: S.String,
-	status: S.String,
-	priority: S.String,
+	status: S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled'),
+	priority: S.Literal('critical', 'high', 'normal', 'low'),
 	payload: S.Unknown,
 	result: Model.FieldOption(S.Unknown),
 	progress: Model.FieldOption(S.Struct({ message: S.String, pct: S.Number })),
-	history: S.Array(S.Struct({ error: S.optional(S.String), status: S.String, timestamp: S.Number })),
+	history: S.Array(S.Struct({ error: S.optional(S.String), status: S.Literal('queued', 'processing', 'complete', 'failed', 'cancelled'), timestamp: S.Number })),
 	attempts: S.Number,
 	maxAttempts: S.Number,
 	scheduledAt: Model.FieldOption(S.DateFromSelf),
@@ -154,14 +172,19 @@ class Job extends Model.Class<Job>('Job')({								// Durable job registry. Belo
 class JobDlq extends Model.Class<JobDlq>('JobDlq')({					// Unified dead-letter queue for jobs and events. Belongs to an App. No updatedAt (append-mostly).
 	// IMPORTANT `UUIDv7` uuid_extract_timestamp(uuid): Extract DLQ creation time — NO dlqAt COLUMN
 	id: Model.Generated(S.UUID),
-	source: S.String,													// Discriminant: 'job' | 'event' — identifies origin type
+	source: S.Literal('job', 'event'),									// Discriminant: identifies origin type
 	originalJobId: S.String,											// Link to original job/event (NO FK — source may be purged before replay)
 	appId: S.UUID,														// Tenant scope
 	userId: Model.FieldOption(S.UUID),									// Audit trail (FK RESTRICT — users never hard-deleted)
 	requestId: Model.FieldOption(S.UUID),								// Correlation for cross-pod traces
 	type: S.String,														// Job type or event type
 	payload: S.Unknown,													// Original payload
-	errorReason: S.String,												// Job: MaxRetries | Validation | HandlerMissing | RunnerUnavailable | Timeout | Panic; Event: DeliveryFailed | DeserializationFailed | DuplicateEvent | HandlerMissing | HandlerTimeout
+	errorReason: S.Literal(
+		'MaxRetries', 'Validation', 'HandlerMissing', 'RunnerUnavailable', 'Timeout', 'Panic',
+		'Processing', 'NotFound', 'AlreadyCancelled',
+		'DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed',
+		'AuditPersistFailed', 'HandlerTimeout',
+	),
 	attempts: S.Number,													// Total attempts before dead-letter
 	errorHistory: S.Array(S.Struct({ error: S.String, timestamp: S.Number })),	// Error trail
 	replayedAt: Model.FieldOption(S.DateFromSelf),						// When job/event was replayed (null = pending)
@@ -178,31 +201,15 @@ class KvStore extends Model.Class<KvStore>('KvStore')({					// Cluster infrastru
 	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
 }) {}
 
-// --- [SEARCH: DOCUMENT] ------------------------------------------------------
-class SearchDocument extends Model.Class<SearchDocument>('SearchDocument')({
-	entityType: S.String,
-	entityId: S.UUID,
-	scopeId: Model.FieldOption(S.UUID),
-	displayText: S.String,
-	contentText: Model.FieldOption(S.String),
-	metadata: Model.FieldOption(S.Unknown),
-	documentHash: Model.Generated(S.String),
-	searchVector: Model.Generated(S.Unknown),
-	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
-}) {}
-
-// --- [SEARCH: EMBEDDING] -----------------------------------------------------
-class SearchEmbedding extends Model.Class<SearchEmbedding>('SearchEmbedding')({
-	entityType: S.String,
-	entityId: S.UUID,
-	scopeId: Model.FieldOption(S.UUID),
-	model: S.String,
-	dimensions: S.Number,
-	embedding: S.Unknown,
-	hash: S.String,
-	updatedAt: Model.DateTimeUpdateFromDate,							// Internal: timestamp
-}) {}
-
 // --- [EXPORT] ----------------------------------------------------------------
 
-export { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, SearchDocument, SearchEmbedding, Session, User };
+export {
+	ApiKey, App, Asset, AuditLog,
+	Job, JobDlq,
+	KvStore,
+	MfaSecret,
+	OauthAccount,
+	Session,
+	User,
+	WebauthnCredential,
+};

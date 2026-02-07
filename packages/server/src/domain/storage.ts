@@ -1,6 +1,6 @@
 /**
- * Storage domain service with tenant context and audit logging.
- * Wraps StorageAdapter with polymorphic single/batch API and automatic audit.
+ * Storage domain service: audit-logged write operations.
+ * Read-only ops (get, exists, list, sign) go directly through StorageAdapter.
  */
 import { Array as A, Effect, Match, Number as N, Option, pipe, Predicate, Record, Struct, type Stream } from 'effect';
 import { constant } from 'effect/Function';
@@ -71,13 +71,12 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 		const putStream = (input: { key: string; stream: Stream.Stream<Uint8Array, unknown>; contentType?: string; metadata?: Record<string, string>; partSizeBytes?: number }) =>
 				pipe(
 					storage.putStream(input),
-					Effect.tap((result) => Effect.all([
-						audit.log('Storage.stream_upload', { details: { contentType: input.contentType, key: input.key, size: result.totalSize }, subjectId: input.key }),
-					], { discard: true })),
+					Effect.tap((result) => Effect.all([audit.log('Storage.stream_upload', { details: { contentType: input.contentType, key: input.key, size: result.totalSize }, subjectId: input.key }),],
+					{ discard: true })),
 					Telemetry.span('storageDomain.putStream'),
 				);
 		const abortUpload = (key: string, uploadId: string) => _traced('abort-multipart', storage.abortUpload(key, uploadId), 'Storage.abort_multipart', { key, uploadId }, key);
-		return { abortUpload, copy, exists: storage.exists, get: storage.get, getStream: storage.getStream, list: storage.list, listStream: storage.listStream, listUploads: storage.listUploads, put, putStream, remove, sign: storage.sign };
+		return { abortUpload, copy, put, putStream, remove };
 	}),
 }) {}
 
@@ -85,7 +84,6 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 
 namespace StorageService {
 	export type Service = typeof StorageService.Service;
-	export type SignInputGetPut = StorageAdapter.SignInputGetPut;
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

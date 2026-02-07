@@ -6,15 +6,23 @@
  * Per-endpoint addError() only for endpoint-specific errors (NotFound, Conflict, Validation).
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
-import { ApiKey, App, AuditLog, Job, JobDlq, Session, User } from '@parametric-portal/database/models';
+import { ApiKey, App, Asset, AuditLog, Job, JobDlq, Session, User } from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { Context } from './context.ts';
 import { HttpError } from './errors.ts';
+import { WebhookService } from './infra/webhooks.ts';
 import { Middleware } from './middleware.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
+const _IdPath = S.Struct({ id: S.UUID });
+const _ProviderPath = S.Struct({ provider: Context.OAuthProvider });
+const _StatusOk = S.Struct({ status: S.Literal('ok') });
+const _PaginationBase = S.Struct({
+	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
+	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
+});
 const _Success = S.Struct({ success: S.Literal(true) });
 const AuthResponse = S.Struct({
 	accessToken: S.String.annotations({ description: 'Opaque access token for API authentication' }),
@@ -28,14 +36,12 @@ const KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
 	items: S.Array(itemSchema).annotations({ description: 'Page of results' }),
 	total: S.Int.annotations({ description: 'Total count of matching items' }),
 }).annotations({ description: 'Cursor-based pagination wrapper', title: 'KeysetResponse' });
-const Query = S.Struct({
+const Query = S.extend(_PaginationBase, S.Struct({
 	after: S.optional(HttpApiSchema.param('after', S.DateFromString)),
 	before: S.optional(HttpApiSchema.param('before', S.DateFromString)),
-	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
 	includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)),
-	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
 	operation: S.optional(HttpApiSchema.param('operation', S.String)),
-});
+}));
 const TransferQuery = S.Struct({
 	after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
 	before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
@@ -63,21 +69,18 @@ const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
 
 // --- [SEARCH_SCHEMAS] --------------------------------------------------------
 
-type SearchEntityTypeValue = typeof SearchEntityType.Type;
 const _EntityTypesFromString = S.transform(
 	S.String,
 	S.Array(SearchEntityType),
-	{ decode: (s) => s.split(',').filter((t): t is SearchEntityTypeValue => ['app', 'asset', 'auditLog', 'user'].includes(t)), encode: (a) => a.join(',') },
+	{ decode: (input) => input.split(',').filter((value): value is typeof SearchEntityType.Type => ['app', 'asset', 'auditLog', 'user'].includes(value)), encode: (values) => values.join(',') },
 );
-const _SearchQuery = S.Struct({
-	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
+const _SearchQuery = S.extend(_PaginationBase, S.Struct({
 	entityTypes: S.optional(HttpApiSchema.param('entityTypes', _EntityTypesFromString)),
 	includeFacets: S.optional(HttpApiSchema.param('includeFacets', S.BooleanFromString)),
 	includeGlobal: S.optional(HttpApiSchema.param('includeGlobal', S.BooleanFromString)),
 	includeSnippets: S.optional(HttpApiSchema.param('includeSnippets', S.BooleanFromString)),
-	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
 	q: HttpApiSchema.param('q', S.String.pipe(S.minLength(2), S.maxLength(256))),
-});
+}));
 const _SuggestQuery = S.Struct({
 	includeGlobal: S.optional(HttpApiSchema.param('includeGlobal', S.BooleanFromString)),
 	limit: S.optional(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 20)))),
@@ -118,6 +121,34 @@ const _StorageUploadResponse = S.Struct({
 	key: S.String.annotations({ description: 'Storage key where file was stored' }),
 	size: S.Int.annotations({ description: 'File size in bytes' }),
 });
+const _AssetCreateRequest = S.Struct({
+	content: S.String.annotations({ description: 'Asset content' }),
+	hash: S.optional(S.String).annotations({ description: 'Content hash for deduplication' }),
+	name: S.optional(S.String).annotations({ description: 'Display name' }),
+	storageRef: S.optional(S.String).annotations({ description: 'S3 storage key reference' }),
+	type: S.NonEmptyTrimmedString.annotations({ description: 'Asset type slug' }),
+});
+const _AssetUpdateRequest = S.Struct({
+	content: S.optional(S.String).annotations({ description: 'Updated content' }),
+	name: S.optional(S.String).annotations({ description: 'Updated display name' }),
+	status: S.optional(S.Literal('active', 'processing', 'failed')).annotations({ description: 'Updated status' }),
+	type: S.optional(S.NonEmptyTrimmedString).annotations({ description: 'Updated asset type' }),
+});
+const _StorageListQuery = S.extend(_PaginationBase, S.Struct({
+	after: S.optional(HttpApiSchema.param('after', S.DateFromString)).annotations({ description: 'Filter: created after this date' }),
+	before: S.optional(HttpApiSchema.param('before', S.DateFromString)).annotations({ description: 'Filter: created before this date' }),
+	sort: S.optionalWith(HttpApiSchema.param('sort', S.Literal('asc', 'desc')), { default: () => 'desc' as const }).annotations({ description: 'Sort direction' }),
+	type: S.optional(HttpApiSchema.param('type', S.NonEmptyTrimmedString)).annotations({ description: 'Filter by asset type' }),
+}));
+const _StorageListItem = S.Struct({
+	id: S.UUID,
+	name: S.NullOr(S.String),
+	size: S.Number,
+	status: S.Literal('active', 'processing', 'failed', 'deleted'),
+	storageRef: S.NullOr(S.String),
+	type: S.String,
+	updatedAt: S.DateTimeUtc,
+});
 
 // --- [WEBHOOK_SCHEMAS] -------------------------------------------------------
 
@@ -128,25 +159,38 @@ const _WebhookRegistration = S.Struct({
 	url: S.String,
 });
 const _WebhookTestResult = S.Struct({ deliveredAt: S.Number, durationMs: S.Number, statusCode: S.Number });
-const _DeliveryRecord = S.Struct({
-	deliveredAt: S.optional(S.Number), deliveryId: S.String, durationMs: S.optional(S.Number), endpointUrl: S.String,
-	error: S.optional(S.String), status: S.Literal('delivered', 'failed'), statusCode: S.optional(S.Number),
-	tenantId: S.String, timestamp: S.Number, type: S.String,
-});
 const _WebhookStatusQuery = S.Struct({
 	url: S.optional(HttpApiSchema.param('url', S.String)),
 });
 
 // --- [ADMIN_SCHEMAS] ---------------------------------------------------------
 
-const _AdminSessionFilter = S.Struct({
-	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
+const _AdminSessionFilter = S.extend(_PaginationBase, S.Struct({
 	ipAddress: S.optional(HttpApiSchema.param('ipAddress', S.String)),
 	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 50 }),
 	userId: S.optional(HttpApiSchema.param('userId', S.UUID)),
-});
+}));
 const _AdminStatementQuery = S.Struct({
 	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 500))), { default: () => 100 }),
+});
+const _OAuthProviderConfig = S.Struct({
+	clientId: S.NonEmptyTrimmedString,
+	clientSecret: S.NonEmptyTrimmedString,
+	enabled: S.Boolean,
+	provider: S.Literal('apple', 'github', 'google', 'microsoft'),
+	scopes: S.optional(S.Array(S.String)),
+});
+const _TenantOAuthConfig = S.Struct({
+	providers: S.Array(_OAuthProviderConfig),
+});
+const _CreateTenant = S.Struct({
+	name: S.NonEmptyTrimmedString,
+	namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
+	settings: S.optional(S.Unknown),
+});
+const _UpdateTenant = S.Struct({
+	name: S.optional(S.NonEmptyTrimmedString),
+	settings: S.optional(S.Unknown),
 });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -157,7 +201,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 	.addError(HttpError.RateLimit)
 	.add(
 		HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
-			.setPath(S.Struct({ provider: Context.OAuthProvider }))
+			.setPath(_ProviderPath)
 			.addSuccess(S.Struct({ url: Url }))
 			.addError(HttpError.OAuth)
 			.annotate(OpenApi.Summary, 'Start OAuth flow')
@@ -165,7 +209,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 	)
 	.add(
 		HttpApiEndpoint.get('oauthCallback', '/oauth/:provider/callback')
-			.setPath(S.Struct({ provider: Context.OAuthProvider }))
+			.setPath(_ProviderPath)
 			.setUrlParams(S.Struct({ code: S.String, state: S.String }))
 			.addSuccess(AuthResponse)
 			.addError(HttpError.OAuth)
@@ -273,19 +317,58 @@ const _AuthGroup = HttpApiGroup.make('auth')
 	.add(
 		HttpApiEndpoint.del('deleteApiKey', '/apikeys/:id')
 			.middleware(Middleware.Auth)
-			.setPath(S.Struct({ id: S.UUID }))
+			.setPath(_IdPath)
 			.addSuccess(_Success)
 			.addError(HttpError.Auth)
 			.addError(HttpError.NotFound)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'Revoke API key'),
+	)
+	.add(
+		HttpApiEndpoint.post('rotateApiKey', '/apikeys/:id/rotate')
+			.middleware(Middleware.Auth)
+			.setPath(_IdPath)
+			.addSuccess(S.extend(ApiKey.json, S.Struct({ apiKey: S.String })))
+			.addError(HttpError.Auth)
+			.addError(HttpError.NotFound)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.annotate(OpenApi.Summary, 'Rotate API key')
+			.annotate(OpenApi.Description, 'Generates a new key value for an existing API key. The old key is invalidated immediately. The new key value is returned only once.'),
+	)
+	.add(
+		HttpApiEndpoint.post('linkProvider', '/link/:provider')
+			.middleware(Middleware.Auth)
+			.setPath(_ProviderPath)
+			.setPayload(S.Struct({ externalId: S.NonEmptyTrimmedString }))
+			.addSuccess(_Success)
+			.addError(HttpError.Auth)
+			.addError(HttpError.Conflict)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.annotate(OpenApi.Summary, 'Link OAuth provider')
+			.annotate(OpenApi.Description, 'Links an OAuth provider to the authenticated user account using the provider external ID from a completed OAuth flow.'),
+	)
+	.add(
+		HttpApiEndpoint.del('unlinkProvider', '/link/:provider')
+			.middleware(Middleware.Auth)
+			.setPath(_ProviderPath)
+			.addSuccess(_Success)
+			.addError(HttpError.Auth)
+			.addError(HttpError.Conflict)
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Unlink OAuth provider')
+			.annotate(OpenApi.Description, 'Removes an OAuth provider link from the authenticated user account. Cannot unlink the last authentication method.'),
 	);
 
 // Health: unauthenticated operational endpoints
 const _HealthGroup = HttpApiGroup.make('health')
 	.prefix('/health')
-	.add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(S.Struct({ status: S.Literal('ok') })))
+	.addError(HttpError.RateLimit)
+	.add(HttpApiEndpoint.get('liveness', '/liveness').addSuccess(_StatusOk))
 	.add(
 		HttpApiEndpoint.get('readiness', '/readiness')
 				.addSuccess(S.Struct({
@@ -310,12 +393,7 @@ const _HealthGroup = HttpApiGroup.make('health')
 			}))
 			.addError(HttpError.ServiceUnavailable)
 			.annotate(OpenApi.Exclude, true),
-	)
-		.add(
-			HttpApiEndpoint.get('metrics', '/metrics')
-				.addSuccess(S.Void)
-				.annotate(OpenApi.Exclude, true),
-		);
+	);
 
 // Telemetry: unauthenticated OTLP ingest
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
@@ -323,14 +401,37 @@ const _TelemetryGroup = HttpApiGroup.make('telemetry')
 	.add(HttpApiEndpoint.post('ingestTraces', '/traces').addSuccess(S.Void).addError(HttpError.RateLimit));
 
 // Users: group-level auth + common errors
+const _ProfileUpdate = S.Struct({
+	email: S.optional(S.String.pipe(S.pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/))).annotations({ description: 'New email address' }),
+});
 const _UsersGroup = HttpApiGroup.make('users')
 	.prefix('/users')
 	.middleware(Middleware.Auth)
 	.addError(HttpError.Internal)
 	.addError(HttpError.RateLimit)
 	.add(
+		HttpApiEndpoint.get('getMe', '/me')
+			.addSuccess(User.json)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Get own profile'),
+	)
+	.add(
+		HttpApiEndpoint.patch('updateProfile', '/me')
+			.setPayload(_ProfileUpdate)
+			.addSuccess(User.json)
+			.addError(HttpError.NotFound)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Update own profile'),
+	)
+	.add(
+		HttpApiEndpoint.post('deactivate', '/me/deactivate')
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Deactivate own account'),
+	)
+	.add(
 		HttpApiEndpoint.patch('updateRole', '/:id/role')
-			.setPath(S.Struct({ id: S.UUID }))
+			.setPath(_IdPath)
 			.setPayload(S.Struct({ role: Context.UserRole.schema }))
 			.addSuccess(User.json)
 			.addError(HttpError.Forbidden)
@@ -405,7 +506,7 @@ const _SearchGroup = HttpApiGroup.make('search')
 	.add(
 		HttpApiEndpoint.post('refresh', '/refresh')
 			.setPayload(S.Struct({ includeGlobal: S.optional(S.Boolean) }))
-			.addSuccess(S.Struct({ status: S.Literal('ok') }))
+			.addSuccess(_StatusOk)
 			.addError(HttpError.Forbidden)
 			.annotate(OpenApi.Description, 'Refresh search index (admin only)'),
 	)
@@ -475,6 +576,47 @@ const _StorageGroup = HttpApiGroup.make('storage')
 			.addError(HttpError.Validation)
 			.annotate(OpenApi.Summary, 'Upload file directly')
 			.annotate(OpenApi.Description, 'Server-side file upload with multipart form data. Files are stored in tenant namespace with automatic content-type detection.'),
+	)
+	.add(
+		HttpApiEndpoint.get('getAsset', '/assets/:id')
+			.setPath(_IdPath)
+			.addSuccess(Asset.json)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Get asset by ID')
+			.annotate(OpenApi.Description, 'Retrieves a single asset by its unique identifier.'),
+	)
+	.add(
+		HttpApiEndpoint.post('createAsset', '/assets')
+			.setPayload(_AssetCreateRequest)
+			.addSuccess(Asset.json)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Create asset')
+			.annotate(OpenApi.Description, 'Creates a new asset in the current tenant namespace.'),
+	)
+	.add(
+		HttpApiEndpoint.patch('updateAsset', '/assets/:id')
+			.setPath(_IdPath)
+			.setPayload(_AssetUpdateRequest)
+			.addSuccess(Asset.json)
+			.addError(HttpError.NotFound)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Update asset metadata')
+			.annotate(OpenApi.Description, 'Updates metadata fields of an existing asset.'),
+	)
+	.add(
+		HttpApiEndpoint.del('archiveAsset', '/assets/:id')
+			.setPath(_IdPath)
+			.addSuccess(S.Struct({ id: S.UUID, success: S.Literal(true) }))
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Archive asset')
+			.annotate(OpenApi.Description, 'Soft-deletes an asset. The asset can be restored later.'),
+	)
+	.add(
+		HttpApiEndpoint.get('listAssets', '/assets')
+			.setUrlParams(_StorageListQuery)
+			.addSuccess(KeysetResponse(_StorageListItem))
+			.annotate(OpenApi.Summary, 'List assets')
+			.annotate(OpenApi.Description, 'Browse assets with cursor-based pagination, filtering by type and date range.'),
 	);
 
 // Webhooks: group-level auth + common errors
@@ -520,7 +662,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 	)
 	.add(
 		HttpApiEndpoint.post('retry', '/retry/:id')
-			.setPath(S.Struct({ id: S.UUID }))
+			.setPath(_IdPath)
 			.addSuccess(_Success)
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Retry failed delivery'),
@@ -528,7 +670,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 		.add(
 			HttpApiEndpoint.get('status', '/status')
 				.setUrlParams(_WebhookStatusQuery)
-				.addSuccess(S.Array(_DeliveryRecord))
+				.addSuccess(S.Array(WebhookService.DeliveryRecord))
 				.annotate(OpenApi.Summary, 'Delivery status'),
 		);
 
@@ -553,7 +695,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
 		)
 	.add(
 		HttpApiEndpoint.del('deleteSession', '/sessions/:id')
-			.setPath(S.Struct({ id: S.UUID }))
+			.setPath(_IdPath)
 			.addSuccess(_Success)
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Force-end session'),
@@ -585,7 +727,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
 	)
 	.add(
 		HttpApiEndpoint.post('replayDlq', '/dlq/:id/replay')
-			.setPath(S.Struct({ id: S.UUID }))
+			.setPath(_IdPath)
 			.addSuccess(_Success)
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Replay dead letter'),
@@ -595,11 +737,6 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addSuccess(S.Void)
 			.annotate(OpenApi.Summary, 'SSE event stream'),
 	)
-		.add(
-			HttpApiEndpoint.get('listApps', '/apps')
-				.addSuccess(S.Array(App.json))
-				.annotate(OpenApi.Summary, 'List tenant apps'),
-		)
 		.add(
 			HttpApiEndpoint.get('dbIoStats', '/db/io-stats')
 				.addSuccess(S.Array(S.Unknown))
@@ -615,7 +752,58 @@ const _AdminGroup = HttpApiGroup.make('admin')
 				.setUrlParams(_AdminStatementQuery)
 				.addSuccess(S.Array(S.Unknown))
 				.annotate(OpenApi.Summary, 'Database statement statistics'),
-		);
+		)
+	.add(
+		HttpApiEndpoint.get('listTenants', '/tenants')
+			.addSuccess(S.Array(App.json))
+			.annotate(OpenApi.Summary, 'List tenants'),
+	)
+	.add(
+		HttpApiEndpoint.post('createTenant', '/tenants')
+			.setPayload(_CreateTenant)
+			.addSuccess(App.json)
+			.addError(HttpError.Conflict)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Create tenant'),
+	)
+	.add(
+		HttpApiEndpoint.get('getTenant', '/tenants/:id')
+			.setPath(_IdPath)
+			.addSuccess(App.json)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Get tenant'),
+	)
+	.add(
+		HttpApiEndpoint.patch('updateTenant', '/tenants/:id')
+			.setPath(_IdPath)
+			.setPayload(_UpdateTenant)
+			.addSuccess(App.json)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Update tenant'),
+	)
+	.add(
+		HttpApiEndpoint.del('deactivateTenant', '/tenants/:id')
+			.setPath(_IdPath)
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Deactivate tenant'),
+	)
+	.add(
+		HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
+			.setPath(_IdPath)
+			.addSuccess(_TenantOAuthConfig)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Get tenant OAuth config'),
+	)
+	.add(
+		HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
+			.setPath(_IdPath)
+			.setPayload(_TenantOAuthConfig)
+			.addSuccess(_TenantOAuthConfig)
+			.addError(HttpError.NotFound)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Update tenant OAuth config'),
+	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 

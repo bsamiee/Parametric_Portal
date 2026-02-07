@@ -8,7 +8,8 @@ import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, HttpMiddle
 import type { Hex64 } from '@parametric-portal/types/types';
 import { Client } from '@parametric-portal/database/client';
 import * as ipaddr from 'ipaddr.js';
-import { Array as A, Cause, Config, Duration, Effect, Layer, Match, Metric, Option, pipe, Redacted } from 'effect';
+import { Array as A, Cause, Config, Data, Duration, Effect, Layer, Match, Metric, Option, pipe, Redacted } from 'effect';
+import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
@@ -35,7 +36,9 @@ const _CONFIG = {
 		base: {'permissions-policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',} satisfies Record<string, string>,
 		hsts: { includeSubDomains: true, maxAge: 31536000 },
 	},
+	tenantExemptPrefixes: ['/api/health', '/api/v1', '/docs'] as ReadonlyArray<string>,
 } as const;
+class _MissingTenantHeader extends Data.TaggedError('MissingTenantHeader')<Record<string, never>> {}
 const _mapLookupError = (fallback: string) => (error: unknown): HttpError.Auth | HttpError.Internal => Match.value(error).pipe(
 	Match.when(Cause.isNoSuchElementException, () => HttpError.Auth.of('Missing session')),
 	Match.when((e: unknown): e is HttpError.Auth => e instanceof HttpError.Auth, (e) => e),
@@ -135,9 +138,12 @@ class SessionAuth extends HttpApiMiddleware.Tag<SessionAuth>()('server/SessionAu
 			),
 		})));
 }
-const makeRequireRole = (findById: (userId: string) => Effect.Effect<Option.Option<{ readonly role: string }>, unknown>) => (min: Context.UserRole) => Context.Request.sessionOrFail.pipe(
+const requireRole = (min: Context.UserRole) => Context.Request.sessionOrFail.pipe(
 	Effect.mapError(_mapLookupError('Session lookup failed')),
-	Effect.flatMap(({ userId }) => findById(userId)),
+	Effect.flatMap(({ userId }) => DatabaseService.pipe(
+		Effect.flatMap((repositories) => repositories.users.one([{ field: 'id', value: userId }])),
+		Effect.map(Option.map((user) => ({ role: user.role }))),
+	)),
 	Effect.mapError(_mapLookupError('User lookup failed')),
 	Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
 	Effect.filterOrFail((user) => Context.UserRole.hasAtLeast(user.role, min), () => HttpError.Forbidden.of('Insufficient permissions')),
@@ -150,7 +156,7 @@ const makeAppLookup =
 	(database: { readonly apps: { readonly byNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> } }) =>
 	(namespace: string): Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown> => database.apps.byNamespace(namespace).pipe(Effect.map(Option.map((app) => ({ id: app.id, namespace: app.namespace }))));
 const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effect<Option.Option<{ readonly id: string; readonly namespace: string }>, unknown>) =>
-	HttpMiddleware.make((app) => Effect.gen(function* () {
+	HttpMiddleware.make((app) => pipe(Effect.gen(function* () {
 		const req = yield* HttpServerRequest.HttpServerRequest;
 		const proxy = yield* Effect.orDie(Config.all({
 			enabled: Config.string('TRUST_PROXY').pipe(Config.withDefault('false'), Config.map((v) => v === 'true' || v === '1')),
@@ -158,8 +164,10 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 		}));
 		const requestId = Option.getOrElse(Headers.get(req.headers, 'x-request-id'), crypto.randomUUID);
 		const namespaceOpt = Headers.get(req.headers, 'x-app-id');
-		const tenantId = yield* pipe(namespaceOpt, Option.match({	// No header → default, found → app id, not found → unspecified (prevents cross-tenant mixing)
-			onNone: () => Effect.succeed(Context.Request.Id.default),
+		const tenantId = yield* pipe(namespaceOpt, Option.match({	// No header → 400 (unless exempt path), found → app id, not found → unspecified (prevents cross-tenant mixing)
+			onNone: () => A.some(_CONFIG.tenantExemptPrefixes, (prefix) => req.url.startsWith(prefix))
+				? Effect.succeed(Context.Request.Id.default)
+				: Effect.fail(new _MissingTenantHeader({})),
 			onSome: (ns) => findByNamespace(ns).pipe(Effect.map(Option.match({ onNone: () => Context.Request.Id.unspecified, onSome: (a) => a.id })), Effect.catchAll(() => Effect.succeed(Context.Request.Id.unspecified))), // NOSONAR S3358
 		}));
 		const cluster = yield* Effect.serviceOption(Sharding.Sharding).pipe(		// Graceful degradation via serviceOption (avoids startup failures)
@@ -199,7 +207,7 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			onSome: (state) => ({ 'x-circuit-state': state, 'x-request-id': requestId }),
 		}));
 		return HttpServerResponse.setHeaders(response, headers);
-	}));
+	}), Effect.catchTag('MissingTenantHeader', () => HttpServerResponse.json({ details: 'X-App-Id header is required', error: 'MissingTenantHeader' }, { status: 400 }))));
 const cors = (origins?: ReadonlyArray<string>) => pipe(
 	(origins ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean),
 	(list) => HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials }),
@@ -217,9 +225,9 @@ const Middleware = {
 	xForwardedHeaders: HttpMiddleware.xForwardedHeaders,
 	// Auth
 	Auth: SessionAuth,
-	makeRequireRole,
 	requireInteractiveSession,
 	requireMfaVerified,
+	requireRole,
 	// Context
 	cors,
 	makeAppLookup,
@@ -231,8 +239,6 @@ const Middleware = {
 namespace Middleware {
 	export type SessionLookup = Parameters<typeof SessionAuth.makeLayer>[0];
 	export type ApiKeyLookup = Parameters<typeof SessionAuth.makeLayer>[1];
-	export type RoleLookup = Parameters<typeof makeRequireRole>[0];
-	export type RequireRoleCheck = ReturnType<typeof makeRequireRole>;
 	export type RequestContextLookup = Parameters<typeof makeRequestContext>[0];
 	export type AppLookupDb = Parameters<typeof makeAppLookup>[0];
 }

@@ -5,7 +5,7 @@
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
 import type { JobDlq } from '@parametric-portal/database/models';
-import { Array as A, Clock, DateTime, Duration, Effect, Function as F, Option, pipe, Schedule, Schema as S } from 'effect';
+import { Array as A, Clock, DateTime, Duration, Effect, Option, pipe, Schedule, Schema as S } from 'effect';
 import { ClusterService } from '../infra/cluster.ts';
 import { Context } from '../context.ts';
 import { MetricsService } from './metrics.ts';
@@ -18,7 +18,7 @@ const _CONFIG = {
 	securityOps: new Set(['access_denied', 'auth_failure', 'mfa_required', 'permission_denied', 'rate_limited', 'token_invalid']) as ReadonlySet<string>,
 } as const;
 
-// --- [SERVICE] ---------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
 class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 	scoped: Effect.gen(function* () {
@@ -30,8 +30,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			const [subject, operation] = index > 0 ? [operationString.slice(0, index), operationString.slice(index + 1)] : ['security', operationString];
 			return { isSecurity: subject === 'security' && _CONFIG.securityOps.has(operation), operation, subject };
 		};
-		// PG18.1: Store full before/after snapshots instead of diffs
-		// Callers pass RETURNING OLD.*/NEW.* data directly; details used for security events
+		// PG18.1: Store full before/after snapshots instead of diffs. Callers pass RETURNING OLD.*/NEW.* data directly; details used for security events
 		const computeOldData = (config?: { readonly before?: unknown; readonly details?: unknown }) => Option.fromNullable(config?.before).pipe(Option.orElse(() => Option.fromNullable(config?.details)));
 		const computeNewData = (config?: { readonly after?: unknown }) => Option.fromNullable(config?.after);
 		const writeDeadLetter = (entry: Record<string, unknown>, error: string, timestampMs: number, context: { readonly tenantId: string; readonly requestId: string; readonly userId: Option.Option<string> }) =>
@@ -44,7 +43,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 				payload: entry,
 				replayedAt: Option.none(),
 				requestId: Option.some(context.requestId),
-				source: 'audit',
+				source: 'event',
 				type: `audit.${entry['subject']}.${entry['operation']}`,
 				userId: context.userId,
 			}).pipe(Effect.ignore);
@@ -85,7 +84,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					Effect.catchAll((databaseError) => Effect.all([
 						Effect.logWarning('AUDIT_FAILURE', { error: String(databaseError), isSecurity: parsed.isSecurity, operation: `${parsed.subject}.${parsed.operation}`, subjectId }),
 							MetricsService.inc(metrics.audit.failures, labels, 1),
-						Effect.when(writeDeadLetter(entry, String(databaseError), timestampMs, dlqContext), F.constant(forceDeadLetter)),
+						Effect.when(writeDeadLetter(entry, String(databaseError), timestampMs, dlqContext), () => forceDeadLetter),
 					], { discard: true })),
 				);
 				}).pipe(Telemetry.span('audit.log', { metrics: false }));

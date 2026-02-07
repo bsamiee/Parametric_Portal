@@ -121,7 +121,7 @@ const _span: {
 							onSome: (metricsService) => MetricsService.trackEffect(coreSpan, { duration: metricsService.http.duration, errors: metricsService.errors, labels: MetricsService.label({ operation: name, tenant: ctx.tenantId }) }),
 						}));
 			}),
-			Effect.catchAll(() => self.pipe(_annotateError, Effect.withSpan(name, { attributes: safeAttrs, captureStackTrace: capture, kind: kind ?? _inferKind(name) }), Effect.withLogSpan(name))),
+			Effect.catchAll(() => self.pipe(_annotateError, Effect.withSpan(name, { attributes: { ...safeAttrs, 'telemetry.context.degraded': true, 'telemetry.context.reason': 'request_context_unavailable' }, captureStackTrace: capture, kind: kind ?? _inferKind(name) }), Effect.withLogSpan(name), Effect.annotateLogs({ 'telemetry.context.degraded': 'true' }))),
 		) as Effect.Effect<A, E, R>;
 	},
 );
@@ -194,7 +194,12 @@ const _Default = Layer.unwrapEffect(
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
-const Telemetry = { config: _CONFIG, Default: _Default, parseHeaders: _parseHeaders, span: _span } as const;
+const Telemetry = {
+	config: _CONFIG,
+	Default: _Default,
+	parseHeaders: _parseHeaders,
+	span: _span
+} as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
