@@ -207,7 +207,7 @@ const makeRequestContext = (findByNamespace: (namespace: string) => Effect.Effec
 			onSome: (state) => ({ 'x-circuit-state': state, 'x-request-id': requestId }),
 		}));
 		return HttpServerResponse.setHeaders(response, headers);
-	}), Effect.catchTag('MissingTenantHeader', () => HttpServerResponse.json({ details: 'X-App-Id header is required', error: 'MissingTenantHeader' }, { status: 400 }))));
+		}), Effect.catchTag('MissingTenantHeader', () => Effect.succeed(HttpServerResponse.unsafeJson({ details: 'X-App-Id header is required', error: 'MissingTenantHeader' }, { status: 400 })))));
 const cors = (origins?: ReadonlyArray<string>) => pipe(
 	(origins ?? _CONFIG.cors.allowedOrigins).map((o) => o.trim()).filter(Boolean),
 	(list) => HttpApiBuilder.middlewareCors({ ..._CONFIG.cors, allowedOrigins: list, credentials: !list.includes('*') && _CONFIG.cors.credentials }),
