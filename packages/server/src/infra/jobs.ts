@@ -72,7 +72,7 @@ const _WorkflowEngineLayer = Layer.unwrapEffect(Config.string('NODE_ENV').pipe(
 	)),
 ));
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
 const _normalizeJobError = (jobId: string) => (error: unknown): JobError =>error instanceof JobError ? error : JobError.from(jobId, 'Processing', error);
 const _retryBase = (config: { readonly base: Duration.Duration; readonly maxAttempts: number }): Schedule.Schedule<[Duration.Duration, number], unknown, never> =>
