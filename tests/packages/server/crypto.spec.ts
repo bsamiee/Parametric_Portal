@@ -28,9 +28,12 @@ layer(_testLayer)('Crypto', (it) => {
 	}), { fastCheck: { numRuns: 100 } });
 
 	// P2: Length Invariant - |encrypt(x)| = version + IV + |encode(x)| + tag
-	it.effect.prop('P2: length formula', { x: _text }, ({ x }) => Crypto.encrypt(x).pipe(Effect.tap((c) => {
-		expect(c.length).toBe(CIPHER.version + CIPHER.iv + new TextEncoder().encode(x).length + CIPHER.tag);
-	})), { fastCheck: { numRuns: 100 } });
+	it.effect.prop('P2: length formula', { x: _text }, ({ x }) => Crypto.encrypt(x).pipe(
+		Effect.tap((c) => {
+			expect(c.length).toBe(CIPHER.version + CIPHER.iv + new TextEncoder().encode(x).length + CIPHER.tag);
+		}),
+		Effect.asVoid,
+	), { fastCheck: { numRuns: 100 } });
 
 	// P3: Tampering Detection - flip bit in ciphertext body -> OP_FAILED
 	it.effect.prop('P3: tampering', { x: _nonempty }, ({ x }) => Effect.gen(function* () {
@@ -59,7 +62,7 @@ layer(_testLayer)('Crypto', (it) => {
 
 	// P6: IV Quality - uniqueness + uniform distribution (chi-squared α=0.01, df=255, threshold=310.46)
 	it.effect('P6: IV uniformity', () => Effect.gen(function* () {
-		const ciphertexts = yield* Effect.forEach(fc.sample(_nonempty, { numRuns: 600 }), Crypto.encrypt);
+		const ciphertexts = yield* Effect.forEach(fc.sample(_nonempty, { numRuns: 600 }), (value) => Crypto.encrypt(value));
 		const vectors = ciphertexts.map((c) => Array.from(c.slice(CIPHER.version, CIPHER.version + CIPHER.iv)));
 		const bytes = vectors.flat(), expected = bytes.length / 256;
 		expect(new Set(vectors.map((v) => v.join(','))).size).toBe(600);
