@@ -4,6 +4,7 @@
  */
 import { applyPatch, createPatch, type Operation } from 'rfc6902';
 import { Array as A, Data, Effect, Option, pipe } from 'effect';
+import { Telemetry } from '../observe/telemetry.ts';
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -19,9 +20,11 @@ const apply = <T extends object>(target: T, patch: Diff.Patch): Effect.Effect<T,
 	const clone = structuredClone(target);
 	const results = applyPatch(clone, [...patch.ops]);
 	const failed = results.filter((error): error is NonNullable<typeof error> => error !== null);
-	return failed.length > 0
+	return (failed.length > 0
 		? Effect.fail(new PatchError({ operations: failed.map((error) => ({ message: error.message })) }))
-		: Effect.succeed(clone);
+		: Effect.succeed(clone)).pipe(
+		Telemetry.span('diff.apply', { 'diff.ops': patch.ops.length, metrics: false }),
+	);
 };
 const fromSnapshots = (oldData: Option.Option<unknown>, newData: Option.Option<unknown>): Option.Option<Diff.Patch> =>
 	pipe(

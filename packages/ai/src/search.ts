@@ -12,10 +12,10 @@ import { AiRuntime } from './runtime.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
-    cron: { embeddings: { concurrency: 5, name: 'refresh-embeddings', schedule: '0 3 * * *' } },
+    cron:   { embeddings: { concurrency: 5, name: 'refresh-embeddings', schedule: '0 3 * * *' } },
     labels: { embeddings: 'embeddings' },
-    text: { joiner: ' ' },
-    users: { anonymous: 'anonymous', system: 'system' },
+    text:   { joiner: ' ' },
+    users:  { anonymous: 'anonymous', system: 'system' },
 } as const;
 
 // --- [PURE_FUNCTIONS] --------------------------------------------------------
@@ -78,27 +78,28 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
                 const appSettings = yield* ai.settings();
                 const { dimensions, model } = appSettings.embedding;
                 const embedding = yield* ai.embed(options.term).pipe(
-                    Effect.map(Option.some),
-                    Effect.catchAll((error) =>
+                    Effect.tapError((error) =>
                         Effect.logWarning('Search embedding failed', {
                             error: String(error),
                             tenantId: ctx.tenantId,
-                        }).pipe(Effect.as(Option.none())),
+                        }),
                     ),
+                    Effect.option,
                 );
                 const result = yield* searchRepo.search(
                     {
                         ...options,
                         scopeId,
-                        ...(Option.isSome(embedding)
-                            ? {
-                                  embedding: {
-                                      dimensions,
-                                      model,
-                                      vector: embedding.value,
-                                  },
-                              }
-                            : {}),
+                        ...Option.match(embedding, {
+                            onNone: () => ({}),
+                            onSome: (vector) => ({
+                                embedding: {
+                                    dimensions,
+                                    model,
+                                    vector,
+                                },
+                            }),
+                        }),
                     },
                     pagination,
                 );
@@ -210,7 +211,7 @@ class SearchService extends Effect.Service<SearchService>()('ai/Search', {
         return { query, refresh, refreshEmbeddings, suggest };
     }),
 }) {
-    static readonly EmbeddingCron = ClusterService.cron({
+	static readonly EmbeddingCron = ClusterService.Schedule.cron({
         cron: Cron.unsafeParse(_CONFIG.cron.embeddings.schedule),
         execute: Effect.gen(function* () {
             const [database, search] = yield* Effect.all([DatabaseService, SearchService]);

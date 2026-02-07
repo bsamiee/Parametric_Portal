@@ -10,31 +10,34 @@ import { JobService } from '@parametric-portal/server/infra/jobs';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Middleware } from '@parametric-portal/server/middleware';
+import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Effect, } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const handleSubscribe = Effect.fn('jobs.subscribe')(
-	(jobs: typeof JobService.Service) =>
-		Effect.gen(function* () {
-			yield* Middleware.requireMfaVerified;
-			const ctx = yield* Context.Request.current;
-			const appId = ctx.tenantId;
-			return yield* StreamingService.sse({
-				filter: (event) => event.tenantId === appId,
-				name: 'jobs.status',
-				serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),
-				source: jobs.onStatusChange(),
-			});
-		}).pipe(Effect.catchAll((error) => Effect.fail('_tag' in error && error._tag === 'Forbidden' ? error : HttpError.Internal.of('SSE failed', error))),),
-);
+const handleSubscribe = (jobs: typeof JobService.Service) =>
+	Effect.gen(function* () {
+		yield* Middleware.requireMfaVerified;
+		const ctx = yield* Context.Request.current;
+		const appId = ctx.tenantId;
+		return yield* StreamingService.sse({
+			filter: (event) => event.tenantId === appId,
+			name: 'jobs.status',
+			serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),
+			source: jobs.onStatusChange(),
+		});
+	}).pipe(
+		Effect.catchTag('Forbidden', Effect.fail),
+		Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('SSE failed', error))),
+		Telemetry.span('jobs.subscribe', { kind: 'server', metrics: false }),
+	);
 
 // --- [LAYERS] ----------------------------------------------------------------
 
 const JobsLive = HttpApiBuilder.group(ParametricApi, 'jobs', (handlers) =>
 	Effect.gen(function* () {
 		const jobs = yield* JobService;
-		return handlers.handleRaw('subscribe', () => CacheService.rateLimit('api', handleSubscribe(jobs)),);
+		return handlers.handleRaw('subscribe', () => CacheService.rateLimit('realtime', handleSubscribe(jobs)),);
 	}),
 );
 

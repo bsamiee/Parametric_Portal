@@ -1,11 +1,32 @@
 /**
  * Stream file parsing and serialization for bulk import/export.
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
+ *
+ * TODO [M7]: Move CPU-bound parsing to @effect/platform Worker pool.
+ * CSV (PapaParse) and SAX (XML) parsing block the event loop during large files.
+ * The project has @effect/platform 0.94.2 + @effect/platform-node 0.104.1 with
+ * full Worker support (Worker.makePoolSerialized, NodeWorker.layer, NodeWorkerRunner).
+ *
+ * Implementation plan:
+ *   1. Define a Schema.TaggedRequest for each parser (delimited, tree, archive)
+ *      with Codec.Input serialized as ArrayBuffer (transferable).
+ *   2. Create a worker entry file that provides NodeWorkerRunner.layer +
+ *      WorkerRunner.layerSerialized with handlers for each request type.
+ *   3. In this module, replace direct parser calls with pool.executeEffect()
+ *      using Worker.makePoolSerialized + NodeWorker.layer as spawner.
+ *   4. The worker needs its own Crypto layer for _zipWithManifest hash verification.
+ *   5. Stream results serialize back via Worker's built-in Stream support.
+ *
+ * Blocked by: Schema serialization of Codec.Input (contains raw buffers that
+ * need Transferable handling), and the Crypto service dependency in the worker
+ * context. Consider Effect.fork to a dedicated fiber as a simpler first step
+ * if full Worker isolation is not yet needed.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
 import { Array as A, Chunk, Clock, Effect, Either, Match, MutableRef, Option, Schema as S, Stream, Tuple } from 'effect';
 import type JSZip from 'jszip';
 import { PassThrough, Readable } from 'node:stream';
+import { Telemetry } from '../observe/telemetry.ts';
 import { Crypto } from '../security/crypto.ts';
 
 // --- [DRIVERS] ---------------------------------------------------------------
@@ -201,7 +222,7 @@ const _zip = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string)
 					Effect.map((manifest) => _zipWithManifest(zip, manifest, buf)),
 				),
 		});
-	}));
+	}).pipe(Telemetry.span('transfer.parse.archive', { metrics: false })));
 const _archive = (codec: Codec.Of<'archive'>, input: Codec.Input, assetType: string): _Stream => codec.lib === 'exceljs' ? _xlsx(codec, input, assetType) : _zip(codec, input, assetType);
 
 // --- [IMPORT] ----------------------------------------------------------------
@@ -212,31 +233,33 @@ const import_ = (input: Codec.Input | readonly Codec.Input[], opts: {
 	readonly format?: Codec.Ext;} = {}): _Stream => {
 	const inputs = Array.isArray(input) ? input : [input];
 	const assetType = opts.type ?? 'unknown';
-	return Stream.fromIterable(inputs).pipe(
-		Stream.flatMap((item): Stream.Stream<_Row, Fatal> => {
-			const codec = Codec(opts.format ?? Codec.detect(item));
-			const result: _Stream = opts.mode === 'file'
-				? Stream.make(Either.right({ content: codec.content(item), ordinal: 1, type: assetType }))
-				: Codec.dispatch<_Stream>(codec.ext, item, {
-						archive: 	(detected, raw) => _archive(detected, raw, assetType),
-						delimited: 	(detected, raw) => _delimited(detected, raw, assetType),
-						none: 		(detected, raw) => {
-							const content = detected.content(raw);
-							const type = assetType === 'unknown' ? detected.ext : assetType;
-							const tooLarge = !detected.binary && Codec.size(content) > limits.entryBytes;
-							return Stream.make(tooLarge
-								? Either.left(new Parse({ code: 'TOO_LARGE', ordinal: 1 }))
-								: Either.right({ content, mime: detected.mime, ordinal: 1, type }));
-						},
-						stream: 	(detected, raw) => _streamed(detected, raw, assetType),
-						tree: 		(detected, raw) => _tree(detected, raw, assetType),
-					});
-			return opts.format
-				? result : Stream.fromEffect(Effect.logDebug('Transfer: auto-detected', { format: codec.ext })).pipe(Stream.flatMap(() => result));
-		}),
-		Stream.zipWithIndex,
-		Stream.mapEffect(([row, idx]) => idx >= limits.maxItems ? Effect.fail(new Fatal({ code: 'ROW_LIMIT' })) : Effect.succeed(row)),
-	);
+	return Stream.unwrap(Effect.succeed(
+		Stream.fromIterable(inputs).pipe(
+			Stream.flatMap((item): Stream.Stream<_Row, Fatal> => {
+				const codec = Codec(opts.format ?? Codec.detect(item));
+				const result: _Stream = opts.mode === 'file'
+					? Stream.make(Either.right({ content: codec.content(item), ordinal: 1, type: assetType }))
+					: Codec.dispatch<_Stream>(codec.ext, item, {
+							archive: 	(detected, raw) => _archive(detected, raw, assetType),
+							delimited: 	(detected, raw) => _delimited(detected, raw, assetType),
+							none: 		(detected, raw) => {
+								const content = detected.content(raw);
+								const type = assetType === 'unknown' ? detected.ext : assetType;
+								const tooLarge = !detected.binary && Codec.size(content) > limits.entryBytes;
+								return Stream.make(tooLarge
+									? Either.left(new Parse({ code: 'TOO_LARGE', ordinal: 1 }))
+									: Either.right({ content, mime: detected.mime, ordinal: 1, type }));
+							},
+							stream: 	(detected, raw) => _streamed(detected, raw, assetType),
+							tree: 		(detected, raw) => _tree(detected, raw, assetType),
+						});
+				return opts.format
+					? result : Stream.fromEffect(Effect.logDebug('Transfer: auto-detected', { format: codec.ext })).pipe(Stream.flatMap(() => result));
+			}),
+			Stream.zipWithIndex,
+			Stream.mapEffect(([row, idx]) => idx >= limits.maxItems ? Effect.fail(new Fatal({ code: 'ROW_LIMIT' })) : Effect.succeed(row)),
+		),
+	).pipe(Telemetry.span('transfer.import', { metrics: false, 'transfer.inputs': inputs.length })));
 };
 
 // --- [SERIALIZERS] -----------------------------------------------------------
@@ -298,8 +321,14 @@ function export_<E, R>(stream: _Out<E, R>, fmt: _TextFormat): Stream.Stream<Uint
 function export_<E, R>(stream: _Out<E, R>, fmt: _BinaryFormat, opts?: { readonly name?: string }): Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R>;
 function export_<E, R>(stream: _Out<E, R>, fmt: keyof typeof _formats, opts?: { readonly name?: string }): Stream.Stream<Uint8Array, E, R> | Effect.Effect<{ readonly data: string; readonly name: string; readonly count: number }, E, R> {
 	return Match.value(fmt).pipe(
-		Match.when((f): f is _TextFormat => _formats[f].kind === 'text', (f) => Stream.map(_text[f](stream), (s) => new TextEncoder().encode(s))),
-		Match.when((f): f is _BinaryFormat => _formats[f].kind === 'binary', (f) => _binary[f](stream, opts?.name)),
+		Match.when((f): f is _TextFormat => _formats[f].kind === 'text', (f) =>
+			Stream.unwrap(Effect.succeed(Stream.map(_text[f](stream), (s) => new TextEncoder().encode(s))).pipe(
+				Telemetry.span('transfer.export.text', { metrics: false, 'transfer.format': f }),
+			)),
+		),
+		Match.when((f): f is _BinaryFormat => _formats[f].kind === 'binary', (f) =>
+			_binary[f](stream, opts?.name).pipe(Telemetry.span('transfer.export.binary', { metrics: false, 'transfer.format': f })),
+		),
 		Match.exhaustive,
 	);
 }
@@ -331,11 +360,11 @@ const TransferError = {
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Transfer {
-	export type BinaryFormat = _BinaryFormat;
+	export type BinaryFormat = keyof typeof _binary;
 	export type BinaryResult = Effect.Effect.Success<ReturnType<(typeof _binary)[BinaryFormat]>>;
 	export type Format = keyof typeof Transfer.formats;
 	export type ImportOpts = NonNullable<Parameters<typeof Transfer.import>[1]>;
-	export type TextFormat = _TextFormat;
+	export type TextFormat = keyof typeof _text;
 }
 namespace TransferError {
 	export type Any = Fatal | Import | Parse;

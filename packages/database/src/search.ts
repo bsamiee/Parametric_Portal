@@ -10,16 +10,7 @@ const _CONFIG = (() => {
 		channels: { refresh: 'search_refresh' },
 		embedding: { maxDimensions: 3072, padValue: 0 },
 		fuzzy: { maxDistance: 2, minTermLength: 4 },
-		limits: {
-			candidate: 200,
-			defaultLimit: 20,
-			embeddingBatch: 200,
-			maxLimit: 100,
-			suggestLimitDefault: 10,
-			suggestLimitMax: 20,
-			termMax: 256,
-			termMin: 2,
-		},
+		limits: {candidate: 200, defaultLimit: 20, embeddingBatch: 200, maxLimit: 100, suggestLimitDefault: 10, suggestLimitMax: 20, termMax: 256, termMin: 2,},
 		rank: { normalization: 32 },
 		refresh: { timeoutMinutes: 5 },
 		regconfig: 'parametric_search',
@@ -68,8 +59,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 			const { entityFilter, scopeFilter } = buildFilters(parameters);
 			const term = sql`casefold(unaccent(${parameters.term}))`; // PG 18.1: casefold() for Unicode case folding (e.g., ß → ss), unaccent() for diacritics
 			const query = sql`websearch_to_tsquery(${_CONFIG.regconfig}::regconfig, unaccent(${parameters.term}))`;
-			// Dispatch table for semantic CTE (hasEmbedding ? with : without)
-			const semanticParts = {
+			const semanticParts = { // Dispatch table for semantic CTE (hasEmbedding ? with : without)
 				cte: hasEmbedding
 					? sql`,
 					semantic_candidates AS (
@@ -167,8 +157,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 				`;
 			return { ctes, query };
 		};
-		// PG 18.1: LEFT JOIN from totals ensures we always get total_count + facets even with 0 paged results
-		const executeSearch = SqlSchema.findAll({
+		const executeSearch = SqlSchema.findAll({ // PG 18.1: LEFT JOIN from totals ensures we always get total_count + facets even with 0 paged results
 			execute: (parameters) => {
 				const hasCursor = parameters.cursorRank !== undefined && parameters.cursorId !== undefined;
 				const cursorFilter = hasCursor
@@ -252,8 +241,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 			Request: S.Struct({ dimensions: S.Int, entityTypes: S.Array(S.String), includeGlobal: S.Boolean, limit: S.Int.pipe(S.positive(), S.lessThanOrEqualTo(_CONFIG.limits.embeddingBatch)), model: S.String, scopeId: S.NullOr(S.UUID) }),
 			Result: S.Struct({ contentText: S.NullOr(S.String), displayText: S.String, documentHash: S.String, entityId: S.UUID, entityType: S.String, metadata: S.Unknown, scopeId: S.NullOr(S.UUID), updatedAt: S.DateFromSelf }),
 		});
-		// PG 18.1: RETURNING WITH (OLD AS old, NEW AS new) returns both old and new row values, OLD.entity_type IS NULL means a fresh insert occurred
-		const executeUpsertEmbedding = SqlSchema.single({
+		const executeUpsertEmbedding = SqlSchema.single({ // PG 18.1: RETURNING WITH (OLD AS old, NEW AS new) returns both old and new row values, OLD.entity_type IS NULL means a fresh insert occurred
 			execute: (parameters) => sql`
 				INSERT INTO ${sql(_CONFIG.tables.embeddings)} (entity_type, entity_id, scope_id, model, dimensions, embedding, hash)
 				VALUES (${parameters.entityType}, ${parameters.entityId}, ${parameters.scopeId}, ${parameters.model}, ${parameters.dimensions}, (${parameters.embeddingJson})::vector, ${parameters.documentHash})
@@ -285,8 +273,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 				),
 			),
 			refresh: (() => {
-				// SqlSchema.void provides request validation and type safety
-				const executeRefresh = SqlSchema.void({
+				const executeRefresh = SqlSchema.void({ // SqlSchema.void provides request validation and type safety
 					execute: (parameters) =>
 						sql`SELECT refresh_search_documents(${parameters.scopeId}::uuid, ${parameters.includeGlobal})`.pipe(
 							Effect.timeout(Duration.minutes(_CONFIG.refresh.timeoutMinutes)),
@@ -353,8 +340,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 		};
 	}),
 }) {
-	/** Test layer factory with mock implementations. Override only the methods you need. */
-	static readonly Test = (overrides: Partial<SearchRepo> = {}) =>
+	static readonly Test = (overrides: Partial<SearchRepo> = {}) => // Test layer factory with mock implementations. Override only the methods you need.
 		Layer.succeed(SearchRepo, {
 			embeddingSources: overrides.embeddingSources ?? ((_) => Effect.succeed([])),
 			refresh: overrides.refresh ?? ((_scopeId, _includeGlobal) => Effect.void),

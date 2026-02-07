@@ -19,7 +19,10 @@ it.effect.prop('P2: inverse', { x: _json, y: _json }, ({ x, y }) =>
 		.pipe(Effect.tap(() => { Diff.create(x, y) ?? expect(x).toEqual(y); }), Effect.asVoid), { fastCheck: { numRuns: 200 } });
 
 // P3: Empty Patch Identity - apply(x, ∅) = x
-it.effect.prop('P3: empty patch', { x: _json }, ({ x }) => Diff.apply(x, { ops: [] }).pipe(Effect.tap((r) => { expect(r).toEqual(x); })), { fastCheck: { numRuns: 200 } });
+it.effect.prop('P3: empty patch', { x: _json }, ({ x }) => Diff.apply(x, { ops: [] }).pipe(
+	Effect.tap((r) => { expect(r).toEqual(x); }),
+	Effect.asVoid,
+), { fastCheck: { numRuns: 200 } });
 
 // P4: Immutability - apply does not mutate input
 it.effect.prop('P4: immutability', { x: _json, y: _json }, ({ x, y }) => {
@@ -33,7 +36,10 @@ it.effect.prop('P5: composition', { a: _json, b: _json, c: _json }, ({ a, b, c }
 	return Effect.all([
 		Effect.gen(function* () { const mid = p1 ? yield* Diff.apply(a, p1) : a; return p2 ? yield* Diff.apply(mid, p2) : mid; }),
 		Diff.apply(a, { ops: [...(p1?.ops ?? []), ...(p2?.ops ?? [])] }),
-	]).pipe(Effect.tap(([seq, comp]) => { expect(seq).toEqual(comp); }));
+	]).pipe(
+		Effect.tap(([seq, comp]) => { expect(seq).toEqual(comp); }),
+		Effect.asVoid,
+	);
 }, { fastCheck: { numRuns: 200 } });
 
 // P6: All RFC 6902 operations - parallel execution, single structural assertion

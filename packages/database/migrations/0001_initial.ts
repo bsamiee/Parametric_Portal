@@ -307,7 +307,7 @@ export default Effect.gen(function* () {
             type TEXT NOT NULL,
             content TEXT NOT NULL,
             status TEXT NOT NULL,
-            hash TEXT NOT NULL,
+            hash TEXT,
             name TEXT,
             storage_ref TEXT,
             deleted_at TIMESTAMPTZ,
@@ -348,7 +348,15 @@ export default Effect.gen(function* () {
             ip_address INET,
             user_agent TEXT,
             CONSTRAINT audit_logs_user_agent_length CHECK (user_agent IS NULL OR length(user_agent) <= 1024),
-            CONSTRAINT audit_logs_operation_valid CHECK (operation IN ('create', 'update', 'delete', 'restore', 'login', 'logout', 'verify', 'revoke'))
+            CONSTRAINT audit_logs_operation_valid CHECK (operation IN (
+                'create', 'update', 'delete', 'restore', 'login', 'logout', 'verify', 'revoke',
+                'sign', 'upload', 'stream_upload', 'copy', 'read', 'list', 'register', 'remove',
+                'enroll', 'disable', 'verifyMfa', 'refresh', 'revokeByIp', 'cancel', 'replay',
+                'export', 'import', 'validate', 'status', 'query', 'suggest', 'refreshEmbeddings',
+                'abort_multipart', 'auth_failure', 'rate_limited',
+                'purge-sessions', 'purge-api-keys', 'purge-assets', 'purge-event-journal',
+                'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts'
+            ))
         )
     `;
     yield* sql`COMMENT ON TABLE audit_logs IS 'Append-only audit trail — use uuid_extract_timestamp(id) for creation time; old_data/new_data populated via RETURNING OLD/NEW'`;
@@ -458,6 +466,17 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_jobs_batch ON jobs(batch_id) WHERE batch_id IS NOT NULL`;
     yield* sql`CREATE INDEX idx_jobs_app_id_fk ON jobs(app_id)`;
     yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    yield* sql`
+        CREATE OR REPLACE FUNCTION count_jobs_by_status()
+        RETURNS JSONB
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT COALESCE(jsonb_object_agg(status, cnt), '{}'::jsonb)
+            FROM (SELECT status, COUNT(*)::int AS cnt FROM jobs GROUP BY status) sub
+        $$
+    `;
+    yield* sql`COMMENT ON FUNCTION count_jobs_by_status() IS 'Aggregate job counts per status as JSONB object — e.g. {"queued":5,"processing":2}'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // JOB_DLQ: Dead-letter queue for failed jobs and events
     // ═══════════════════════════════════════════════════════════════════════════
@@ -478,7 +497,9 @@ export default Effect.gen(function* () {
             CONSTRAINT job_dlq_source_valid CHECK (source IN ('job', 'event')),
             CONSTRAINT job_dlq_error_reason_valid CHECK (error_reason IN (
                 'MaxRetries', 'Validation', 'HandlerMissing', 'RunnerUnavailable', 'Timeout', 'Panic',
-                'DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'HandlerTimeout'
+                'Processing', 'NotFound', 'AlreadyCancelled',
+                'DeliveryFailed', 'DeserializationFailed', 'DuplicateEvent', 'ValidationFailed',
+                'AuditPersistFailed', 'HandlerTimeout'
             )),
             CONSTRAINT job_dlq_error_history_array CHECK (jsonb_typeof(error_history) = 'array'),
             CONSTRAINT job_dlq_attempts_positive CHECK (attempts > 0)

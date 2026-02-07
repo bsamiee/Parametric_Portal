@@ -3,7 +3,7 @@
  * No custom types - uses Effect's official types directly.
  */
 import { HttpMiddleware, HttpServerRequest } from '@effect/platform';
-import { Boolean as B, Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
+import { Effect, HashSet, Match, Metric, MetricLabel, Stream } from 'effect';
 import { Context } from '../context.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -15,10 +15,11 @@ const _CONFIG = {
 		jobs: 		[0.01, 0.1, 1, 10, 100, 1000] as const,						// Background processing
 		oauth: 		[0.1, 0.5, 1, 2, 5, 10, 30] as const,						// OAuth token exchanges (external APIs)
 		rateLimit: 	[0.0001, 0.001, 0.01, 0.1, 1] as const,						// Fast checks
+		rpc: 		[0.001, 0.01, 0.05, 0.1, 0.5, 1, 5] as const,				// RPC execution
 		storage: 	[0.005, 0.025, 0.125, 0.625, 3.125, 15.625, 78.125, 390.625] as const,	// S3 operations (5x exponential)
 		transfer: 	[0.1, 0.5, 2.5, 12.5, 62.5, 312.5] as const,				// Data transfers (5x exponential)
 	},
-	labels: {			// Prometheus label value limit is 128 chars; we truncate at 120 to leave room for suffix
+	labels: {			// OTLP label value limit is 128 chars; we truncate at 120 to leave room for suffix
 		maxContent: 120,
 		truncateSuffix: '...',
 	},
@@ -37,14 +38,12 @@ const errorTag = (err: unknown): string => Match.value(err).pipe(
 class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', {
 	effect: Effect.succeed({
 		ai: {
-			duration: Metric.timerWithBoundaries('ai_duration_seconds', _CONFIG.boundaries.transfer),
-			embeddings: Metric.counter('ai_embeddings_total'),
-			errors: Metric.frequency('ai_errors_total'),
-			requests: Metric.counter('ai_requests_total'),
-			tokens: Metric.counter('ai_tokens_total'),
+			duration: Metric.timerWithBoundaries('ai_duration_seconds', _CONFIG.boundaries.transfer), embeddings: Metric.counter('ai_embeddings_total'),
+			errors: Metric.frequency('ai_errors_total'), requests: Metric.counter('ai_requests_total'), tokens: Metric.counter('ai_tokens_total'),
 		},
 		audit: {failures: Metric.counter('audit_failures_total'), writes: Metric.counter('audit_writes_total'),},
 		auth: {
+			apiKey: { hits: Metric.counter('auth_api_key_hits_total'), lookups: Metric.counter('auth_api_key_lookups_total'), misses: Metric.counter('auth_api_key_misses_total') },
 			apiKeys: Metric.counter('auth_api_keys_total'), logins: Metric.counter('auth_logins_total'), logouts: Metric.counter('auth_logouts_total'),
 			refreshes: Metric.counter('auth_refreshes_total'), session: {hits: Metric.counter('auth_session_hits_total'), lookups: Metric.counter('auth_session_lookups_total'), misses: Metric.counter('auth_session_misses_total'),},
 		},
@@ -74,26 +73,18 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			redeliveries: Metric.counter('cluster_redeliveries_total'),
 		},
 		database: {
-			cacheHitRatio: Metric.gauge('database_cache_hit_ratio_percent'),
-			ioReads: Metric.gauge('database_io_reads_total'),
-			ioWrites: Metric.gauge('database_io_writes_total'),
+			cacheHitRatio: Metric.gauge('database_cache_hit_ratio_percent'), ioReads: Metric.gauge('database_io_reads_total'), ioWrites: Metric.gauge('database_io_writes_total'),
 			vectorIndexScans: Metric.gauge('database_vector_index_scans_total'),
 		},
 		errors: Metric.frequency('errors_total'),
 		events: {
-			deadLettered: Metric.counter('events_dead_lettered_total'),
-			deliveryLatency: Metric.timerWithBoundaries('events_delivery_latency_seconds', _CONFIG.boundaries.cluster),
-			duplicatesSkipped: Metric.counter('events_duplicates_skipped_total'),
-			emitted: Metric.counter('events_emitted_total'),
-			outboxDepth: Metric.gauge('events_outbox_depth'),
-			processed: Metric.counter('events_processed_total'),
-			retries: Metric.counter('events_retries_total'),
-			subscriptions: Metric.gauge('events_subscriptions_active'),
+			deadLettered: Metric.counter('events_dead_lettered_total'), deliveryLatency: Metric.timerWithBoundaries('events_delivery_latency_seconds', _CONFIG.boundaries.cluster),
+			duplicatesSkipped: Metric.counter('events_duplicates_skipped_total'), emitted: Metric.counter('events_emitted_total'), outboxDepth: Metric.gauge('events_outbox_depth'),
+			processed: Metric.counter('events_processed_total'), retries: Metric.counter('events_retries_total'), subscriptions: Metric.gauge('events_subscriptions_active'),
 		},
 		fiber: { active: Metric.fiberActive, failures: Metric.fiberFailures, lifetimes: Metric.fiberLifetimes, started: Metric.fiberStarted, successes: Metric.fiberSuccesses },
 		http: {
-			active: Metric.gauge('http_requests_active'),
-			duration: Metric.timerWithBoundaries('http_request_duration_seconds', _CONFIG.boundaries.http),
+			active: Metric.gauge('http_requests_active'), duration: Metric.timerWithBoundaries('http_request_duration_seconds', _CONFIG.boundaries.http),
 			requests: Metric.counter('http_requests_total'),
 		},
 		jobs: {
@@ -118,6 +109,8 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			bulkheadRejections: Metric.counter('resilience_bulkhead_rejections_total'), fallbacks: Metric.counter('resilience_fallbacks_total'),
 			hedges: Metric.counter('resilience_hedges_total'), retries: Metric.counter('resilience_retries_total'), timeouts: Metric.counter('resilience_timeouts_total'),
 		},
+		rpc: {duration: Metric.timerWithBoundaries('rpc_duration_seconds', _CONFIG.boundaries.rpc), errors: Metric.frequency('rpc_errors_total'), requests: Metric.counter('rpc_requests_total'),},
+		rtc: {connections: Metric.counter('rtc_connections_total'), events: Metric.counter('rtc_events_total'),},
 		search: {
 			queries: Metric.counter('search_queries_total', { description: 'Total search queries' }),
 			refreshes: Metric.counter('search_refreshes_total', { description: 'Total index refreshes' }),
@@ -130,12 +123,9 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			stateErrors: Metric.counter('singleton_state_errors_total'), stateOperations: Metric.counter('singleton_state_operations_total'),
 		},
 		storage: {
-			bytes: Metric.counter('storage_bytes_total'),
-			duration: Metric.timerWithBoundaries('storage_operation_duration_seconds', _CONFIG.boundaries.storage),
-			errors: Metric.counter('storage_errors_total'),
+			bytes: Metric.counter('storage_bytes_total'), duration: Metric.timerWithBoundaries('storage_operation_duration_seconds', _CONFIG.boundaries.storage), errors: Metric.counter('storage_errors_total'),
 			multipart: {bytes: Metric.counter('storage_multipart_bytes_total'), parts: Metric.counter('storage_multipart_parts_total'), uploads: Metric.counter('storage_multipart_uploads_total'),},
-			operations: Metric.counter('storage_operations_total'),
-			stream: { duration: Metric.timerWithBoundaries('storage_stream_duration_seconds', _CONFIG.boundaries.storage) },
+			operations: Metric.counter('storage_operations_total'), stream: { duration: Metric.timerWithBoundaries('storage_stream_duration_seconds', _CONFIG.boundaries.storage) },
 		},
 		stream: {
 			active: Metric.gauge('stream_active'), bytes: Metric.counter('stream_bytes_total'), duration: Metric.timerWithBoundaries('stream_duration_seconds', [0.1, 1, 10, 60, 300]),
@@ -144,14 +134,6 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		transfer: {
 			duration: Metric.timerWithBoundaries('transfer_duration_seconds', _CONFIG.boundaries.transfer), exports: Metric.counter('transfer_exports_total'),
 			imports: Metric.counter('transfer_imports_total'), rows: Metric.counter('transfer_rows_total'),
-		},
-		workers: {
-			active: Metric.gauge('workers_active'),
-			completions: Metric.counter('workers_completions_total'),
-			crashes: Metric.counter('workers_crashes_total'),
-			duration: Metric.timerWithBoundaries('workers_duration_seconds', _CONFIG.boundaries.transfer),
-			queueDepth: Metric.gauge('workers_queue_depth'),
-			timeouts: Metric.counter('workers_timeouts_total'),
 		},
 	}),
 }) {
@@ -175,10 +157,9 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 		counter: Metric.Metric.Counter<number>,
 		labels: HashSet.HashSet<MetricLabel.MetricLabel>,
 		value = 1,): Effect.Effect<void> =>
-		B.match(value === 1, {
-			onFalse: () => Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value),
-			onTrue: () => Metric.increment(Metric.taggedWithLabels(counter, labels)),
-		});
+		value === 1
+			? Metric.increment(Metric.taggedWithLabels(counter, labels))
+			: Metric.incrementBy(Metric.taggedWithLabels(counter, labels), value);
 	// --- [GAUGE] -------------------------------------------------------------
 	static readonly gauge = (							// Update gauge with labels using official Metric.update API.
 		gauge: Metric.Metric.Gauge<number>,
@@ -236,7 +217,7 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 			readonly operation: 'send' | 'broadcast' | 'receive';
 			readonly entityType: string;
 		},): Effect.Effect<A, E, R | MetricsService> =>
-		Effect.flatMap(MetricsService, (metrics) => { // NOSONAR S3358
+		Effect.flatMap(MetricsService, (metrics) => {
 			const labels = MetricsService.label({
 				entity_type: config.entityType,
 				operation: config.operation,
@@ -248,10 +229,10 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 					send: Metric.increment(Metric.taggedWithLabels(metrics.cluster.messagesSent, labels)),
 				})[config.operation]),
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.cluster.messageLatency, labels)),
-				Effect.tapError((e) => {
+				Effect.tapError((error) => {
 					const errorLabels = MetricsService.label({
 						entity_type: config.entityType,
-						type: e.reason,  // ClusterError.reason: 'MailboxFull' | 'RunnerUnavailable' | etc.
+						type: error.reason,
 					});
 					return Metric.increment(Metric.taggedWithLabels(metrics.cluster.errors, errorLabels));
 				}),
@@ -278,10 +259,10 @@ class MetricsService extends Effect.Service<MetricsService>()('server/Metrics', 
 					submit: Metric.increment(Metric.taggedWithLabels(metrics.jobs.enqueued, labels)),
 				})[config.operation]),
 				Metric.trackDuration(Metric.taggedWithLabels(metrics.jobs.processingSeconds, labels)),
-				Effect.tapError((e) => {
+				Effect.tapError((error) => {
 					const errorLabels = MetricsService.label({
 						job_type: config.jobType,
-						reason: e.reason,
+						reason: error.reason,
 					});
 					return Metric.increment(Metric.taggedWithLabels(metrics.jobs.failures, errorLabels));
 				}),

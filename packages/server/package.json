@@ -33,6 +33,11 @@
       "import": "./src/platform/cache.ts",
       "default": "./src/platform/cache.ts"
     },
+    "./platform/websocket": {
+      "types": "./src/platform/websocket.ts",
+      "import": "./src/platform/websocket.ts",
+      "default": "./src/platform/websocket.ts"
+    },
     "./observe/telemetry": {
       "types": "./src/observe/telemetry.ts",
       "import": "./src/observe/telemetry.ts",
@@ -88,6 +93,11 @@
       "import": "./src/domain/storage.ts",
       "default": "./src/domain/storage.ts"
     },
+    "./domain/transfer": {
+      "types": "./src/domain/transfer.ts",
+      "import": "./src/domain/transfer.ts",
+      "default": "./src/domain/transfer.ts"
+    },
     "./utils/circuit": {
       "types": "./src/utils/circuit.ts",
       "import": "./src/utils/circuit.ts",
@@ -108,20 +118,15 @@
       "import": "./src/utils/resilience.ts",
       "default": "./src/utils/resilience.ts"
     },
-    "./infra/handlers/purge-assets": {
-      "types": "./src/infra/handlers/purge-assets.ts",
-      "import": "./src/infra/handlers/purge-assets.ts",
-      "default": "./src/infra/handlers/purge-assets.ts"
+    "./infra/handlers/purge": {
+      "types": "./src/infra/handlers/purge.ts",
+      "import": "./src/infra/handlers/purge.ts",
+      "default": "./src/infra/handlers/purge.ts"
     },
     "./platform/streaming": {
       "types": "./src/platform/streaming.ts",
       "import": "./src/platform/streaming.ts",
       "default": "./src/platform/streaming.ts"
-    },
-    "./platform/websocket": {
-      "types": "./src/platform/websocket.ts",
-      "import": "./src/platform/websocket.ts",
-      "default": "./src/platform/websocket.ts"
     },
     "./infra/webhooks": {
       "types": "./src/infra/webhooks.ts",
@@ -140,23 +145,20 @@
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@effect-aws/client-s3": "catalog:",
-    "@effect/cli": "catalog:",
     "@effect/cluster": "catalog:",
     "@effect/experimental": "catalog:",
     "@effect/opentelemetry": "catalog:",
     "@effect/platform": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/platform-node-shared": "catalog:",
-    "@effect/printer": "catalog:",
-    "@effect/printer-ansi": "catalog:",
     "@effect/rpc": "catalog:",
     "@effect/sql": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/workflow": "catalog:",
     "@parametric-portal/database": "workspace:*",
     "@parametric-portal/types": "workspace:*",
+    "@simplewebauthn/server": "catalog:",
     "arctic": "catalog:",
-    "cockatiel": "catalog:",
     "effect": "catalog:",
     "exceljs": "catalog:",
     "ipaddr.js": "catalog:",

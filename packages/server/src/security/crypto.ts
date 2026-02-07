@@ -1,12 +1,20 @@
 /**
- * Unified cryptographic service with HKDF tenant key derivation.
+ * Unified cryptographic service with HKDF tenant key derivation and versioned key rotation.
  * Flat API (hash, compare, pair), Effect.Encoding, timing-safe comparison.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { type Hex64, Uuidv7 } from '@parametric-portal/types/types';
-import { Cache, Config, Data, Duration, Effect, Encoding, Either, Number as N, Redacted } from 'effect';
+import { Cache, Config, Data, Duration, Effect, Encoding, Either, HashMap, Option, Redacted, Schema as S } from 'effect';
 import { Context } from '../context.ts';
 import { Telemetry } from '../observe/telemetry.ts';
+
+// --- [SCHEMA] ----------------------------------------------------------------
+
+const _VersionedKeySchema = S.Struct({
+	key: S.String,
+	version: S.Number.pipe(S.int(), S.greaterThanOrEqualTo(1), S.lessThanOrEqualTo(255)),
+});
+const _KeyConfigSchema = S.Array(_VersionedKeySchema);
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -14,60 +22,79 @@ const _encoder = new TextEncoder();
 const _decoder = new TextDecoder();
 const _CONFIG = {
 	cache: { capacity: 1000, ttl: Duration.hours(24) },
-	hkdf: { hash: 'SHA-256', info: 'parametric-tenant-key-v1', salt: new Uint8Array(32) },
+	hkdf: { hash: 'SHA-256', info: 'parametric-tenant-key-v1', legacySalt: new Uint8Array(32) },
 	iv: 12,
 	key: { length: 256, name: 'AES-GCM' } as const,
 	minBytes: 14,
-	version: { current: 1, max: 255, min: 1 },
+	version: { max: 255, min: 1 },
 } as const;
+const _hkdfSalt = (version: number): Uint8Array<ArrayBuffer> =>
+	version === 1
+		? new Uint8Array(_CONFIG.hkdf.legacySalt)
+		: _encoder.encode(`parametric-portal-hkdf-v${version}`);
 
 // --- [ERRORS] ----------------------------------------------------------------
 
 class CryptoError extends Data.TaggedError('CryptoError')<{
 	readonly cause?: unknown;
-	readonly code: 'INVALID_FORMAT' | 'KEY_FAILED' | 'OP_FAILED';
-	readonly op: 'decrypt' | 'encrypt' | 'hmac' | 'key';
+	readonly code: 'INVALID_FORMAT' | 'KEY_FAILED' | 'KEY_NOT_FOUND' | 'OP_FAILED';
+	readonly op: 'decrypt' | 'encrypt' | 'hmac' | 'key' | 'reencrypt';
 	readonly tenantId: string;
 }> {}
 
-// --- [SERVICE] ---------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
+const _importHkdfKey = (base64Material: string): Effect.Effect<CryptoKey, CryptoError> =>
+	Either.match(Encoding.decodeBase64(base64Material), {
+		onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
+		onRight: (bytes) => Effect.tryPromise({
+			catch: (error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'key', tenantId: Context.Request.Id.system }),
+			try: () => crypto.subtle.importKey('raw', new Uint8Array(bytes), 'HKDF', false, ['deriveKey']),
+		}),
+	});
+const _loadKeys = Effect.gen(function* () {
+	const multiKeyConfig = yield* Config.string('ENCRYPTION_KEYS').pipe(Config.option,);
+	const parsed: ReadonlyArray<{ readonly key: string; readonly version: number }> = yield* Option.match(multiKeyConfig, {
+		onNone: () => Config.redacted('ENCRYPTION_KEY').pipe(Effect.map((redacted): ReadonlyArray<{ readonly key: string; readonly version: number }> => [{ key: Redacted.value(redacted), version: 1 }]),),
+		onSome: (value) => S.decodeUnknown(S.parseJson(_KeyConfigSchema))(value).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),),
+	});
+	const currentVersion = yield* Config.integer('ENCRYPTION_KEY_VERSION').pipe(Config.withDefault(parsed.reduce<number>((max, entry) => Math.max(entry.version, max), 0),));
+	const imported = yield* Effect.forEach(parsed, (entry) => _importHkdfKey(entry.key).pipe(Effect.map((cryptoKey): readonly [number, CryptoKey] => [entry.version, cryptoKey])),);
+	return { currentVersion, keys: HashMap.fromIterable(imported) };
+});
 class Service extends Effect.Service<Service>()('server/CryptoService', {
 	effect: Effect.gen(function* () {
-		const masterKey = yield* Config.redacted('ENCRYPTION_KEY').pipe(
-			Effect.flatMap((redacted) =>
-				Encoding.decodeBase64(Redacted.value(redacted)).pipe(
-					Either.match({
-						onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
-						onRight: (bytes) => Effect.tryPromise({
-							catch: (error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'key', tenantId: Context.Request.Id.system }),
-							try: () => crypto.subtle.importKey('raw', new Uint8Array(bytes), 'HKDF', false, ['deriveKey']),
-						}),
-					}),
-				),
-			),
-		);
+		const { currentVersion, keys } = yield* _loadKeys;
 		const tenantKeyCache = yield* Cache.make({
 			capacity: _CONFIG.cache.capacity,
-			lookup: (tenantId: string) => Effect.promise(() =>
-				crypto.subtle.deriveKey(
-					{
-						hash: _CONFIG.hkdf.hash,
-						info: _encoder.encode(`${_CONFIG.hkdf.info}:${tenantId}`),
-						name: 'HKDF',
-						salt: _CONFIG.hkdf.salt,
-					},
-					masterKey,
-					{ length: _CONFIG.key.length, name: _CONFIG.key.name },
-					false,
-					['encrypt', 'decrypt'],
-				),
-			),
+			lookup: (compositeKey: string) => Effect.gen(function* () {
+				const separatorIndex = compositeKey.indexOf(':');
+				const version = Number(compositeKey.slice(0, separatorIndex));
+				const tenantId = compositeKey.slice(separatorIndex + 1);
+				const masterKey = yield* Option.match(HashMap.get(keys, version), {
+					onNone: () => Effect.fail(new CryptoError({ code: "KEY_NOT_FOUND", op: "key", tenantId })),
+					onSome: Effect.succeed,
+				});
+				return yield* Effect.promise(() =>
+					crypto.subtle.deriveKey(
+						{
+							hash: _CONFIG.hkdf.hash,
+							info: _encoder.encode(`${_CONFIG.hkdf.info}:${tenantId}`),
+							name: 'HKDF',
+							salt: _hkdfSalt(version),
+						},
+						masterKey,
+						{ length: _CONFIG.key.length, name: _CONFIG.key.name },
+						false,
+						['encrypt', 'decrypt'],
+					),
+				);
+			}),
 			timeToLive: _CONFIG.cache.ttl,
 		});
-		const deriveKey = (tenantId: string) => tenantKeyCache.get(tenantId);
-		yield* Effect.logInfo('CryptoService initialized with HKDF tenant key derivation');
-		return { deriveKey };
+		const deriveKey = (tenantId: string, version?: number) => tenantKeyCache.get(`${version ?? currentVersion}:${tenantId}`);
+		yield* Effect.logInfo(`CryptoService initialized with ${HashMap.size(keys)} versioned key(s), current version: ${currentVersion}`);
+		return { currentVersion, deriveKey };
 	}),
 }) {}
 
@@ -78,42 +105,56 @@ const compare = (a: string, b: string): Effect.Effect<boolean> =>
 		const bufA = _encoder.encode(a);
 		const bufB = _encoder.encode(b);
 		return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
-	});
-const decrypt = (bytes: Uint8Array): Effect.Effect<string, CryptoError, Service> =>
+	}).pipe(Telemetry.span('crypto.compare', { metrics: false }));
+const decrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Effect<string, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.currentTenantId;
 		yield* Effect.filterOrFail(
 			Effect.succeed(bytes),
-			(b) => b.length >= _CONFIG.minBytes && b[0] !== undefined && N.between({ maximum: _CONFIG.version.max, minimum: _CONFIG.version.min })(b[0]),
+			(b) => b.length >= _CONFIG.minBytes && b[0] !== undefined && b[0] >= _CONFIG.version.min && b[0] <= _CONFIG.version.max,
 			() => new CryptoError({ code: 'INVALID_FORMAT', op: 'decrypt', tenantId }),
 		);
+		const version = bytes[0] as number;
 		const iv = bytes.slice(1, 1 + _CONFIG.iv);
 		const cipher = bytes.slice(1 + _CONFIG.iv);
 		const service = yield* Service;
-		const key = yield* service.deriveKey(tenantId).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'decrypt', tenantId })),);
+		const key = yield* service.deriveKey(tenantId, version).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: error instanceof CryptoError && error.code === 'KEY_NOT_FOUND' ? 'KEY_NOT_FOUND' : 'KEY_FAILED', op: 'decrypt', tenantId })),);
+		const params: AesGcmParams = additionalData ? { additionalData, iv, name: 'AES-GCM' } : { iv, name: 'AES-GCM' };
 		const plaintext = yield* Effect.tryPromise({
 			catch: (error) => new CryptoError({ cause: error, code: 'OP_FAILED', op: 'decrypt', tenantId }),
-			try: () => crypto.subtle.decrypt({ iv, name: 'AES-GCM' }, key, cipher),
+			try: () => crypto.subtle.decrypt(params, key, cipher),
 		});
 		return _decoder.decode(plaintext);
 	}), 'crypto.decrypt');
-const encrypt = (plaintext: string): Effect.Effect<Uint8Array, CryptoError, Service> =>
+const encrypt = (plaintext: string, additionalData?: BufferSource): Effect.Effect<Uint8Array, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.currentTenantId;
 		const service = yield* Service;
-		const key = yield* service.deriveKey(tenantId).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
+		const key = yield* service.deriveKey(tenantId, service.currentVersion).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
 		const iv = crypto.getRandomValues(new Uint8Array(_CONFIG.iv));
+		const params: AesGcmParams = additionalData ? { additionalData, iv, name: 'AES-GCM' } : { iv, name: 'AES-GCM' };
 		const ciphertext = yield* Effect.tryPromise({
 			catch: (error) => new CryptoError({ cause: error, code: 'OP_FAILED', op: 'encrypt', tenantId }),
-			try: () => crypto.subtle.encrypt({ iv, name: 'AES-GCM' }, key, _encoder.encode(plaintext)),
+			try: () => crypto.subtle.encrypt(params, key, _encoder.encode(plaintext)),
 		});
 		const ciphertextBytes = new Uint8Array(ciphertext);
 		const result = new Uint8Array(1 + iv.length + ciphertextBytes.length);
-		result[0] = _CONFIG.version.current;
+		result[0] = service.currentVersion;
 		result.set(iv, 1);
 		result.set(ciphertextBytes, 1 + iv.length);
 		return result;
 	}), 'crypto.encrypt');
+const reencrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Effect<Uint8Array, CryptoError, Service> =>
+	Telemetry.span(Effect.gen(function* () {
+		const service = yield* Service;
+		const envelopeVersion = bytes[0];
+		return (envelopeVersion === service.currentVersion)
+			? bytes
+			: yield* decrypt(bytes, additionalData).pipe(
+				Effect.flatMap((plaintext) => encrypt(plaintext, additionalData)),
+				Effect.mapError((error) => new CryptoError({ cause: error, code: error.code, op: 'reencrypt', tenantId: error.tenantId })),
+			);
+	}), 'crypto.reencrypt');
 const hash = (input: string): Effect.Effect<Hex64> =>
 	Effect.promise(() => crypto.subtle.digest('SHA-256', _encoder.encode(input))).pipe(
 		Effect.map((buf) => Encoding.encodeHex(new Uint8Array(buf)) as Hex64),
@@ -121,20 +162,27 @@ const hash = (input: string): Effect.Effect<Hex64> =>
 	);
 const hmac = (key: string, data: string): Effect.Effect<Hex64> =>
 	Effect.gen(function* () {
-		const cryptoKey = yield* Effect.promise(() =>crypto.subtle.importKey('raw', _encoder.encode(key), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']),);
-		const signature = yield* Effect.promise(() =>crypto.subtle.sign('HMAC', cryptoKey, _encoder.encode(data)),);
+		const cryptoKey = yield* Effect.promise(() => crypto.subtle.importKey('raw', _encoder.encode(key), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']));
+		const signature = yield* Effect.promise(() => crypto.subtle.sign('HMAC', cryptoKey, _encoder.encode(data)));
 		return Encoding.encodeHex(new Uint8Array(signature)) as Hex64;
 	}).pipe(Telemetry.span('crypto.hmac'));
 const pair = Effect.gen(function* () {
-	const tok = Uuidv7.generateSync();
-	const h = yield* hash(tok);
-	return { hash: h, token: tok } as const;
+	const token = Uuidv7.generateSync();
+	const hashed = yield* hash(token);
+	return { hash: hashed, token: Redacted.make(token) } as const;
 }).pipe(Telemetry.span('crypto.pair'));
 
-// --- [ENTRY_POINT] -----------------------------------------------------------
-
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Crypto = { compare, decrypt, encrypt, hash, hmac, pair, Service } as const;
+const Crypto = {
+	compare,
+	decrypt,
+	encrypt,
+	hash,
+	hmac,
+	pair,
+	reencrypt,
+	Service,
+} as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 

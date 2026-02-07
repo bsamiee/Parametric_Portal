@@ -4,7 +4,8 @@
  * PG18.1: Uses old_data/new_data columns for full before/after snapshots.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Array as A, Clock, DateTime, Duration, Effect, Function as F, Option, pipe, Schedule, Schema as S } from 'effect';
+import type { JobDlq } from '@parametric-portal/database/models';
+import { Array as A, Clock, DateTime, Duration, Effect, Option, pipe, Schedule, Schema as S } from 'effect';
 import { ClusterService } from '../infra/cluster.ts';
 import { Context } from '../context.ts';
 import { MetricsService } from './metrics.ts';
@@ -17,7 +18,7 @@ const _CONFIG = {
 	securityOps: new Set(['access_denied', 'auth_failure', 'mfa_required', 'permission_denied', 'rate_limited', 'token_invalid']) as ReadonlySet<string>,
 } as const;
 
-// --- [SERVICE] ---------------------------------------------------------------
+// --- [SERVICES] --------------------------------------------------------------
 
 class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 	scoped: Effect.gen(function* () {
@@ -29,12 +30,9 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			const [subject, operation] = index > 0 ? [operationString.slice(0, index), operationString.slice(index + 1)] : ['security', operationString];
 			return { isSecurity: subject === 'security' && _CONFIG.securityOps.has(operation), operation, subject };
 		};
-		// PG18.1: Store full before/after snapshots instead of diffs
-		// Callers pass RETURNING OLD.*/NEW.* data directly; details used for security events
-		const computeOldData = (config?: { readonly before?: unknown; readonly details?: unknown }) =>
-			Option.fromNullable(config?.before).pipe(Option.orElse(() => Option.fromNullable(config?.details)));
-		const computeNewData = (config?: { readonly after?: unknown }) =>
-			Option.fromNullable(config?.after);
+		// PG18.1: Store full before/after snapshots instead of diffs. Callers pass RETURNING OLD.*/NEW.* data directly; details used for security events
+		const computeOldData = (config?: { readonly before?: unknown; readonly details?: unknown }) => Option.fromNullable(config?.before).pipe(Option.orElse(() => Option.fromNullable(config?.details)));
+		const computeNewData = (config?: { readonly after?: unknown }) => Option.fromNullable(config?.after);
 		const writeDeadLetter = (entry: Record<string, unknown>, error: string, timestampMs: number, context: { readonly tenantId: string; readonly requestId: string; readonly userId: Option.Option<string> }) =>
 			database.jobDlq.insert({
 				appId: context.tenantId,
@@ -45,7 +43,7 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 				payload: entry,
 				replayedAt: Option.none(),
 				requestId: Option.some(context.requestId),
-				source: 'audit',
+				source: 'event',
 				type: `audit.${entry['subject']}.${entry['operation']}`,
 				userId: context.userId,
 			}).pipe(Effect.ignore);
@@ -86,37 +84,38 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 					Effect.catchAll((databaseError) => Effect.all([
 						Effect.logWarning('AUDIT_FAILURE', { error: String(databaseError), isSecurity: parsed.isSecurity, operation: `${parsed.subject}.${parsed.operation}`, subjectId }),
 							MetricsService.inc(metrics.audit.failures, labels, 1),
-						Effect.when(writeDeadLetter(entry, String(databaseError), timestampMs, dlqContext), F.constant(forceDeadLetter)),
+						Effect.when(writeDeadLetter(entry, String(databaseError), timestampMs, dlqContext), () => forceDeadLetter),
 					], { discard: true })),
 				);
-			}).pipe(Telemetry.span('audit.log'));
+				}).pipe(Telemetry.span('audit.log', { metrics: false }));
+		const replayDlqEntry = (dlq: JobDlq) => Effect.gen(function* () {
+			const entry = yield* S.decodeUnknown(S.Record({ key: S.String, value: S.Unknown }))(dlq.payload);
+			yield* database.audit.log(entry as Parameters<typeof database.audit.log>[0]);
+			yield* database.jobDlq.markReplayed(dlq.id);
+			return { id: dlq.id, success: true as const };
+		}).pipe(Effect.catchAll((error) => Effect.logWarning('Audit DLQ replay failed', { dlqId: dlq.id, error: String(error) }).pipe(Effect.as({ id: dlq.id, success: false as const }))),);
 		const replayDeadLetters = Effect.sync(Context.Request.system).pipe(
 			Effect.flatMap((ctx) => Context.Request.within(
 				Context.Request.Id.system,
-				Telemetry.span(
-					Effect.gen(function* () {
-						const pending = yield* database.jobDlq.listPending({ limit: 100, type: 'audit.*' });
-						const results = yield* Effect.forEach(pending.items, (dlq) =>
-							S.decodeUnknown(S.Record({ key: S.String, value: S.Unknown }))(dlq.payload).pipe(
-								Effect.flatMap((entry) => database.audit.log(entry as Parameters<typeof database.audit.log>[0])),
-								Effect.tap(() => database.jobDlq.markReplayed(dlq.id)),
-								Effect.as({ id: dlq.id, success: true as const }),
-								Effect.catchAll((error) => Effect.logWarning('Audit DLQ replay failed', { dlqId: dlq.id, error: String(error) }).pipe(Effect.as({ id: dlq.id, success: false as const }))),
-							), { concurrency: _CONFIG.deadLetter.concurrency });
-						const [failures, successes] = A.partition(results, (r) => r.success);
-						yield* Effect.when(Effect.logInfo('Audit dead-letter replay completed', { failed: failures.length, replayed: successes.length }), () => results.length > 0);
-						return { failed: failures.length, replayed: successes.length, skipped: pending.items.length === 0 };
-					}),
-					'audit.replayDeadLetters',
-				),
-				ctx,
-			)),
-		);
+					Telemetry.span(
+						Effect.gen(function* () {
+							const pending = yield* database.jobDlq.listPending({ limit: 100, type: 'audit.*' });
+							const results = yield* Effect.forEach(pending.items, replayDlqEntry, { concurrency: _CONFIG.deadLetter.concurrency });
+							const [failures, successes] = A.partition(results, (r) => r.success);
+							yield* Effect.when(Effect.logInfo('Audit dead-letter replay completed', { failed: failures.length, replayed: successes.length }), () => results.length > 0);
+							return { failed: failures.length, replayed: successes.length, skipped: pending.items.length === 0 };
+						}),
+						'audit.replayDeadLetters',
+						{ metrics: false },
+					),
+					ctx,
+				)),
+			);
 		yield* Effect.logInfo('AuditService initialized');
 		return { log, replayDeadLetters };
 	}),
 }) {
-	static readonly ReplayLayer = ClusterService.singleton(	// Cluster-wide singleton for replay: prevents thundering herd across pods
+	static readonly ReplayLayer = ClusterService.Schedule.singleton(	// Cluster-wide singleton for replay: prevents thundering herd across pods
 		'audit-dlq-replay',
 		() => Effect.gen(function* () {
 			const audit = yield* AuditService;

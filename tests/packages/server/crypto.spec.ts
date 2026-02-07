@@ -1,7 +1,7 @@
 import { it, layer } from '@effect/vitest';
 import { Context } from '@parametric-portal/server/context';
 import { Crypto } from '@parametric-portal/server/security/crypto';
-import { Array as A, ConfigProvider, Effect, FastCheck as fc, Layer, Logger, LogLevel } from 'effect';
+import { Array as A, ConfigProvider, Effect, FastCheck as fc, Layer, Logger, LogLevel, Redacted } from 'effect';
 import { expect } from 'vitest';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -28,9 +28,12 @@ layer(_testLayer)('Crypto', (it) => {
 	}), { fastCheck: { numRuns: 100 } });
 
 	// P2: Length Invariant - |encrypt(x)| = version + IV + |encode(x)| + tag
-	it.effect.prop('P2: length formula', { x: _text }, ({ x }) => Crypto.encrypt(x).pipe(Effect.tap((c) => {
-		expect(c.length).toBe(CIPHER.version + CIPHER.iv + new TextEncoder().encode(x).length + CIPHER.tag);
-	})), { fastCheck: { numRuns: 100 } });
+	it.effect.prop('P2: length formula', { x: _text }, ({ x }) => Crypto.encrypt(x).pipe(
+		Effect.tap((c) => {
+			expect(c.length).toBe(CIPHER.version + CIPHER.iv + new TextEncoder().encode(x).length + CIPHER.tag);
+		}),
+		Effect.asVoid,
+	), { fastCheck: { numRuns: 100 } });
 
 	// P3: Tampering Detection - flip bit in ciphertext body -> OP_FAILED
 	it.effect.prop('P3: tampering', { x: _nonempty }, ({ x }) => Effect.gen(function* () {
@@ -45,7 +48,7 @@ layer(_testLayer)('Crypto', (it) => {
 		Crypto.decrypt(new Uint8Array([0, ...Array.from<number>({ length: 28 }).fill(0)])).pipe(Effect.flip),
 		Crypto.decrypt(new Uint8Array(CIPHER.minBytes - 1)).pipe(Effect.flip),
 		Crypto.decrypt(new Uint8Array([255, ...crypto.getRandomValues(new Uint8Array(28))])).pipe(Effect.flip),
-	]).pipe(Effect.map(([v0, minB, v255]) => expect([v0.code, minB.code, v255.code]).toEqual(['INVALID_FORMAT', 'INVALID_FORMAT', 'OP_FAILED']))));
+	]).pipe(Effect.map(([v0, minB, v255]) => expect([v0.code, minB.code, v255.code]).toEqual(['INVALID_FORMAT', 'INVALID_FORMAT', 'KEY_NOT_FOUND']))));
 
 	// P5: Tenant Isolation - different tenants produce different ciphertexts + cross-tenant decrypt fails
 	it.effect.prop('P5: tenant isolation', { t1: fc.uuid(), t2: fc.uuid(), x: _nonempty }, ({ t1, t2, x }) => {
@@ -59,7 +62,7 @@ layer(_testLayer)('Crypto', (it) => {
 
 	// P6: IV Quality - uniqueness + uniform distribution (chi-squared α=0.01, df=255, threshold=310.46)
 	it.effect('P6: IV uniformity', () => Effect.gen(function* () {
-		const ciphertexts = yield* Effect.forEach(fc.sample(_nonempty, { numRuns: 600 }), Crypto.encrypt);
+		const ciphertexts = yield* Effect.forEach(fc.sample(_nonempty, { numRuns: 600 }), (value) => Crypto.encrypt(value));
 		const vectors = ciphertexts.map((c) => Array.from(c.slice(CIPHER.version, CIPHER.version + CIPHER.iv)));
 		const bytes = vectors.flat(), expected = bytes.length / 256;
 		expect(new Set(vectors.map((v) => v.join(','))).size).toBe(600);
@@ -89,7 +92,7 @@ it.effect.prop('P8: hmac laws', { k1: _nonempty, k2: _nonempty, msg: _nonempty }
 // P9: Pair - uniqueness + hash derivation correctness
 it.effect('P9: pair', () => Effect.gen(function* () {
 	const pairs = yield* Crypto.pair.pipe(Effect.replicate(100), Effect.all);
-	expect(new Set(pairs.map((p) => p.token)).size).toBe(100);
+	expect(new Set(pairs.map((p) => Redacted.value(p.token))).size).toBe(100);
 	const first = A.headNonEmpty(pairs as A.NonEmptyArray<typeof pairs[number]>);
-	expect(yield* Crypto.hash(first.token)).toBe(first.hash);
+	expect(yield* Crypto.hash(Redacted.value(first.token))).toBe(first.hash);
 }));

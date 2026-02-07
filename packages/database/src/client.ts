@@ -4,7 +4,7 @@
  */
 import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
-import { Config, Duration, Effect, Option, String as S } from 'effect';
+import { Config, Duration, Effect, Option, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -21,26 +21,26 @@ const _CONFIG = {
 // --- [LAYERS] ----------------------------------------------------------------
 
 const _layer = PgClient.layerConfig({
-	applicationName: Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault(_CONFIG.app.name)),
-	connectionTTL: Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(_CONFIG.pool.connectionTtlMs), Config.map(Duration.millis)),
-	connectTimeout: Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(Config.withDefault(_CONFIG.pool.connectTimeoutMs), Config.map(Duration.millis)),
-	database: Config.string('POSTGRES_DB').pipe(Config.withDefault(_CONFIG.defaults.database)),
-	host: Config.string('POSTGRES_HOST').pipe(Config.withDefault(_CONFIG.defaults.host)),
-	idleTimeout: Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(Config.withDefault(_CONFIG.pool.idleTimeoutMs), Config.map(Duration.millis)),
-	maxConnections: Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(_CONFIG.pool.max)),
-	minConnections: Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(_CONFIG.pool.min)),
-	password: Config.redacted('POSTGRES_PASSWORD'),
-	port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(_CONFIG.defaults.port)),
-	spanAttributes: Config.succeed(_CONFIG.spanAttributes),
-	ssl: Config.boolean('POSTGRES_SSL').pipe(
-		Config.withDefault(_CONFIG.ssl.enabled),
-		Config.map((sslEnabled) => (sslEnabled ? { rejectUnauthorized: _CONFIG.ssl.rejectUnauthorized } : undefined)),
+	applicationName: 		Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault(_CONFIG.app.name)),
+	connectionTTL: 			Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(_CONFIG.pool.connectionTtlMs), Config.map(Duration.millis)),
+	connectTimeout: 		Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(Config.withDefault(_CONFIG.pool.connectTimeoutMs), Config.map(Duration.millis)),
+	database: 				Config.string('POSTGRES_DB').pipe(Config.withDefault(_CONFIG.defaults.database)),
+	host: 					Config.string('POSTGRES_HOST').pipe(Config.withDefault(_CONFIG.defaults.host)),
+	idleTimeout: 			Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(Config.withDefault(_CONFIG.pool.idleTimeoutMs), Config.map(Duration.millis)),
+	maxConnections: 		Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(_CONFIG.pool.max)),
+	minConnections: 		Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(_CONFIG.pool.min)),
+	password: 				Config.redacted('POSTGRES_PASSWORD'),
+	port: 					Config.integer('POSTGRES_PORT').pipe(Config.withDefault(_CONFIG.defaults.port)),
+	spanAttributes: 		Config.succeed(_CONFIG.spanAttributes),
+	ssl: 					Config.boolean('POSTGRES_SSL').pipe(
+								Config.withDefault(_CONFIG.ssl.enabled),
+								Config.map((sslEnabled) => (sslEnabled ? { rejectUnauthorized: _CONFIG.ssl.rejectUnauthorized } : undefined)),
 	),
-	transformJson: Config.succeed(true),
-	transformQueryNames: Config.succeed(S.camelToSnake),
-	transformResultNames: Config.succeed(S.snakeToCamel),
-	url: Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
-	username: Config.string('POSTGRES_USER').pipe(Config.withDefault(_CONFIG.defaults.username)),
+	transformJson: 			Config.succeed(true),
+	transformQueryNames: 	Config.succeed(S.camelToSnake),
+	transformResultNames: 	Config.succeed(S.snakeToCamel),
+	url: 					Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
+	username: 				Config.string('POSTGRES_USER').pipe(Config.withDefault(_CONFIG.defaults.username)),
 });
 
 // --- [FUNCTIONS] -------------------------------------------------------------
@@ -52,7 +52,7 @@ const _setTenant = (appId: string) => Effect.gen(function* () {
 
 // --- [OBJECT] ----------------------------------------------------------------
 
-const Client = (<const T>(t: T) => t)({
+const Client = {
 	config: _CONFIG,
 	health: Effect.fn('db.checkHealth')(function* () {			// Quick health check: tests connection availability. Use for liveness probes. Does not test transaction capability.
 		const sql = yield* SqlClient.SqlClient;
@@ -75,6 +75,19 @@ const Client = (<const T>(t: T) => t)({
 		return { healthy, latencyMs: Duration.toMillis(duration) };
 	}),
 	layer: _layer,
+	listen: {
+		// Raw LISTEN/NOTIFY stream — returns unparsed string payloads. Uses dedicated connection via PgClient (not from pool).
+		raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
+		// Typed LISTEN/NOTIFY stream — decodes JSON payloads through schema, silently dropping decode failures (logged as warnings).
+		typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
+			Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
+				Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(
+					Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })),
+					Effect.option,
+				)),
+				Stream.filterMap((decoded) => decoded),
+			))),
+	},
 	lock: {					/** Advisory locks for distributed coordination. Use xact variants with connection pooling. */
 		acquire: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* sql`SELECT pg_advisory_xact_lock(${key})`; }),
 		session: { 			/** Session-scoped locks (requires explicit release, use with caution in pooled connections) */
@@ -162,7 +175,7 @@ const Client = (<const T>(t: T) => t)({
 			return yield* sql<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`;
 		}),
 	},
-});
+} as const;
 
 // --- [EXPORT] ----------------------------------------------------------------
 

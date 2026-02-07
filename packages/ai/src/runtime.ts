@@ -44,8 +44,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         const wrapError = (operation: string) => (cause: unknown) =>
             Match.value(cause).pipe(
                 Match.when(AiError.isAiError, (error: AiError.AiError) => error),
-                Match.orElse((error) =>
-                    error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation }),
+                Match.orElse((error) => error instanceof AiRuntimeError ? error : new AiRuntimeError({ cause: error, operation }),
                 ),
             );
         const mapSettingsError = wrapError(_CONFIG.labels.operations.settings);
@@ -87,26 +86,25 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                 .get(new AiSettingsKey({ tenantId }))
                 .pipe(Effect.mapError(mapSettingsError));
         const settings = () => Context.Request.currentTenantId.pipe(Effect.flatMap(settingsFor));
-        const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) => {
-            const tokenLabels = (kind: string) => MetricsService.label({ ...labels, kind });
-            const inc = (kind: string, value: number | undefined) =>
-                Option.fromNullable(value).pipe(
-                    Option.match({
-                        onNone: () => Effect.void,
-                        onSome: (tokens) => MetricsService.inc(metrics.ai.tokens, tokenLabels(kind), tokens),
-                    }),
-                );
-            return Effect.all(
+        const tokenUsage = (labels: Record<string, string | undefined>, usage: Response.Usage) =>
+            Effect.forEach(
                 [
-                    inc(_CONFIG.labels.tokenKinds.input, usage.inputTokens),
-                    inc(_CONFIG.labels.tokenKinds.output, usage.outputTokens),
-                    inc(_CONFIG.labels.tokenKinds.total, usage.totalTokens),
-                    inc(_CONFIG.labels.tokenKinds.reasoning, usage.reasoningTokens),
-                    inc(_CONFIG.labels.tokenKinds.cached, usage.cachedInputTokens),
+                    [_CONFIG.labels.tokenKinds.input, usage.inputTokens] as const,
+                    [_CONFIG.labels.tokenKinds.output, usage.outputTokens] as const,
+                    [_CONFIG.labels.tokenKinds.total, usage.totalTokens] as const,
+                    [_CONFIG.labels.tokenKinds.reasoning, usage.reasoningTokens] as const,
+                    [_CONFIG.labels.tokenKinds.cached, usage.cachedInputTokens] as const,
                 ],
+                ([kind, value]) =>
+                    Option.fromNullable(value).pipe(
+                        Option.match({
+                            onNone: () => Effect.void,
+                            onSome: (tokens) =>
+                                MetricsService.inc(metrics.ai.tokens, MetricsService.label({ ...labels, kind }), tokens),
+                        }),
+                    ),
                 { discard: true },
             );
-        };
         const track = <A, E, R>(
             operation: string,
             labels: ReturnType<typeof MetricsService.label>,
@@ -175,7 +173,10 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     count: (value: A) => number,) =>
                     track(_CONFIG.labels.operations.embed, labels, effect.pipe(Effect.provide(layers.embedding))).pipe(
                         Effect.tap((value: A) => MetricsService.inc(metrics.ai.embeddings, labels, count(value))),
-                        Effect.tap(() => requestAnnotations),
+                        Effect.tapBoth({
+                            onFailure: () => requestAnnotations,
+                            onSuccess: () => requestAnnotations,
+                        }),
                         Telemetry.span(_CONFIG.labels.operations.embed, { kind: 'client', metrics: false }),
                     );
                 return yield* Match.value(input).pipe(

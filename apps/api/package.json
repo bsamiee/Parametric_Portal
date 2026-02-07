@@ -17,6 +17,8 @@
         "@effect/experimental": "catalog:",
         "@effect/platform": "catalog:",
         "@effect/platform-node": "catalog:",
+        "@effect/rpc": "catalog:",
+        "@effect/workflow": "catalog:",
         "@parametric-portal/ai": "workspace:*",
         "@parametric-portal/database": "workspace:*",
         "@parametric-portal/server": "workspace:*",

@@ -75,7 +75,6 @@ catalog:
   class-variance-authority: 0.7.1
   clsx: 2.1.1
   cmdk: 1.1.1
-  cockatiel: 3.2.1
   colorjs.io: 0.6.1
   date-fns: 4.1.0
   effect: 3.19.15
@@ -139,6 +138,8 @@ catalog:
   vite-tsconfig-paths: 6.0.5
   vitest: 4.0.18
   vitest-browser-react: 2.0.5
+  '@simplewebauthn/server': 13.2.2
+  '@simplewebauthn/types': 12.0.0
   yaml: 2.8.2
   zundo: 2.3.0
   zustand: 5.0.11
