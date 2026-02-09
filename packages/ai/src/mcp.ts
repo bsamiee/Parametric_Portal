@@ -33,8 +33,8 @@ const Mcp = (() => {
         );
     const layer = (input: {
         readonly transport: Transport;
-        readonly toolkits?: Parameters<typeof McpServer.toolkit>[0] | ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]> | undefined;
-        readonly layers?: Layer.Layer<never, never, unknown> | ReadonlyArray<Layer.Layer<never, never, unknown>> | undefined;
+        readonly toolkits?: Parameters<typeof McpServer.toolkit>[0] | ReadonlyArray<Parameters<typeof McpServer.toolkit>[0]>;
+        readonly layers?: Layer.Layer<never, never, unknown> | ReadonlyArray<Layer.Layer<never, never, unknown>>;
     }) => {
         const base = transportLayer(input.transport);
         const toolkitLayers = pipe(

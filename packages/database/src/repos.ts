@@ -4,8 +4,7 @@
  */
 import { SqlClient } from '@effect/sql';
 import { Clock, Effect, Schema as S } from 'effect';
-import { Client } from './client.ts';
-import { repo, Update } from './factory.ts';
+import { repo, routine, Update } from './factory.ts';
 import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, Session, User, WebauthnCredential } from './models.ts';
 
 // --- [REPOSITORIES] ----------------------------------------------------------
@@ -162,39 +161,49 @@ const makeKvStoreRepo = Effect.gen(function* () {
 		setJson: <A, I>(key: string, jsonValue: A, schema: S.Schema<A, I, never>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
 	};
 });
+const _SYSTEM_SCHEMA = {
+	cacheHitRatio: S.Struct({backendType: S.String, cacheHitRatio: S.Number, hits: S.Unknown, ioContext: S.String, ioObject: S.String, reads: S.Unknown, writes: S.Unknown,}),
+	ioConfig: S.Struct({ name: S.String, setting: S.String }),
+	ioStats: S.Unknown,
+	statements: S.Array(S.Unknown),
+} as const;
+const _SYSTEM_ROUTINE = {
+	fn: {count_event_outbox: {}, purge_event_journal: { args: ['days'], params: S.Struct({ days: S.Number }) },},
+	fnSet: {get_db_cache_hit_ratio: { schema: _SYSTEM_SCHEMA.cacheHitRatio }, get_db_io_config: { schema: _SYSTEM_SCHEMA.ioConfig }, get_db_io_stats: { schema: _SYSTEM_SCHEMA.ioStats },},
+	fnTyped: {list_stat_statements_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: _SYSTEM_SCHEMA.statements },},
+} as const;
 
-// --- [EVENT_JOURNAL] ---------------------------------------------------------
-
-const _purgeEventJournal = (olderThanDays: number) => Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	const result = yield* sql`WITH deleted AS (DELETE FROM effect_event_journal WHERE timestamp < ${Date.now() - olderThanDays * 24 * 60 * 60 * 1000} RETURNING id) SELECT COUNT(*)::int as count FROM deleted`;
-	return (result[0]?.['count'] as number) ?? 0;
+const makeSystemRepo = Effect.gen(function* () {
+	const repository = yield* routine('database/system', _SYSTEM_ROUTINE);
+	return {
+		dbCacheHitRatio: () => repository.fnSet('get_db_cache_hit_ratio', {}),
+		dbIoConfig: () => repository.fnSet('get_db_io_config', {}),
+		dbIoStats: () => repository.fnSet('get_db_io_stats', {}),
+		eventJournalPurge: (days: number) => repository.fn('purge_event_journal', { days }),
+		eventOutboxCount: () => repository.fn('count_event_outbox', {}),
+		listStatStatements: (limit = 100) => repository.fnTyped('list_stat_statements_json', { limit }),
+	};
 });
-const _countEventOutbox = Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	return (yield* sql`SELECT COUNT(*)::int AS count FROM effect_event_remotes`)[0] as { count: number };
-}).pipe(Effect.map(row => row.count));
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, kvStore] = yield* Effect.all([
+		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, kvStore, system] = yield* Effect.all([
 			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo,
+			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo, makeSystemRepo,
 		]);
 		const monitoring = {
-			cacheHitRatio: Effect.fn('db.cacheHitRatio')(() => sqlClient<{ backendType: string; cacheHitRatio: number; hits: bigint; ioContext: string; ioObject: string; reads: bigint; writes: bigint }>`
-				SELECT backend_type, object AS io_object, context AS io_context, SUM(hits) AS hits, SUM(reads) AS reads, SUM(writes) AS writes,
-					CASE WHEN SUM(hits) + SUM(reads) > 0 THEN (SUM(hits)::double precision / (SUM(hits) + SUM(reads)) * 100) ELSE 0 END AS cache_hit_ratio
-				FROM pg_stat_io WHERE object = 'relation' AND context = 'normal' GROUP BY backend_type, object, context`),
-			ioConfig: Effect.fn('db.ioConfig')(() => sqlClient<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name IN ('io_method', 'io_workers', 'effective_io_concurrency', 'io_combine_limit')`),
-			ioStats: Effect.fn('db.ioStats')(() => sqlClient<{ backendType: string; evictions: bigint; extends: bigint; extendTime: number | null; fsyncTime: number | null; fsyncs: bigint; hits: bigint; ioContext: string; ioObject: string; readTime: number | null; reads: bigint; reuses: bigint; statsReset: Date | null; writeTime: number | null; writebackTime: number | null; writebacks: bigint; writes: bigint }>`
-				SELECT backend_type, object AS io_object, context AS io_context, reads, read_time, writes, write_time, writebacks, writeback_time,
-					extends, extend_time, hits, evictions, reuses, fsyncs, fsync_time, stats_reset FROM pg_stat_io`),
+			cacheHitRatio: Effect.fn('db.cacheHitRatio')(system.dbCacheHitRatio),
+			ioConfig: Effect.fn('db.ioConfig')(system.dbIoConfig),
+			ioStats: Effect.fn('db.ioStats')(system.dbIoStats),
 		} as const;
-		return { apiKeys, apps, assets, audit, eventJournal: { purge: _purgeEventJournal }, eventOutbox: { count: _countEventOutbox }, jobDlq, jobs, kvStore, listStatStatements: Client.statements, mfaSecrets, monitoring, oauthAccounts, sessions, users, webauthnCredentials, withTransaction: sqlClient.withTransaction };
+		return {
+			apiKeys, apps, assets, audit, eventJournal: { purge: (olderThanDays: number) => system.eventJournalPurge(olderThanDays) }, eventOutbox: { count: system.eventOutboxCount() },
+			jobDlq, jobs, kvStore, listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)), mfaSecrets,
+			monitoring, oauthAccounts, sessions, users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
+		};
 	}),
 }) {}
 

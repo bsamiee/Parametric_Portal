@@ -24,6 +24,8 @@ const _CONFIG = {
 		jobQueueDepth: 		{ critical: 1000, warning: 500 },
 	},
 } as const;
+const _rowMetric = (row: unknown, key: 'hits' | 'reads' | 'writes') =>
+	Number((((typeof row === 'object' && row !== null ? row : {}) as Record<string, unknown>)[key]) ?? _CONFIG.fallback.metric);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -98,10 +100,11 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 		const pollEventOutboxDepth = pollMetric({ fetch: database.eventOutbox.count, gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
 		const pollIoStats = Effect.gen(function* () {
 			const stats = yield* database.monitoring.cacheHitRatio();
+			const rows = Array.isArray(stats) ? stats : [];
 			const zero = Number(_CONFIG.fallback.metric);
-			const totalReads = stats.reduce((sum, s) => sum + Number(s.reads), zero);
-			const totalHits = stats.reduce((sum, s) => sum + Number(s.hits), zero);
-			const totalWrites = stats.reduce((sum, s) => sum + Number(s.writes), zero);
+			const totalReads = rows.reduce<number>((sum, row) => sum + _rowMetric(row, 'reads'), zero);
+			const totalHits = rows.reduce<number>((sum, row) => sum + _rowMetric(row, 'hits'), zero);
+			const totalWrites = rows.reduce<number>((sum, row) => sum + _rowMetric(row, 'writes'), zero);
 			const avgHitRatio = totalReads + totalHits > zero ? (totalHits / (totalReads + totalHits)) * 100 : zero;
 			yield* Effect.all([Metric.set(metrics.database.cacheHitRatio, avgHitRatio), Metric.set(metrics.database.ioReads, totalReads), Metric.set(metrics.database.ioWrites, totalWrites)], { discard: true });
 			yield* Effect.when(Effect.logWarning('Cache hit ratio below threshold', { avgHitRatio, threshold: _CONFIG.thresholds.cacheHitRatio.warning }), () => avgHitRatio > zero && avgHitRatio < _CONFIG.thresholds.cacheHitRatio.warning);

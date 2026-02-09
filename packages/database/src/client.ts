@@ -108,7 +108,9 @@ const Client = {
 		try: (key: bigint) => _sqlFn((sql) => sql<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false))),
 	},
 		notify: (channel: string, payload: string) => _sqlFn((sql) => sql`SELECT pg_notify(${channel}, ${payload})`),
-	statements: Effect.fn('db.listStatStatements')((limit = 100) => _sqlFn((sql) => sql`SELECT * FROM pg_stat_statements LIMIT ${limit}`)),
+	statements: Effect.fn('db.listStatStatements')((limit = 100) => _sqlFn((sql) =>
+		sql<{ result: unknown }>`SELECT list_stat_statements_json(${limit}) AS result`.pipe(Effect.map(([row]) => Array.isArray(row?.result) ? row.result : [])),
+	)),
 		tenant: {
 			with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;

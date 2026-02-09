@@ -239,27 +239,33 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 					),
 				});
 			};
-			const memTtl = Duration.decode(options.inMemoryTTL ?? Duration.seconds(30));
-			const ttlMs = Duration.toMillis(memTtl);
-			const cache = yield* PersistedCache.make({ inMemoryCapacity: options.inMemoryCapacity ?? 1000, inMemoryTTL: memTtl, lookup, storeId: options.storeId, timeToLive: () => options.timeToLive ?? Duration.minutes(5) });
-			const registered = new Map<string, { cleanup: () => void; expiresAt: number }>();
-			const pruneOnce = Clock.currentTimeMillis.pipe(Effect.tap((now) =>
-				Effect.forEach([...registered.entries()], ([id, entry]) => Effect.when(Effect.sync(() => { entry.cleanup(); registered.delete(id); }), () => entry.expiresAt <= now), { discard: true }),
-			));
-			yield* Effect.forkScoped(pruneOnce.pipe(Effect.repeat(Schedule.spaced(memTtl))));
-			const ensureRegistered = (key: K, primary: string) => {
-				const id = `${options.storeId}:${primary}`;
-				return Effect.gen(function* () {
-					const now = yield* pruneOnce;
-					const cleanup = registered.get(id)?.cleanup ?? (() => {
-						service._registerCacheKey(options.storeId, primary);
-						const unregister = service._reactivity.unsafeRegister([id], () => { Effect.runFork(cache.invalidate(key).pipe(Effect.ignore)); });
-						return () => { unregister(); service._unregisterCacheKey(options.storeId, primary); };
-					})();
-					registered.set(id, { cleanup, expiresAt: now + ttlMs });
-				});
-			};
-			yield* Effect.addFinalizer(() => Effect.forEach([...registered.values()], (entry) => Effect.sync(entry.cleanup), { discard: true }).pipe(Effect.andThen(Effect.sync(() => { registered.clear(); }))));
+				const memTtl = Duration.decode(options.inMemoryTTL ?? Duration.seconds(30));
+				const ttlMs = Duration.toMillis(memTtl);
+				const cache = yield* PersistedCache.make({ inMemoryCapacity: options.inMemoryCapacity ?? 1000, inMemoryTTL: memTtl, lookup, storeId: options.storeId, timeToLive: () => options.timeToLive ?? Duration.minutes(5) });
+				const registered = new Map<string, { expiresAt: number; primary: string; unregister: () => unknown }>();
+				const pruneOnce = Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Effect.forEach(
+					[...registered.entries()].filter(([, entry]) => entry.expiresAt <= now),
+					([id, entry]) => Effect.sync(entry.unregister).pipe(
+						Effect.andThen(Effect.sync(service._unregisterCacheKey.bind(null, options.storeId, entry.primary))),
+						Effect.andThen(Effect.sync(registered.delete.bind(registered, id))),
+						Effect.asVoid,
+					),
+					{ discard: true },
+				).pipe(Effect.as(now))));
+				yield* Effect.forkScoped(pruneOnce.pipe(Effect.repeat(Schedule.spaced(memTtl))));
+				const ensureRegistered = (key: K, primary: string) => {
+					const id = `${options.storeId}:${primary}`;
+					return pruneOnce.pipe(Effect.flatMap((now) => {
+						registered.get(id) ?? service._registerCacheKey(options.storeId, primary);
+						const entry = registered.get(id) ?? { expiresAt: now, primary, unregister: service._reactivity.unsafeRegister([id], Effect.runFork.bind(null, cache.invalidate(key).pipe(Effect.ignore))) };
+						registered.set(id, { ...entry, expiresAt: now + ttlMs });
+						return Effect.void;
+					}));
+				};
+				yield* Effect.addFinalizer(() => Effect.forEach([...registered.values()], (entry) => Effect.sync(entry.unregister).pipe(
+					Effect.andThen(Effect.sync(service._unregisterCacheKey.bind(null, options.storeId, entry.primary))),
+					Effect.asVoid,
+				), { discard: true }).pipe(Effect.andThen(Effect.sync(registered.clear.bind(registered)))));
 			return {
 				get: (key) => { const primary = PrimaryKey.value(key); return ensureRegistered(key, primary).pipe(Effect.andThen(cache.get(key))); },
 				invalidate: (key) => { const primary = PrimaryKey.value(key); return ensureRegistered(key, primary).pipe(Effect.andThen(CacheService.invalidate(options.storeId, primary)), Effect.provideService(CacheService, service), Effect.asVoid); },

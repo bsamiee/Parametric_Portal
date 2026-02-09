@@ -8,7 +8,7 @@ import { HttpError } from '@parametric-portal/server/errors';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Array as A, Effect, Option } from 'effect';
+import { Array as A, Effect } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -19,7 +19,10 @@ const _ENTITY_TYPES = ['user', 'app', 'asset', 'auditLog'] as const;
 const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 	Effect.gen(function* () {
 		const search = yield* SearchService;
-		const isEntityType = (v: string): v is typeof _ENTITY_TYPES[number] => (_ENTITY_TYPES as readonly string[]).includes(v);
+		const isEntityType = <T extends { readonly entityType: string }>(
+			item: T,
+		): item is T & { readonly entityType: typeof _ENTITY_TYPES[number] } =>
+			(_ENTITY_TYPES as readonly string[]).includes(item.entityType);
 		return handlers
 			.handle('search', ({ urlParams }) =>
 				CacheService.rateLimit('api',
@@ -32,14 +35,21 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 							term: urlParams.q,
 						},
 						{ cursor: urlParams.cursor, limit: urlParams.limit },
-					).pipe(
+						).pipe(
 							Effect.map((result) => ({
-							cursor: result.cursor,
-							facets: result.facets ? { app: result.facets['app'] ?? 0, asset: result.facets['asset'] ?? 0, auditLog: result.facets['auditLog'] ?? 0, user: result.facets['user'] ?? 0 } : null,
-							hasNext: result.hasNext,
-							hasPrev: result.hasPrev,
-							items: A.filterMap(result.items, (item) => isEntityType(item.entityType) ? Option.some({ displayText: item.displayText, entityId: item.entityId, entityType: item.entityType, metadata: item.metadata, rank: item.rank, snippet: item.snippet }) : Option.none()),
-							total: result.total,
+								cursor: result.cursor,
+								facets:
+									(result.facets && {
+										app: result.facets['app'] ?? 0,
+										asset: result.facets['asset'] ?? 0,
+										auditLog: result.facets['auditLog'] ?? 0,
+										user: result.facets['user'] ?? 0,
+									}) ||
+									null,
+								hasNext: result.hasNext,
+								hasPrev: result.hasPrev,
+								items: A.filter(result.items, isEntityType),
+								total: result.total,
 							})),
 							Effect.mapError((error) => HttpError.Internal.of('Search failed', error)),
 							Telemetry.span('search.query', { kind: 'server', metrics: false }),

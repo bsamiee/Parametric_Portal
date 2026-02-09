@@ -1,7 +1,3 @@
-/**
- * Webhook management endpoints.
- * Admin-gated CRUD for webhook registrations, test delivery, retry, status.
- */
 import { HttpApiBuilder } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
@@ -44,12 +40,11 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 				Telemetry.span('webhooks.register', { kind: 'server', metrics: false }),
 			)))
 			.handle('remove', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
-				Effect.andThen(Context.Request.currentTenantId),
-				Effect.flatMap((tenantId) => Effect.try({
-					catch: (error) => HttpError.Validation.of('url', 'Malformed webhook URL encoding', error),
-					try: () => decodeURIComponent(path.url),
-				}).pipe(Effect.map((decodedUrl) => ({ decodedUrl, tenantId })))),
-				Effect.flatMap(({ tenantId, decodedUrl }) => webhooks.remove(tenantId, decodedUrl)),
+				Effect.andThen(Effect.all([Context.Request.currentTenantId, Effect.try({
+					catch: HttpError.Validation.of.bind(null, 'url', 'Malformed webhook URL encoding'),
+					try: decodeURIComponent.bind(null, path.url),
+				})])),
+				Effect.flatMap(([tenantId, decodedUrl]) => webhooks.remove(tenantId, decodedUrl)),
 				Effect.mapError((error): HttpError.Validation | HttpError.Internal =>
 					error instanceof HttpError.Validation || error instanceof HttpError.Internal
 						? error

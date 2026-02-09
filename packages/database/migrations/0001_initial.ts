@@ -755,6 +755,109 @@ export default Effect.gen(function* () {
         $$
     `;
     yield* sql`COMMENT ON FUNCTION purge_event_journal IS 'Hard-delete journal entries older than N days (timestamp is epoch ms)'`;
+    yield* sql.unsafe(String.raw`
+        CREATE OR REPLACE FUNCTION count_event_outbox()
+        RETURNS INT
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT COUNT(*)::int
+            FROM effect_event_remotes
+        $$;
+        COMMENT ON FUNCTION count_event_outbox IS 'Count pending event remotes for outbox-depth monitoring';
+
+        CREATE OR REPLACE FUNCTION get_db_io_config()
+        RETURNS TABLE(name TEXT, setting TEXT)
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT name, setting
+            FROM pg_settings
+            WHERE name IN ('io_method', 'io_workers', 'effective_io_concurrency', 'io_combine_limit')
+        $$;
+        COMMENT ON FUNCTION get_db_io_config IS 'Expose PostgreSQL Async I/O configuration for admin and polling endpoints';
+
+        CREATE OR REPLACE FUNCTION get_db_cache_hit_ratio()
+        RETURNS TABLE(
+            backend_type TEXT,
+            io_object TEXT,
+            io_context TEXT,
+            hits BIGINT,
+            reads BIGINT,
+            writes BIGINT,
+            cache_hit_ratio DOUBLE PRECISION
+        )
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT backend_type, object AS io_object, context AS io_context,
+                SUM(hits) AS hits,
+                SUM(reads) AS reads,
+                SUM(writes) AS writes,
+                CASE
+                    WHEN SUM(hits) + SUM(reads) > 0
+                        THEN (SUM(hits)::double precision / (SUM(hits) + SUM(reads)) * 100)
+                    ELSE 0
+                END AS cache_hit_ratio
+            FROM pg_stat_io
+            WHERE object = 'relation' AND context = 'normal'
+            GROUP BY backend_type, object, context
+        $$;
+        COMMENT ON FUNCTION get_db_cache_hit_ratio IS 'Aggregate pg_stat_io relation cache hit ratio by backend type/context';
+
+        CREATE OR REPLACE FUNCTION get_db_io_stats()
+        RETURNS TABLE(
+            backend_type TEXT,
+            io_object TEXT,
+            io_context TEXT,
+            reads BIGINT,
+            read_time DOUBLE PRECISION,
+            writes BIGINT,
+            write_time DOUBLE PRECISION,
+            writebacks BIGINT,
+            writeback_time DOUBLE PRECISION,
+            extends BIGINT,
+            extend_time DOUBLE PRECISION,
+            hits BIGINT,
+            evictions BIGINT,
+            reuses BIGINT,
+            fsyncs BIGINT,
+            fsync_time DOUBLE PRECISION,
+            stats_reset TIMESTAMPTZ
+        )
+        LANGUAGE sql
+        STABLE
+        AS $$
+            SELECT backend_type, object AS io_object, context AS io_context,
+                reads, read_time, writes, write_time, writebacks, writeback_time,
+                extends, extend_time, hits, evictions, reuses, fsyncs, fsync_time, stats_reset
+            FROM pg_stat_io
+        $$;
+        COMMENT ON FUNCTION get_db_io_stats IS 'Expose raw pg_stat_io counters and timings for admin diagnostics';
+
+        CREATE OR REPLACE FUNCTION list_stat_statements_json(p_limit INT DEFAULT 100)
+        RETURNS JSONB
+        LANGUAGE plpgsql
+        STABLE
+        AS $$
+        DECLARE
+            safe_limit INT := GREATEST(1, LEAST(COALESCE(p_limit, 100), 500));
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') THEN
+                RETURN COALESCE((
+                    SELECT jsonb_agg(to_jsonb(stats))
+                    FROM (
+                        SELECT *
+                        FROM pg_stat_statements
+                        LIMIT safe_limit
+                    ) stats
+                ), '[]'::jsonb);
+            END IF;
+            RETURN '[]'::jsonb;
+        END
+        $$;
+        COMMENT ON FUNCTION list_stat_statements_json IS 'Return pg_stat_statements rows as JSONB with limit clamped to [1,500], or [] when extension is unavailable';
+    `);
     yield* sql`
         CREATE OR REPLACE FUNCTION delete_kv_by_prefix(p_prefix TEXT)
         RETURNS INT

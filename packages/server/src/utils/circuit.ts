@@ -58,7 +58,7 @@ class CircuitState extends Effect.Service<CircuitState>()('server/CircuitState',
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _shouldTrip = (breaker: NonNullable<Circuit.Config['breaker']>, internal: typeof _INITIAL_STATE): boolean =>
+const shouldTrip = (breaker: NonNullable<Circuit.Config['breaker']>, internal: typeof _INITIAL_STATE): boolean =>
 	Match.value(breaker).pipe(
 		Match.tag('consecutive', (configuration) => internal.failureCount >= (configuration.threshold ?? _CONFIG.defaults.consecutiveThreshold)),
 		Match.tag('count', (configuration) => {
@@ -109,7 +109,7 @@ const _createInstance = (
 			const now = Date.now();
 			const [beforeState, afterState] = yield* STM.commit(TRef.modify(stateRef, (before) => {
 				const updated = { ...before, failureCount: before.failureCount + 1, failures: [...before.failures, now], lastFailureAt: now, totalCount: before.totalCount + 1 };
-				const after = _shouldTrip(breaker, updated) ? { ...updated, state: 'Open' as const } : updated;
+				const after = shouldTrip(breaker, updated) ? { ...updated, state: 'Open' as const } : updated;
 				return [[before.state, after.state] as const, after] as const;
 			}));
 			yield* Effect.when(_notifyStateChange(beforeState, afterState), F.constant(afterState !== beforeState));

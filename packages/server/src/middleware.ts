@@ -192,43 +192,52 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 		apiKeyLookup: (hash: Hex64) => Effect.Effect<Option.Option<{ readonly id: string; readonly userId: string; readonly expiresAt: Option.Option<Date> }>>,) =>
 		Layer.effect(this, Effect.map(Effect.all([MetricsService, AuditService]), ([metrics, audit]) => Middleware.of({
 				bearer: (token: Redacted.Redacted<string>) => Effect.gen(function* () {
-					const req = yield* HttpServerRequest.HttpServerRequest;
-					const tenantId = yield* Context.Request.currentTenantId;
+						const req = yield* HttpServerRequest.HttpServerRequest;
+						const tenantId = yield* Context.Request.currentTenantId;
 						const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
+						const missingSessionEffect = Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true });
 						yield* Metric.increment(metrics.auth.session.lookups);
+						const scopedLookup = Context.Request.withinSync(tenantId, sessionLookup(hash)).pipe(Effect.provide(Client.layer));
 						const sessionOpt = yield* Match.value(_isLongLived(req.headers)).pipe(
-							Match.when(true, () => Context.Request.withinSync(tenantId, sessionLookup(hash)).pipe(Effect.provide(Client.layer))),
-								Match.orElse(() => sessionLookup(hash)),
-								Effect.catchAll((error) =>
-									Effect.logError('Session lookup failed', { error: String(error) }).pipe(
-										Effect.andThen(Effect.die(HttpError.Internal.of('Session lookup failed', error))),
-									)),
-							);
-						yield* Option.match(sessionOpt, {
-							onNone: () => Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid session')))),
-						onSome: (session) => Context.Request.update({ session: Option.some({ ...session, kind: 'session' }) }).pipe(Effect.tap(() => Metric.increment(metrics.auth.session.hits))),
-					});
-				}),
+							Match.when(true, F.constant(scopedLookup)),
+							Match.orElse(F.constant(sessionLookup(hash))),
+							Effect.catchAll((error) =>
+								Effect.logError('Session lookup failed', { error: String(error) }).pipe(
+									Effect.andThen(Effect.die(HttpError.Internal.of('Session lookup failed', error))),
+								)),
+						);
+						const session = yield* Effect.fromNullable(Option.getOrUndefined(sessionOpt)).pipe(
+							Effect.tapError(F.constant(missingSessionEffect)),
+							Effect.mapError(F.constant(HttpError.Auth.of('Invalid session'))),
+						);
+						yield* Context.Request.update({ session: Option.some({ ...session, kind: 'session' }) }).pipe(
+							Effect.tap(F.constant(Metric.increment(metrics.auth.session.hits))),
+						);
+					}),
 				apiKey: (token: Redacted.Redacted<string>) => Effect.gen(function* () {
-					const req = yield* HttpServerRequest.HttpServerRequest;
-					const tenantId = yield* Context.Request.currentTenantId;
+						const req = yield* HttpServerRequest.HttpServerRequest;
+						const tenantId = yield* Context.Request.currentTenantId;
 						const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
+						const missingKeyEffect = Effect.all([Metric.increment(metrics.auth.apiKey.misses), audit.log('auth_failure', { details: { reason: 'invalid_api_key' } })], { discard: true });
 						yield* Metric.increment(metrics.auth.apiKey.lookups);
+						const scopedLookup = Context.Request.withinSync(tenantId, apiKeyLookup(hash)).pipe(Effect.provide(Client.layer));
 						const keyOpt = yield* Match.value(_isLongLived(req.headers)).pipe(
-							Match.when(true, () => Context.Request.withinSync(tenantId, apiKeyLookup(hash)).pipe(Effect.provide(Client.layer))),
-								Match.orElse(() => apiKeyLookup(hash)),
-								Effect.catchAll((error) =>
-									Effect.logError('API key lookup failed', { error: String(error) }).pipe(
-										Effect.andThen(Effect.die(HttpError.Internal.of('API key lookup failed', error))),
-									)),
-							);
-					const missingKeyEffect = Effect.all([Metric.increment(metrics.auth.apiKey.misses), audit.log('auth_failure', { details: { reason: 'invalid_api_key' } })], { discard: true }).pipe(Effect.andThen(Effect.fail(HttpError.Auth.of('Invalid API key'))));
-					const key = yield* Option.match(keyOpt, { onNone: F.constant(missingKeyEffect), onSome: Effect.succeed });
-					const expiry = Option.getOrNull(key.expiresAt);
-					const isExpired = expiry !== null && expiry < new Date();
-					const validKeyEffect = Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(F.constant(Metric.increment(metrics.auth.apiKey.hits))));
-					yield* Effect.if(isExpired, { onTrue: F.constant(Effect.fail(HttpError.Auth.of('API key expired'))), onFalse: F.constant(validKeyEffect) });
-				}),
+							Match.when(true, F.constant(scopedLookup)),
+							Match.orElse(F.constant(apiKeyLookup(hash))),
+							Effect.catchAll((error) =>
+								Effect.logError('API key lookup failed', { error: String(error) }).pipe(
+									Effect.andThen(Effect.die(HttpError.Internal.of('API key lookup failed', error))),
+								)),
+						);
+						const key = yield* Effect.fromNullable(Option.getOrUndefined(keyOpt)).pipe(
+							Effect.tapError(F.constant(missingKeyEffect)),
+							Effect.mapError(F.constant(HttpError.Auth.of('Invalid API key'))),
+						);
+						const expiry = Option.getOrUndefined(key.expiresAt);
+						const isExpired = expiry !== undefined && expiry < new Date();
+						const validKeyEffect = Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(F.constant(Metric.increment(metrics.auth.apiKey.hits))));
+						yield* Effect.if(isExpired, { onTrue: F.constant(Effect.fail(HttpError.Auth.of('API key expired'))), onFalse: F.constant(validKeyEffect) });
+					}),
 			})));
 	static readonly pipeline = (database: typeof DatabaseService.Service, options?: { readonly hsts?: typeof _CONFIG.security.hsts | false }) =>
 		(app: HttpApp.Default) => app.pipe(

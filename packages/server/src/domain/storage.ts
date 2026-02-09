@@ -44,9 +44,9 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 		function copy(input: readonly StorageAdapter.CopyInput[]): Effect.Effect<readonly StorageAdapter.CopyResult[], unknown>;
 		function copy(input: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): Effect.Effect<StorageAdapter.CopyResult | readonly StorageAdapter.CopyResult[], unknown> {
 			return Match.value(input).pipe(
-				Match.when((value: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]): value is readonly StorageAdapter.CopyInput[] => Array.isArray(value), (items) => pipe(
+				Match.when(Array.isArray as (value: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]) => value is readonly StorageAdapter.CopyInput[], (items) => pipe(
 					storage.copy(items),
-					Effect.tap(() => audit.log('Storage.copy', { details: { copies: pipe(items, A.map((item) => ({ dest: item.destKey, source: item.sourceKey }))), count: items.length }, subjectId: pipe(A.head(items), Option.map(Struct.get('destKey')), Option.getOrUndefined) })),
+					Effect.tap(constant(audit.log('Storage.copy', { details: { copies: pipe(items, A.map((item) => ({ dest: item.destKey, source: item.sourceKey }))), count: items.length }, subjectId: pipe(A.head(items), Option.map(Struct.get('destKey')), Option.getOrUndefined) }))),
 					Telemetry.span('storageDomain.copy.batch'),
 				)),
 				Match.orElse((item) => _traced('copy', storage.copy(item), 'Storage.copy', { destKey: item.destKey, sourceKey: item.sourceKey }, item.destKey)),

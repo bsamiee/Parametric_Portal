@@ -84,28 +84,23 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 		);
 		yield* Client.listen.raw('event_journal_notify').pipe(
 			Stream.mapEffect((payload) => decodeNotify(payload).pipe(
-				Effect.flatMap(({ eventId, sourceNodeId }) =>
-					Match.value(sourceNodeId === nodeId).pipe(
-						Match.when(true, () => Effect.void),
-						Match.orElse(() => sql.unsafe(
-							'SELECT payload FROM effect_event_journal WHERE primary_key = $1 LIMIT 1',
-							[eventId],
-						).pipe(
-							Effect.flatMap((rows) => Option.fromNullable((rows as ReadonlyArray<{ readonly payload: Uint8Array }>)[0]?.payload).pipe(
-								Option.match({
-									onNone: () => Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }),
-									onSome: (entryPayload) => Effect.sync(() => new TextDecoder().decode(entryPayload)).pipe(
-										Effect.flatMap(_decode),
-										Effect.flatMap((envelope) => PubSub.publish(hub, envelope)),
-									),
-								}),
-							)),
-						)),
-					),
-				),
-				Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
-				Effect.catchAll(() => Effect.void),
-			)),
+					Effect.flatMap(({ eventId, sourceNodeId }) => pipe(
+						Effect.gen(function* () {
+							const rows = yield* sql.unsafe(
+								'SELECT payload FROM effect_event_journal WHERE primary_key = $1 LIMIT 1',
+								[eventId],
+							);
+							const entryPayload = yield* Effect.fromNullable((rows as ReadonlyArray<{ readonly payload: Uint8Array }>)[0]?.payload);
+							const decoded = new TextDecoder().decode(entryPayload);
+							const envelope = yield* _decode(decoded);
+							yield* PubSub.publish(hub, envelope);
+						}),
+						Effect.catchTag('NoSuchElementException', constant(Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }))),
+						Effect.unless(constant(sourceNodeId === nodeId)),
+					)),
+					Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
+					Effect.catchAll(constant(Effect.void)),
+				)),
 			Stream.runDrain,
 			Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY stream interrupted, falling back to cron polling', { error: String(error) })),
 			Effect.retry({ times: 3 }),
@@ -120,59 +115,43 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 				Match.orElse((v) => [v]),
 			) as ReadonlyArray<EventBus.Types.Input>;
 			return Telemetry.span(
-				pipe(
-					Context.Request.current,
-					Effect.flatMap((requestContext) => pipe(
-						Effect.annotateCurrentSpan('correlation.id', requestContext.requestId),
-						Effect.andThen(Effect.forEach(items, Effect.fn(function*(item) {
-							const snowflake = yield* sharding.getSnowflake;
-							const envelope = new EventEnvelope({
-								emittedAt: DateTime.unsafeMake(Snowflake.timestamp(snowflake)),
-								event: new DomainEvent({
-									aggregateId: item.aggregateId, causationId: item.causationId,
-									correlationId: item.correlationId ?? requestContext.requestId,
-									eventId: item.eventId ?? (String(snowflake) as typeof DomainEvent.Type['eventId']),
-									payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
-								}),
-							});
-							const json = yield* _encode(envelope);
-								yield* journal.write({
-									effect: constant(Metric.increment(metrics.events.emitted)),
-									event: envelope.event.eventType,
-									payload: new TextEncoder().encode(json),
-									primaryKey: envelope.event.eventId,
-								}).pipe(
-									Effect.catchTag('EventJournalError', (cause) =>
-										Match.value(cause.cause).pipe(
-											Match.when((defect: unknown): defect is { readonly sqlState: string } =>
-												typeof defect === 'object'
-												&& defect !== null
-												&& 'sqlState' in defect
-												&& typeof defect.sqlState === 'string'
-												&& defect.sqlState === '23505',
-											() => Effect.fail(EventError.from(envelope.event.eventId, 'DuplicateEvent', cause))),
-											Match.when((defect: unknown): defect is { readonly cause: { readonly sqlState: string } } =>
-												typeof defect === 'object'
-												&& defect !== null
-												&& 'cause' in defect
-												&& typeof defect.cause === 'object'
-												&& defect.cause !== null
-												&& 'sqlState' in defect.cause
-												&& typeof defect.cause.sqlState === 'string'
-												&& defect.cause.sqlState === '23505',
-											() => Effect.fail(EventError.from(envelope.event.eventId, 'DuplicateEvent', cause))),
-											Match.orElse(() => Effect.fail(EventError.from(envelope.event.eventId, 'DeliveryFailed', cause))),
-										)),
-								);
-								const notifyPayload = yield* encodeNotify({ eventId: envelope.event.eventId, sourceNodeId: nodeId });
-							yield* Client.notify('event_journal_notify', notifyPayload).pipe(
-								Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY publish failed', { error: String(error) })),
-								Effect.ignore,
-							);
-							return envelope;
-						}), { concurrency: 'unbounded' })),
-					)),
-				),
+				Effect.forEach(items, Effect.fn(function*(item) {
+					const requestContext = yield* Context.Request.current;
+					yield* Effect.annotateCurrentSpan('correlation.id', requestContext.requestId);
+					const snowflake = yield* sharding.getSnowflake;
+					const envelope = new EventEnvelope({
+						emittedAt: DateTime.unsafeMake(Snowflake.timestamp(snowflake)),
+						event: new DomainEvent({
+							aggregateId: item.aggregateId, causationId: item.causationId,
+							correlationId: item.correlationId ?? requestContext.requestId,
+							eventId: item.eventId ?? (String(snowflake) as typeof DomainEvent.Type['eventId']),
+							payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
+						}),
+					});
+					const json = yield* _encode(envelope);
+					yield* journal.write({
+						effect: constant(Metric.increment(metrics.events.emitted)),
+						event: envelope.event.eventType,
+						payload: new TextEncoder().encode(json),
+						primaryKey: envelope.event.eventId,
+					}).pipe(
+						Effect.catchTag('EventJournalError', (cause) => Effect.fail(EventError.from(
+							envelope.event.eventId,
+							pipe(
+								Option.fromNullable((cause.cause as { readonly sqlState?: unknown; readonly cause?: { readonly sqlState?: unknown } } | undefined)?.sqlState ?? (cause.cause as { readonly cause?: { readonly sqlState?: unknown } } | undefined)?.cause?.sqlState),
+								Option.filter(S.is(S.Literal('23505'))),
+								Option.match({ onNone: constant('DeliveryFailed'), onSome: constant('DuplicateEvent') }),
+							),
+							cause,
+						))),
+					);
+					const notifyPayload = yield* encodeNotify({ eventId: envelope.event.eventId, sourceNodeId: nodeId });
+					yield* Client.notify('event_journal_notify', notifyPayload).pipe(
+						Effect.tapError(constant(Effect.logWarning('LISTEN/NOTIFY publish failed'))),
+						Effect.ignore,
+					);
+					return envelope;
+				}), { concurrency: 'unbounded' }),
 				'eventbus.publish',
 				{ 'event.count': items.length, metrics: false },
 			);
@@ -186,47 +165,42 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 				return Stream.unwrapScoped(
 					STM.commit(TRef.updateAndGet(subscriptions, (current) => current + 1)).pipe(
 						Effect.flatMap((count) => Metric.set(metrics.events.subscriptions, count)),
-						Effect.andThen(PubSub.subscribe(hub)),
-						Effect.map(Stream.fromQueue),
-							Effect.map(Stream.filter((envelope) => envelope.event.eventType === eventType && (filter?.(envelope.event) ?? true))),
-							Effect.map(Stream.mapEffect(Effect.fn(function*(envelope) {
-								const deliver = Effect.gen(function* () {
-									const payload = yield* S.validate(schema)(envelope.event.payload).pipe(
+							Effect.andThen(PubSub.subscribe(hub)),
+							Effect.map(Stream.fromQueue),
+								Effect.map(Stream.filter((envelope) => envelope.event.eventType === eventType && (filter?.(envelope.event) ?? true))),
+								Effect.map(Stream.mapEffect(Effect.fn(function*(envelope) {
+									yield* S.validate(schema)(envelope.event.payload).pipe(
 										Effect.mapError((cause) => EventError.from(envelope.event.eventId, 'ValidationFailed', cause)),
-									);
-									yield* Telemetry.span(handler(envelope.event, payload), 'eventbus.handle', { 'event.type': eventType, metrics: false }).pipe(
-										Effect.tap(constant(Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels)))),
-									);
-								});
-								yield* deliver.pipe(
-									Effect.tapError((error) => Metric.increment(Metric.taggedWithLabels(metrics.events.retries, labels)).pipe(
-										Effect.when(constant(error.isRetryable)),
-										Effect.asVoid,
-									)),
-									Effect.retry({
-										schedule: Resilience.schedule({ base: Duration.millis(100), cap: Duration.seconds(5), maxAttempts: 3 }),
-										while: (error) => error.isRetryable,
-									}),
-									Effect.catchAll((error) => Match.value(error.reason).pipe(
-										Match.when('DuplicateEvent', () =>
-											Metric.increment(Metric.taggedWithLabels(metrics.events.duplicatesSkipped, labels)).pipe(Effect.asVoid)),
-										Match.orElse(() =>
-											Context.Request.withinSync(envelope.event.tenantId, database.jobDlq.insert({
-												appId: envelope.event.tenantId, attempts: 1,
-												errorHistory: [{ error: String(error.cause ?? error.message), timestamp: Date.now() }],
+										Effect.flatMap((payload) => Telemetry.span(handler(envelope.event, payload), 'eventbus.handle', { 'event.type': eventType, metrics: false }).pipe(
+											Effect.tap(constant(Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels)))),
+										)),
+										Effect.tapError((error) => Metric.increment(Metric.taggedWithLabels(metrics.events.retries, labels)).pipe(
+											Effect.when(constant(error.isRetryable)),
+											Effect.asVoid,
+										)),
+										Effect.retry({
+											schedule: Resilience.schedule({ base: Duration.millis(100), cap: Duration.seconds(5), maxAttempts: 3 }),
+											while: (error) => error.isRetryable,
+										}),
+										Effect.catchAll((error) => Match.value(error.reason).pipe(
+											Match.when('DuplicateEvent', constant(Metric.increment(Metric.taggedWithLabels(metrics.events.duplicatesSkipped, labels)).pipe(Effect.asVoid))),
+											Match.orElse(constant(
+												Context.Request.withinSync(envelope.event.tenantId, database.jobDlq.insert({
+													appId: envelope.event.tenantId, attempts: 1,
+													errorHistory: [{ error: String(error.cause ?? error.message), timestamp: Date.now() }],
 												errorReason: error.reason, originalJobId: envelope.event.eventId,
 												payload: envelope.event.payload, replayedAt: Option.none(),
 												requestId: Option.fromNullable(envelope.event.correlationId),
 												source: 'event', type: eventType, userId: Option.none(),
-											}).pipe(Effect.provideService(SqlClient.SqlClient, sql))).pipe(
-												Effect.tap(constant(Effect.logWarning('Event written to DLQ', { 'dlq.error_reason': error.reason, 'dlq.event_id': envelope.event.eventId, 'dlq.event_type': eventType }))),
-												Effect.catchAll(constant(Effect.logError('DLQ write failed', { 'dlq.event_id': envelope.event.eventId }))),
-												Effect.asVoid,
-											),
-										),
-									)),
-								);
-						}))),
+												}).pipe(Effect.provideService(SqlClient.SqlClient, sql))).pipe(
+													Effect.tap(constant(Effect.logWarning('Event written to DLQ', { 'dlq.error_reason': error.reason, 'dlq.event_id': envelope.event.eventId, 'dlq.event_type': eventType }))),
+													Effect.catchAll(constant(Effect.logError('DLQ write failed', { 'dlq.event_id': envelope.event.eventId }))),
+													Effect.asVoid,
+												),
+											)),
+										)),
+									);
+							}))),
 						Effect.map(
 							Stream.ensuring(
 								STM.commit(TRef.updateAndGet(subscriptions, (current) => Math.max(0, current - 1))).pipe(
@@ -262,20 +236,18 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 						(!filter.tenantId || envelope.event.tenantId === filter.tenantId)
 						&& (!filter.aggregateId || envelope.event.aggregateId === filter.aggregateId),
 					);
-					const nextCursor = pipe(
-						Option.fromNullable((rows as ReadonlyArray<{ readonly primary_key?: string | number | bigint }>)[rows.length - 1]?.primary_key),
-						Option.map((primaryKey) => String(primaryKey)),
-						Option.filter(() => rows.length >= batchSize),
-					);
+						const nextCursor = pipe(
+							Option.fromNullable((rows as ReadonlyArray<{ readonly primary_key?: string | number | bigint }>)[rows.length - 1]?.primary_key),
+							Option.map(String),
+							Option.filter(() => rows.length >= batchSize),
+						);
 					return [Chunk.fromIterable(filtered), nextCursor] as const;
 				})).pipe(Stream.schedule(Schedule.spaced(throttle)), Stream.tap(constant(Metric.increment(metrics.events.processed))));
 			};
 		yield* Effect.logInfo('EventBus initialized with SqlEventJournal + PubSub fan-out + LISTEN/NOTIFY bridge');
 		return { publish, replay, stream, subscribe };
 	}),
-}) {
-	static readonly Model = { Envelope: EventEnvelope, Error: EventError, Event: DomainEvent } as const;
-}
+}) {static readonly Model = { Envelope: EventEnvelope, Error: EventError, Event: DomainEvent } as const;}
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
