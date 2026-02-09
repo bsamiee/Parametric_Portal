@@ -14,30 +14,24 @@ const Keyset = S.Struct({ cursor: S.optional(S.String), limit: Limit });
 const Offset = S.Struct({ limit: Limit, offset: S.optionalWith(S.NonNegativeInt, { default: () => 0 }) });
 const KeysetInput = S.Struct({ asc: Asc, cursor: S.optional(S.String), limit: Limit });
 const OffsetInput = S.Struct({ asc: Asc, limit: Limit, offset: S.optionalWith(S.NonNegativeInt, { default: () => 0 }) });
-const IdCursor = S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String })));
-const compoundCursor = <V, I>(vSchema: S.Schema<V, I, never>) => S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String, v: vSchema })));
+const _idCursor = S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String })));
+const _compoundCursor = <V, I>(vSchema: S.Schema<V, I, never>) => S.compose(S.StringFromBase64Url, S.parseJson(S.Struct({ id: S.String, v: vSchema })));
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const withCount = <T extends S.Struct.Fields>(fields: T) => S.Struct({ ...fields, totalCount: S.NumberFromString });
 const strip = <T extends { totalCount: number }>(rows: readonly T[]): { items: Omit<T, 'totalCount'>[]; total: number } => ({ items: rows.map(({ totalCount: _, ...rest }) => rest), total: rows[0]?.totalCount ?? 0 });
-const tryDecode = <A>(schema: S.Schema<A, string, never>) => (raw: string) => S.decode(schema)(raw).pipe(Effect.map(Option.some<A>), Effect.catchAll(() => Effect.succeed(Option.none())));
 function decode(raw: string | undefined): Effect.Effect<Option.Option<{ id: string }>>;
 function decode<V, I>(raw: string | undefined, vSchema: S.Schema<V, I, never>): Effect.Effect<Option.Option<{ id: string; v: V }>>;
 function decode<V, I>(raw: string | undefined, vSchema?: S.Schema<V, I, never>) {
-	return Option.fromNullable(raw).pipe(
-		Option.match({
-			onNone: () => Effect.succeed(Option.none()),
-			onSome: (encoded) => vSchema ? tryDecode(compoundCursor(vSchema))(encoded) : tryDecode(IdCursor)(encoded),
-		}),
-	);
+	return Option.fromNullable(raw).pipe(Option.match({
+		onNone: () => Effect.succeed(Option.none()),
+		onSome: (encoded) => (vSchema ? S.decode(_compoundCursor(vSchema))(encoded) : S.decode(_idCursor)(encoded)).pipe(Effect.map(Option.some), Effect.catchAll(() => Effect.succeed(Option.none()))),
+	}));
 }
 function encode(id: string): string;
 function encode<V, I>(id: string, v: V, vSchema: S.Schema<V, I, never>): string;
 function encode<V, I>(id: string, v?: V, vSchema?: S.Schema<V, I, never>): string {
-	return vSchema !== undefined && v !== undefined
-		? S.encodeSync(compoundCursor(vSchema))({ id, v })
-		: S.encodeSync(IdCursor)({ id });
+	return vSchema !== undefined && v !== undefined ? S.encodeSync(_compoundCursor(vSchema))({ id, v }) : S.encodeSync(_idCursor)({ id });
 }
 function keyset<T>(rows: readonly T[], total: number, limit: number, key: (t: T) => { id: string }, hasPrev?: boolean): { cursor: string | null; hasNext: boolean; hasPrev: boolean; items: readonly T[]; total: number };
 function keyset<T, V, I>(rows: readonly T[], total: number, limit: number, key: (t: T) => { id: string; v: V }, vSchema: S.Schema<V, I, never>, hasPrev?: boolean): { cursor: string | null; hasNext: boolean; hasPrev: boolean; items: readonly T[]; total: number };
@@ -74,27 +68,17 @@ const Page = {
 	Offset,
 	OffsetInput,
 	offset,
-	strip,
-	withCount,
+	strip
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Page {
-	export type Asc = S.Schema.Type<typeof Asc>;
-	export type Bounds = typeof _PAGE_BOUNDS;
-	export type Cursor = Simplify<{ readonly id: string }>;
-	export type CursorCompound<V> = Simplify<{ readonly id: string; readonly v: V }>;
 	export type Keyset = S.Schema.Type<typeof Keyset>;
-	export type KeysetEncoded = S.Schema.Encoded<typeof Keyset>;
 	export type KeysetInput = S.Schema.Type<typeof KeysetInput>;
-	export type KeysetInputEncoded = S.Schema.Encoded<typeof KeysetInput>;
 	export type KeysetOut<T> = Simplify<{ readonly cursor: string | null; readonly hasNext: boolean; readonly hasPrev: boolean; readonly items: readonly T[]; readonly total: number }>;
-	export type Limit = Keyset['limit'];
 	export type Offset = S.Schema.Type<typeof Offset>;
-	export type OffsetEncoded = S.Schema.Encoded<typeof Offset>;
 	export type OffsetInput = S.Schema.Type<typeof OffsetInput>;
-	export type OffsetInputEncoded = S.Schema.Encoded<typeof OffsetInput>;
 	export type OffsetOut<T> = Simplify<{ readonly hasNext: boolean; readonly hasPrev: boolean; readonly items: readonly T[]; readonly page: number; readonly pages: number; readonly total: number }>;
 }
 

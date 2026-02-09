@@ -44,14 +44,14 @@ it.effect.prop('P5: composition', { a: _json, b: _json, c: _json }, ({ a, b, c }
 
 // P6: All RFC 6902 operations - parallel execution, single structural assertion
 it.effect('P6: RFC6902 ops', () => Effect.all([
-	Diff.apply({ a: 1 }, 		{ ops: [{ op: 'add', 	path: '/b', 	value: 2 }] }),
-	Diff.apply({ a: 1, b: 2 }, 	{ ops: [{ op: 'remove', path: '/b' }] }),
-	Diff.apply({ a: 1 }, 		{ ops: [{ op: 'replace', path: '/a', 	value: 9 }] }),
-	Diff.apply({ a: 1, b: 2 }, 	{ ops: [{ from: '/a', 	op: 'move', 	path: '/c' }] }),
-	Diff.apply({ a: 1 }, 		{ ops: [{ from: '/a', 	op: 'copy', 	path: '/b' }] }),
-	Diff.apply({ a: 1 }, 		{ ops: [{ op: 'test', 	path: '/a', 	value: 1 }] }),
-	Diff.apply({ arr: [1, 2] }, { ops: [{ op: 'add', 	path: '/arr/0', value: 0 }] }),
-	Diff.apply({ arr: [1, 2] }, { ops: [{ op: 'add', 	path: '/arr/-', value: 3 }] }),
+	Diff.apply({ a: 1 }, 		{ ops: [{ op: 'add', 	 path: '/b', 	 value: 2 }] }),
+	Diff.apply({ a: 1, b: 2 }, 	{ ops: [{ op: 'remove',  path: '/b' }] }),
+	Diff.apply({ a: 1 }, 		{ ops: [{ op: 'replace', path: '/a', 	 value: 9 }] }),
+	Diff.apply({ a: 1, b: 2 }, 	{ ops: [{ from: '/a', 	 op: 'move', 	 path: '/c' }] }),
+	Diff.apply({ a: 1 }, 		{ ops: [{ from: '/a', 	 op: 'copy', 	 path: '/b' }] }),
+	Diff.apply({ a: 1 }, 		{ ops: [{ op: 'test', 	 path: '/a', 	 value: 1 }] }),
+	Diff.apply({ arr: [1, 2] }, { ops: [{ op: 'add', 	 path: '/arr/0', value: 0 }] }),
+	Diff.apply({ arr: [1, 2] }, { ops: [{ op: 'add', 	 path: '/arr/-', value: 3 }] }),
 ]).pipe(Effect.map((r) => expect(r).toEqual([{ a: 1, b: 2 }, { a: 1 }, { a: 9 }, { b: 2, c: 1 }, { a: 1, b: 1 }, { a: 1 }, { arr: [0, 1, 2] }, { arr: [1, 2, 3] }]))));
 
 // --- [OPTION COMBINATORS] ----------------------------------------------------
@@ -62,13 +62,13 @@ it.effect.prop('P7: fromSnapshots', { x: _json, y: _json }, ({ x, y }) => Effect
 	direct ? expect(Option.isSome(wrapped) && wrapped.value.ops).toEqual(direct.ops) : expect(Option.isNone(wrapped)).toBe(true);
 }), { fastCheck: { numRuns: 200 } });
 
-// P8: fromSnapshots None → None + enrichEntry/enrichEntries
+// P8: fromSnapshots None → None + enrich (single + array)
 it.effect('P8: Option combinators', () => Effect.sync(() => {
 	const opts = [Option.none(), Option.some({})] as const;
 	expect(A.flatMap(opts, (a) => A.map(opts, (b) => [a, b] as const)).filter(([a, b]) => Option.isNone(a) || Option.isNone(b)).every(([a, b]) => Option.isNone(Diff.fromSnapshots(a, b)))).toBe(true);
-	const enriched = Diff.enrichEntry({ newData: Option.some({ a: 2 }), oldData: Option.some({ a: 1 }) });
+	const enriched = Diff.enrich({ newData: Option.some({ a: 2 }), oldData: Option.some({ a: 1 }) });
 	expect(Option.isSome(enriched.diff)).toBe(true);
-	expect(Diff.enrichEntries([{ newData: Option.some({ a: 2 }), oldData: Option.some({ a: 1 }) }, { newData: Option.some({ b: 1 }), oldData: Option.some({ b: 1 }) }]).map((e) => Option.isSome(e.diff))).toEqual([true, false]);
+	expect(Diff.enrich([{ newData: Option.some({ a: 2 }), oldData: Option.some({ a: 1 }) }, { newData: Option.some({ b: 1 }), oldData: Option.some({ b: 1 }) }]).map((e) => Option.isSome(e.diff))).toEqual([true, false]);
 }));
 
 // --- [SECURITY + ERROR] ------------------------------------------------------

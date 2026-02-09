@@ -55,8 +55,8 @@ const handleDeactivate = (repositories: DatabaseService.Type, audit: typeof Audi
 	}).pipe(Telemetry.span('users.deactivate', { kind: 'server', metrics: false }));
 const handleUpdateRole = (repositories: DatabaseService.Type, audit: typeof AuditService.Service, targetUserId: string, newRole: Context.UserRole) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
-		yield* Middleware.requireRole('admin');
+		yield* Middleware.mfaVerified;
+		yield* Middleware.role('admin');
 		const user = yield* repositories.users.one([{ field: 'id', value: targetUserId }]).pipe(
 			Effect.mapError((error) => HttpError.Internal.of('User lookup failed', error)),
 			Effect.flatMap(Option.match({

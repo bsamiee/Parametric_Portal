@@ -4,176 +4,124 @@
  */
 import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
-import { Config, Duration, Effect, Option, Schema as Sch, Stream, String as S } from 'effect';
+import { readFileSync } from 'node:fs';
+import type { SecureVersion } from 'node:tls';
+import { Config, Duration, Effect, Layer, Option, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _CONFIG = {
-	app: 		{ name: 'parametric-portal' },
-	defaults: 	{ database: 'parametric', host: 'localhost', port: 5432, username: 'postgres' },
-	durations: 	{ health: Duration.seconds(5) },
-	pool: 		{ connectionTtlMs: 900_000, connectTimeoutMs: 5_000, idleTimeoutMs: 30_000, max: 10, min: 2 },
-	spanAttributes: { 'db.system': 'postgresql', 'service.name': 'database' },
-	ssl: 		{ enabled: false, rejectUnauthorized: true },
-	stats: 		{ limit: 100 },
-} as const;
+const _HEALTH_TIMEOUT = Duration.seconds(5);
+const _mergePgOptions = (raw: string | undefined, next: ReadonlyArray<readonly [string, number]>) => [
+	...new Map<string, string>([
+		...(((raw ?? '').match(/-c\s+[^ ]+/g) ?? [])
+			.map((token) => token.replace(/^-c\s+/, '').split('=', 2))
+			.filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')
+			.map(([key, value]) => [key, value] as const)),
+		...next.map(([key, value]) => [key, String(value)] as const),
+	]).entries(),
+].map(([key, value]) => `-c ${key}=${value}`).join(' ');
 
 // --- [LAYERS] ----------------------------------------------------------------
 
-const _layer = PgClient.layerConfig({
-	applicationName: 		Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault(_CONFIG.app.name)),
-	connectionTTL: 			Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(_CONFIG.pool.connectionTtlMs), Config.map(Duration.millis)),
-	connectTimeout: 		Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(Config.withDefault(_CONFIG.pool.connectTimeoutMs), Config.map(Duration.millis)),
-	database: 				Config.string('POSTGRES_DB').pipe(Config.withDefault(_CONFIG.defaults.database)),
-	host: 					Config.string('POSTGRES_HOST').pipe(Config.withDefault(_CONFIG.defaults.host)),
-	idleTimeout: 			Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(Config.withDefault(_CONFIG.pool.idleTimeoutMs), Config.map(Duration.millis)),
-	maxConnections: 		Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(_CONFIG.pool.max)),
-	minConnections: 		Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(_CONFIG.pool.min)),
-	password: 				Config.redacted('POSTGRES_PASSWORD'),
-	port: 					Config.integer('POSTGRES_PORT').pipe(Config.withDefault(_CONFIG.defaults.port)),
-	spanAttributes: 		Config.succeed(_CONFIG.spanAttributes),
-	ssl: 					Config.boolean('POSTGRES_SSL').pipe(
-								Config.withDefault(_CONFIG.ssl.enabled),
-								Config.map((sslEnabled) => (sslEnabled ? { rejectUnauthorized: _CONFIG.ssl.rejectUnauthorized } : undefined)),
-	),
-	transformJson: 			Config.succeed(true),
-	transformQueryNames: 	Config.succeed(S.camelToSnake),
-	transformResultNames: 	Config.succeed(S.snakeToCamel),
-	url: 					Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
-	username: 				Config.string('POSTGRES_USER').pipe(Config.withDefault(_CONFIG.defaults.username)),
-});
-
-// --- [FUNCTIONS] -------------------------------------------------------------
-
-const _setTenant = (appId: string) => Effect.gen(function* () {
-	const sql = yield* SqlClient.SqlClient;
-	yield* sql`SELECT set_config('app.current_tenant', ${appId}, true)`;
-});
+const _sslConfig = Config.all({
+	caPath: 					Config.string('POSTGRES_SSL_CA').pipe(Config.option),
+	certPath: 					Config.string('POSTGRES_SSL_CERT').pipe(Config.option),
+	enabled: 					Config.boolean('POSTGRES_SSL').pipe(Config.withDefault(false)),
+	keyPath: 					Config.string('POSTGRES_SSL_KEY').pipe(Config.option),
+	minVersion: 				Config.string('POSTGRES_SSL_MIN_VERSION').pipe(Config.withDefault('TLSv1.2')),
+	rejectUnauthorized: 		Config.boolean('POSTGRES_SSL_REJECT_UNAUTHORIZED').pipe(Config.withDefault(true)),
+	servername: 				Config.string('POSTGRES_SSL_SERVERNAME').pipe(Config.option),
+}).pipe(Config.mapAttempt(({ caPath, certPath, enabled, keyPath, minVersion, rejectUnauthorized, servername }) =>
+	enabled ? {
+		ca: 					Option.getOrUndefined(Option.map(caPath, (path) => readFileSync(path, 'utf8'))),
+		cert: 					Option.getOrUndefined(Option.map(certPath, (path) => readFileSync(path, 'utf8'))),
+		key: 					Option.getOrUndefined(Option.map(keyPath, (path) => readFileSync(path, 'utf8'))),
+		minVersion: 			minVersion as SecureVersion,
+		rejectUnauthorized,
+		servername: 			Option.getOrUndefined(servername),
+	} : undefined,
+));
+const _layer = Layer.unwrapEffect(Effect.gen(function* () {
+	const timeouts = yield* Config.all({
+		idleInTransactionMs: 	Config.integer('POSTGRES_IDLE_IN_TXN_TIMEOUT_MS').pipe(Config.withDefault(60_000)),
+		lockMs: 				Config.integer('POSTGRES_LOCK_TIMEOUT_MS').pipe(Config.withDefault(10_000)),
+		statementMs: 			Config.integer('POSTGRES_STATEMENT_TIMEOUT_MS').pipe(Config.withDefault(30_000)),
+		transactionMs: 			Config.integer('POSTGRES_TRANSACTION_TIMEOUT_MS').pipe(Config.withDefault(120_000)),
+	});
+	process.env['PGOPTIONS'] = _mergePgOptions(process.env['PGOPTIONS'], [
+		['statement_timeout', timeouts.statementMs],
+		['lock_timeout', timeouts.lockMs],
+		['idle_in_transaction_session_timeout', timeouts.idleInTransactionMs],
+		['transaction_timeout', timeouts.transactionMs],
+	]);
+	return PgClient.layerConfig({
+		applicationName: 		Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault('parametric-portal')),
+		connectionTTL: 			Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(900_000), Config.map(Duration.millis)),
+		connectTimeout: 		Config.integer('POSTGRES_CONNECT_TIMEOUT_MS').pipe(Config.withDefault(5_000), Config.map(Duration.millis)),
+		database: 				Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
+		host: 					Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
+		idleTimeout: 			Config.integer('POSTGRES_IDLE_TIMEOUT_MS').pipe(Config.withDefault(30_000), Config.map(Duration.millis)),
+		maxConnections: 		Config.integer('POSTGRES_POOL_MAX').pipe(Config.withDefault(10)),
+		minConnections: 		Config.integer('POSTGRES_POOL_MIN').pipe(Config.withDefault(2)),
+		password: 				Config.redacted('POSTGRES_PASSWORD').pipe(Config.option, Config.map(Option.getOrUndefined)),
+		port: 					Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
+		spanAttributes: 		Config.succeed({ 'service.name': 'database' }),
+		ssl: 					_sslConfig,
+		transformJson: 			Config.succeed(true),
+		transformQueryNames: 	Config.succeed(S.camelToSnake),
+		transformResultNames: 	Config.succeed(S.snakeToCamel),
+		url: 					Config.redacted('DATABASE_URL').pipe(Config.option, Config.map(Option.getOrUndefined)),
+		username: 				Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
+	});
+}));
+const _sqlFn = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; return yield* query(sql); });
 
 // --- [OBJECT] ----------------------------------------------------------------
 
 const Client = {
-	config: _CONFIG,
-	health: Effect.fn('db.checkHealth')(function* () {			// Quick health check: tests connection availability. Use for liveness probes. Does not test transaction capability.
+	health: Effect.fn('db.checkHealth')(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const [duration, healthy] = yield* sql`SELECT 1`.pipe(
-			Effect.as(true),
-			Effect.timeout(_CONFIG.durations.health),
-			Effect.catchAll(() => Effect.succeed(false)),
-			Effect.timed,
-		);
+		const [duration, healthy] = yield* sql`SELECT 1`.pipe(Effect.as(true), Effect.timeout(_HEALTH_TIMEOUT), Effect.catchAll(() => Effect.succeed(false)), Effect.timed);
 		return { healthy, latencyMs: Duration.toMillis(duration) };
 	}),
-	healthDeep: Effect.fn('db.checkHealthDeep')(function* () {	// Deep health check: tests transaction capability. Use for readiness probes. Catches connection pool exhaustion.
+	healthDeep: Effect.fn('db.checkHealthDeep')(function* () {
 		const sql = yield* SqlClient.SqlClient;
-		const [duration, healthy] = yield* sql.withTransaction(sql`SELECT 1`).pipe(
-			Effect.as(true),
-			Effect.timeout(_CONFIG.durations.health),
-			Effect.catchAll(() => Effect.succeed(false)),
-			Effect.timed,
-		);
+		const [duration, healthy] = yield* sql.withTransaction(sql`SELECT 1`).pipe(Effect.as(true), Effect.timeout(_HEALTH_TIMEOUT), Effect.catchAll(() => Effect.succeed(false)), Effect.timed);
 		return { healthy, latencyMs: Duration.toMillis(duration) };
 	}),
 	layer: _layer,
 	listen: {
-		// Raw LISTEN/NOTIFY stream — returns unparsed string payloads. Uses dedicated connection via PgClient (not from pool).
 		raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
-		// Typed LISTEN/NOTIFY stream — decodes JSON payloads through schema, silently dropping decode failures (logged as warnings).
 		typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
 			Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
-				Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(
-					Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })),
-					Effect.option,
-				)),
+				Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
 				Stream.filterMap((decoded) => decoded),
 			))),
 	},
-	lock: {					/** Advisory locks for distributed coordination. Use xact variants with connection pooling. */
-		acquire: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* sql`SELECT pg_advisory_xact_lock(${key})`; }),
-		session: { 			/** Session-scoped locks (requires explicit release, use with caution in pooled connections) */
-			acquire: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* sql`SELECT pg_advisory_lock(${key})`; }),
-			release: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; const [r] = yield* sql<{ released: boolean }>`SELECT pg_advisory_unlock(${key}) AS released`; return r?.released ?? false; }),
-			try: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; const [r] = yield* sql<{ acquired: boolean }>`SELECT pg_try_advisory_lock(${key}) AS acquired`; return r?.acquired ?? false; }),
+	lock: {
+		acquire: (key: bigint) => _sqlFn((sql) => sql`SELECT pg_advisory_xact_lock(${key})`),
+		session: {
+			acquire: (key: bigint) => _sqlFn((sql) => sql`SELECT pg_advisory_lock(${key})`),
+			release: (key: bigint) => _sqlFn((sql) => sql<{ released: boolean }>`SELECT pg_advisory_unlock(${key}) AS released`.pipe(Effect.map(([r]) => r?.released ?? false))),
+			try: (key: bigint) => _sqlFn((sql) => sql<{ acquired: boolean }>`SELECT pg_try_advisory_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false))),
 		},
-		try: (key: bigint) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; const [r] = yield* sql<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`; return r?.acquired ?? false; }),
+		try: (key: bigint) => _sqlFn((sql) => sql<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false))),
 	},
-	monitoring: {			/** PG18.1 pg_stat_io observability functions. */
-		cacheHitRatio: Effect.fn('db.cacheHitRatio')(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ backendType: string; cacheHitRatio: number; hits: bigint; ioContext: string; ioObject: string; reads: bigint; writes: bigint }>`
-				SELECT
-					backend_type,
-					object AS io_object,
-					context AS io_context,
-					SUM(hits) AS hits,
-					SUM(reads) AS reads,
-					SUM(writes) AS writes,
-					CASE
-						WHEN SUM(hits) + SUM(reads) > 0
-							THEN (SUM(hits)::double precision / (SUM(hits) + SUM(reads)) * 100)
-						ELSE 0
-					END AS cache_hit_ratio
-				FROM pg_stat_io
-				WHERE object = 'relation' AND context = 'normal'
-				GROUP BY backend_type, object, context
-			`;
-		}),
-		ioConfig: Effect.fn('db.ioConfig')(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name IN ('io_method', 'io_workers', 'effective_io_concurrency', 'io_combine_limit')`;
-		}),
-		ioStats: Effect.fn('db.ioStats')(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ backendType: string; evictions: bigint; extends: bigint; extendTime: number | null; fsyncTime: number | null; fsyncs: bigint; hits: bigint; ioContext: string; ioObject: string; readTime: number | null; reads: bigint; reuses: bigint; statsReset: Date | null; writeTime: number | null; writebackTime: number | null; writebacks: bigint; writes: bigint }>`
-				SELECT
-					backend_type,
-					object AS io_object,
-					context AS io_context,
-					reads,
-					read_time,
-					writes,
-					write_time,
-					writebacks,
-					writeback_time,
-					extends,
-					extend_time,
-					hits,
-					evictions,
-					reuses,
-					fsyncs,
-					fsync_time,
-					stats_reset
-				FROM pg_stat_io
-			`;
-		}),
+		notify: (channel: string, payload: string) => _sqlFn((sql) => sql`SELECT pg_notify(${channel}, ${payload})`),
+	statements: Effect.fn('db.listStatStatements')((limit = 100) => _sqlFn((sql) => sql`SELECT * FROM pg_stat_statements LIMIT ${limit}`)),
+		tenant: {
+			with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				return yield* sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(Effect.andThen(effect), Effect.provideService(SqlClient.SqlClient, sql)));
+			}),
 	},
-	notify: (channel: string, payload?: string) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; yield* payload ? sql`SELECT pg_notify(${channel}, ${payload})` : sql`NOTIFY ${sql(channel)}`; }),
-	statements: Effect.fn('db.listStatStatements')((limit: number = _CONFIG.stats.limit) =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql`SELECT * FROM pg_stat_statements LIMIT ${limit}`;
-		}),
-	),
-	tenant: { 				/** RLS policy - SET LOCAL (3rd param = true) for transaction-scoped isolation with connection pooling. */
-		set: _setTenant,	/** Set tenant context for current transaction. RLS policies read this via current_setting(). */
-		with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () { /** Execute effect within tenant context. Wraps in transaction with SET LOCAL. */
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql.withTransaction(_setTenant(appId).pipe(Effect.andThen(effect), Effect.provideService(SqlClient.SqlClient, sql)));
-		}),
-	},
-	vector: {				/** pgvector 0.8+ HNSW configuration for filtered vector queries. */
-		configureIterativeScan: (mode: 'relaxed_order' | 'strict_order' | 'off' = 'relaxed_order') => Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`SET hnsw.iterative_scan = ${mode}`;
-		}),
+	vector: {
+		configureIterativeScan: (mode: 'relaxed_order' | 'strict_order' | 'off' = 'relaxed_order') => _sqlFn((sql) => sql`SET hnsw.iterative_scan = ${mode}`),
 		getConfig: Effect.fn('db.vectorConfig')(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			return yield* sql<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
 		}),
-		indexStats: (tableName: string, indexName: string) => Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`;
-		}),
+		indexStats: (tableName: string, indexName: string) => _sqlFn((sql) => sql<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`),
 	},
 } as const;
 

@@ -37,7 +37,7 @@ const handleSign = (
 	audit: typeof AuditService.Service,
 	payload: { readonly key: string; readonly op: 'get' | 'put'; readonly expiresInSeconds: number; readonly contentType?: string },) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const metrics = yield* MetricsService;
 		const expires = Duration.seconds(payload.expiresInSeconds);
 		const expiresAt = DateTime.addDuration(DateTime.unsafeNow(), expires);
@@ -57,7 +57,7 @@ const handleExists = (adapter: typeof StorageAdapter.Service, key: string) =>
 	);
 const handleRemove = (storage: typeof StorageService.Service, audit: typeof AuditService.Service, key: string) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const metrics = yield* MetricsService;
 		yield* Resilience.run('storage.remove', storage.remove(key), { circuit: 'storage', timeout: Duration.seconds(10) }).pipe(Effect.mapError((error) => HttpError.Internal.of('Failed to delete object', error)),);
 		yield* Effect.all([
@@ -71,7 +71,7 @@ const handleUpload = (
 	audit: typeof AuditService.Service,
 	payload: { readonly file: Multipart.PersistedFile; readonly key?: string; readonly contentType?: string },) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const [metrics, fileSystem] = yield* Effect.all([MetricsService, FileSystem.FileSystem]);
 		const key = payload.key ?? payload.file.name;
 		const contentType = payload.contentType ?? payload.file.contentType;
@@ -95,7 +95,7 @@ const handleCreateAsset = (
 	audit: typeof AuditService.Service,
 	payload: { readonly content: string; readonly hash?: string; readonly name?: string; readonly storageRef?: string; readonly type: string },) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const [tenantId, session] = yield* Effect.all([Context.Request.currentTenantId, Context.Request.sessionOrFail]);
 		const asset = yield* database.assets.insert({
 			appId: tenantId,
@@ -118,7 +118,7 @@ const handleUpdateAsset = (
 	assetId: string,
 	payload: { readonly content?: string; readonly name?: string; readonly status?: string; readonly type?: string },) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const tenantId = yield* Context.Request.currentTenantId;
 		yield* _requireTenantAsset(database, assetId, tenantId);
 		const updates = Record.getSomes({
@@ -140,7 +140,7 @@ const handleUpdateAsset = (
 	}).pipe(Telemetry.span('storage.updateAsset', { kind: 'server', metrics: false }));
 const handleArchiveAsset = (database: typeof DatabaseService.Service, audit: typeof AuditService.Service, assetId: string) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const tenantId = yield* Context.Request.currentTenantId;
 		yield* database.assets.softDelete(assetId, tenantId).pipe(Effect.mapError((error) => Cause.isNoSuchElementException(error) ? HttpError.NotFound.of('asset', assetId) : HttpError.Internal.of('Asset archive failed', error)),);
 		yield* audit.log('Asset.archive', { details: { assetId }, subjectId: assetId });

@@ -17,7 +17,8 @@ import { Effect, Match, pipe } from 'effect';
 
 const _RATE_LIMIT_PRESET = 'health' as const;
 const _liveness = pipe(
-	Effect.succeed({ status: 'ok' as const }),
+	Client.health(),
+	Effect.map(({ healthy, latencyMs }) => ({ latencyMs, status: healthy ? 'ok' as const : 'degraded' as const })),
 	Telemetry.span('health.liveness', { kind: 'server', metrics: false }),
 );
 
@@ -55,8 +56,12 @@ const _readiness = (polling: PollingService) => pipe(
 		checks: {
 			cache: { connected: cache.connected, latencyMs: cache.latencyMs },
 			database: { healthy: db.healthy, latencyMs: db.latencyMs },
-			metrics: critical.length > 0 ? 'alerted' as const : alerts.length > 0 ? 'degraded' as const : 'healthy' as const,
-			polling: { criticalAlerts: critical.length, totalAlerts: alerts.length },
+			metrics: Match.value({ alertCount: alerts.length, criticalCount: critical.length }).pipe(
+				Match.when(({ criticalCount }) => criticalCount > 0, () => 'alerted' as const),
+				Match.when(({ alertCount }) => alertCount > 0, () => 'degraded' as const),
+				Match.orElse(() => 'healthy' as const),
+			),
+				polling: { criticalAlerts: critical.length, scope: 'global' as const, totalAlerts: alerts.length },
 			vector: { configured: vectorConfig },
 		},
 		status: 'ok' as const,

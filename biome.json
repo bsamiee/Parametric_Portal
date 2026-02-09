@@ -175,6 +175,7 @@
                 "packages/ai/src/**/*.ts",
                 "packages/components-next/src/**/*.ts",
                 "packages/components-next/src/**/*.tsx",
+                "infrastructure/src/**/*.ts",
                 "tests/**/*.ts",
                 "tests/**/*.spec.ts",
                 "tests/**/*.test.ts"

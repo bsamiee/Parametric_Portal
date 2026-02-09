@@ -27,20 +27,28 @@ const apply = <T extends object>(target: T, patch: Diff.Patch): Effect.Effect<T,
 	);
 };
 const fromSnapshots = (oldData: Option.Option<unknown>, newData: Option.Option<unknown>): Option.Option<Diff.Patch> =>
-	pipe(
-		Option.all({ newData, oldData }),
-		Option.flatMap(({ oldData: before, newData: after }) => Option.fromNullable(create(before, after))),
-	);
-const enrichEntry = <T extends Diff.Entry>(entry: T): T & { readonly diff: Option.Option<Diff.Patch> } => ({
-	...entry,
-	diff: fromSnapshots(entry.oldData, entry.newData),
-});
-const enrichEntries = <T extends Diff.Entry>(entries: readonly T[]): readonly (T & { readonly diff: Option.Option<Diff.Patch> })[] => A.map(entries, enrichEntry);
+	pipe(Option.all({ newData, oldData }), Option.flatMap(({ oldData: before, newData: after }) => Option.fromNullable(create(before, after))));
+const enrich: {
+	<T extends Diff.Entry>(entry: T): T & { readonly diff: Option.Option<Diff.Patch> };
+	<T extends Diff.Entry>(entries: readonly T[]): (T & { readonly diff: Option.Option<Diff.Patch> })[];
+} = <T extends Diff.Entry>(input: T | readonly T[]): never => {
+	const one = (entry: T): T & { readonly diff: Option.Option<Diff.Patch> } => ({
+		...entry,
+		diff: pipe(Option.all({ newData: entry.newData, oldData: entry.oldData }), Option.flatMap(({ oldData: before, newData: after }) => Option.fromNullable(create(before, after)))),
+	});
+	return (Array.isArray(input) ? A.map(input as readonly T[], one) : one(input as T)) as never;
+};
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Diff = { apply, create, enrichEntries, enrichEntry, fromSnapshots, PatchError } as const;
+const Diff = {
+	apply,
+	create,
+	enrich,
+	fromSnapshots,
+	PatchError
+} as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 

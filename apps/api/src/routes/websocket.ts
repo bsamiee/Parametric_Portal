@@ -1,7 +1,7 @@
 /**
  * WebSocket upgrade endpoint with authenticated tenant context.
  */
-import { HttpApiBuilder, HttpServerRequest } from '@effect/platform';
+import { HttpApiBuilder, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { ParametricApi } from '@parametric-portal/server/api';
 import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
@@ -19,17 +19,17 @@ const _Handled = Symbol.for('@effect/platform/HttpApp/handled');
 
 const handleConnect = (webSocket: typeof WebSocketService.Service) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const [request, socket, session, tenantId] = yield* Effect.all([
 			HttpServerRequest.HttpServerRequest,
 			HttpServerRequest.upgrade,
 			Context.Request.sessionOrFail,
 			Context.Request.currentTenantId,
 		]);
-		yield* Effect.sync(() => {(request as unknown as Record<PropertyKey, unknown>)[_Handled] = true;});
-		yield* webSocket.accept(socket, session.userId, tenantId);
-		return yield* Effect.fail(HttpError.Internal.of('WebSocket closed'));
-	}).pipe(
+			yield* Effect.sync(() => {(request as unknown as Record<PropertyKey, unknown>)[_Handled] = true;});
+			yield* webSocket.accept(socket, session.userId, tenantId);
+			return HttpServerResponse.empty();
+		}).pipe(
 		Effect.catchTag('Forbidden', Effect.fail),
 		Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('WebSocket failed', error))),
 		Telemetry.span('websocket.connect', { kind: 'server', metrics: false }),

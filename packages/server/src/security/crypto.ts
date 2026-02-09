@@ -8,14 +8,6 @@ import { Cache, Config, Data, Duration, Effect, Encoding, Either, HashMap, Optio
 import { Context } from '../context.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const _VersionedKeySchema = S.Struct({
-	key: S.String,
-	version: S.Number.pipe(S.int(), S.greaterThanOrEqualTo(1), S.lessThanOrEqualTo(255)),
-});
-const _KeyConfigSchema = S.Array(_VersionedKeySchema);
-
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _encoder = new TextEncoder();
@@ -28,10 +20,6 @@ const _CONFIG = {
 	minBytes: 14,
 	version: { max: 255, min: 1 },
 } as const;
-const _hkdfSalt = (version: number): Uint8Array<ArrayBuffer> =>
-	version === 1
-		? new Uint8Array(_CONFIG.hkdf.legacySalt)
-		: _encoder.encode(`parametric-portal-hkdf-v${version}`);
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -44,27 +32,26 @@ class CryptoError extends Data.TaggedError('CryptoError')<{
 
 // --- [SERVICES] --------------------------------------------------------------
 
-const _importHkdfKey = (base64Material: string): Effect.Effect<CryptoKey, CryptoError> =>
-	Either.match(Encoding.decodeBase64(base64Material), {
-		onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
-		onRight: (bytes) => Effect.tryPromise({
-			catch: (error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'key', tenantId: Context.Request.Id.system }),
-			try: () => crypto.subtle.importKey('raw', new Uint8Array(bytes), 'HKDF', false, ['deriveKey']),
-		}),
-	});
-const _loadKeys = Effect.gen(function* () {
-	const multiKeyConfig = yield* Config.string('ENCRYPTION_KEYS').pipe(Config.option,);
-	const parsed: ReadonlyArray<{ readonly key: string; readonly version: number }> = yield* Option.match(multiKeyConfig, {
-		onNone: () => Config.redacted('ENCRYPTION_KEY').pipe(Effect.map((redacted): ReadonlyArray<{ readonly key: string; readonly version: number }> => [{ key: Redacted.value(redacted), version: 1 }]),),
-		onSome: (value) => S.decodeUnknown(S.parseJson(_KeyConfigSchema))(value).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),),
-	});
-	const currentVersion = yield* Config.integer('ENCRYPTION_KEY_VERSION').pipe(Config.withDefault(parsed.reduce<number>((max, entry) => Math.max(entry.version, max), 0),));
-	const imported = yield* Effect.forEach(parsed, (entry) => _importHkdfKey(entry.key).pipe(Effect.map((cryptoKey): readonly [number, CryptoKey] => [entry.version, cryptoKey])),);
-	return { currentVersion, keys: HashMap.fromIterable(imported) };
-});
 class Service extends Effect.Service<Service>()('server/CryptoService', {
 	effect: Effect.gen(function* () {
-		const { currentVersion, keys } = yield* _loadKeys;
+		const multiKeyConfig = yield* Config.string('ENCRYPTION_KEYS').pipe(Config.option);
+		const parsed = yield* Option.match(multiKeyConfig, {
+			onNone: () => Config.redacted('ENCRYPTION_KEY').pipe(Effect.map((redacted): ReadonlyArray<{ readonly key: string; readonly version: number }> => [{ key: Redacted.value(redacted), version: 1 }])),
+			onSome: (value) => S.decodeUnknown(S.parseJson(S.Array(S.Struct({ key: S.String, version: S.Number.pipe(S.int(), S.greaterThanOrEqualTo(1), S.lessThanOrEqualTo(255)) }))))(value).pipe(
+				Effect.mapError((error) => new CryptoError({ cause: error, code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
+			),
+		});
+		const currentVersion = yield* Config.integer('ENCRYPTION_KEY_VERSION').pipe(Config.withDefault(parsed.reduce<number>((max, entry) => Math.max(entry.version, max), 0)));
+		const imported = yield* Effect.forEach(parsed, (entry) =>
+			Either.match(Encoding.decodeBase64(entry.key), {
+				onLeft: () => Effect.fail(new CryptoError({ code: 'INVALID_FORMAT', op: 'key', tenantId: Context.Request.Id.system })),
+				onRight: (bytes) => Effect.tryPromise({
+					catch: (error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'key', tenantId: Context.Request.Id.system }),
+					try: () => crypto.subtle.importKey('raw', new Uint8Array(bytes), 'HKDF', false, ['deriveKey']),
+				}).pipe(Effect.map((cryptoKey): readonly [number, CryptoKey] => [entry.version, cryptoKey])),
+			}),
+		);
+		const keys = HashMap.fromIterable(imported);
 		const tenantKeyCache = yield* Cache.make({
 			capacity: _CONFIG.cache.capacity,
 			lookup: (compositeKey: string) => Effect.gen(function* () {
@@ -81,7 +68,7 @@ class Service extends Effect.Service<Service>()('server/CryptoService', {
 							hash: _CONFIG.hkdf.hash,
 							info: _encoder.encode(`${_CONFIG.hkdf.info}:${tenantId}`),
 							name: 'HKDF',
-							salt: _hkdfSalt(version),
+							salt: version === 1 ? new Uint8Array(_CONFIG.hkdf.legacySalt) : _encoder.encode(`parametric-portal-hkdf-v${version}`),
 						},
 						masterKey,
 						{ length: _CONFIG.key.length, name: _CONFIG.key.name },
@@ -118,7 +105,7 @@ const decrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Effec
 		const iv = bytes.slice(1, 1 + _CONFIG.iv);
 		const cipher = bytes.slice(1 + _CONFIG.iv);
 		const service = yield* Service;
-		const key = yield* service.deriveKey(tenantId, version).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: error instanceof CryptoError && error.code === 'KEY_NOT_FOUND' ? 'KEY_NOT_FOUND' : 'KEY_FAILED', op: 'decrypt', tenantId })),);
+		const key = yield* service.deriveKey(tenantId, version).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: error instanceof CryptoError && error.code === 'KEY_NOT_FOUND' ? 'KEY_NOT_FOUND' : 'KEY_FAILED', op: 'decrypt', tenantId })));
 		const params: AesGcmParams = additionalData ? { additionalData, iv, name: 'AES-GCM' } : { iv, name: 'AES-GCM' };
 		const plaintext = yield* Effect.tryPromise({
 			catch: (error) => new CryptoError({ cause: error, code: 'OP_FAILED', op: 'decrypt', tenantId }),
@@ -130,7 +117,7 @@ const encrypt = (plaintext: string, additionalData?: BufferSource): Effect.Effec
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.currentTenantId;
 		const service = yield* Service;
-		const key = yield* service.deriveKey(tenantId, service.currentVersion).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })),);
+		const key = yield* service.deriveKey(tenantId, service.currentVersion).pipe(Effect.mapError((error) => new CryptoError({ cause: error, code: 'KEY_FAILED', op: 'encrypt', tenantId })));
 		const iv = crypto.getRandomValues(new Uint8Array(_CONFIG.iv));
 		const params: AesGcmParams = additionalData ? { additionalData, iv, name: 'AES-GCM' } : { iv, name: 'AES-GCM' };
 		const ciphertext = yield* Effect.tryPromise({
@@ -147,8 +134,7 @@ const encrypt = (plaintext: string, additionalData?: BufferSource): Effect.Effec
 const reencrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Effect<Uint8Array, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const service = yield* Service;
-		const envelopeVersion = bytes[0];
-		return (envelopeVersion === service.currentVersion)
+		return (bytes[0] === service.currentVersion)
 			? bytes
 			: yield* decrypt(bytes, additionalData).pipe(
 				Effect.flatMap((plaintext) => encrypt(plaintext, additionalData)),
@@ -173,16 +159,7 @@ const pair = Effect.gen(function* () {
 }).pipe(Telemetry.span('crypto.pair'));
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Crypto = {
-	compare,
-	decrypt,
-	encrypt,
-	hash,
-	hmac,
-	pair,
-	reencrypt,
-	Service,
-} as const;
+const Crypto = { compare, decrypt, encrypt, hash, hmac, pair, reencrypt, Service } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 

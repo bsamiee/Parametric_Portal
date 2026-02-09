@@ -80,15 +80,49 @@ export default Effect.gen(function* () {
     yield* sql`CREATE EXTENSION IF NOT EXISTS fuzzystrmatch`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS unaccent`;
     yield* sql`CREATE EXTENSION IF NOT EXISTS vector`;
-    yield* sql`CREATE EXTENSION IF NOT EXISTS pg_stat_statements`;
-    yield* sql`CREATE EXTENSION IF NOT EXISTS pgaudit`;
+    yield* sql.unsafe(String.raw`
+	        DO $$
+	        BEGIN
+	            CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+	        EXCEPTION
+	            WHEN OTHERS THEN
+	                RAISE WARNING 'pg_stat_statements unavailable: %', SQLERRM;
+	        END;
+	        $$;
+	    `);
+    yield* sql.unsafe(String.raw`
+	        DO $$
+	        BEGIN
+	            CREATE EXTENSION IF NOT EXISTS pgaudit;
+	        EXCEPTION
+	            WHEN OTHERS THEN
+	                RAISE WARNING 'pgaudit unavailable: %', SQLERRM;
+	        END;
+	        $$;
+	    `);
     yield* sql`COMMENT ON EXTENSION btree_gist IS 'btree_gist: GiST support for scalar types — required for temporal constraints (WITHOUT OVERLAPS)'`;
     yield* sql`COMMENT ON EXTENSION pg_trgm IS 'pg_trgm: trigram similarity for fuzzy search'`;
     yield* sql`COMMENT ON EXTENSION fuzzystrmatch IS 'fuzzystrmatch: levenshtein/soundex matchers for fuzzy search'`;
     yield* sql`COMMENT ON EXTENSION unaccent IS 'unaccent: Unicode diacritic normalization for search'`;
     yield* sql`COMMENT ON EXTENSION vector IS 'pgvector 0.8+: vector similarity search with HNSW iterative scan support'`;
-    yield* sql`COMMENT ON EXTENSION pg_stat_statements IS 'pg_stat_statements: SQL statement performance statistics'`;
-    yield* sql`COMMENT ON EXTENSION pgaudit IS 'pgaudit: compliance audit logging for SOC2/HIPAA/PCI-DSS'`;
+    yield* sql.unsafe(String.raw`
+	        DO $$
+	        BEGIN
+	            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements') THEN
+	                COMMENT ON EXTENSION pg_stat_statements IS 'pg_stat_statements: SQL statement performance statistics';
+	            END IF;
+	        END;
+	        $$;
+	    `);
+    yield* sql.unsafe(String.raw`
+	        DO $$
+	        BEGIN
+	            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pgaudit') THEN
+	                COMMENT ON EXTENSION pgaudit IS 'pgaudit: compliance audit logging for SOC2/HIPAA/PCI-DSS';
+	            END IF;
+	        END;
+	        $$;
+	    `);
     yield* sql`CREATE COLLATION IF NOT EXISTS case_insensitive (provider = icu, locale = 'und-u-ks-level2', deterministic = false)`;
     yield* sql`COMMENT ON COLLATION case_insensitive IS 'ICU nondeterministic collation for case-insensitive TEXT (Unicode-aware)'`;
     // ═══════════════════════════════════════════════════════════════════════════
@@ -427,6 +461,37 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_mfa_user ON mfa_secrets(user_id) INCLUDE (enabled_at) WHERE deleted_at IS NULL`;
     yield* sql`CREATE TRIGGER mfa_secrets_updated_at BEFORE UPDATE ON mfa_secrets FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
+    // WEBAUTHN_CREDENTIALS: Passkey credentials (user-scoped, soft-delete)
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql`
+        CREATE TABLE webauthn_credentials (
+            id UUID PRIMARY KEY DEFAULT uuidv7(),
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            credential_id TEXT NOT NULL,
+            public_key BYTEA NOT NULL,
+            counter INTEGER NOT NULL DEFAULT 0,
+            device_type TEXT NOT NULL,
+            backed_up BOOLEAN NOT NULL DEFAULT false,
+            transports TEXT[] NOT NULL DEFAULT '{}',
+            name TEXT NOT NULL,
+            last_used_at TIMESTAMPTZ,
+            deleted_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT webauthn_credentials_credential_id_unique UNIQUE NULLS NOT DISTINCT (credential_id),
+            CONSTRAINT webauthn_credentials_counter_non_negative CHECK (counter >= 0),
+            CONSTRAINT webauthn_credentials_device_type_valid CHECK (device_type IN ('singleDevice', 'multiDevice')),
+            CONSTRAINT webauthn_credentials_name_not_empty CHECK (length(trim(name)) > 0),
+            CONSTRAINT webauthn_credentials_transports_no_nulls CHECK (array_position(transports, NULL) IS NULL)
+        )
+    `;
+    yield* sql`COMMENT ON TABLE webauthn_credentials IS 'WebAuthn passkeys — use uuid_extract_timestamp(id) for creation time'`;
+    yield* sql`COMMENT ON COLUMN webauthn_credentials.credential_id IS 'Base64url credential ID from authenticator; globally unique'`;
+    yield* sql`COMMENT ON COLUMN webauthn_credentials.deleted_at IS 'Soft-delete timestamp — NULL means active'`;
+    yield* sql`CREATE INDEX idx_webauthn_credentials_user_active ON webauthn_credentials(user_id) INCLUDE (credential_id, name, last_used_at, counter, device_type, backed_up) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_webauthn_credentials_credential_id_active ON webauthn_credentials(credential_id) INCLUDE (user_id, counter, public_key, transports, backed_up, device_type) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_webauthn_credentials_user_id_fk ON webauthn_credentials(user_id)`;
+    yield* sql`CREATE TRIGGER webauthn_credentials_updated_at BEFORE UPDATE ON webauthn_credentials FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    // ═══════════════════════════════════════════════════════════════════════════
     // JOBS: Durable job registry with snowflake job_id
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
@@ -462,7 +527,7 @@ export default Effect.gen(function* () {
     yield* sql`CREATE INDEX idx_jobs_app_status ON jobs(app_id, status) INCLUDE (type, priority, attempts)`;
     yield* sql`CREATE INDEX idx_jobs_app_type ON jobs(app_id, type) INCLUDE (status, priority)`;
     yield* sql`CREATE INDEX idx_jobs_app_updated ON jobs(app_id, updated_at DESC) INCLUDE (status, type)`;
-    yield* sql`CREATE INDEX idx_jobs_dedupe ON jobs(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL`;
+    yield* sql`CREATE UNIQUE INDEX idx_jobs_dedupe_active_unique ON jobs(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'processing')`;
     yield* sql`CREATE INDEX idx_jobs_batch ON jobs(batch_id) WHERE batch_id IS NOT NULL`;
     yield* sql`CREATE INDEX idx_jobs_app_id_fk ON jobs(app_id)`;
     yield* sql`CREATE TRIGGER jobs_updated_at BEFORE UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
@@ -704,67 +769,6 @@ export default Effect.gen(function* () {
         $$
     `;
     yield* sql`COMMENT ON FUNCTION delete_kv_by_prefix IS 'Hard-delete kv_store entries by key prefix pattern'`;
-    // ═══════════════════════════════════════════════════════════════════════════
-    // MONITORING FUNCTIONS: PG18.1 pg_stat_io for I/O observability
-    // ═══════════════════════════════════════════════════════════════════════════
-    yield* sql`
-        CREATE OR REPLACE FUNCTION get_io_stats_by_backend()
-        RETURNS TABLE(
-            backend_type TEXT,
-            io_object TEXT,
-            io_context TEXT,
-            blks_hit BIGINT,
-            blks_read BIGINT,
-            blks_written BIGINT,
-            blks_extended BIGINT,
-            stats_reset TIMESTAMPTZ
-        )
-        LANGUAGE sql
-        STABLE
-        AS $$
-            SELECT
-                backend_type,
-                object,
-                context,
-                SUM(hits)::bigint,
-                SUM(reads)::bigint,
-                SUM(writes)::bigint,
-                SUM(extends)::bigint,
-                MAX(stats_reset)
-            FROM pg_stat_io
-            GROUP BY backend_type, object, context
-            ORDER BY SUM(reads) DESC
-        $$
-    `;
-    yield* sql`COMMENT ON FUNCTION get_io_stats_by_backend() IS 'PG18.1: Aggregated I/O statistics by backend type from pg_stat_io catalog view'`;
-    yield* sql`
-        CREATE OR REPLACE FUNCTION get_io_cache_hit_ratio()
-        RETURNS TABLE(
-            io_object TEXT,
-            io_context TEXT,
-            cache_hit_ratio NUMERIC,
-            hits BIGINT,
-            reads BIGINT
-        )
-        LANGUAGE sql
-        STABLE
-        AS $$
-            SELECT
-                object,
-                context,
-                CASE
-                    WHEN hits + reads > 0
-                    THEN ROUND(100.0 * hits / (hits + reads), 2)
-                    ELSE 0
-                END,
-                hits,
-                reads
-            FROM pg_stat_io
-            WHERE object = 'relation'
-            ORDER BY reads DESC
-        $$
-    `;
-    yield* sql`COMMENT ON FUNCTION get_io_cache_hit_ratio() IS 'PG18.1: Cache hit ratio from pg_stat_io for relation objects'`;
     // ═══════════════════════════════════════════════════════════════════════════
     // JSON UTILITIES: JSONB diff extraction for audit display
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1141,6 +1145,7 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE oauth_accounts ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE mfa_secrets ENABLE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE webauthn_credentials ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE assets ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE jobs ENABLE ROW LEVEL SECURITY`;
@@ -1157,6 +1162,8 @@ export default Effect.gen(function* () {
     yield* sql`CREATE POLICY oauth_accounts_tenant_isolation ON oauth_accounts USING (user_id IN (SELECT get_tenant_user_ids()))`;
     // RLS Policies: mfa_secrets (scoped via SECURITY DEFINER helper — avoids chained RLS)
     yield* sql`CREATE POLICY mfa_secrets_tenant_isolation ON mfa_secrets USING (user_id IN (SELECT get_tenant_user_ids()))`;
+    // RLS Policies: webauthn_credentials (scoped via SECURITY DEFINER helper — avoids chained RLS)
+    yield* sql`CREATE POLICY webauthn_credentials_tenant_isolation ON webauthn_credentials USING (user_id IN (SELECT get_tenant_user_ids()))`;
     // RLS Policies: assets (scoped by app_id)
     yield* sql`CREATE POLICY assets_tenant_isolation ON assets USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: audit_logs (scoped by app_id)
@@ -1175,6 +1182,7 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE api_keys FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE oauth_accounts FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE mfa_secrets FORCE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE webauthn_credentials FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE assets FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE jobs FORCE ROW LEVEL SECURITY`;

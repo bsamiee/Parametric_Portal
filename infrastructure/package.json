@@ -1,0 +1,17 @@
+{
+	"name": "@parametric-portal/infrastructure",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@pulumi/aws": "catalog:",
+		"@pulumi/awsx": "catalog:",
+		"@pulumi/docker": "catalog:",
+		"@pulumi/kubernetes": "catalog:",
+		"@pulumi/pulumi": "catalog:",
+		"effect": "catalog:"
+	},
+	"devDependencies": {
+		"@types/node": "catalog:",
+		"typescript": "catalog:"
+	}
+}

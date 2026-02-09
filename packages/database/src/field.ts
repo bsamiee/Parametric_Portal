@@ -15,7 +15,7 @@ type _RawEntry = Readonly<{ col: string; sql: string; ts: string; mark: string |
 // --- [METADATA_TABLES] -------------------------------------------------------
 
 const _FK = {RESTRICT: 'RESTRICT', CASCADE: 'CASCADE', SETNULL:'SET NULL', SETDEFAULT:'SET DEFAULT', NOACTION:'NO ACTION',} as const;
-const _SQL_CAST = { INET: 'inet', JSONB: 'jsonb', UUID: 'uuid' } as const; /** SQL type → PostgreSQL cast string (types requiring explicit cast for comparisons) */
+const _SQL_CAST = { INET: 'inet', JSONB: 'jsonb', UUID: 'uuid' } as const;
 const _WRAP_META = (<const T extends Record<string, _RawMeta>>(table: T) => Object.fromEntries((Object.keys(table) as (keyof T & string)[]).map(key => [key, { ...table[key], name: key }])) as { [K in keyof T]: T[K] & { readonly name: K } })({
 	Generated:               { cat: 'generated', sel: true,  ins: false, upd: true,  json: true,  auto: false,    store: false   },
 	GeneratedByApp:          { cat: 'generated', sel: true,  ins: true,  upd: true,  json: true,  auto: false,    store: false   },
@@ -61,7 +61,7 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	ipAddress:        { col: 'ip_address',       sql: 'INET',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	userAgent:        { col: 'user_agent',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	name:             { col: 'name',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	storageRef:       { col: 'storage_ref',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	storageRef:       { col: 'storage_ref',      sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	namespace:        { col: 'namespace',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	email:            { col: 'email',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	role:             { col: 'role',             sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -84,7 +84,6 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	model:            { col: 'model',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	dimensions:       { col: 'dimensions',       sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	embedding:        { col: 'embedding',        sql: 'VECTOR',      ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
-	// Job fields (jobs + job_dlq)
 	jobId:            { col: 'job_id',           sql: 'TEXT',        ts: 'S.String',          mark: 'pk',        gen: false,    null: false, ref: false,      wrap: false                                                  },
 	batchId:          { col: 'batch_id',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	dedupeKey:        { col: 'dedupe_key',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
@@ -103,95 +102,53 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	lockedUntil:      { col: 'locked_until',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	waitMs:           { col: 'wait_ms',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	durationMs:       { col: 'duration_ms',      sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
-	// Job DLQ fields (job_dlq table: dead-letter archive)
 	source:           { col: 'source',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	originalJobId:    { col: 'original_job_id',  sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	errorReason:      { col: 'error_reason',     sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	errorHistory:     { col: 'error_history',    sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	replayedAt:       { col: 'replayed_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
-	// KV store fields (cluster infrastructure state)
 	kvKey:            { col: 'key',              sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
 	kvValue:          { col: 'value',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 });
 const _TABLES = {
-	apps: {
-		fields: 	[_REGISTRY.id, _REGISTRY.name, _REGISTRY.namespace, _REGISTRY.settings, _REGISTRY.updatedAt]},
-	users: {
-		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.role, _REGISTRY.status, _REGISTRY.roleOrder, _REGISTRY.deletedAt, _REGISTRY.updatedAt]},
-	sessions: {
-		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.hash, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt, _REGISTRY.deletedAt, _REGISTRY.verifiedAt, _REGISTRY.ipAddress, _REGISTRY.userAgent, _REGISTRY.updatedAt, _REGISTRY.prefix],
-		required: 	[_REGISTRY.appId, _REGISTRY.userId, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt]},
-	apiKeys: {
-		fields: 	[_REGISTRY.id, _REGISTRY.userId, _REGISTRY.name, _REGISTRY.hash, _REGISTRY.encrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.lastUsedAt, _REGISTRY.updatedAt, _REGISTRY.prefix],
-		required: 	[_REGISTRY.userId]},
-	oauthAccounts: {
-		fields: 	[_REGISTRY.id, _REGISTRY.userId, _REGISTRY.provider, _REGISTRY.externalId, _REGISTRY.accessEncrypted, _REGISTRY.refreshEncrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.scope, _REGISTRY.updatedAt],
-		required: 	[_REGISTRY.userId],
-		unique: 	[[_REGISTRY.provider, _REGISTRY.externalId]]},
-	assets: {
-		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.type, _REGISTRY.content, _REGISTRY.status, _REGISTRY.deletedAt, _REGISTRY.updatedAt, _REGISTRY.size, _REGISTRY.hash, _REGISTRY.name, _REGISTRY.storageRef],
-		nullable:	[_REGISTRY.hash, _REGISTRY.name, _REGISTRY.storageRef],	// Override: hash/name/storageRef are optional metadata in assets
-		fk: 		[[_REGISTRY.userId, _FK.SETNULL]] as const},
-	auditLogs: {
-		fields: 	[_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.operation, _REGISTRY.subject, _REGISTRY.subjectId, _REGISTRY.oldData, _REGISTRY.newData, _REGISTRY.ipAddress, _REGISTRY.userAgent]},
-	mfaSecrets: {
-		fields: 	[_REGISTRY.id, _REGISTRY.userId, _REGISTRY.encrypted, _REGISTRY.backupHashes, _REGISTRY.enabledAt, _REGISTRY.deletedAt, _REGISTRY.updatedAt, _REGISTRY.remaining],
-		required: 	[_REGISTRY.userId],
-		unique:		[[_REGISTRY.userId]]},
-	searchDocuments: {
-		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.displayText, _REGISTRY.contentText, _REGISTRY.metadata, _REGISTRY.documentHash, _REGISTRY.searchVector, _REGISTRY.updatedAt],
-		pk: 		[_REGISTRY.entityType, _REGISTRY.entityId]},
-	searchEmbeddings: {
-		fields: 	[_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.model, _REGISTRY.dimensions, _REGISTRY.embedding, _REGISTRY.hash, _REGISTRY.updatedAt],
-		pk: 		[_REGISTRY.entityType, _REGISTRY.entityId],
-		fk: 		[[_REGISTRY.entityType, _REGISTRY.entityId], _FK.CASCADE] as const},
-	jobs: {
-		fields: 	[_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.result, _REGISTRY.progress, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts, _REGISTRY.scheduledAt, _REGISTRY.batchId, _REGISTRY.dedupeKey, _REGISTRY.lastError, _REGISTRY.completedAt, _REGISTRY.updatedAt],
-		required: 	[_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts]},
-	jobDlq: {
-		fields: 	[_REGISTRY.id, _REGISTRY.source, _REGISTRY.originalJobId, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.type, _REGISTRY.payload, _REGISTRY.errorReason, _REGISTRY.attempts, _REGISTRY.errorHistory, _REGISTRY.replayedAt],
-		fk: 		[[_REGISTRY.userId, _FK.RESTRICT]] as const},
-	kvStore: {
-		fields: 	[_REGISTRY.id, _REGISTRY.kvKey, _REGISTRY.kvValue, _REGISTRY.expiresAt, _REGISTRY.updatedAt],
-		unique: 	[[_REGISTRY.kvKey]]},
+	apps:             { fields: [_REGISTRY.id, _REGISTRY.name, _REGISTRY.namespace, _REGISTRY.settings, _REGISTRY.updatedAt] },
+	users:            { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.role, _REGISTRY.status, _REGISTRY.roleOrder, _REGISTRY.deletedAt, _REGISTRY.updatedAt] },
+	sessions:         { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.hash, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt, _REGISTRY.deletedAt, _REGISTRY.verifiedAt, _REGISTRY.ipAddress, _REGISTRY.userAgent, _REGISTRY.updatedAt, _REGISTRY.prefix], required: [_REGISTRY.appId, _REGISTRY.userId, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt] },
+	apiKeys:          { fields: [_REGISTRY.id, _REGISTRY.userId, _REGISTRY.name, _REGISTRY.hash, _REGISTRY.encrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.lastUsedAt, _REGISTRY.updatedAt, _REGISTRY.prefix], required: [_REGISTRY.userId] },
+	oauthAccounts:    { fields: [_REGISTRY.id, _REGISTRY.userId, _REGISTRY.provider, _REGISTRY.externalId, _REGISTRY.accessEncrypted, _REGISTRY.refreshEncrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.scope, _REGISTRY.updatedAt], required: [_REGISTRY.userId], unique: [[_REGISTRY.provider, _REGISTRY.externalId]] },
+	assets:           { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.type, _REGISTRY.content, _REGISTRY.status, _REGISTRY.deletedAt, _REGISTRY.updatedAt, _REGISTRY.size, _REGISTRY.hash, _REGISTRY.name, _REGISTRY.storageRef], nullable: [_REGISTRY.hash, _REGISTRY.name, _REGISTRY.storageRef], fk: [[_REGISTRY.userId, _FK.SETNULL]] as const },
+	auditLogs:        { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.operation, _REGISTRY.subject, _REGISTRY.subjectId, _REGISTRY.oldData, _REGISTRY.newData, _REGISTRY.ipAddress, _REGISTRY.userAgent] },
+	mfaSecrets:       { fields: [_REGISTRY.id, _REGISTRY.userId, _REGISTRY.encrypted, _REGISTRY.backupHashes, _REGISTRY.enabledAt, _REGISTRY.deletedAt, _REGISTRY.updatedAt, _REGISTRY.remaining], required: [_REGISTRY.userId], unique: [[_REGISTRY.userId]] },
+	searchDocuments:  { fields: [_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.displayText, _REGISTRY.contentText, _REGISTRY.metadata, _REGISTRY.documentHash, _REGISTRY.searchVector, _REGISTRY.updatedAt], pk: [_REGISTRY.entityType, _REGISTRY.entityId] },
+	searchEmbeddings: { fields: [_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.model, _REGISTRY.dimensions, _REGISTRY.embedding, _REGISTRY.hash, _REGISTRY.updatedAt], pk: [_REGISTRY.entityType, _REGISTRY.entityId], fk: [[_REGISTRY.entityType, _REGISTRY.entityId], _FK.CASCADE] as const },
+	jobs:             { fields: [_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.result, _REGISTRY.progress, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts, _REGISTRY.scheduledAt, _REGISTRY.batchId, _REGISTRY.dedupeKey, _REGISTRY.lastError, _REGISTRY.completedAt, _REGISTRY.updatedAt], required: [_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts] },
+	jobDlq:           { fields: [_REGISTRY.id, _REGISTRY.source, _REGISTRY.originalJobId, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.type, _REGISTRY.payload, _REGISTRY.errorReason, _REGISTRY.attempts, _REGISTRY.errorHistory, _REGISTRY.replayedAt], fk: [[_REGISTRY.userId, _FK.RESTRICT]] as const },
+	kvStore:          { fields: [_REGISTRY.id, _REGISTRY.kvKey, _REGISTRY.kvValue, _REGISTRY.expiresAt, _REGISTRY.updatedAt], unique: [[_REGISTRY.kvKey]] },
 } as const;
 
 // --- [DERIVED_TYPES] ---------------------------------------------------------
 type _Reg = typeof _REGISTRY; type _Fks = typeof _FK; type _Metas = typeof _WRAP_META; type _Tbls = typeof _TABLES;
-// Tier 1: Key unions (from consts)
 type _FkAction = _Fks[keyof _Fks]; type _WrapName = keyof _Metas; type _Field = keyof _Reg; type _Table = keyof _Tbls;
-// Tier 2: Entry lookups (parameterized)
 type _Meta<W extends _WrapName = _WrapName> = _Metas[W]; type _Entry<F extends _Field = _Field> = _Reg[F]; type _Tbl<T extends _Table = _Table> = _Tbls[T];
-// Tier 3: Entry value unions
 type _WrapCat = _Meta['cat']; type _Mark = Exclude<_Entry['mark'], false>; type _Wrap = Exclude<_Entry['wrap'], false>; type _Gen = Exclude<_Entry['gen'], false>; type _Sql = _Entry['sql'];
-// Tier 4: Widened shapes (single object with union values, not union of objects)
 type _EntryShape = { [K in keyof _Entry]: _Entry[K] }; type _MetaShape = { [K in keyof _Meta]: _Meta[K] };
-// Tier 5: Bi-directional mappings
-type _ColToField = { [F in _Field as _Reg[F]['col']]: F };
-type _Col = keyof _ColToField;
+type _ColToField = { [F in _Field as _Reg[F]['col']]: F }; type _Col = keyof _ColToField;
 type _CatToWraps = { [C in _WrapCat]: O.SelectKeys<_Metas, { cat: C }, 'extends->'> & _WrapName };
 type _FieldsOf<T extends _Table> = _Tbls[T]['fields'][number]['field'];
 type _TablesOf<F extends _Field> = { [T in _Table]: F extends _FieldsOf<T> ? T : never }[_Table];
-// Tier 6: Capability selection (ts-toolbelt O.SelectKeys)
 type _Has<C extends Partial<_EntryShape>> = O.SelectKeys<_Reg, C, 'extends->'> & _Field;
 type _HasMeta<C extends Partial<_MetaShape>> = O.SelectKeys<_Metas, C, 'extends->'> & _WrapName;
 type _HasWrap<C extends Partial<_MetaShape>> = { [F in _Field]: _Reg[F]['wrap'] extends readonly (infer W)[] ? Extract<W, C> extends never ? never : F : never }[_Field];
 type _HasNot<P extends keyof _EntryShape> = Exclude<_Field, O.SelectKeys<_Reg, Record<P, false>, 'equals'>> & _Field;
-// Tier 6b: Capability definition tables (type-level data driving derived caps)
 type _FalsifiableProp = 'mark' | 'gen' | 'ref' | 'wrap';
-type _FilterDef = { nullable: { null: true }; required: { null: false }; unwrapped: { wrap: false } };
-type _WrapMetaDef = { autoUpdate: { auto: 'both' }; autoInsert: { auto: 'insert' | 'both' } };
-// Tier 7: Capability aggregation (all derived from registry + definition tables)
 type _WrapNames<W extends readonly { readonly name: string }[]> = { [K in keyof W]: W[K] extends { readonly name: infer N } ? N : never };
 type _Dims = { [M in _Mark as `mark:${M}`]: _Has<{ mark: M }> } & { [W in _Wrap as `wrap:${Str.Join<_WrapNames<W>, ','>}`]: _Has<{ wrap: W }> };
-type _FilterCaps = { [K in keyof _FilterDef]: _Has<_FilterDef[K]> };
-type _ExistsCaps = { [P in _FalsifiableProp as `has${Capitalize<P>}`]: _HasNot<P> };
-type _WrapMetaCaps = { [K in keyof _WrapMetaDef]: _HasWrap<_WrapMetaDef[K]> };
-type _Caps = _Dims & { [G in _Gen as `gen:${G}`]: _Has<{ gen: G }> } & { [S in _Sql as `sql:${S}`]: _Has<{ sql: S }> } & _FilterCaps & _ExistsCaps & _WrapMetaCaps;
+type _Caps = _Dims & { [G in _Gen as `gen:${G}`]: _Has<{ gen: G }> } & { [Sq in _Sql as `sql:${Sq}`]: _Has<{ sql: Sq }> }
+	& { nullable: _Has<{ null: true }>; required: _Has<{ null: false }>; unwrapped: _Has<{ wrap: false }> }
+	& { [P in _FalsifiableProp as `has${Capitalize<P>}`]: _HasNot<P> }
+	& { autoUpdate: _HasWrap<{ auto: 'both' }>; autoInsert: _HasWrap<{ auto: 'insert' | 'both' }> };
 type _CapKey = keyof _Caps;
-// Tier 8: Resolved (enriched with field name)
 type _Resolved<F extends _Field = _Field> = Simplify<_Entry<F> & { readonly field: F }>;
-// Tier 9: Function signatures (TERMINAL)
 type _LensIn = { fields: _Field[]; cols: _Col[]; first: { field: _Field; col: _Col } | undefined };
 type _Lens = { fields: _Field[]; cols: _Col[]; marks: _Mark[]; wraps: _Wrap[]; first: _Resolved | undefined; in: (cols: Record<string, unknown>) => _LensIn };
 type _DispatchDim = 'mark' | 'wrap' | 'sql' | 'gen';
@@ -201,16 +158,7 @@ type _DimHandlers<D extends _DispatchDim, R> = { none: (entry: _Entry, field: _F
 
 // --- [CACHE_BUILDER] ---------------------------------------------------------
 
-type _CacheIndex = {
-	byField: Record<string, _Resolved>;
-	byCol: Record<string, _Resolved>;
-	cols: _Col[];
-	marks: _Mark[];
-	wraps: _Wrap[];
-	query: Record<string, _Field[]>;
-	entries: Record<string, _Resolved[]>;
-	wrapByCat: Record<string, _WrapName[]>;
-};
+type _CacheIndex = { byField: Record<string, _Resolved>; byCol: Record<string, _Resolved>; cols: _Col[]; marks: _Mark[]; wraps: _Wrap[]; query: Record<string, _Field[]>; entries: Record<string, _Resolved[]>; wrapByCat: Record<string, _WrapName[]> };
 const _addCap = (index: _CacheIndex, key: string | false | undefined, field: _Field, resolved: _Resolved): void => {
 	// biome-ignore lint/suspicious/noAssignInExpressions: Builder pattern with nullish coalescing assignment
 	key && (index.query[key] ??= []).push(field);
@@ -221,7 +169,6 @@ const _indexField = (index: _CacheIndex, field: _Field): void => {
 	const meta = _REGISTRY[field];
 	const resolved = { ...meta, field } as _Resolved<typeof field>;
 	const wraps = meta.wrap || undefined;
-	const wrapAuto = (w: _RawMeta) => w.auto;
 	// biome-ignore lint/style/noParameterAssign: Builder pattern mutation
 	index.byField[field] = resolved;
 	// biome-ignore lint/style/noParameterAssign: Builder pattern mutation
@@ -229,82 +176,61 @@ const _indexField = (index: _CacheIndex, field: _Field): void => {
 	index.cols.push(meta.col);
 	meta.mark && index.marks.push(meta.mark);
 	meta.wrap && index.wraps.push(meta.wrap);
-	// Non-falsifiable caps: null → nullable/required, sql → sql:X
 	_addCap(index, meta.null ? 'nullable' : 'required', field, resolved);
 	_addCap(index, `sql:${meta.sql}`, field, resolved);
-	// Falsifiable dimension caps: mark:X, wrap:X/unwrapped, gen:X
 	_addCap(index, meta.mark && `mark:${meta.mark}`, field, resolved);
 	_addCap(index, meta.wrap ? `wrap:${meta.wrap.map(w => w.name).join(',')}` : 'unwrapped', field, resolved);
 	_addCap(index, meta.gen && `gen:${meta.gen}`, field, resolved);
-	// Existence caps: hasX for falsifiable props
 	_addCap(index, meta.mark && 'hasMark', field, resolved);
 	_addCap(index, meta.gen && 'hasGen', field, resolved);
 	_addCap(index, meta.ref && 'hasRef', field, resolved);
 	_addCap(index, meta.wrap && 'hasWrap', field, resolved);
-	// Wrap meta caps: autoUpdate, autoInsert
-	_addCap(index, wraps?.some(w => wrapAuto(w) === 'both') && 'autoUpdate', field, resolved);
-	_addCap(index, wraps?.some(w => wrapAuto(w) === 'insert' || wrapAuto(w) === 'both') && 'autoInsert', field, resolved);
+	_addCap(index, wraps?.some(w => (w.auto as string | false) === 'both') && 'autoUpdate', field, resolved);
+	_addCap(index, wraps?.some(w => (w.auto as string | false) === 'insert' || (w.auto as string | false) === 'both') && 'autoInsert', field, resolved);
 };
-const _indexWrapCategories = (index: _CacheIndex): _CacheIndex => ({
-	...index,
-	wrapByCat: Object.groupBy(Object.keys(_WRAP_META) as _WrapName[], (name) => _WRAP_META[name].cat) as Record<string, _WrapName[]>,
-})
-const _buildTableIndex = (keys: readonly _Field[], tableNames: readonly _Table[]) => Object.fromEntries(keys.map(field => [field, tableNames.filter(table => _TABLES[table].fields.some(entry => entry.field === field))])) as { [F in _Field]: _Table[] };
-const _finalizeCache = (index: _CacheIndex, keys: readonly _Field[], tableNames: readonly _Table[]) => ({
-	...(index.byField as { [FieldKey in _Field]: _Resolved<FieldKey> }),
-	...(index.byCol as { [ColKey in _Col]: _Resolved<_ColToField[ColKey]> }),
-	keys,
-	cols: index.cols as readonly _Col[],
-	marks: [...new Set(index.marks)] as readonly _Mark[],
-	wraps: [...new Set(index.wraps)] as readonly _Wrap[],
-	query: index.query as { [K in _CapKey]: _Caps[K][] },
-	entries: index.entries as unknown as { readonly [K in _CapKey]: readonly _Resolved<_Caps[K]>[] },
-	wrapByCat: index.wrapByCat as unknown as { readonly [C in _WrapCat]: readonly _WrapName[] },
-	tableNames,
-	tableByField: _buildTableIndex(keys, tableNames),
-});
 const _buildCache = () => {
 	const keys = Object.keys(_REGISTRY) as _Field[];
 	const tableNames = Object.keys(_TABLES) as _Table[];
 	const index: _CacheIndex = { byField: {}, byCol: {}, cols: [], marks: [], wraps: [], query: {}, entries: {}, wrapByCat: {} };
 	A.map(keys, (field) => _indexField(index, field));
-	return _finalizeCache(_indexWrapCategories(index), keys, tableNames);
+	const wrapByCat = Object.groupBy(Object.keys(_WRAP_META) as _WrapName[], (name) => _WRAP_META[name].cat) as Record<string, _WrapName[]>;
+	const tableByField = Object.fromEntries(keys.map(field => [field, tableNames.filter(table => _TABLES[table].fields.some(entry => entry.field === field))])) as { [F in _Field]: _Table[] };
+	return {
+		...(index.byField as { [FieldKey in _Field]: _Resolved<FieldKey> }),
+		...(index.byCol as { [ColKey in _Col]: _Resolved<_ColToField[ColKey]> }),
+		keys, cols: index.cols as readonly _Col[],
+		marks: [...new Set(index.marks)] as readonly _Mark[],
+		wraps: [...new Set(index.wraps)] as readonly _Wrap[],
+		query: index.query as { [K in _CapKey]: _Caps[K][] },
+		entries: index.entries as unknown as { readonly [K in _CapKey]: readonly _Resolved<_Caps[K]>[] },
+		wrapByCat: wrapByCat as unknown as { readonly [C in _WrapCat]: readonly _WrapName[] },
+		tableNames, tableByField,
+	};
 };
-const _cache = _buildCache();	// Field Cache
+const _cache = _buildCache();
 
 // --- [INTERNAL] --------------------------------------------------------------
 
-const _pick = (cap: _CapKey, cols: Record<string, unknown>): _Resolved | undefined =>						/** Find first entry matching cap whose field OR col exists in cols object */
+const _pick = (cap: _CapKey, cols: Record<string, unknown>): _Resolved | undefined =>
 	(_cache.entries[cap] as readonly _Resolved[] | undefined)?.find(entry => entry.field in cols || entry.col in cols);
-const _has = (cap: _CapKey, field: string): boolean =>														/** Check if field belongs to capability set (type-safe membership test) */
+const _has = (cap: _CapKey, field: string): boolean =>
 	(_cache.query[cap] as readonly string[] | undefined)?.includes(field) ?? false;
-const _resolve = (fieldOrCol: string): _Resolved | undefined => {											/** Resolve field or column name to entry (unified lookup via spread cache keys) */
+const _resolve = (fieldOrCol: string): _Resolved | undefined => {
 	const val = (_cache as Record<string, unknown>)[fieldOrCol];
-	const isResolved = val && typeof val === 'object' && 'field' in val;
-	return isResolved ? val as _Resolved : undefined;
+	return val && typeof val === 'object' && 'field' in val ? val as _Resolved : undefined;
 };
-const _predMeta = (fieldOrCol: string): { cast: typeof _SQL_CAST[keyof typeof _SQL_CAST] | undefined; wrap: 'casefold' | undefined } => {		/** Derive predicate metadata from field registry (cast + wrap for SQL predicates) */
+const _predMeta = (fieldOrCol: string): { cast: typeof _SQL_CAST[keyof typeof _SQL_CAST] | undefined; wrap: 'casefold' | undefined } => {
 	const entry = _resolve(fieldOrCol);
-	return Match.value(entry).pipe(
-		Match.when(Match.undefined, () => ({ cast: undefined, wrap: undefined })),
-		Match.orElse((resolved) => ({
-			cast: _SQL_CAST[resolved.sql as keyof typeof _SQL_CAST],
-			wrap: undefined,
-		})),
-	);
+	return entry ? { cast: _SQL_CAST[entry.sql as keyof typeof _SQL_CAST], wrap: undefined } : { cast: undefined, wrap: undefined };
 };
-const _isSqlType = (fieldOrCol: string, sqlType: _Sql): boolean => _resolve(fieldOrCol)?.sql === sqlType;	/** Check if field has specific SQL type */
-const _isGen = (fieldOrCol: string, gen: _Gen): boolean => _resolve(fieldOrCol)?.gen === gen;				/** Check if field has specific generation type */
+const _isSqlType = (fieldOrCol: string, sqlType: _Sql): boolean => _resolve(fieldOrCol)?.sql === sqlType;
+const _isGen = (fieldOrCol: string, gen: _Gen): boolean => _resolve(fieldOrCol)?.gen === gen;
 function _get<F extends _Field>(key: F): _Resolved<F>;
 function _get<C extends _Col>(key: C): _Resolved<_ColToField[C]>;
 function _get<T extends _Table>(key: T, layer: 'table'): _Tbl<T>;
 function _get<W extends _WrapName>(key: W, layer: 'wrap'): _Meta<W>;
 function _get(key: string, layer?: 'table' | 'wrap') {
-	return Match.value(layer).pipe(
-		Match.when('table', () => _TABLES[key as _Table]),
-		Match.when('wrap', () => _WRAP_META[key as _WrapName]),
-		Match.orElse(() => _cache[key as _Field]),
-	);
+	return Match.value(layer).pipe(Match.when('table', () => _TABLES[key as _Table]), Match.when('wrap', () => _WRAP_META[key as _WrapName]), Match.orElse(() => _cache[key as _Field]));
 }
 function _from(mark: _Mark, cols: Record<string, unknown>): _Col | false;
 function _from<MarkKey extends _Mark>(marks: readonly MarkKey[], cols: Record<string, unknown>): { [Key in MarkKey]?: _Col };
@@ -328,7 +254,7 @@ function _from(input: _Mark | readonly string[], cols?: Record<string, unknown>,
 function _lens(cap: _CapKey): _Lens;
 function _lens(constraints: Partial<_Entry>): _Lens;
 function _lens(input: _CapKey | Partial<_Entry>): _Lens {
-	const fields = typeof input === 'string'	// Fast path: cap key string → direct cache lookup
+	const fields = typeof input === 'string'
 		? ((_cache.query as Record<string, _Field[] | undefined>)[input] ?? [])
 		: (() => {
 			const keys = Object.keys(input);
@@ -355,13 +281,9 @@ const _dispatch = <D extends _DispatchDim, R>(dim: D, targets: _Field | readonly
 	(typeof targets === 'string' ? [targets] : targets).map((name) => {
 		const entry = _REGISTRY[name];
 		const value = entry[dim];
-		const isFalse = value === false;
-		const isWrap = dim === 'wrap';
-		return isFalse
-			? handlers.none(entry, name)
-			: isWrap
-				? ((wrapMeta: _Meta) => (handlers as _DimHandlers<'wrap', R>)[wrapMeta.cat](entry, wrapMeta, name))((value as _Wrap)[0])
-				: ((handler: ((e: _Entry, f: _Field) => R) | undefined) => handler ? handler(entry, name) : handlers.none(entry, name))((handlers as unknown as Record<string, (e: _Entry, f: _Field) => R>)[value as string]);
+		return value === false ? handlers.none(entry, name)
+			: dim === 'wrap' ? ((wrapMeta: _Meta) => (handlers as _DimHandlers<'wrap', R>)[wrapMeta.cat](entry, wrapMeta, name))((value as _Wrap)[0])
+			: ((handler: ((e: _Entry, f: _Field) => R) | undefined) => handler ? handler(entry, name) : handlers.none(entry, name))((handlers as unknown as Record<string, (e: _Entry, f: _Field) => R>)[value as string]);
 	});
 
 // --- [FIELD_OBJECT] ----------------------------------------------------------
@@ -378,18 +300,13 @@ const Field = Object.assign(_get, _cache.query, {
 // --- [FIELD_NAMESPACE] -------------------------------------------------------
 
 namespace Field {
-	// Key unions (parameterized for narrowing)
 	export type Name<F extends _Field = _Field> = F; export type Table<T extends _Table = _Table> = T; export type Col<C extends _Col = _Col> = C; export type Mark<M extends _Mark = _Mark> = M; export type Wrap<W extends _Wrap = _Wrap> = W;
 	export type WrapName<W extends _WrapName = _WrapName> = W; export type Gen<G extends _Gen = _Gen> = G; export type FkAction<A extends _FkAction = _FkAction> = A; export type WrapCat<C extends _WrapCat = _WrapCat> = C;
-	// Entry lookups (parameterized)
 	export type Entry<F extends _Field = _Field> = _Entry<F>; export type Resolved<F extends _Field = _Field> = _Resolved<F>;
 	export type TableEntry<T extends _Table = _Table> = _Tbl<T>; export type WrapEntry<W extends _WrapName = _WrapName> = _Meta<W>;
-	// Bi-directional mappings
 	export type FieldsOf<T extends _Table = _Table> = _FieldsOf<T>; export type TablesOf<F extends _Field = _Field> = _TablesOf<F>; export type CatToWraps<C extends _WrapCat = _WrapCat> = _CatToWraps[C];
-	// Capability selection (use shape types for valid constraints)
 	export type Has<C extends Partial<_EntryShape> = Partial<_EntryShape>> = _Has<C>; export type HasMeta<C extends Partial<_MetaShape> = Partial<_MetaShape>> = _HasMeta<C>;
 	export type HasWrap<C extends Partial<_MetaShape> = Partial<_MetaShape>> = _HasWrap<C>;
-	// Function signatures
 	export type Lens<L extends _Lens = _Lens> = L; export type DispatchDim<D extends _DispatchDim = _DispatchDim> = D; export type DimHandlers<D extends _DispatchDim = _DispatchDim, R = unknown> = _DimHandlers<D, R>;
 }
 

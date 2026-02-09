@@ -283,8 +283,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                                     ),
                             },
                         );
-                    const onError = (error: unknown) =>
-                        MetricsService.trackError(metrics.ai.errors, labels, error);
+                    const onError = (error: unknown) => MetricsService.trackError(metrics.ai.errors, labels, error);
                     const withStart = Stream.onStart(base, onStart);
                     const withFinish = Stream.mapEffect(withStart, (part) => onFinish(part).pipe(Effect.as(part)),);
                     const withError = Stream.tapError(withFinish, onError);

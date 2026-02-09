@@ -24,44 +24,30 @@ import { constant } from 'effect/Function';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
-const _resolveCodec = (format: string) => pipe(
-	Option.fromNullable(Codec.resolve(format)),
-	Option.match({
-		onNone: () => Effect.fail(HttpError.Validation.of('format', `Unsupported format: ${format}`)),
-		onSome: Effect.succeed,
-	}),
-);
+const _resolveCodec = (format: string) => Option.match(Option.fromNullable(Codec.resolve(format)), {
+	onNone: () => Effect.fail(HttpError.Validation.of('format', `Unsupported format: ${format}`)),
+	onSome: Effect.succeed,
+});
 const _mapAsset = (asset: Asset, index: number) => ({
-	content: asset.content,
-	id: asset.id,
-	ordinal: index + 1,
-	type: asset.type,
+	content: asset.content, id: asset.id, ordinal: index + 1, type: asset.type,
 	updatedAt: DateTime.toEpochMillis(asset.updatedAt),
 	...(Option.isSome(asset.hash) && { hash: asset.hash.value }),
 	...(Option.isSome(asset.name) && { name: asset.name.value }),
 });
-const _hydrateAsset = (adapter: typeof StorageAdapter.Service) => (asset: Asset) => Option.match(asset.storageRef, {
-	onNone: () => Effect.succeed(asset),
-	onSome: (storageKey) => adapter.get(storageKey).pipe(
-		Effect.option,
-		Effect.map(Option.match({
-			onNone: () => asset,
-			onSome: (storageResult: StorageAdapter.GetResult) => ({ ...asset, content: Buffer.from(storageResult.body).toString('base64') }),
-		})),
-	),
-});
+const _resolveItemCodec = (item: { mime?: string | null; name?: string | null }, fallback: NonNullable<ReturnType<typeof Codec.resolve>>) => pipe(
+	Option.fromNullable(item.mime),
+	Option.flatMap((mime) => Option.fromNullable(Codec.resolve(mime))),
+	Option.orElse(() => pipe(Option.fromNullable(item.name), Option.flatMap((name) => Option.fromNullable(name.split('.').pop())), Option.flatMap((ext) => Option.fromNullable(Codec.resolve(ext))))),
+	Option.getOrElse(() => fallback),
+);
 const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const [metrics, context, repositories, audit, adapter] = yield* Effect.all([MetricsService, Context.Request.current, DatabaseService, AuditService, StorageAdapter]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;
 		const codec = yield* _resolveCodec(parameters.format);
-		const exportFormat = yield* Effect.filterOrFail(
-			Effect.succeed(codec.ext),
-			(ext): ext is Transfer.Format => Object.hasOwn(Transfer.formats, ext),
-			() => HttpError.Validation.of('format', `Unsupported export format: ${parameters.format}`),
-		);
+		const exportFormat = yield* Effect.filterOrFail(Effect.succeed(codec.ext), (ext): ext is Transfer.Format => Object.hasOwn(Transfer.formats, ext), () => HttpError.Validation.of('format', `Unsupported export format: ${parameters.format}`));
 		const isBinaryFormat = (value: Transfer.Format): value is Transfer.BinaryFormat => Transfer.formats[value].kind === 'binary';
 		const baseStream = Stream.fromIterableEffect(repositories.assets.byFilter(session.userId, appId, {
 			...(Option.isSome(parameters.after) && { after: parameters.after.value }),
@@ -70,7 +56,13 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 		}));
 		const textStream = baseStream.pipe(Stream.zipWithIndex, Stream.map(([asset, index]) => _mapAsset(asset, index)));
 		const binaryStream = baseStream.pipe(
-			Stream.mapEffect(_hydrateAsset(adapter)),
+			Stream.mapEffect((asset) => pipe(
+				asset.storageRef,
+				Option.map(adapter.get as (storageKey: string) => Effect.Effect<StorageAdapter.GetResult, unknown>),
+				Option.map(Effect.map((storageResult) => ({ ...asset, content: Buffer.from(storageResult.body).toString('base64') }))),
+				Option.map(Effect.orElseSucceed(constant(asset))),
+				Option.getOrElse(constant(Effect.succeed(asset))),
+			)),
 			Stream.zipWithIndex,
 			Stream.map(([asset, index]) => _mapAsset(asset, index)),
 		);
@@ -104,7 +96,7 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 	}).pipe(Telemetry.span('transfer.export', { kind: 'server', metrics: false }));
 const _importAssets = (parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const [metrics, context, repositories, search, audit, storage] = yield* Effect.all([MetricsService, Context.Request.current, DatabaseService, SearchRepo, AuditService, StorageService]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;
@@ -113,10 +105,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 		const body = yield* HttpServerRequest.HttpServerRequest.pipe(
 			Effect.flatMap((req) => req.arrayBuffer),
 			Effect.mapError((err) => HttpError.Internal.of('Failed to read request body', err)),
-			Effect.filterOrFail(
-				(buffer) => buffer.byteLength > 0 && buffer.byteLength <= Transfer.limits.totalBytes,
-				(buffer) => HttpError.Validation.of('body', buffer.byteLength === 0 ? 'Empty request body' : `Max import size: ${Transfer.limits.totalBytes} bytes`),
-			),
+			Effect.filterOrFail((buffer) => buffer.byteLength > 0 && buffer.byteLength <= Transfer.limits.totalBytes, (buffer) => HttpError.Validation.of('body', buffer.byteLength === 0 ? 'Empty request body' : `Max import size: ${Transfer.limits.totalBytes} bytes`)),
 		);
 		const parsed = yield* Stream.runCollect(Transfer.import(codec.binary ? body : codec.content(body), { format: codec.ext })).pipe(
 			Effect.map((chunk) => Chunk.toArray(chunk)),
@@ -126,37 +115,20 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 		);
 		const { failures: rawFailures, items: rawItems } = Transfer.partition(parsed);
 		const maxContentBytes = Transfer.limits.entryBytes;
-		const resolveBinaryCodec = (item: typeof rawItems[number]) => pipe(
-			Option.fromNullable(item.mime),
-			Option.flatMap((mime) => Option.fromNullable(Codec.resolve(mime))),
-			Option.orElse(() => pipe(
-				Option.fromNullable(item.name),
-				Option.flatMap((name) => Option.fromNullable(name.split('.').pop())),
-				Option.flatMap((ext) => Option.fromNullable(Codec.resolve(ext))),
-			)),
-			Option.getOrElse(() => codec),
-		);
 		const binaryValidation = codec.binary
-			? pipe(
-				rawItems,
-				A.map((item) => ({
-					item,
-					parseError: Option.match(Option.liftThrowable(() => resolveBinaryCodec(item).buf(item.content).byteLength)(), {
-						onNone: () => Option.some(new TransferError.Parse({ code: 'INVALID_RECORD', detail: 'Invalid binary entry content', ordinal: item.ordinal })),
-						onSome: (sizeBytes) => sizeBytes > maxContentBytes
-							? Option.some(new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal }))
-							: Option.none(),
-					}),
-				})),
-			)
+			? pipe(rawItems, A.map((item) => ({
+				item,
+				parseError: Option.match(Option.liftThrowable(() => _resolveItemCodec(item, codec).buf(item.content).byteLength)(), {
+					onNone: () => Option.some(new TransferError.Parse({ code: 'INVALID_RECORD', detail: 'Invalid binary entry content', ordinal: item.ordinal })),
+					onSome: (sizeBytes) => sizeBytes > maxContentBytes
+						? Option.some(new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal }))
+						: Option.none(),
+				}),
+			})))
 			: [];
 		const sizeFailures = codec.binary
 			? A.filterMap(binaryValidation, ({ parseError }) => parseError)
-			: pipe(
-				rawItems,
-				A.filter((item) => Codec.size(item.content) > maxContentBytes),
-				A.map((item) => new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal })),
-			);
+			: pipe(rawItems, A.filter((item) => Codec.size(item.content) > maxContentBytes), A.map((item) => new TransferError.Parse({ code: 'TOO_LARGE', detail: `Max content size: ${maxContentBytes} bytes`, ordinal: item.ordinal })));
 		const items = codec.binary
 			? A.filterMap(binaryValidation, ({ item, parseError }) => Option.match(parseError, { onNone: () => Option.some(item), onSome: () => Option.none() }))
 			: pipe(rawItems, A.filter((item) => Codec.size(item.content) <= maxContentBytes));
@@ -168,56 +140,32 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 			MetricsService.inc(metrics.transfer.rows, MetricsService.label({ app: appId, outcome: 'parsed' }), items.length),
 			MetricsService.inc(metrics.transfer.rows, MetricsService.label({ app: appId, outcome: 'failed' }), failures.length),
 		], { discard: true });
-		yield* Effect.filterOrFail(
-			Effect.succeed(items),
-			A.isNonEmptyReadonlyArray,
-			() => HttpError.Validation.of('body', failures.length > 0 ? `All ${failures.length} rows failed validation` : 'Empty file - no data to import'),
-		);
-		const hashError = new TransferError.Fatal({ code: 'PARSER_ERROR', detail: 'Failed to compute content hash' });
-		const toHashError = () => hashError;
+		yield* Effect.filterOrFail(Effect.succeed(items), A.isNonEmptyReadonlyArray, () => HttpError.Validation.of('body', failures.length > 0 ? `All ${failures.length} rows failed validation` : 'Empty file - no data to import'));
+		const toHashError = () => new TransferError.Fatal({ code: 'PARSER_ERROR', detail: 'Failed to compute content hash' });
 		const prepareItem = (item: typeof items[number]) =>
 			codec.binary
 				? Effect.gen(function* () {
-					const byMime = pipe(
-						Option.fromNullable(item.mime),
-						Option.flatMap((mime) => Option.fromNullable(Codec.resolve(mime))),
-					);
-					const byName = pipe(
-						Option.fromNullable(item.name),
-						Option.flatMap((name) => Option.fromNullable(name.split('.').pop())),
-						Option.flatMap((ext) => Option.fromNullable(Codec.resolve(ext))),
-					);
-					const itemCodec = pipe(byMime, Option.orElse(() => byName), Option.getOrElse(() => codec));
+					const itemCodec = _resolveItemCodec(item, codec);
 					const rawBuffer = itemCodec.buf(item.content);
 					const computedHash = yield* (item.hash === undefined ? Crypto.hash(item.content) : Effect.succeed(item.hash)).pipe(Effect.mapError(toHashError));
 					const storageKey = `assets/${appId}/${computedHash}.${itemCodec.ext}`;
 					const originalName = item.name ?? `${computedHash.slice(0, 8)}.${itemCodec.ext}`;
 					yield* storage.put({ body: rawBuffer, contentType: itemCodec.mime, key: storageKey, metadata: { type: item.type } });
 					const metadata = JSON.stringify({ hash: computedHash, mime: itemCodec.mime, originalName, size: rawBuffer.byteLength, storageRef: storageKey });
-					return {
-						appId, content: metadata, deletedAt: Option.none(), hash: pipe(computedHash, Option.some),
-						name: pipe(originalName, Option.some), status: 'active' as const, storageRef: pipe(storageKey, Option.some),
-						type: item.type, updatedAt: undefined, userId: pipe(session.userId, Option.some),
-					};
+					return { appId, content: metadata, deletedAt: Option.none(), hash: Option.some(computedHash), name: Option.some(originalName), status: 'active' as const, storageRef: Option.some(storageKey), type: item.type, updatedAt: undefined, userId: Option.some(session.userId) };
 				})
-				: Effect.succeed({
-					appId, content: item.content, deletedAt: Option.none(), hash: Option.fromNullable(item.hash),
-					name: Option.fromNullable(item.name), status: 'active' as const, storageRef: Option.none<string>(),
-					type: item.type, updatedAt: undefined, userId: pipe(session.userId, Option.some),
-				});
-		const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
-			const ordinals = batchItems.map((batchItem) => batchItem.ordinal);
-			const prepareAll = Effect.forEach(batchItems, prepareItem, { concurrency: 10 });
-			return prepareAll.pipe(
-				Effect.flatMap((prepared) => repositories.assets.insertMany(prepared) as Effect.Effect<readonly Asset[], unknown>),
-				Effect.map((created): typeof accumulator => ({ assets: A.appendAll(accumulator.assets, created), dbFailures: accumulator.dbFailures })),
-				Effect.catchAll((error) =>
-					Effect.logError('Batch insert failed', { error: String(error), ordinals }).pipe(
-						Effect.as({ assets: accumulator.assets, dbFailures: A.append(accumulator.dbFailures, new TransferError.Import({ cause: error, code: 'BATCH_FAILED', rows: ordinals })) } as typeof accumulator),
-					),
-				),
-			);
-		};
+				: Effect.succeed({ appId, content: item.content, deletedAt: Option.none(), hash: Option.fromNullable(item.hash), name: Option.fromNullable(item.name), status: 'active' as const, storageRef: Option.none<string>(), type: item.type, updatedAt: undefined, userId: Option.some(session.userId) });
+			const processBatch = (accumulator: { readonly assets: readonly Asset[]; readonly dbFailures: readonly TransferError.Import[] }, batchItems: typeof items) => {
+				const ordinals = batchItems.map((batchItem) => batchItem.ordinal);
+				return Effect.forEach(batchItems, prepareItem, { concurrency: 10 }).pipe(
+					Effect.flatMap((prepared) => repositories.assets.insertMany(prepared) as Effect.Effect<readonly Asset[], unknown>),
+					Effect.map((created): typeof accumulator => ({ assets: A.appendAll(accumulator.assets, created), dbFailures: accumulator.dbFailures })),
+					Effect.catchAll((error) => Effect.as(
+						Effect.logError('Batch insert failed', { error: String(error), ordinals }),
+						{ assets: accumulator.assets, dbFailures: A.append(accumulator.dbFailures, new TransferError.Import({ cause: error, code: 'BATCH_FAILED', rows: ordinals })) } as typeof accumulator,
+					)),
+				);
+			};
 		const initial = { assets: [] as readonly Asset[], dbFailures: [] as readonly TransferError.Import[] };
 		const { assets, dbFailures } = dryRun
 			? initial

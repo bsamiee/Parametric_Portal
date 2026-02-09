@@ -17,7 +17,7 @@ import { Effect, } from 'effect';
 
 const handleSubscribe = (jobs: typeof JobService.Service) =>
 	Effect.gen(function* () {
-		yield* Middleware.requireMfaVerified;
+		yield* Middleware.mfaVerified;
 		const ctx = yield* Context.Request.current;
 		const appId = ctx.tenantId;
 		return yield* StreamingService.sse({
