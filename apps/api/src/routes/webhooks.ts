@@ -45,9 +45,15 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 			)))
 			.handle('remove', ({ path }) => CacheService.rateLimit('mutation', requireAdmin.pipe(
 				Effect.andThen(Context.Request.currentTenantId),
-			Effect.map((tenantId) => ({ decodedUrl: decodeURIComponent(path.url), tenantId })),
+				Effect.flatMap((tenantId) => Effect.try({
+					catch: (error) => HttpError.Validation.of('url', 'Malformed webhook URL encoding', error),
+					try: () => decodeURIComponent(path.url),
+				}).pipe(Effect.map((decodedUrl) => ({ decodedUrl, tenantId })))),
 				Effect.flatMap(({ tenantId, decodedUrl }) => webhooks.remove(tenantId, decodedUrl)),
-				Effect.mapError((error) => HttpError.Internal.of('Webhook remove failed', error)),
+				Effect.mapError((error): HttpError.Validation | HttpError.Internal =>
+					error instanceof HttpError.Validation || error instanceof HttpError.Internal
+						? error
+						: HttpError.Internal.of('Webhook remove failed', error)),
 				Effect.tap(() => audit.log('Webhook.remove', { details: { url: path.url } })),
 				Effect.as({ success: true as const }),
 				Telemetry.span('webhooks.remove', { kind: 'server', metrics: false }),

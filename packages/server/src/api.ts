@@ -600,6 +600,7 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 		HttpApiEndpoint.del('remove', '/:url')
 			.setPath(S.Struct({ url: S.String }))
 			.addSuccess(_Success)
+			.addError(HttpError.Validation)
 			.annotate(OpenApi.Summary, 'Remove webhook'),
 	)
 	.add(

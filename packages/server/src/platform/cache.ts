@@ -212,7 +212,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 	} as const;
 	static readonly _presenceSchema = S.Struct({ connectedAt: S.Number, userId: S.String });
 	static readonly Persistence: Layer.Layer<Persistence.ResultPersistence, never, CacheService> = Layer.unwrapScoped(CacheService.pipe(Effect.map((service) => PersistenceRedis.layerResult(service._redisOpts))),);
-	static readonly cache = <K extends Persistence.ResultPersistence.KeyAny, A, R>(options: {
+	static readonly cache = <K extends Persistence.ResultPersistence.KeyAny, A = never, R = never>(options: {
 		readonly storeId: string; readonly timeToLive?: Duration.DurationInput; readonly inMemoryCapacity?: number; readonly inMemoryTTL?: Duration.DurationInput;
 	} & ({
 		readonly lookup: (key: K) => Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R>;

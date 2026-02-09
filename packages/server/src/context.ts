@@ -2,7 +2,7 @@
  * Unified request context: tenant isolation, session state, rate limiting, circuit breaker.
  * FiberRef+Effect.Tag composition, cookie handling, cluster state propagation.
  */
-import type { ShardId } from '@effect/cluster';
+import { Entity, type ShardId } from '@effect/cluster';
 import { HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import type { Cookie } from '@effect/platform/Cookies';
 import type { SqlClient } from '@effect/sql';
@@ -33,7 +33,7 @@ const _EMPTY_CTX = {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const OAuthProvider = S.Literal('apple', 'github', 'google', 'microsoft');
-const _RunnerId = S.NonEmptyTrimmedString.pipe(S.brand('RunnerId'));
+const _RunnerId = S.NonEmptyTrimmedString;
 const _ShardIdString = S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
 const UserRole = (() => {
 	const roles = ['owner', 'admin', 'member', 'viewer', 'guest'] as const;
@@ -86,7 +86,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		requestId: 'x-request-id',
 		trace: ['traceparent', 'tracestate', 'baggage'] as const,
 	} as const;
-	private static readonly _ref = FiberRef.unsafeMake<Context.Request.Data>({ ..._EMPTY_CTX, requestId: crypto.randomUUID(), tenantId: _ID.default });
+	private static readonly _ref = FiberRef.unsafeMake<Context.Request.Data>({ ..._EMPTY_CTX, requestId: crypto.randomUUID(), tenantId: _ID.unspecified });
 	static readonly current = FiberRef.get(Request._ref);
 	static readonly currentTenantId = Request.current.pipe(Effect.map((ctx) => ctx.tenantId));
 	static readonly sessionOrFail = Request.current.pipe(Effect.flatMap((ctx) => Option.match(ctx.session, { onNone: () => Effect.fail(HttpError.Auth.of('Missing session')), onSome: Effect.succeed })));
@@ -118,7 +118,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx) => ({ ...ctx, ...partial })).pipe(Effect.andThen(Request.annotate(Effect.void)));
 	static readonly within = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E, R> => Effect.locallyWith(Request.annotate(effect), Request._ref, (current) => ({ ...current, ...ctx, tenantId }));
 	static readonly withinSync = <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>, ctx?: Partial<Context.Request.Data>): Effect.Effect<A, E | SqlError, R | SqlClient.SqlClient> =>
-		Client.tenant.with(tenantId, Effect.locallyWith(Request.annotate(effect), Request._ref, (current) => ({ ...current, ...ctx, tenantId })));
+		Client.tenant.with(tenantId, Request.within(tenantId, effect, ctx));
 	static readonly system = (requestId = crypto.randomUUID()): Context.Request.Data => ({ ..._EMPTY_CTX, requestId, tenantId: _ID.system });
 	static readonly cookie = (() => {	// Cookie: IIFE encapsulates secure flag and config
 		const secure = Config.string('API_BASE_URL').pipe(
@@ -144,10 +144,21 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		<A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>): Effect.Effect<A, E, R>;
 		(partial: Partial<Context.Request.ClusterState>): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 	} = dual(2, <A, E, R>(effect: Effect.Effect<A, E, R>, partial: Partial<Context.Request.ClusterState>) =>
-		Effect.locallyWith(Request.annotate(effect), Request._ref, (ctx) => ({
-			...ctx,
-			cluster: Option.some({ ...Option.getOrElse(ctx.cluster, constant({ entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null } as Context.Request.ClusterState)), ...partial }),
-		})),
+		Effect.serviceOption(Entity.CurrentRunnerAddress).pipe(
+			Effect.flatMap((runnerAddress) =>
+				Effect.locallyWith(Request.annotate(effect), Request._ref, (ctx) => {
+					const current = Option.getOrElse(ctx.cluster, constant({ entityId: null, entityType: null, isLeader: false, runnerId: null, shardId: null } as Context.Request.ClusterState));
+					const merged = { ...current, ...partial };
+					return {
+						...ctx,
+						cluster: Option.some({
+							...merged,
+							runnerId: merged.runnerId ?? Option.getOrNull(Option.map(runnerAddress, (address) => address.toString())),
+						}),
+					};
+				}),
+			),
+		),
 	);
 	static readonly config = {
 		csrf: { expectedValue: 'XMLHttpRequest', header: Request.Headers.requestedWith },

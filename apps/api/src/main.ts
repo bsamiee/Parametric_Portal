@@ -3,7 +3,7 @@
  * Architecture: Platform → Services → HTTP (3-tier, linear dependency chain).
  */
 import { createServer } from 'node:http';
-import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
+import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer, HttpServerResponse } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { AiRuntime } from '@parametric-portal/ai/runtime';
 import { SearchService } from '@parametric-portal/ai/search';
@@ -99,7 +99,9 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
 	return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
 		CacheService.headers,
 		HttpMiddleware.logger,
-		Effect.orDie,
+		Effect.catchAllDefect((defect) => Effect.logError('Unhandled request defect', { defect: String(defect) }).pipe(
+			Effect.andThen(HttpServerResponse.unsafeJson({ details: 'Unhandled request defect', error: 'InternalServerError' }, { status: 500 })),
+		)),
 	)).pipe(
 		Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
 		Layer.provide(ApiLayer),

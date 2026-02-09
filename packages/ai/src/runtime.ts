@@ -57,9 +57,9 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                     }),
                 ),
             );
-        const settingsCache = yield* CacheService.cache<AiSettingsKey, never>({
+        const settingsCache = yield* CacheService.cache({
             inMemoryCapacity: _CONFIG.cache.settings.capacity,
-            lookup: (key) =>
+            lookup: (key: AiSettingsKey) =>
                 db.apps.one([{ field: 'id', value: key.tenantId }]).pipe(
                     Effect.mapError(mapSettingsError),
                     Effect.flatMap(
