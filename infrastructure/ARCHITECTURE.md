@@ -81,7 +81,9 @@ infrastructure/
 ├── package.json         # @pulumi/* dependencies
 ├── tsconfig.json        # TS config
 └── src/
-    └── platform.ts      # All config + resources in one file
+    ├── platform.ts      # Entry point: config, env/secret assembly, deploy orchestration
+    ├── data.ts           # CloudDataTier (VPC + RDS + ElastiCache + S3) / SelfhostedDataTier (Docker)
+    └── compute.ts        # CloudComputeTier (K8s) / SelfhostedComputeTier (Docker + Traefik) / ObserveTier
 ```
 
 **Pulumi.yaml** (required, minimal):

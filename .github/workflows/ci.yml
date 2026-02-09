@@ -132,7 +132,7 @@ jobs:
             echo "## CI Summary"
             echo ""
             echo "### Affected Projects"
-            pnpm exec nx show projects --affected --json | jq -r '.[] | "- " + .' || echo "- None"
+            pnpm exec nx show projects --affected --json 2>/dev/null | jq -r '.[] | "- " + .' 2>/dev/null || echo "- None"
             echo ""
             echo "### Quick Links"
             echo "- [Artifacts](#artifacts) - Coverage reports and project graph"
@@ -141,22 +141,39 @@ jobs:
       - name: Create Quality Debt Issue
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
-        env:
-          NODE_OPTIONS: --import tsx
         with:
           script: |
-            const { run } = await import('${{ github.workspace }}/.github/scripts/failure-alert.ts');
-            await run({
-              context: { repo: context.repo, payload: context.payload },
-              core,
-              github,
-              spec: {
-                kind: 'ci',
-                job: '${{ github.job }}',
-                runUrl: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}',
-                prNumber: context.payload.pull_request.number
-              }
+            const marker = '<!-- CI-QUALITY-ALERT -->';
+            const body = [
+              marker,
+              '## CI Failure',
+              '',
+              `- Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+              `- Job: ${{ github.job }}`,
+              '',
+              'Review and fix the failing quality checks before merge.'
+            ].join('\n');
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100
             });
+            const existing = comments.find((comment) => comment.user?.type === 'Bot' && comment.body?.includes(marker));
+            await (existing
+              ? github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body
+                })
+              : github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body
+                }));
 
   # --- Security Scanning (parallel with quality) ----------------------------
   dependency-audit:

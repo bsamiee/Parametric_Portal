@@ -60,7 +60,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 				)
 			.handle('refresh', ({ payload }) =>
 				CacheService.rateLimit('api',
-					Middleware.requireRole('admin').pipe(
+					Middleware.role('admin').pipe(
 							Effect.andThen(search.refresh(payload.includeGlobal)),
 							Effect.as({ status: 'ok' as const }),
 							Effect.catchTag('Forbidden', Effect.fail),
@@ -71,7 +71,7 @@ const SearchLive = HttpApiBuilder.group(ParametricApi, 'search', (handlers) =>
 				)
 			.handle('refreshEmbeddings', ({ payload }) =>
 				CacheService.rateLimit('api',
-					Middleware.requireRole('admin').pipe(
+					Middleware.role('admin').pipe(
 							Effect.andThen(search.refreshEmbeddings({ includeGlobal: payload.includeGlobal })),
 							Effect.map((result) => ({ count: result.count })),
 							Effect.catchTag('Forbidden', Effect.fail),

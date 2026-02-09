@@ -11,26 +11,16 @@ import { ParametricApi } from '@parametric-portal/server/api';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
 import { Resilience } from '@parametric-portal/server/utils/resilience';
-import { Array as A, Config, Duration, Effect, Match, Option, pipe, Schema as S } from 'effect';
+import { Array as A, Duration, Effect, Match, Option, pipe, Schema as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _CONFIG = {
 	contentType: { header: 'content-type', json: 'application/json', protobuf: { aliases: ['application/x-protobuf', 'application/protobuf'], primary: 'application/x-protobuf' } },
-	defaults: 	 { endpoint: Telemetry.config.defaults.endpoint, headers: Telemetry.config.defaults.headers },
-	paths: 		 { traces: '/v1/traces' },
-	replace: 	 { grpc: ':4317', http: ':4318' },
+	protocol: 	 { httpJson: 'http/json', httpProtobuf: 'http/protobuf' } as const,
 	response: 	 { accepted: 202 },
 	telemetry: 	 { circuit: 'telemetry.otlp' },
 } as const;
-const CollectorEndpoint = Config.string('OTEL_EXPORTER_OTLP_ENDPOINT').pipe(
-	Config.withDefault(_CONFIG.defaults.endpoint),
-	Config.map((url) => url.replace(_CONFIG.replace.grpc, _CONFIG.replace.http)),
-);
-const CollectorHeaders = Config.string('OTEL_EXPORTER_OTLP_HEADERS').pipe(
-	Config.withDefault(_CONFIG.defaults.headers),
-	Config.map(Telemetry.parseHeaders),
-);
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
@@ -40,11 +30,10 @@ const OtlpPayload = S.Struct({ resourceSpans: S.Array(S.Unknown) });
 
 const handleIngestTraces = (request: HttpServerRequest.HttpServerRequest) =>
 	Effect.gen(function* () {
-		const endpoint = yield* CollectorEndpoint;
-		const extraHeaders = yield* CollectorHeaders;
+		const collector = yield* Telemetry.collectorConfig;
 		const contentType = Headers.get(request.headers, _CONFIG.contentType.header).pipe(
 			Option.map((header) => (header.split(';')[0] ?? '').trim().toLowerCase()),
-			Option.getOrElse(() => _CONFIG.contentType.json),
+			Option.getOrElse(() => collector.protocol === _CONFIG.protocol.httpProtobuf ? _CONFIG.contentType.protobuf.primary : _CONFIG.contentType.json),
 		);
 		const payload = yield* Match.value(A.some(_CONFIG.contentType.protobuf.aliases, (value) => contentType.includes(value))).pipe(
 			Match.when(true, () => request.arrayBuffer.pipe(Effect.map((buffer) => ({ body: new Uint8Array(buffer), contentType: _CONFIG.contentType.protobuf.primary })))),
@@ -54,8 +43,8 @@ const handleIngestTraces = (request: HttpServerRequest.HttpServerRequest) =>
 			)),
 		);
 		const outbound = pipe(
-			HttpClientRequest.post(`${endpoint}${_CONFIG.paths.traces}`),
-			HttpClientRequest.setHeaders(extraHeaders),
+			HttpClientRequest.post(collector.endpoint),
+			HttpClientRequest.setHeaders(collector.headers),
 			payload.body instanceof Uint8Array
 				? HttpClientRequest.bodyUint8Array(payload.body, payload.contentType)
 				: HttpClientRequest.bodyText(payload.body, payload.contentType),

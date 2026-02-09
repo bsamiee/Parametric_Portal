@@ -3,7 +3,6 @@
  * Admin-gated CRUD for users, sessions, jobs, DLQ, events, tenants.
  */
 import { HttpApiBuilder } from '@effect/platform';
-import { Client } from '@parametric-portal/database/client';
 import { App } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { ParametricApi } from '@parametric-portal/server/api';
@@ -11,6 +10,7 @@ import { Context } from '@parametric-portal/server/context';
 import { HttpError } from '@parametric-portal/server/errors';
 import { EventBus } from '@parametric-portal/server/infra/events';
 import { JobService } from '@parametric-portal/server/infra/jobs';
+import { WebhookService } from '@parametric-portal/server/infra/webhooks';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { AuditService } from '@parametric-portal/server/observe/audit';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
@@ -20,7 +20,7 @@ import { Cause, Effect, Option } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _requireAdmin = Middleware.requireMfaVerified.pipe(Effect.andThen(Middleware.requireRole('admin')));
+const _requireAdmin = Middleware.mfaVerified.pipe(Effect.andThen(Middleware.role('admin')));
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -59,6 +59,7 @@ const handleGetTenant = (database: typeof DatabaseService.Service, id: string) =
 const handleUpdateTenant = (
 	database: typeof DatabaseService.Service,
 	audit: typeof AuditService.Service,
+	eventBus: typeof EventBus.Service,
 	id: string,
 	payload: { readonly name?: string; readonly settings?: unknown },) =>
 	CacheService.rateLimit('mutation', _requireAdmin.pipe(
@@ -67,19 +68,30 @@ const handleUpdateTenant = (
 			...(payload.settings === undefined ? {} : { settings: payload.settings }),
 		}).pipe(Effect.mapError((error) => Cause.isNoSuchElementException(error) ? HttpError.NotFound.of('tenant', id) : HttpError.Internal.of('Tenant update failed', error)),)),
 		Effect.tap(() => audit.log('App.update', { details: { tenantId: id } })),
+		Effect.tap(() => Effect.when(eventBus.publish({
+			aggregateId: id,
+			payload: { _tag: 'app', action: 'settings.updated' },
+			tenantId: id,
+		}).pipe(Effect.ignore), () => payload.settings !== undefined)),
 		Telemetry.span('admin.updateTenant', { kind: 'server', metrics: false }),
 	));
 const handleDeactivateTenant = (
 	database: typeof DatabaseService.Service,
 	audit: typeof AuditService.Service,
+	eventBus: typeof EventBus.Service,
 	id: string,) =>
 	CacheService.rateLimit('mutation', _requireAdmin.pipe(
 		Effect.andThen(database.apps.one([{ field: 'id', value: id }]).pipe(Effect.mapError((error) => HttpError.Internal.of('Tenant lookup failed', error)),)),
 		Effect.flatMap(Option.match({
 			onNone: () => Effect.fail(HttpError.NotFound.of('tenant', id) as HttpError.Internal | HttpError.NotFound),
 			onSome: (tenant) => database.apps.updateSettings(tenant.id, { ...settingsRecord(tenant.settings), deactivated: true }).pipe(Effect.mapError((error) => HttpError.Internal.of('Tenant deactivation failed', error) as HttpError.Internal | HttpError.NotFound),),
-		})),
+			})),
 		Effect.tap(() => audit.log('App.deactivate', { details: { tenantId: id } })),
+		Effect.tap(() => eventBus.publish({
+			aggregateId: id,
+			payload: { _tag: 'app', action: 'settings.updated' },
+			tenantId: id,
+		}).pipe(Effect.ignore)),
 		Effect.as({ success: true as const }),
 		Telemetry.span('admin.deactivateTenant', { kind: 'server', metrics: false }),
 	));
@@ -103,6 +115,7 @@ const handleGetTenantOAuth = (database: typeof DatabaseService.Service, id: stri
 const handleUpdateTenantOAuth = <P extends { readonly providers: ReadonlyArray<unknown> }>(
 	database: typeof DatabaseService.Service,
 	audit: typeof AuditService.Service,
+	eventBus: typeof EventBus.Service,
 	id: string,
 	payload: P,) =>
 	CacheService.rateLimit('mutation', _requireAdmin.pipe(
@@ -110,8 +123,13 @@ const handleUpdateTenantOAuth = <P extends { readonly providers: ReadonlyArray<u
 		Effect.flatMap(Option.match({
 			onNone: () => Effect.fail(HttpError.NotFound.of('tenant', id) as HttpError.Internal | HttpError.NotFound),
 			onSome: (tenant) => database.apps.updateSettings(tenant.id, { ...settingsRecord(tenant.settings), oauthProviders: payload.providers }).pipe(Effect.mapError((error) => HttpError.Internal.of('Tenant OAuth config update failed', error) as HttpError.Internal | HttpError.NotFound),),
-		})),
+			})),
 		Effect.tap(() => audit.log('App.updateOAuth', { details: { tenantId: id } })),
+		Effect.tap(() => eventBus.publish({
+			aggregateId: id,
+			payload: { _tag: 'app', action: 'settings.updated' },
+			tenantId: id,
+		}).pipe(Effect.ignore)),
 		Effect.map(() => payload),
 		Telemetry.span('admin.updateTenantOAuth', { kind: 'server', metrics: false }),
 	));
@@ -120,7 +138,7 @@ const handleUpdateTenantOAuth = <P extends { readonly providers: ReadonlyArray<u
 
 const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 	Effect.gen(function* () {
-		const [database, jobs, eventBus, audit] = yield* Effect.all([DatabaseService, JobService, EventBus, AuditService]);
+		const [database, jobs, eventBus, audit, webhooks] = yield* Effect.all([DatabaseService, JobService, EventBus, AuditService, WebhookService]);
 		return handlers
 			.handle('listUsers', ({ urlParams }) => CacheService.rateLimit('api', _requireAdmin.pipe(
 				Effect.andThen(Context.Request.currentTenantId),
@@ -165,7 +183,25 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Telemetry.span('admin.listDlq', { kind: 'server', metrics: false }),
 			)))
 			.handle('replayDlq', ({ path }) => CacheService.rateLimit('mutation', _requireAdmin.pipe(
-				Effect.andThen(database.jobDlq.markReplayed(path.id).pipe(Effect.mapError((error) => Cause.isNoSuchElementException(error) ? HttpError.NotFound.of('dlq', path.id) : HttpError.Internal.of('DLQ replay failed', error)),)),
+				Effect.andThen(database.jobDlq.one([{ field: 'id', value: path.id }]).pipe(Effect.mapError((error) => HttpError.Internal.of('DLQ lookup failed', error)))),
+				Effect.flatMap((entryOpt) => Effect.gen(function* () {
+					const entry = yield* Option.match(entryOpt, {
+						onNone: () => Effect.fail(HttpError.NotFound.of('dlq', path.id)),
+						onSome: Effect.succeed,
+					});
+					yield* Effect.when(
+						Effect.fail(HttpError.Validation.of('dlqReplay', `Unsupported event DLQ type: ${entry.type}`)),
+						() => entry.source === 'event' && !entry.type.startsWith('webhook:'),
+					);
+					yield* (entry.source === 'job'
+						? Context.Request.withinSync(entry.appId, jobs.submit(entry.type, entry.payload, { priority: 'normal' }).pipe(
+							Effect.flatMap(() => database.jobDlq.markReplayed(path.id)),
+							Effect.asVoid,
+						))
+						: webhooks.retry(path.id).pipe(Effect.asVoid)).pipe(
+							Effect.catchAll((error: unknown) => Effect.fail(HttpError.Internal.of('DLQ replay failed', error))),
+						);
+				})),
 				Effect.tap(() => audit.log('Dlq.replay', { details: { dlqId: path.id } })),
 				Effect.as({ success: true as const }),
 				Telemetry.span('admin.replayDlq', { kind: 'server', metrics: false }),
@@ -185,27 +221,31 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 				Telemetry.span('admin.events', { kind: 'server', metrics: false }),
 			)))
 			.handle('dbIoStats', () => CacheService.rateLimit('api', _requireAdmin.pipe(
-				Effect.andThen(Client.monitoring.ioStats().pipe(Effect.mapError((error) => HttpError.Internal.of('Database io stats failed', error)),)),
+				Effect.andThen(database.monitoring.ioStats().pipe(Effect.mapError((error) => HttpError.Internal.of('Database io stats failed', error)),)),
 				Telemetry.span('admin.dbIoStats', { kind: 'server', metrics: false }),
 			)))
 			.handle('dbIoConfig', () => CacheService.rateLimit('api', _requireAdmin.pipe(
-				Effect.andThen(Client.monitoring.ioConfig().pipe(Effect.mapError((error) => HttpError.Internal.of('Database io config failed', error)),)),
+				Effect.andThen(database.monitoring.ioConfig().pipe(Effect.mapError((error) => HttpError.Internal.of('Database io config failed', error)),)),
 				Telemetry.span('admin.dbIoConfig', { kind: 'server', metrics: false }),
 			)))
 			.handle('dbStatements', ({ urlParams }) => CacheService.rateLimit('api', _requireAdmin.pipe(
 				Effect.andThen(database.listStatStatements(urlParams.limit).pipe(Effect.mapError((error) => HttpError.Internal.of('Database statements failed', error)),)),
 				Telemetry.span('admin.dbStatements', { kind: 'server', metrics: false }),
 			)))
-			// Tenant CRUD
-			.handle('listTenants', () => handleListTenants(database))
-			.handle('createTenant', ({ payload }) => handleCreateTenant(database, audit, payload))
-			.handle('getTenant', ({ path }) => handleGetTenant(database, path.id))
-			.handle('updateTenant', ({ path, payload }) => handleUpdateTenant(database, audit, path.id, payload))
-			.handle('deactivateTenant', ({ path }) => handleDeactivateTenant(database, audit, path.id))
-			.handle('getTenantOAuth', ({ path }) => handleGetTenantOAuth(database, path.id))
-			.handle('updateTenantOAuth', ({ path, payload }) => handleUpdateTenantOAuth(database, audit, path.id, payload));
-	}),
-);
+			.handle('dbCacheHitRatio', () => CacheService.rateLimit('api', _requireAdmin.pipe(
+				Effect.andThen(database.monitoring.cacheHitRatio().pipe(Effect.mapError((error) => HttpError.Internal.of('Database cache hit ratio failed', error)),)),
+				Telemetry.span('admin.dbCacheHitRatio', { kind: 'server', metrics: false }),
+			)))
+				// Tenant CRUD
+				.handle('listTenants', () => handleListTenants(database))
+				.handle('createTenant', ({ payload }) => handleCreateTenant(database, audit, payload))
+				.handle('getTenant', ({ path }) => handleGetTenant(database, path.id))
+				.handle('updateTenant', ({ path, payload }) => handleUpdateTenant(database, audit, eventBus, path.id, payload))
+				.handle('deactivateTenant', ({ path }) => handleDeactivateTenant(database, audit, eventBus, path.id))
+				.handle('getTenantOAuth', ({ path }) => handleGetTenantOAuth(database, path.id))
+				.handle('updateTenantOAuth', ({ path, payload }) => handleUpdateTenantOAuth(database, audit, eventBus, path.id, payload));
+		}),
+	);
 
 // --- [EXPORT] ----------------------------------------------------------------
 

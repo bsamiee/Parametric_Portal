@@ -31,8 +31,8 @@ const withDiffs = <T extends { oldData: Option.Option<unknown>; newData: Option.
 const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 	Effect.gen(function* () {
 		const repositories = yield* DatabaseService;
-		const adminLookup = <A>(find: Effect.Effect<A, unknown>) => Middleware.requireMfaVerified.pipe(
-			Effect.andThen(Middleware.requireRole('admin')),
+		const adminLookup = <A>(find: Effect.Effect<A, unknown>) => Middleware.mfaVerified.pipe(
+			Effect.andThen(Middleware.role('admin')),
 			Effect.andThen(find),
 			Effect.mapError((error) => HttpError.Internal.of('Audit lookup failed', error)),
 		);
@@ -48,7 +48,7 @@ const AuditLive = HttpApiBuilder.group(ParametricApi, 'audit', (handlers) =>
 						Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),
 					)).pipe(Telemetry.span('audit.getByUser', { kind: 'server', metrics: false }))))
 				.handle('getMine', ({ urlParams: parameters }) =>
-					CacheService.rateLimit('api', Middleware.requireMfaVerified.pipe(
+					CacheService.rateLimit('api', Middleware.mfaVerified.pipe(
 						Effect.andThen(Effect.all([Context.Request.current, Context.Request.sessionOrFail])),
 						Effect.flatMap(([context, session]) => repositories.audit.byUser(context.tenantId, session.userId, parameters.limit, parameters.cursor, parameters)),
 						Effect.map((result) => ({ ...result, items: withDiffs(result.items, parameters.includeDiff ?? false) })),

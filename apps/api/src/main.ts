@@ -3,7 +3,7 @@
  * Architecture: Platform → Services → HTTP (3-tier, linear dependency chain).
  */
 import { createServer } from 'node:http';
-import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer } from '@effect/platform';
+import { HttpApiBuilder, HttpApiSwagger, HttpMiddleware, HttpServer, HttpServerResponse } from '@effect/platform';
 import { NodeFileSystem, NodeHttpServer, NodeRuntime } from '@effect/platform-node';
 import { AiRuntime } from '@parametric-portal/ai/runtime';
 import { SearchService } from '@parametric-portal/ai/search';
@@ -11,7 +11,6 @@ import { Client } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { SearchRepo } from '@parametric-portal/database/search';
 import { ParametricApi } from '@parametric-portal/server/api';
-import { Context } from '@parametric-portal/server/context';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Auth } from '@parametric-portal/server/domain/auth';
 import { StorageService } from '@parametric-portal/server/domain/storage';
@@ -69,17 +68,23 @@ const ServicesLayer = Layer.mergeAll(Auth.Service.Default, StorageService.Defaul
 	Layer.provideMerge(ReplayGuardService.Default),
 	Layer.provideMerge(CacheService.Layer),
 	Layer.provideMerge(Resilience.Layer),
-	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, Context.Request.SystemLayer, StreamingService.Default, ClusterService.Layers.runner)),
+	Layer.provideMerge(Layer.mergeAll(DatabaseService.Default, SearchRepo.Default, MetricsService.Default, Crypto.Service.Default, StreamingService.Default, ClusterService.Default)),
 	Layer.provideMerge(PlatformLayer),
 );
 
 // --- [HTTP_LAYER] ------------------------------------------------------------
 // Route handlers, auth middleware, API composition.
 
-const SessionAuthLayer = Layer.unwrapEffect(Effect.all([Auth.Service, DatabaseService]).pipe(
-	Effect.map(([auth, database]) => Middleware.Auth.makeLayer(
-		(hash) => auth.sessionLookup(hash),
-		(hash) => database.apiKeys.byHash(hash).pipe(
+const RouteLayer = Layer.mergeAll(AdminLive, AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive, WebhooksLive, WebSocketLive).pipe(Layer.provide(ServicesLayer));
+const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer));
+
+// --- [SERVER_LAYER] ----------------------------------------------------------
+// HTTP server with middleware pipeline + auth + CORS in single MiddlewareLayer.
+
+const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
+	const [database, auth, serverConfig] = yield* Effect.all([Effect.orDie(DatabaseService), Effect.orDie(Auth.Service), Effect.orDie(ServerConfig)]);
+	const MiddlewareLayer = Middleware.layer({
+		apiKeyLookup: (hash) => database.apiKeys.byHash(hash).pipe(
 			Effect.map(Option.filter((key) => Option.isNone(key.deletedAt))),
 			Effect.tap(Option.match({
 				onNone: () => Effect.void,
@@ -88,31 +93,19 @@ const SessionAuthLayer = Layer.unwrapEffect(Effect.all([Auth.Service, DatabaseSe
 			Effect.map(Option.map((key) => ({ expiresAt: key.expiresAt, id: key.id, userId: key.userId }))),
 			Effect.catchAll(() => Effect.succeed(Option.none())),
 		),
-	)),
-)).pipe(Layer.provide(ServicesLayer));
-const RouteLayer = Layer.mergeAll(AdminLive, AuditLive, AuthLive, HealthLive, JobsLive, SearchLive, StorageLive, TelemetryRouteLive, TransferLive, UsersLive, WebhooksLive, WebSocketLive).pipe(Layer.provide(ServicesLayer));
-const ApiLayer = HttpApiBuilder.api(ParametricApi).pipe(Layer.provide(RouteLayer));
-
-// --- [SERVER_LAYER] ----------------------------------------------------------
-// HTTP server with middleware pipeline: context → trace → security → metrics → logging.
-
-const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
-	const database = yield* Effect.orDie(DatabaseService);
-	const serverConfig = yield* Effect.orDie(ServerConfig);
-	return HttpApiBuilder.serve((application) => application.pipe(
-		Middleware.xForwardedHeaders,
-		Middleware.makeRequestContext(Middleware.makeAppLookup(database)),
-		Middleware.trace,
-		Middleware.security(),
-		Middleware.serverTiming,
-		Middleware.metrics,
+		cors: serverConfig.corsOrigins,
+			sessionLookup: (hash) => auth.session.lookup(hash),
+		});
+	return HttpApiBuilder.serve((application) => Middleware.pipeline(database)(application).pipe(
 		CacheService.headers,
 		HttpMiddleware.logger,
+		Effect.catchAllDefect((defect) => Effect.logError('Unhandled request defect', { defect: String(defect) }).pipe(
+			Effect.andThen(HttpServerResponse.unsafeJson({ details: 'Unhandled request defect', error: 'InternalServerError' }, { status: 500 })),
+		)),
 	)).pipe(
 		Layer.provide(HttpApiSwagger.layer({ path: '/docs' })),
 		Layer.provide(ApiLayer),
-		Layer.provide(Middleware.cors(serverConfig.corsOrigins)),
-		Layer.provide(SessionAuthLayer),
+		Layer.provide(MiddlewareLayer),
 		HttpServer.withLogAddress,
 		Layer.provide(NodeHttpServer.layer(createServer, { port: serverConfig.port })),
 	);
@@ -120,11 +113,6 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
 
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
-// NOTE: CurrentAddress requirement is a phantom type from @effect/cluster Entity.toLayer.
-// Entity handlers yield Entity.CurrentAddress internally, but Entity.toLayer uses Exclude<RX, CurrentAddress>
-// to remove it from layer requirements. TypeScript sometimes fails to compute this exclusion properly.
-// This type assertion is safe because CurrentAddress is only available within entity scope (not app level).
-// ShardingConfig is provided by ClusterService.Layers.runner via _storageLayers.
 NodeRuntime.runMain((Effect.scoped(Layer.launch(ServerLayer)).pipe(
 	Effect.onInterrupt(() => Effect.logInfo('Graceful shutdown initiated')),
 	Effect.ensuring(Effect.logInfo('Server shutdown complete')),

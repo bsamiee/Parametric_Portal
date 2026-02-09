@@ -4,16 +4,16 @@
  * Expanded @effect/rpc coverage: all inter-node operations are proper RPCs with
  * Schema-typed payloads, success responses, and tagged errors.
  */
-import { ClusterCron, ClusterMetrics, Entity, EntityId, Sharding, ShardingConfig, Singleton, Snowflake, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
+import { ClusterCron, ClusterMetrics, Entity, EntityId, RunnerStorage, Sharding, ShardingConfig, Singleton, Snowflake, SqlMessageStorage, SqlRunnerStorage } from '@effect/cluster';
 import { NodeClusterHttp } from '@effect/platform-node';
 import { Rpc, RpcGroup } from '@effect/rpc';
-import { PgClient } from '@effect/sql-pg';
-import { Array as A, Cause, Clock, Config, Cron, DateTime, Duration, Effect, FiberMap, Layer, Match, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
+import { Array as A, Cause, Clock, Config, Cron, DateTime, Duration, Effect, FiberMap, HashRing, Layer, Metric, Option, Ref, Schedule, Schema as S } from 'effect';
 import { Client as DbClient } from '@parametric-portal/database/client';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
+import { CacheService } from '../platform/cache.ts';
 import { Resilience } from '../utils/resilience.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
@@ -30,26 +30,13 @@ const _CONFIG = {
 const _RPC_SPAN_OPTS = { metrics: false } as const;
 const _shardingLayer = ShardingConfig.layer({
 	entityMailboxCapacity: _CONFIG.entity.mailboxCapacity,
-	entityMaxIdleTime: _CONFIG.entity.maxIdleTime,
+	entityMaxIdleTime: 	_CONFIG.entity.maxIdleTime,
 	preemptiveShutdown: _CONFIG.sharding.preemptiveShutdown,
-	sendRetryInterval: _CONFIG.send.retryInterval,
-	shardsPerGroup: _CONFIG.sharding.shardsPerGroup,
+	sendRetryInterval: 	_CONFIG.send.retryInterval,
+	shardsPerGroup: 	_CONFIG.sharding.shardsPerGroup,
 });
 const _storageLayer = Layer.mergeAll(
-	SqlRunnerStorage.layer.pipe(Layer.provide(PgClient.layerConfig({
-		applicationName: Config.succeed('cluster-runner-storage'),
-		connectionTTL: Config.succeed(Duration.hours(24)),
-		connectTimeout: Config.succeed(Duration.seconds(10)),
-		database: Config.string('POSTGRES_DB').pipe(Config.withDefault('parametric')),
-		host: Config.string('POSTGRES_HOST').pipe(Config.withDefault('localhost')),
-		idleTimeout: Config.succeed(Duration.hours(24)),
-		maxConnections: Config.succeed(1),
-		minConnections: Config.succeed(1),
-		password: Config.redacted('POSTGRES_PASSWORD'),
-		port: Config.integer('POSTGRES_PORT').pipe(Config.withDefault(5432)),
-		spanAttributes: Config.succeed({ 'db.system': 'postgresql', 'service.name': 'cluster-runner-storage' }),
-		username: Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
-	}))),
+	SqlRunnerStorage.layer.pipe(Layer.provide(DbClient.layer)),
 	SqlMessageStorage.layer.pipe(Layer.provide(DbClient.layer)),
 	_shardingLayer,
 	Snowflake.layerGenerator,
@@ -57,41 +44,30 @@ const _storageLayer = Layer.mergeAll(
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const _SCHEMA = (() => {
-	const _invalidation = { mode: S.Literal('key', 'pattern'), target: S.String, tenantId: S.optional(S.String) } as const;
-	const _singletonHealthResult = S.Struct({
-		healthy: S.Boolean,
-		lastExecution: S.String,
-		name: S.String,
-		staleFormatted: S.String,
-		staleMs: S.Number,
-	});
-	return {
-		Payload: {
-			ClusterHealth: { includeMetrics: S.optional(S.Boolean) },
-			Invalidation: S.Struct(_invalidation),
-			InvalidationFields: _invalidation,
-			LeaderInfo: { shardGroup: S.optional(S.String) },
-			NodeInfo: { runnerId: S.String },
-			ShardAssignment: { entityId: S.String, shardGroup: S.optional(S.String) },
-			SingletonHealth: { singletons: S.Array(S.Struct({ expectedInterval: S.Number, name: S.String })) },
-			SingletonHeartbeat: { singletonName: S.String },
-			SingletonState: { singletonName: S.String },
-			Status: { entityId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')) },
-		},
-		Response: {
-			ClusterHealth: S.Struct({ degraded: S.Boolean, entities: S.Number, healthy: S.Boolean, runners: S.Number, runnersHealthy: S.Number, shards: S.Number, singletons: S.Number }),
-			Invalidation: S.Struct({ count: S.Number, mode: S.Literal('key', 'pattern'), target: S.String }),
-			LeaderInfo: S.Struct({ activeSingletons: S.Array(S.String), runnerId: S.optional(S.String), shardGroup: S.String }),
-			NodeInfo: S.Struct({ entityCount: S.Number, runnerId: S.String, shardCount: S.Number, startedAt: S.Number, status: S.Literal('active', 'draining', 'starting') }),
-			ShardAssignment: S.Struct({ isLocal: S.Boolean, runnerId: S.optional(S.String), shardId: S.Number }),
-			SingletonHealth: S.Struct({ healthy: S.Boolean, healthyCount: S.Number, results: S.Array(_singletonHealthResult), unhealthyCount: S.Number }),
-			SingletonHeartbeat: S.Struct({ healthy: S.Boolean, lastHeartbeat: S.Number, singletonName: S.String }),
-			SingletonState: S.Struct({ isLeader: S.Boolean, lastExecution: S.optional(S.Number), singletonName: S.String, status: S.Literal('active', 'idle', 'migrating', 'stopped') }),
-			Status: S.Struct({ status: S.Literal('idle', 'processing', 'suspended', 'complete', 'failed'), updatedAt: S.Number }),
-		},
-	} as const;
-})();
+const _SCHEMA = {
+	Payload: {
+		ClusterHealth: {},
+		Invalidation: { mode: S.Literal('key', 'pattern'), storeId: S.String, target: S.String },
+		LeaderInfo: { shardGroup: S.optional(S.String) },
+		NodeInfo: { runnerId: S.String },
+		ShardAssignment: { entityId: S.String, shardGroup: S.optional(S.String) },
+		SingletonHealth: { singletons: S.Array(S.Struct({ expectedInterval: S.Number, name: S.String })) },
+		SingletonHeartbeat: { singletonName: S.String },
+		SingletonState: { singletonName: S.String },
+		Status: { entityId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')) },
+	},
+	Response: {
+		ClusterHealth: S.Struct({ degraded: S.Boolean, entities: S.Number, healthy: S.Boolean, runners: S.Number, runnersHealthy: S.Number, shards: S.Number, singletons: S.Number }),
+		Invalidation: S.Struct({ count: S.Number, mode: S.Literal('key', 'pattern'), target: S.String }),
+		LeaderInfo: S.Struct({ runnerId: S.optional(S.String), shardGroup: S.String }),
+		NodeInfo: S.Struct({ entityCount: S.Number, runnerId: S.String, shardCount: S.Number, startedAt: S.Number, status: S.Literal('active') }),
+		ShardAssignment: S.Struct({ isLocal: S.Boolean, runnerId: S.optional(S.String), shardId: S.Number }),
+		SingletonHealth: S.Struct({ healthy: S.Boolean, healthyCount: S.Number, results: S.Array(S.Struct({ healthy: S.Boolean, lastExecution: S.String, name: S.String, staleFormatted: S.String, staleMs: S.Number })), unhealthyCount: S.Number }),
+		SingletonHeartbeat: S.Struct({ healthy: S.Boolean, lastHeartbeat: S.Number, singletonName: S.String }),
+		SingletonState: S.Struct({ isLeader: S.Boolean, lastExecution: S.optional(S.Number), singletonName: S.String, status: S.Literal('active', 'idle', 'stopped') }),
+		Status: S.Struct({ status: S.Literal('idle', 'processing', 'suspended'), updatedAt: S.Number }),
+	},
+} as const;
 
 // --- [ERRORS] ----------------------------------------------------------------
 
@@ -126,22 +102,21 @@ class InfraError extends S.TaggedError<InfraError>()('InfraError', {
 
 const _RPC_GROUPS = {
 	CacheInvalidation: RpcGroup.make(
-		Rpc.make('invalidateKey', { error: InfraError, payload: _SCHEMA.Payload.InvalidationFields, success: _SCHEMA.Response.Invalidation }),
-		Rpc.make('invalidatePattern', { error: InfraError, payload: _SCHEMA.Payload.InvalidationFields, success: _SCHEMA.Response.Invalidation }),
+		Rpc.make('invalidate', 			{ error: InfraError, payload: _SCHEMA.Payload.Invalidation, success: _SCHEMA.Response.Invalidation }),
 	),
 	ClusterManagement: RpcGroup.make(
-		Rpc.make('status', { error: ClusterError, payload: _SCHEMA.Payload.Status, success: _SCHEMA.Response.Status }),
-		Rpc.make('nodeInfo', { error: ClusterError, payload: _SCHEMA.Payload.NodeInfo, success: _SCHEMA.Response.NodeInfo }),
-		Rpc.make('shardAssignment', { error: ClusterError, payload: _SCHEMA.Payload.ShardAssignment, success: _SCHEMA.Response.ShardAssignment }),
+		Rpc.make('status', 				{ error: ClusterError, payload: _SCHEMA.Payload.Status, success: _SCHEMA.Response.Status }),
+		Rpc.make('nodeInfo', 			{ error: ClusterError, payload: _SCHEMA.Payload.NodeInfo, success: _SCHEMA.Response.NodeInfo }),
+		Rpc.make('shardAssignment', 	{ error: ClusterError, payload: _SCHEMA.Payload.ShardAssignment, success: _SCHEMA.Response.ShardAssignment }),
 	),
 	HealthCheck: RpcGroup.make(
-		Rpc.make('clusterHealth', { error: InfraError, payload: _SCHEMA.Payload.ClusterHealth, success: _SCHEMA.Response.ClusterHealth }),
-		Rpc.make('singletonHealth', { error: InfraError, payload: _SCHEMA.Payload.SingletonHealth, success: _SCHEMA.Response.SingletonHealth }),
+		Rpc.make('clusterHealth', 		{ error: InfraError, payload: _SCHEMA.Payload.ClusterHealth, success: _SCHEMA.Response.ClusterHealth }),
+		Rpc.make('singletonHealth', 	{ error: InfraError, payload: _SCHEMA.Payload.SingletonHealth, success: _SCHEMA.Response.SingletonHealth }),
 	),
 	SingletonOps: RpcGroup.make(
-		Rpc.make('singletonState', { error: SingletonError, payload: _SCHEMA.Payload.SingletonState, success: _SCHEMA.Response.SingletonState }),
-		Rpc.make('singletonHeartbeat', { error: SingletonError, payload: _SCHEMA.Payload.SingletonHeartbeat, success: _SCHEMA.Response.SingletonHeartbeat }),
-		Rpc.make('leaderInfo', { error: SingletonError, payload: _SCHEMA.Payload.LeaderInfo, success: _SCHEMA.Response.LeaderInfo }),
+		Rpc.make('singletonState', 		{ error: SingletonError, payload: _SCHEMA.Payload.SingletonState, success: _SCHEMA.Response.SingletonState }),
+		Rpc.make('singletonHeartbeat', 	{ error: SingletonError, payload: _SCHEMA.Payload.SingletonHeartbeat, success: _SCHEMA.Response.SingletonHeartbeat }),
+		Rpc.make('leaderInfo', 			{ error: SingletonError, payload: _SCHEMA.Payload.LeaderInfo, success: _SCHEMA.Response.LeaderInfo }),
 	),
 } as const;
 const _AllClusterRpcs = _RPC_GROUPS.ClusterManagement.merge(_RPC_GROUPS.SingletonOps, _RPC_GROUPS.HealthCheck, _RPC_GROUPS.CacheInvalidation);
@@ -151,10 +126,6 @@ const _AllClusterRpcs = _RPC_GROUPS.ClusterManagement.merge(_RPC_GROUPS.Singleto
 const _retrySchedule = (maxAttempts: number) => Resilience.schedule({ base: _CONFIG.retry.base, cap: _CONFIG.retry.cap, maxAttempts });
 const _readMetric = <A extends number | bigint>(metric: Metric.Metric.Gauge<A>) => Metric.value(metric).pipe(Effect.map(({ value }) => Number(value)));
 const _rpcSpan = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) => Telemetry.span(effect, `rpc.${name}`, _RPC_SPAN_OPTS);
-const _clusterHealthFlags = ({ runners, runnersHealthy, singletons }: { readonly runners: number; readonly runnersHealthy: number; readonly singletons: number }) => ({
-	degraded: runnersHealthy < runners,
-	healthy: runnersHealthy > 0 && singletons > 0,
-});
 const _versionedStateKey = (singletonName: string, version: number) => `${_CONFIG.singleton.keyPrefix}${singletonName}:v${version}`;
 const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, type: 'singleton' | 'cron') =>
 	Effect.flatMap(MetricsService, (metrics) => Effect.sync(Context.Request.system).pipe(
@@ -166,10 +137,7 @@ const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E
 					{
 						duration: metrics.singleton.duration,
 						errors: metrics.errors,
-						labels: Match.value(type).pipe(
-							Match.when('cron', () => MetricsService.label({ singleton: name, type: 'cron' })),
-							Match.orElse(() => MetricsService.label({ singleton: name })),
-						),
+						labels: MetricsService.label(type === 'cron' ? { singleton: name, type: 'cron' } : { singleton: name }),
 					},
 				).pipe(
 					Effect.andThen(Clock.currentTimeMillis),
@@ -182,33 +150,20 @@ const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E
 			requestContext,
 		)),
 	));
-const _computeClusterHealth = () => Effect.all({
-	entities: _readMetric(ClusterMetrics.entities),
-	runners: _readMetric(ClusterMetrics.runners),
-	runnersHealthy: _readMetric(ClusterMetrics.runnersHealthy),
-	shards: _readMetric(ClusterMetrics.shards),
-	singletons: _readMetric(ClusterMetrics.singletons),
-});
+const _readSingletonMetric = (metrics: MetricsService, singletonName: string) => Metric.value(
+	Metric.taggedWithLabels(metrics.singleton.lastExecution, MetricsService.label({ singleton: singletonName })),
+).pipe(Effect.map(({ value }) => Number(value)));
 const _computeSingletonHealth = (metrics: MetricsService, config: ReadonlyArray<{ readonly expectedInterval: number; readonly name: string }>) => Clock.currentTimeMillis.pipe(
 	Effect.map(DateTime.unsafeMake),
-	Effect.flatMap((nowDateTime) => Effect.forEach(config, ({ expectedInterval, name }) => Metric.value(
-		Metric.taggedWithLabels(metrics.singleton.lastExecution, MetricsService.label({ singleton: name })),
-	).pipe(
-		Effect.map(({ value }) => {
-			const valueDateTime = DateTime.unsafeMake(Number(value));
-			const elapsed = DateTime.distanceDuration(nowDateTime, valueDateTime);
-			return {
-				healthy: Duration.between(elapsed, { maximum: Duration.times(Duration.millis(expectedInterval), _CONFIG.singleton.threshold), minimum: Duration.zero }),
-				lastExecution: Number(value) > 0 ? DateTime.formatIso(valueDateTime) : 'never',
-				name,
-				staleFormatted: Number(value) > 0 ? Duration.format(elapsed) : 'N/A',
-				staleMs: Duration.toMillis(elapsed),
-			};
+	Effect.flatMap((now) => Effect.forEach(config, ({ expectedInterval, name }) => _readSingletonMetric(metrics, name).pipe(
+		Effect.map((ts) => {
+			const dt = DateTime.unsafeMake(ts), elapsed = DateTime.distanceDuration(now, dt), hasRun = ts > 0;
+			return { healthy: Duration.between(elapsed, { maximum: Duration.times(Duration.millis(expectedInterval), _CONFIG.singleton.threshold), minimum: Duration.zero }), lastExecution: hasRun ? DateTime.formatIso(dt) : 'never', name, staleFormatted: hasRun ? Duration.format(elapsed) : 'N/A', staleMs: Duration.toMillis(elapsed) };
 		}),
 	), { concurrency: 'unbounded' })),
 	Effect.map((results) => {
-		const [healthy, unhealthy] = A.partition(results, (result) => result.healthy);
-		return { healthy: A.isEmptyArray(unhealthy), healthyCount: healthy.length, results, unhealthyCount: unhealthy.length };
+		const unhealthyCount = A.filter(results, (r) => !r.healthy).length;
+		return { healthy: unhealthyCount === 0, healthyCount: results.length - unhealthyCount, results, unhealthyCount };
 	}),
 );
 
@@ -221,71 +176,99 @@ const _ClusterEntityLive = _ClusterEntity.toLayer(Effect.gen(function* () {
 	const activationLabels = MetricsService.label({ entity_type: 'Cluster' });
 	const activatedAt = yield* Clock.currentTimeMillis;
 	yield* Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityActivations, activationLabels));
-	yield* Effect.addFinalizer(() => Clock.currentTimeMillis.pipe(
-		Effect.flatMap((deactivatedAt) => Effect.all([
-			Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityDeactivations, activationLabels)),
-			Metric.update(Metric.taggedWithLabels(metrics.cluster.entityLifetime, activationLabels), Duration.millis(deactivatedAt - activatedAt)),
-		], { discard: true })),
-	));
+		yield* Effect.addFinalizer(() => Clock.currentTimeMillis.pipe(
+			Effect.flatMap((deactivatedAt) => Effect.all([
+				Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityDeactivations, activationLabels)),
+				Metric.update(Metric.taggedWithLabels(metrics.cluster.entityLifetime, activationLabels), Duration.millis(deactivatedAt - activatedAt)),
+			], { discard: true })),
+		));
 	return {
-		clusterHealth: () => _rpcSpan('clusterHealth', _computeClusterHealth().pipe(
-			Effect.map((clusterMetrics) => ({ ..._clusterHealthFlags(clusterMetrics), ...clusterMetrics })),
-		)),
-		invalidateKey: ({ payload }) => _rpcSpan('invalidateKey', Effect.succeed({ count: 1, mode: payload.mode, target: payload.target })),
-		invalidatePattern: ({ payload }) => _rpcSpan('invalidatePattern', Effect.succeed({ count: 0, mode: payload.mode, target: payload.target })),
-		leaderInfo: ({ payload }) => _rpcSpan('leaderInfo', _readMetric(ClusterMetrics.singletons).pipe(
-			Effect.map((singletonCount) => ({
-				activeSingletons: A.makeBy(singletonCount, (index) => `singleton-${index}`),
-				runnerId: 'local',
+		clusterHealth: () => _rpcSpan('clusterHealth', Effect.all({
+			entities: _readMetric(ClusterMetrics.entities), runners: _readMetric(ClusterMetrics.runners),
+			runnersHealthy: _readMetric(ClusterMetrics.runnersHealthy), shards: _readMetric(ClusterMetrics.shards), singletons: _readMetric(ClusterMetrics.singletons),
+		}).pipe(Effect.map((m) => ({ ...m, degraded: m.runnersHealthy < m.runners, healthy: m.runnersHealthy > 0 && m.singletons > 0 })))),
+			invalidate: ({ payload }) => _rpcSpan('invalidate', (payload.mode === 'key' ? CacheService.invalidate(payload.storeId, payload.target) : CacheService.invalidatePattern(payload.storeId, payload.target)).pipe(Effect.map((count) => ({ count, mode: payload.mode, target: payload.target })))),
+		leaderInfo: ({ payload }) => _rpcSpan('leaderInfo', ShardingConfig.ShardingConfig.pipe(
+			Effect.map((config) => ({
+				runnerId: Option.getOrUndefined(Option.map(config.runnerAddress, (a) => a.toString())),
 				shardGroup: payload.shardGroup ?? 'default',
 			})),
 		)),
-		nodeInfo: () => _rpcSpan('nodeInfo', Effect.all({ entityCount: _readMetric(ClusterMetrics.entities), shardCount: _readMetric(ClusterMetrics.shards) }).pipe(
-			Effect.map(({ entityCount, shardCount }) => ({ entityCount, runnerId: 'local', shardCount, startedAt: activatedAt, status: 'active' as const })),
+		nodeInfo: ({ payload }) => _rpcSpan('nodeInfo', Effect.all({
+			entityCount: _readMetric(ClusterMetrics.entities),
+			isLocal: ShardingConfig.ShardingConfig.pipe(Effect.map((c) => Option.getOrUndefined(Option.map(c.runnerAddress, (a) => a.toString())) === payload.runnerId)),
+			registered: RunnerStorage.RunnerStorage.pipe(
+				Effect.flatMap((rs) => rs.getRunners),
+				Effect.map(A.findFirst(([r]) => r.address.toString() === payload.runnerId)),
+				Effect.mapError((cause): ClusterError => ClusterError.from('PersistenceError', undefined, { cause })),
+			),
+			shardCount: _readMetric(ClusterMetrics.shards),
+		}).pipe(
+			Effect.flatMap(({ entityCount, isLocal, registered, shardCount }) =>
+				Option.isSome(registered) && registered.value[1] && isLocal
+					? Effect.succeed({ entityCount, runnerId: payload.runnerId, shardCount, startedAt: activatedAt, status: 'active' as const })
+					: Effect.fail(ClusterError.from(Option.isNone(registered) ? 'RunnerNotRegistered' : 'RunnerUnavailable', undefined, { requestId: payload.runnerId }))),
 		)),
-		shardAssignment: ({ payload }) => _rpcSpan('shardAssignment', Effect.sync(() => {
-			const shardId = sharding.getShardId(EntityId.make(payload.entityId), payload.shardGroup ?? 'default');
-			const isLocal = sharding.hasShardId(shardId);
-			return { isLocal, runnerId: isLocal ? 'local' : undefined, shardId: shardId.id };
+		shardAssignment: ({ payload }) => _rpcSpan('shardAssignment', Effect.gen(function* () {
+			const group = payload.shardGroup ?? 'default';
+			const shardId = sharding.getShardId(EntityId.make(payload.entityId), group);
+			const runners = yield* RunnerStorage.RunnerStorage.pipe(
+				Effect.flatMap((rs) => rs.getRunners),
+				Effect.map(A.filterMap(([r, h]) => h && A.some(r.groups, (g) => g === group) ? Option.some(r) : Option.none())),
+				Effect.mapError((cause): ClusterError => ClusterError.from('PersistenceError', undefined, { cause })),
+			);
+			const ring = runners.reduce((acc, r) => HashRing.add(acc, r.address, { weight: r.weight }), HashRing.make());
+			const assigned = Option.fromNullable(HashRing.getShards(ring, _CONFIG.sharding.shardsPerGroup)?.[Math.max(0, shardId.id - 1)]);
+			return { isLocal: sharding.hasShardId(shardId), runnerId: Option.getOrUndefined(Option.map(assigned, (a) => a.toString())), shardId: shardId.id };
 		})),
 		singletonHealth: ({ payload }) => _rpcSpan('singletonHealth', _computeSingletonHealth(metrics, payload.singletons)),
-		singletonHeartbeat: ({ payload }) => _rpcSpan('singletonHeartbeat', Clock.currentTimeMillis.pipe(
-			Effect.map((timestamp) => ({ healthy: true, lastHeartbeat: timestamp, singletonName: payload.singletonName })),
-		)),
-		singletonState: ({ payload: { singletonName } }) => _rpcSpan('singletonState', Metric.value(
-			Metric.taggedWithLabels(metrics.singleton.lastExecution, MetricsService.label({ singleton: singletonName })),
-		).pipe(
-			Effect.map(({ value }) => Number(value)),
-			Effect.map((value) => ({ isLeader: true, lastExecution: value > 0 ? value : undefined, singletonName, status: value > 0 ? 'active' : 'idle' as const })),
-		)),
-		status: () => _rpcSpan('status', Clock.currentTimeMillis.pipe(Effect.map((timestamp) => ({ status: 'idle' as const, updatedAt: timestamp })))),
+		singletonHeartbeat: ({ payload }) => _rpcSpan('singletonHeartbeat', Effect.all({
+			isLeader: Effect.sync(() => sharding.hasShardId(sharding.getShardId(EntityId.make(payload.singletonName), 'default'))),
+			lastExecution: _readSingletonMetric(metrics, payload.singletonName),
+			timestamp: Clock.currentTimeMillis,
+		}).pipe(Effect.map(({ isLeader, lastExecution, timestamp }) => ({
+			healthy: isLeader && lastExecution > 0,
+			lastHeartbeat: lastExecution > 0 ? lastExecution : timestamp,
+			singletonName: payload.singletonName,
+		})))),
+		singletonState: ({ payload: { singletonName } }) => _rpcSpan('singletonState', Effect.all({
+			isLeader: Effect.sync(() => sharding.hasShardId(sharding.getShardId(EntityId.make(singletonName), 'default'))),
+			lastExecution: _readSingletonMetric(metrics, singletonName),
+		}).pipe(Effect.map(({ isLeader, lastExecution }) => ({
+			isLeader,
+			lastExecution: lastExecution > 0 ? lastExecution : undefined,
+			singletonName,
+			status: isLeader ? (lastExecution > 0 ? 'active' : 'idle') : 'stopped' as const,
+		})))),
+		status: ({ payload }) => _rpcSpan('status', Effect.suspend(() => {
+			const shardId = sharding.getShardId(EntityId.make(payload.entityId), 'default');
+			return sharding.hasShardId(shardId)
+				? Effect.all({ entities: sharding.activeEntityCount, isShutdown: sharding.isShutdown, timestamp: Clock.currentTimeMillis }).pipe(
+					Effect.map(({ entities, isShutdown, timestamp }) => ({ status: isShutdown ? 'suspended' : entities > 0 ? 'processing' : 'idle' as const, updatedAt: timestamp })))
+				: Effect.fail(ClusterError.from('EntityNotAssignedToRunner', payload.entityId, { requestId: payload.entityId, resumeToken: `${shardId.group}:${shardId.id}` }));
+		})),
 	};
 }), {
 	concurrency: _CONFIG.entity.concurrency,
 	defectRetryPolicy: _retrySchedule(_CONFIG.retry.maxAttempts.defect),
 	spanAttributes: { 'entity.service': 'cluster-infrastructure', 'entity.version': 'v2' },
 });
-const _clusterLayerBase = (clientOnly: boolean) => Layer.unwrapEffect(
+const _clusterLayerBase = () => Layer.unwrapEffect(
 	Config.all({
-		environment: Config.string('NODE_ENV').pipe(Config.withDefault('development')),
-		labelSelector: Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal')),
-		mode: Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto')),
-		namespace: Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default')),
+		environment: 	Config.string('NODE_ENV').pipe(Config.withDefault('development')),
+		labelSelector: 	Config.string('K8S_LABEL_SELECTOR').pipe(Config.withDefault('app=parametric-portal')),
+		mode: 			Config.string('CLUSTER_HEALTH_MODE').pipe(Config.withDefault('auto')),
+		namespace: 		Config.string('K8S_NAMESPACE').pipe(Config.withDefault('default')),
 	}).pipe(
 		Effect.map(({ environment, labelSelector, mode, namespace }) => ({
-			httpServerLayer: Match.value(clientOnly).pipe(
-				Match.when(true, () => Layer.empty),
-				Match.orElse(() => NodeClusterHttp.layerHttpServer.pipe(Layer.provide(_shardingLayer))),
-			),
-			runnerHealth: Match.value({ environment, mode }).pipe(
-				Match.when({ mode: 'k8s' }, () => ({ k8s: { labelSelector, namespace } as const, layer: NodeClusterHttp.layerK8sHttpClient, mode: 'k8s' as const })),
-				Match.when({ environment: 'production', mode: 'auto' }, () => ({ k8s: { labelSelector, namespace } as const, layer: NodeClusterHttp.layerK8sHttpClient, mode: 'k8s' as const })),
-				Match.orElse(() => ({ k8s: undefined, layer: Layer.empty, mode: 'ping' as const })),
-			),
+			httpServerLayer: NodeClusterHttp.layerHttpServer.pipe(Layer.provide(_shardingLayer)),
+			runnerHealth: (mode === 'k8s' || (environment === 'production' && mode === 'auto'))
+				? { k8s: { labelSelector, namespace } as const, layer: NodeClusterHttp.layerK8sHttpClient, mode: 'k8s' as const }
+				: { k8s: undefined, layer: Layer.empty, mode: 'ping' as const },
 		})),
 		Effect.tap(({ runnerHealth }) => Effect.logDebug('Cluster health mode selected', { mode: runnerHealth.mode, useK8s: runnerHealth.mode === 'k8s' })),
 		Effect.map(({ httpServerLayer, runnerHealth }) => NodeClusterHttp.layer({
-			clientOnly,
+			clientOnly: false,
 			runnerHealth: runnerHealth.mode,
 			runnerHealthK8s: runnerHealth.k8s,
 			serialization: _CONFIG.transport.serialization,
@@ -298,12 +281,12 @@ const _clusterLayerBase = (clientOnly: boolean) => Layer.unwrapEffect(
 		)),
 	),
 );
-const _clusterLayerRunner = _ClusterEntityLive.pipe(Layer.provideMerge(_clusterLayerBase(false)));
+const _clusterLayer = _ClusterEntityLive.pipe(Layer.provideMerge(_clusterLayerBase()));
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', {
-	dependencies: [_clusterLayerRunner],
+	dependencies: [_clusterLayer],
 	effect: Effect.gen(function* () {
 		const sharding = yield* Sharding.Sharding;
 		yield* Effect.annotateLogsScoped({ 'service.name': 'cluster' });
@@ -318,14 +301,9 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 		};
 	}),
 }) {
-	static readonly Layers = {
-		client: _ClusterEntityLive.pipe(Layer.provideMerge(_clusterLayerBase(true))),
-		runner: _clusterLayerRunner,
-	} as const;
 	static readonly Model = {
 		Entity: _ClusterEntity,
 		Error: { Cluster: ClusterError, Infra: InfraError, Singleton: SingletonError },
-		Payload: { Invalidation: _SCHEMA.Payload.Invalidation },
 		Response: _SCHEMA.Response,
 		Rpcs: { ..._RPC_GROUPS, Merged: _AllClusterRpcs },
 	} as const;
@@ -337,28 +315,20 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 			readonly shardGroup?: string;
 			readonly skipIfOlderThan?: Duration.DurationInput;
 			readonly calculateNextRunFromPrevious?: boolean;
-		}) => ClusterCron.make({
-			calculateNextRunFromPrevious: config.calculateNextRunFromPrevious ?? false,
-			cron: config.cron,
-			execute: Effect.annotateLogsScoped({ 'service.name': `cron.${config.name}` }).pipe(Effect.zipRight(_trackLeaderExecution(config.name, config.execute, 'cron'))),
-			name: config.name,
-			shardGroup: config.shardGroup,
-			skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
-		}).pipe(
-			Layer.provide(_clusterLayerRunner),
-			Layer.provide(MetricsService.Default),
-		),
+			}) => ClusterCron.make({
+				calculateNextRunFromPrevious: config.calculateNextRunFromPrevious ?? false,
+				cron: config.cron,
+				execute: Effect.annotateLogsScoped({ 'service.name': `cron.${config.name}` }).pipe(Effect.zipRight(_trackLeaderExecution(config.name, config.execute, 'cron'))),
+				name: config.name,
+				shardGroup: config.shardGroup,
+				skipIfOlderThan: config.skipIfOlderThan ?? _CONFIG.cron.skipIfOlderThan,
+			}),
 		cronInfo: (cron: Cron.Cron, options?: { readonly nextCount?: number }) => Effect.sync(() => {
-			const currentDate = new Date();
-			return {
-				matchesNow: Cron.match(cron, currentDate),
-				nextRuns: A.unfold(
-					{ current: 0, sequence: Cron.sequence(cron, currentDate) },
-					({ current, sequence }) => current >= (options?.nextCount ?? 5)
-						? Option.none()
-						: ((result) => result.done ? Option.none() : Option.some([result.value, { current: current + 1, sequence }] as const))(sequence.next()),
-				),
-			};
+			const now = new Date(), limit = options?.nextCount ?? 5, seq = Cron.sequence(cron, now);
+			return { matchesNow: Cron.match(cron, now), nextRuns: A.unfold(0, (n) => {
+				const next = seq.next();
+				return next.done || n >= limit ? Option.none() : Option.some([next.value, n + 1] as const);
+			}) };
 		}),
 		singleton: <E, R, StateSchema extends S.Schema.Any = never>(
 			name: string,
@@ -453,37 +423,27 @@ class ClusterService extends Effect.Service<ClusterService>()('server/Cluster', 
 					yield* FiberMap.run(fibers, 'main-work')(_trackLeaderExecution(name, run(stateRef), 'singleton'));
 					yield* sharding.isShutdown.pipe(
 						Effect.repeat(Schedule.spaced(Duration.millis(100)).pipe(Schedule.whileOutput((shutdown) => !shutdown))),
-						Effect.tap(() => Effect.logInfo(`Singleton ${name} detected shutdown`)),
-						Effect.tap(() => Effect.logInfo(`Singleton ${name} interrupted gracefully`)),
-						Effect.catchAllCause((cause) => Match.value(Cause.isInterrupted(cause)).pipe(
-							Match.when(true, () => Effect.void),
-							Match.orElse(() => Effect.logError(`Singleton ${name} exited unexpectedly`, { cause }).pipe(Effect.andThen(Effect.failCause(cause)))),
-						)),
+						Effect.tap(() => Effect.logInfo(`Singleton ${name} shutting down gracefully`)),
+						Effect.catchAllCause((cause) => Cause.isInterrupted(cause)
+							? Effect.void
+							: Effect.logError(`Singleton ${name} exited unexpectedly`, { cause }).pipe(Effect.andThen(Effect.failCause(cause)))),
 					);
-				}),
-				{ shardGroup: options?.shardGroup },
-			).pipe(
-				Layer.provide(_clusterLayerRunner),
-				Layer.provide(DatabaseService.Default),
-				Layer.provide(MetricsService.Default),
-			);
-		},
-	} as const;
+					}),
+					{ shardGroup: options?.shardGroup },
+				);
+			},
+		} as const;
 	static readonly Health = {
-		cluster: () => Telemetry.span(_computeClusterHealth().pipe(
-			Effect.map((clusterMetrics) => ({ ..._clusterHealthFlags(clusterMetrics), metrics: clusterMetrics })),
-		), 'cluster.checkClusterHealth', _RPC_SPAN_OPTS),
+		cluster: () => Telemetry.span(Effect.all({
+			entities: _readMetric(ClusterMetrics.entities), runners: _readMetric(ClusterMetrics.runners),
+			runnersHealthy: _readMetric(ClusterMetrics.runnersHealthy), shards: _readMetric(ClusterMetrics.shards), singletons: _readMetric(ClusterMetrics.singletons),
+		}).pipe(Effect.map((m) => ({ degraded: m.runnersHealthy < m.runners, healthy: m.runnersHealthy > 0 && m.singletons > 0, metrics: m }))),
+		'cluster.checkClusterHealth', _RPC_SPAN_OPTS),
 		singleton: (config: ReadonlyArray<{ readonly name: string; readonly expectedInterval: Duration.DurationInput }>) => Telemetry.span(
 			MetricsService.pipe(
-				Effect.flatMap((metrics) => _computeSingletonHealth(metrics, config.map(({ expectedInterval, name }) => ({
-					expectedInterval: Duration.toMillis(Duration.decode(expectedInterval)),
-					name,
-				})))),
-				Effect.map((result) => ({ healthy: result.healthy, healthyCount: result.healthyCount, singletons: result.results, unhealthyCount: result.unhealthyCount })),
-			),
-			'cluster.checkSingletonHealth',
-			_RPC_SPAN_OPTS,
-		),
+				Effect.flatMap((metrics) => _computeSingletonHealth(metrics, config.map(({ expectedInterval, name }) => ({ expectedInterval: Duration.toMillis(Duration.decode(expectedInterval)), name })))),
+				Effect.map(({ results, ...rest }) => ({ ...rest, singletons: results })),
+			), 'cluster.checkSingletonHealth', _RPC_SPAN_OPTS),
 	} as const;
 }
 
