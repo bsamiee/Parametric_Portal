@@ -1,8 +1,12 @@
 {
     "compilerOptions": {
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
         "lib": ["esnext"],
-        "rootDir": ".",
-        "tsBuildInfoFile": "../.nx/cache/tsbuildinfo/tools.tsbuildinfo"
+        "noEmit": true,
+        "rootDir": "."
     },
     "exclude": ["node_modules"],
     "extends": "../tsconfig.base.json",

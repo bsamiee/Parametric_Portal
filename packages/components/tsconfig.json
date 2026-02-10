@@ -1,8 +1,12 @@
 {
     "compilerOptions": {
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
+        "noEmit": true,
         "outDir": "dist",
         "rootDir": ".",
-        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/components.tsbuildinfo",
         "types": ["vite/client", "vitest/globals"]
     },
     "exclude": ["dist", "node_modules"],

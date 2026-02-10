@@ -1,9 +1,13 @@
 {
     "compilerOptions": {
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "emitDeclarationOnly": false,
+        "noEmit": true,
         "outDir": "dist",
         "preserveSymlinks": true,
         "rootDir": ".",
-        "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/database.tsbuildinfo",
         "types": ["node", "vitest/globals"]
     },
     "exclude": ["dist", "node_modules"],

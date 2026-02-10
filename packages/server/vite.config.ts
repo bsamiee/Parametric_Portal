@@ -37,6 +37,7 @@ export default defineConfig(
                 'platform/websocket': './src/platform/websocket.ts',
                 // Security modules
                 'security/crypto': './src/security/crypto.ts',
+                'security/policy': './src/security/policy.ts',
                 'security/totp-replay': './src/security/totp-replay.ts',
                 // Utility modules
                 'utils/circuit': './src/utils/circuit.ts',
@@ -46,6 +47,7 @@ export default defineConfig(
             },
             external: [
                 '@aws-sdk/client-s3',
+                '@aws-sdk/client-sesv2',
                 '@aws-sdk/s3-request-presigner',
                 '@effect-aws/client-s3',
                 '@effect/cli',
@@ -71,6 +73,7 @@ export default defineConfig(
                 'ipaddr.js',
                 'jszip',
                 'nanoid',
+                'nodemailer',
                 'otplib',
                 'papaparse',
                 'rfc6902',

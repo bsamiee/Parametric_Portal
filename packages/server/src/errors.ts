@@ -56,28 +56,27 @@ class Auth extends S.TaggedError<Auth>()('Auth', { ..._cause, details: S.String 
 	static readonly of = (field: string, details: string, cause?: unknown) => new Validation({ cause, details, field });
 	override get message() { return `Validation: ${this.field} - ${this.details}`; }}
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _errors = {Auth, Conflict, Forbidden, GatewayTimeout, Gone, Internal, NotFound, OAuth, RateLimit, ServiceUnavailable, Validation,} as const;
+const _isHttpError = <E>(error: E): error is Extract<E, { readonly _tag: keyof typeof _errors }> =>
+	error !== null && typeof error === 'object' && '_tag' in error &&
+	typeof (error as { readonly _tag: unknown })._tag === 'string' &&
+	(error as { readonly _tag: string })._tag in _errors;
+
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const HttpError = {
-	Auth,
-	Conflict,
-	Forbidden,
-	GatewayTimeout,
-	Gone,
-	Internal,
-	NotFound,
-	OAuth,
-	RateLimit,
-	ServiceUnavailable,
-	Validation
+	..._errors,
+	is: _isHttpError
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace HttpError {
-	type _I<K extends keyof typeof HttpError> = InstanceType<(typeof HttpError)[K]>;
-	export type Any = _I<keyof typeof HttpError>;
+	type _I<K extends keyof typeof _errors> = InstanceType<(typeof _errors)[K]>;
+	export type Any = _I<keyof typeof _errors>;
 	export type Auth = _I<'Auth'>; export type Conflict = _I<'Conflict'>; export type Forbidden = _I<'Forbidden'>; export type GatewayTimeout = _I<'GatewayTimeout'>;
 	export type Gone = _I<'Gone'>; export type Internal = _I<'Internal'>; export type NotFound = _I<'NotFound'>; export type OAuth = _I<'OAuth'>;
 	export type RateLimit = _I<'RateLimit'>; export type ServiceUnavailable = _I<'ServiceUnavailable'>; export type Validation = _I<'Validation'>;

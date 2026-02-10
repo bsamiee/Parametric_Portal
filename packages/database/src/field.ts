@@ -55,7 +55,8 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	backupHashes:     { col: 'backup_hashes',    sql: 'TEXT[]',      ts: 'S.Array(S.String)', mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
 	size:             { col: 'size',             sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	remaining:        { col: 'remaining',        sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
-	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'AppSettingsSchema', mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	notificationPreferences: { col: 'notification_preferences', sql: 'JSONB', ts: 'S.Unknown', mark: false, gen: false, null: false, ref: false, wrap: false },
 	oldData:          { col: 'old_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	newData:          { col: 'new_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	ipAddress:        { col: 'ip_address',       sql: 'INET',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
@@ -72,6 +73,10 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	operation:        { col: 'operation',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	subject:          { col: 'subject',          sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	provider:         { col: 'provider',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	channel:          { col: 'channel',          sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	template:         { col: 'template',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	recipient:        { col: 'recipient',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
+	error:            { col: 'error',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	scope:            { col: 'scope',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	entityType:       { col: 'entity_type',      sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 	entityId:         { col: 'entity_id',        sql: 'UUID',        ts: 'S.UUID',            mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
@@ -97,6 +102,7 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	scheduledAt:      { col: 'scheduled_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	startedAt:        { col: 'started_at',       sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	completedAt:      { col: 'completed_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
+	deliveredAt:      { col: 'delivered_at',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'stamp',     gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption, _WRAP_META.Generated]           },
 	lastError:        { col: 'last_error',       sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	lockedBy:         { col: 'locked_by',        sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	lockedUntil:      { col: 'locked_until',     sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
@@ -109,10 +115,18 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	replayedAt:       { col: 'replayed_at',      sql: 'TIMESTAMPTZ', ts: 'S.DateFromSelf',    mark: 'soft',      gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	kvKey:            { col: 'key',              sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
 	kvValue:          { col: 'value',            sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	resource:         { col: 'resource',         sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	action:           { col: 'action',           sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	credentialId:     { col: 'credential_id',    sql: 'TEXT',        ts: 'S.String',          mark: 'unique',    gen: false,    null: false, ref: false,      wrap: false                                                  },
+	publicKey:        { col: 'public_key',       sql: 'BYTEA',       ts: 'BufferSchema',      mark: 'sensitive', gen: false,    null: false, ref: false,      wrap: [_WRAP_META.Sensitive]                                  },
+	counter:          { col: 'counter',          sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	deviceType:       { col: 'device_type',      sql: 'TEXT',        ts: 'S.String',          mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	backedUp:         { col: 'backed_up',        sql: 'BOOLEAN',     ts: 'S.Boolean',         mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
+	transports:       { col: 'transports',       sql: 'TEXT[]',      ts: 'S.Array(S.String)', mark: false,       gen: false,    null: false, ref: false,      wrap: false                                                  },
 });
 const _TABLES = {
-	apps:             { fields: [_REGISTRY.id, _REGISTRY.name, _REGISTRY.namespace, _REGISTRY.settings, _REGISTRY.updatedAt] },
-	users:            { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.role, _REGISTRY.status, _REGISTRY.roleOrder, _REGISTRY.deletedAt, _REGISTRY.updatedAt] },
+	apps:             { fields: [_REGISTRY.id, _REGISTRY.name, _REGISTRY.namespace, _REGISTRY.status, _REGISTRY.settings, _REGISTRY.updatedAt] },
+	users:            { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.email, _REGISTRY.notificationPreferences, _REGISTRY.role, _REGISTRY.status, _REGISTRY.roleOrder, _REGISTRY.deletedAt, _REGISTRY.updatedAt] },
 	sessions:         { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.hash, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt, _REGISTRY.deletedAt, _REGISTRY.verifiedAt, _REGISTRY.ipAddress, _REGISTRY.userAgent, _REGISTRY.updatedAt, _REGISTRY.prefix], required: [_REGISTRY.appId, _REGISTRY.userId, _REGISTRY.accessExpiresAt, _REGISTRY.refreshHash, _REGISTRY.refreshExpiresAt] },
 	apiKeys:          { fields: [_REGISTRY.id, _REGISTRY.userId, _REGISTRY.name, _REGISTRY.hash, _REGISTRY.encrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.lastUsedAt, _REGISTRY.updatedAt, _REGISTRY.prefix], required: [_REGISTRY.userId] },
 	oauthAccounts:    { fields: [_REGISTRY.id, _REGISTRY.userId, _REGISTRY.provider, _REGISTRY.externalId, _REGISTRY.accessEncrypted, _REGISTRY.refreshEncrypted, _REGISTRY.expiresAt, _REGISTRY.deletedAt, _REGISTRY.scope, _REGISTRY.updatedAt], required: [_REGISTRY.userId], unique: [[_REGISTRY.provider, _REGISTRY.externalId]] },
@@ -123,6 +137,9 @@ const _TABLES = {
 	searchEmbeddings: { fields: [_REGISTRY.entityType, _REGISTRY.entityId, _REGISTRY.scopeId, _REGISTRY.model, _REGISTRY.dimensions, _REGISTRY.embedding, _REGISTRY.hash, _REGISTRY.updatedAt], pk: [_REGISTRY.entityType, _REGISTRY.entityId], fk: [[_REGISTRY.entityType, _REGISTRY.entityId], _FK.CASCADE] as const },
 	jobs:             { fields: [_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.result, _REGISTRY.progress, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts, _REGISTRY.scheduledAt, _REGISTRY.batchId, _REGISTRY.dedupeKey, _REGISTRY.lastError, _REGISTRY.completedAt, _REGISTRY.updatedAt], required: [_REGISTRY.jobId, _REGISTRY.appId, _REGISTRY.type, _REGISTRY.status, _REGISTRY.priority, _REGISTRY.payload, _REGISTRY.history, _REGISTRY.attempts, _REGISTRY.maxAttempts] },
 	jobDlq:           { fields: [_REGISTRY.id, _REGISTRY.source, _REGISTRY.originalJobId, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.requestId, _REGISTRY.type, _REGISTRY.payload, _REGISTRY.errorReason, _REGISTRY.attempts, _REGISTRY.errorHistory, _REGISTRY.replayedAt], fk: [[_REGISTRY.userId, _FK.RESTRICT]] as const },
+	notifications:    { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.userId, _REGISTRY.channel, _REGISTRY.template, _REGISTRY.status, _REGISTRY.recipient, _REGISTRY.provider, _REGISTRY.payload, _REGISTRY.error, _REGISTRY.attempts, _REGISTRY.maxAttempts, _REGISTRY.jobId, _REGISTRY.dedupeKey, _REGISTRY.deliveredAt, _REGISTRY.updatedAt] },
+	permissions:      { fields: [_REGISTRY.id, _REGISTRY.appId, _REGISTRY.role, _REGISTRY.resource, _REGISTRY.action, _REGISTRY.deletedAt, _REGISTRY.updatedAt] },
+	webauthnCredentials: { fields: [_REGISTRY.id, _REGISTRY.userId, _REGISTRY.credentialId, _REGISTRY.publicKey, _REGISTRY.counter, _REGISTRY.deviceType, _REGISTRY.backedUp, _REGISTRY.transports, _REGISTRY.name, _REGISTRY.lastUsedAt, _REGISTRY.deletedAt, _REGISTRY.updatedAt] },
 	kvStore:          { fields: [_REGISTRY.id, _REGISTRY.kvKey, _REGISTRY.kvValue, _REGISTRY.expiresAt, _REGISTRY.updatedAt], unique: [[_REGISTRY.kvKey]] },
 } as const;
 
@@ -278,12 +295,26 @@ function _lens(input: _CapKey | Partial<_Entry>): _Lens {
 	};
 }
 const _dispatch = <D extends _DispatchDim, R>(dim: D, targets: _Field | readonly _Field[], handlers: _DimHandlers<D, R>): R[] =>
-	(typeof targets === 'string' ? [targets] : targets).map((name) => {
-		const entry = _REGISTRY[name];
+	A.map(Array.isArray(targets) ? targets : [targets], (name): R => {
+		const entry = _REGISTRY[name as _Field];
 		const value = entry[dim];
-		return value === false ? handlers.none(entry, name)
-			: dim === 'wrap' ? ((wrapMeta: _Meta) => (handlers as _DimHandlers<'wrap', R>)[wrapMeta.cat](entry, wrapMeta, name))((value as _Wrap)[0])
-			: ((handler: ((e: _Entry, f: _Field) => R) | undefined) => handler ? handler(entry, name) : handlers.none(entry, name))((handlers as unknown as Record<string, (e: _Entry, f: _Field) => R>)[value as string]);
+		const dispatchKey = Match.value([value, dim] as const).pipe(
+			Match.when(([v]) => v === false, () => 'none' as const),
+			Match.when(([, d]) => d === 'wrap', () => 'wrap' as const),
+			Match.orElse(() => 'handler' as const)
+		);
+		const dispatchTable = {
+			none: () => handlers.none(entry, name),
+			wrap: () => ((wrapMeta: _Meta) => (handlers as _DimHandlers<'wrap', R>)[wrapMeta.cat](entry, wrapMeta, name))((value as _Wrap)[0]),
+			handler: () => {
+				const h = (handlers as unknown as Record<string, (e: _Entry, f: _Field) => R>)[value as string];
+				return Match.value(h).pipe(
+					Match.when(Match.undefined, () => handlers.none(entry, name)),
+					Match.orElse(fn => fn(entry, name))
+				);
+			}
+		};
+		return dispatchTable[dispatchKey]() as R;
 	});
 
 // --- [FIELD_OBJECT] ----------------------------------------------------------

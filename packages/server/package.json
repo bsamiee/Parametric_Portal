@@ -73,6 +73,11 @@
       "import": "./src/security/crypto.ts",
       "default": "./src/security/crypto.ts"
     },
+    "./security/policy": {
+      "types": "./src/security/policy.ts",
+      "import": "./src/security/policy.ts",
+      "default": "./src/security/policy.ts"
+    },
     "./security/totp-replay": {
       "types": "./src/security/totp-replay.ts",
       "import": "./src/security/totp-replay.ts",
@@ -92,6 +97,11 @@
       "types": "./src/domain/storage.ts",
       "import": "./src/domain/storage.ts",
       "default": "./src/domain/storage.ts"
+    },
+    "./domain/notifications": {
+      "types": "./src/domain/notifications.ts",
+      "import": "./src/domain/notifications.ts",
+      "default": "./src/domain/notifications.ts"
     },
     "./domain/transfer": {
       "types": "./src/domain/transfer.ts",
@@ -132,6 +142,16 @@
       "types": "./src/infra/webhooks.ts",
       "import": "./src/infra/webhooks.ts",
       "default": "./src/infra/webhooks.ts"
+    },
+    "./domain/features": {
+      "types": "./src/domain/features.ts",
+      "import": "./src/domain/features.ts",
+      "default": "./src/domain/features.ts"
+    },
+    "./infra/email": {
+      "types": "./src/infra/email.ts",
+      "import": "./src/infra/email.ts",
+      "default": "./src/infra/email.ts"
     }
   },
   "scripts": {
@@ -143,6 +163,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/client-sesv2": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@effect-aws/client-s3": "catalog:",
     "@effect/cluster": "catalog:",
@@ -165,6 +186,7 @@
     "ioredis": "catalog:",
     "jszip": "catalog:",
     "nanoid": "catalog:",
+    "nodemailer": "catalog:",
     "otplib": "catalog:",
     "papaparse": "catalog:",
     "rfc6902": "catalog:",
@@ -173,6 +195,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/nodemailer": "catalog:",
     "@types/papaparse": "catalog:",
     "@types/sax": "catalog:",
     "typescript": "catalog:",

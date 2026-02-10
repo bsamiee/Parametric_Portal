@@ -3,45 +3,69 @@
  * UUIDv7 ordering, casefold comparisons, purge/revoke DB functions.
  */
 import { SqlClient } from '@effect/sql';
-import { Clock, Effect, Schema as S } from 'effect';
+import { Clock, Effect, Option, Record as R, Schema as S } from 'effect';
 import { repo, routine, Update } from './factory.ts';
-import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, OauthAccount, Session, User, WebauthnCredential } from './models.ts';
+import { ApiKey, App, Asset, AuditLog, Job, JobDlq, KvStore, MfaSecret, Notification, OauthAccount, Permission, Session, User, WebauthnCredential, type AppSettingsSchema } from './models.ts';
 
 // --- [REPOSITORIES] ----------------------------------------------------------
 
 const makeUserRepo = Effect.gen(function* () {
-	const repository = yield* repo(User, 'users', { resolve: { byEmail: ['appId', 'email'] } });
+	const repository = yield* repo(User, 'users', { resolve: { byEmail: 'email' }, scoped: 'appId' });
 	return { ...repository,
-		byAppRole: (appId: string, role: string) => repository.find([{ field: 'app_id', value: appId }, { field: 'role', value: role }]),
-		byEmail: (appId: string, email: string) => repository.by('byEmail', { appId, email }),
+		byEmail: (email: string) => repository.by('byEmail', email),
+		byRole: (role: string) => repository.find([{ field: 'role', value: role }]),
 		restore: (id: string, appId: string) => repository.lift(id, { app_id: appId }),
+		setNotificationPreferences: (id: string, preferences: S.Schema.Type<typeof User.fields.notificationPreferences>) => repository.set(id, { notification_preferences: preferences }),
 		softDelete: (id: string, appId: string) => repository.drop(id, { app_id: appId }),
+	};
+});
+const makePermissionRepo = Effect.gen(function* () {
+	const repository = yield* repo(Permission, 'permissions', {
+		conflict: { keys: ['appId', 'role', 'resource', 'action'], only: ['deletedAt'] },
+		scoped: 'appId',
+	});
+	return { ...repository,
+		byRole: (role: string) => repository.find([{ field: 'role', value: role }]),
+		grant: (payload: { appId: string; role: S.Schema.Type<typeof Permission.fields.role>; resource: string; action: string }) =>
+			repository.upsert({
+				action: payload.action,
+				appId: payload.appId,
+				deletedAt: Option.none(),
+				resource: payload.resource,
+				role: payload.role,
+				updatedAt: undefined,
+			}),
+		revoke: (role: string, resource: string, action: string) =>
+			repository.drop([
+				{ field: 'role', value: role },
+				{ field: 'resource', value: resource },
+				{ field: 'action', value: action },
+			]),
 	};
 });
 const makeAppRepo = Effect.gen(function* () {
 	const repository = yield* repo(App, 'apps', { resolve: { byNamespace: 'namespace' } });
 	return { ...repository,
+		archive: (id: string) => repository.set(id, { status: 'archived' }),
 		byNamespace: (namespace: string) => repository.by('byNamespace', namespace),
-		updateSettings: (id: string, settings: Record<string, unknown>) => repository.set(id, { settings }),
+		resume: (id: string) => repository.set(id, { status: 'active' }),
+		suspend: (id: string) => repository.set(id, { status: 'suspended' }),
+		updateSettings: (id: string, settings: S.Schema.Type<typeof AppSettingsSchema>) => repository.set(id, { settings }),
 	};
 });
 const makeSessionRepo = Effect.gen(function* () {
 	const repository = yield* repo(Session, 'sessions', {
-		fn: { count_sessions_by_ip: { args: [{ cast: 'inet', field: 'ip' }, 'windowMinutes'], params: S.Struct({ ip: S.String, windowMinutes: S.Number }) },
-			revoke_sessions_by_ip: { args: [{ cast: 'inet', field: 'ip' }], params: S.Struct({ ip: S.String }) } },
+		fn: { revoke_sessions_by_ip: { args: [{ cast: 'inet', field: 'ip' }], params: S.Struct({ ip: S.String }) } },
 		purge: 'purge_sessions', resolve: { byHash: 'hash', byRefreshHash: 'refreshHash' },
+		scoped: 'appId',
 	});
 	return { ...repository,
 		byHash: (hash: string) => repository.by('byHash', hash),
-		byIp: (ip: string) => repository.find([{ field: 'ip_address', value: ip }]),
 		byRefreshHash: (hash: string) => repository.by('byRefreshHash', hash),
 		byRefreshHashForUpdate: (hash: string) => repository.one([{ field: 'refresh_hash', value: hash }], 'update'),
 		byUser: (userId: string) => repository.find([{ field: 'user_id', value: userId }]),
-		countByIp: (ip: string, windowMinutes = 60) => repository.fn('count_sessions_by_ip', { ip, windowMinutes }),
-		restore: (id: string) => repository.lift(id),
 		softDelete: (id: string) => repository.drop(id),
 		softDeleteByIp: (ip: string) => repository.fn('revoke_sessions_by_ip', { ip }),
-		softDeleteByUser: (userId: string) => repository.drop([{ field: 'user_id', value: userId }]),
 		touch: (id: string) => repository.set(id, { updated_at: Update.now }),
 		verify: (id: string) => repository.set(id, { verified_at: Update.now }, undefined, { field: 'verified_at', op: 'null' }),
 	};
@@ -69,11 +93,11 @@ const makeOauthAccountRepo = Effect.gen(function* () {
 	};
 });
 const makeAssetRepo = Effect.gen(function* () {
-	const repository = yield* repo(Asset, 'assets', { purge: 'purge_assets' });
+	const repository = yield* repo(Asset, 'assets', { purge: 'purge_assets', scoped: 'appId' });
 	return { ...repository,
-		byAppType: (appId: string, type: string) => repository.find([{ field: 'app_id', value: appId }, { field: 'type', value: type }]),
-		byFilter: (userId: string, appId: string, { after, before, ids, types }: { after?: Date; before?: Date; ids?: string[]; types?: string[] } = {}) => repository.find(repository.preds({ after, app_id: appId, before, id: ids, type: types, user_id: userId })),
+		byFilter: (userId: string, { after, before, ids, types }: { after?: Date; before?: Date; ids?: string[]; types?: string[] } = {}) => repository.find(repository.preds({ after, before, id: ids, type: types, user_id: userId })),
 		byHash: (hash: string) => repository.one([{ field: 'hash', value: hash }]),
+		byType: (type: string) => repository.find([{ field: 'type', value: type }]),
 		byUser: (userId: string) => repository.find([{ field: 'user_id', value: userId }]),
 		byUserKeyset: (userId: string, limit: number, cursor?: string) => repository.page([{ field: 'user_id', value: userId }], { cursor, limit }),
 		findStaleForPurge: (olderThanDays: number) => Clock.currentTimeMillis.pipe(
@@ -83,7 +107,7 @@ const makeAssetRepo = Effect.gen(function* () {
 				{ field: 'storage_ref', op: 'notNull' },
 			])),
 		),
-		insertMany: (items: readonly S.Schema.Type<typeof Asset.insert>[]) => repository.put(items as S.Schema.Type<typeof Asset.insert>[]),
+		insertMany: (items: readonly S.Schema.Type<typeof Asset.insert>[]) => repository.put([...items]),
 		restore: (id: string, appId: string) => repository.lift(id, { app_id: appId }),
 		softDelete: (id: string, appId: string) => repository.drop(id, { app_id: appId }),
 	};
@@ -91,11 +115,12 @@ const makeAssetRepo = Effect.gen(function* () {
 const makeAuditRepo = Effect.gen(function* () {
 	const repository = yield* repo(AuditLog, 'audit_logs', {
 		fn: { count_audit_by_ip: { args: [{ cast: 'uuid', field: 'appId' }, { cast: 'inet', field: 'ip' }, 'windowMinutes'], params: S.Struct({ appId: S.UUID, ip: S.String, windowMinutes: S.Number }) } },
+		scoped: 'appId',
 	});
 	return { ...repository,
-		byIp: (appId: string, ip: string, limit: number, cursor?: string) => repository.page([{ field: 'app_id', value: appId }, { field: 'ip_address', value: ip }], { cursor, limit }),
-		bySubject: (appId: string, subject: string, subjectId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: string } = {}) => repository.page(repository.preds({ after, app_id: appId, before, operation, subject, subject_id: subjectId }), { cursor, limit }),
-		byUser: (appId: string, userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: string } = {}) => repository.page(repository.preds({ after, app_id: appId, before, operation, user_id: userId }), { cursor, limit }),
+		byIp: (ip: string, limit: number, cursor?: string) => repository.page([{ field: 'ip_address', value: ip }], { cursor, limit }),
+		bySubject: (subject: string, subjectId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: string } = {}) => repository.page(repository.preds({ after, before, operation, subject, subject_id: subjectId }), { cursor, limit }),
+		byUser: (userId: string, limit: number, cursor?: string, { after, before, operation }: { after?: Date; before?: Date; operation?: string } = {}) => repository.page(repository.preds({ after, before, operation, user_id: userId }), { cursor, limit }),
 		countByIp: (appId: string, ip: string, windowMinutes = 60) => repository.fn('count_audit_by_ip', { appId, ip, windowMinutes }),
 		log: repository.insert,
 	};
@@ -107,9 +132,6 @@ const makeMfaSecretRepo = Effect.gen(function* () {
 	});
 	return { ...repository,
 		byUser: (userId: string) => repository.by('byUser', userId),
-		byUserForUpdate: (userId: string) => repository.one([{ field: 'user_id', value: userId }], 'update'),
-		enable: (userId: string) => repository.set([{ field: 'user_id', value: userId }], { enabled_at: Update.now }),
-		restore: (userId: string) => repository.lift([{ field: 'user_id', value: userId }]),
 		softDelete: (userId: string) => repository.drop([{ field: 'user_id', value: userId }]),
 	};
 });
@@ -127,25 +149,39 @@ const makeJobRepo = Effect.gen(function* () {
 	const repository = yield* repo(Job, 'jobs', {
 		fnTyped: { count_jobs_by_status: { args: [], params: S.Struct({}), schema: S.Record({ key: S.String, value: S.Number }) } },
 		pk: { column: 'job_id' },
+		scoped: 'appId',
 	});
 	return { ...repository,
 		byDateRange: (after: Date, before: Date, options?: { limit?: number; cursor?: string }) => repository.page(repository.preds({ after, before }), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
 		byStatus: (status: string, options?: { after?: Date; before?: Date; limit?: number; cursor?: string }) => repository.page(repository.preds({ after: options?.after, before: options?.before, status }), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
-		countByStatus: repository.fnTyped('count_jobs_by_status', {}).pipe(Effect.map(result => result as Record<string, number>)),
+		countByStatus: () => repository.fnTyped('count_jobs_by_status', {}),
 		countByStatuses: (...statuses: readonly string[]) => repository.count([{ field: 'status', op: 'in', values: [...statuses] }]),
 		isDuplicate: (dedupeKey: string) => repository.exists([{ field: 'dedupe_key', value: dedupeKey }, { field: 'status', op: 'in', values: ['queued', 'processing'] }]),
 	};
 });
 const makeJobDlqRepo = Effect.gen(function* () {
-	const repository = yield* repo(JobDlq, 'job_dlq', { purge: 'purge_job_dlq', resolve: { byOriginalJob: 'originalJobId' } });
+	const repository = yield* repo(JobDlq, 'job_dlq', { purge: 'purge_job_dlq', resolve: { byOriginalJob: 'originalJobId' }, scoped: 'appId' });
+	const _typePred = (type?: string) => type === undefined
+		? []
+		: [{ field: 'type', op: type.includes('*') ? 'like' : 'eq', value: type.replaceAll('*', '%') } as const];
 	return { ...repository,
 		byErrorReason: (errorReason: string, options?: { limit?: number; cursor?: string }) => repository.page([{ field: 'error_reason', value: errorReason }], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
 		byOriginalJob: (originalJobId: string) => repository.by('byOriginalJob', originalJobId),
 		byRequest: (requestId: string) => repository.find([{ field: 'request_id', value: requestId }]),
-		countPending: (type?: string) => repository.count(type ? [{ field: 'type', value: type }] : []),
-		listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(options?.type ? [{ field: 'type', value: options.type }] : [], { cursor: options?.cursor, limit: options?.limit ?? 100 }),
+		countPending: (type?: string) => repository.count(_typePred(type)),
+		listPending: (options?: { type?: string; limit?: number; cursor?: string }) => repository.page(_typePred(options?.type), { cursor: options?.cursor, limit: options?.limit ?? 100 }),
 		markReplayed: (id: string) => repository.drop(id),
 		unmarkReplayed: (id: string) => repository.lift(id),
+	};
+});
+const makeNotificationRepo = Effect.gen(function* () {
+	const repository = yield* repo(Notification, 'notifications', { scoped: 'appId' });
+	return { ...repository,
+		transition: (id: string, updates: { status: string; error?: string | null; provider?: string | null; deliveredAt?: Date | null; jobId?: string | null }) =>
+			repository.set(id, R.filter(
+				{ delivered_at: updates.deliveredAt, error: updates.error, job_id: updates.jobId, provider: updates.provider, status: updates.status } as Record<string, unknown>,
+				(value) => value !== undefined,
+			)),
 	};
 });
 const makeKvStoreRepo = Effect.gen(function* () {
@@ -161,20 +197,16 @@ const makeKvStoreRepo = Effect.gen(function* () {
 		setJson: <A, I>(key: string, jsonValue: A, schema: S.Schema<A, I, never>, expiresAt?: Date) => repository.json.encode(schema)(jsonValue).pipe(Effect.flatMap((encoded) => repository.upsert({ expiresAt, key, value: encoded }))),
 	};
 });
-const _SYSTEM_SCHEMA = {
-	cacheHitRatio: S.Struct({backendType: S.String, cacheHitRatio: S.Number, hits: S.Unknown, ioContext: S.String, ioObject: S.String, reads: S.Unknown, writes: S.Unknown,}),
-	ioConfig: S.Struct({ name: S.String, setting: S.String }),
-	ioStats: S.Unknown,
-	statements: S.Array(S.Unknown),
-} as const;
-const _SYSTEM_ROUTINE = {
-	fn: {count_event_outbox: {}, purge_event_journal: { args: ['days'], params: S.Struct({ days: S.Number }) },},
-	fnSet: {get_db_cache_hit_ratio: { schema: _SYSTEM_SCHEMA.cacheHitRatio }, get_db_io_config: { schema: _SYSTEM_SCHEMA.ioConfig }, get_db_io_stats: { schema: _SYSTEM_SCHEMA.ioStats },},
-	fnTyped: {list_stat_statements_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: _SYSTEM_SCHEMA.statements },},
-} as const;
-
 const makeSystemRepo = Effect.gen(function* () {
-	const repository = yield* routine('database/system', _SYSTEM_ROUTINE);
+	const repository = yield* routine('database/system', {
+		fn: { count_event_outbox: {}, purge_event_journal: { args: ['days'], params: S.Struct({ days: S.Number }) } },
+		fnSet: {
+			get_db_cache_hit_ratio: { schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
+			get_db_io_config: 		{ schema: S.Struct({ name: S.String, setting: S.String }) },
+			get_db_io_stats: 		{ schema: S.Unknown },
+		},
+		fnTyped: { list_stat_statements_json: { args: ['limit'], params: S.Struct({ limit: S.Number }), schema: S.Array(S.Unknown) } },
+	});
 	return {
 		dbCacheHitRatio: () => repository.fnSet('get_db_cache_hit_ratio', {}),
 		dbIoConfig: () => repository.fnSet('get_db_io_config', {}),
@@ -190,9 +222,9 @@ const makeSystemRepo = Effect.gen(function* () {
 class DatabaseService extends Effect.Service<DatabaseService>()('database/DatabaseService', {
 	effect: Effect.gen(function* () {
 		const sqlClient = yield* SqlClient.SqlClient;
-		const [users, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, kvStore, system] = yield* Effect.all([
-			makeUserRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
-			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeKvStoreRepo, makeSystemRepo,
+		const [users, permissions, apps, sessions, apiKeys, oauthAccounts, assets, audit, mfaSecrets, webauthnCredentials, jobs, jobDlq, notifications, kvStore, system] = yield* Effect.all([
+			makeUserRepo, makePermissionRepo, makeAppRepo, makeSessionRepo, makeApiKeyRepo,
+			makeOauthAccountRepo, makeAssetRepo, makeAuditRepo, makeMfaSecretRepo, makeWebauthnCredentialRepo, makeJobRepo, makeJobDlqRepo, makeNotificationRepo, makeKvStoreRepo, makeSystemRepo,
 		]);
 		const monitoring = {
 			cacheHitRatio: Effect.fn('db.cacheHitRatio')(system.dbCacheHitRatio),
@@ -202,7 +234,7 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 		return {
 			apiKeys, apps, assets, audit, eventJournal: { purge: (olderThanDays: number) => system.eventJournalPurge(olderThanDays) }, eventOutbox: { count: system.eventOutboxCount() },
 			jobDlq, jobs, kvStore, listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)), mfaSecrets,
-			monitoring, oauthAccounts, sessions, users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
+			monitoring, notifications, oauthAccounts, permissions, sessions, users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
 		};
 	}),
 }) {}

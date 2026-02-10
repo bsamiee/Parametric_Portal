@@ -151,7 +151,7 @@
             "allowedVersions": {
                 "puppeteer": "24.34.0",
                 "typescript": "6.0.0-dev.20251125",
-                "vitest": "4.0.16"
+                "vitest": "4.0.18"
             }
         }
     }

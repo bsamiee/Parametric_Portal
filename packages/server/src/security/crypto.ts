@@ -158,8 +158,19 @@ const pair = Effect.gen(function* () {
 	return { hash: hashed, token: Redacted.make(token) } as const;
 }).pipe(Telemetry.span('crypto.pair'));
 
+// --- [ENTRY] -----------------------------------------------------------------
+
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Crypto = { compare, decrypt, encrypt, hash, hmac, pair, reencrypt, Service } as const;
+const Crypto = {
+	compare,
+	decrypt,
+	encrypt,
+	hash,
+	hmac,
+	pair,
+	reencrypt,
+	Service
+} as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 

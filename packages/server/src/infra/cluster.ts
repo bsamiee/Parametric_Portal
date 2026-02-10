@@ -57,15 +57,15 @@ const _SCHEMA = {
 		Status: { entityId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')) },
 	},
 	Response: {
-		ClusterHealth: S.Struct({ degraded: S.Boolean, entities: S.Number, healthy: S.Boolean, runners: S.Number, runnersHealthy: S.Number, shards: S.Number, singletons: S.Number }),
-		Invalidation: S.Struct({ count: S.Number, mode: S.Literal('key', 'pattern'), target: S.String }),
-		LeaderInfo: S.Struct({ runnerId: S.optional(S.String), shardGroup: S.String }),
-		NodeInfo: S.Struct({ entityCount: S.Number, runnerId: S.String, shardCount: S.Number, startedAt: S.Number, status: S.Literal('active') }),
-		ShardAssignment: S.Struct({ isLocal: S.Boolean, runnerId: S.optional(S.String), shardId: S.Number }),
-		SingletonHealth: S.Struct({ healthy: S.Boolean, healthyCount: S.Number, results: S.Array(S.Struct({ healthy: S.Boolean, lastExecution: S.String, name: S.String, staleFormatted: S.String, staleMs: S.Number })), unhealthyCount: S.Number }),
+		ClusterHealth: 		S.Struct({ degraded: S.Boolean, entities: S.Number, healthy: S.Boolean, runners: S.Number, runnersHealthy: S.Number, shards: S.Number, singletons: S.Number }),
+		Invalidation: 		S.Struct({ count: S.Number, mode: S.Literal('key', 'pattern'), target: S.String }),
+		LeaderInfo: 		S.Struct({ runnerId: S.optional(S.String), shardGroup: S.String }),
+		NodeInfo: 			S.Struct({ entityCount: S.Number, runnerId: S.String, shardCount: S.Number, startedAt: S.Number, status: S.Literal('active') }),
+		ShardAssignment: 	S.Struct({ isLocal: S.Boolean, runnerId: S.optional(S.String), shardId: S.Number }),
+		SingletonHealth: 	S.Struct({ healthy: S.Boolean, healthyCount: S.Number, results: S.Array(S.Struct({ healthy: S.Boolean, lastExecution: S.String, name: S.String, staleFormatted: S.String, staleMs: S.Number })), unhealthyCount: S.Number }),
 		SingletonHeartbeat: S.Struct({ healthy: S.Boolean, lastHeartbeat: S.Number, singletonName: S.String }),
-		SingletonState: S.Struct({ isLeader: S.Boolean, lastExecution: S.optional(S.Number), singletonName: S.String, status: S.Literal('active', 'idle', 'stopped') }),
-		Status: S.Struct({ status: S.Literal('idle', 'processing', 'suspended'), updatedAt: S.Number }),
+		SingletonState: 	S.Struct({ isLeader: S.Boolean, lastExecution: S.optional(S.Number), singletonName: S.String, status: S.Literal('active', 'idle', 'stopped') }),
+		Status: 			S.Struct({ status: S.Literal('idle', 'processing', 'suspended'), updatedAt: S.Number }),
 	},
 } as const;
 
@@ -142,7 +142,7 @@ const _trackLeaderExecution = <A, E, R>(name: string, effect: Effect.Effect<A, E
 				).pipe(
 					Effect.andThen(Clock.currentTimeMillis),
 					Effect.tap((timestamp) => Effect.all([
-						Metric.set(metrics.singleton.lastExecution, timestamp),
+						Metric.set(Metric.taggedWithLabels(metrics.singleton.lastExecution, MetricsService.label({ singleton: name })), timestamp),
 						Metric.increment(metrics.singleton.executions),
 					], { discard: true })),
 				),
@@ -187,7 +187,25 @@ const _ClusterEntityLive = _ClusterEntity.toLayer(Effect.gen(function* () {
 			entities: _readMetric(ClusterMetrics.entities), runners: _readMetric(ClusterMetrics.runners),
 			runnersHealthy: _readMetric(ClusterMetrics.runnersHealthy), shards: _readMetric(ClusterMetrics.shards), singletons: _readMetric(ClusterMetrics.singletons),
 		}).pipe(Effect.map((m) => ({ ...m, degraded: m.runnersHealthy < m.runners, healthy: m.runnersHealthy > 0 && m.singletons > 0 })))),
-			invalidate: ({ payload }) => _rpcSpan('invalidate', (payload.mode === 'key' ? CacheService.invalidate(payload.storeId, payload.target) : CacheService.invalidatePattern(payload.storeId, payload.target)).pipe(Effect.map((count) => ({ count, mode: payload.mode, target: payload.target })))),
+			invalidate: ({ payload }) => _rpcSpan(
+				'invalidate.controlPlane',
+				Effect.succeed(payload).pipe(
+					Effect.filterOrFail(
+						({ storeId, target }) => storeId.trim().length > 0 && target.trim().length > 0,
+						() => InfraError.from('InvalidPattern', `${payload.storeId}:${payload.target}`),
+					),
+					Effect.tap(({ mode, storeId, target }) => Effect.logDebug('Cluster invalidation RPC', { mode, storeId, target })),
+					Effect.flatMap(({ mode, storeId, target }) =>
+						(mode === 'key' ? CacheService.invalidate(storeId, target) : CacheService.invalidatePattern(storeId, target)).pipe(
+							Effect.filterOrFail(
+								(count) => Number.isFinite(count) && count >= 0,
+								() => InfraError.from('StoreUnavailable', `${storeId}:${target}`),
+							),
+							Effect.map((count) => ({ count, mode, target })),
+							Effect.tap((result) => Effect.logDebug('Cluster invalidation RPC completed', result)),
+						)),
+				),
+			),
 		leaderInfo: ({ payload }) => _rpcSpan('leaderInfo', ShardingConfig.ShardingConfig.pipe(
 			Effect.map((config) => ({
 				runnerId: Option.getOrUndefined(Option.map(config.runnerAddress, (a) => a.toString())),

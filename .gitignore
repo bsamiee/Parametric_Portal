@@ -109,6 +109,10 @@ Thumbs.db
 .gemini/settings.json
 .gemini/.DS_Store
 
+# --- [LOCAL_PLANNING] ---------------------------------------------------------
+packages/server/ROADMAP.md
+packages/server/_X/
+
 # --- [INFRASTRUCTURE_SECRETS] -------------------------------------------------
 infrastructure/kamal/.kamal/secrets
 infrastructure/traefik/acme/

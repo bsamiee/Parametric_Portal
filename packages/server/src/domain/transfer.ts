@@ -42,14 +42,15 @@ const _resolveItemCodec = (item: { mime?: string | null; name?: string | null },
 );
 const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
-		yield* Middleware.mfaVerified;
+		yield* Middleware.permission('transfer', 'export');
+		yield* Middleware.feature('enableExport');
 		const [metrics, context, repositories, audit, adapter] = yield* Effect.all([MetricsService, Context.Request.current, DatabaseService, AuditService, StorageAdapter]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;
 		const codec = yield* _resolveCodec(parameters.format);
 		const exportFormat = yield* Effect.filterOrFail(Effect.succeed(codec.ext), (ext): ext is Transfer.Format => Object.hasOwn(Transfer.formats, ext), () => HttpError.Validation.of('format', `Unsupported export format: ${parameters.format}`));
 		const isBinaryFormat = (value: Transfer.Format): value is Transfer.BinaryFormat => Transfer.formats[value].kind === 'binary';
-		const baseStream = Stream.fromIterableEffect(repositories.assets.byFilter(session.userId, appId, {
+		const baseStream = Stream.fromIterableEffect(repositories.assets.byFilter(session.userId, {
 			...(Option.isSome(parameters.after) && { after: parameters.after.value }),
 			...(Option.isSome(parameters.before) && { before: parameters.before.value }),
 			...(Option.isSome(parameters.typeSlug) && { types: [parameters.typeSlug.value] }),
@@ -96,7 +97,7 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 	}).pipe(Telemetry.span('transfer.export', { kind: 'server', metrics: false }));
 const _importAssets = (parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
-		yield* Middleware.mfaVerified;
+		yield* Middleware.permission('transfer', 'import');
 		const [metrics, context, repositories, search, audit, storage] = yield* Effect.all([MetricsService, Context.Request.current, DatabaseService, SearchRepo, AuditService, StorageService]);
 		const session = yield* Context.Request.sessionOrFail;
 		const appId = context.tenantId;

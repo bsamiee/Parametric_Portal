@@ -5,9 +5,9 @@
 import { S3, S3ClientInstance } from '@effect-aws/client-s3';
 import { CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Array as A, Chunk, Config, Duration, Effect, type Either, Exit, Layer, Match, Metric, Option, Redacted, Stream } from 'effect';
+import { Buffer } from 'node:buffer';
+import { Array as A, Chunk, Config, Duration, Effect, type Either, Exit, Layer, Match, Metric, Option, Redacted, Stream, Struct } from 'effect';
 import { constant } from 'effect/Function';
-import { Struct } from 'effect';
 import { Context } from '../context.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -45,7 +45,6 @@ const _layer = Layer.unwrapEffect(_ENV.pipe(Effect.map((c) => S3.layer({
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _path = (key: string) => Context.Request.currentTenantId.pipe(Effect.map((t) => t === Context.Request.Id.system ? `system/${key}` : `tenants/${t}/${key}`));
-const _concatBytes = (chunks: readonly Uint8Array[]): Uint8Array => chunks.reduce((acc, c) => { const r = new Uint8Array(acc.length + c.length); r.set(acc); r.set(c, acc.length); return r; }, new Uint8Array(0));
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -68,7 +67,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 				onNone: () => Effect.succeed(Chunk.empty<Uint8Array>()),
 				onSome: (iterable) => Stream.runCollect(Stream.fromAsyncIterable(iterable, (error) => error as Error)),
 			});
-			const body = _concatBytes(Chunk.toReadonlyArray(chunks));
+			const body = new Uint8Array(Buffer.concat(Chunk.toReadonlyArray(chunks)));
 			return { body, contentType: response.ContentType ?? 'application/octet-stream', etag: Option.fromNullable(response.ETag), key, metadata: response.Metadata ?? {}, size: body.length };
 		});
 		const _copy = (input: StorageAdapter.CopyInput) => Effect.all([_path(input.sourceKey), _path(input.destKey)]).pipe(
@@ -157,7 +156,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 					},
 				);
 				const overflow = headState.tail.length > 0 ? Option.some(headState.tail) : Option.none<readonly Uint8Array[]>();
-				const headBytes = _concatBytes(headState.head);
+				const headBytes = Buffer.concat(headState.head);
 				return yield* headState.ended && headState.size < threshold
 					? s3.putObject({ Body: headBytes, Bucket: bucket, ContentType: contentType, Key: fk, Metadata: input.metadata }).pipe(Effect.map((response) => ({ etag: response.ETag ?? '', key: input.key, totalSize: headBytes.length })))
 					: Effect.gen(function* () {
@@ -178,7 +177,7 @@ class StorageAdapter extends Effect.Service<StorageAdapter>()('server/StorageAda
 						const headParts = A.map(headUploads, (response, index) => ({ ETag: response.ETag ?? '', PartNumber: index + 1 }));
 						const init = { buffer: headSplit.rest, nextPart: headParts.length + 1, parts: headParts, totalSize: headBytes.length };
 						const state = yield* Stream.runFoldEffect(remainderStream, init, (s, chunk) => {
-							const combined = _concatBytes([s.buffer, chunk]);
+							const combined = Buffer.concat([s.buffer, chunk]);
 							const { parts, rest } = _splitBuffer(combined);
 							const start = s.nextPart;
 							return Effect.forEach(parts, (body, index) => s3.uploadPart({ Body: body, Bucket: bucket, Key: fk, PartNumber: start + index, UploadId: acquiredUid }), { concurrency: 3 }).pipe(

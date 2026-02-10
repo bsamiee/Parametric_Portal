@@ -6,20 +6,29 @@ import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
 import { readFileSync } from 'node:fs';
 import type { SecureVersion } from 'node:tls';
-import { Config, Duration, Effect, Layer, Option, Schema as Sch, Stream, String as S } from 'effect';
+import { Config, Duration, Effect, FiberRef, Layer, Option, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
-const _HEALTH_TIMEOUT = Duration.seconds(5);
-const _mergePgOptions = (raw: string | undefined, next: ReadonlyArray<readonly [string, number]>) => [
-	...new Map<string, string>([
-		...(((raw ?? '').match(/-c\s+[^ ]+/g) ?? [])
-			.map((token) => token.replace(/^-c\s+/, '').split('=', 2))
-			.filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')
-			.map(([key, value]) => [key, value] as const)),
-		...next.map(([key, value]) => [key, String(value)] as const),
-	]).entries(),
-].map(([key, value]) => `-c ${key}=${value}`).join(' ');
+const _CONFIG = {
+	health: { timeout: Duration.seconds(5) },
+	pgOptions: {
+		extractPattern: /-c\s+[^ ]+/g,
+		replacePattern: /^-c\s+/,
+		timeouts: [
+			['statement_timeout', 'statementMs'],
+			['lock_timeout', 'lockMs'],
+			['idle_in_transaction_session_timeout', 'idleInTransactionMs'],
+			['transaction_timeout', 'transactionMs'],
+		] as const,
+	},
+	tenant: {
+		id: {
+			system: '00000000-0000-7000-8000-000000000000',
+			unspecified: '00000000-0000-7000-8000-ffffffffffff',
+		} as const,
+	},
+} as const;
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -48,12 +57,17 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
 		statementMs: 			Config.integer('POSTGRES_STATEMENT_TIMEOUT_MS').pipe(Config.withDefault(30_000)),
 		transactionMs: 			Config.integer('POSTGRES_TRANSACTION_TIMEOUT_MS').pipe(Config.withDefault(120_000)),
 	});
-	process.env['PGOPTIONS'] = _mergePgOptions(process.env['PGOPTIONS'], [
-		['statement_timeout', timeouts.statementMs],
-		['lock_timeout', timeouts.lockMs],
-		['idle_in_transaction_session_timeout', timeouts.idleInTransactionMs],
-		['transaction_timeout', timeouts.transactionMs],
-	]);
+	const currentPgOptions = new RegExp(_CONFIG.pgOptions.extractPattern).exec(process.env['PGOPTIONS'] ?? '') ?? [];
+	const normalizedPgOptions = currentPgOptions
+		.map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
+		.filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')
+		.map(([key, value]) => [key, value] as const);
+	const timeoutPgOptions = _CONFIG.pgOptions.timeouts
+		.map(([key, timeoutKey]) => [key, String(timeouts[timeoutKey])] as const);
+	process.env['PGOPTIONS'] = Array.from(
+		new Map<string, string>([...normalizedPgOptions, ...timeoutPgOptions]),
+		([key, value]) => `-c ${key}=${value}`,
+	).join(' ');
 	return PgClient.layerConfig({
 		applicationName: 		Config.string('POSTGRES_APP_NAME').pipe(Config.withDefault('parametric-portal')),
 		connectionTTL: 			Config.integer('POSTGRES_CONNECTION_TTL_MS').pipe(Config.withDefault(900_000), Config.map(Duration.millis)),
@@ -74,58 +88,79 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
 		username: 				Config.string('POSTGRES_USER').pipe(Config.withDefault('postgres')),
 	});
 }));
-const _sqlFn = <A, E>(query: (sql: SqlClient.SqlClient) => Effect.Effect<A, E>) => Effect.gen(function* () { const sql = yield* SqlClient.SqlClient; return yield* query(sql); });
 
 // --- [OBJECT] ----------------------------------------------------------------
 
-const Client = {
-	health: Effect.fn('db.checkHealth')(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const [duration, healthy] = yield* sql`SELECT 1`.pipe(Effect.as(true), Effect.timeout(_HEALTH_TIMEOUT), Effect.catchAll(() => Effect.succeed(false)), Effect.timed);
-		return { healthy, latencyMs: Duration.toMillis(duration) };
-	}),
-	healthDeep: Effect.fn('db.checkHealthDeep')(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const [duration, healthy] = yield* sql.withTransaction(sql`SELECT 1`).pipe(Effect.as(true), Effect.timeout(_HEALTH_TIMEOUT), Effect.catchAll(() => Effect.succeed(false)), Effect.timed);
-		return { healthy, latencyMs: Duration.toMillis(duration) };
-	}),
-	layer: _layer,
-	listen: {
-		raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
-		typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
-			Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
-				Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
-				Stream.filterMap((decoded) => decoded),
-			))),
-	},
-	lock: {
-		acquire: (key: bigint) => _sqlFn((sql) => sql`SELECT pg_advisory_xact_lock(${key})`),
-		session: {
-			acquire: (key: bigint) => _sqlFn((sql) => sql`SELECT pg_advisory_lock(${key})`),
-			release: (key: bigint) => _sqlFn((sql) => sql<{ released: boolean }>`SELECT pg_advisory_unlock(${key}) AS released`.pipe(Effect.map(([r]) => r?.released ?? false))),
-			try: (key: bigint) => _sqlFn((sql) => sql<{ acquired: boolean }>`SELECT pg_try_advisory_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false))),
-		},
-		try: (key: bigint) => _sqlFn((sql) => sql<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false))),
-	},
-		notify: (channel: string, payload: string) => _sqlFn((sql) => sql`SELECT pg_notify(${channel}, ${payload})`),
-	statements: Effect.fn('db.listStatStatements')((limit = 100) => _sqlFn((sql) =>
-		sql<{ result: unknown }>`SELECT list_stat_statements_json(${limit}) AS result`.pipe(Effect.map(([row]) => Array.isArray(row?.result) ? row.result : [])),
-	)),
-		tenant: {
-			with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				return yield* sql.withTransaction(sql`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(Effect.andThen(effect), Effect.provideService(SqlClient.SqlClient, sql)));
-			}),
-	},
-	vector: {
-		configureIterativeScan: (mode: 'relaxed_order' | 'strict_order' | 'off' = 'relaxed_order') => _sqlFn((sql) => sql`SET hnsw.iterative_scan = ${mode}`),
-		getConfig: Effect.fn('db.vectorConfig')(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			return yield* sql<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
+const Client = (() => {
+	const sql = SqlClient.SqlClient;
+	return {
+		health: Effect.fn('db.checkHealth')(function* () {
+			const db = yield* sql;
+			const [duration, healthy] = yield* db`SELECT 1`.pipe(
+				Effect.as(true),
+				Effect.timeout(_CONFIG.health.timeout),
+				Effect.orElseSucceed(() => false),
+				Effect.timed,
+			);
+			return { healthy, latencyMs: Duration.toMillis(duration) };
 		}),
-		indexStats: (tableName: string, indexName: string) => _sqlFn((sql) => sql<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`),
-	},
-} as const;
+		healthDeep: Effect.fn('db.checkHealthDeep')(function* () {
+			const db = yield* sql;
+			const [duration, healthy] = yield* db.withTransaction(db`SELECT 1`).pipe(
+				Effect.as(true),
+				Effect.timeout(_CONFIG.health.timeout),
+				Effect.orElseSucceed(() => false),
+				Effect.timed,
+			);
+				return { healthy, latencyMs: Duration.toMillis(duration) };
+		}),
+		layer: _layer,
+		listen: {
+			raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
+			typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
+				Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
+					Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
+					Stream.filterMap((decoded) => decoded),
+				))),
+		},
+		lock: {
+			acquire: (key: bigint) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_advisory_xact_lock(${key})`)),
+			session: {
+				acquire: (key: bigint) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_advisory_lock(${key})`)),
+				release: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ released: boolean }>`SELECT pg_advisory_unlock(${key}) AS released`.pipe(Effect.map(([r]) => r?.released ?? false)))),
+				try: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ acquired: boolean }>`SELECT pg_try_advisory_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false)))),
+			},
+			try: (key: bigint) => sql.pipe(Effect.flatMap((db) => db<{ acquired: boolean }>`SELECT pg_try_advisory_xact_lock(${key}) AS acquired`.pipe(Effect.map(([r]) => r?.acquired ?? false)))),
+		},
+		notify: (channel: string, payload: string) => sql.pipe(Effect.flatMap((db) => db`SELECT pg_notify(${channel}, ${payload})`)),
+		statements: Effect.fn('db.listStatStatements')((limit = 100) => sql.pipe(Effect.flatMap((db) =>
+			db<{ result: unknown }>`SELECT list_stat_statements_json(${limit}) AS result`.pipe(Effect.map(([row]) => Array.isArray(row?.result) ? row.result : [])),
+		))),
+		tenant: (() => {
+			const Id = _CONFIG.tenant.id;
+			const ref = FiberRef.unsafeMake<string>(Id.unspecified);
+			const tenant = {
+				current: FiberRef.get(ref),
+				Id,
+				locally: <A, E, R>(tenantId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => Effect.locallyWith(effect, ref, () => tenantId),
+				set: (tenantId: string) => FiberRef.set(ref, tenantId),
+				with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => tenant.locally(appId, Effect.gen(function* () {
+					const db = yield* sql;
+					return yield* db.withTransaction(db`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(Effect.andThen(effect), Effect.provideService(SqlClient.SqlClient, db)));
+				})),
+			} as const;
+			return tenant;
+		})(),
+		vector: {
+			configureIterativeScan: (mode: 'relaxed_order' | 'strict_order' | 'off' = 'relaxed_order') => sql.pipe(Effect.flatMap((db) => db`SET hnsw.iterative_scan = ${mode}`)),
+			getConfig: Effect.fn('db.vectorConfig')(function* () {
+				const db = yield* sql;
+				return yield* db<{ name: string; setting: string }>`SELECT name, setting FROM pg_settings WHERE name LIKE 'hnsw.%'`;
+			}),
+			indexStats: (tableName: string, indexName: string) => sql.pipe(Effect.flatMap((db) => db<{ idxScan: bigint; idxTupFetch: bigint; idxTupRead: bigint }>`SELECT idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE relname = ${tableName} AND indexrelname = ${indexName}`)),
+		},
+	} as const;
+})();
 
 // --- [EXPORT] ----------------------------------------------------------------
 
