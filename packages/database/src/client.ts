@@ -57,7 +57,7 @@ const _layer = Layer.unwrapEffect(Effect.gen(function* () {
 		statementMs: 			Config.integer('POSTGRES_STATEMENT_TIMEOUT_MS').pipe(Config.withDefault(30_000)),
 		transactionMs: 			Config.integer('POSTGRES_TRANSACTION_TIMEOUT_MS').pipe(Config.withDefault(120_000)),
 	});
-	const currentPgOptions = new RegExp(_CONFIG.pgOptions.extractPattern).exec(process.env['PGOPTIONS'] ?? '') ?? [];
+	const currentPgOptions = (process.env['PGOPTIONS'] ?? '').match(_CONFIG.pgOptions.extractPattern) ?? [];
 	const normalizedPgOptions = currentPgOptions
 		.map((token) => token.replace(_CONFIG.pgOptions.replacePattern, '').split('=', 2))
 		.filter((parts): parts is [string, string] => (parts[0] ?? '') !== '' && (parts[1] ?? '') !== '')

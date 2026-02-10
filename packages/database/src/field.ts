@@ -56,7 +56,7 @@ const _REGISTRY = (<const T extends Record<string, _RawEntry>>(table: T) => Obje
 	size:             { col: 'size',             sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'stored', null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	remaining:        { col: 'remaining',        sql: 'INTEGER',     ts: 'S.Number',          mark: false,       gen: 'virtual',null: false, ref: false,      wrap: [_WRAP_META.Generated]                                  },
 	settings:         { col: 'settings',         sql: 'JSONB',       ts: 'AppSettingsSchema', mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
-	notificationPreferences: { col: 'notification_preferences', sql: 'JSONB', ts: 'S.Unknown', mark: false, gen: false, null: false, ref: false, wrap: false },
+	notificationPreferences: { col: 'notification_preferences', sql: 'JSONB', ts: 'NotificationPreferencesSchema', mark: false, gen: false, null: false, ref: false, wrap: [_WRAP_META.Generated] },
 	oldData:          { col: 'old_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	newData:          { col: 'new_data',         sql: 'JSONB',       ts: 'S.Unknown',         mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },
 	ipAddress:        { col: 'ip_address',       sql: 'INET',        ts: 'S.String',          mark: false,       gen: false,    null: true,  ref: false,      wrap: [_WRAP_META.FieldOption]                                },

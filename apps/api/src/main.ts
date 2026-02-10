@@ -97,6 +97,11 @@ const ServerLayer = Layer.unwrapEffect(Effect.gen(function* () {
 							onSome: (key) => database.apiKeys.touch(key.id).pipe(Effect.ignore),
 						})),
 						Effect.map(Option.map((key) => ({ id: key.id, userId: key.userId }))),
+						Effect.catchAll((error) =>
+							Effect.logError('API key lookup failed', { error: String(error) }).pipe(
+								Effect.andThen(Effect.succeed(Option.none())),
+							),
+						),
 					);
 				},
 			cors: serverConfig.corsOrigins,

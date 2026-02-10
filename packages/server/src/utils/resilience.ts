@@ -53,7 +53,7 @@ const _run = <A, E, R>(operation: string, eff: Effect.Effect<A, E, R>, configura
 		const circuitName = configuration.circuit === false ? undefined : (configuration.circuit ?? operation);
 		const bulkhead = Match.value(configuration.bulkhead).pipe(
 			Match.when(false, () => undefined),
-			Match.when(undefined, () => _CONFIG.defaults.bulkhead),
+			Match.when(undefined, () => undefined),
 			Match.orElse((value) => value),
 		);
 		const bulkheadKey = `${operation}:${bulkhead}`;

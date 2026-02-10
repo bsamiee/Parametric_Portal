@@ -126,7 +126,7 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
 			const isAsyncTenantContextPath = A.some(_CONFIG.tenantAsyncContextPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`));
 			const withTenantContext = isAsyncTenantContextPath
 				? Context.Request.within
-				: Context.Request.withinSync;
+				: Context.Request.within;
 		const appWithRequest = Effect.provideService(app, HttpServerRequest.HttpServerRequest, req);
 		const ctx: Context.Request.Data = { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') };
 		const resultEffect = Effect.all([appWithRequest, Context.Request.current]).pipe(Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })));
@@ -186,7 +186,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 							const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
 							const missingSessionEffect = Effect.all([Metric.increment(metrics.auth.session.misses), audit.log('auth_failure', { details: { reason: 'invalid_session' } })], { discard: true });
 							yield* Metric.increment(metrics.auth.session.lookups);
-								const sessionOpt = yield* Context.Request.withinSync(tenantId, sessionLookup(hash)).pipe(
+								const sessionOpt = yield* Context.Request.within(tenantId, sessionLookup(hash)).pipe(
 									Effect.provideService(SqlClient.SqlClient, sqlClient),
 									Effect.catchAll((error) =>
 										Effect.logError('Session lookup failed', { error: String(error) }).pipe(
@@ -206,7 +206,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 							const hash = yield* Crypto.hmac(tenantId, Redacted.value(token));
 							const missingKeyEffect = Effect.all([Metric.increment(metrics.auth.apiKey.misses), audit.log('auth_failure', { details: { reason: 'invalid_api_key' } })], { discard: true });
 							yield* Metric.increment(metrics.auth.apiKey.lookups);
-								const keyOpt = yield* Context.Request.withinSync(tenantId, apiKeyLookup(hash)).pipe(
+								const keyOpt = yield* Context.Request.within(tenantId, apiKeyLookup(hash)).pipe(
 									Effect.provideService(SqlClient.SqlClient, sqlClient),
 									Effect.catchAll((error) =>
 										Effect.logError('API key lookup failed', { error: String(error) }).pipe(

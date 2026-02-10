@@ -228,6 +228,7 @@ const AdminLive = HttpApiBuilder.group(ParametricApi, 'admin', (handlers) =>
 							: HttpError.Internal.of('Tenant update failed', error)),
 					);
 					yield* audit.log('App.update', { details: { tenantId: path.id } });
+					yield* eventBus.publish({ aggregateId: path.id, payload: { _tag: 'app', action: 'settings.updated' }, tenantId: path.id }).pipe(Effect.ignore);
 					return updated;
 				})).pipe(
 					Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Tenant update failed', error)),

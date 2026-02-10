@@ -21,15 +21,15 @@ const handleConnect = (webSocket: typeof WebSocketService.Service) =>
 	Effect.gen(function* () {
 		yield* Middleware.feature('enableRealtime');
 		yield* Middleware.permission('websocket', 'connect');
-	const [request, socket, session, tenantId] = yield* Effect.all([
-		HttpServerRequest.HttpServerRequest,
-		HttpServerRequest.upgrade,
-		Context.Request.sessionOrFail,
-		Context.Request.currentTenantId,
-	]);
+		const [request, socket, session, tenantId] = yield* Effect.all([
+			HttpServerRequest.HttpServerRequest,
+			HttpServerRequest.upgrade,
+			Context.Request.sessionOrFail,
+			Context.Request.currentTenantId,
+		]);
 		yield* Effect.sync(() => {(request as unknown as Record<PropertyKey, unknown>)[_Handled] = true;});
-			yield* webSocket.accept(socket, session.userId, tenantId);
-			return HttpServerResponse.empty();
+		yield* webSocket.accept(socket, session.userId, tenantId);
+		return HttpServerResponse.empty();
 	}).pipe(
 		Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('WebSocket failed', error)),
 		Telemetry.span('websocket.connect', { kind: 'server', metrics: false }),
