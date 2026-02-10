@@ -1,4 +1,4 @@
-/** Cache infrastructure: PersistedCache + Redis (standalone/cluster/sentinel). */
+/** Cache infrastructure: PersistedCache + Redis (standalone/sentinel). */
 import { PersistedCache, type Persistence, Reactivity } from '@effect/experimental';
 import * as PersistenceRedis from '@effect/experimental/Persistence/Redis';
 import { layer as rateLimiterLayer, layerStoreMemory, RateLimitExceeded, RateLimiter } from '@effect/experimental/RateLimiter';
@@ -6,7 +6,7 @@ import { layerStore as layerStoreRedis } from '@effect/experimental/RateLimiter/
 import { HttpMiddleware, HttpServerRequest, HttpServerResponse } from '@effect/platform';
 import { Clock, Config, Data, Duration, Effect, Layer, Match, Metric, Option, PrimaryKey, Redacted, Schedule, Schema as S, type Scope } from 'effect';
 import { constant, flow } from 'effect/Function';
-import Redis, { Cluster, type ClusterNode, type RedisOptions } from 'ioredis';
+import Redis, { type RedisOptions } from 'ioredis';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { MetricsService } from '../observe/metrics.ts';
@@ -20,7 +20,12 @@ class RedisError extends Data.TaggedError('RedisError')<{ readonly operation: st
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _runRedis = <A>(operation: string, execute: () => Promise<A>) => Effect.tryPromise({ catch: (cause) => new RedisError({ cause, operation }), try: execute });
-const _parseNodes = (raw: string) => raw.split(',').flatMap((entry) => { const [host, portStr] = entry.trim().split(':'); return (host && portStr) ? [{ host, port: Number(portStr) }] : []; });
+const _parseNodes = (raw: string) => raw.split(',').flatMap((entry) => {
+	const [hostRaw, portRaw] = entry.trim().split(':');
+	const host = hostRaw?.trim() ?? '';
+	const port = Number(portRaw);
+	return host !== '' && Number.isInteger(port) && port >= 1 && port <= 65_535 ? [{ host, port }] : [];
+});
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -29,12 +34,6 @@ const _redisConfig = Config.all({
 	autoResendUnfulfilledCommands: 	Config.boolean('REDIS_AUTO_RESEND_UNFULFILLED').pipe(Config.withDefault(true)),
 	autoResubscribe: 				Config.boolean('REDIS_AUTO_RESUBSCRIBE').pipe(Config.withDefault(true)),
 	blockingTimeout: 				Config.integer('REDIS_BLOCKING_TIMEOUT').pipe(Config.option),
-	clusterMaxRedirections: 		Config.integer('REDIS_CLUSTER_MAX_REDIRECTIONS').pipe(Config.withDefault(16)),
-	clusterNatMap: 					Config.string('REDIS_CLUSTER_NAT_MAP').pipe(Config.option, Config.map(Option.map((raw) => JSON.parse(raw) as Record<string, { host: string; port: number }>))),
-	clusterNodes: 					Config.string('REDIS_CLUSTER_NODES').pipe(Config.withDefault('')),
-	clusterScaleReads: 				Config.literal('master', 'slave', 'all')('REDIS_CLUSTER_SCALE_READS').pipe(Config.withDefault('master' as const)),
-	clusterSlotsRefreshInterval: 	Config.integer('REDIS_CLUSTER_SLOTS_REFRESH_INTERVAL').pipe(Config.withDefault(5000)),
-	clusterSlotsRefreshTimeout: 	Config.integer('REDIS_CLUSTER_SLOTS_REFRESH_TIMEOUT').pipe(Config.withDefault(1000)),
 	commandTimeout: 				Config.integer('REDIS_COMMAND_TIMEOUT').pipe(Config.option),
 	connectionName: 				Config.string('REDIS_CONNECTION_NAME').pipe(Config.withDefault('parametric-portal')),
 	connectTimeout: 				Config.integer('REDIS_CONNECT_TIMEOUT').pipe(Config.withDefault(5000)),
@@ -47,7 +46,7 @@ const _redisConfig = Config.all({
 	lazyConnect: 					Config.boolean('REDIS_LAZY_CONNECT').pipe(Config.withDefault(false)),
 	maxLoadingRetryTime: 			Config.integer('REDIS_MAX_LOADING_RETRY_TIME').pipe(Config.withDefault(10000)),
 	maxRetriesPerRequest: 			Config.integer('REDIS_MAX_RETRIES_PER_REQUEST').pipe(Config.withDefault(20)),
-	mode: 							Config.literal('standalone', 'cluster', 'sentinel')('REDIS_MODE').pipe(Config.withDefault('standalone' as const)),
+	mode: 							Config.literal('standalone', 'sentinel')('REDIS_MODE').pipe(Config.withDefault('standalone' as const)),
 	noDelay: 						Config.boolean('REDIS_NO_DELAY').pipe(Config.withDefault(true)),
 	password: 						Config.redacted('REDIS_PASSWORD').pipe(Config.option),
 	port: 							Config.integer('REDIS_PORT').pipe(Config.withDefault(6379)),
@@ -87,29 +86,14 @@ const _redisConfig = Config.all({
 		tls, username: Option.getOrUndefined(config.username),
 	} as const;
 	const withHost = { ...baseOpts, host: config.host, port: config.port };
-	return Match.value(config.mode).pipe(
-		Match.when('standalone', () => ({
-			connect: () => new Redis(withHost) as Redis | Cluster,
-			mode: 'standalone' as const,
-			redisOpts: withHost satisfies RedisOptions,
-		})),
-		Match.when('cluster', () => {
-			const nodes = _parseNodes(config.clusterNodes);
-			const clusterNodes: ReadonlyArray<ClusterNode> = nodes.length > 0 ? nodes : [{ host: config.host, port: config.port }];
-			const { enableAutoPipelining, enableOfflineQueue, enableReadyCheck, lazyConnect, retryStrategy: clusterRetry, ...perNodeOpts } = withHost;
-			return {
-				connect: (): Redis | Cluster => new Cluster([...clusterNodes], {
-					clusterRetryStrategy: clusterRetry, enableAutoPipelining, enableOfflineQueue, enableReadyCheck, lazyConnect,
-					maxRedirections: config.clusterMaxRedirections, natMap: Option.getOrUndefined(config.clusterNatMap),
-					redisOptions: perNodeOpts, scaleReads: config.clusterScaleReads,
-					slotsRefreshInterval: config.clusterSlotsRefreshInterval, slotsRefreshTimeout: config.clusterSlotsRefreshTimeout,
-				}),
-				mode: 'cluster' as const,
-				redisOpts: { ...baseOpts, host: (clusterNodes[0] as { host: string; port: number }).host, port: (clusterNodes[0] as { host: string; port: number }).port } satisfies RedisOptions,
-			};
-		}),
-		Match.when('sentinel', () => {
-			const sentinels = _parseNodes(config.sentinelNodes);
+		return Match.value(config.mode).pipe(
+			Match.when('standalone', () => ({
+				connect: () => new Redis(withHost),
+				mode: 'standalone' as const,
+				redisOpts: withHost satisfies RedisOptions,
+			})),
+			Match.when('sentinel', () => {
+				const sentinels = _parseNodes(config.sentinelNodes);
 			const sentinelList = sentinels.length > 0 ? [...sentinels] : [{ host: config.host, port: 26379 }];
 			const sentinelOpts = {
 				...baseOpts,
@@ -118,8 +102,8 @@ const _redisConfig = Config.all({
 				sentinelCommandTimeout: Option.getOrUndefined(config.sentinelCommandTimeout),
 				sentinelPassword: optValue(config.sentinelPassword), sentinels: sentinelList, sentinelUsername: optValue(config.sentinelUsername),
 			} satisfies RedisOptions;
-			return { connect: () => new Redis(sentinelOpts) as Redis | Cluster, mode: 'sentinel' as const, redisOpts: sentinelOpts };
-		}),
+				return { connect: () => new Redis(sentinelOpts), mode: 'sentinel' as const, redisOpts: sentinelOpts };
+			}),
 		Match.exhaustive,
 	);
 }));
@@ -169,22 +153,30 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 		));
 		const kv = {
 			del: (key: string) => _runRedis('del', () => redis.del(key)).pipe(Effect.ignore),
-			get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) => _runRedis('get', () => redis.get(key)).pipe(
-				Effect.flatMap((value) => value === null ? Effect.succeed(Option.none<A>()) : S.decode(S.parseJson(schema))(value).pipe(Effect.map(Option.some))),
-				Effect.catchAll(() => Effect.succeed(Option.none<A>())),
-			),
+				get: <A, I = A, R = never>(key: string, schema: S.Schema<A, I, R>) => _runRedis('get', () => redis.get(key)).pipe(
+					Effect.flatMap((value) => value === null ? Effect.succeed(Option.none<A>()) : S.decode(S.parseJson(schema))(value).pipe(Effect.map(Option.some))),
+					Effect.catchAll((error) => Effect.logWarning('cache.kv.get failed', { error: String(error), key }).pipe(Effect.as(Option.none<A>()))),
+				),
 			set: (key: string, value: unknown, ttl: Duration.Duration) => S.encode(S.parseJson(S.Unknown))(value).pipe(Effect.flatMap((json) => _runRedis('set', () => redis.set(key, json, 'PX', Duration.toMillis(ttl)))), Effect.ignore),
 		} as const;
 		const sets = {
-			add: (key: string, ...members: readonly string[]) => _runRedis('sadd', () => redis.sadd(key, ...members)).pipe(Effect.ignore),
+			add: (key: string, ...members: readonly string[]) => Match.value(members.length).pipe(
+				Match.when(0, () => Effect.void),
+				Match.orElse(() => _runRedis('sadd', () => redis.sadd(key, ...members)).pipe(Effect.ignore)),
+			),
 			members: (key: string) => _runRedis('smembers', () => redis.smembers(key)).pipe(Effect.orElseSucceed(() => [] as readonly string[])),
-			remove: (key: string, ...members: readonly string[]) => _runRedis('srem', () => redis.srem(key, ...members)).pipe(Effect.ignore),
+			remove: (key: string, ...members: readonly string[]) => Match.value(members.length).pipe(
+				Match.when(0, () => Effect.void),
+				Match.orElse(() => _runRedis('srem', () => redis.srem(key, ...members)).pipe(Effect.ignore)),
+			),
+			touch: (key: string, ttl: Duration.Duration) =>
+				_runRedis('expire', () => redis.expire(key, Math.max(1, Math.ceil(Duration.toSeconds(ttl))))).pipe(Effect.ignore),
 		} as const;
-		const pubsub = {
-			duplicate: Effect.sync(() => redis.duplicate()),
-			publish: (channel: string, payload: string) => _runRedis('publish', () => redis.publish(channel, payload)),
-			subscribe: (connection: Redis | Cluster, channel: string) => _runRedis('subscribe', () => connection.subscribe(channel)),
-		} as const;
+			const pubsub = {
+				duplicate: Effect.sync(() => redis.duplicate()),
+				publish: (channel: string, payload: string) => _runRedis('publish', () => redis.publish(channel, payload)),
+				subscribe: (connection: Redis, channel: string) => _runRedis('subscribe', () => connection.subscribe(channel)),
+			} as const;
 		yield* Effect.logInfo('CacheService initialized', { mode: config.mode });
 		return {
 			_invalidateLocal: invalidateLocal,
@@ -225,23 +217,38 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			const service = yield* CacheService;
 			const metricsOpt = yield* Effect.serviceOption(MetricsService);
 			const labels = MetricsService.label({ storeId: options.storeId });
-			const lookup = (key: K): Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R> => {
-				const run = 'map' in options
-					? options.lookup(key).pipe(
-						Effect.tap((opt) => Option.match(opt, { onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
-						Effect.map((opt) => Option.match(opt, { onNone: constant(Option.none<S.WithResult.Success<K> extends Option.Option<infer B> ? B : never>()), onSome: flow(options.map, Option.some) }) as S.WithResult.Success<K>),
-					) : options.lookup(key);
-				return Option.match(metricsOpt, {
-					onNone: constant(run),
-					onSome: (metrics) => run.pipe(
-						Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
-						Effect.tapBoth({ onFailure: constant(MetricsService.inc(metrics.cache.misses, labels)), onSuccess: constant(MetricsService.inc(metrics.cache.hits, labels)) }),
-					),
-				});
-			};
+				const lookup = (key: K): Effect.Effect<S.WithResult.Success<K>, S.WithResult.Failure<K>, R> =>
+					'map' in options
+						? Option.match(metricsOpt, {
+							onNone: () => options.lookup(key).pipe(
+								Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
+								Effect.map(Option.match({ onNone: constant(Option.none()), onSome: flow(options.map, Option.some) }) as unknown as (opt: Option.Option<A>) => S.WithResult.Success<K>),
+							),
+							onSome: (metrics) => options.lookup(key).pipe(
+								Effect.tap(Option.match({ onNone: constant(Effect.void), onSome: options.onSome ?? Effect.succeed })),
+								Effect.tap(Option.match({
+									onNone: constant(MetricsService.inc(metrics.cache.misses, labels)),
+									onSome: constant(MetricsService.inc(metrics.cache.hits, labels)),
+								})),
+								Effect.map(Option.match({ onNone: constant(Option.none()), onSome: flow(options.map, Option.some) }) as unknown as (opt: Option.Option<A>) => S.WithResult.Success<K>),
+								Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
+								Effect.tapError(constant(MetricsService.inc(metrics.cache.misses, labels))),
+							),
+						})
+						: Option.match(metricsOpt, {
+							onNone: () => options.lookup(key),
+							onSome: (metrics) => options.lookup(key).pipe(
+								Metric.trackDuration(Metric.taggedWithLabels(metrics.cache.lookupDuration, labels)),
+								Effect.tapBoth({
+									onFailure: constant(MetricsService.inc(metrics.cache.misses, labels)),
+									onSuccess: constant(MetricsService.inc(metrics.cache.hits, labels)),
+								}),
+							),
+						});
 				const memTtl = Duration.decode(options.inMemoryTTL ?? Duration.seconds(30));
-				const ttlMs = Duration.toMillis(memTtl);
-				const cache = yield* PersistedCache.make({ inMemoryCapacity: options.inMemoryCapacity ?? 1000, inMemoryTTL: memTtl, lookup, storeId: options.storeId, timeToLive: () => options.timeToLive ?? Duration.minutes(5) });
+				const persistedTtl = Duration.decode(options.timeToLive ?? Duration.minutes(5));
+				const registrationTtlMs = Math.max(Duration.toMillis(memTtl), Duration.toMillis(persistedTtl));
+				const cache = yield* PersistedCache.make({ inMemoryCapacity: options.inMemoryCapacity ?? 1000, inMemoryTTL: memTtl, lookup, storeId: options.storeId, timeToLive: () => persistedTtl });
 				const registered = new Map<string, { expiresAt: number; primary: string; unregister: () => unknown }>();
 				const pruneOnce = Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Effect.forEach(
 					[...registered.entries()].filter(([, entry]) => entry.expiresAt <= now),
@@ -258,7 +265,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 					return pruneOnce.pipe(Effect.flatMap((now) => {
 						registered.get(id) ?? service._registerCacheKey(options.storeId, primary);
 						const entry = registered.get(id) ?? { expiresAt: now, primary, unregister: service._reactivity.unsafeRegister([id], Effect.runFork.bind(null, cache.invalidate(key).pipe(Effect.ignore))) };
-						registered.set(id, { ...entry, expiresAt: now + ttlMs });
+						registered.set(id, { ...entry, expiresAt: now + registrationTtlMs });
 						return Effect.void;
 					}));
 				};
@@ -292,6 +299,7 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 		add: (key: string, ...members: readonly string[]) => CacheService.pipe(Effect.flatMap((service) => service.sets.add(key, ...members))),
 		members: (key: string) => CacheService.pipe(Effect.flatMap((service) => service.sets.members(key))),
 		remove: (key: string, ...members: readonly string[]) => CacheService.pipe(Effect.flatMap((service) => service.sets.remove(key, ...members))),
+		touch: (key: string, ttl: Duration.Duration) => CacheService.pipe(Effect.flatMap((service) => service.sets.touch(key, ttl))),
 	} as const;
 	static readonly _invalidateImpl = (mode: 'key' | 'pattern', storeId: string, target: string) =>
 		CacheService.pipe(Effect.flatMap((service) => Effect.all([
@@ -363,8 +371,12 @@ class CacheService extends Effect.Service<CacheService>()('server/CacheService',
 			Effect.catchAll((error) => Effect.logWarning('Redis SET NX failed (fail-closed)', { error: String(error) }).pipe(Effect.as({ alreadyExists: true, key }))),
 		);
 	static readonly Layer = CacheService.Default.pipe(Layer.provideMerge(rateLimiterLayer), Layer.provideMerge(Layer.unwrapEffect(
-		Config.all({ prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')), redisOpts: _redisConfig, store: Config.string('RATE_LIMIT_STORE').pipe(Config.withDefault('redis')) }).pipe(
-			Effect.map(({ prefix, redisOpts, store }) => store === 'redis' ? layerStoreRedis({ ...redisOpts.redisOpts, prefix }) : layerStoreMemory),
+		Config.all({ prefix: Config.string('RATE_LIMIT_PREFIX').pipe(Config.withDefault('rl:')), redisOpts: _redisConfig, store: Config.literal('redis', 'memory')('RATE_LIMIT_STORE').pipe(Config.withDefault('redis' as const)) }).pipe(
+			Effect.map(({ prefix, redisOpts, store }) => Match.value(store).pipe(
+				Match.when('redis', () => layerStoreRedis({ ...redisOpts.redisOpts, prefix })),
+				Match.when('memory', () => layerStoreMemory),
+				Match.exhaustive,
+			)),
 		),
 	)), Layer.provideMerge(CacheService.Persistence));
 }

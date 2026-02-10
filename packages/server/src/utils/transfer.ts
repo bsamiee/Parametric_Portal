@@ -1,8 +1,6 @@
 /**
  * Stream file parsing and serialization for bulk import/export.
  * Codec-driven dispatch; Either accumulates parse errors, Fatal halts stream.
- *
- * TODO [M7]: Move CPU-bound parsing to @effect/platform Worker pool.
  */
 import { Codec, Metadata } from '@parametric-portal/types/files';
 import { Array as A, Chunk, Clock, Effect, Either, Match, MutableRef, Option, Schema as S, Stream, Tuple } from 'effect';

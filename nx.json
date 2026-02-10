@@ -1,20 +1,7 @@
 {
     "$schema": "./node_modules/nx/schemas/nx-schema.json",
-    "daemon": {
-        "enabled": false
-    },
     "defaultBase": "main",
     "extends": "nx/presets/npm.json",
-    "installation": {
-        "plugins": {
-            "@nx/docker": "22.3.3",
-            "@nx/js": "22.3.3",
-            "@nx/playwright": "22.3.3",
-            "@nx/vite": "22.3.3",
-            "@nx/vitest": "22.3.3"
-        },
-        "version": "22.3.3"
-    },
     "namedInputs": {
         "default": ["{projectRoot}/**/*", "sharedGlobals"],
         "docker": ["{projectRoot}/Dockerfile", "{projectRoot}/.dockerignore", "production"],
@@ -40,8 +27,6 @@
         "sharedGlobals": [
             "{workspaceRoot}/nx.json",
             "{workspaceRoot}/tsconfig.base.json",
-            "{workspaceRoot}/vite.config.ts",
-            "{workspaceRoot}/vite.factory.ts",
             "{workspaceRoot}/vitest.config.ts",
             "{workspaceRoot}/playwright.config.ts",
             "{workspaceRoot}/biome.json",
@@ -56,6 +41,7 @@
             "{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)",
             "{workspaceRoot}/vitest.config.ts",
             "{workspaceRoot}/vite.config.ts",
+            "{workspaceRoot}/vite.factory.ts",
             "sharedGlobals"
         ],
         "typescript": [
@@ -211,7 +197,7 @@
         },
         "build": {
             "dependsOn": ["^build"],
-            "inputs": ["production", "^production"],
+            "inputs": ["production", "^production", "{workspaceRoot}/vite.factory.ts"],
             "outputs": ["{projectRoot}/dist/**/*.js", "{projectRoot}/dist/**/*.d.ts", "{projectRoot}/dist/**/*.map"]
         },
         "dev": {
@@ -319,6 +305,7 @@
         },
         "typecheck": {
             "cache": true,
+            "dependsOn": ["^typecheck"],
             "executor": "nx:run-commands",
             "inputs": ["typescript", "sharedGlobals"],
             "options": {

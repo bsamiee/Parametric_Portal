@@ -4,7 +4,7 @@
  * PG18.1: Uses old_data/new_data columns for full before/after snapshots.
  */
 import { DatabaseService } from '@parametric-portal/database/repos';
-import type { JobDlq } from '@parametric-portal/database/models';
+import { AuditLog, type JobDlq } from '@parametric-portal/database/models';
 import { Array as A, Clock, DateTime, Effect, Option, pipe, Schema as S, Struct } from 'effect';
 import { constant } from 'effect/Function';
 import { Context } from '../context.ts';
@@ -56,8 +56,11 @@ class AuditService extends Effect.Service<AuditService>()('server/Audit', {
 			);
 		}).pipe(Telemetry.span('audit.log', { metrics: false }));
 		const replayDlqEntry = (dlq: JobDlq) => Effect.gen(function* () {
-			const entry = yield* S.decodeUnknown(S.Record({ key: S.String, value: S.Unknown }))(dlq.payload);
-			yield* database.audit.log(entry as Parameters<typeof database.audit.log>[0]);
+			const entry = yield* S.decodeUnknown(AuditLog.insert)(
+				dlq.payload,
+				{ errors: 'all', onExcessProperty: 'ignore' },
+			);
+			yield* database.audit.log(entry);
 			yield* database.jobDlq.markReplayed(dlq.id);
 			return { id: dlq.id, success: true as const };
 		}).pipe(Effect.catchAll((error) => Effect.logWarning('Audit DLQ replay failed', { dlqId: dlq.id, error: String(error) }).pipe(Effect.as({ id: dlq.id, success: false as const }))));

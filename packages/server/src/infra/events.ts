@@ -41,22 +41,33 @@ class DomainEvent extends S.Class<DomainEvent>('DomainEvent')({
 	eventId: S.String.pipe(S.pattern(/^\d{18,19}$/), S.brand('SnowflakeId')),
 	payload: S.Unknown,
 	tenantId: S.String,
-}) {
-	[PrimaryKey.symbol]() { return this.eventId; }
-	get eventType(): string {
-		const payload = this.payload as { _tag?: string; action?: string } | undefined;
-		return payload?._tag && payload?.action ? `${payload._tag}.${payload.action}` : 'unknown';
+	}) {
+		[PrimaryKey.symbol]() { return this.eventId; }
+		get eventType(): string {
+			const resolved = Option.fromNullable(this.payload).pipe(
+				Option.filter((payload): payload is Readonly<Record<string, unknown>> => typeof payload === 'object' && payload !== null),
+				Option.flatMap((payload) => typeof payload['_tag'] === 'string' && typeof payload['action'] === 'string' ? Option.some(`${payload['_tag']}.${payload['action']}`) : Option.none()),
+			);
+			return Option.getOrElse(resolved, constant('unknown'));
+		}
 	}
-}
 class EventEnvelope extends S.Class<EventEnvelope>('EventEnvelope')({
 	emittedAt: S.DateTimeUtcFromNumber,
 	event: DomainEvent,
 }) {}
 
-// --- [SERVICES] --------------------------------------------------------------
+// --- [CONSTANTS] -------------------------------------------------------------
 
-const _decode = S.decode(S.parseJson(EventEnvelope));
-const _encode = S.encode(S.parseJson(EventEnvelope));
+const _JSON = {
+	envelope: S.parseJson(EventEnvelope),
+	notify: S.parseJson(S.Struct({ eventId: S.String, sourceNodeId: S.String })),
+} as const;
+const _CODEC = {
+	envelope: { decode: S.decode(_JSON.envelope), encode: S.encode(_JSON.envelope) },
+	notify: { decode: S.decode(_JSON.notify), encode: S.encode(_JSON.notify) },
+} as const;
+
+// --- [SERVICES] --------------------------------------------------------------
 
 class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 	dependencies: [SqlEventJournal.layer({ eventLogTable: 'effect_event_journal', remotesTable: 'effect_event_remotes' }), MetricsService.Default, ClusterService.Default, DatabaseService.Default],
@@ -64,43 +75,38 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 		const journal = yield* EventJournal.EventJournal;
 		const sharding = yield* Sharding.Sharding;
 		const metrics = yield* MetricsService;
-		const database = yield* DatabaseService;
-		const sql = yield* SqlClient.SqlClient;
-		const nodeId = crypto.randomUUID();
-		const notifySchema = S.Struct({ eventId: S.String, sourceNodeId: S.String });
-		const decodeNotify = S.decode(S.parseJson(notifySchema));
-		const encodeNotify = S.encode(S.parseJson(notifySchema));
-		const subscriptions = yield* STM.commit(TRef.make(0));
-		yield* Effect.annotateLogsScoped({ 'service.name': 'eventbus' });
-		const hub = yield* PubSub.bounded<EventEnvelope>(256);
-		const changesQueue = yield* journal.changes;
-		yield* Stream.fromQueue(changesQueue).pipe(
-			Stream.mapEffect((entry) => Effect.sync(() => new TextDecoder().decode(entry.payload)).pipe(
-				Effect.flatMap(_decode), Effect.tapError((error) => Effect.logWarning('Event envelope decode failed', { error: String(error) })), Effect.option,
-			)),
-			Stream.filterMap((envelope) => envelope),
-			Stream.mapEffect((envelope) => PubSub.publish(hub, envelope)),
-			Stream.runDrain, Effect.forkScoped,
-		);
-		yield* Client.listen.raw('event_journal_notify').pipe(
-			Stream.mapEffect((payload) => decodeNotify(payload).pipe(
-					Effect.flatMap(({ eventId, sourceNodeId }) => pipe(
-						Effect.gen(function* () {
-							const rows = yield* sql.unsafe(
-								'SELECT payload FROM effect_event_journal WHERE primary_key = $1 LIMIT 1',
-								[eventId],
-							);
-							const entryPayload = yield* Effect.fromNullable((rows as ReadonlyArray<{ readonly payload: Uint8Array }>)[0]?.payload);
-							const decoded = new TextDecoder().decode(entryPayload);
-							const envelope = yield* _decode(decoded);
-							yield* PubSub.publish(hub, envelope);
-						}),
-						Effect.catchTag('NoSuchElementException', constant(Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }))),
-						Effect.unless(constant(sourceNodeId === nodeId)),
-					)),
-					Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
-					Effect.catchAll(constant(Effect.void)),
+			const database = yield* DatabaseService;
+			const sql = yield* SqlClient.SqlClient;
+			const nodeId = crypto.randomUUID();
+			const subscriptions = yield* STM.commit(TRef.make(0));
+			yield* Effect.annotateLogsScoped({ 'service.name': 'eventbus' });
+			const hub = yield* PubSub.bounded<EventEnvelope>(256);
+			const changesQueue = yield* journal.changes;
+			yield* Stream.fromQueue(changesQueue).pipe(
+				Stream.mapEffect((entry) => Effect.sync(() => new TextDecoder().decode(entry.payload)).pipe(
+					Effect.flatMap(_CODEC.envelope.decode),
+					Effect.tap((envelope) => PubSub.publish(hub, envelope)),
+					Effect.tapError((error) => Effect.logWarning('Event envelope decode failed', { error: String(error) })),
+					Effect.option,
 				)),
+				Stream.runDrain, Effect.forkScoped,
+			);
+			yield* Client.listen.raw('event_journal_notify').pipe(
+				Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
+						Effect.flatMap(({ eventId, sourceNodeId }) => sql.unsafe(
+								'SELECT convert_from(payload, \'UTF8\') AS payload FROM effect_event_journal WHERE primary_key = $1 LIMIT 1',
+								[eventId],
+							).pipe(
+								Effect.flatMap(S.decodeUnknown(S.Array(S.Struct({ payload: S.String })))),
+								Effect.flatMap((rows) => Effect.fromNullable(rows[0]?.payload)),
+								Effect.flatMap(_CODEC.envelope.decode),
+								Effect.flatMap((envelope) => PubSub.publish(hub, envelope)),
+								Effect.catchTag('NoSuchElementException', constant(Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }))),
+								Effect.unless(constant(sourceNodeId === nodeId)),
+							)),
+						Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
+						Effect.catchAll(constant(Effect.void)),
+					)),
 			Stream.runDrain,
 			Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY stream interrupted, falling back to cron polling', { error: String(error) })),
 			Effect.retry({ times: 3 }),
@@ -108,48 +114,50 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 			Effect.forkScoped,
 		);
 		const publish = (input: EventBus.Types.Input | readonly EventBus.Types.Input[] | Chunk.Chunk<EventBus.Types.Input>) => {
-			const items = pipe(
-				Match.value(input),
-				Match.when(Chunk.isChunk, Chunk.toReadonlyArray),
-				Match.when(Array.isArray, (arr) => arr),
-				Match.orElse((v) => [v]),
-			) as ReadonlyArray<EventBus.Types.Input>;
-			return Telemetry.span(
-				Effect.forEach(items, Effect.fn(function*(item) {
-					const requestContext = yield* Context.Request.current;
-					yield* Effect.annotateCurrentSpan('correlation.id', requestContext.requestId);
-					const snowflake = yield* sharding.getSnowflake;
-					const envelope = new EventEnvelope({
-						emittedAt: DateTime.unsafeMake(Snowflake.timestamp(snowflake)),
-						event: new DomainEvent({
-							aggregateId: item.aggregateId, causationId: item.causationId,
-							correlationId: item.correlationId ?? requestContext.requestId,
-							eventId: item.eventId ?? (String(snowflake) as typeof DomainEvent.Type['eventId']),
-							payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
-						}),
-					});
-					const json = yield* _encode(envelope);
-					yield* journal.write({
-						effect: constant(Metric.increment(metrics.events.emitted)),
-						event: envelope.event.eventType,
-						payload: new TextEncoder().encode(json),
-						primaryKey: envelope.event.eventId,
-					}).pipe(
-						Effect.catchTag('EventJournalError', (cause) => Effect.fail(EventError.from(
-							envelope.event.eventId,
-							pipe(
-								Option.fromNullable((cause.cause as { readonly sqlState?: unknown; readonly cause?: { readonly sqlState?: unknown } } | undefined)?.sqlState ?? (cause.cause as { readonly cause?: { readonly sqlState?: unknown } } | undefined)?.cause?.sqlState),
-								Option.filter(S.is(S.Literal('23505'))),
-								Option.match({ onNone: constant('DeliveryFailed'), onSome: constant('DuplicateEvent') }),
-							),
-							cause,
-						))),
-					);
-					const notifyPayload = yield* encodeNotify({ eventId: envelope.event.eventId, sourceNodeId: nodeId });
-					yield* Client.notify('event_journal_notify', notifyPayload).pipe(
-						Effect.tapError(constant(Effect.logWarning('LISTEN/NOTIFY publish failed'))),
-						Effect.ignore,
-					);
+				const items = pipe(
+					Match.value(input),
+					Match.when(Chunk.isChunk, Chunk.toReadonlyArray),
+					Match.when(Array.isArray, (arr) => arr),
+					Match.orElse((v) => [v]),
+				);
+				return Telemetry.span(
+					Effect.forEach(items, Effect.fn(function*(item) {
+							const requestContext = yield* Context.Request.current;
+							yield* Effect.annotateCurrentSpan('correlation.id', requestContext.requestId);
+							const snowflake = yield* sharding.getSnowflake;
+							const eventId = item.eventId ?? S.decodeSync(DomainEvent.fields.eventId)(String(snowflake));
+							const correlationId = pipe(
+								Option.fromNullable(item.correlationId ?? requestContext.requestId),
+								Option.filter(S.is(S.UUID)),
+								Option.getOrUndefined,
+							);
+							const envelope = new EventEnvelope({
+								emittedAt: DateTime.unsafeMake(Snowflake.timestamp(snowflake)),
+								event: new DomainEvent({
+									aggregateId: item.aggregateId, causationId: item.causationId,
+									correlationId,
+									eventId,
+										payload: item.payload, tenantId: item.tenantId ?? requestContext.tenantId,
+									}),
+								});
+						const json = yield* _CODEC.envelope.encode(envelope);
+						yield* journal.write({
+							effect: constant(Metric.increment(metrics.events.emitted)),
+							event: envelope.event.eventType,
+							payload: new TextEncoder().encode(json),
+							primaryKey: envelope.event.eventId,
+						}).pipe(
+							Effect.catchTag('EventJournalError', (cause) => Effect.fail(EventError.from(
+								envelope.event.eventId,
+								String(cause.cause).includes('23505') ? 'DuplicateEvent' : 'DeliveryFailed',
+									cause,
+								))),
+							);
+						const notifyPayload = yield* _CODEC.notify.encode({ eventId: envelope.event.eventId, sourceNodeId: nodeId });
+						yield* Client.notify('event_journal_notify', notifyPayload).pipe(
+							Effect.tapError(constant(Effect.logWarning('LISTEN/NOTIFY publish failed'))),
+							Effect.ignore,
+						);
 					return envelope;
 				}), { concurrency: 'unbounded' }),
 				'eventbus.publish',
@@ -225,22 +233,26 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 					const eventCond = pipe(Option.fromNullable(filter.eventType), Option.map((v) => `event = $${params.push(v)}`));
 					const conditions = ['1=1', ...Option.toArray(timestampCond), cursorCond, ...Option.toArray(eventCond)];
 					const whereClause = conditions.join(' AND ');
-					const rows = yield* sql.unsafe(
-						`SELECT payload, primary_key FROM effect_event_journal WHERE ${whereClause} ORDER BY primary_key::numeric ASC LIMIT $${params.push(batchSize)}`, params,
-					).pipe(Effect.catchTag('SqlError', (cause) => Effect.fail(EventError.from('', 'DeliveryFailed', cause))));
-					const envelopes = yield* Effect.forEach(
-						rows as ReadonlyArray<{ readonly payload: Uint8Array }>,
-						(row) => _decode(new TextDecoder().decode(row.payload)).pipe(Effect.orElseFail(constant(EventError.from('', 'DeserializationFailed')))),
-					);
+						const rows = yield* sql.unsafe(
+							`SELECT convert_from(payload, 'UTF8') AS payload, primary_key FROM effect_event_journal WHERE ${whereClause} ORDER BY primary_key::numeric ASC LIMIT $${params.push(batchSize)}`, params,
+						).pipe(
+							Effect.catchTag('SqlError', (cause) => Effect.fail(EventError.from('', 'DeliveryFailed', cause))),
+							Effect.flatMap(S.decodeUnknown(S.Array(S.Struct({ payload: S.String, primary_key: S.optional(S.Union(S.String, S.Number, S.BigInt)) })))),
+							Effect.mapError((error) => error instanceof EventError ? error : EventError.from('', 'DeserializationFailed', error)),
+						);
+							const envelopes = yield* Effect.forEach(
+								rows,
+								({ payload }) => _CODEC.envelope.decode(payload),
+							).pipe(Effect.orElseFail(constant(EventError.from('', 'DeserializationFailed'))));
 					const filtered = envelopes.filter((envelope) =>
 						(!filter.tenantId || envelope.event.tenantId === filter.tenantId)
 						&& (!filter.aggregateId || envelope.event.aggregateId === filter.aggregateId),
 					);
-						const nextCursor = pipe(
-							Option.fromNullable((rows as ReadonlyArray<{ readonly primary_key?: string | number | bigint }>)[rows.length - 1]?.primary_key),
-							Option.map(String),
-							Option.filter(() => rows.length >= batchSize),
-						);
+							const nextCursor = pipe(
+								Option.fromNullable(rows.at(-1)?.primary_key),
+								Option.map(String),
+								Option.filter(() => rows.length >= batchSize),
+							);
 					return [Chunk.fromIterable(filtered), nextCursor] as const;
 				})).pipe(Stream.schedule(Schedule.spaced(throttle)), Stream.tap(constant(Metric.increment(metrics.events.processed))));
 			};

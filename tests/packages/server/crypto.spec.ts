@@ -12,7 +12,7 @@ const _nonempty = fc.string({ maxLength: 64, minLength: 1 });
 
 // --- [LAYER] -----------------------------------------------------------------
 
-const _testLayer = Layer.mergeAll(Context.Request.SystemLayer, Crypto.Service.Default).pipe(
+const _testLayer = Crypto.Service.Default.pipe(
 	Layer.provide(Layer.setConfigProvider(ConfigProvider.fromMap(new Map([['ENCRYPTION_KEY', 'cGFyYW1ldHJpYy1wb3J0YWwtY3J5cHRvLWtleS0zMmI=']])))),
 	Layer.provide(Logger.minimumLogLevel(LogLevel.Warning)),
 );

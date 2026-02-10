@@ -6,22 +6,33 @@
  * Per-endpoint addError() only for endpoint-specific errors (NotFound, Conflict, Validation).
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
-import { ApiKey, App, Asset, AuditLog, Job, JobDlq, Session, User } from '@parametric-portal/database/models';
+import {
+	ApiKey,
+	App,
+	AppSettingsSchema,
+	Asset,
+	AuditLog,
+	Job,
+	JobDlq,
+	Notification,
+	NotificationPreferencesSchema,
+	OAuthProviderConfigSchema,
+	Session,
+	User
+} from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
 import { Context } from './context.ts';
 import { HttpError } from './errors.ts';
 import { WebhookService } from './infra/webhooks.ts';
+import { FeatureService } from './domain/features.ts';
 import { Middleware } from './middleware.ts';
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _IdPath = S.Struct({ id: S.UUID });
 const _ProviderPath = S.Struct({ provider: Context.OAuthProvider });
-const _PaginationBase = S.Struct({
-	cursor: S.optional(HttpApiSchema.param('cursor', S.String)),
-	limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }),
-});
+const _PaginationBase = S.Struct({ cursor: S.optional(HttpApiSchema.param('cursor', S.String)), limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }) });
 const _Success = S.Struct({ success: S.Literal(true) });
 const AuthResponse = S.Struct({
 	accessToken: S.String.annotations({ description: 'Opaque access token for API authentication' }),
@@ -35,12 +46,7 @@ const KeysetResponse = <T extends S.Schema.Any>(itemSchema: T) => S.Struct({
 	items: S.Array(itemSchema).annotations({ description: 'Page of results' }),
 	total: S.Int.annotations({ description: 'Total count of matching items' }),
 }).annotations({ description: 'Cursor-based pagination wrapper', title: 'KeysetResponse' });
-const Query = S.extend(_PaginationBase, S.Struct({
-	after: S.optional(HttpApiSchema.param('after', S.DateFromString)),
-	before: S.optional(HttpApiSchema.param('before', S.DateFromString)),
-	includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)),
-	operation: S.optional(HttpApiSchema.param('operation', S.String)),
-}));
+const Query = S.extend(_PaginationBase, S.Struct({ after: S.optional(HttpApiSchema.param('after', S.DateFromString)), before: S.optional(HttpApiSchema.param('before', S.DateFromString)), includeDiff: S.optional(HttpApiSchema.param('includeDiff', S.BooleanFromString)), operation: S.optional(HttpApiSchema.param('operation', S.String)) }));
 const TransferQuery = S.Struct({
 	after: S.optionalWith(HttpApiSchema.param('after', S.DateFromString), { as: 'Option' }),
 	before: S.optionalWith(HttpApiSchema.param('before', S.DateFromString), { as: 'Option' }),
@@ -68,13 +74,12 @@ const AuditLogWithDiff = S.extend(AuditLog.json, S.Struct({
 }));
 const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
 const _TenantOAuthConfig = S.Struct({
-	providers: S.Array(S.Struct({
-		clientId: S.NonEmptyTrimmedString,
-		clientSecret: S.NonEmptyTrimmedString,
-		enabled: S.Boolean,
-		provider: S.Literal('apple', 'github', 'google', 'microsoft'),
-		scopes: S.optional(S.Array(S.String)),
-	})),
+	providers: S.Array(OAuthProviderConfigSchema),
+});
+const _PermissionShape = S.Struct({
+	action: S.NonEmptyTrimmedString,
+	resource: S.NonEmptyTrimmedString,
+	role: Context.UserRole.schema,
 });
 
 // --- [GROUPS] ----------------------------------------------------------------
@@ -87,6 +92,8 @@ const _AuthGroup = HttpApiGroup.make('auth')
 		HttpApiEndpoint.get('oauthStart', '/oauth/:provider')
 			.setPath(_ProviderPath)
 			.addSuccess(S.Struct({ url: Url }))
+			.addError(HttpError.Forbidden)
+			.addError(HttpError.Internal)
 			.addError(HttpError.OAuth)
 			.annotate(OpenApi.Summary, 'Start OAuth flow')
 			.annotate(OpenApi.Description, 'Initiates OAuth authorization flow for the specified provider.'),
@@ -96,6 +103,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 			.setPath(_ProviderPath)
 			.setUrlParams(S.Struct({ code: S.String, state: S.String }))
 			.addSuccess(AuthResponse)
+			.addError(HttpError.Forbidden)
 			.addError(HttpError.OAuth)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'OAuth callback')
@@ -129,7 +137,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 	.add(
 		HttpApiEndpoint.get('mfaStatus', '/mfa/status')
 			.middleware(Middleware)
-			.addSuccess(S.Struct({ enabled: S.optional(S.Boolean), enrolled: S.optional(S.Boolean), remainingBackupCodes: S.optional(S.Int) }))
+			.addSuccess(S.Struct({ enabled: S.Boolean, enrolled: S.Boolean, remainingBackupCodes: S.optional(S.Int) }))
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
 			.annotate(OpenApi.Summary, 'Get MFA status'),
@@ -137,7 +145,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 	.add(
 		HttpApiEndpoint.post('mfaEnroll', '/mfa/enroll')
 			.middleware(Middleware)
-			.addSuccess(S.Struct({ backupCodes: S.optional(S.Array(S.String)), qrDataUrl: S.optional(S.String), secret: S.optional(S.String) }))
+			.addSuccess(S.Struct({ backupCodes: S.Array(S.String), qrDataUrl: S.String, secret: S.String }))
 			.addError(HttpError.Auth)
 			.addError(HttpError.Conflict)
 			.addError(HttpError.Forbidden)
@@ -190,7 +198,7 @@ const _AuthGroup = HttpApiGroup.make('auth')
 		HttpApiEndpoint.post('createApiKey', '/apikeys')
 			.middleware(Middleware)
 			.setPayload(S.Struct({ expiresAt: S.optional(S.DateFromSelf), name: S.NonEmptyTrimmedString }))
-			.addSuccess(S.extend(ApiKey.json, S.Struct({ apiKey: S.optional(S.String) })))
+			.addSuccess(S.extend(ApiKey.json, S.Struct({ apiKey: S.String })))
 			.addError(HttpError.Auth)
 			.addError(HttpError.Forbidden)
 			.addError(HttpError.Internal)
@@ -257,14 +265,21 @@ const _HealthGroup = HttpApiGroup.make('health')
 		HttpApiEndpoint.get('readiness', '/readiness')
 			.addSuccess(S.Struct({
 				checks: S.Struct({
-					cache: S.Struct({ connected: S.Boolean, latencyMs: S.Number }),
-					database: S.Struct({ healthy: S.Boolean, latencyMs: S.Number }),
-					metrics: S.Literal('healthy', 'degraded', 'alerted'),
-						polling: S.Struct({ criticalAlerts: S.Number, scope: S.Literal('global'), totalAlerts: S.Number }),
-					vector: S.Struct({ configured: S.Boolean }),
-				}),
-				status: S.Literal('ok'),
-			}))
+						cache: S.Struct({ connected: S.Boolean, latencyMs: S.Number }),
+						database: S.Struct({ healthy: S.Boolean, latencyMs: S.Number }),
+						metrics: S.Literal('healthy', 'degraded', 'alerted'),
+						polling: S.Struct({
+							criticalAlerts: S.Number,
+							lastFailureAtMs: S.optional(S.Number),
+							lastSuccessAtMs: S.optional(S.Number),
+							scope: S.Literal('global'),
+							stale: S.Boolean,
+							totalAlerts: S.Number,
+						}),
+						vector: S.Struct({ configured: S.Boolean }),
+					}),
+					status: S.Literal('ok'),
+				}))
 			.addError(HttpError.ServiceUnavailable),
 	)
 	.add(
@@ -282,12 +297,30 @@ const _HealthGroup = HttpApiGroup.make('health')
 // Telemetry: unauthenticated OTLP ingest
 const _TelemetryGroup = HttpApiGroup.make('telemetry')
 	.prefix('/v1')
-	.add(HttpApiEndpoint.post('ingestTraces', '/traces').addSuccess(S.Void).addError(HttpError.RateLimit));
+	.add(
+		HttpApiEndpoint.post('ingestTraces', '/traces')
+			.addSuccess(S.Void)
+			.addError(HttpError.RateLimit)
+			.addError(HttpError.ServiceUnavailable),
+	)
+	.add(
+		HttpApiEndpoint.post('ingestMetrics', '/metrics')
+			.addSuccess(S.Void)
+			.addError(HttpError.RateLimit)
+			.addError(HttpError.ServiceUnavailable),
+	)
+	.add(
+		HttpApiEndpoint.post('ingestLogs', '/logs')
+			.addSuccess(S.Void)
+			.addError(HttpError.RateLimit)
+			.addError(HttpError.ServiceUnavailable),
+	);
 
 // Users: group-level auth + common errors
 const _UsersGroup = HttpApiGroup.make('users')
 	.prefix('/users')
 	.middleware(Middleware)
+	.addError(HttpError.Forbidden)
 	.addError(HttpError.Internal)
 	.addError(HttpError.RateLimit)
 	.add(
@@ -299,7 +332,7 @@ const _UsersGroup = HttpApiGroup.make('users')
 	.add(
 		HttpApiEndpoint.patch('updateProfile', '/me')
 			.setPayload(S.Struct({
-				email: S.optional(S.String.pipe(S.pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/))).annotations({ description: 'New email address' }),
+				email: S.String.pipe(S.pattern(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)).annotations({ description: 'New email address' }),
 			}))
 			.addSuccess(User.json)
 			.addError(HttpError.NotFound)
@@ -317,8 +350,33 @@ const _UsersGroup = HttpApiGroup.make('users')
 			.setPath(_IdPath)
 			.setPayload(S.Struct({ role: Context.UserRole.schema }))
 			.addSuccess(User.json)
-			.addError(HttpError.Forbidden)
 			.addError(HttpError.NotFound),
+	)
+	.add(
+		HttpApiEndpoint.get('getNotificationPreferences', '/me/notifications/preferences')
+			.addSuccess(NotificationPreferencesSchema)
+			.addError(HttpError.NotFound)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Get notification preferences'),
+	)
+	.add(
+		HttpApiEndpoint.put('updateNotificationPreferences', '/me/notifications/preferences')
+			.setPayload(NotificationPreferencesSchema)
+			.addSuccess(NotificationPreferencesSchema)
+			.addError(HttpError.NotFound)
+			.addError(HttpError.Validation)
+			.annotate(OpenApi.Summary, 'Update notification preferences'),
+	)
+	.add(
+		HttpApiEndpoint.get('listNotifications', '/me/notifications')
+			.setUrlParams(Query)
+			.addSuccess(KeysetResponse(Notification.json))
+			.annotate(OpenApi.Summary, 'List own notifications'),
+	)
+	.add(
+		HttpApiEndpoint.get('subscribeNotifications', '/me/notifications/subscribe')
+			.addSuccess(S.Void)
+			.annotate(OpenApi.Summary, 'Subscribe to own notifications'),
 	);
 
 // Audit: group-level auth + common errors
@@ -372,6 +430,7 @@ const _TransferGroup = HttpApiGroup.make('transfer')
 const _SearchGroup = HttpApiGroup.make('search')
 	.prefix('/search')
 	.middleware(Middleware)
+	.addError(HttpError.Forbidden)
 	.addError(HttpError.Internal)
 	.addError(HttpError.RateLimit)
 	.add(
@@ -410,14 +469,12 @@ const _SearchGroup = HttpApiGroup.make('search')
 		HttpApiEndpoint.post('refresh', '/refresh')
 			.setPayload(S.Struct({ includeGlobal: S.optional(S.Boolean) }))
 			.addSuccess(S.Struct({ status: S.Literal('ok') }))
-			.addError(HttpError.Forbidden)
 			.annotate(OpenApi.Description, 'Refresh search index (admin only)'),
 	)
 	.add(
 		HttpApiEndpoint.post('refreshEmbeddings', '/refresh/embeddings')
 			.setPayload(S.Struct({ includeGlobal: S.optional(S.Boolean) }))
 			.addSuccess(S.Struct({ count: S.Int }))
-			.addError(HttpError.Forbidden)
 			.annotate(OpenApi.Description, 'Refresh search embeddings (admin only)'),
 	);
 
@@ -438,6 +495,7 @@ const _JobsGroup = HttpApiGroup.make('jobs')
 const _WebSocketGroup = HttpApiGroup.make('websocket')
 	.prefix('/ws')
 	.middleware(Middleware)
+	.addError(HttpError.Auth)
 	.addError(HttpError.Forbidden)
 	.addError(HttpError.Internal)
 	.addError(HttpError.RateLimit)
@@ -551,15 +609,7 @@ const _StorageGroup = HttpApiGroup.make('storage')
 				sort: S.optionalWith(HttpApiSchema.param('sort', S.Literal('asc', 'desc')), { default: () => 'desc' as const }).annotations({ description: 'Sort direction' }),
 				type: S.optional(HttpApiSchema.param('type', S.NonEmptyTrimmedString)).annotations({ description: 'Filter by asset type' }),
 			})))
-			.addSuccess(KeysetResponse(S.Struct({
-				id: S.UUID,
-				name: S.NullOr(S.String),
-				size: S.Number,
-				status: S.Literal('active', 'processing', 'failed', 'deleted'),
-				storageRef: S.NullOr(S.String),
-				type: S.String,
-				updatedAt: S.DateTimeUtc,
-			})))
+			.addSuccess(KeysetResponse(Asset.json.pipe(S.pick('id', 'name', 'size', 'status', 'storageRef', 'type', 'updatedAt'))))
 			.annotate(OpenApi.Summary, 'List assets')
 			.annotate(OpenApi.Description, 'Browse assets with cursor-based pagination, filtering by type and date range.'),
 	);
@@ -570,27 +620,26 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 	.middleware(Middleware)
 	.addError(HttpError.Forbidden)
 	.addError(HttpError.Internal)
+	.addError(HttpError.NotFound)
 	.addError(HttpError.RateLimit)
-	.add(
-		HttpApiEndpoint.get('list', '/')
-			.addSuccess(S.Array(S.Struct({
-				active: S.Boolean,
-				allowWebhookEvents: S.optionalWith(S.Boolean, { default: () => false }),
-				eventTypes: S.Array(S.String),
-				timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-				url: S.String,
-			})))
-			.annotate(OpenApi.Summary, 'List registered webhooks'),
+		.add(
+			HttpApiEndpoint.get('list', '/')
+				.addSuccess(S.Array(S.Struct({
+					active: S.Boolean,
+					eventTypes: S.Array(S.String),
+					timeout: S.optionalWith(S.Number, { default: () => 5000 }),
+					url: S.String,
+				})))
+				.annotate(OpenApi.Summary, 'List registered webhooks'),
 	)
-	.add(
-		HttpApiEndpoint.post('register', '/')
-			.setPayload(S.Struct({
-				active: S.Boolean,
-				allowWebhookEvents: S.optionalWith(S.Boolean, { default: () => false }),
-				eventTypes: S.Array(S.String),
-				secret: S.String.pipe(S.minLength(32)),
-				timeout: S.optionalWith(S.Number, { default: () => 5000 }),
-				url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')),
+		.add(
+			HttpApiEndpoint.post('register', '/')
+				.setPayload(S.Struct({
+					active: S.Boolean,
+					eventTypes: S.Array(S.String),
+					secret: S.String.pipe(S.minLength(32)),
+					timeout: S.optionalWith(S.Number, { default: () => 5000 }),
+					url: S.String.pipe(S.pattern(/^https:\/\/[a-zA-Z0-9]/), S.brand('WebhookUrl')),
 			}))
 			.addSuccess(_Success)
 			.addError(HttpError.Validation)
@@ -620,12 +669,13 @@ const _WebhooksGroup = HttpApiGroup.make('webhooks')
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Retry failed delivery'),
 	)
-	.add(
-		HttpApiEndpoint.get('status', '/status')
-			.setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', S.String)) }))
-			.addSuccess(S.Array(WebhookService.DeliveryRecord))
-			.annotate(OpenApi.Summary, 'Delivery status'),
-	);
+		.add(
+			HttpApiEndpoint.get('status', '/status')
+				.setUrlParams(S.Struct({ url: S.optional(HttpApiSchema.param('url', S.String)) }))
+				.addSuccess(S.Array(WebhookService.DeliveryRecord))
+				.annotate(OpenApi.Summary, 'Delivery status')
+				.annotate(OpenApi.Description, 'Returns the latest delivery snapshot per endpoint URL.'),
+		);
 
 // Admin: group-level auth + common errors — excluded from OpenAPI
 const _AdminGroup = HttpApiGroup.make('admin')
@@ -692,6 +742,19 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.annotate(OpenApi.Summary, 'Replay dead letter'),
 	)
 	.add(
+		HttpApiEndpoint.get('listNotifications', '/notifications')
+			.setUrlParams(Query)
+			.addSuccess(KeysetResponse(Notification.json))
+			.annotate(OpenApi.Summary, 'List notifications'),
+	)
+	.add(
+		HttpApiEndpoint.post('replayNotification', '/notifications/:id/replay')
+			.setPath(_IdPath)
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Replay notification'),
+	)
+	.add(
 		HttpApiEndpoint.get('events', '/events')
 			.addSuccess(S.Void)
 			.annotate(OpenApi.Summary, 'SSE event stream'),
@@ -720,6 +783,23 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.annotate(OpenApi.Summary, 'Database cache hit ratio'),
 	)
 	.add(
+		HttpApiEndpoint.get('listPermissions', '/permissions')
+			.addSuccess(S.Array(_PermissionShape))
+			.annotate(OpenApi.Summary, 'List tenant permissions'),
+	)
+	.add(
+		HttpApiEndpoint.put('grantPermission', '/permissions')
+			.setPayload(_PermissionShape)
+			.addSuccess(_PermissionShape)
+			.annotate(OpenApi.Summary, 'Grant tenant permission'),
+	)
+	.add(
+		HttpApiEndpoint.del('revokePermission', '/permissions')
+			.setPayload(_PermissionShape)
+			.addSuccess(_Success)
+			.annotate(OpenApi.Summary, 'Revoke tenant permission'),
+	)
+	.add(
 		HttpApiEndpoint.get('listTenants', '/tenants')
 			.addSuccess(S.Array(App.json))
 			.annotate(OpenApi.Summary, 'List tenants'),
@@ -729,7 +809,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.setPayload(S.Struct({
 				name: S.NonEmptyTrimmedString,
 				namespace: S.NonEmptyTrimmedString.pipe(S.pattern(/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/)),
-				settings: S.optional(S.Unknown),
+				settings: S.optional(AppSettingsSchema),
 			}))
 			.addSuccess(App.json)
 			.addError(HttpError.Conflict)
@@ -748,7 +828,7 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.setPath(_IdPath)
 			.setPayload(S.Struct({
 				name: S.optional(S.NonEmptyTrimmedString),
-				settings: S.optional(S.Unknown),
+				settings: S.optional(AppSettingsSchema),
 			}))
 			.addSuccess(App.json)
 			.addError(HttpError.NotFound)
@@ -759,7 +839,14 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.setPath(_IdPath)
 			.addSuccess(_Success)
 			.addError(HttpError.NotFound)
-			.annotate(OpenApi.Summary, 'Deactivate tenant'),
+			.annotate(OpenApi.Summary, 'Suspend tenant'),
+	)
+	.add(
+		HttpApiEndpoint.post('resumeTenant', '/tenants/:id/resume')
+			.setPath(_IdPath)
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Resume suspended tenant'),
 	)
 	.add(
 		HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
@@ -776,6 +863,21 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addError(HttpError.NotFound)
 			.addError(HttpError.Validation)
 			.annotate(OpenApi.Summary, 'Update tenant OAuth config'),
+	)
+	.add(
+		HttpApiEndpoint.get('getFeatureFlags', '/features')
+			.addSuccess(FeatureService.FlagRegistry)
+			.annotate(OpenApi.Summary, 'Get tenant feature flags'),
+	)
+	.add(
+		HttpApiEndpoint.put('setFeatureFlag', '/features')
+			.setPayload(S.Struct({
+				flag: S.keyof(FeatureService.FlagRegistry),
+				value: S.Boolean,
+			}))
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Set tenant feature flag'),
 	);
 
 // --- [ENTRY_POINT] -----------------------------------------------------------

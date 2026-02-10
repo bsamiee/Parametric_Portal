@@ -204,9 +204,19 @@ export default Effect.gen(function* () {
             name TEXT NOT NULL,
             namespace TEXT COLLATE case_insensitive NOT NULL,
             settings JSONB,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'archived')),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT apps_name_not_empty CHECK (length(trim(name)) > 0),
-            CONSTRAINT apps_namespace_not_empty CHECK (length(trim(namespace)) > 0)
+            CONSTRAINT apps_namespace_not_empty CHECK (length(trim(namespace)) > 0),
+            CONSTRAINT apps_settings_shape CHECK (
+                settings IS NULL OR (
+                    jsonb_typeof(settings) = 'object'
+                    AND jsonb_typeof(COALESCE(settings->'featureFlags', '{}'::jsonb)) = 'object'
+                    AND jsonb_typeof(COALESCE(settings->'oauthProviders', '[]'::jsonb)) = 'array'
+                    AND jsonb_typeof(COALESCE(settings->'webhooks', '[]'::jsonb)) = 'array'
+                    AND (settings - ARRAY['featureFlags', 'oauthProviders', 'webhooks']) = '{}'::jsonb
+                )
+            )
         )
     `;
     yield* sql`COMMENT ON TABLE apps IS 'Tenant isolation root — all user-facing entities scope to an app; use uuid_extract_timestamp(id) for creation time'`;
@@ -223,6 +233,11 @@ export default Effect.gen(function* () {
             id UUID PRIMARY KEY DEFAULT uuidv7(),
             app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
             email TEXT COLLATE case_insensitive NOT NULL,
+            notification_preferences JSONB NOT NULL DEFAULT jsonb_build_object(
+                'channels', jsonb_build_object('email', true, 'webhook', true, 'inApp', true),
+                'templates', '{}'::jsonb,
+                'mutedUntil', NULL
+            ),
             role TEXT NOT NULL,
             status TEXT NOT NULL,
             deleted_at TIMESTAMPTZ,
@@ -235,12 +250,36 @@ export default Effect.gen(function* () {
     yield* sql`COMMENT ON TABLE users IS 'User accounts — NEVER hard-delete; use uuid_extract_timestamp(id) for creation time'`;
     yield* sql`COMMENT ON COLUMN users.deleted_at IS 'Soft-delete timestamp — NULL means active; set enables email re-registration'`;
     yield* sql`COMMENT ON COLUMN users.email IS 'Format validated at app layer; ICU nondeterministic collation enforces case-insensitive uniqueness among active users'`;
+    yield* sql`COMMENT ON COLUMN users.notification_preferences IS 'Per-user notification preferences: channel toggles, template overrides, mute window'`;
     yield* sql`COMMENT ON COLUMN users.role_order IS 'VIRTUAL generated — permission hierarchy (owner=4, admin=3, member=2, viewer=1, guest=0)'`;
     yield* sql`CREATE UNIQUE INDEX idx_users_app_email_active ON users(app_id, email) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_email ON users(app_id, email) INCLUDE (id, role) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_id ON users(app_id) INCLUDE (id, email, role) WHERE deleted_at IS NULL`;
     yield* sql`CREATE INDEX idx_users_app_id_fk ON users(app_id)`;
     yield* sql`CREATE TRIGGER users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PERMISSIONS: Tenant-scoped resource-action authorization matrix
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql`
+        CREATE TABLE permissions (
+            id UUID PRIMARY KEY DEFAULT uuidv7(),
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+            role TEXT NOT NULL,
+            resource TEXT NOT NULL,
+            action TEXT NOT NULL,
+            deleted_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT permissions_role_valid CHECK (role IN ('owner', 'admin', 'member', 'viewer', 'guest')),
+            CONSTRAINT permissions_resource_not_empty CHECK (length(trim(resource)) > 0),
+            CONSTRAINT permissions_action_not_empty CHECK (length(trim(action)) > 0),
+            CONSTRAINT permissions_unique UNIQUE NULLS NOT DISTINCT (app_id, role, resource, action)
+        )
+    `;
+    yield* sql`COMMENT ON TABLE permissions IS 'Tenant-scoped authorization matrix (role × resource × action)'`;
+    yield* sql`COMMENT ON COLUMN permissions.deleted_at IS 'Soft-delete timestamp — NULL means active permission'`;
+    yield* sql`CREATE INDEX idx_permissions_app_role_active ON permissions(app_id, role) INCLUDE (resource, action) WHERE deleted_at IS NULL`;
+    yield* sql`CREATE INDEX idx_permissions_app_id_fk ON permissions(app_id)`;
+    yield* sql`CREATE TRIGGER permissions_updated_at BEFORE UPDATE ON permissions FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
     // ═══════════════════════════════════════════════════════════════════════════
     // SESSIONS: Token-based auth with MFA gate
     // ═══════════════════════════════════════════════════════════════════════════
@@ -383,11 +422,13 @@ export default Effect.gen(function* () {
             user_agent TEXT,
             CONSTRAINT audit_logs_user_agent_length CHECK (user_agent IS NULL OR length(user_agent) <= 1024),
             CONSTRAINT audit_logs_operation_valid CHECK (operation IN (
-                'create', 'update', 'delete', 'restore', 'login', 'logout', 'verify', 'revoke',
-                'sign', 'upload', 'stream_upload', 'copy', 'read', 'list', 'register', 'remove',
-                'enroll', 'disable', 'verifyMfa', 'refresh', 'revokeByIp', 'cancel', 'replay',
-                'export', 'import', 'validate', 'status', 'query', 'suggest', 'refreshEmbeddings',
-                'abort_multipart', 'auth_failure', 'rate_limited',
+                'create', 'update', 'delete', 'read', 'list', 'status',
+                'login', 'refresh', 'revoke', 'revokeByIp',
+                'verify', 'verifyMfa', 'register', 'enroll', 'disable',
+                'sign', 'upload', 'stream_upload', 'copy', 'remove', 'abort_multipart',
+                'export', 'import', 'validate',
+                'cancel', 'replay',
+                'auth_failure', 'permission_denied',
                 'purge-sessions', 'purge-api-keys', 'purge-assets', 'purge-event-journal',
                 'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts'
             ))
@@ -543,6 +584,41 @@ export default Effect.gen(function* () {
     `;
     yield* sql`COMMENT ON FUNCTION count_jobs_by_status() IS 'Aggregate job counts per status as JSONB object — e.g. {"queued":5,"processing":2}'`;
     // ═══════════════════════════════════════════════════════════════════════════
+    // NOTIFICATIONS: Durable channel delivery ledger (email/webhook/in-app)
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql`
+        CREATE TABLE notifications (
+            id UUID PRIMARY KEY DEFAULT uuidv7(),
+            app_id UUID NOT NULL REFERENCES apps(id) ON DELETE RESTRICT,
+            user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+            channel TEXT NOT NULL CHECK (channel IN ('email', 'webhook', 'inApp')),
+            template TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('queued', 'sending', 'delivered', 'failed', 'dlq')),
+            recipient TEXT,
+            provider TEXT,
+            payload JSONB NOT NULL,
+            error TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+            max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts > 0),
+            job_id TEXT,
+            dedupe_key TEXT,
+            delivered_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT notifications_template_not_empty CHECK (length(trim(template)) > 0)
+        )
+    `;
+    yield* sql`COMMENT ON TABLE notifications IS 'Tenant-scoped notification ledger for email/webhook/in-app delivery lifecycle — use uuid_extract_timestamp(id) for creation time'`;
+    yield* sql`COMMENT ON COLUMN notifications.user_id IS 'FK to users — RESTRICT (users never hard-deleted); NULL for system/broadcast notifications'`;
+    yield* sql`COMMENT ON COLUMN notifications.job_id IS 'Snowflake job_id linking to jobs table — NO FK constraint (job may complete/purge before notification)'`;
+    yield* sql`CREATE INDEX idx_notifications_app_status ON notifications(app_id, status, id DESC) INCLUDE (channel, template, attempts, max_attempts)`;
+    yield* sql`CREATE INDEX idx_notifications_app_user ON notifications(app_id, user_id, id DESC) INCLUDE (channel, status, template) WHERE user_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_notifications_app_updated ON notifications(app_id, updated_at DESC) INCLUDE (channel, status, user_id)`;
+    yield* sql`CREATE INDEX idx_notifications_job_id ON notifications(job_id) WHERE job_id IS NOT NULL`;
+    yield* sql`CREATE INDEX idx_notifications_app_id_fk ON notifications(app_id)`;
+    yield* sql`CREATE INDEX idx_notifications_user_id_fk ON notifications(user_id) WHERE user_id IS NOT NULL`;
+    yield* sql`CREATE UNIQUE INDEX idx_notifications_dedupe_active ON notifications(app_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'sending')`;
+    yield* sql`CREATE TRIGGER notifications_updated_at BEFORE UPDATE ON notifications FOR EACH ROW EXECUTE FUNCTION set_updated_at()`;
+    // ═══════════════════════════════════════════════════════════════════════════
     // JOB_DLQ: Dead-letter queue for failed jobs and events
     // ═══════════════════════════════════════════════════════════════════════════
     yield* sql`
@@ -570,10 +646,21 @@ export default Effect.gen(function* () {
             CONSTRAINT job_dlq_attempts_positive CHECK (attempts > 0)
         )
     `;
-    yield* sql`COMMENT ON TABLE job_dlq IS 'Unified dead-letter queue for jobs and events — use uuid_extract_timestamp(id) for DLQ creation time; NO updated_at (append-mostly)'`;
-    yield* sql`COMMENT ON COLUMN job_dlq.source IS 'Discriminant: job = background job, event = domain event from EventBus'`;
-    yield* sql`COMMENT ON COLUMN job_dlq.original_job_id IS 'Reference to original job/event — snowflake string, NO FK constraint (source may be purged before replay)'`;
-    yield* sql`COMMENT ON COLUMN job_dlq.error_reason IS 'Failure classification discriminant for typed error handling — valid values depend on source'`;
+    yield* sql`
+	        COMMENT ON TABLE job_dlq IS 'Unified dead-letter queue for jobs and events — use uuid_extract_timestamp(id) for DLQ creation time; NO updated_at (append-mostly)'
+	    `;
+    yield* sql`
+	        COMMENT ON COLUMN job_dlq.source IS 'Discriminant: job = background job, event = domain event from EventBus'
+	    `;
+    yield* sql`
+	        COMMENT ON COLUMN job_dlq.original_job_id IS 'Reference to original job/event — snowflake string, NO FK constraint (source may be purged before replay)'
+	    `;
+    yield* sql`
+	        COMMENT ON COLUMN job_dlq.payload IS 'Serialized failed payload; webhook DLQ entries persist endpoint snapshot + event data for deterministic replay even after settings drift'
+	    `;
+    yield* sql`
+	        COMMENT ON COLUMN job_dlq.error_reason IS 'Failure classification discriminant for typed error handling — valid values depend on source'
+	    `;
     yield* sql`COMMENT ON COLUMN job_dlq.error_history IS 'Array of {error: string, timestamp: number} entries from all attempts'`;
     yield* sql`COMMENT ON COLUMN job_dlq.replayed_at IS 'NULL = pending replay; set when job/event resubmitted to queue'`;
     yield* sql`CREATE INDEX idx_job_dlq_id_brin ON job_dlq USING BRIN (id)`;
@@ -790,13 +877,13 @@ export default Effect.gen(function* () {
         LANGUAGE sql
         STABLE
         AS $$
-            SELECT backend_type, object AS io_object, context AS io_context,
-                SUM(hits) AS hits,
-                SUM(reads) AS reads,
-                SUM(writes) AS writes,
-                CASE
-                    WHEN SUM(hits) + SUM(reads) > 0
-                        THEN (SUM(hits)::double precision / (SUM(hits) + SUM(reads)) * 100)
+	            SELECT backend_type, object AS io_object, context AS io_context,
+	                SUM(hits)::double precision AS hits,
+	                SUM(reads)::double precision AS reads,
+	                SUM(writes)::double precision AS writes,
+	                CASE
+	                    WHEN SUM(hits) + SUM(reads) > 0
+	                        THEN (SUM(hits)::double precision / (SUM(hits) + SUM(reads)) * 100)
                     ELSE 0
                 END AS cache_hit_ratio
             FROM pg_stat_io
@@ -1238,12 +1325,125 @@ export default Effect.gen(function* () {
     `);
     yield* sql`SELECT refresh_search_documents()`;
     // ═══════════════════════════════════════════════════════════════════════════
+    // PERMISSIONS SEED: default and system tenants
+    // ═══════════════════════════════════════════════════════════════════════════
+    yield* sql.unsafe(String.raw`
+        WITH tenants(app_id) AS (
+            VALUES
+                ('00000000-0000-7000-8000-000000000001'::uuid),
+                ('00000000-0000-7000-8000-000000000000'::uuid)
+        ),
+        all_roles(role) AS (
+            VALUES ('owner'), ('admin'), ('member'), ('viewer'), ('guest')
+        ),
+        all_actions(resource, action) AS (
+            VALUES
+                ('auth', 'logout'),
+                ('auth', 'me'),
+                ('auth', 'mfaStatus'),
+                ('auth', 'mfaEnroll'),
+                ('auth', 'mfaVerify'),
+                ('auth', 'mfaDisable'),
+                ('auth', 'mfaRecover'),
+                ('auth', 'listApiKeys'),
+                ('auth', 'createApiKey'),
+                ('auth', 'deleteApiKey'),
+                ('auth', 'rotateApiKey'),
+                ('auth', 'linkProvider'),
+                ('auth', 'unlinkProvider'),
+                ('users', 'getMe'),
+                ('users', 'updateProfile'),
+                ('users', 'deactivate'),
+                ('users', 'getNotificationPreferences'),
+                ('users', 'updateNotificationPreferences'),
+                ('users', 'listNotifications'),
+                ('users', 'subscribeNotifications'),
+                ('audit', 'getMine'),
+                ('transfer', 'export'),
+                ('transfer', 'import'),
+                ('search', 'search'),
+                ('search', 'suggest'),
+                ('jobs', 'subscribe'),
+                ('storage', 'sign'),
+                ('storage', 'exists'),
+                ('storage', 'remove'),
+                ('storage', 'upload'),
+                ('storage', 'getAsset'),
+                ('storage', 'createAsset'),
+                ('storage', 'updateAsset'),
+                ('storage', 'archiveAsset'),
+                ('storage', 'listAssets'),
+                ('websocket', 'connect')
+        ),
+        privileged_roles(role) AS (
+            VALUES ('owner'), ('admin')
+        ),
+        privileged_actions(resource, action) AS (
+            VALUES
+                ('users', 'updateRole'),
+                ('audit', 'getByEntity'),
+                ('audit', 'getByUser'),
+                ('search', 'refresh'),
+                ('search', 'refreshEmbeddings'),
+                ('webhooks', 'list'),
+                ('webhooks', 'register'),
+                ('webhooks', 'remove'),
+                ('webhooks', 'test'),
+                ('webhooks', 'retry'),
+                ('webhooks', 'status'),
+                ('admin', 'listUsers'),
+                ('admin', 'listSessions'),
+                ('admin', 'deleteSession'),
+                ('admin', 'revokeSessionsByIp'),
+                ('admin', 'listJobs'),
+                ('admin', 'cancelJob'),
+                ('admin', 'listDlq'),
+                ('admin', 'replayDlq'),
+                ('admin', 'listNotifications'),
+                ('admin', 'replayNotification'),
+                ('admin', 'events'),
+                ('admin', 'dbIoStats'),
+                ('admin', 'dbIoConfig'),
+                ('admin', 'dbStatements'),
+                ('admin', 'dbCacheHitRatio'),
+                ('admin', 'listTenants'),
+                ('admin', 'createTenant'),
+                ('admin', 'getTenant'),
+                ('admin', 'updateTenant'),
+                ('admin', 'deactivateTenant'),
+                ('admin', 'resumeTenant'),
+                ('admin', 'getTenantOAuth'),
+                ('admin', 'updateTenantOAuth'),
+                ('admin', 'listPermissions'),
+                ('admin', 'grantPermission'),
+                ('admin', 'revokePermission'),
+                ('admin', 'getFeatureFlags'),
+                ('admin', 'setFeatureFlag')
+        ),
+        seed(app_id, role, resource, action) AS (
+            SELECT tenants.app_id, all_roles.role, all_actions.resource, all_actions.action
+            FROM tenants
+            CROSS JOIN all_roles
+            CROSS JOIN all_actions
+            UNION ALL
+            SELECT tenants.app_id, privileged_roles.role, privileged_actions.resource, privileged_actions.action
+            FROM tenants
+            CROSS JOIN privileged_roles
+            CROSS JOIN privileged_actions
+        )
+        INSERT INTO permissions (app_id, role, resource, action)
+        SELECT app_id, role, resource, action
+        FROM seed
+        ON CONFLICT (app_id, role, resource, action) DO NOTHING
+    `);
+    // ═══════════════════════════════════════════════════════════════════════════
     // RLS: Row-Level Security for multi-tenant isolation
     // ═══════════════════════════════════════════════════════════════════════════
     // Custom GUC for tenant context (set via SET LOCAL in transactions)
     yield* sql`SELECT set_config('app.current_tenant', '00000000-0000-7000-8000-000000000001', false)`;
     // Enable RLS on tenant-scoped tables
     yield* sql`ALTER TABLE users ENABLE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE permissions ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE sessions ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE oauth_accounts ENABLE ROW LEVEL SECURITY`;
@@ -1252,11 +1452,14 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE assets ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE jobs ENABLE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE notifications ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE job_dlq ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents ENABLE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings ENABLE ROW LEVEL SECURITY`;
     // RLS Policies: users (scoped by app_id)
     yield* sql`CREATE POLICY users_tenant_isolation ON users USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    // RLS Policies: permissions (scoped by app_id)
+    yield* sql`CREATE POLICY permissions_tenant_isolation ON permissions USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: sessions (scoped by app_id)
     yield* sql`CREATE POLICY sessions_tenant_isolation ON sessions USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: api_keys (scoped via SECURITY DEFINER helper — avoids chained RLS)
@@ -1273,6 +1476,8 @@ export default Effect.gen(function* () {
     yield* sql`CREATE POLICY audit_logs_tenant_isolation ON audit_logs USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: jobs (scoped by app_id)
     yield* sql`CREATE POLICY jobs_tenant_isolation ON jobs USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
+    // RLS Policies: notifications (scoped by app_id)
+    yield* sql`CREATE POLICY notifications_tenant_isolation ON notifications USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: job_dlq (scoped by app_id)
     yield* sql`CREATE POLICY job_dlq_tenant_isolation ON job_dlq USING (app_id = current_setting('app.current_tenant')::uuid) WITH CHECK (app_id = current_setting('app.current_tenant')::uuid)`;
     // RLS Policies: search_documents (scoped by scope_id = app_id, or global if NULL)
@@ -1281,6 +1486,7 @@ export default Effect.gen(function* () {
     yield* sql`CREATE POLICY search_embeddings_tenant_isolation ON search_embeddings USING (scope_id IS NULL OR scope_id = current_setting('app.current_tenant')::uuid)`;
     // FORCE RLS for table owners (superuser bypass is acceptable for migrations/admin)
     yield* sql`ALTER TABLE users FORCE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE permissions FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE sessions FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE api_keys FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE oauth_accounts FORCE ROW LEVEL SECURITY`;
@@ -1289,12 +1495,15 @@ export default Effect.gen(function* () {
     yield* sql`ALTER TABLE assets FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE jobs FORCE ROW LEVEL SECURITY`;
+    yield* sql`ALTER TABLE notifications FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE job_dlq FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_documents FORCE ROW LEVEL SECURITY`;
     yield* sql`ALTER TABLE search_embeddings FORCE ROW LEVEL SECURITY`;
     yield* sql`COMMENT ON POLICY users_tenant_isolation ON users IS 'RLS: Isolate users by app_id matching current_setting(app.current_tenant)'`;
+    yield* sql`COMMENT ON POLICY permissions_tenant_isolation ON permissions IS 'RLS: Isolate permissions by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY assets_tenant_isolation ON assets IS 'RLS: Isolate assets by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY audit_logs_tenant_isolation ON audit_logs IS 'RLS: Isolate audit_logs by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY jobs_tenant_isolation ON jobs IS 'RLS: Isolate jobs by app_id matching current_setting(app.current_tenant)'`;
+    yield* sql`COMMENT ON POLICY notifications_tenant_isolation ON notifications IS 'RLS: Isolate notifications by app_id matching current_setting(app.current_tenant)'`;
     yield* sql`COMMENT ON POLICY job_dlq_tenant_isolation ON job_dlq IS 'RLS: Isolate job_dlq by app_id matching current_setting(app.current_tenant)'`;
 });

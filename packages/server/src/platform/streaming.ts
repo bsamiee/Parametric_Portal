@@ -65,28 +65,32 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 	}): Effect.Effect<Stream.Stream<unknown, E | Error | Multipart.MultipartError | MsgPack.MsgPackError, never>, Resilience.Error<never>, StreamingService | Resilience.State> => {
 		const format = config.format ?? 'binary';
 		return Resilience.run(`streaming.ingest.${config.name}`, Effect.gen(function* () {
-			const formatConfig = _formats[format];
-			const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
-			const labels = _labels('ingest', format, config.name, tenantId);
-			const raw = ('getReader' in config.source
-				? Stream.fromReadableStream({ evaluate: () => config.source as ReadableStream<Uint8Array>, onError: (error) => error as E | Error })
-				: Stream.fromAsyncIterable(config.source, (error) => error as E | Error)
-			).pipe(
-				(stream) => config.throttle ? Stream.throttle(stream, { cost: Chunk.size, units: config.throttle.units, duration: config.throttle.duration, burst: config.throttle.burst }) : stream,
-				(stream) => config.debounce ? Stream.debounce(stream, config.debounce) : stream,
-			);
+				const formatConfig = _formats[format];
+				const tenantId = yield* Context.Request.currentTenantId.pipe(Effect.orElseSucceed(() => 'system'));
+				const labels = _labels('ingest', format, config.name, tenantId);
+				const source = config.source;
+				const raw: Stream.Stream<Uint8Array, E | Error, never> = ('getReader' in source
+					? Stream.fromReadableStream({ evaluate: () => source, onError: (error) => error as E | Error })
+					: Stream.fromAsyncIterable(source, (error) => error as E | Error)
+				).pipe(
+					(stream) => config.throttle ? Stream.throttle(stream, { cost: Chunk.size, units: config.throttle.units, duration: config.throttle.duration, burst: config.throttle.burst }) : stream,
+					(stream) => config.debounce ? Stream.debounce(stream, config.debounce) : stream,
+				);
 			const decoded = Match.value(format).pipe(
 				Match.when('multipart', () => pipe(raw, Stream.pipeThroughChannel(Multipart.makeChannel<E | Error>(config.headers ?? {})), Multipart.withLimitsStream(config.limits ?? { maxParts: Option.some(100), maxFieldSize: 1 << 20, maxFileSize: Option.some(10 << 20) }))),
 				Match.when('msgpack', () => pipe(raw, Stream.pipeThroughChannel(MsgPack.unpack()))),
 				Match.when('sse', () => pipe(raw, Stream.decodeText('utf-8'), Stream.pipeThroughChannel(Sse.makeChannel<E | Error, unknown>()))),
 				Match.when('ndjson', () => pipe(raw, Stream.pipeThroughChannel(Ndjson.unpack()))),
-				Match.when('binary', () => raw),
-				Match.exhaustive,
-			);
-			const metricTap = (item: unknown) => format === 'binary' ? _inc(labels, (metrics) => metrics.stream.bytes, (item as Uint8Array).length) : _inc(labels, (metrics) => metrics.stream.elements);
-			return decoded.pipe(
-				(stream) => config.retry ? Stream.retry(stream, Resilience.schedule({ base: config.retry.base, maxAttempts: config.retry.times })) : stream,
-				Stream.buffer({ capacity: formatConfig.capacity, strategy: formatConfig.strategy }),
+					Match.when('binary', () => raw),
+					Match.exhaustive,
+				);
+				const metricTap = (item: unknown) => Match.value(format).pipe(
+					Match.when('binary', () => item instanceof Uint8Array ? _inc(labels, (metrics) => metrics.stream.bytes, item.length) : _inc(labels, (metrics) => metrics.stream.elements)),
+					Match.orElse(() => _inc(labels, (metrics) => metrics.stream.elements)),
+				);
+				return decoded.pipe(
+					(stream) => config.retry ? Stream.retry(stream, Resilience.schedule({ base: config.retry.base, maxAttempts: config.retry.times })) : stream,
+					Stream.buffer({ capacity: formatConfig.capacity, strategy: formatConfig.strategy }),
 				_withMetrics(labels, config.name, format),
 				Stream.tap(metricTap),
 			);
@@ -170,9 +174,12 @@ class StreamingService extends Effect.Service<StreamingService>()('server/Stream
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace StreamingService {
-	type _F = typeof _formats;
-	export type Ingest = { [K in keyof _F]: _F[K]['ingest'] extends true ? K : never }[keyof _F];
-	export type Emit = { [K in keyof _F]: _F[K]['emit'] extends true ? K : never }[keyof _F];
+	export type Ingest = {
+		[K in keyof typeof _formats]: (typeof _formats)[K]['ingest'] extends true ? K : never
+	}[keyof typeof _formats];
+	export type Emit = {
+		[K in keyof typeof _formats]: (typeof _formats)[K]['emit'] extends true ? K : never
+	}[keyof typeof _formats];
 	export interface State<A> { readonly get: Effect.Effect<A>; readonly set: (value: A) => Effect.Effect<void>; readonly update: (updater: (current: A) => A) => Effect.Effect<void>; readonly modify: <B>(modifier: (current: A) => readonly [B, A]) => Effect.Effect<B>; readonly changes: Stream.Stream<A, never, never> }
 }
 

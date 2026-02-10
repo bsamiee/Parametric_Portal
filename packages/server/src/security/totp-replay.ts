@@ -17,22 +17,17 @@ const _CONFIG = {
 	lockoutSchema: S.Struct({ count: S.Number, lastFailure: S.Number, lockedUntil: S.Number }),
 	ttl: Duration.millis(150_000),
 } as const;
-const _incMfa = (outcome: string) => Effect.serviceOption(MetricsService).pipe(
-	Effect.flatMap(Option.match({
-		onNone: () => Effect.void,
-		onSome: (metrics) => MetricsService.inc(metrics.mfa.verifications, MetricsService.label({ outcome })),
-	})),
-);
 
 // --- [SERVICES] --------------------------------------------------------------
 
 class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/ReplayGuardService', {
 	scoped: Effect.gen(function* () {
 		yield* Effect.logInfo('ReplayGuardService initialized');
+		const incMfa = pipe(yield* Effect.serviceOption(MetricsService), Option.match({ onNone: () => () => Effect.void, onSome: (service) => (outcome: string) => MetricsService.inc(service.mfa.verifications, MetricsService.label({ outcome })) }));
 		return {
 			checkAndMark: (userId: string, timeStep: number, code: string) =>
 				CacheService.setNX(`${_CONFIG.keyPrefix}${userId}:${timeStep}:${code}`, '1', _CONFIG.ttl).pipe(
-					Effect.flatMap((result) => _incMfa(result.alreadyExists ? 'replay_reject' : 'replay_mark').pipe(Effect.as({ alreadyUsed: result.alreadyExists, backend: 'redis' as const }),)),
+					Effect.flatMap((result) => incMfa(result.alreadyExists ? 'replay_reject' : 'replay_mark').pipe(Effect.as({ alreadyUsed: result.alreadyExists, backend: 'redis' as const }),)),
 					Telemetry.span('totp.checkAndMark', { metrics: false }),
 				),
 			checkLockout: (userId: string) =>
@@ -41,7 +36,7 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 					const lockout = yield* CacheService.kv.get(_CONFIG.lockoutKey(userId), _CONFIG.lockoutSchema);
 					yield* pipe(lockout, Option.filter((state) => state.lockedUntil > now), Option.match({
 						onNone: () => Effect.void,
-						onSome: (state) => _incMfa('lockout_block').pipe(
+						onSome: (state) => incMfa('lockout_block').pipe(
 							Effect.andThen(Effect.fail(HttpError.RateLimit.of(state.lockedUntil - now, { recoveryAction: 'email-verify' }))),
 						),
 					}));
@@ -57,10 +52,10 @@ class ReplayGuardService extends Effect.Service<ReplayGuardService>()('server/Re
 						Option.getOrElse(() => 0),
 					);
 					yield* CacheService.kv.set(_CONFIG.lockoutKey(userId), { count, lastFailure: now, lockedUntil }, Duration.millis(_CONFIG.lockout.maxMs));
-					yield* Effect.when(_incMfa('lockout_triggered'), () => lockedUntil > 0 && prev.lockedUntil <= now);
+					yield* Effect.when(incMfa('lockout_triggered'), () => lockedUntil > 0 && prev.lockedUntil <= now);
 				}).pipe(Telemetry.span('totp.recordFailure', { metrics: false })),
 			recordSuccess: (userId: string) => CacheService.kv.del(_CONFIG.lockoutKey(userId)).pipe(
-				Effect.andThen(_incMfa('verification_success')),
+				Effect.andThen(incMfa('verification_success')),
 				Telemetry.span('totp.recordSuccess', { metrics: false }),
 			),
 		};

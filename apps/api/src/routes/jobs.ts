@@ -11,24 +11,23 @@ import { CacheService } from '@parametric-portal/server/platform/cache';
 import { StreamingService } from '@parametric-portal/server/platform/streaming';
 import { Middleware } from '@parametric-portal/server/middleware';
 import { Telemetry } from '@parametric-portal/server/observe/telemetry';
-import { Effect, } from 'effect';
+import { Effect } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const handleSubscribe = (jobs: typeof JobService.Service) =>
 	Effect.gen(function* () {
-		yield* Middleware.mfaVerified;
+		yield* Middleware.permission('jobs', 'subscribe');
 		const ctx = yield* Context.Request.current;
 		const appId = ctx.tenantId;
-		return yield* StreamingService.sse({
+	return yield* StreamingService.sse({
 			filter: (event) => event.tenantId === appId,
 			name: 'jobs.status',
 			serialize: (event) => ({ data: JSON.stringify(event), event: 'status', id: event.jobId }),
 			source: jobs.onStatusChange(),
 		});
 	}).pipe(
-		Effect.catchTag('Forbidden', Effect.fail),
-		Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('SSE failed', error))),
+		Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('SSE failed', error)),
 		Telemetry.span('jobs.subscribe', { kind: 'server', metrics: false }),
 	);
 

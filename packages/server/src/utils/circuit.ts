@@ -26,11 +26,6 @@ const _INITIAL_STATE = {
 	successCount: 0 as number,
 	totalCount: 0 as number,
 };
-const _updateMetric = (circuitName: string, stateValue: string) =>
-	Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({
-		onNone: F.constant(Effect.void),
-		onSome: (ms) => Metric.update(Metric.taggedWithLabels(ms.circuit.stateChanges, MetricsService.label({ circuit: circuitName })), stateValue),
-	}));
 const current = Context.Request.current.pipe(Effect.map((requestContext) => requestContext.circuit));
 
 // --- [ERRORS] ----------------------------------------------------------------
@@ -84,37 +79,44 @@ const _createInstance = (
 		const stateRef = yield* STM.commit(TRef.make(_INITIAL_STATE));
 		const isolatedRef = yield* STM.commit(TRef.make(false));
 		const userCallback = Option.fromNullable(config.onStateChange);
-		const metrics = config.metrics ?? true;
+		const metricsService = yield* Effect.serviceOption(MetricsService);
 		const stateTracker = MutableRef.make({ current: _INITIAL_STATE.state, previous: _INITIAL_STATE.state });
 		const _notifyStateChange = (previous: typeof _INITIAL_STATE.state, currentState: typeof _INITIAL_STATE.state): Effect.Effect<void> =>
-			Effect.gen(function* () {
-				MutableRef.set(stateTracker, { current: currentState, previous });
-				yield* Effect.logWarning(`Circuit[${name}] state change`, { from: previous, to: currentState });
-				yield* Option.match(userCallback, {
+			Effect.void.pipe(
+				Effect.tap(F.constant(MutableRef.set(stateTracker, { current: currentState, previous }))),
+				Effect.zipRight(Effect.logWarning(`Circuit[${name}] state change`, { from: previous, to: currentState })),
+				Effect.zipRight(Option.match(userCallback, {
 					onNone: F.constant(Effect.void),
 					onSome: F.apply({ name, previous, state: currentState }),
-				});
-				yield* Effect.when(_updateMetric(name, currentState), F.constant(metrics));
-			});
+				})),
+				Effect.zipRight(Effect.when(
+					Option.getOrElse(
+						Option.map(metricsService, (ms) => Metric.update(Metric.taggedWithLabels(ms.circuit.stateChanges, MetricsService.label({ circuit: name })), currentState)),
+						F.constant(Effect.void),
+					),
+					F.constant(config.metrics ?? true),
+				)),
+			);
 		const _circuitContext = (): Option.Option<{ readonly name: string; readonly state: string }> => Option.some({ name, state: MutableRef.get(stateTracker).current });
-		const _onSuccess = Effect.gen(function* () {
-			const [beforeState, afterState] = yield* STM.commit(TRef.modify(stateRef, (before) => {
-				const after = { ...before, failureCount: 0, state: 'Closed' as const, successCount: before.successCount + 1, totalCount: before.totalCount + 1 };
-				return [[before.state, after.state] as const, after] as const;
-			}));
-			yield* Effect.when(_notifyStateChange(beforeState, afterState), F.constant(beforeState !== afterState));
-			yield* Effect.logDebug(`Circuit[${name}] success`);
-		});
-		const _onFailure = Effect.gen(function* () {
-			const now = Date.now();
-			const [beforeState, afterState] = yield* STM.commit(TRef.modify(stateRef, (before) => {
+		const _onSuccess = STM.commit(TRef.modify(stateRef, (before) => {
+			const after = { ...before, failureCount: 0, state: 'Closed' as const, successCount: before.successCount + 1, totalCount: before.totalCount + 1 };
+			return [[before.state, after.state] as const, after] as const;
+		})).pipe(
+			Effect.flatMap(([beforeState, afterState]) => Effect.when(_notifyStateChange(beforeState, afterState), F.constant(beforeState !== afterState))),
+			Effect.zipRight(Effect.logDebug(`Circuit[${name}] success`)),
+		);
+		const _onFailure = Effect.sync(Date.now).pipe(
+			Effect.flatMap((now) => STM.commit(TRef.modify(stateRef, (before) => {
 				const updated = { ...before, failureCount: before.failureCount + 1, failures: [...before.failures, now], lastFailureAt: now, totalCount: before.totalCount + 1 };
-				const after = shouldTrip(breaker, updated) ? { ...updated, state: 'Open' as const } : updated;
+				const after = B.match(shouldTrip(breaker, updated), {
+					onFalse: F.constant(updated),
+					onTrue: F.constant({ ...updated, state: 'Open' as const }),
+				});
 				return [[before.state, after.state] as const, after] as const;
-			}));
-			yield* Effect.when(_notifyStateChange(beforeState, afterState), F.constant(afterState !== beforeState));
-			yield* Effect.logDebug(`Circuit[${name}] failure`);
-		});
+			}))),
+			Effect.flatMap(([beforeState, afterState]) => Effect.when(_notifyStateChange(beforeState, afterState), F.constant(afterState !== beforeState))),
+			Effect.zipRight(Effect.logDebug(`Circuit[${name}] failure`)),
+		);
 		const execute = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A, E | CircuitError, R> =>
 			Effect.gen(function* () {
 				yield* STM.commit(TMap.set(lastAccess, name, Date.now()));
@@ -182,17 +184,21 @@ const Circuit = {
 	current,
 	Error: CircuitError,
 	gc: (maxIdleMs = _CONFIG.defaults.gcIdleMs) => CircuitState.pipe(
-		Effect.flatMap(({ lastAccess, registry }) => STM.commit(STM.gen(function* () {
-			const accessEntries = yield* TMap.toArray(lastAccess);
-			const now = Date.now();
-			const staleKeys = accessEntries.filter(([, timestamp]) => now - timestamp > maxIdleMs).map(([circuitName]) => circuitName);
-			const cleanup = staleKeys.reduce(
-				(transaction, circuitName) => transaction.pipe(STM.zipRight(TMap.remove(registry, circuitName)), STM.zipRight(TMap.remove(lastAccess, circuitName))),
-				STM.void,
-			);
-			yield* cleanup;
-			return { removed: staleKeys.length };
-		}))),
+		Effect.flatMap(({ lastAccess, registry }) => STM.commit(TMap.toArray(lastAccess)).pipe(
+			Effect.map((accessEntries) => {
+				const now = Date.now();
+				return A.filterMap(accessEntries, ([circuitName, timestamp]) => Option.liftPredicate(circuitName, F.constant(now - timestamp > maxIdleMs)),
+				);
+			}),
+			Effect.flatMap((staleKeys) =>
+				STM.commit(A.reduce(staleKeys, STM.void, (transaction, circuitName) =>
+					transaction.pipe(
+						STM.zipRight(TMap.remove(registry, circuitName)),
+						STM.zipRight(TMap.remove(lastAccess, circuitName)),
+					),
+				)).pipe(Effect.as({ removed: staleKeys.length })),
+			),
+		)),
 	),
 	get: (name: string) => CircuitState.pipe(Effect.flatMap(({ registry }) => STM.commit(TMap.get(registry, name)))),
 	is,
