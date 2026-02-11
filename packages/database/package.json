@@ -60,6 +60,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "ts-essentials": "catalog:",
     "ts-toolbelt": "catalog:",
     "type-fest": "catalog:",

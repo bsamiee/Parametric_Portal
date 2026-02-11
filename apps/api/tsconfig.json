@@ -14,7 +14,7 @@
             "@parametric-portal/types/*": ["../../packages/types/src/*"]
         },
         "tsBuildInfoFile": "../../.nx/cache/tsbuildinfo/api.tsbuildinfo",
-        "types": ["node", "vitest/globals"]
+        "types": ["node"]
     },
     "exclude": ["node_modules", "dist"],
     "extends": "../../tsconfig.base.json",

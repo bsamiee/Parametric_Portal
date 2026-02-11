@@ -8,6 +8,7 @@
         "test:coverage": "vitest run --config ../vitest.config.ts --project root-tests --coverage"
     },
     "devDependencies": {
+        "@types/node": "catalog:",
         "@effect/vitest": "catalog:",
         "@fast-check/vitest": "catalog:",
         "@parametric-portal/server": "workspace:*",
