@@ -28,7 +28,7 @@ const handleSubscribe = (jobs: typeof JobService.Service) =>
 		});
 	}).pipe(
 		Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('SSE failed', error)),
-		Telemetry.span('jobs.subscribe', { kind: 'server', metrics: false }),
+		Telemetry.span('jobs.subscribe'),
 	);
 
 // --- [LAYERS] ----------------------------------------------------------------

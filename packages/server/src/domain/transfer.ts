@@ -78,7 +78,7 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 				Effect.mapError((err) => HttpError.Internal.of(`${codec.ext.toUpperCase()} generation failed`, err)),
 				Effect.tap((result: Transfer.BinaryResult) => auditExport(result.name, result.count)),
 				Effect.map((result: Transfer.BinaryResult) => ({ ...result, format: codec.ext })),
-				Telemetry.span(`transfer.serialize.${codec.ext}`),
+				Telemetry.span(`transfer.serialize.${codec.ext}`, { metrics: false }),
 			)
 			: (() => {
 				const filename = `assets-${DateTime.formatIso(DateTime.unsafeNow()).replaceAll(/[:.]/g, '-')}.${codec.ext}`;
@@ -93,7 +93,7 @@ const _exportAssets = (parameters: typeof TransferQuery.Type) =>
 					Effect.tap(() => auditExport(filename)),
 				);
 			})();
-	}).pipe(Telemetry.span('transfer.export', { kind: 'server', metrics: false }));
+	}).pipe(Telemetry.span('transfer.export', { metrics: false }));
 const _importAssets = (parameters: typeof TransferQuery.Type) =>
 	Effect.gen(function* () {
 		yield* Middleware.permission('transfer', 'import');
@@ -111,7 +111,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 			Effect.map((chunk) => Chunk.toArray(chunk)),
 			Effect.tap((rows) => Effect.annotateCurrentSpan('transfer.rows.raw', rows.length)),
 			Effect.catchTag('Fatal', (err) => Effect.fail(HttpError.Validation.of('body', err.detail ?? err.code))),
-			Telemetry.span('transfer.parse'),
+			Telemetry.span('transfer.parse', { metrics: false }),
 		);
 		const { failures: rawFailures, items: rawItems } = Transfer.partition(parsed);
 		const maxContentBytes = Transfer.limits.entryBytes;
@@ -175,7 +175,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 					Effect.annotateCurrentSpan('transfer.db_failures', failed.length),],
 					{ discard: true })),
 				Effect.mapError((err) => HttpError.Internal.of('Import processing failed', err)),
-				Telemetry.span('transfer.insert'),
+				Telemetry.span('transfer.insert', { metrics: false }),
 			);
 			yield* Effect.when(
 				repositories.search.refresh(appId).pipe(Effect.tapError((error) => Effect.logWarning('Search refresh failed', { error: String(error) })), Effect.catchAll(() => Effect.void)),
@@ -193,7 +193,7 @@ const _importAssets = (parameters: typeof TransferQuery.Type) =>
 			failed: A.appendAll(failures.map((err) => ({ error: err.detail ?? err.code, ordinal: err.ordinal ?? null })), dbFailures.flatMap((err) => err.rows.map((ordinal) => ({ error: 'Database insert failed' as const, ordinal })))),
 			imported: dryRun ? items.length : assets.length,
 		};
-	}).pipe(Telemetry.span('transfer.import', { kind: 'server', metrics: false }));
+	}).pipe(Telemetry.span('transfer.import', { metrics: false }));
 
 // --- [SERVICES] --------------------------------------------------------------
 

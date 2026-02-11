@@ -5,16 +5,12 @@
 import { SqlClient } from '@effect/sql';
 import { AppSettingsDefaults, FeatureFlagsSchema } from '@parametric-portal/database/models';
 import { DatabaseService } from '@parametric-portal/database/repos';
-import { Duration, Effect, Option, PrimaryKey, Schema as S, Stream } from 'effect';
+import { Duration, Effect, Hash, Option, PrimaryKey, Schema as S, Stream } from 'effect';
 import { Context } from '../context.ts';
 import { HttpError } from '../errors.ts';
 import { EventBus } from '../infra/events.ts';
 import { Telemetry } from '../observe/telemetry.ts';
 import { CacheService } from '../platform/cache.ts';
-
-// --- [SCHEMA] ----------------------------------------------------------------
-
-const FlagRegistry = FeatureFlagsSchema;
 
 // --- [SERVICES] --------------------------------------------------------------
 
@@ -25,7 +21,7 @@ class FeatureService extends Effect.Service<FeatureService>()('server/Features',
 		class FlagCacheKey extends S.TaggedRequest<FlagCacheKey>()('FlagCacheKey', {
 			failure: HttpError.Internal,
 			payload: { tenantId: S.String },
-			success: FlagRegistry,
+			success: FeatureFlagsSchema,
 			}) {[PrimaryKey.symbol]() { return `features:${this.tenantId}`; }}
 			const cache = yield* CacheService.cache<FlagCacheKey, never, never>({
 					lookup: (key) => Context.Request.withinSync(key.tenantId, database.apps.readSettings(key.tenantId)).pipe(
@@ -50,7 +46,7 @@ class FeatureService extends Effect.Service<FeatureService>()('server/Features',
 				Effect.catchAll((error) => Effect.fail(HttpError.Internal.of('Feature flag cache error', error))),
 			);
 		const getAll = Context.Request.currentTenantId.pipe(Effect.flatMap(_loadFlags));
-			const set = <K extends keyof typeof FlagRegistry.Type>(flagName: K, value: typeof FlagRegistry.Type[K]) =>
+			const set = <K extends keyof typeof FeatureFlagsSchema.Type>(flagName: K, value: typeof FeatureFlagsSchema.Type[K]) =>
 				Telemetry.span(Effect.gen(function* () {
 					const tenantId = yield* Context.Request.currentTenantId;
 					const loaded = yield* Context.Request.withinSync(tenantId, database.apps.readSettings(tenantId, 'update')).pipe(
@@ -77,13 +73,13 @@ class FeatureService extends Effect.Service<FeatureService>()('server/Features',
 					payload: { _tag: 'app', action: 'settings.updated' },
 					tenantId,
 				}).pipe(Effect.ignore);
-			}), 'features.set', { 'feature.flag': flagName });
-		const isEnabled = Effect.fn('FeatureService.isEnabled')(function* (flagName: keyof typeof FlagRegistry.Type) {
+			}), 'features.set', { 'feature.flag': flagName, metrics: false });
+		const isEnabled = Effect.fn('FeatureService.isEnabled')(function* (flagName: keyof typeof FeatureFlagsSchema.Type) {
 			const tenantId = yield* Context.Request.currentTenantId;
 			const flags = yield* _loadFlags(tenantId);
-			return flags[flagName];
+			return Math.abs(Hash.string(`${tenantId}:${flagName}`) % 100) < flags[flagName];
 		});
-		const require = Effect.fn('FeatureService.require')(function* (flagName: keyof typeof FlagRegistry.Type) {
+		const require = Effect.fn('FeatureService.require')(function* (flagName: keyof typeof FeatureFlagsSchema.Type) {
 			yield* isEnabled(flagName).pipe(
 				Effect.filterOrFail(
 					(enabled) => enabled,
@@ -94,9 +90,7 @@ class FeatureService extends Effect.Service<FeatureService>()('server/Features',
 		yield* Effect.logInfo('FeatureService initialized');
 		return { getAll, isEnabled, require, set };
 	}),
-}) {
-	static readonly FlagRegistry = FlagRegistry;
-}
+}) {static readonly FeatureFlagsSchema = FeatureFlagsSchema;}
 
 // --- [EXPORT] ----------------------------------------------------------------
 

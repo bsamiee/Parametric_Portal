@@ -19,6 +19,7 @@ import { TransferService } from '@parametric-portal/server/domain/transfer';
 import { ClusterService } from '@parametric-portal/server/infra/cluster';
 import { EmailAdapter } from '@parametric-portal/server/infra/email';
 import { EventBus } from '@parametric-portal/server/infra/events';
+import { ProvisioningService } from '@parametric-portal/server/infra/handlers/provisioning';
 import { PurgeService } from '@parametric-portal/server/infra/handlers/purge';
 import { JobService } from '@parametric-portal/server/infra/jobs';
 import { StorageAdapter } from '@parametric-portal/server/infra/storage';
@@ -65,7 +66,8 @@ const PlatformLayer = Layer.mergeAll(Client.layer, StorageAdapter.S3ClientLayer,
 // Crons: domain services own their schedules (PollingService.Crons, PurgeService.Crons, SearchService.EmbeddingCron)
 
 const ServicesLayer = Layer.mergeAll(Auth.Service.Default, EmailAdapter.Default, FeatureService.Default, NotificationService.Default, StorageService.Default, TransferService.Default, AiRuntime.Default, SearchService.Default, JobService.Default, PollingService.Default, EventBus.Default, WebhookService.Default, WebSocketService.Default, PolicyService.Default).pipe(
-	Layer.provideMerge(Layer.mergeAll(PollingService.Crons, PurgeService.Crons, SearchService.EmbeddingCron)),
+	Layer.provideMerge(Layer.mergeAll(PollingService.Crons, PurgeService.Crons, PurgeService.SweepCron, SearchService.EmbeddingCron)),
+	Layer.provideMerge(ProvisioningService.Layer),
 	Layer.provideMerge(PurgeService.Handlers),
 	Layer.provideMerge(Layer.mergeAll(StorageAdapter.Default, AuditService.Default)),
 	Layer.provideMerge(ReplayGuardService.Default),

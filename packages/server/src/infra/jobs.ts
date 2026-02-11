@@ -8,7 +8,7 @@ import { ClusterWorkflowEngine, DeliverAt, Entity, EntityId, Sharding, Snowflake
 import { Rpc, RpcClientError } from '@effect/rpc';
 import { Activity, Workflow } from '@effect/workflow';
 import { SqlClient } from '@effect/sql';
-import { Cause, Chunk, Clock, Config, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
+import { Cause, Chunk, Clock, Config, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Job, JobStatusSchema, type JobDlq } from '@parametric-portal/database/models';
 import { Resilience } from '../utils/resilience.ts';
@@ -109,7 +109,7 @@ const _makeDlqWatcher = (submitFn: (type: string, payload: unknown, opts?: { pri
 				Effect.tap(() => Effect.logDebug('DLQ watcher cycle completed')),
 				Effect.catchAll((error) => Effect.logWarning('DLQ watcher cycle failed', { error: String(error) })),
 			),
-			'job.dlqWatcher',
+			'jobs.dlqWatcher',
 			{ metrics: false },
 		);
 	});
@@ -262,11 +262,14 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 					Effect.map(Option.getOrElse(() => null)),
 					Effect.flatMap((current) => Match.value(current).pipe(
 						Match.when(null, () => Effect.succeed(JobState.transition(null, status, timestamp, options))),
-						Match.orElse((state) =>
-							_STATUS_MODEL[state.status].transitions.has(status) || state.status === status
-								? Effect.succeed(JobState.transition(state, status, timestamp, options))
-								: Effect.fail(JobError.from(jobId, 'Validation', { from: state.status, to: status })),
-						),
+						Match.orElse((state) => pipe(
+							Effect.succeed(state),
+							Effect.filterOrFail(
+								(current) => _STATUS_MODEL[current.status].transitions.has(status) || current.status === status,
+								(current) => JobError.from(jobId, 'Validation', { from: current.status, to: status }),
+							),
+							Effect.map((current) => JobState.transition(current, status, timestamp, options)),
+						)),
 					)),
 					Effect.tap((state) => _writeState(jobId, tenantId, state)),
 				),
@@ -352,7 +355,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 								}).pipe(Effect.uninterruptible)),
 								Effect.asVoid,
 								Effect.catchAllCause((compensationCause) => Effect.logError('Workflow compensation failed', { cause: String(compensationCause), jobId })),
-							), 'job.workflow.compensate', { 'job.id': jobId, 'job.type': envelope.type, metrics: false });
+							), 'jobs.workflow.compensate', { 'job.id': jobId, 'job.type': envelope.type, metrics: false });
 						}),
 					));
 				yield* Clock.currentTimeMillis.pipe(Effect.flatMap((completedTimestamp) => _lifecycle('complete', { envelope, jobId, result, timestamp: completedTimestamp }).pipe(Effect.tap(() => Effect.logDebug('Job completed', { 'job.elapsed': Duration.format(Duration.millis(completedTimestamp - startTimestamp)) })))));
@@ -364,7 +367,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 				Effect.onInterrupt(() => Clock.currentTimeMillis.pipe(Effect.flatMap((cancelledTimestamp) => _lifecycle('cancelled', { envelope, jobId, timestamp: cancelledTimestamp }).pipe(Effect.asVoid)), Effect.catchAllCause(() => Effect.void))),
 			),
 		)),
-		'job.workflow.execute',
+		'jobs.workflow.execute',
 		{ 'job.id': jobId, 'job.type': envelope.type, metrics: false },
 	);
 	yield* Metric.increment(Metric.taggedWithLabels(metrics.cluster.entityActivations, _entityLabels));
@@ -506,7 +509,11 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 							? Chunk.fromIterable<T>(payloads)
 							: Chunk.of(payloads);
 					const validationId = yield* cluster.generateId.pipe(Effect.map(String));
-					yield* Effect.when(Effect.fail(JobError.from(validationId, 'Validation', { reason: 'empty_batch' })), () => isBatch && Chunk.isEmpty(items));
+					yield* Effect.filterOrFail(
+						Effect.succeed(items),
+						(chunk) => !(isBatch && Chunk.isEmpty(chunk)),
+						() => JobError.from(validationId, 'Validation', { reason: 'empty_batch' }),
+					);
 					const priority = opts?.priority ?? 'normal';
 					const batchId = yield* (isBatch ? cluster.generateId.pipe(Effect.map(String)) : Effect.succeed(undefined));
 					const deliverAt = Option.fromNullable(opts?.scheduledAt).pipe(Option.match({
@@ -530,7 +537,7 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 						? Effect.succeed(results)
 						: Effect.fromNullable(results[0]).pipe(Effect.orElseFail(() => JobError.from(validationId, 'Validation', { reason: 'empty_submit_result' })));
 				})),
-				Telemetry.span('job.submit', { 'job.type': type, metrics: false }),
+				Telemetry.span('jobs.submit', { 'job.type': type, metrics: false }),
 			);
 		}
 				const statusStream = eventBus.stream().pipe(
@@ -545,12 +552,12 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 			yield* _forkPeriodic(leaderOnly('jobs-maintenance:dlq', _makeDlqWatcher(submit)), Duration.millis(dlqConfig.checkIntervalMs), 'DLQ watcher scheduler failed');
 		return {
 			cancel: (jobId: string) => _rpcWithTenant(jobId, (tenantId) => getClient(jobId)['cancel']({ jobId, tenantId })).pipe(
-				Telemetry.span('job.cancel', { 'job.id': jobId, metrics: false }),
+				Telemetry.span('jobs.cancel', { 'job.id': jobId, metrics: false }),
 			),
 			onStatusChange: () => statusStream,
 			registerHandler: <T>(type: string, handler: (payload: T) => Effect.Effect<void, unknown, never>) => STM.commit(TMap.set(handlers, type, handler as (payload: unknown) => Effect.Effect<unknown, unknown, never>)),
 			status: (jobId: string) => _rpcWithTenant(jobId, (tenantId) => getClient(jobId)['status']({ jobId, tenantId })).pipe(
-				Telemetry.span('job.status', { 'job.id': jobId, metrics: false }),
+				Telemetry.span('jobs.status', { 'job.id': jobId, metrics: false }),
 			),
 			submit,
 		};
@@ -564,15 +571,15 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 				onSome: (entry: typeof JobDlq.Type) => jobs.submit(entry.type, entry.payload, { priority: 'normal' }).pipe(
 					Effect.flatMap(() => Effect.flatMap(DatabaseService, (database) => database.jobDlq.markReplayed(dlqId)))),
 			}))),
-		'job.replay', { 'dlq.id': dlqId, metrics: false },
+		'jobs.replay', { 'dlq.id': dlqId, metrics: false },
 	)));
 	static readonly resetJob = (jobId: string) => Sharding.Sharding.pipe(Effect.flatMap((sharding) => Telemetry.span(
 		sharding.reset(Snowflake.Snowflake(jobId)).pipe(Effect.flatMap((ok) => ok ? Effect.logInfo('Job state reset', { jobId }) : Effect.fail(JobError.from(jobId, 'NotFound')))),
-		'job.reset', { 'job.id': jobId, metrics: false })));
+		'jobs.reset', { 'job.id': jobId, metrics: false })));
 	static readonly isLocal = (entityId: string) => ClusterService.pipe(Effect.flatMap((cluster) => cluster.isLocal(entityId)));
 	static readonly recoverInFlight = Sharding.Sharding.pipe(Effect.flatMap((sharding) => Telemetry.span(
 		sharding.pollStorage.pipe(Effect.tap(() => Effect.logInfo('Job message storage polled for recovery'))),
-		'job.recoverInFlight', { metrics: false })));
+		'jobs.recoverInFlight', { metrics: false })));
 }
 
 // --- [EXPORT] ----------------------------------------------------------------

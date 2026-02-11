@@ -32,7 +32,7 @@ const handleConnect = (webSocket: typeof WebSocketService.Service) =>
 		return HttpServerResponse.empty();
 	}).pipe(
 		Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('WebSocket failed', error)),
-		Telemetry.span('websocket.connect', { kind: 'server', metrics: false }),
+		Telemetry.span('websocket.connect'),
 	);
 
 // --- [LAYERS] ----------------------------------------------------------------

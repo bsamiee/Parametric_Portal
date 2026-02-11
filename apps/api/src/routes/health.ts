@@ -71,7 +71,7 @@ const _readiness = (polling: PollingService) => pipe(
 		status: 'ok' as const,
 		})),
 		Effect.mapError((error) => error instanceof HttpError.ServiceUnavailable ? error : HttpError.ServiceUnavailable.of('Readiness check failed', 30000, error)),
-		Telemetry.span('health.readiness', { kind: 'server', metrics: false }),
+		Telemetry.span('health.readiness'),
 	);
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -80,13 +80,13 @@ const HealthLive = HttpApiBuilder.group(ParametricApi, 'health', (handlers) =>
 	Effect.andThen(PollingService, (polling) => handlers
 		.handle('liveness', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, Client.health().pipe(
 			Effect.map(({ healthy, latencyMs }) => ({ latencyMs, status: healthy ? 'ok' as const : 'degraded' as const })),
-			Telemetry.span('health.liveness', { kind: 'server', metrics: false }),
+			Telemetry.span('health.liveness'),
 		)))
 		.handle('readiness', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, _readiness(polling)))
 			.handle('clusterHealth', () => CacheService.rateLimit(_RATE_LIMIT_PRESET, ClusterService.Health.cluster().pipe(
 				Effect.map((cluster) => ({ cluster })),
 				Effect.mapError((error) => HttpError.ServiceUnavailable.of('Cluster health check failed', 30000, error)),
-				Telemetry.span('health.clusterHealth', { kind: 'server', metrics: false }),
+				Telemetry.span('health.clusterHealth'),
 			)))
 	),
 );

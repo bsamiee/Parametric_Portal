@@ -177,7 +177,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 					dimensions: options.dimensions, entityTypes: options.entityTypes ?? [], includeGlobal: options.includeGlobal ?? false,
 					limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.embeddingBatch, 1), _CONFIG.limits.embeddingBatch),
 					model: options.model, scopeId: options.scopeId ?? null,
-				}).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'embeddingSources' })), Effect.withSpan('search.embeddingSources')),
+				}).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'embeddingSources' }))),
 			),
 			refresh: (() => {
 				const executeRefresh = SqlSchema.void({
@@ -185,7 +185,7 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 					Request: S.Struct({ includeGlobal: S.Boolean, scopeId: S.NullOr(S.UUID) }),
 				});
 				return Effect.fn('SearchRepo.refresh')((scopeId: string | null = null, includeGlobal = false) =>
-					executeRefresh({ includeGlobal, scopeId }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'refresh' })), Effect.withSpan('search.refresh')));
+					executeRefresh({ includeGlobal, scopeId }).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'refresh' }))));
 			})(),
 			search: Effect.fn('SearchRepo.search')((options: { readonly embedding?: EmbeddingInput; readonly entityTypes?: readonly string[]; readonly includeFacets?: boolean; readonly includeGlobal?: boolean; readonly includeSnippets?: boolean; readonly scopeId: string | null; readonly term: string }, pagination: { cursor?: string; limit?: number } = {}) =>
 				Effect.gen(function* () {
@@ -211,21 +211,22 @@ class SearchRepo extends Effect.Service<SearchRepo>()('database/Search', {
 					const facets = options.includeFacets ? rows[0]?.facets ?? null : null;
 					const { items } = Page.strip(rows.filter((row): row is typeof row & { entityId: string; entityType: string; displayText: string; rank: number } => row.entityId !== null));
 					return { ...Page.keyset(items, totalCount, limit, (item) => ({ id: item.entityId, v: item.rank }), S.Number, Option.isSome(cursorValue)), facets };
-				}).pipe(Effect.withSpan('search.query', { attributes: { term: options.term } })),
+				}).pipe(Effect.tap(() => Effect.annotateCurrentSpan({ 'search.term': options.term }))),
 			),
 			suggest: Effect.fn('SearchRepo.suggest')((options: { readonly includeGlobal?: boolean; readonly limit?: number; readonly prefix: string; readonly scopeId: string | null }) =>
 				executeSuggestions({
 					includeGlobal: options.includeGlobal ?? false,
 					limit: Math.min(Math.max(options.limit ?? _CONFIG.limits.suggestLimitDefault, 1), _CONFIG.limits.suggestLimitMax),
 					prefix: options.prefix, scopeId: options.scopeId,
-				}).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'suggest' })), Effect.withSpan('search.suggest')),
+				}).pipe(Effect.mapError((cause) => new SearchError({ cause, operation: 'suggest' }))),
 			),
 			upsertEmbedding: Effect.fn('SearchRepo.upsertEmbedding')((input: { readonly dimensions: number; readonly embedding: readonly number[]; readonly entityId: string; readonly entityType: string; readonly documentHash: string; readonly model: string; readonly scopeId: string | null }) =>
 				_embeddingPayload({ dimensions: input.dimensions, model: input.model, vector: input.embedding }).pipe(
 					Effect.andThen((payload) => executeUpsertEmbedding({ ...payload, documentHash: input.documentHash, entityId: input.entityId, entityType: input.entityType, scopeId: input.scopeId })),
-					Effect.mapError((cause) => new SearchError({ cause, operation: 'upsertEmbedding' })), Effect.withSpan('search.upsertEmbedding'),
+					Effect.mapError((cause) => new SearchError({ cause, operation: 'upsertEmbedding' })),
 				),
 			),
+
 		};
 	}),
 }) {

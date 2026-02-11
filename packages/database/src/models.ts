@@ -23,6 +23,7 @@ const AuditOperationSchema = S.Literal(
 	'auth_failure', 'permission_denied',
 	'purge-sessions', 'purge-api-keys', 'purge-assets', 'purge-event-journal',
 	'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts',
+	'archive', 'purge-tenant',
 );
 const NotificationPreferencesSchema = S.Struct({
 	channels: 	S.Struct({email: S.Boolean, inApp: S.Boolean, webhook: S.Boolean,}),
@@ -30,25 +31,16 @@ const NotificationPreferencesSchema = S.Struct({
 	templates: 	S.Record({key: S.String, value: S.Struct({email: S.optional(S.Boolean), inApp: S.optional(S.Boolean), webhook: S.optional(S.Boolean),}),}),
 });
 const FeatureFlagsSchema = S.Struct({
-	enableAiSearch: 		S.optionalWith(S.Boolean, { default: () => false }),
-	enableApiKeys: 			S.optionalWith(S.Boolean, { default: () => true }),
-	enableAuditLog: 		S.optionalWith(S.Boolean, { default: () => true }),
-	enableExport: 			S.optionalWith(S.Boolean, { default: () => false }),
-	enableMfa: 				S.optionalWith(S.Boolean, { default: () => false }),
-	enableNotifications: 	S.optionalWith(S.Boolean, { default: () => true }),
-	enableOAuth: 			S.optionalWith(S.Boolean, { default: () => false }),
-	enableRealtime: 		S.optionalWith(S.Boolean, { default: () => true }),
-	enableWebhooks: 		S.optionalWith(S.Boolean, { default: () => false }),
+	enableAiSearch: 		S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+	enableApiKeys: 			S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
+	enableAuditLog: 		S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
+	enableExport: 			S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+	enableMfa: 				S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+	enableNotifications: 	S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
+	enableOAuth: 			S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
+	enableRealtime: 		S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 100 }),
+	enableWebhooks: 		S.optionalWith(S.Int.pipe(S.between(0, 100)), { default: () => 0 }),
 });
-const OAuthProviderFields = {
-	clientId: S.NonEmptyTrimmedString,
-	enabled: S.Boolean,
-	keyId: S.optional(S.NonEmptyTrimmedString),
-	provider: OAuthProviderSchema,
-	scopes: S.optional(S.Array(S.String)),
-	teamId: S.optional(S.NonEmptyTrimmedString),
-	tenant: S.optional(S.NonEmptyTrimmedString),
-};
 const AppWebhookSchema = S.Struct({
 	active: S.Boolean,
 	endpoint: S.Struct({
@@ -60,7 +52,17 @@ const AppWebhookSchema = S.Struct({
 });
 const AppSettingsSchema = S.Struct({
 	featureFlags: S.optionalWith(FeatureFlagsSchema, { default: () => S.decodeSync(FeatureFlagsSchema)({}) }),
-	oauthProviders: S.optionalWith(S.Array(S.Struct({ ...OAuthProviderFields, clientSecretEncrypted: S.String })), { default: () => [] }),
+	oauthProviders: S.optionalWith(S.Array(
+		S.Struct({
+			clientId: S.NonEmptyTrimmedString,
+			clientSecretEncrypted: S.String,
+			enabled: S.Boolean,
+			keyId: S.optional(S.NonEmptyTrimmedString),
+			provider: OAuthProviderSchema,
+			scopes: S.optional(S.Array(S.String)),
+			teamId: S.optional(S.NonEmptyTrimmedString),
+			tenant: S.optional(S.NonEmptyTrimmedString) })),
+		{ default: () => [] }),
 	webhooks: S.optionalWith(S.Array(AppWebhookSchema), { default: () => [] }),
 });
 const AppSettingsDefaults = S.decodeSync(AppSettingsSchema)({});
@@ -113,7 +115,6 @@ class OauthAccount extends Model.Class<OauthAccount>('OauthAccount')({
 	provider: OAuthProviderSchema,
 	externalId: S.String,
 	expiresAt: Model.FieldOption(S.DateFromSelf),
-	scope: Model.FieldOption(S.String),
 	accessEncrypted: Model.Sensitive(S.Uint8ArrayFromSelf),
 	refreshEncrypted: Model.FieldOption(Model.Sensitive(S.Uint8ArrayFromSelf)),
 	deletedAt: Model.FieldOption(S.DateFromSelf),
@@ -283,7 +284,7 @@ class KvStore extends Model.Class<KvStore>('KvStore')({
 
 export {
 	ApiKey, App, Asset, AuditLog, Job, JobDlq, JobStatusSchema, KvStore, MfaSecret, Notification,
-	AppSettingsDefaults, AppSettingsSchema, AppWebhookSchema, FeatureFlagsSchema,
-	AuditOperationSchema, NotificationPreferencesSchema, OAuthProviderFields, OAuthProviderSchema,
+	AppSettingsDefaults, AppSettingsSchema, FeatureFlagsSchema,
+	AuditOperationSchema, NotificationPreferencesSchema, OAuthProviderSchema,
 	OauthAccount, Permission, RoleSchema, Session, User, WebauthnCredential,
 };

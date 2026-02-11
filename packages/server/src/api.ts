@@ -7,24 +7,11 @@
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, Multipart, OpenApi } from '@effect/platform';
 import {
-	ApiKey,
-	App,
-	AppSettingsSchema,
-	Asset,
-	AuditOperationSchema,
-	AuditLog,
-	Job,
-	JobDlq,
-	Notification,
-	NotificationPreferencesSchema,
-	Permission,
-	Session,
-	User,
-	OAuthProviderFields,
+	ApiKey, App, AppSettingsSchema, Asset, AuditOperationSchema, AuditLog, Job, JobDlq, Notification, NotificationPreferencesSchema, OAuthProviderSchema,
+	Permission, RoleSchema, Session, User,
 } from '@parametric-portal/database/models';
 import { Url } from '@parametric-portal/types/types';
 import { Schema as S } from 'effect';
-import { Context } from './context.ts';
 import { HttpError } from './errors.ts';
 import { WebhookService } from './infra/webhooks.ts';
 import { FeatureService } from './domain/features.ts';
@@ -33,7 +20,7 @@ import { Middleware } from './middleware.ts';
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _IdPath = S.Struct({ id: S.UUID });
-const _ProviderPath = S.Struct({ provider: Context.OAuthProvider });
+const _ProviderPath = S.Struct({ provider: OAuthProviderSchema });
 const _PaginationBase = S.Struct({ cursor: S.optional(HttpApiSchema.param('cursor', S.String)), limit: S.optionalWith(HttpApiSchema.param('limit', S.NumberFromString.pipe(S.int(), S.between(1, 100))), { default: () => 20 }) });
 const _Success = S.Struct({ success: S.Literal(true) });
 const AuthResponse = S.Struct({
@@ -92,14 +79,8 @@ const AuditLogWithDiff = S.extend(AuditLog.json, S.Struct({
 	})),
 }));
 const SearchEntityType = S.Literal('app', 'asset', 'auditLog', 'user');
-const _TenantOAuthProviderRead = S.Struct({ ...OAuthProviderFields, clientSecretSet: S.Boolean });
-const _TenantOAuthProviderUpdate = S.Struct({ ...OAuthProviderFields, clientSecret: S.optional(S.NonEmptyTrimmedString) });
-const _TenantOAuthRead = S.Struct({
-	providers: S.Array(_TenantOAuthProviderRead),
-});
-const _TenantOAuthUpdate = S.Struct({
-	providers: S.Array(_TenantOAuthProviderUpdate),
-});
+const _TenantOAuthProviderRead = S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecretSet: S.Boolean, enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) });
+const _TenantOAuthProviderUpdate = S.Struct({ clientId: S.NonEmptyTrimmedString, clientSecret: S.optional(S.NonEmptyTrimmedString), enabled: S.Boolean, keyId: S.optional(S.NonEmptyTrimmedString), provider: OAuthProviderSchema, scopes: S.optional(S.Array(S.String)), teamId: S.optional(S.NonEmptyTrimmedString), tenant: S.optional(S.NonEmptyTrimmedString) });
 const _PermissionShape = S.Struct({
 	action: Permission.fields.action,
 	resource: Permission.fields.resource,
@@ -372,7 +353,7 @@ const _UsersGroup = HttpApiGroup.make('users')
 	.add(
 		HttpApiEndpoint.patch('updateRole', '/:id/role')
 			.setPath(_IdPath)
-			.setPayload(S.Struct({ role: Context.UserRole.schema }))
+			.setPayload(S.Struct({ role: RoleSchema }))
 			.addSuccess(User.json)
 			.addError(HttpError.NotFound),
 	)
@@ -868,32 +849,47 @@ const _AdminGroup = HttpApiGroup.make('admin')
 			.addError(HttpError.NotFound)
 			.annotate(OpenApi.Summary, 'Resume suspended tenant'),
 	)
+	.add(
+		HttpApiEndpoint.post('archiveTenant', '/tenants/:id/archive')
+			.setPath(_IdPath)
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Archive tenant'),
+	)
+	.add(
+		HttpApiEndpoint.post('purgeTenant', '/tenants/:id/purge')
+			.setPath(_IdPath)
+			.setPayload(S.Struct({ confirm: S.Literal(true) }))
+			.addSuccess(_Success)
+			.addError(HttpError.NotFound)
+			.annotate(OpenApi.Summary, 'Purge tenant data'),
+	)
 		.add(
 			HttpApiEndpoint.get('getTenantOAuth', '/tenants/:id/oauth')
 				.setPath(_IdPath)
-				.addSuccess(_TenantOAuthRead)
+				.addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
 				.addError(HttpError.NotFound)
 				.annotate(OpenApi.Summary, 'Get tenant OAuth config'),
 		)
 		.add(
 			HttpApiEndpoint.put('updateTenantOAuth', '/tenants/:id/oauth')
 				.setPath(_IdPath)
-				.setPayload(_TenantOAuthUpdate)
-				.addSuccess(_TenantOAuthRead)
+				.setPayload(S.Struct({ providers: S.Array(_TenantOAuthProviderUpdate) }))
+				.addSuccess(S.Struct({ providers: S.Array(_TenantOAuthProviderRead) }))
 				.addError(HttpError.NotFound)
 				.addError(HttpError.Validation)
 				.annotate(OpenApi.Summary, 'Update tenant OAuth config'),
 	)
 	.add(
 		HttpApiEndpoint.get('getFeatureFlags', '/features')
-			.addSuccess(FeatureService.FlagRegistry)
+			.addSuccess(FeatureService.FeatureFlagsSchema)
 			.annotate(OpenApi.Summary, 'Get tenant feature flags'),
 	)
 	.add(
 		HttpApiEndpoint.put('setFeatureFlag', '/features')
 			.setPayload(S.Struct({
-				flag: S.keyof(FeatureService.FlagRegistry),
-				value: S.Boolean,
+				flag: S.keyof(FeatureService.FeatureFlagsSchema),
+				value: S.Int.pipe(S.between(0, 100)),
 			}))
 			.addSuccess(_Success)
 			.addError(HttpError.NotFound)

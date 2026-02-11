@@ -52,7 +52,7 @@ const handleIngest = (signal: (typeof _CONFIG.signal)[number], request: HttpServ
 		Effect.as(HttpServerResponse.empty({ status: _CONFIG.response.accepted })),
 		Effect.tapError((error) => Effect.logWarning('Telemetry proxy failed', { error: String(error), signal })),
 		Effect.catchAll((error) => Effect.succeed(HttpServerResponse.unsafeJson({ details: String(error), error: 'TelemetryProxyFailed' }, { status: _CONFIG.response.unavailable }))),
-		Telemetry.span('telemetry.ingest', { kind: 'server', metrics: false, 'telemetry.signal': signal }),
+		Telemetry.span('telemetry.ingest', { 'telemetry.signal': signal }),
 	);
 
 // --- [LAYERS] ----------------------------------------------------------------

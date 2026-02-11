@@ -114,21 +114,22 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 				)),
 				Stream.runDrain, Effect.forkScoped,
 			);
-				yield* Client.listen.raw('event_journal_notify').pipe(
-					Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
-							Effect.flatMap(({ eventId, sourceNodeId }) => database.eventJournal.byPrimaryKey(eventId).pipe(
-								Effect.flatMap(Option.match({
-									onNone: () => Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }),
-									onSome: (entry) => _CODEC.envelope.decode(entry.payload).pipe(
-										Effect.flatMap((envelope) => PubSub.publish(hub, envelope)),
-									),
-								})),
-								Effect.unless(constant(sourceNodeId === nodeId)),
-							)),
-							Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
-							Effect.catchAll(constant(Effect.void)),
-						)),
-			Stream.runDrain,
+				const handleNotifyEntry = (entry: { readonly payload: string }) => _CODEC.envelope.decode(entry.payload).pipe(
+				Effect.flatMap((envelope) => PubSub.publish(hub, envelope)),
+			);
+			yield* Client.listen.raw('event_journal_notify').pipe(
+				Stream.mapEffect((payload) => _CODEC.notify.decode(payload).pipe(
+					Effect.flatMap(({ eventId, sourceNodeId }) => database.eventJournal.byPrimaryKey(eventId).pipe(
+						Effect.flatMap(Option.match({
+							onNone: () => Effect.logWarning('LISTEN/NOTIFY event not found in journal', { eventId }),
+							onSome: handleNotifyEntry,
+						})),
+						Effect.unless(constant(sourceNodeId === nodeId)),
+					)),
+					Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { error: String(error) })),
+					Effect.catchAll(constant(Effect.void)),
+				)),
+				Stream.runDrain,
 			Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY stream interrupted, retrying bridge listener', { error: String(error) })),
 			Effect.retry({ times: 3 }),
 			Effect.catchAll(() => Effect.logWarning('LISTEN/NOTIFY bridge disabled after retries exhausted; no automatic polling fallback configured')),
@@ -184,7 +185,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 						);
 					return envelope;
 				}), { concurrency: 'unbounded' }),
-				'eventbus.publish',
+				'events.publish',
 				{ 'event.count': items.length, metrics: false },
 			);
 			};
@@ -203,7 +204,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 								Effect.map(Stream.mapEffect(Effect.fn(function*(envelope) {
 									yield* S.validate(schema)(envelope.event.payload).pipe(
 										Effect.mapError((cause) => EventError.from(envelope.event.eventId, 'ValidationFailed', cause)),
-										Effect.flatMap((payload) => Telemetry.span(handler(envelope.event, payload), 'eventbus.handle', { 'event.type': eventType, metrics: false }).pipe(
+										Effect.flatMap((payload) => Telemetry.span(handler(envelope.event, payload), 'events.handle', { 'event.type': eventType, metrics: false }).pipe(
 											Effect.tap(constant(Metric.increment(Metric.taggedWithLabels(metrics.events.processed, labels)))),
 										)),
 										Effect.tapError((error) => Metric.increment(Metric.taggedWithLabels(metrics.events.retries, labels)).pipe(
@@ -248,7 +249,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 					const throttle = filter.throttle ?? Duration.millis(10);
 					const batchSize = filter.batchSize ?? 500;
 					const initialCursor = Option.getOrElse(Option.fromNullable(filter.sinceSequenceId), constant('0'));
-					return Stream.paginateChunkEffect(initialCursor, Effect.fn('eventbus.replay')(function*(cursor) {
+					return Stream.paginateChunkEffect(initialCursor, Effect.fn('events.replay')(function*(cursor) {
 						yield* Effect.annotateCurrentSpan('replay.batch_size', batchSize);
 						yield* Effect.annotateCurrentSpan('replay.cursor', cursor);
 						const rows = yield* database.eventJournal.replay({

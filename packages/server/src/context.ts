@@ -8,7 +8,6 @@ import type { Cookie } from '@effect/platform/Cookies';
 import type { SqlClient } from '@effect/sql';
 import type { SqlError } from '@effect/sql/SqlError';
 import { Client } from '@parametric-portal/database/client';
-import { OAuthProviderSchema, RoleSchema } from '@parametric-portal/database/models';
 import { Config, Data, Duration, Effect, FiberId, FiberRef, Option, pipe, Record, Schedule, Schema as S } from 'effect';
 import { HttpError } from './errors.ts';
 import { constant, dual } from 'effect/Function';
@@ -23,7 +22,6 @@ const _ID = {
 
 // --- [SCHEMA] ----------------------------------------------------------------
 
-const OAuthProvider = OAuthProviderSchema;
 const _RunnerId = 		S.NonEmptyTrimmedString;
 const _ShardIdString = 	S.String.pipe(S.pattern(/^[a-zA-Z0-9_-]+:\d+$/), S.brand('ShardIdString'));
 const _RequestData = S.Struct({
@@ -37,7 +35,6 @@ const _RequestData = S.Struct({
 	tenantId: 		S.String,
 	userAgent: 		S.OptionFromSelf(S.String),
 });
-const UserRole = { schema: RoleSchema } as const;
 
 // --- [SERIALIZABLE] ----------------------------------------------------------
 
@@ -174,7 +171,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 		durations: { pkce: Duration.minutes(10), refresh: Duration.days(30), session: Duration.days(7) },
 		endpoints: { githubApi: 'https://api.github.com/user' },
 		oauth: {
-			capabilities: { apple: { oidc: true, pkce: true }, github: { oidc: false, pkce: false }, google: { oidc: true, pkce: true }, microsoft: { oidc: true, pkce: true } } as const satisfies Record<S.Schema.Type<typeof OAuthProvider>, { oidc: boolean; pkce: boolean }>,
+			capabilities: { apple: { oidc: true, pkce: true }, github: { oidc: false, pkce: false }, google: { oidc: true, pkce: true }, microsoft: { oidc: true, pkce: true } } as const satisfies Record<'apple' | 'github' | 'google' | 'microsoft', { oidc: boolean; pkce: boolean }>,
 			retry: Schedule.exponential(Duration.millis(100)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(3))),
 			scopes: { github: ['user:email'], oidc: ['openid', 'profile', 'email'] }, timeout: Duration.seconds(10),
 		},
@@ -184,13 +181,11 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 // --- [ENTRY_POINT] -----------------------------------------------------------
 
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge
-const Context = { OAuthProvider, Request, Serializable, UserRole } as const;
+const Context = { Request, Serializable } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------
 
 namespace Context {
-	export type OAuthProvider = S.Schema.Type<typeof OAuthProvider>;
-	export type UserRole = S.Schema.Type<typeof UserRole.schema>;
 	export type Serializable = InstanceType<typeof Serializable>;
 	export namespace Request {
 		export type Id = (typeof Request.Id)[keyof typeof Request.Id];
