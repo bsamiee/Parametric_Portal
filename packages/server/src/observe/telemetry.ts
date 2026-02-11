@@ -61,7 +61,7 @@ const _span: {
 			const spanAttrs = A.reduce(_REDACT_KEYS, { ...requestAttrs, ...restAttrs } as Record.ReadonlyRecord<string, unknown>, (acc, key) => Record.remove(acc, key));
 			const prefixKind = pipe(_SPAN_KIND_PREFIXES, A.findFirst(([, prefixes]) => A.some(prefixes, (p) => name.startsWith(p))), Option.map(([k]) => k));
 			const spanKind = kind ?? pipe(ctx.circuit, Option.as('client' as Tracer.SpanKind), Option.orElse(() => prefixKind), Option.getOrElse((): Tracer.SpanKind => 'internal'));
-			const coreSpan = self.pipe(_annotateError, Effect.withSpan(name, { attributes: spanAttrs, captureStackTrace: captureStackTrace !== false, kind: spanKind }), Effect.withLogSpan(name), Effect.annotateLogs(requestAttrs));
+			const coreSpan = self.pipe(Effect.withSpan(name, { attributes: spanAttrs, captureStackTrace: captureStackTrace !== false, kind: spanKind }), _annotateError, Effect.withLogSpan(name), Effect.annotateLogs(requestAttrs));
 			return yield* Effect.serviceOption(MetricsService).pipe(
 				Effect.when(() => metrics !== false && spanKind !== 'server'),
 				Effect.map(Option.flatten),

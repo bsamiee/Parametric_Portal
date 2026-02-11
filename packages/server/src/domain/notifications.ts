@@ -44,61 +44,66 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
 		yield* jobs.registerHandler('notification.send', Effect.fn(function* (raw) {
 			const { notificationId } = yield* S.decodeUnknown(S.Struct({ notificationId: S.UUID }))(raw);
 			const notification = yield* database.notifications.one([{ field: 'id', value: notificationId }]);
-			const row = yield* notification;
-			yield* pipe(
-				Effect.logDebug('notification.send skipped non-queued row', { notificationId: row.id, status: row.status }),
-				Effect.andThen(Option.none<never>()),
-				Effect.when(() => row.status !== 'queued'),
-				Effect.asVoid,
-			);
-			const claimed = yield* database.notifications.transition(row.id, { status: 'sending' }, 'queued');
-			yield* pipe(
-				Effect.logDebug('notification.send claim skipped', { notificationId: row.id }),
-				Effect.when(() => Option.isNone(claimed)),
-				Effect.asVoid,
-			);
-			yield* pipe(
-				Match.value(row.channel).pipe(
-					Match.when('email', () => Effect.filterOrFail(
-						Effect.succeed(Option.getOrUndefined(row.recipient)),
-						(recipient): recipient is string => recipient !== undefined,
-						() => NotificationError.from('MissingRecipient', row.id),
-					).pipe(
-						Effect.flatMap((recipient) => email.send({ notificationId: row.id, template: row.template, tenantId: row.appId, to: recipient, vars: row.payload })),
-						Effect.map((result) => Option.some(result.provider)),
+			yield* Option.match(notification, {
+				onNone: () => Effect.void,
+				onSome: (row) => pipe(
+					Effect.void,
+					Effect.tap(() => pipe(
+						Effect.logDebug('notification.send skipped non-queued row', { notificationId: row.id, status: row.status }),
+						Effect.andThen(Option.none<never>()),
+						Effect.when(() => row.status !== 'queued'),
+						Effect.asVoid,
 					)),
-					Match.when('webhook', () => webhooks.deliverEvent(row.appId, row.template, row.payload, row.id).pipe(Effect.as(Option.none<string>()))),
-					Match.orElse(() => eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'inApp', data: row.payload, template: row.template, userId: Option.getOrUndefined(row.userId) }, tenantId: row.appId }).pipe(Effect.as(Option.none<string>()))),
+					Effect.flatMap(() => database.notifications.transition(row.id, { status: 'sending' }, 'queued')),
+					Effect.tap((claimed) => pipe(
+						Effect.logDebug('notification.send claim skipped', { notificationId: row.id }),
+						Effect.when(() => Option.isNone(claimed)),
+						Effect.asVoid,
+					)),
+					Effect.flatMap((claimed) => pipe(
+						Match.value(row.channel).pipe(
+							Match.when('email', () => Effect.filterOrFail(
+								Effect.succeed(Option.getOrUndefined(row.recipient)),
+								(recipient): recipient is string => recipient !== undefined,
+								() => NotificationError.from('MissingRecipient', row.id),
+							).pipe(
+								Effect.flatMap((recipient) => email.send({ notificationId: row.id, template: row.template, tenantId: row.appId, to: recipient, vars: row.payload })),
+								Effect.map((result) => Option.some(result.provider)),
+							)),
+							Match.when('webhook', () => webhooks.deliverEvent(row.appId, row.template, row.payload, row.id).pipe(Effect.as(Option.none<string>()))),
+							Match.orElse(() => eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'inApp', data: row.payload, template: row.template, userId: Option.getOrUndefined(row.userId) }, tenantId: row.appId }).pipe(Effect.as(Option.none<string>()))),
+						),
+						Effect.flatMap((provider) => database.notifications.transition(row.id, { deliveredAt: new Date(), error: null, provider: Option.getOrNull(provider), status: 'delivered' })),
+						Effect.tap(() => eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'status', status: 'delivered' }, tenantId: row.appId }).pipe(Effect.ignore)),
+						Effect.catchAll(Effect.fn(function* (error) {
+							const message = error instanceof Error ? error.message : String(error);
+							const encodedError = JSON.stringify({ message, tag: MetricsService.errorTag(error) });
+							const attemptsNext = row.attempts + 1;
+							const retryJobId = yield* Match.value(attemptsNext >= row.maxAttempts).pipe(
+								Match.when(true, () => Effect.succeed(Option.none<string>())),
+								Match.orElse(() => Context.Request.withinSync(
+									row.appId,
+									jobs.submit('notification.send', { notificationId: row.id }, {
+										dedupeKey: `${row.appId}:${row.id}:retry:${attemptsNext}`,
+										maxAttempts: 1,
+									}),
+								).pipe(Effect.map(Option.some))),
+							);
+							const next = Option.match(retryJobId, {
+								onNone: () => ({ status: 'dlq' as const }),
+								onSome: (jobId) => ({ jobId, status: 'queued' as const }),
+							});
+							yield* database.notifications.set(row.id, Match.value(next).pipe(
+								Match.when({ status: 'dlq' }, () => ({ attempts: Update.inc(), error: encodedError, status: 'dlq' as const })),
+								Match.orElse((queued) => ({ attempts: Update.inc(), error: encodedError, jobId: queued.jobId, status: 'queued' as const })),
+							));
+							yield* eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'status', error: encodedError, status: next.status }, tenantId: row.appId }).pipe(Effect.ignore);
+						})),
+						Effect.when(() => Option.isSome(claimed)),
+						Effect.asVoid,
+					)),
 				),
-				Effect.flatMap((provider) => database.notifications.transition(row.id, { deliveredAt: new Date(), error: null, provider: Option.getOrNull(provider), status: 'delivered' })),
-				Effect.tap(() => eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'status', status: 'delivered' }, tenantId: row.appId })),
-				Effect.catchAll(Effect.fn(function* (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					const encodedError = JSON.stringify({ message, tag: MetricsService.errorTag(error) });
-					const attemptsNext = row.attempts + 1;
-					const retryJobId = yield* Match.value(attemptsNext >= row.maxAttempts).pipe(
-						Match.when(true, () => Effect.succeed(Option.none<string>())),
-						Match.orElse(() => Context.Request.withinSync(
-							row.appId,
-							jobs.submit('notification.send', { notificationId: row.id }, {
-								dedupeKey: `${row.appId}:${row.id}:retry:${attemptsNext}`,
-								maxAttempts: 1,
-							}),
-						).pipe(Effect.map(Option.some))),
-					);
-					const next = Option.match(retryJobId, {
-						onNone: () => ({ status: 'dlq' as const }),
-						onSome: (jobId) => ({ jobId, status: 'queued' as const }),
-					});
-					yield* database.notifications.set(row.id, Match.value(next).pipe(
-						Match.when({ status: 'dlq' }, () => ({ attempts: Update.inc(), error: encodedError, status: 'dlq' as const })),
-						Match.orElse((queued) => ({ attempts: Update.inc(), error: encodedError, jobId: queued.jobId, status: 'queued' as const })),
-					));
-					yield* eventBus.publish({ aggregateId: row.id, payload: { _tag: 'notification', action: 'status', error: encodedError, status: next.status }, tenantId: row.appId }).pipe(Effect.ignore);
-				})),
-				Effect.when(() => Option.isSome(claimed)),
-				Effect.asVoid,
-			);
+			});
 		}, (effect) => effect.pipe(
 			Effect.catchIf(Cause.isNoSuchElementException, () => Effect.void),
 			Telemetry.span('notification.job.handle', { metrics: false }),
@@ -145,8 +150,13 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
 							Effect.mapError((error) => HttpError.Validation.of('notificationPreferences', String(error))),
 						))
 						: Option.none<S.Schema.Type<typeof NotificationPreferencesSchema>>();
-					const blocked = Option.isSome(preferences) && ((preferences.value.mutedUntil !== null && Date.parse(preferences.value.mutedUntil) > Date.now()) || !preferences.value.channels[request.channel] || preferences.value.templates[request.template]?.[request.channel] === false);
-					yield* Effect.filterOrFail(Effect.void, () => !blocked, () => NotificationError.from('PreferenceBlocked'));
+					const blocked = Option.isSome(preferences) && (() => {
+						const isMuted = preferences.value.mutedUntil !== null && Date.parse(preferences.value.mutedUntil) > Date.now();
+						const channelDisabled = !preferences.value.channels[request.channel];
+						const templateBlocked = preferences.value.templates[request.template]?.[request.channel] === false;
+						return isMuted || channelDisabled || templateBlocked;
+					})();
+					yield* Effect.when(Effect.fail(NotificationError.from('PreferenceBlocked')), () => blocked).pipe(Effect.asVoid);
 					const fallbackEmail = Option.flatMap(user, (value) => Option.fromNullable(value.email));
 					const recipient = request.channel === 'email' ? Option.getOrUndefined(Option.orElse(Option.fromNullable(request.recipient), () => fallbackEmail)) : request.recipient;
 					yield* Effect.filterOrFail(Effect.void, () => !(request.channel === 'email' && recipient === undefined), () => NotificationError.from('MissingRecipient'));
@@ -169,15 +179,13 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
 							{ field: 'status', op: 'in', values: ['queued', 'sending'] },
 						]))
 						: Option.none();
-					const dedupRace = pipe(
-						dedupeKey,
-						Effect.flatMap((dk) => database.notifications.one([
+					const dedupRace = Option.match(dedupeKey, {
+						onNone: () => Effect.fail(new Error('No dedupe key for race')),
+						onSome: (dk) => Context.Request.withinSync(tenantId, database.notifications.one([
 							{ field: 'dedupe_key', value: dk },
 							{ field: 'status', op: 'in', values: ['queued', 'sending'] },
-						])),
-						Effect.flatten,
-						Effect.map((row) => ({ duplicate: true as const, row })),
-					);
+						])).pipe(Effect.flatten, Effect.map((row) => ({ duplicate: true as const, row }))),
+					});
 					const staged = Option.isSome(existingDedup)
 						? { duplicate: true as const, row: existingDedup.value }
 						: yield* Context.Request.withinSync(tenantId, database.notifications.put(toInsert(dedupeKey)).pipe(

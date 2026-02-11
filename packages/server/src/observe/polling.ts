@@ -109,8 +109,7 @@ class PollingService extends Effect.Service<PollingService>()('server/Polling', 
 		const pollJobQueueDepth = pollMetric({ fetch: _sumTenantMetric(() => database.jobs.countByStatuses('queued', 'processing')), gauge: metrics.jobs.queueDepth, metric: 'jobs_queue_depth', spanName: 'polling.jobQueueDepth', thresholds: _CONFIG.thresholds.jobQueueDepth, warningMessage: 'Job queue depth critical' });
 		const pollEventOutboxDepth = pollMetric({ fetch: database.eventOutbox.count, gauge: metrics.events.outboxDepth, metric: 'events_outbox_depth', spanName: 'polling.eventOutboxDepth', thresholds: _CONFIG.thresholds.eventOutboxDepth, warningMessage: 'Event outbox depth critical' });
 			const pollIoStats = Effect.gen(function* () {
-				const stats = yield* database.monitoring.cacheHitRatio();
-				const rows = Array.isArray(stats) ? stats : [];
+				const rows = yield* database.monitoring.cacheHitRatio();
 				const zero = Number(_CONFIG.fallback.metric);
 				const totalReads = rows.reduce<number>((sum, row) => sum + row.reads, zero);
 				const totalHits = rows.reduce<number>((sum, row) => sum + row.hits, zero);

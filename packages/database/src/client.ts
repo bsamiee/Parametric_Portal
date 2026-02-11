@@ -119,7 +119,7 @@ const Client = (() => {
 			raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
 			typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
 				Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
-					Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError(F.constant(Effect.logWarning('LISTEN/NOTIFY decode failed', { channel }))), Effect.option)),
+					Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
 					Stream.filterMap((decoded) => decoded),
 				))),
 		},

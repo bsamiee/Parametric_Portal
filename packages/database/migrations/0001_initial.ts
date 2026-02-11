@@ -809,6 +809,65 @@ export default Effect.gen(function* () {
         $$
     `;
     yield* sql`COMMENT ON FUNCTION purge_event_journal IS 'Hard-delete journal entries older than N days (timestamp is epoch ms)'`;
+    yield* sql`
+        CREATE OR REPLACE FUNCTION purge_tenant_cascade(p_app_id UUID)
+        RETURNS INT
+        LANGUAGE plpgsql
+        AS $$
+        DECLARE
+            _total int := 0;
+            _count int;
+        BEGIN
+            DELETE FROM search_embeddings WHERE scope_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM search_documents WHERE scope_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM notifications WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM audit_logs WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM jobs WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM job_dlq WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM assets WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM webauthn_credentials WHERE user_id IN (SELECT id FROM users WHERE app_id = p_app_id);
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM mfa_secrets WHERE user_id IN (SELECT id FROM users WHERE app_id = p_app_id);
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM oauth_accounts WHERE user_id IN (SELECT id FROM users WHERE app_id = p_app_id);
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM api_keys WHERE user_id IN (SELECT id FROM users WHERE app_id = p_app_id);
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM sessions WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM permissions WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM users WHERE app_id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            DELETE FROM apps WHERE id = p_app_id;
+            GET DIAGNOSTICS _count = ROW_COUNT; _total := _total + _count;
+
+            RETURN _total;
+        END
+        $$
+    `;
+    yield* sql`COMMENT ON FUNCTION purge_tenant_cascade IS 'Cascade-delete all tenant data and the app record — returns total deleted rows'`;
     yield* sql.unsafe(String.raw`
         CREATE OR REPLACE FUNCTION count_event_outbox()
         RETURNS INT

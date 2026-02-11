@@ -8,7 +8,7 @@ import { ClusterWorkflowEngine, DeliverAt, Entity, EntityId, Sharding, Snowflake
 import { Rpc, RpcClientError } from '@effect/rpc';
 import { Activity, Workflow } from '@effect/workflow';
 import { SqlClient } from '@effect/sql';
-import { Cause, Chunk, Clock, Config, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
+import { Cause, Chunk, Clock, Config, DateTime, Duration, Effect, Fiber, FiberMap, Layer, Mailbox, Match, Metric, Option, pipe, Ref, Schedule, Schema as S, STM, Stream, TMap, TRef } from 'effect';
 import { DatabaseService } from '@parametric-portal/database/repos';
 import { Job, JobStatusSchema, type JobDlq } from '@parametric-portal/database/models';
 import { Resilience } from '../utils/resilience.ts';
@@ -262,11 +262,14 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 					Effect.map(Option.getOrElse(() => null)),
 					Effect.flatMap((current) => Match.value(current).pipe(
 						Match.when(null, () => Effect.succeed(JobState.transition(null, status, timestamp, options))),
-						Match.orElse((state) =>
-							_STATUS_MODEL[state.status].transitions.has(status) || state.status === status
-								? Effect.succeed(JobState.transition(state, status, timestamp, options))
-								: Effect.fail(JobError.from(jobId, 'Validation', { from: state.status, to: status })),
-						),
+						Match.orElse((state) => pipe(
+							Effect.succeed(state),
+							Effect.filterOrFail(
+								(current) => _STATUS_MODEL[current.status].transitions.has(status) || current.status === status,
+								(current) => JobError.from(jobId, 'Validation', { from: current.status, to: status }),
+							),
+							Effect.map((current) => JobState.transition(current, status, timestamp, options)),
+						)),
 					)),
 					Effect.tap((state) => _writeState(jobId, tenantId, state)),
 				),
@@ -506,7 +509,11 @@ class JobService extends Effect.Service<JobService>()('server/Jobs', {
 							? Chunk.fromIterable<T>(payloads)
 							: Chunk.of(payloads);
 					const validationId = yield* cluster.generateId.pipe(Effect.map(String));
-					yield* Effect.when(Effect.fail(JobError.from(validationId, 'Validation', { reason: 'empty_batch' })), () => isBatch && Chunk.isEmpty(items));
+					yield* Effect.filterOrFail(
+						Effect.succeed(items),
+						(chunk) => !(isBatch && Chunk.isEmpty(chunk)),
+						() => JobError.from(validationId, 'Validation', { reason: 'empty_batch' }),
+					);
 					const priority = opts?.priority ?? 'normal';
 					const batchId = yield* (isBatch ? cluster.generateId.pipe(Effect.map(String)) : Effect.succeed(undefined));
 					const deliverAt = Option.fromNullable(opts?.scheduledAt).pipe(Option.match({
