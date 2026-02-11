@@ -29,14 +29,14 @@ class AiSettingsKey extends S.TaggedRequest<AiSettingsKey>()('AiSettingsKey', {
     success: AiRegistry.schema,
 }) { [PrimaryKey.symbol]() { return `ai:settings:${this.tenantId}`; } }
 
-// --- [CLASSES] ---------------------------------------------------------------
+// --- [ERRORS] ----------------------------------------------------------------
 
 class AiRuntimeError extends Data.TaggedError('AiRuntimeError')<{
     readonly operation: string;
     readonly cause: unknown;
 }> {}
 
-// --- [PURE_FUNCTIONS] --------------------------------------------------------
+// --- [FUNCTIONS] -------------------------------------------------------------
 
 const _wrapError = (operation: string) => (cause: unknown) =>
     Match.value(cause).pipe(
@@ -95,10 +95,10 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
             );
         const languageContext = (operation: string) =>
             Context.Request.current.pipe(
-                Effect.bindTo('ctx'),
-                Effect.bind('resolved', ({ ctx }) => Effect.all([settingsFor(ctx.tenantId), Effect.fiberId])),
-                Effect.map(({ ctx, resolved: [appSettings, fiberId] }) => {
-                    const labelPairs = { model: appSettings.language.model, operation, provider: appSettings.language.provider, tenant: ctx.tenantId };
+                Effect.bindTo('requestContext'),
+                Effect.bind('resolved', ({ requestContext }) => Effect.all([settingsFor(requestContext.tenantId), Effect.fiberId])),
+                Effect.map(({ requestContext, resolved: [appSettings, fiberId] }) => {
+                    const labelPairs = { model: appSettings.language.model, operation, provider: appSettings.language.provider, tenant: requestContext.tenantId };
                     return {
                         appSettings,
                         labelPairs,
@@ -109,7 +109,7 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
                             request: { maxTokens: appSettings.language.maxTokens, model: appSettings.language.model, temperature: appSettings.language.temperature, topK: appSettings.language.topK, topP: appSettings.language.topP },
                             system: appSettings.language.provider,
                         }),
-                        spanAttrs: Context.Request.toAttrs(ctx, fiberId),
+                        spanAttrs: Context.Request.toAttrs(requestContext, fiberId),
                     } as const;
                 }),
             );
@@ -118,10 +118,10 @@ class AiRuntime extends Effect.Service<AiRuntime>()('ai/Runtime', {
         // biome-ignore lint/suspicious/noExplicitAny: overloads provide precise types to callers
         function embed(input: string | readonly string[]): any {
             return Context.Request.current.pipe(
-                Effect.bindTo('ctx'),
-                Effect.bind('appSettings', ({ ctx }) => settingsFor(ctx.tenantId)),
-                Effect.flatMap(({ ctx, appSettings }) => {
-                    const labelPairs = { dimensions: String(appSettings.embedding.dimensions), model: appSettings.embedding.model, operation: _CONFIG.labels.operations.embed, provider: appSettings.embedding.provider, tenant: ctx.tenantId };
+                Effect.bindTo('requestContext'),
+                Effect.bind('appSettings', ({ requestContext }) => settingsFor(requestContext.tenantId)),
+                Effect.flatMap(({ requestContext, appSettings }) => {
+                    const labelPairs = { dimensions: String(appSettings.embedding.dimensions), model: appSettings.embedding.model, operation: _CONFIG.labels.operations.embed, provider: appSettings.embedding.provider, tenant: requestContext.tenantId };
                     const labels = MetricsService.label(labelPairs);
                     const layers = AiRegistry.layers(appSettings);
                     const ann = annotate({ operation: { name: _CONFIG.telemetry.operations.embeddings }, request: { model: appSettings.embedding.model }, system: appSettings.embedding.provider });

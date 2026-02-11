@@ -109,7 +109,7 @@ class Request extends Effect.Tag('server/RequestContext')<Request, Context.Reque
 				),
 			),
 		);
-	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx) => ({
+	static readonly update = (partial: Partial<Context.Request.Data>) => FiberRef.update(Request._ref, (ctx): Context.Request.Data => ({
 		appNamespace: partial.appNamespace ?? ctx.appNamespace,
 		circuit: partial.circuit ?? ctx.circuit,
 		cluster: partial.cluster ?? ctx.cluster,

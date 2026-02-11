@@ -67,6 +67,29 @@ const _CODEC = {
 	notify: { decode: S.decode(_JSON.notify), encode: S.encode(_JSON.notify) },
 } as const;
 
+// --- [FUNCTIONS] -------------------------------------------------------------
+
+const _extractSqlErrorCode = (cause: unknown): string =>
+	Match.value(cause).pipe(
+		Match.when(
+			(value: unknown): value is { code: string } =>
+				typeof value === 'object' && value !== null && 'code' in value && typeof (value as { readonly code?: unknown }).code === 'string',
+			(value) => value.code,
+		),
+		Match.when(
+			(value: unknown): value is { cause: { code: string } } =>
+				typeof value === 'object'
+				&& value !== null
+				&& 'cause' in value
+				&& typeof (value as { readonly cause?: unknown }).cause === 'object'
+				&& (value as { readonly cause?: unknown }).cause !== null
+				&& 'code' in (value as { readonly cause: { readonly code?: unknown } }).cause
+				&& typeof (value as { readonly cause: { readonly code?: unknown } }).cause.code === 'string',
+			(value) => value.cause.code,
+		),
+		Match.orElse(() => String(cause).includes('23505') ? '23505' : ''),
+	);
+
 // --- [SERVICES] --------------------------------------------------------------
 
 class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
@@ -146,25 +169,7 @@ class EventBus extends Effect.Service<EventBus>()('server/EventBus', {
 								primaryKey: envelope.event.eventId,
 							}).pipe(
 								Effect.catchTag('EventJournalError', (cause) => {
-									const sqlCode = Match.value(cause.cause).pipe(
-										Match.when(
-											(value: unknown): value is { code: string } =>
-												typeof value === 'object' && value !== null && 'code' in value && typeof (value as { readonly code?: unknown }).code === 'string',
-											(value) => value.code,
-										),
-										Match.when(
-											(value: unknown): value is { cause: { code: string } } =>
-												typeof value === 'object'
-												&& value !== null
-												&& 'cause' in value
-												&& typeof (value as { readonly cause?: unknown }).cause === 'object'
-												&& (value as { readonly cause?: unknown }).cause !== null
-												&& 'code' in (value as { readonly cause: { readonly code?: unknown } }).cause
-												&& typeof (value as { readonly cause: { readonly code?: unknown } }).cause.code === 'string',
-											(value) => value.cause.code,
-										),
-										Match.orElse(() => String(cause.cause).includes('23505') ? '23505' : ''),
-									);
+									const sqlCode = _extractSqlErrorCode(cause.cause);
 									return Effect.fail(EventError.from(
 										envelope.event.eventId,
 										sqlCode === '23505' ? 'DuplicateEvent' : 'DeliveryFailed',

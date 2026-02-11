@@ -62,7 +62,7 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
 			const matches = (table: Record<string, readonly string[]>) => table[resource]?.includes('*') === true || table[resource]?.includes(action) === true;
 				yield* Effect.filterOrFail(Effect.succeed(session), () => !(matches(rules.interactive) && session.kind !== 'session'), () => HttpError.Forbidden.of('Interactive session required'));
 				yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA enrollment required')), () => matches(rules.mfa) && !session.mfaEnabled);
-				yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA verification required')), () => matches(rules.mfa) && Option.isNone(session.verifiedAt));
+				yield* Effect.when(Effect.fail(HttpError.Forbidden.of('MFA verification required')), () => matches(rules.mfa) && session.mfaEnabled && Option.isNone(session.verifiedAt));
 				const user = yield* Context.Request.withinSync(ctx.tenantId, database.users.one([{ field: 'id', value: session.userId }])).pipe(
 					Effect.flatMap(Option.match({ onNone: () => Effect.fail(HttpError.Forbidden.of('User not found')), onSome: Effect.succeed })),
 				);
@@ -80,22 +80,22 @@ class PolicyService extends Effect.Service<PolicyService>()('server/Policy', {
 			);
 		});
 		const list = (role?: S.Schema.Type<typeof Context.UserRole.schema>) => Context.Request.currentTenantId.pipe(
-			Effect.flatMap((tid) => Context.Request.withinSync(tid, role === undefined ? database.permissions.find([]) : database.permissions.byRole(role))),
+			Effect.flatMap((tenantId) => Context.Request.withinSync(tenantId, role === undefined ? database.permissions.find([]) : database.permissions.byRole(role))),
 			Effect.map((ps) => ps.filter((p) => Option.isNone(p.deletedAt))),
 			Effect.mapError((error) => HttpError.Internal.of('Permission list failed', error)),
 		);
 			const grant = (input: { role: S.Schema.Type<typeof Context.UserRole.schema>; resource: string; action: string }) => Effect.gen(function* () {
-				const tid = yield* Context.Request.currentTenantId;
-				const granted = yield* Context.Request.withinSync(tid, database.permissions.grant({ action: input.action, appId: tid, resource: input.resource, role: input.role }));
-				yield* cache.invalidate(new CacheKey({ role: input.role, tenantId: tid })).pipe(Effect.ignore);
-				yield* eventBus.publish({ aggregateId: tid, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId: tid }).pipe(Effect.ignore);
+				const tenantId = yield* Context.Request.currentTenantId;
+				const granted = yield* Context.Request.withinSync(tenantId, database.permissions.grant({ action: input.action, appId: tenantId, resource: input.resource, role: input.role }));
+				yield* cache.invalidate(new CacheKey({ role: input.role, tenantId })).pipe(Effect.ignore);
+				yield* eventBus.publish({ aggregateId: tenantId, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId }).pipe(Effect.ignore);
 				return granted;
 			}).pipe(Effect.mapError((error) => error instanceof HttpError.Internal ? error : HttpError.Internal.of('Permission grant failed', error)));
 		const revoke = (input: { role: S.Schema.Type<typeof Context.UserRole.schema>; resource: string; action: string }) => Effect.gen(function* () {
-			const tid = yield* Context.Request.currentTenantId;
-			yield* Context.Request.withinSync(tid, database.permissions.revoke(input.role, input.resource, input.action));
-			yield* cache.invalidate(new CacheKey({ role: input.role, tenantId: tid })).pipe(Effect.ignore);
-			yield* eventBus.publish({ aggregateId: tid, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId: tid }).pipe(Effect.ignore);
+			const tenantId = yield* Context.Request.currentTenantId;
+			yield* Context.Request.withinSync(tenantId, database.permissions.revoke(input.role, input.resource, input.action));
+			yield* cache.invalidate(new CacheKey({ role: input.role, tenantId })).pipe(Effect.ignore);
+			yield* eventBus.publish({ aggregateId: tenantId, payload: { _tag: 'policy', action: 'changed', role: input.role }, tenantId }).pipe(Effect.ignore);
 		}).pipe(Effect.mapError((error) => HttpError.Internal.of('Permission revoke failed', error)));
 		const seedEntries = Object.entries(_CONFIG.catalog).flatMap(([resource, actions]) => {
 			const priv = _CONFIG.rules.privileged[resource];

@@ -204,7 +204,7 @@ class NotificationService extends Effect.Service<NotificationService>()('server/
 												});
 												return database.notifications.transition(staged.row.id, { error: encodedError, jobId: null, status: 'failed' }).pipe(Effect.andThen(Effect.fail(error)));
 											}),
-											Effect.flatMap((jobId) => database.notifications.transition(staged.row.id, { error: null, jobId, status: 'queued' })),
+											Effect.flatMap((jobId) => database.notifications.transition(staged.row.id, { error: null, jobId, status: 'queued' }, 'queued')),
 											Effect.asVoid,
 										)),
 									);

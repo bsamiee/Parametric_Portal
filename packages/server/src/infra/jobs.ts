@@ -327,7 +327,7 @@ const JobEntityLive = JobEntity.toLayer(Effect.gen(function* () {
 						_JobWorkflow.withCompensation((_value, cause) => {
 							const errorReason = Option.match(Cause.failureOption(cause), {
 								onNone: () => 'MaxRetries' as const,
-								onSome: (failure) => failure instanceof JobError ? failure.reason : 'Processing',
+								onSome: (failure) => (typeof failure === 'object' && failure !== null && '_tag' in failure && (failure as { _tag: unknown })._tag === 'JobError' && 'reason' in failure && typeof (failure as { reason: unknown }).reason === 'string') ? (failure as JobError).reason : 'Processing',
 							});
 							return Telemetry.span(Clock.currentTimeMillis.pipe(
 								Effect.flatMap((failedTimestamp) => _lifecycle('failed', {

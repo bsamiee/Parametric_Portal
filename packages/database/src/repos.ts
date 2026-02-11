@@ -91,11 +91,11 @@ const makeApiKeyRepo = Effect.gen(function* () {
 const makeOauthAccountRepo = Effect.gen(function* () {
 	const sqlClient = yield* SqlClient.SqlClient;
 	const repository = yield* repo(OauthAccount, 'oauth_accounts', {
-		conflict: { keys: ['provider', 'externalId'], only: ['accessEncrypted', 'deletedAt', 'expiresAt', 'refreshEncrypted'] },
+		conflict: { keys: ['provider', 'externalId'], only: ['accessEncrypted', 'expiresAt', 'refreshEncrypted'] },
 		purge: 'purge_oauth_accounts', resolve: { byExternal: ['provider', 'externalId'], byUser: 'many:userId' },
 	});
 	const byExternalAny = SqlSchema.findOne({
-		execute: (input: { externalId: string; provider: S.Schema.Type<typeof OauthAccount.fields.provider> }) => sqlClient`SELECT * FROM oauth_accounts WHERE provider = ${input.provider} AND external_id = ${input.externalId} LIMIT 1`,
+		execute: (input: { externalId: string; provider: S.Schema.Type<typeof OauthAccount.fields.provider> }) => sqlClient`SELECT * FROM oauth_accounts WHERE provider = ${input.provider} AND external_id = ${input.externalId} AND deleted_at IS NULL LIMIT 1`,
 		Request: S.Struct({ externalId: S.String, provider: OauthAccount.fields.provider }),
 		Result: OauthAccount,
 	});
