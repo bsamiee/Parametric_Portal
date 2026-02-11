@@ -221,7 +221,7 @@ const makeKvStoreRepo = Effect.gen(function* () {
 });
 const makeSystemRepo = Effect.gen(function* () {
 	const repository = yield* routine('database/system', {
-		fn: { count_event_outbox: {}, purge_event_journal: { args: ['days'], params: S.Struct({ days: S.Number }) } },
+		fn: { count_event_outbox: {}, purge_event_journal: { args: ['days'], params: S.Struct({ days: S.Number }) }, purge_tenant_cascade: { args: ['appId'], params: S.Struct({ appId: S.UUID }) } },
 		fnSet: {
 			get_db_cache_hit_ratio: { schema: S.Struct({ backendType: S.String, cacheHitRatio: S.Number, hits: S.Number, ioContext: S.String, ioObject: S.String, reads: S.Number, writes: S.Number }) },
 			get_db_io_config: { schema: S.Struct({ name: S.String, setting: S.String }) },
@@ -253,6 +253,7 @@ const makeSystemRepo = Effect.gen(function* () {
 		}),
 		eventOutboxCount: () => repository.fn('count_event_outbox', {}),
 		listStatStatements: (limit = 100) => repository.fnTyped('list_stat_statements_json', { limit }),
+		purgeTenantCascade: (appId: string) => repository.fn('purge_tenant_cascade', { appId }),
 	};
 });
 
@@ -278,7 +279,9 @@ class DatabaseService extends Effect.Service<DatabaseService>()('database/Databa
 					replay: (input: { batchSize: number; eventType?: string; sinceSequenceId: string; sinceTimestamp?: number }) => system.eventJournalReplay(input),
 				}, eventOutbox: { count: system.eventOutboxCount() },
 				jobDlq, jobs, kvStore, listStatStatements: Effect.fn('db.listStatStatements')((limit = 100) => system.listStatStatements(limit)), mfaSecrets,
-				monitoring, notifications, oauthAccounts, permissions, search: searchRepo, sessions, users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
+				monitoring, notifications, oauthAccounts, permissions, search: searchRepo, sessions,
+				system: { purgeTenantCascade: (appId: string) => system.purgeTenantCascade(appId) },
+				users, webauthnCredentials, withTransaction: sqlClient.withTransaction,
 			};
 		}),
 }) {}

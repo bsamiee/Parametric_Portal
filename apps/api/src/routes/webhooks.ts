@@ -22,7 +22,7 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 					? HttpError.NotFound.of('app', 'current')
 					: HttpError.Internal.of('Webhook list failed', e),
 				),
-				Telemetry.span('webhooks.list', { kind: 'server', metrics: false }),
+				Telemetry.span('webhooks.list'),
 			)))
 			.handle('register', ({ payload }) => Middleware.guarded('webhooks', 'register', 'mutation', Middleware.feature('enableWebhooks').pipe(
 				Effect.andThen(Context.Request.currentTenantId),
@@ -37,7 +37,7 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 				),
 				Effect.tap(() => audit.log('Webhook.register', { details: { url: payload.url } })),
 				Effect.as({ success: true as const }),
-				Telemetry.span('webhooks.register', { kind: 'server', metrics: false }),
+				Telemetry.span('webhooks.register'),
 			)))
 			.handle('remove', ({ path }) => Middleware.guarded('webhooks', 'remove', 'mutation', Middleware.feature('enableWebhooks').pipe(
 				Effect.andThen(Effect.all([Context.Request.currentTenantId, Effect.try({
@@ -51,7 +51,7 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 				),
 				Effect.tap(() => audit.log('Webhook.remove', { details: { url: path.url } })),
 				Effect.as({ success: true as const }),
-				Telemetry.span('webhooks.remove', { kind: 'server', metrics: false }),
+				Telemetry.span('webhooks.remove'),
 			)))
 			.handle('test', ({ payload }) => Middleware.guarded('webhooks', 'test', 'mutation', Middleware.feature('enableWebhooks').pipe(
 				Effect.andThen(Context.Request.currentTenantId),
@@ -60,7 +60,7 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 					? HttpError.NotFound.of('app', 'current')
 					: HttpError.Internal.of('Webhook test delivery failed', e),
 				),
-				Telemetry.span('webhooks.test', { kind: 'server', metrics: false }),
+				Telemetry.span('webhooks.test'),
 			)))
 			.handle('retry', ({ path }) => Middleware.guarded('webhooks', 'retry', 'mutation', Middleware.feature('enableWebhooks').pipe(
 				Effect.andThen(webhooks.retry(path.id)),
@@ -69,7 +69,7 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 					: HttpError.Internal.of('Webhook retry failed', e),
 				),
 				Effect.as({ success: true as const }),
-				Telemetry.span('webhooks.retry', { kind: 'server', metrics: false, 'webhook.delivery_id': path.id }),
+				Telemetry.span('webhooks.retry', { 'webhook.delivery_id': path.id }),
 			)))
 			.handle('status', ({ urlParams }) => Middleware.guarded('webhooks', 'status', 'api', Middleware.feature('enableWebhooks').pipe(
 				Effect.andThen(Context.Request.currentTenantId),
@@ -78,7 +78,7 @@ const WebhooksLive = HttpApiBuilder.group(ParametricApi, 'webhooks', (handlers) 
 					? HttpError.NotFound.of('app', 'current')
 					: HttpError.Internal.of('Webhook status failed', e),
 				),
-				Telemetry.span('webhooks.status', { kind: 'server', metrics: false }),
+				Telemetry.span('webhooks.status'),
 			)));
 	}),
 );

@@ -6,7 +6,7 @@ import { PgClient } from '@effect/sql-pg';
 import { SqlClient } from '@effect/sql';
 import { readFileSync } from 'node:fs';
 import type { SecureVersion } from 'node:tls';
-import { Config, Duration, Effect, FiberRef, Layer, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
+import { Config, Duration, Effect, FiberRef, Function as F, Layer, Option, Redacted, Schema as Sch, Stream, String as S } from 'effect';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -22,12 +22,7 @@ const _CONFIG = {
 			['transaction_timeout', 'transactionMs'],
 		] as const,
 	},
-	tenant: {
-		id: {
-			system: '00000000-0000-7000-8000-000000000000',
-			unspecified: '00000000-0000-7000-8000-ffffffffffff',
-		} as const,
-	},
+	tenant: {id: {system: '00000000-0000-7000-8000-000000000000', unspecified: '00000000-0000-7000-8000-ffffffffffff',} as const,},
 } as const;
 
 // --- [LAYERS] ----------------------------------------------------------------
@@ -124,7 +119,7 @@ const Client = (() => {
 			raw: (channel: string) => Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel))),
 			typed: <A, I>(channel: string, schema: Sch.Schema<A, I, never>) =>
 				Stream.unwrap(Effect.map(PgClient.PgClient, (pgClient) => pgClient.listen(channel).pipe(
-					Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError((error) => Effect.logWarning('LISTEN/NOTIFY decode failed', { channel, error: String(error) })), Effect.option)),
+					Stream.mapEffect((payload) => Sch.decode(Sch.parseJson(schema))(payload).pipe(Effect.tapError(F.constant(Effect.logWarning('LISTEN/NOTIFY decode failed', { channel }))), Effect.option)),
 					Stream.filterMap((decoded) => decoded),
 				))),
 		},
@@ -153,19 +148,18 @@ const Client = (() => {
 				set: (tenantId: string) => FiberRef.set(ref, tenantId),
 				with: <A, E, R>(appId: string, effect: Effect.Effect<A, E, R>) => tenant.locally(appId, Effect.gen(function* () {
 					const inSqlContext = yield* FiberRef.get(sqlContextRef);
+					const db = yield* sql;
 					return yield* inSqlContext
 						? effect
-						: Effect.flatMap(sql, (db) =>
-							Effect.locallyWith(
-								db.withTransaction(
-									db`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(
-										Effect.andThen(effect),
-										Effect.provideService(SqlClient.SqlClient, db),
-									),
+						: Effect.locallyWith(
+							db.withTransaction(
+								db`SELECT set_config('app.current_tenant', ${appId}, true)`.pipe(
+									Effect.andThen(effect),
+									Effect.provideService(SqlClient.SqlClient, db),
 								),
-								sqlContextRef,
-								() => true,
 							),
+							sqlContextRef,
+							F.constTrue,
 						);
 				})),
 			} as const;

@@ -112,7 +112,7 @@ const decrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Effec
 			try: () => crypto.subtle.decrypt(params, key, cipher),
 		});
 		return _decoder.decode(plaintext);
-	}), 'crypto.decrypt');
+	}), 'crypto.decrypt', { metrics: false });
 const encrypt = (plaintext: string, additionalData?: BufferSource): Effect.Effect<Uint8Array, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const tenantId = yield* Context.Request.currentTenantId;
@@ -130,7 +130,7 @@ const encrypt = (plaintext: string, additionalData?: BufferSource): Effect.Effec
 		result.set(iv, 1);
 		result.set(ciphertextBytes, 1 + iv.length);
 		return result;
-	}), 'crypto.encrypt');
+	}), 'crypto.encrypt', { metrics: false });
 const reencrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Effect<Uint8Array, CryptoError, Service> =>
 	Telemetry.span(Effect.gen(function* () {
 		const service = yield* Service;
@@ -140,23 +140,23 @@ const reencrypt = (bytes: Uint8Array, additionalData?: BufferSource): Effect.Eff
 				Effect.flatMap((plaintext) => encrypt(plaintext, additionalData)),
 				Effect.mapError((error) => new CryptoError({ cause: error, code: error.code, op: 'reencrypt', tenantId: error.tenantId })),
 			);
-	}), 'crypto.reencrypt');
+	}), 'crypto.reencrypt', { metrics: false });
 const hash = (input: string): Effect.Effect<Hex64> =>
 	Effect.promise(() => crypto.subtle.digest('SHA-256', _encoder.encode(input))).pipe(
 		Effect.map((buf) => Encoding.encodeHex(new Uint8Array(buf)) as Hex64),
-		Telemetry.span('crypto.hash'),
+		Telemetry.span('crypto.hash', { metrics: false }),
 	);
 const hmac = (key: string, data: string): Effect.Effect<Hex64> =>
 	Effect.gen(function* () {
 		const cryptoKey = yield* Effect.promise(() => crypto.subtle.importKey('raw', _encoder.encode(key), { hash: 'SHA-256', name: 'HMAC' }, false, ['sign']));
 		const signature = yield* Effect.promise(() => crypto.subtle.sign('HMAC', cryptoKey, _encoder.encode(data)));
 		return Encoding.encodeHex(new Uint8Array(signature)) as Hex64;
-	}).pipe(Telemetry.span('crypto.hmac'));
+	}).pipe(Telemetry.span('crypto.hmac', { metrics: false }));
 const pair = Effect.gen(function* () {
 	const token = Uuidv7.generateSync();
 	const hashed = yield* hash(token);
 	return { hash: hashed, token: Redacted.make(token) } as const;
-}).pipe(Telemetry.span('crypto.pair'));
+}).pipe(Telemetry.span('crypto.pair', { metrics: false }));
 
 // --- [ENTRY] -----------------------------------------------------------------
 

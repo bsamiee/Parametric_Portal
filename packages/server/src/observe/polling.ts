@@ -28,7 +28,12 @@ const _CONFIG = {
 // --- [SCHEMA] ----------------------------------------------------------------
 
 const _SCHEMA = {
-	alert: S.Struct({ current: S.Number, metric: S.String, severity: S.Literal('critical', 'warning'), threshold: S.Number }),
+	alert: S.Struct({
+		current: S.Number,
+		metric: S.String,
+		severity: S.Literal('critical', 'warning'),
+		threshold: S.Number }
+	),
 } as const;
 
 // --- [SERVICES] --------------------------------------------------------------

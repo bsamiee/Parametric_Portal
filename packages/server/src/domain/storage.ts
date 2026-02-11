@@ -19,7 +19,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 			Match.orElse(constant({})),
 		);
 		const _traced = <O>(name: string, op: Effect.Effect<O, unknown>, event: string, details: Record<string, unknown>, subjectId: string) =>
-			pipe(op, Effect.tap((result) => audit.log(event, { details: { ...details, ..._sizeOf(result) }, subjectId })), Telemetry.span(`storageDomain.${name}`));
+			pipe(op, Effect.tap((result) => audit.log(event, { details: { ...details, ..._sizeOf(result) }, subjectId })), Telemetry.span(`storage.domain.${name}`, { metrics: false }));
 		function put(input: StorageAdapter.PutInput): Effect.Effect<StorageAdapter.PutResult, unknown>;
 		function put(input: readonly StorageAdapter.PutInput[]): Effect.Effect<readonly StorageAdapter.PutResult[], unknown>;
 		function put(input: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): Effect.Effect<StorageAdapter.PutResult | readonly StorageAdapter.PutResult[], unknown> {
@@ -27,7 +27,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 				Match.when((value: StorageAdapter.PutInput | readonly StorageAdapter.PutInput[]): value is readonly StorageAdapter.PutInput[] => Array.isArray(value), (items) => pipe(
 					storage.put(items),
 					Effect.tap((results) => audit.log('Storage.upload', { details: { count: items.length, keys: pipe(items, A.map(Struct.get('key'))), totalSize: pipe(results, A.map(Struct.get('size')), N.sumAll) }, subjectId: pipe(A.head(items), Option.map(Struct.get('key')), Option.getOrUndefined) })),
-					Telemetry.span('storageDomain.put.batch'),
+					Telemetry.span('storage.domain.put.batch', { metrics: false }),
 				)),
 				Match.orElse((item) => _traced('put', storage.put(item), 'Storage.upload', { contentType: item.contentType, key: item.key }, item.key)),
 			);
@@ -47,7 +47,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 				Match.when(Array.isArray as (value: StorageAdapter.CopyInput | readonly StorageAdapter.CopyInput[]) => value is readonly StorageAdapter.CopyInput[], (items) => pipe(
 					storage.copy(items),
 					Effect.tap(constant(audit.log('Storage.copy', { details: { copies: pipe(items, A.map((item) => ({ dest: item.destKey, source: item.sourceKey }))), count: items.length }, subjectId: pipe(A.head(items), Option.map(Struct.get('destKey')), Option.getOrUndefined) }))),
-					Telemetry.span('storageDomain.copy.batch'),
+					Telemetry.span('storage.domain.copy.batch', { metrics: false }),
 				)),
 				Match.orElse((item) => _traced('copy', storage.copy(item), 'Storage.copy', { destKey: item.destKey, sourceKey: item.sourceKey }, item.destKey)),
 			);
@@ -56,7 +56,7 @@ class StorageService extends Effect.Service<StorageService>()('server/Storage', 
 			pipe(
 				storage.putStream(input),
 				Effect.tap((result) => audit.log('Storage.stream_upload', { details: { contentType: input.contentType, key: input.key, size: result.totalSize }, subjectId: input.key })),
-				Telemetry.span('storageDomain.putStream'),
+				Telemetry.span('storage.domain.putStream', { metrics: false }),
 			);
 		const abortUpload = (key: string, uploadId: string) => _traced('abort-multipart', storage.abortUpload(key, uploadId), 'Storage.abort_multipart', { key, uploadId }, key);
 		return { abortUpload, copy, put, putStream, remove };

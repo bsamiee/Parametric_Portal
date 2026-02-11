@@ -12,79 +12,68 @@ import { MetricsService } from './metrics.ts';
 // --- [CONSTANTS] -------------------------------------------------------------
 
 const _SPAN_KIND_PREFIXES = [
-	['consumer', ['jobs.process', 'jobs.poll']],
-	['producer', ['jobs.enqueue']],
-	['server', ['auth.', 'health.', 'transfer.', 'users.']]
+	['consumer', 	['jobs.process', 'jobs.poll']],
+	['internal', 	['cache.', 'cron.', 'crypto.']],
+	['producer', 	['email.send', 'eventbus.', 'job.', 'jobs.enqueue', 'jobs.submit']],
+	['server', 		['admin.', 'audit.', 'auth.', 'health.', 'jobs.subscribe', 'notification.', 'rpc.', 'search.', 'storage.', 'telemetry.', 'transfer.', 'users.', 'websocket.']],
+	['client', 		['webhook.', 'webhooks.']],
 ] as const satisfies ReadonlyArray<readonly [Tracer.SpanKind, ReadonlyArray<string>]>;
-const _REDACT_KEYS = ['session.id', 'session_id', 'user.id', 'user_id'] as const;
+const _REDACT_KEYS = ['client.address', 'session.id', 'session_id', 'user.id', 'user_id'] as const;
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
 const _resolveEndpoint = (base: string, path: string, override: Option.Option<string>): string => Option.match(override, { onNone: () => `${base.replace(/\/$/, '')}${path}`, onSome: (endpoint) => endpoint.replace(/\/$/, '') });
+const _annotateError = Effect.tapErrorCause((cause: Cause.Cause<unknown>) => {
+	const pretty = A.head(Cause.prettyErrors(cause));
+	const msg = Option.match(pretty, { onNone: () => Cause.pretty(cause), onSome: (entry) => entry.message });
+	const stack = pipe(pretty, Option.flatMapNullable((entry) => entry.stack), Option.getOrUndefined);
+	const base = { 'exception.message': msg, 'exception.stacktrace': stack };
+	const attrs = Cause.match(cause, {
+		onDie: (defect) => { const errorType = defect instanceof Error ? defect.constructor.name : 'Defect'; return { ...base, 'error': true, 'error.type': errorType, 'exception.type': errorType }; },
+		onEmpty: {} as Record.ReadonlyRecord<string, unknown>,
+		onFail: (error) => { const errorType = MetricsService.errorTag(error); return { ...base, 'error': true, 'error.type': errorType, 'exception.type': errorType }; },
+		onInterrupt: (fiberId) => ({ 'error': true, 'error.type': 'FiberInterrupted', 'exception.message': `Interrupted by ${FiberId.threadName(fiberId)}`, 'exception.type': 'FiberInterrupted' }),
+		onParallel: (left, right) => ({ ...left, ...right, 'error.parallel': HashSet.size(Cause.linearize(cause)) }),
+		onSequential: (left, right) => ({ ...left, ...right, 'error.sequential': true }),
+	});
+	return Effect.gen(function* () {
+		const { nowNs, span } = yield* Effect.all({ nowNs: Clock.currentTimeNanos, span: Effect.optionFromOptional(Effect.currentSpan) });
+		yield* Option.match(span, {
+			onNone: () => Effect.void,
+			onSome: (currentSpan) => Effect.when(
+				Effect.sync(() => currentSpan.event('exception', nowNs, { 'exception.message': attrs['exception.message'], 'exception.stacktrace': attrs['exception.stacktrace'], 'exception.type': attrs['exception.type'] })),
+				() => attrs['error'] === true,
+			),
+		});
+		yield* Effect.annotateCurrentSpan(attrs);
+	});
+});
 const _span: {
 	(name: string, opts?: Telemetry.SpanOpts): <A, E, R>(self: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 	<A, E, R>(self: Effect.Effect<A, E, R>, name: string, opts?: Telemetry.SpanOpts): Effect.Effect<A, E, R>;
 } = dual(
 	(args) => Effect.isEffect(args[0]),
 	<A, E, R>(self: Effect.Effect<A, E, R>, name: string, opts?: Telemetry.SpanOpts): Effect.Effect<A, E, R> => {
-		const inferKind = (spanName: string): Tracer.SpanKind => pipe(
-			_SPAN_KIND_PREFIXES, A.findFirst(([, prefixes]) => A.some(prefixes, (p) => spanName.startsWith(p))),
-			Option.map(([kind]) => kind), Option.getOrElse((): Tracer.SpanKind => 'internal'),
-		);
-		const annotateError = Effect.tapErrorCause((cause: Cause.Cause<unknown>) => {
-			const pretty = A.head(Cause.prettyErrors(cause));
-			const msg = Option.match(pretty, { onNone: () => Cause.pretty(cause), onSome: (entry) => entry.message });
-			const stack = pipe(pretty, Option.flatMapNullable((entry) => entry.stack), Option.getOrUndefined);
-			const base = { 'exception.message': msg, 'exception.stacktrace': stack };
-			const attrs = Cause.match(cause, {
-				onDie: (defect) => { const errorType = defect instanceof Error ? defect.constructor.name : 'Defect'; return { ...base, 'error': true, 'error.type': errorType, 'exception.type': errorType }; },
-				onEmpty: {} as Record.ReadonlyRecord<string, unknown>,
-				onFail: (error) => { const errorType = MetricsService.errorTag(error); return { ...base, 'error': true, 'error.type': errorType, 'exception.type': errorType }; },
-				onInterrupt: (fiberId) => ({ 'error': true, 'error.type': 'FiberInterrupted', 'exception.message': `Interrupted by ${FiberId.threadName(fiberId)}`, 'exception.type': 'FiberInterrupted' }),
-				onParallel: (left) => ({ ...left, 'error.parallel': HashSet.size(Cause.linearize(cause)) }),
-				onSequential: (left) => ({ ...left, 'error.sequential': true }),
-			});
-			return Effect.gen(function* () {
-				const { nowNs, span } = yield* Effect.all({ nowNs: Clock.currentTimeNanos, span: Effect.optionFromOptional(Effect.currentSpan) });
-				yield* Option.match(span, {
-					onNone: () => Effect.void,
-					onSome: (currentSpan) => Effect.when(
-						Effect.sync(() => currentSpan.event('exception', nowNs, { 'exception.message': attrs['exception.message'], 'exception.stacktrace': attrs['exception.stacktrace'], 'exception.type': attrs['exception.type'] })),
-						() => attrs['error'] === true,
-					),
-				});
-				yield* Effect.annotateCurrentSpan(attrs);
-			});
-			});
-			const { captureStackTrace, kind, metrics, ...restAttrs } = opts ?? {};
-			const capture = captureStackTrace !== false;
-				const effect = Effect.all({ ctx: Context.Request.current, fiberId: Effect.fiberId }, { concurrency: 'unbounded' }).pipe(
-					Effect.flatMap(({ ctx, fiberId }) => {
-						const requestAttrs = Context.Request.toAttrs(ctx, fiberId);
-						const spanAttrs = A.reduce(
-							_REDACT_KEYS,
-							{ ...requestAttrs, ...restAttrs } as Record.ReadonlyRecord<string, unknown>,
-							(acc, key) => Record.remove(acc, key),
-						);
-						const spanKind = kind ?? pipe(ctx.circuit, Option.map((): Tracer.SpanKind => 'client'), Option.getOrElse(() => inferKind(name)));
-					const coreSpan = self.pipe(annotateError, Effect.withSpan(name, { attributes: spanAttrs, captureStackTrace: capture, kind: spanKind }), Effect.withLogSpan(name), Effect.annotateLogs(requestAttrs));
-					return metrics === false
-						? coreSpan
-						: Effect.flatMap(Effect.serviceOption(MetricsService), Option.match({
-								onNone: () => coreSpan,
-								onSome: (metricsService) => {
-									const metricConfig = Match.value(spanKind).pipe(
-										Match.when('server', () => ({ duration: metricsService.http.duration, errors: metricsService.errors })),
-										Match.orElse(() => ({ duration: metricsService.rpc.duration, errors: metricsService.rpc.errors })),
-									);
-									return MetricsService.trackEffect(coreSpan, { ...metricConfig, labels: MetricsService.label({ operation: name, tenant: ctx.tenantId }) });
-									},
-								}));
-					}),
-				);
-				return effect as Effect.Effect<A, E, R>;
-			},
-		);
+		const { captureStackTrace, kind, metrics, ...restAttrs } = opts ?? {};
+		const effect = Effect.gen(function* () {
+			const { ctx, fiberId } = yield* Effect.all({ ctx: Context.Request.current, fiberId: Effect.fiberId }, { concurrency: 'unbounded' });
+			const requestAttrs = Context.Request.toAttrs(ctx, fiberId);
+			const spanAttrs = A.reduce(_REDACT_KEYS, { ...requestAttrs, ...restAttrs } as Record.ReadonlyRecord<string, unknown>, (acc, key) => Record.remove(acc, key));
+			const prefixKind = pipe(_SPAN_KIND_PREFIXES, A.findFirst(([, prefixes]) => A.some(prefixes, (p) => name.startsWith(p))), Option.map(([k]) => k));
+			const spanKind = kind ?? pipe(ctx.circuit, Option.as('client' as Tracer.SpanKind), Option.orElse(() => prefixKind), Option.getOrElse((): Tracer.SpanKind => 'internal'));
+			const coreSpan = self.pipe(_annotateError, Effect.withSpan(name, { attributes: spanAttrs, captureStackTrace: captureStackTrace !== false, kind: spanKind }), Effect.withLogSpan(name), Effect.annotateLogs(requestAttrs));
+			return yield* Effect.serviceOption(MetricsService).pipe(
+				Effect.when(() => metrics !== false && spanKind !== 'server'),
+				Effect.map(Option.flatten),
+				Effect.flatMap(Option.match({
+					onNone: () => coreSpan,
+					onSome: (ms) => MetricsService.trackEffect(coreSpan, { duration: ms.rpc.duration, errors: ms.rpc.errors, labels: MetricsService.label({ operation: name, tenant: ctx.tenantId }) }),
+				})),
+			);
+		});
+		return effect as Effect.Effect<A, E, R>;
+	},
+);
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -101,9 +90,9 @@ const _telemetryConfig = Config.all({
 	logLevel: 			Config.logLevel('LOG_LEVEL').pipe(Config.withDefault(LogLevel.Info)),
 	logsEndpoint: 		Config.string('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT').pipe(Config.option),
 	logsExporter: 		Config.string('OTEL_LOGS_EXPORTER').pipe(Config.withDefault('otlp'), Config.map((raw) => Match.value(raw.toLowerCase().replaceAll(' ', '')).pipe(
-		Match.when('none', () => 			({ console: false, otlp: false })), Match.when('otlp', () => ({ console: false, otlp: true })),
-		Match.when('console', () => 		({ console: true, otlp: false })), 	Match.when('console,otlp', () => ({ console: true, otlp: true })),
-		Match.when('otlp,console', () => 	({ console: true, otlp: true })), 	Match.orElse(() => ({ console: false, otlp: true })),
+		Match.when('none', () => 			({ console: false, 	otlp: false })), 	Match.when('otlp', () => 			({ console: false, 	otlp: true })),
+		Match.when('console', () => 		({ console: true, 	otlp: false })), 	Match.when('console,otlp', () => 	({ console: true, 	otlp: true })),
+		Match.when('otlp,console', () => 	({ console: true, 	otlp: true })), 	Match.orElse(() => 					({ console: false, 	otlp: true })),
 	))),
 	metricsEndpoint: 	Config.string('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT').pipe(Config.option),
 	metricsExporter: 	Config.literal('none', 'otlp')('OTEL_METRICS_EXPORTER').pipe(Config.withDefault('otlp' as const)),
@@ -116,9 +105,9 @@ const _telemetryConfig = Config.all({
 const _collectorEndpoints = (cfg: Config.Config.Success<typeof _telemetryConfig>) => {
 	const baseEndpoint = Option.getOrElse(cfg.baseEndpoint, () => cfg.environment === 'production' ? 'https://alloy.monitoring.svc.cluster.local:4318' : 'http://127.0.0.1:4318');
 	return {
-		logs: _resolveEndpoint(baseEndpoint, '/v1/logs', cfg.logsEndpoint),
-		metrics: _resolveEndpoint(baseEndpoint, '/v1/metrics', cfg.metricsEndpoint),
-		traces: _resolveEndpoint(baseEndpoint, '/v1/traces', cfg.tracesEndpoint),
+		logs: 			_resolveEndpoint(baseEndpoint, '/v1/logs', cfg.logsEndpoint),
+		metrics: 		_resolveEndpoint(baseEndpoint, '/v1/metrics', cfg.metricsEndpoint),
+		traces: 		_resolveEndpoint(baseEndpoint, '/v1/traces', cfg.tracesEndpoint),
 	} as const;
 };
 const _Default = Layer.unwrapEffect(
@@ -164,12 +153,12 @@ const _Default = Layer.unwrapEffect(
 // biome-ignore lint/correctness/noUnusedVariables: const+namespace merge pattern
 const Telemetry = {
 	collectorConfig: 	_telemetryConfig.pipe(Config.map((cfg) => ({
-		endpoints: _collectorEndpoints(cfg),
+		endpoints: 		_collectorEndpoints(cfg),
 		headers: 		cfg.headers,
 		protocol: 		cfg.protocol,
 	}))),
 	Default: _Default,
-	span: _span
+	span: _span,
 } as const;
 
 // --- [NAMESPACE] -------------------------------------------------------------

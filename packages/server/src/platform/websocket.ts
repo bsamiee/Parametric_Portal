@@ -1,7 +1,8 @@
 /** WebSocket service: rooms, presence, cross-instance pub/sub, Machine lifecycle. */
 import type { Socket } from '@effect/platform';
 import { Machine } from '@effect/experimental';
-import { Array as Arr, Clock, Config, Duration, Effect, Function as F, Match, Metric, Number as Num, Option, Request, Schedule, Schema as S, STM, TMap } from 'effect';
+import { Array as Arr, Clock, Config, Duration, Effect, Match, Metric, Number as N, Option, Request, Schedule, Schema as S, STM, TMap } from 'effect';
+import { apply, constant, flow } from 'effect/Function';
 import { CacheService } from './cache.ts';
 import { MetricsService } from '../observe/metrics.ts';
 import { Telemetry } from '../observe/telemetry.ts';
@@ -101,12 +102,12 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 			addRoom: (socketId: string, roomId: string) => _reg.update(socketId, (entry) => ({ ...entry, rooms: [...entry.rooms, roomId] })),
 			entries: () => STM.commit(TMap.toArray(socketRegistry)),
 			get: (socketId: string) => STM.commit(TMap.get(socketRegistry, socketId)),
-				modify: (socketId: string, partial: Partial<_SocketRegistryEntry>) => _reg.update(socketId, (entry) => ({ ...entry, ...partial })),
+			modify: (socketId: string, partial: Partial<_SocketRegistryEntry>) => _reg.update(socketId, (entry) => ({ ...entry, ...partial })),
 			remove: (socketId: string) => STM.commit(TMap.remove(socketRegistry, socketId)),
 			removeRoom: (socketId: string, roomId: string) => _reg.update(socketId, (entry) => ({ ...entry, rooms: Arr.filter(entry.rooms, (id) => id !== roomId) })),
-				set: (socketId: string, entry: _SocketRegistryEntry) => STM.commit(TMap.set(socketRegistry, socketId, entry)),
-				update: (socketId: string, updateFn: (entry: _SocketRegistryEntry) => _SocketRegistryEntry) => STM.commit(TMap.get(socketRegistry, socketId).pipe(STM.flatMap(Option.match({ onNone: () => STM.void, onSome: (entry) => TMap.set(socketRegistry, socketId, updateFn(entry)) })))),
-				values: () => STM.commit(TMap.values(socketRegistry)),
+			set: (socketId: string, entry: _SocketRegistryEntry) => STM.commit(TMap.set(socketRegistry, socketId, entry)),
+			update: (socketId: string, updateFn: (entry: _SocketRegistryEntry) => _SocketRegistryEntry) => STM.commit(TMap.get(socketRegistry, socketId).pipe(STM.flatMap(Option.match({ onNone: () => STM.void, onSome: (entry) => TMap.set(socketRegistry, socketId, updateFn(entry)) })))),
+			values: () => STM.commit(TMap.values(socketRegistry)),
 			} as const;
 			const _roomsFor = (socketId: string) => _reg.get(socketId).pipe(Effect.map(Option.match({ onNone: () => [] as ReadonlyArray<string>, onSome: (entry) => entry.rooms })));
 			const _touchRoom = (tenantId: string, roomId: string) => cache.sets.touch(_MODEL.key.room(tenantId, roomId), _MODEL.roomTtl);
@@ -114,11 +115,11 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 			const encoded = yield* _CODEC.outbound.encode(payload);
 			yield* Option.fromNullable(messageType).pipe(
 				Option.map(_trackRtcEvent.bind(null, 'outbound')),
-				Option.getOrElse(F.constant(Effect.void)),
+				Option.getOrElse(constant(Effect.void)),
 			);
 			yield* Effect.forEach(
 				entries,
-				(entry) => entry.socket.writer.pipe(Effect.map(F.apply(encoded)), Effect.flatten, Effect.ignore),
+				(entry) => entry.socket.writer.pipe(Effect.map(apply(encoded)), Effect.flatten, Effect.ignore),
 				{ concurrency: 'unbounded', discard: true },
 			);
 		});
@@ -218,13 +219,13 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 							yield* Effect.unless(
 								Effect.filterOrFail(
 									Effect.succeed(rooms),
-									F.flow(Arr.length, Num.lessThan(tuning.maxRoomsPerSocket)),
-									F.constant(WsError.from('room_limit', input.socketId)),
+									flow(Arr.length, N.lessThan(tuning.maxRoomsPerSocket)),
+									constant(WsError.from('room_limit', input.socketId)),
 								).pipe(
 									Effect.andThen(Effect.all([_reg.addRoom(input.socketId, roomId), cache.sets.add(_MODEL.key.room(input.tenantId, roomId), input.socketId)], { discard: true })),
 									Effect.asVoid,
 								),
-								F.constant(Arr.contains(roomId)(rooms)),
+								constant(Arr.contains(roomId)(rooms)),
 							);
 							});
 					return Effect.succeed(
@@ -239,15 +240,15 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 							),
 					})),
 						Machine.procedures.add<CommandRequest>()('Command', (context) => Match.value(context.state).pipe(
-							Match.when(_MODEL.lifecycle.disconnecting, F.constant(Effect.fail(WsError.from('disconnecting', input.socketId)))),
-								Match.orElse(F.constant(Match.value(context.request.command).pipe(
+							Match.when(_MODEL.lifecycle.disconnecting, constant(Effect.fail(WsError.from('disconnecting', input.socketId)))),
+								Match.orElse(constant(Match.value(context.request.command).pipe(
 									Match.tag('join', ({ roomId }) => _joinRoom(roomId).pipe(Effect.andThen(_touchRoom(input.tenantId, roomId)))),
 								Match.tag('leave', ({ roomId }) => Effect.all([
 									_reg.removeRoom(input.socketId, roomId),
 									cache.sets.remove(_MODEL.key.room(input.tenantId, roomId), input.socketId),
 								], { discard: true })),
 									Match.tag('send', ({ data, roomId }) => _roomsFor(input.socketId).pipe(
-										Effect.filterOrFail(Arr.contains(roomId), F.constant(WsError.from('not_in_room', input.socketId))),
+										Effect.filterOrFail(Arr.contains(roomId), constant(WsError.from('not_in_room', input.socketId))),
 											Effect.andThen(_send({ _tag: 'room', roomId }, data, input.tenantId)),
 											Effect.andThen(_touchRoom(input.tenantId, roomId)),
 											Effect.ignore,
@@ -273,7 +274,7 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 							Metric.increment(Metric.taggedWithLabels(metrics.rtc.connections, labels)),
 							CacheService.presence.set(tenantId, socketId, { connectedAt, userId }),
 						], { discard: true });
-					yield* Effect.addFinalizer(F.constant(_cleanupForSocket(socketId, tenantId)));
+					yield* Effect.addFinalizer(constant(_cleanupForSocket(socketId, tenantId)));
 				const write = yield* socket.writer;
 					const sendOutbound = (payload: typeof _SCHEMA.OutboundMsg.Type) => _CODEC.outbound.encode(payload).pipe(
 					Effect.tap(_trackRtcEvent('outbound', payload._tag)),
@@ -286,17 +287,17 @@ class WebSocketService extends Effect.Service<WebSocketService>()('server/WebSoc
 					direct: (message: { data: unknown; targetSocketId: string }) => actor.send(new CommandRequest({ command: { _tag: 'direct', data: message.data, targetSocketId: message.targetSocketId } })),
 					join: (message: { roomId: string }) => actor.send(new CommandRequest({ command: { _tag: 'join', roomId: message.roomId } })),
 					leave: (message: { roomId: string }) => actor.send(new CommandRequest({ command: { _tag: 'leave', roomId: message.roomId } })),
-					'meta.get': F.constant(cache.kv.get(_MODEL.key.meta(socketId), S.Record({ key: S.String, value: S.Unknown })).pipe(Effect.map(Option.getOrElse(() => ({}))), Effect.map(_metaPayload), Effect.flatMap(sendOutbound), Effect.ignore)),
+					'meta.get': constant(cache.kv.get(_MODEL.key.meta(socketId), S.Record({ key: S.String, value: S.Unknown })).pipe(Effect.map(Option.getOrElse(() => ({}))), Effect.map(_metaPayload), Effect.flatMap(sendOutbound), Effect.ignore)),
 					'meta.set': (message: { metadata: Record<string, unknown> }) => actor.send(new CommandRequest({ command: { _tag: 'meta.set', metadata: message.metadata } })),
-					pong: F.constant(actor.send(new SignalRequest({ signal: { _tag: 'pong' } })).pipe(Effect.ignore)),
+					pong: constant(actor.send(new SignalRequest({ signal: { _tag: 'pong' } })).pipe(Effect.ignore)),
 					send: (message: { data: unknown; roomId: string }) => actor.send(new CommandRequest({ command: { _tag: 'send', data: message.data, roomId: message.roomId } })),
 				};
 				const handle = (msg: typeof _SCHEMA.InboundMsg.Type) => _trackRtcEvent('inbound', msg._tag).pipe(Effect.andThen(Match.valueTags(msg, _dispatch)));
 				return yield* socket.runRaw((data) => Telemetry.span(
 					decode(data).pipe(
 						Effect.flatMap(handle),
-						Effect.tapError(F.constant(_trackRtcEvent('error', 'dispatch'))),
-						Effect.catchAll(F.flow(WsError.toPayload, sendOutbound, Effect.ignore)),
+						Effect.tapError(constant(_trackRtcEvent('error', 'dispatch'))),
+						Effect.catchAll(flow(WsError.toPayload, sendOutbound, Effect.ignore)),
 					),
 					'websocket.readDispatch',
 					{ metrics: false, 'websocket.socket_id': socketId },

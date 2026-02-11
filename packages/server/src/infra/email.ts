@@ -6,6 +6,7 @@ import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientRequest } from '@effect/platform';
 import { Config, Duration, Effect, identity, Match, Option, Redacted, Schema as S } from 'effect';
 import * as Nodemailer from 'nodemailer';
+import { Telemetry } from '../observe/telemetry.ts';
 
 // --- [CONSTANTS] -------------------------------------------------------------
 
@@ -167,6 +168,7 @@ class EmailAdapter extends Effect.Service<EmailAdapter>()('server/EmailAdapter',
 				),
 			),
 			Effect.as({ provider }),
+			Telemetry.span('email.send', { 'email.provider': provider, metrics: false }),
 		);
 		return { send } as const;
 	}),

@@ -361,7 +361,6 @@ export default Effect.gen(function* () {
             refresh_encrypted BYTEA,
             expires_at TIMESTAMPTZ,
             deleted_at TIMESTAMPTZ,
-            scope TEXT,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT oauth_provider_external_unique UNIQUE NULLS NOT DISTINCT (provider, external_id),
             CONSTRAINT oauth_provider_valid CHECK (provider IN ('apple', 'github', 'google', 'microsoft'))
@@ -434,6 +433,7 @@ export default Effect.gen(function* () {
                 'sign', 'upload', 'stream_upload', 'copy', 'remove', 'abort_multipart',
                 'export', 'import', 'validate',
                 'cancel', 'replay',
+                'archive', 'purge-tenant',
                 'auth_failure', 'permission_denied',
                 'purge-sessions', 'purge-api-keys', 'purge-assets', 'purge-event-journal',
                 'purge-job-dlq', 'purge-kv-store', 'purge-mfa-secrets', 'purge-oauth-accounts'

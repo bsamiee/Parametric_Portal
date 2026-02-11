@@ -29,7 +29,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 							onNone: () => Effect.fail(HttpError.NotFound.of('user')),
 							onSome: Effect.succeed,
 						})),
-						Telemetry.span('users.getMe', { metrics: false }),
+						Telemetry.span('users.getMe'),
 					)))
 				.handle('updateProfile', ({ payload }) =>
 					Middleware.guarded('users', 'updateProfile', 'mutation', Context.Request.sessionOrFail.pipe(
@@ -39,7 +39,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 							after: { email: updatedUser.email },
 							subjectId: updatedUser.id,
 						})),
-						Telemetry.span('users.updateProfile', { metrics: false }),
+						Telemetry.span('users.updateProfile'),
 					)))
 				.handle('deactivate', () =>
 					Middleware.guarded('users', 'deactivate', 'mutation', Context.Request.sessionOrFail.pipe(
@@ -51,7 +51,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 							subjectId: user.id,
 						})),
 						Effect.as({ success: true as const }),
-						Telemetry.span('users.deactivate', { metrics: false }),
+						Telemetry.span('users.deactivate'),
 					)))
 				.handle('updateRole', ({ path: { id }, payload: { role } }) =>
 					Middleware.guarded('users', 'updateRole', 'mutation', database.users.one([{ field: 'id', value: id }]).pipe(
@@ -68,18 +68,20 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 							subjectId: id,
 						})),
 						Effect.map(({ updatedUser }) => updatedUser),
-						Telemetry.span('users.updateRole', { metrics: false }),
+						Telemetry.span('users.updateRole'),
 					)))
 				.handle('getNotificationPreferences', () =>
 					Middleware.guarded('users', 'getNotificationPreferences', 'api', Middleware.feature('enableNotifications').pipe(
 						Effect.andThen(notifications.getPreferences()),
 						Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Notification preference lookup failed', error)),
+						Telemetry.span('users.getNotificationPreferences'),
 					)))
 				.handle('updateNotificationPreferences', ({ payload }) =>
 					Middleware.guarded('users', 'updateNotificationPreferences', 'mutation', Middleware.feature('enableNotifications').pipe(
 						Effect.andThen(notifications.updatePreferences(payload)),
 						Effect.tap(() => audit.log('User.update', { details: { notifications: true } })),
 						Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Notification preference update failed', error)),
+						Telemetry.span('users.updateNotificationPreferences'),
 					)))
 				.handle('listNotifications', ({ urlParams }) =>
 					Middleware.guarded('users', 'listNotifications', 'api', Middleware.feature('enableNotifications').pipe(
@@ -90,7 +92,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 							limit: urlParams.limit,
 						})),
 						Effect.mapError((error) => HttpError.is(error) ? error : HttpError.Internal.of('Notification list failed', error)),
-						Telemetry.span('users.listNotifications', { metrics: false }),
+						Telemetry.span('users.listNotifications'),
 					)))
 				.handleRaw('subscribeNotifications', () =>
 					Middleware.guarded('users', 'subscribeNotifications', 'realtime', Middleware.feature('enableNotifications').pipe(
@@ -100,7 +102,7 @@ const UsersLive = HttpApiBuilder.group(ParametricApi, 'users', (handlers) =>
 							source: notifications.streamMine(),
 						})),
 						Effect.mapError((error): HttpError.Internal => HttpError.Internal.of('Notification stream failed', error)),
-						Telemetry.span('users.subscribeNotifications', { metrics: false }),
+						Telemetry.span('users.subscribeNotifications'),
 					)));
 		}),
 );

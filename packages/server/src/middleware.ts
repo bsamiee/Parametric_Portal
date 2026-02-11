@@ -7,7 +7,8 @@ import { Headers, HttpApiBuilder, HttpApiMiddleware, HttpApiSecurity, type HttpA
 import { SqlClient } from '@effect/sql';
 import type { Hex64 } from '@parametric-portal/types/types';
 import { isIP } from 'node:net';
-import { Array as A, Data, Duration, Effect, Function as F, Layer, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
+import { Array as A, Data, Duration, Effect, Layer, Metric, Option, pipe, Redacted, Schema as S } from 'effect';
+import { constant } from 'effect/Function';
 import { Context } from './context.ts';
 import { AuditService } from './observe/audit.ts';
 import { HttpError } from './errors.ts';
@@ -51,6 +52,11 @@ const _proxyConfig = (() => {
 	const hopsRaw = Number(process.env['PROXY_HOPS'] ?? '1');
 	return { enabled: enabledRaw === 'true' || enabledRaw === '1', hops: Number.isFinite(hopsRaw) && hopsRaw > 0 ? Math.floor(hopsRaw) : 1 } as const;
 })();
+
+// --- [ERRORS] ----------------------------------------------------------------
+
+const _TenantSuspended = Data.TaggedError('TenantSuspended')<{ readonly tenantId: string }>;
+const _TenantArchived = Data.TaggedError('TenantArchived')<{ readonly tenantId: string }>;
 
 // --- [GLOBAL_MIDDLEWARE] -----------------------------------------------------
 
@@ -103,9 +109,9 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
 			const isExemptPath = A.some(_CONFIG.tenantExemptPrefixes, (prefix) => path === prefix || path.startsWith(`${prefix}/`));
 		const exemptEffect = Effect.succeed(Context.Request.Id.system);
 		const missingHeaderEffect = Effect.fail(new (class extends Data.TaggedError('MissingTenantHeader')<Record<string, never>> {})({}));
-		const exemptOrMissing = Effect.if(isExemptPath, { onTrue: F.constant(exemptEffect), onFalse: F.constant(missingHeaderEffect) });
+		const exemptOrMissing = Effect.if(isExemptPath, { onTrue: constant(exemptEffect), onFalse: constant(missingHeaderEffect) });
 		const tenantId = yield* Option.match(namespaceOpt, {
-			onNone: F.constant(exemptOrMissing),
+			onNone: constant(exemptOrMissing),
 			onSome: (namespace) => database.apps.byNamespace(namespace).pipe(
 				Effect.flatMap(Option.match({
 					onNone: () => Effect.fail(new (class extends Data.TaggedError('UnknownTenantHeader')<{ readonly namespace: string }> {})({ namespace })),
@@ -113,11 +119,11 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
 				})),
 				Effect.filterOrFail(
 					(tenant) => tenant.status !== 'suspended',
-					(tenant) => new (class extends Data.TaggedError('TenantSuspended')<{ readonly tenantId: string }> {})({ tenantId: tenant.id }),
+					(tenant) => new _TenantSuspended({ tenantId: tenant.id }),
 				),
 				Effect.filterOrFail(
 					(tenant) => tenant.status !== 'archived',
-					(tenant) => new (class extends Data.TaggedError('TenantArchived')<{ readonly tenantId: string }> {})({ tenantId: tenant.id }),
+					(tenant) => new _TenantArchived({ tenantId: tenant.id }),
 				),
 				Effect.map((tenant) => tenant.id),
 			),
@@ -129,7 +135,11 @@ const _makeRequestContext = (database: { readonly apps: { readonly byNamespace: 
 				: Context.Request.withinSync;
 		const appWithRequest = Effect.provideService(app, HttpServerRequest.HttpServerRequest, req);
 		const ctx: Context.Request.Data = { appNamespace: namespaceOpt, circuit: Option.none(), cluster: Option.none(), ipAddress, rateLimit: Option.none(), requestId, session: Option.none(), tenantId, userAgent: Headers.get(req.headers, 'user-agent') };
-		const resultEffect = Effect.all([appWithRequest, Context.Request.current]).pipe(Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })));
+		const resultEffect = Effect.all([appWithRequest, Context.Request.current]).pipe(
+			Effect.map(([response, requestContext]) => ({ circuit: requestContext.circuit, response })),
+			Effect.annotateSpans('tenant.id', tenantId),
+			Effect.annotateSpans('request.id', requestId),
+		);
 		const { circuit, response } = yield* withTenantContext(tenantId, resultEffect, ctx);
 		const circuitState = Option.getOrUndefined(Option.map(circuit, (c) => c.state));
 		return HttpServerResponse.setHeaders(response, { [Context.Request.Headers.requestId]: requestId, ...(circuitState ? { [Context.Request.Headers.circuitState]: circuitState } : {}) });
@@ -165,7 +175,7 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 					: HttpError.Internal.of('Permission check failed', error),
 			),
 		);
-	static readonly feature = <K extends keyof typeof FeatureService.FlagRegistry.Type>(flagName: K) =>
+	static readonly feature = <K extends keyof typeof FeatureService.FeatureFlagsSchema.Type>(flagName: K) =>
 		FeatureService.pipe(
 			Effect.flatMap((features) => features.require(flagName)),
 			Effect.mapError((error) =>
@@ -194,11 +204,11 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 										)),
 								);
 							const session = yield* Effect.fromNullable(Option.getOrUndefined(sessionOpt)).pipe(
-								Effect.tapError(F.constant(missingSessionEffect)),
-								Effect.mapError(F.constant(HttpError.Auth.of('Invalid session'))),
+								Effect.tapError(constant(missingSessionEffect)),
+								Effect.mapError(constant(HttpError.Auth.of('Invalid session'))),
 							);
 						yield* Context.Request.update({ session: Option.some(session) }).pipe(
-							Effect.tap(F.constant(Metric.increment(metrics.auth.session.hits))),
+							Effect.tap(constant(Metric.increment(metrics.auth.session.hits))),
 						);
 					}),
 					apiKey: (token: Redacted.Redacted<string>) => Effect.gen(function* () {
@@ -214,17 +224,17 @@ class Middleware extends HttpApiMiddleware.Tag<Middleware>()('server/Middleware'
 										)),
 								);
 								const key = yield* Effect.fromNullable(Option.getOrUndefined(keyOpt)).pipe(
-									Effect.tapError(F.constant(missingKeyEffect)),
-									Effect.mapError(F.constant(HttpError.Auth.of('Invalid API key'))),
+									Effect.tapError(constant(missingKeyEffect)),
+									Effect.mapError(constant(HttpError.Auth.of('Invalid API key'))),
 								);
-							const validKeyEffect = Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(F.constant(Metric.increment(metrics.auth.apiKey.hits))));
+							const validKeyEffect = Context.Request.update({ session: Option.some({ appId: tenantId, id: key.id, kind: 'apiKey', mfaEnabled: false, userId: key.userId, verifiedAt: Option.none() }) }).pipe(Effect.tap(constant(Metric.increment(metrics.auth.apiKey.hits))));
 							yield* validKeyEffect;
 						}),
 				})));
 	static readonly pipeline = (database: Parameters<typeof _makeRequestContext>[0], options?: { readonly hsts?: typeof _CONFIG.security.hsts | false }) =>
 		(app: HttpApp.Default) => app.pipe(
-			_makeRequestContext(database),
 			_trace,
+			_makeRequestContext(database),
 			_security(options?.hsts),
 			_serverTiming,
 			MetricsService.middleware,

@@ -110,7 +110,6 @@ Thumbs.db
 .gemini/.DS_Store
 
 # --- [LOCAL_PLANNING] ---------------------------------------------------------
-packages/server/ROADMAP.md
 packages/server/_X/
 
 # --- [INFRASTRUCTURE_SECRETS] -------------------------------------------------

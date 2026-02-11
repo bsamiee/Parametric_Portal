@@ -23,7 +23,7 @@ import { Crypto } from '@parametric-portal/server/security/crypto';
 import { CacheService } from '@parametric-portal/server/platform/cache';
 import { Resilience } from '@parametric-portal/server/utils/resilience';
 import { constant, flow } from 'effect/Function';
-import { Array as Arr, Duration, Effect, Option, Predicate, Redacted, Struct } from 'effect';
+import { Array as Arr, Duration, Effect, Match, Option, Predicate, Redacted, Struct } from 'effect';
 
 // --- [FUNCTIONS] -------------------------------------------------------------
 
@@ -67,7 +67,7 @@ const _handleApiKeyOperation = (operation: 'create' | 'rotate', repositories: Da
 			audit.log(auditEntry.label, { details: auditEntry.details, subjectId: auditEntry.subjectId }),
 		], { discard: true });
 		return { ...record, apiKey: Redacted.value(pair.token) };
-	}).pipe(Telemetry.span(`auth.apiKeys.${operation}`, { kind: 'server', metrics: false }));
+	}).pipe(Telemetry.span(`auth.apiKeys.${operation}`));
 
 // --- [LAYERS] ----------------------------------------------------------------
 
@@ -91,7 +91,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						Effect.flatMap(Context.Request.cookie.set('oauth', initiate.cookie)),
 						Effect.mapError(constant(HttpError.OAuth.of(provider, 'Response build failed'))),
 					)),
-					Telemetry.span('auth.oauth.start', { kind: 'server', metrics: false, 'oauth.provider': provider }),
+					Telemetry.span('auth.oauth.start', { 'oauth.provider': provider }),
 				)))
 			.handleRaw('oauthCallback', ({ path: { provider }, urlParams: { code, state } }) =>
 				CacheService.rateLimit('auth', Effect.gen(function* () {
@@ -110,7 +110,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						Effect.flatMap(Context.Request.cookie.set('refresh', result.refreshToken)),
 						Effect.mapError(constant(HttpError.OAuth.of(provider, 'Response build failed'))),
 					);
-				}).pipe(Telemetry.span('auth.oauth.callback', { kind: 'server', metrics: false, 'oauth.provider': provider }))))
+				}).pipe(Telemetry.span('auth.oauth.callback', { 'oauth.provider': provider }))))
 			// Session
 			.handleRaw('refresh', () =>
 				CacheService.rateLimit('auth', Effect.gen(function* () {
@@ -125,7 +125,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						Effect.flatMap(Context.Request.cookie.set('refresh', refreshToken)),
 						Effect.mapError(constant(HttpError.Auth.of('Response build failed'))),
 					);
-				}).pipe(Telemetry.span('auth.refresh', { kind: 'server', metrics: false }))))
+				}).pipe(Telemetry.span('auth.refresh'))))
 			.handleRaw('logout', () =>
 				Middleware.guarded('auth', 'logout', 'api', Effect.gen(function* () {
 					yield* _csrf;
@@ -135,7 +135,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						Effect.flatMap(Context.Request.cookie.clear('refresh')),
 						Effect.mapError(constant(HttpError.Internal.of('Response build failed'))),
 					);
-				}).pipe(Telemetry.span('auth.logout', { kind: 'server', metrics: false }))))
+				}).pipe(Telemetry.span('auth.logout'))))
 			.handle('me', () =>
 				Middleware.guarded('auth', 'me', 'api', Effect.gen(function* () {
 					const { userId } = yield* Context.Request.sessionOrFail;
@@ -145,7 +145,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					);
 					yield* audit.log('User.read', { subjectId: userId });
 					return user;
-				}).pipe(Telemetry.span('auth.me', { kind: 'server', metrics: false }))))
+				}).pipe(Telemetry.span('auth.me'))))
 			// MFA
 			.handle('mfaStatus', () =>
 				Effect.gen(function* () {
@@ -155,7 +155,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					const status = yield* auth.mfa.status(userId);
 					yield* audit.log('MfaSecret.status', { subjectId: userId });
 					return status;
-				}).pipe(Telemetry.span('auth.mfa.status', { kind: 'server', metrics: false })))
+				}).pipe(Telemetry.span('auth.mfa.status')))
 			.handle('mfaEnroll', () =>
 				CacheService.rateLimit('mfa', Effect.gen(function* () {
 					yield* Middleware.feature('enableMfa');
@@ -164,14 +164,14 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					const userOption = yield* repositories.users.one([{ field: 'id', value: session.userId }]).pipe(Effect.mapError(constant(HttpError.Internal.of('User lookup failed'))));
 					const user = yield* Option.match(userOption, { onNone: constant(Effect.fail(HttpError.NotFound.of('user', session.userId))), onSome: Effect.succeed });
 					return yield* auth.mfa.enroll(user.id, user.email);
-				}).pipe(Telemetry.span('auth.mfa.enroll', { kind: 'server', metrics: false }))))
+				}).pipe(Telemetry.span('auth.mfa.enroll'))))
 			.handle('mfaVerify', ({ payload }) =>
 				CacheService.rateLimit('mfa', Effect.gen(function* () {
 					yield* Middleware.feature('enableMfa');
 					yield* Middleware.permission('auth', 'mfaVerify');
 					const session = yield* Context.Request.sessionOrFail;
 					return yield* auth.mfa.verify(session.id, payload.code, 'totp');
-				}).pipe(Telemetry.span('auth.mfa.verify', { kind: 'server', metrics: false }))))
+				}).pipe(Telemetry.span('auth.mfa.verify'))))
 			.handle('mfaDisable', () =>
 				Effect.gen(function* () {
 					yield* Middleware.feature('enableMfa');
@@ -179,7 +179,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					const { userId } = yield* Context.Request.sessionOrFail;
 					yield* auth.mfa.disable(userId);
 					return { success: true as const };
-				}).pipe(Telemetry.span('auth.mfa.disable', { kind: 'server', metrics: false })))
+				}).pipe(Telemetry.span('auth.mfa.disable')))
 			.handle('mfaRecover', ({ payload }) =>
 				CacheService.rateLimit('mfa', Middleware.feature('enableMfa').pipe(
 					Effect.andThen(Middleware.permission('auth', 'mfaRecover')),
@@ -189,7 +189,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						(value): value is { readonly remainingCodes: number; readonly success: true } => 'remainingCodes' in value,
 						constant(HttpError.Internal.of('MFA recovery response invalid')),
 					),
-					Telemetry.span('auth.mfa.recover', { kind: 'server', metrics: false }),
+					Telemetry.span('auth.mfa.recover'),
 				)))
 			// API keys
 			.handle('listApiKeys', () =>
@@ -199,7 +199,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					const keys = yield* repositories.apiKeys.byUser(userId).pipe(Effect.mapError(constant(HttpError.Internal.of('API key list failed'))));
 					yield* audit.log('ApiKey.list', { details: { count: keys.length }, subjectId: userId });
 					return { data: keys };
-				}).pipe(Telemetry.span('auth.apiKeys.list', { kind: 'server', metrics: false }))))
+				}).pipe(Telemetry.span('auth.apiKeys.list'))))
 			.handle('createApiKey', ({ payload }) =>
 				Middleware.guarded('auth', 'createApiKey', 'mutation', Middleware.feature('enableApiKeys').pipe(Effect.andThen(_handleApiKeyOperation('create', repositories, audit, payload))) as Effect.Effect<
 					Effect.Effect.Success<ReturnType<typeof _handleApiKeyOperation>>,
@@ -226,7 +226,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 						MetricsService.inc(metrics.auth.apiKeys, MetricsService.label({ operation: 'delete' })),
 					], { discard: true })),
 					Effect.as({ success: true } as const),
-					Telemetry.span('auth.apiKeys.delete', { kind: 'server', metrics: false }),
+					Telemetry.span('auth.apiKeys.delete'),
 				)))
 			.handle('rotateApiKey', ({ path: { id } }) =>
 				Middleware.guarded('auth', 'rotateApiKey', 'mutation', Middleware.feature('enableApiKeys').pipe(Effect.andThen(_handleApiKeyOperation('rotate', repositories, audit, { id })))))
@@ -252,35 +252,35 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					Effect.bind('externalAccount', constant(repositories.oauthAccounts.byExternalAny(provider, externalId).pipe(
 						Effect.mapError(constant(HttpError.Internal.of('OAuth account conflict check failed'))),
 					))),
-					Effect.tap(({ externalAccount, session }) => Option.match(externalAccount, {
-						onNone: constant(repositories.oauthAccounts.insert({
+					Effect.let('linkAction', ({ externalAccount, session }) => {
+						const account = Option.getOrNull(externalAccount);
+						return {
+							accountId: account?.id ?? '',
+							canRestore: account !== null && account.userId === session.userId && Option.isSome(account.deletedAt),
+							isNone: account === null,
+							session,
+						};
+					}),
+					Effect.tap(({ linkAction }) => Match.value(linkAction).pipe(
+						Match.when({ isNone: true }, constant(repositories.oauthAccounts.insert({
 							accessEncrypted: new Uint8Array(0),
 							deletedAt: Option.none(),
 							expiresAt: Option.none(),
 							externalId,
 							provider,
 							refreshEncrypted: Option.none(),
-							scope: Option.none(),
 							updatedAt: undefined,
-							userId: session.userId,
-						}).pipe(
-							Effect.mapError(constant(HttpError.Internal.of('OAuth account link failed'))),
+							userId: linkAction.session.userId,
+						}).pipe(Effect.mapError(constant(HttpError.Internal.of('OAuth account link failed'))), Effect.asVoid))),
+						Match.when({ canRestore: true }, constant(repositories.oauthAccounts.restore(linkAction.accountId).pipe(
+							Effect.mapError(constant(HttpError.Internal.of('OAuth account restore failed'))),
 							Effect.asVoid,
-						)),
-						onSome: (account) => account.deletedAt.pipe(
-							Option.filter(constant(account.userId === session.userId)),
-							Option.match({
-								onNone: constant(Effect.fail(HttpError.Conflict.of('oauth_account', 'External ID is already linked to another account'))),
-								onSome: constant(repositories.oauthAccounts.restore(account.id).pipe(
-									Effect.mapError(constant(HttpError.Internal.of('OAuth account restore failed'))),
-									Effect.asVoid,
-								)),
-							}),
-						),
-					})),
+						))),
+						Match.orElse(constant(Effect.fail(HttpError.Conflict.of('oauth_account', 'External ID is already linked to another account')))),
+					)),
 					Effect.tap(({ session }) => audit.log('OauthAccount.create', { details: { externalId, provider }, subjectId: session.userId })),
 					Effect.as({ success: true as const }),
-					Telemetry.span('auth.link.provider', { kind: 'server', metrics: false, 'oauth.provider': provider }),
+					Telemetry.span('auth.link.provider', { 'oauth.provider': provider }),
 				)))
 			.handle('unlinkProvider', ({ path: { provider } }) =>
 				Middleware.guarded('auth', 'unlinkProvider', 'mutation', Middleware.feature('enableOAuth').pipe(
@@ -303,7 +303,7 @@ const AuthLive = HttpApiBuilder.group(ParametricApi, 'auth', (handlers) =>
 					Effect.tap(({ target }) => repositories.oauthAccounts.softDelete(target.id).pipe(Effect.mapError(constant(HttpError.Internal.of('OAuth account unlink failed'))))),
 					Effect.tap(({ session }) => audit.log('OauthAccount.delete', { details: { provider }, subjectId: session.userId })),
 					Effect.as({ success: true as const }),
-					Telemetry.span('auth.unlink.provider', { kind: 'server', metrics: false, 'oauth.provider': provider }),
+					Telemetry.span('auth.unlink.provider', { 'oauth.provider': provider }),
 				)));
 	}),
 );
